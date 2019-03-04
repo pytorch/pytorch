@@ -13,9 +13,8 @@ template <class Context>
 class BoxWithNMSLimitOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template <class... Args>
-  explicit BoxWithNMSLimitOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  BoxWithNMSLimitOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         score_thres_(
             this->template GetSingleArgument<float>("score_thresh", 0.05)),
         nms_thres_(this->template GetSingleArgument<float>("nms", 0.3)),

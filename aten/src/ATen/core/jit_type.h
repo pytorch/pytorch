@@ -29,7 +29,7 @@ namespace c10 {
 _(TensorType) \
 _(DimensionedTensorType) \
 _(CompleteTensorType) \
-_(UndefinedTensorType) \
+_(AutogradZeroTensorType) \
 _(TupleType) \
 _(ListType) \
 _(DictType) \
@@ -44,7 +44,7 @@ _(BoolType) \
 _(OptionalType) \
 _(VarType) \
 _(DeviceObjType) \
-_(UserType) \
+_(ClassType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -255,9 +255,9 @@ private:
 struct TensorType;
 using TensorTypePtr = std::shared_ptr<TensorType>;
 // This type represents a single Tensor, with an unknown shape.
-// Subtype hierarchy for Tensor Types (DynamicType as the base type):
-// CompleteTensorType <: TensorType <: DynamicType
-// UndefinedTensorType <: DynamicType
+// Subtype hierarchy for Tensor Types (TensorType as the base type):
+// CompleteTensorType <: DimensionedTensorType <: TensorType
+// AutogradZeroTensorType <: TensorType
 struct CAFFE2_API TensorType : public Type {
   static TensorTypePtr create() {
     return TensorTypePtr(new TensorType()); // NOLINT(modernize-make-shared)
@@ -280,15 +280,15 @@ protected:
   : Type(kind) {}
 };
 
-struct UndefinedTensorType;
-using UndefinedTensorTypePtr = std::shared_ptr<UndefinedTensorType>;
+struct AutogradZeroTensorType;
+using AutogradZeroTensorTypePtr = std::shared_ptr<AutogradZeroTensorType>;
 // This type represents an undefined tensor.
-struct CAFFE2_API UndefinedTensorType : public TensorType {
-  static UndefinedTensorTypePtr create() {
-    return UndefinedTensorTypePtr(new UndefinedTensorType()); // NOLINT(modernize-make-shared)
+struct CAFFE2_API AutogradZeroTensorType : public TensorType {
+  static AutogradZeroTensorTypePtr create() {
+    return AutogradZeroTensorTypePtr(new AutogradZeroTensorType()); // NOLINT(modernize-make-shared)
   }
 
-  DEFINE_IS_SUBCLASS(UndefinedTensorType);
+  DEFINE_IS_SUBCLASS(AutogradZeroTensorType);
 
   bool requires_grad() const override { return false; }
 
@@ -297,18 +297,18 @@ struct CAFFE2_API UndefinedTensorType : public TensorType {
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
     return rhs->kind() == TypeKind::TensorType ||
-           rhs->kind() == TypeKind::UndefinedTensorType ||
+           rhs->kind() == TypeKind::AutogradZeroTensorType ||
            TensorType::isSubtypeOf(rhs);
   }
   std::string str() const override {
     return "UndefinedTensor";
   }
 
-  static const TypeKind Kind = TypeKind::UndefinedTensorType;
+  static const TypeKind Kind = TypeKind::AutogradZeroTensorType;
   // global singleton
-  static UndefinedTensorTypePtr get();
+  static AutogradZeroTensorTypePtr get();
 protected:
-  UndefinedTensorType(): TensorType(TypeKind::UndefinedTensorType) {}
+  AutogradZeroTensorType(): TensorType(TypeKind::AutogradZeroTensorType) {}
 };
 
 struct DimensionedTensorType;
@@ -1093,21 +1093,23 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
  * User Defined Types
  */
 
-struct UserType;
-using UserTypePtr = std::shared_ptr<UserType>;
+struct ClassType;
+using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::script::Module;
 using ::torch::jit::script::Method;
 
-// This represents a user-defined type in TorchScript.
-struct CAFFE2_API UserType : public Type {
+// This represents a class in TorchScript.
+struct CAFFE2_API ClassType : public Type {
   // Create a user type and register it globally.
-  static UserTypePtr create(const std::string& name, std::shared_ptr<Module> module);
+  static ClassTypePtr create(
+      const std::string& name,
+      std::shared_ptr<Module> module);
   // returns nullptr if there is no type with that name
-  static UserTypePtr get(const std::string& name);
+  static ClassTypePtr get(const std::string& name);
 
-  DEFINE_IS_SUBCLASS(UserType);
+  DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
-    if (auto user_rhs = rhs.cast<UserType>()) {
+    if (auto user_rhs = rhs.cast<ClassType>()) {
       return typename_ == user_rhs->typename_;
     }
     return false;
@@ -1119,7 +1121,7 @@ struct CAFFE2_API UserType : public Type {
     return *this == *rhs;
   }
   std::string str() const override {
-    return std::string("UserType<") + typename_ + ">";
+    return std::string("ClassType<") + typename_ + ">";
   }
 
   TypePtr getAttribute(const std::string& name) const {
@@ -1170,11 +1172,11 @@ struct CAFFE2_API UserType : public Type {
     attributes_.emplace_back(name, type);
   }
 
-  static const TypeKind Kind = TypeKind::UserType;
+  static const TypeKind Kind = TypeKind::ClassType;
 
  private:
-  UserType(std::string name, std::shared_ptr<Module> module)
-      : Type(TypeKind::UserType),
+  ClassType(std::string name, std::shared_ptr<Module> module)
+      : Type(TypeKind::ClassType),
         typename_(std::move(name)),
         module_(std::move(module)) {}
 

@@ -13,9 +13,8 @@ template <class Context, class Engine = DefaultEngine>
 class BatchMatMulOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template <class... Args>
-  explicit BatchMatMulOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  BatchMatMulOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         trans_a_(this->template GetSingleArgument<int>("trans_a", 0)),
         trans_b_(this->template GetSingleArgument<int>("trans_b", 0)),
         broadcast_(this->template GetSingleArgument<int>("broadcast", 0)) {}
