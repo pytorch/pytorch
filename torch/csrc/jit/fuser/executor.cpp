@@ -27,7 +27,7 @@ namespace fuser {
 static c10::optional<std::vector<int64_t>> getMapSize(
     const KernelSpec& spec,
     at::TensorList args,
-    at::IntList arg_subset) {
+    at::IntArrayRef arg_subset) {
   // TODO: this keeps reallocating map_size at every iteration, but we know
   // exactly how much storage do we need, so this could be fixed in-place at
   // every step. We're just missing a few functions for ATen, but the fix
@@ -97,25 +97,44 @@ static c10::optional<std::vector<int64_t>> canRunKernel(
 // (see above).
 // Note: Arguments are mutated by this call, although map_size is restored
 // to its original value.
-static void expandArgs(
+static bool expandArgs(
     const KernelSpec& spec,
     std::vector<at::Tensor>& args,
-    std::vector<int64_t>& map_size) {
+    std::vector<int64_t>& map_size, bool dry_run) {
+  bool has_broadcast = false;
   for (size_t i = 0; i < args.size(); ++i) {
     auto& arg = args[i];
     const auto& pdesc = spec.inputChunks()[i];
     if (pdesc.nSubTensors() == 1) {
       if (arg.sizes().equals(map_size))
         continue;
-      arg = arg.expand(map_size);
+      if (!dry_run) {
+        arg = arg.expand(map_size);
+        has_broadcast = true;
+      } else {
+        return true;
+      }
     } else {
       map_size.at(pdesc.dim()) *= pdesc.nSubTensors();
       if (!arg.sizes().equals(map_size)) {
-        arg = arg.expand(map_size);
+        if (!dry_run) {
+          arg = arg.expand(map_size);
+          has_broadcast = true;
+        } else {
+          return true;
+        }
       }
       map_size.at(pdesc.dim()) /= pdesc.nSubTensors();
     }
   }
+  return has_broadcast;
+}
+
+static bool shouldExpandArgs(
+    const KernelSpec& spec,
+    std::vector<at::Tensor>& args,
+    std::vector<int64_t>& map_size) {  
+  return expandArgs(spec, args, map_size, /*dry_run=*/true);
 }
 
 // Note: assumes that inputs are 32-bit addressable
@@ -141,8 +160,8 @@ static std::vector<int64_t> computeMapSize(
 // Tries to compress sizes and strides according to cont. Emits the result t
 // c_sizes, c_strides and throws an error on failure (if can't compress)
 static void compressContiguous(
-    const at::IntList& sizes,
-    const at::IntList& strides,
+    const at::IntArrayRef& sizes,
+    const at::IntArrayRef& strides,
     const std::vector<bool>& cont,
     uint32_t* c_sizes,
     uint32_t* c_strides) {
@@ -191,7 +210,7 @@ void launchFusion(
   AT_ASSERT(inputs[0].numel() <= std::numeric_limits<uint32_t>::max());
 
   // Computes map_size, numel from the first input
-  at::IntList map_size;
+  at::IntArrayRef map_size;
   uint32_t numel;
   std::vector<int64_t> keep_alive_size;
   if (fusion.chunkDesc()[0].isNoop()) {
@@ -220,8 +239,8 @@ void launchFusion(
 
   auto addTensorInfoRaw = [&](const TensorDesc& desc,
                               void* data_ptr,
-                              at::IntList sizes,
-                              at::IntList strides) {
+                              at::IntArrayRef sizes,
+                              at::IntArrayRef strides) {
     const auto nDim = desc.nDim(); // NOTE: this is the compressed dim
     AT_ASSERT(nDim <= uncompressedDim); // We'd overflow the space otherwise
     auto ti = reinterpret_cast<TensorInfo*>(buffer_next);
@@ -326,7 +345,11 @@ bool runFusion(const int64_t key, Stack& stack) {
   // Tries to run fallback if map size can't be computed
   if (!maybe_map_size)
     return false;
-  expandArgs(spec, inputs, *maybe_map_size);
+  if (spec.hasRandom()) {
+      bool hasBroadcast = shouldExpandArgs(spec,inputs, *maybe_map_size);
+      if (hasBroadcast) return false;
+  }
+  expandArgs(spec, inputs, *maybe_map_size, /*dry_run=*/false);
 
   // Retrieves the kernel, compiling (and caching) if necessary
   ArgSpec arg_spec{inputs, device.index()};

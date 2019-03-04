@@ -1,5 +1,4 @@
 #include <torch/csrc/autograd/profiler.h>
-#include <torch/csrc/cuda/cuda_check.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <nvToolsExt.h>
 
@@ -8,6 +7,15 @@
 namespace torch { namespace autograd { namespace profiler {
 
 namespace {
+
+static inline void cudaCheck(cudaError_t result, const char * file, int line) {
+  if(result != cudaSuccess) {
+    std::stringstream ss;
+    ss << file << ":" << line << ": " << cudaGetErrorString(result);
+    throw std::runtime_error(ss.str());
+  }
+}
+#define TORCH_CUDA_CHECK(result) cudaCheck(result,__FILE__,__LINE__);
 
 struct CUDAMethods : public CUDAStubs {
   void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) override {

@@ -1,8 +1,7 @@
-graph(%x : Double(*, *)
-      %y : Double(*, *)
-      %c : Double(*, *)) {
+graph(%x : Double(*, *),
+      %y : Double(*, *),
+      %c : Double(*, *)):
   %3 : int = prim::Constant[value=1](), scope: AddmmWrapper
   %4 : Double(*, *) = aten::mm(%x, %y), scope: AddmmWrapper
   %5 : Double(*, *) = aten::add(%4, %c, %3), scope: AddmmWrapper
-  return (%5);
-}
+  return (%5)

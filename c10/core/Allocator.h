@@ -16,7 +16,7 @@ namespace c10 {
 // nullptr DataPtrs can still have a nontrivial device; this allows
 // us to treat zero-size allocations uniformly with non-zero allocations.
 //
-class DataPtr {
+class C10_API DataPtr {
  private:
   c10::detail::UniqueVoidPtr ptr_;
   Device device_;
@@ -169,7 +169,16 @@ struct C10_API Allocator {
   }
 };
 
-// Question: is this still needed?
+// This context is used to generate DataPtr which have arbitrary
+// std::function deleters associated with them.  In some user facing
+// functions, we give a (user-friendly) interface for constructing
+// tensors from external data which take an arbitrary std::function
+// deleter.  Grep for InefficientStdFunctionContext to find these
+// occurrences.
+//
+// This context is inefficient because we have to do a dynamic
+// allocation InefficientStdFunctionContext, on top of the dynamic
+// allocation which is implied by std::function itself.
 struct C10_API InefficientStdFunctionContext {
   std::unique_ptr<void, std::function<void(void*)>> ptr_;
   InefficientStdFunctionContext(
@@ -181,17 +190,13 @@ struct C10_API InefficientStdFunctionContext {
       Device device);
 };
 
-} // namespace c10
-
-namespace caffe2 {
-
 /** Set the allocator for DeviceType `t`. The passed in allocator pointer is
  *  expected to have static lifetime; this function does NOT take ownership
  *  of the raw pointer. (The reason for this is to prevent existing pointers
  *  to an allocator of a particular device from being invalidated when
  *  SetAllocator is called.)
  *
- *  Also note that this is not thraed-safe, and we assume this function will
+ *  Also note that this is not thread-safe, and we assume this function will
  *  only be called during initialization.
  */
 C10_API void SetAllocator(DeviceType t, Allocator* alloc);
@@ -209,4 +214,4 @@ struct AllocatorRegisterer {
   static AllocatorRegisterer<t> g_allocator_##d(f); \
   }
 
-} // namespace caffe2
+} // namespace c10

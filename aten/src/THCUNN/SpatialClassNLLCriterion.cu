@@ -69,7 +69,7 @@ __global__ void SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel(
 
 template <typename T, typename AccumT>
 #if defined(__HIP_PLATFORM_HCC__)
-C10_LAUNCH_BOUNDS(1024)
+C10_LAUNCH_BOUNDS_1(1024)
 #endif
 __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
           T *output,

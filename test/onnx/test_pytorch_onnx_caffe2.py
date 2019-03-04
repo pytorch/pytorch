@@ -684,6 +684,14 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.AvgPool2d(5, padding=(2))
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
+    def test_avgpool2d_with_count_include_pad_set_false(self):
+        model = nn.AvgPool2d(7, padding=(2), count_include_pad=False)
+        self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
+
+    def test_avgpool2d_with_count_include_pad_set_true(self):
+        model = nn.AvgPool2d(7, padding=(2), count_include_pad=True)
+        self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
+
     def test_avgpool2d_no_padding(self):
         model = nn.AvgPool2d(5)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
@@ -701,6 +709,36 @@ class TestCaffe2Backend(unittest.TestCase):
     def test_avg_pool3D_ceil(self):
         model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 44, 31, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_avg_pool1D(self):
+        model = torch.nn.AdaptiveAvgPool1d((5))
+        x = torch.randn(20, 16, 50, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_avg_pool2D(self):
+        model = torch.nn.AdaptiveAvgPool2d((5, 4))
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_avg_pool3D(self):
+        model = torch.nn.AdaptiveAvgPool3d((5, 4, 3))
+        x = torch.randn(20, 16, 50, 44, 30, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_max_pool1D(self):
+        model = torch.nn.AdaptiveMaxPool1d((5))
+        x = torch.randn(20, 16, 50, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_max_pool2D(self):
+        model = torch.nn.AdaptiveMaxPool2d((5, 4))
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_max_pool3D(self):
+        model = torch.nn.AdaptiveMaxPool3d((5, 4, 3))
+        x = torch.randn(20, 16, 50, 44, 30, requires_grad=True)
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_weight_norm(self):
@@ -1065,6 +1103,23 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_model_test(FlattenModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_reshape(self):
+        class ReshapeModel(torch.nn.Module):
+            def forward(self, input):
+                return input.reshape(1, 1)
+
+        x = torch.randn(1, requires_grad=True)
+        self.run_model_test(ReshapeModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_reshape_as(self):
+        class ReshapeAsModel(torch.nn.Module):
+            def forward(self, input):
+                y = torch.randn(3, 1, 2, 1, requires_grad=False)
+                return input.reshape_as(y)
+
+        x = torch.randn(2, 3, requires_grad=True)
+        self.run_model_test(ReshapeAsModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
 # a bit of metaprogramming to set up all the rnn tests
 

@@ -117,7 +117,12 @@ class C10OperatorWrapper final : public Operator<Context> {
 
   void pushOutputParameters_() {
     for (size_t i = 0; i < num_output_parameters; ++i) {
-      stack_.emplace_back(at::Tensor(C10Tensor(*Output(i))));
+      caffe2::Tensor preallocated_output_tensor = OperatorBase::OutputTensorOrUndefined(i);
+      if (preallocated_output_tensor.defined()) {
+        stack_.emplace_back(at::Tensor(std::move(preallocated_output_tensor)));
+      } else {
+        stack_.emplace_back(IValue());
+      }
     }
   }
 
@@ -174,6 +179,8 @@ C10_DECLARE_REGISTRY(
     const OperatorDef&,
     Workspace*);
 
+// TODO Also register c10 operators on mobile
+#ifndef C10_MOBILE
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OperatorHandle, Name, NumOutputParameters)  \
@@ -213,4 +220,10 @@ C10_DECLARE_REGISTRY(
           NumOutputParameters,                                                     \
           std::tuple<__VA_ARGS__>>)
 
+#else
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OperatorHandle, Name, NumOutputParameters)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(OperatorHandle, Name, NumOutputParameters, ...)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT(OperatorHandle, Name, NumOutputParameters)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(OperatorHandle, Name, NumOutputParameters, ...)
+#endif
 } // namespace caffe2

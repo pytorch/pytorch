@@ -79,7 +79,7 @@ THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 }
 
 /* Storage init */
-THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset, at::IntList sizes, at::IntList strides) {
+THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset, at::IntArrayRef sizes, at::IntArrayRef strides) {
   if (strides.data()) {
     AT_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
   }
@@ -126,7 +126,7 @@ THTensor *THTensor_(newWithStorage4d)(THStorage *storage, ptrdiff_t storageOffse
                                           {stride0, stride1, stride2, stride3});
 }
 
-THTensor *THTensor_(newWithSize)(at::IntList size, at::IntList stride)
+THTensor *THTensor_(newWithSize)(at::IntArrayRef size, at::IntArrayRef stride)
 {
   return THTensor_(newWithStorage)(NULL, 0, size, stride);
 }
@@ -200,7 +200,7 @@ THTensor *THTensor_(newUnfold)(THTensor *tensor, int dimension_, int64_t size_, 
   return self;
 }
 
-THTensor *THTensor_(newView)(THTensor *tensor, at::IntList size)
+THTensor *THTensor_(newView)(THTensor *tensor, at::IntArrayRef size)
 {
   ptrdiff_t numel = THTensor_(nElement)(tensor);
   THTensor *self = THTensor_(new)();
@@ -217,7 +217,7 @@ THTensor *THTensor_(newView)(THTensor *tensor, at::IntList size)
 }
 
 /* Resize */
-void THTensor_(resize)(THTensor *self, at::IntList size, at::IntList stride)
+void THTensor_(resize)(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride)
 {
   return THTensor_resize(self, size, stride);
 }
@@ -274,7 +274,7 @@ void THTensor_(set)(THTensor *self, THTensor *src)
                             THTensor_getStridePtr(src));
 }
 
-void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_)
+void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_)
 {
   THTensor_setStorage(self, storage_, storageOffset_, size_, stride_);
 }
@@ -351,12 +351,21 @@ void THTensor_(select)(THTensor *self, THTensor *src, int dimension, int64_t sli
 
   THTensor_(set)(self, src);
   THTensor_(narrow)(self, NULL, dimension, sliceIndex, 1);
+
+  std::vector<int64_t> newSize(self->dim()-1);
+  std::vector<int64_t> newStride(self->dim()-1);
+  for (d = 0; d < dimension; d++)
+  {
+    newSize[d] = self->size(d);
+    newStride[d] = self->stride(d);
+  }
+
   for(d = dimension; d < self->dim()-1; d++)
   {
-    self->set_size(d, self->size(d+1));
-    self->set_stride(d, self->stride(d+1));
+    newSize[d] = self->size(d+1);
+    newStride[d] = self->stride(d+1);
   }
-  self->resize_dim((unsigned int)(self->dim() - 1));
+  self->set_sizes_and_strides(newSize, newStride);
 }
 
 void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1, int dimension2)
@@ -458,12 +467,20 @@ void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
 
   if(src->size(dimension) == 1)
   {
+    std::vector<int64_t> newSize(self->dim() - 1);
+    std::vector<int64_t> newStride(self->dim() - 1);
+    for (d = 0; d < dimension; d++)
+    {
+      newSize[d] = self->size(d);
+      newStride[d] = self->stride(d);
+    }
+
     for(d = dimension; d < self->dim()-1; d++)
     {
-      self->set_size(d, self->size(d+1));
-      self->set_stride(d, self->stride(d+1));
+      newSize[d] = self->size(d+1);
+      newStride[d] = self->stride(d+1);
     }
-    self->resize_dim((unsigned int)(self->dim() - 1));
+    self->set_sizes_and_strides(newSize, newStride);
   }
 }
 
@@ -770,24 +787,41 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   }
   allContiguous = allContiguous && THTensor_(isContiguous)(result);
 
-  // First path is for contiguous inputs along dim 0
+  // First path is for contiguous inputs
   // Second path for non-contiguous
   int64_t offset;
-  if (dimension == 0 && allContiguous) {
+  if (allContiguous) {
+    int64_t outer = 1, inner = 1;
+
+    // Outer is the product of dimensions from the left up to (and not
+    // including the concatenation dimension). This becomes the number of times
+    // we have to replicate the memcpy call.
+    for (int i = 0; i < dimension; ++i) {
+      outer *= size[i];
+    }
+
+    // The product of dimensions to the right of the concatenation dimension.
+    // We go on to multiply this by the size of the concat dimension for
+    // each input tensor.
+    for (int i = dimension + 1; i < size.size(); ++i) {
+      inner *= size[i];
+    }
+
     scalar_t* result_data = THStorage_(data)(THTensor_getStoragePtr(result)) + result->storage_offset();
     offset = 0;
-    for (int j = 0; j < numInputs; j++) {
-      if (!should_skip(inputs[j])) {
-        THTensor* input0 = inputs[j];
-        scalar_t* input0_data = THStorage_(data)(THTensor_getStoragePtr(input0)) + input0->storage_offset();
-        int64_t input0_size = THTensor_(nElement)(input0);
-        // C standard says you can't pass nullptrs to memcpy, even if the size is 0; ubsan checks this.
-        if (input0_size != 0) {
-          memcpy(result_data + offset, input0_data, input0_size*sizeof(scalar_t));
-        }
-        offset += input0_size;
-      }
-    }
+    for (int o = 0; o < outer; ++o) {
+      for (int j = 0; j < numInputs; ++j) {
+        if (!should_skip(inputs[j])) {
+          THTensor* input0 = inputs[j];
+          scalar_t* input0_data = THStorage_(data)(THTensor_getStoragePtr(input0)) + input0->storage_offset();
+          int local_inner = inner * input0->size(dimension);
+          if (local_inner != 0) {
+            memcpy(result_data + offset, input0_data + o*local_inner, local_inner*sizeof(scalar_t));
+          } // input0_size != 0
+          offset += local_inner;
+        }  // should_skip
+      } // for j
+    } // for i
   } else {
     offset = 0;
     for (int j = 0; j < numInputs; j++) {

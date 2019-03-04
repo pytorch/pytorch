@@ -29,7 +29,7 @@ template <class Context>
 class ConvPoolOpBase : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
+  explicit ConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         legacy_pad_(
             static_cast<LegacyPadding>(this->template GetSingleArgument<int>(
@@ -238,7 +238,7 @@ class ConvPoolOpBase : public Operator<Context> {
   // Helper function that is also called from OperatorSchema. Modified
   // kernel parameters and output output_dims and channel_first.
   static void InferOutputSize(
-      const at::IntList& input_dims,
+      const at::IntArrayRef& input_dims,
       const int output_channel,
       const StorageOrder order,
       const bool global_pooling,

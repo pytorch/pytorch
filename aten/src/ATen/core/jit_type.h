@@ -1,24 +1,35 @@
 #pragma once
 
-#include <ATen/core/ivalue.h>
-#include <ATen/core/interned_strings.h>
-#include <ATen/core/functional.h>
-#include <ATen/core/Type.h>
 #include <ATen/core/TensorMethods.h>
+#include <ATen/core/Type.h>
+#include <ATen/core/functional.h>
+#include <ATen/core/interned_strings.h>
+#include <ATen/core/ivalue.h>
 #include <c10/util/TypeList.h>
 #include <caffe2/core/common.h>
+
+#include <c10/util/Optional.h>
 
 #include <memory>
 #include <iostream>
 #include <type_traits>
 
+namespace torch {
+namespace jit {
+namespace script {
+struct Module;
+struct Method;
+}
+} // namespace jit
+} // namespace torch
+
 namespace c10 {
 
 #define C10_FORALL_TYPES(_) \
-_(DynamicType) \
 _(TensorType) \
+_(DimensionedTensorType) \
 _(CompleteTensorType) \
-_(UndefinedTensorType) \
+_(AutogradZeroTensorType) \
 _(TupleType) \
 _(ListType) \
 _(DictType) \
@@ -33,6 +44,7 @@ _(BoolType) \
 _(OptionalType) \
 _(VarType) \
 _(DeviceObjType) \
+_(ClassType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -209,8 +221,8 @@ using OptionalTypePtr = std::shared_ptr<OptionalType>;
 // Note: NoneType is NOT a subtype of any optional.
 // instead NoneType is convertable in schema matching to any Optional[T]
 // it is handled this way because it is not possible to match None to Optional[T]
-// and extract T. Intead, we always create an instance of the prim::None instruction
-// with a particular type: v: Optional[int] = prim::None()
+// and extract T. Intead, we always create a None constant instruction
+// with a particular type: v: Optional[int] = None()
 struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType, OptionalType> {
   static OptionalTypePtr create(TypePtr element) {
     return OptionalTypePtr(new OptionalType(std::move(element))); // NOLINT(modernize-make-shared)
@@ -240,17 +252,17 @@ private:
   OptionalType(TypePtr elem) : SingleElementType(elem) {}
 };
 
-struct DynamicType;
-using DynamicTypePtr = std::shared_ptr<DynamicType>;
+struct TensorType;
+using TensorTypePtr = std::shared_ptr<TensorType>;
 // This type represents a single Tensor, with an unknown shape.
-// Subtype hierarchy for Tensor Types (DynamicType as the base type):
-// CompleteTensorType <: TensorType <: DynamicType
-// UndefinedTensorType <: DynamicType
-struct CAFFE2_API DynamicType : public Type {
-  static DynamicTypePtr create() {
-    return DynamicTypePtr(new DynamicType()); // NOLINT(modernize-make-shared)
+// Subtype hierarchy for Tensor Types (TensorType as the base type):
+// CompleteTensorType <: DimensionedTensorType <: TensorType
+// AutogradZeroTensorType <: TensorType
+struct CAFFE2_API TensorType : public Type {
+  static TensorTypePtr create() {
+    return TensorTypePtr(new TensorType()); // NOLINT(modernize-make-shared)
   }
-  DEFINE_IS_SUBCLASS(DynamicType);
+  DEFINE_IS_SUBCLASS(TensorType);
 
   bool requires_grad() const override { return true; }
 
@@ -260,23 +272,23 @@ struct CAFFE2_API DynamicType : public Type {
   std::string str() const override {
     return "Tensor";
   }
-  static const TypeKind Kind = TypeKind::DynamicType;
+  static const TypeKind Kind = TypeKind::TensorType;
   // global singleton
-  static DynamicTypePtr get();
+  static TensorTypePtr get();
 protected:
-  DynamicType(TypeKind kind=TypeKind::DynamicType)
+  TensorType(TypeKind kind=TypeKind::TensorType)
   : Type(kind) {}
 };
 
-struct UndefinedTensorType;
-using UndefinedTensorTypePtr = std::shared_ptr<UndefinedTensorType>;
+struct AutogradZeroTensorType;
+using AutogradZeroTensorTypePtr = std::shared_ptr<AutogradZeroTensorType>;
 // This type represents an undefined tensor.
-struct CAFFE2_API UndefinedTensorType : public DynamicType {
-  static UndefinedTensorTypePtr create() {
-    return UndefinedTensorTypePtr(new UndefinedTensorType()); // NOLINT(modernize-make-shared)
+struct CAFFE2_API AutogradZeroTensorType : public TensorType {
+  static AutogradZeroTensorTypePtr create() {
+    return AutogradZeroTensorTypePtr(new AutogradZeroTensorType()); // NOLINT(modernize-make-shared)
   }
 
-  DEFINE_IS_SUBCLASS(UndefinedTensorType);
+  DEFINE_IS_SUBCLASS(AutogradZeroTensorType);
 
   bool requires_grad() const override { return false; }
 
@@ -284,28 +296,28 @@ struct CAFFE2_API UndefinedTensorType : public DynamicType {
     return rhs.kind() == kind();
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
-    return rhs->kind() == TypeKind::DynamicType ||
-           rhs->kind() == TypeKind::UndefinedTensorType ||
-           DynamicType::isSubtypeOf(rhs);
+    return rhs->kind() == TypeKind::TensorType ||
+           rhs->kind() == TypeKind::AutogradZeroTensorType ||
+           TensorType::isSubtypeOf(rhs);
   }
   std::string str() const override {
     return "UndefinedTensor";
   }
 
-  static const TypeKind Kind = TypeKind::UndefinedTensorType;
+  static const TypeKind Kind = TypeKind::AutogradZeroTensorType;
   // global singleton
-  static UndefinedTensorTypePtr get();
+  static AutogradZeroTensorTypePtr get();
 protected:
-  UndefinedTensorType(): DynamicType(TypeKind::UndefinedTensorType) {}
+  AutogradZeroTensorType(): TensorType(TypeKind::AutogradZeroTensorType) {}
 };
 
-struct TensorType;
-using TensorTypePtr = std::shared_ptr<TensorType>;
+struct DimensionedTensorType;
+using DimensionedTensorTypePtr = std::shared_ptr<DimensionedTensorType>;
 // This type represents a single Tensor with a specific size
-struct CAFFE2_API TensorType : public DynamicType {
+struct CAFFE2_API DimensionedTensorType : public TensorType {
   template<typename ... T>
-  static TensorTypePtr create( T&& ... all ) {
-    return TensorTypePtr(new TensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
+  static DimensionedTensorTypePtr create( T&& ... all ) {
+    return DimensionedTensorTypePtr(new DimensionedTensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
 
   at::ScalarType scalarType() const { return scalar_type_; }
@@ -313,38 +325,38 @@ struct CAFFE2_API TensorType : public DynamicType {
   int64_t dim() const { return dim_; }
   bool requires_grad() const override { return requires_grad_; }
 
-  TensorTypePtr toScalarType(at::ScalarType type){
-    auto t = TensorType::create(*this);
+  DimensionedTensorTypePtr toScalarType(at::ScalarType type){
+    auto t = DimensionedTensorType::create(*this);
     t->scalar_type_ = type;
     return t;
   }
-  TensorTypePtr withDim(size_t new_dim) {
-    auto t = TensorType::create(*this);
+  DimensionedTensorTypePtr withDim(size_t new_dim) {
+    auto t = DimensionedTensorType::create(*this);
     t->dim_ = new_dim;
     return t;
   }
-  TensorTypePtr withRequiresGrad(bool req) {
-    auto t = TensorType::create(*this);
+  DimensionedTensorTypePtr withRequiresGrad(bool req) {
+    auto t = DimensionedTensorType::create(*this);
     t->requires_grad_ = req;
     return t;
   }
 
   bool operator==(const Type& rhs) const override {
-    if (rhs.kind() != TypeKind::TensorType)
+    if (rhs.kind() != TypeKind::DimensionedTensorType)
       return false;
-    auto rt = rhs.expect<TensorType>();
+    auto rt = rhs.expect<DimensionedTensorType>();
     return scalarType() == rt->scalarType() &&
            device() == rt->device() &&
            dim() == rt->dim();
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
-    return rhs->kind() == TypeKind::DynamicType ||
-          (rhs->kind() == TypeKind::TensorType && Type::isSubtypeOf(rhs)) ||
-          DynamicType::isSubtypeOf(rhs);
+    return rhs->kind() == TypeKind::TensorType ||
+          (rhs->kind() == TypeKind::DimensionedTensorType && Type::isSubtypeOf(rhs)) ||
+          TensorType::isSubtypeOf(rhs);
   }
   bool isSubclass(const TypeKind kind) const override {
-    return kind == TypeKind::DynamicType ||
-        kind == TypeKind::TensorType;
+    return kind == TypeKind::TensorType ||
+        kind == TypeKind::DimensionedTensorType;
   }
   std::string str() const override {
     // str is used for user-facing error messages, where we
@@ -352,17 +364,17 @@ struct CAFFE2_API TensorType : public DynamicType {
     return "Tensor";
   }
 
-  static const TypeKind Kind = TypeKind::TensorType;
+  static const TypeKind Kind = TypeKind::DimensionedTensorType;
 
 protected:
-  TensorType(const at::Tensor& tensor, TypeKind kind=TypeKind::TensorType)
-    : TensorType(tensor.type().scalarType(),
+  DimensionedTensorType(const at::Tensor& tensor, TypeKind kind=TypeKind::DimensionedTensorType)
+    : DimensionedTensorType(tensor.type().scalarType(),
                  tensor.device(),
                  tensor.dim(),
                  tensor.is_variable() && tensor.requires_grad(),
                  kind) {}
-  TensorType(at::ScalarType scalar_type, at::Device device, int64_t dim, bool requires_grad=true, TypeKind kind=TypeKind::TensorType)
-    : DynamicType(kind)
+  DimensionedTensorType(at::ScalarType scalar_type, at::Device device, int64_t dim, bool requires_grad=true, TypeKind kind=TypeKind::DimensionedTensorType)
+    : TensorType(kind)
     , scalar_type_(scalar_type)
     , requires_grad_(at::isFloatingType(scalar_type) && requires_grad)
     , device_(device)
@@ -377,28 +389,28 @@ protected:
 struct CompleteTensorType;
 using CompleteTensorTypePtr = std::shared_ptr<CompleteTensorType>;
 // This type represents a single Tensor with a specific size
-struct CAFFE2_API CompleteTensorType : public TensorType {
+struct CAFFE2_API CompleteTensorType : public DimensionedTensorType {
   template<typename ... T>
   static CompleteTensorTypePtr create( T&& ... all ) {
     return CompleteTensorTypePtr(new CompleteTensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
 
   // overloaded create variadic template argument as it could not distinguish initializer list
-  static CompleteTensorTypePtr create(at::ScalarType scalar_type, at::Device device, at::IntList sizes) {
+  static CompleteTensorTypePtr create(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes) {
     return CompleteTensorTypePtr(new CompleteTensorType(scalar_type, device, sizes)); // NOLINT(modernize-make-shared)
   }
-  static CompleteTensorTypePtr create(at::ScalarType scalar_type, at::Device device, at::IntList sizes, at::IntList strides) {
+  static CompleteTensorTypePtr create(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes, at::IntArrayRef strides) {
     return CompleteTensorTypePtr(new CompleteTensorType(scalar_type, device, sizes, strides)); // NOLINT(modernize-make-shared)
   }
 
   const std::vector<int64_t>& sizes() const { return sizes_; }
   const std::vector<int64_t>& strides() const { return strides_; }
 
-  TypePtr withSizesStrides(at::IntList sizes, at::IntList strides) const {
+  TypePtr withSizesStrides(at::IntArrayRef sizes, at::IntArrayRef strides) const {
     return CompleteTensorType::create(scalar_type_, device_, sizes, strides);
   }
 
-  TypePtr withSizes(at::IntList sizes) const {
+  TypePtr withSizes(at::IntArrayRef sizes) const {
     return withSizesStrides(sizes, CompleteTensorType::contiguousStridesOf(sizes));
   }
 
@@ -424,14 +436,14 @@ struct CAFFE2_API CompleteTensorType : public TensorType {
            device() == rt->device();
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
-    if (rhs->kind() == TypeKind::TensorType)
-      return *expect<TensorType>() ==  *rhs;
-    return rhs->kind() == TypeKind::DynamicType ||
-           DynamicType::isSubtypeOf(rhs);
+    if (rhs->kind() == TypeKind::DimensionedTensorType)
+      return *expect<DimensionedTensorType>() ==  *rhs;
+    return rhs->kind() == TypeKind::TensorType ||
+           TensorType::isSubtypeOf(rhs);
   }
   bool isSubclass(const TypeKind kind) const override {
-    return kind == TypeKind::DynamicType ||
-           kind == TypeKind::TensorType ||
+    return kind == TypeKind::TensorType ||
+           kind == TypeKind::DimensionedTensorType ||
            kind == TypeKind::CompleteTensorType;
   }
   std::string str() const override {
@@ -454,17 +466,17 @@ struct CAFFE2_API CompleteTensorType : public TensorType {
 
 private:
   CompleteTensorType(const at::Tensor& tensor)
-    : TensorType(tensor, TypeKind::CompleteTensorType)
+    : DimensionedTensorType(tensor, TypeKind::CompleteTensorType)
     , sizes_(tensor.sizes().vec())
     , strides_(tensor.strides().vec()) {}
-  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntList sizes, bool requires_grad=true)
+  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes, bool requires_grad=true)
     : CompleteTensorType(scalar_type, device, sizes, CompleteTensorType::contiguousStridesOf(sizes), requires_grad) {}
-  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntList sizes, at::IntList strides, bool requires_grad=true)
-    : TensorType(scalar_type, device, sizes.size(), requires_grad, TypeKind::CompleteTensorType)
+  CompleteTensorType(at::ScalarType scalar_type, at::Device device, at::IntArrayRef sizes, at::IntArrayRef strides, bool requires_grad=true)
+    : DimensionedTensorType(scalar_type, device, sizes.size(), requires_grad, TypeKind::CompleteTensorType)
     , sizes_(sizes.vec())
     , strides_(strides.vec()) {}
 
-  static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
+  static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
     std::vector<int64_t> strides(sizes.size());
     if(sizes.empty()) // zero-dim case
       return strides;
@@ -514,7 +526,7 @@ private:
 
 struct DictType;
 using DictTypePtr = std::shared_ptr<DictType>;
-struct DictType : public Type {
+struct CAFFE2_API DictType : public Type {
   friend struct Type;
   static const TypeKind Kind = TypeKind::DictType;
 
@@ -526,9 +538,9 @@ struct DictType : public Type {
         return DictTypePtr(new DictType(key, value));
       default:
         AT_ERROR(
-            "Cannot create dict for key type ",
+            "Cannot create dict for key type '",
             key->str(),
-            ", only int, float, and string keys are supported");
+            "', only int, float, and string keys are supported");
     }
   }
 
@@ -629,10 +641,11 @@ private:
 
 struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
+using OptNameList = c10::optional<std::vector<std::string>>;
 // This type represents a Tuple
 struct CAFFE2_API TupleType : public Type {
-  static TupleTypePtr create(std::vector<TypePtr> types) {
-    return TupleTypePtr(new TupleType( std::move(types) )); // NOLINT(modernize-make-shared)
+  static TupleTypePtr create(std::vector<TypePtr> types, OptNameList names=c10::nullopt) {
+    return TupleTypePtr(new TupleType(std::move(types), std::move(names))); // NOLINT(modernize-make-shared)
   }
   DEFINE_IS_SUBCLASS(TupleType);
   at::ArrayRef<TypePtr> elements() const {
@@ -641,13 +654,25 @@ struct CAFFE2_API TupleType : public Type {
   bool operator==(const Type& rhs) const override {
     return compare(rhs, [](const TypePtr a, const TypePtr b) {
       return *a == *b;
-    });
+    }) && names_ == rhs.expect<TupleType>()->names_;
+    // `compare` guarantees that rhs is always a TupleType, so the
+    // dynamic_cast above always success.
   }
-  bool isSubtypeOf(const TypePtr rhs) const override {
+  bool isSubtypeOf(const TypePtr rhs_) const override {
+    if (Type::isSubtypeOf(rhs_))
+      return true;
+    auto rhs = rhs_->cast<TupleType>();
+    if (!rhs)
+      return false;
+    // unnamed tuple is not a subtype of nametuple
+    if (!hasNames() && rhs->hasNames())
+      return false;
+    // namedtuple may be a subtype of unnamed tuple
+    bool names_match = !rhs->hasNames() || names() == rhs->names();
     // co-variant rules for tuples
-    return compare(*rhs, [](const TypePtr a, const TypePtr b) {
+    return names_match && compare(*rhs, [](const TypePtr a, const TypePtr b) {
       return a->isSubtypeOf(b);
-    }) || Type::isSubtypeOf(rhs);
+    });
   }
   bool requires_grad() const override {
     return std::any_of(elements_.begin(), elements_.end(),
@@ -678,6 +703,12 @@ struct CAFFE2_API TupleType : public Type {
   bool hasFreeVariables() const override {
     return has_free_variables_;
   }
+  bool hasNames() const {
+    return names_.has_value();
+  }
+  const std::vector<std::string> &names() const {
+    return names_.value();
+  }
 
   at::ArrayRef<TypePtr> containedTypes() const override {
     return elements_;
@@ -688,9 +719,10 @@ struct CAFFE2_API TupleType : public Type {
 
   static const TypeKind Kind = TypeKind::TupleType;
 private:
-  TupleType(std::vector<TypePtr> elements_)
+  TupleType(std::vector<TypePtr> elements_, OptNameList names)
   : Type(TypeKind::TupleType)
-  , elements_(std::move(elements_)) {
+  , elements_(std::move(elements_))
+  , names_(std::move(names)) {
     has_free_variables_ =
         std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
           return v->hasFreeVariables();
@@ -710,8 +742,10 @@ private:
     }
     return true;
   }
+
   std::vector<TypePtr> elements_;
   bool has_free_variables_;
+  OptNameList names_;
 };
 
 struct NumberType;
@@ -951,9 +985,9 @@ CAFFE2_API std::ostream& operator<<(std::ostream & out, const Type & t);
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
 
 inline TypePtr unshapedType(const TypePtr& type) {
-  if (type->kind() == TypeKind::TensorType ||
+  if (type->kind() == TypeKind::DimensionedTensorType ||
       type->kind() == TypeKind::CompleteTensorType) {
-    return DynamicType::get();
+    return TensorType::get();
   }
   return type->withContained(fmap(type->containedTypes(), unshapedType));
 }
@@ -989,7 +1023,7 @@ template <typename T> struct getTypePtr_ final {
 };
 
 template<> struct getTypePtr_<at::Tensor> final {
-  static TypePtr call() { return DynamicType::get(); }
+  static TypePtr call() { return TensorType::get(); }
 };
 template<> struct getTypePtr_<double> final {
   static TypePtr call() { return FloatType::get(); }
@@ -1018,7 +1052,16 @@ template<class T> struct getTypePtr_<ArrayRef<T>> final {
     return type;
   }
 };
-template<class T> struct getTypePtr_<at::optional<T>> final {
+template <class K, class V>
+struct getTypePtr_<std::unordered_map<K, V>> final {
+  static TypePtr call() {
+    static auto type =
+        DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
+    return type;
+  }
+};
+template <class T>
+struct getTypePtr_<at::optional<T>> final {
   static TypePtr call() {
     static auto type = OptionalType::create(getTypePtr_<T>::call());
     return type;
@@ -1026,6 +1069,8 @@ template<class T> struct getTypePtr_<at::optional<T>> final {
 };
 }
 template<class T> inline TypePtr getTypePtr() {
+  // TODO: static_assert that a templated function exists, and throw a friendy
+  // error message if not
   return detail::getTypePtr_<T>::call();
 }
 
@@ -1044,4 +1089,113 @@ matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 
 CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 
+/**
+ * User Defined Types
+ */
+
+struct ClassType;
+using ClassTypePtr = std::shared_ptr<ClassType>;
+using ::torch::jit::script::Module;
+using ::torch::jit::script::Method;
+
+// This represents a class in TorchScript.
+struct CAFFE2_API ClassType : public Type {
+  // Create a user type and register it globally.
+  static ClassTypePtr create(
+      const std::string& name,
+      std::shared_ptr<Module> module);
+  // returns nullptr if there is no type with that name
+  static ClassTypePtr get(const std::string& name);
+
+  DEFINE_IS_SUBCLASS(ClassType);
+  bool operator==(const Type& rhs) const override {
+    if (auto user_rhs = rhs.cast<ClassType>()) {
+      return typename_ == user_rhs->typename_;
+    }
+    return false;
+  }
+
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    // XXX: We do not have inheritance implemented, only types that are the
+    // same can subtype from each other.
+    return *this == *rhs;
+  }
+  std::string str() const override {
+    return std::string("ClassType<") + typename_ + ">";
+  }
+
+  TypePtr getAttribute(const std::string& name) const {
+    const auto it = std::find_if(
+        attributes_.cbegin(), attributes_.cend(), [&](const Attribute& attr) {
+          return attr.name == name;
+        });
+    if (it == attributes_.cend()) {
+      return nullptr;
+    }
+
+    return it->type;
+  }
+
+  Method* getMethod(const std::string& name) const;
+
+  std::string name() const {
+    return typename_;
+  }
+
+  size_t numAttributes() const {
+    return attributes_.size();
+  }
+
+  // Attributes are stored in a specific slot at runtime for effiency.
+  // When emitting instructions we specify the slot so that attribute access is
+  // a constant lookup
+  size_t getAttributeSlot(const std::string& name) const {
+    size_t slot = 0;
+    for (const auto& attr : attributes_) {
+      if (name == attr.name) {
+        return slot;
+      }
+      slot++;
+    }
+    throw std::runtime_error("Couldn't find attribute: " + name);
+  }
+
+  bool hasAttribute(const std::string& name) const {
+    return std::find_if(
+               attributes_.cbegin(),
+               attributes_.cend(),
+               [&](const Attribute& attr) { return attr.name == name; }) !=
+        attributes_.cend();
+  }
+
+  void addAttribute(const std::string& name, TypePtr type) {
+    attributes_.emplace_back(name, type);
+  }
+
+  static const TypeKind Kind = TypeKind::ClassType;
+
+ private:
+  ClassType(std::string name, std::shared_ptr<Module> module)
+      : Type(TypeKind::ClassType),
+        typename_(std::move(name)),
+        module_(std::move(module)) {}
+
+  // Name of type (note that this has to be globally unique).
+  std::string typename_;
+
+  // Mapping of attribute names -> their type.
+  // NOTE: this does not contain methods, which are stored in the module
+  // TODO: once modules support arbitrary ivalue attributes, we don't need this
+  // anymore.
+  struct Attribute {
+    Attribute(std::string n, TypePtr t)
+        : name(std::move(n)), type(std::move(t)) {}
+    std::string name;
+    TypePtr type;
+  };
+  std::vector<Attribute> attributes_;
+  // Holds method attributes
+  std::shared_ptr<Module> module_;
+
+};
 } // namespace c10

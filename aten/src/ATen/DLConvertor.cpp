@@ -37,6 +37,9 @@ static DLDataType getDLDataType(const Type& type) {
     case ScalarType::Half:
       dtype.code = DLDataTypeCode::kDLFloat;
       break;
+    case ScalarType::Bool:
+      dtype.code = DLDataTypeCode::kDLUInt;
+      break;
     case ScalarType::ComplexHalf:
       throw std::logic_error("ComplexHalf is not supported by dlpack");
     case ScalarType::ComplexFloat:
@@ -172,8 +175,8 @@ Tensor fromDLPack(const DLManagedTensor* src) {
     src->deleter(const_cast<DLManagedTensor*>(src));
   };
   return at::from_blob(src->dl_tensor.data,
-      IntList(src->dl_tensor.shape, src->dl_tensor.ndim),
-      IntList(src->dl_tensor.strides, src->dl_tensor.ndim),
+      IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
+      IntArrayRef(src->dl_tensor.strides, src->dl_tensor.ndim),
       deleter,
       at::device(device_type).dtype(stype));
 }

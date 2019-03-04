@@ -4,7 +4,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/utils/math_utils.h"
+#include "caffe2/utils/math/utils.h"
 
 namespace caffe2 {
 
@@ -267,3 +267,7 @@ void LayerNormGradientOp<CUDAContext>::LayerNormBackward(
 REGISTER_CUDA_OPERATOR(LayerNormGradient, LayerNormGradientOp<CUDAContext>);
 
 } // namespace caffe2
+
+C10_REGISTER_CAFFE2_OPERATOR_CUDA(
+    LayerNorm,
+    caffe2::LayerNormOp<caffe2::CUDAContext>)

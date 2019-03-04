@@ -978,7 +978,7 @@ void testSubgraphUtils() {
   ASSERT_EQ(originalNodes.size(), newNodes.size());
 }
 
-autograd::Variable var(at::Type& t, at::IntList sizes, bool requires_grad) {
+autograd::Variable var(at::Type& t, at::IntArrayRef sizes, bool requires_grad) {
   return autograd::make_variable(at::rand(sizes, t.options()), requires_grad);
 }
 autograd::Variable undef() {
@@ -989,7 +989,7 @@ int device(const autograd::Variable& v) {
   return v.type().is_cuda() ? v.get_device() : -1;
 }
 
-bool isEqual(at::IntList lhs, at::IntList rhs) {
+bool isEqual(at::IntArrayRef lhs, at::IntArrayRef rhs) {
   return lhs.size() == rhs.size() &&
       std::equal(lhs.begin(), lhs.end(), rhs.begin());
 }
@@ -1232,10 +1232,9 @@ void testCustomOperators() {
     ASSERT_EQ(op->schema().arguments()[0].name(), "_0");
     ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
     ASSERT_EQ(op->schema().arguments()[1].name(), "_1");
-    ASSERT_EQ(
-        op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().arguments()[1].type()->kind(), TypeKind::TensorType);
 
-    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -1261,11 +1260,10 @@ void testCustomOperators() {
     ASSERT_EQ(op->schema().arguments()[0].name(), "a");
     ASSERT_EQ(op->schema().arguments()[0].type()->kind(), TypeKind::FloatType);
     ASSERT_EQ(op->schema().arguments()[1].name(), "b");
-    ASSERT_EQ(
-        op->schema().arguments()[1].type()->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().arguments()[1].type()->kind(), TypeKind::TensorType);
 
     ASSERT_EQ(op->schema().returns().size(), 1);
-    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::DynamicType);
+    ASSERT_EQ(op->schema().returns()[0].type()->kind(), TypeKind::TensorType);
 
     Stack stack;
     push(stack, 2.0f, autograd::make_variable(at::ones(5)));
@@ -1420,9 +1418,11 @@ void testCustomOperators() {
 }
 
 void testEvalModeForLoadedModule() {
-  if (isSandcastle()) return;  // The module file to load is not generated in Sandcastle
+  if (isSandcastle())
+    return; // The module file to load is not generated in Sandcastle
   std::string module_path = "dropout_model.pt";
-  std::shared_ptr<torch::jit::script::Module> module = torch::jit::load(module_path);
+  std::shared_ptr<torch::jit::script::Module> module =
+      torch::jit::load(module_path);
   AT_ASSERT(module->get_module("dropout")->is_training());
   module->eval();
   AT_ASSERT(!module->get_module("dropout")->is_training());
@@ -1474,7 +1474,7 @@ void testSchemaParser() {
     // The list itself is annotated with `a`
     const auto& aliasInfo = *s.arguments().at(0).alias_info();
     ASSERT_TRUE(
-        aliasInfo.sets() ==
+        aliasInfo.beforeSets() ==
         std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
     ASSERT_TRUE(aliasInfo.isWrite());
 
@@ -1485,7 +1485,38 @@ void testSchemaParser() {
         Symbol::fromQualString("alias::b"),
         Symbol::fromQualString("alias::c"),
     };
-    ASSERT_TRUE(containedAliasInfo.sets() == expected);
+    ASSERT_TRUE(containedAliasInfo.beforeSets() == expected);
+    ASSERT_TRUE(containedAliasInfo.afterSets() == expected);
+    ASSERT_FALSE(containedAliasInfo.isWrite());
+  }
+  {
+    const auto s = parseSchema(
+        "at::what(Tensor(b -> b|c)[](a!) list, Tensor(c) element)"
+        " -> (Tensor(b|c)[](a!))");
+
+    // The list itself is annotated with `a`
+    const auto& aliasInfo = *s.arguments().at(0).alias_info();
+    ASSERT_EQ(
+        aliasInfo.beforeSets(),
+        std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
+    ASSERT_EQ(
+        aliasInfo.afterSets(),
+        std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
+    ASSERT_TRUE(aliasInfo.isWrite());
+    ASSERT_EQ(aliasInfo.containedTypes().size(), 1);
+
+    // Check the contained types
+    ASSERT_TRUE(!aliasInfo.containedTypes().empty());
+    const auto& containedAliasInfo = aliasInfo.containedTypes()[0];
+    const auto expectedBefore = std::unordered_set<Symbol>{
+        Symbol::fromQualString("alias::b"),
+    };
+    const auto expectedAfter = std::unordered_set<Symbol>{
+        Symbol::fromQualString("alias::b"),
+        Symbol::fromQualString("alias::c")
+    };
+    ASSERT_TRUE(containedAliasInfo.beforeSets() == expectedBefore);
+    ASSERT_TRUE(containedAliasInfo.afterSets() == expectedAfter);
     ASSERT_FALSE(containedAliasInfo.isWrite());
   }
 }
@@ -1493,10 +1524,10 @@ void testSchemaParser() {
 void testTopologicalIndex() {
   {
     Graph graph;
-    auto node1 = graph.create(prim::Undefined);
-    auto node2 = graph.create(prim::Undefined);
-    auto node3 = graph.create(prim::Undefined);
-    auto node4 = graph.create(prim::Undefined);
+    auto node1 = graph.create(prim::AutogradZero);
+    auto node2 = graph.create(prim::AutogradZero);
+    auto node3 = graph.create(prim::AutogradZero);
+    auto node4 = graph.create(prim::AutogradZero);
 
     graph.appendNode(node4);
     graph.prependNode(node1);
@@ -1521,12 +1552,12 @@ void testTopologicalIndex() {
     //      \      ...
     //      C    block2
     auto block1 = node3->addBlock();
-    auto A = graph.create(prim::Undefined);
+    auto A = graph.create(prim::AutogradZero);
     block1->appendNode(A);
-    auto B = graph.create(prim::Undefined);
+    auto B = graph.create(prim::AutogradZero);
     block1->appendNode(B);
     auto block2 = B->addBlock();
-    auto C = graph.create(prim::Undefined);
+    auto C = graph.create(prim::AutogradZero);
     block2->appendNode(C);
 
     // Check isAfter on different block levels
@@ -1536,7 +1567,7 @@ void testTopologicalIndex() {
 
     // make sure things don't blow up on deletions
     node2->destroy();
-    auto node2p = graph.create(prim::Undefined);
+    auto node2p = graph.create(prim::AutogradZero);
     node2p->insertAfter(node1);
     ASSERT_TRUE(node1->isBefore(node2p));
     ASSERT_TRUE(node2p->isBefore(node3));
@@ -1546,11 +1577,11 @@ void testTopologicalIndex() {
     Graph graph;
     std::map<size_t, Node*> nodes;
 
-    auto anchor = graph.create(prim::Undefined);
+    auto anchor = graph.create(prim::AutogradZero);
     graph.appendNode(anchor);
     // Inserting to the same place a lot will trigger reindexing
     for (auto i = 0; i < 100; ++i) {
-      auto n = graph.create(prim::Undefined);
+      auto n = graph.create(prim::AutogradZero);
       n->insertAfter(anchor);
       nodes[i] = n;
     }
@@ -1782,6 +1813,46 @@ void testAutogradProfiler() {
   AT_CHECK(count == 200);
 }
 
+void testNoneSchemaMatch() {
+  RegisterOperators reg({
+      Operator(
+          "test::test_none() -> int?",
+          [](const Node* node) {
+            return [](Stack& stack) {
+              push(stack, IValue());
+              return 0;
+            };
+          }),
+      Operator(
+          "test::is_none(int? a) -> bool",
+          [](const Node* node) {
+            return [](Stack& stack) {
+              IValue a = pop(stack);
+              if (a.isNone()) {
+                push(stack, true);
+              } else {
+                push(stack, false);
+              }
+              return 0;
+            };
+          }),
+  });
+
+  // Constant propagation will run test_none and produce a None,
+  // testing that its type is set appropriately and schema matching  doesn't
+  // fail when running is_none
+
+  auto r = std::make_shared<Graph>();
+  auto& g = *r;
+  auto opt_int = g.insert(Symbol::fromQualString("test::test_none"), {});
+  auto out_bool = g.insert(Symbol::fromQualString("test::is_none"), {opt_int});
+  g.registerOutput(out_bool);
+  ConstantPropagation(r);
+
+  auto nodes = r->block()->nodes();
+  // checking that constant propagation ran wo/failure
+  AT_ASSERT(std::distance(nodes.begin(), nodes.end()) == 1);
+}
 
 } // namespace
 } // namespace jit

@@ -36,7 +36,7 @@ static constexpr int launch_bound2 = 4;
 namespace at { namespace native {
 
 template<int nt, int vt, typename func_t>
-C10_LAUNCH_BOUNDS(nt, launch_bound2)
+C10_LAUNCH_BOUNDS_2(nt, launch_bound2)
 __global__ void elementwise_kernel(int N, func_t f) {
   int tid = threadIdx.x;
   int nv = nt * vt;

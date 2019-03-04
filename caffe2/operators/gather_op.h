@@ -88,7 +88,7 @@ static bool gather_impl(
   // would have data dimension size of 0.
   // This *must* be done AFTER output->raw_mutable_data() above as that has
   // important allocation side effect that we must see.
-  if (output->size() == 0) {
+  if (output->numel() == 0) {
     return true;
   }
 
@@ -103,7 +103,7 @@ static bool gather_impl(
   auto src_batch_bytesize = data.size_from_dim(axis) * item_bytesize;
   // Treat indices as a single block even if they have multiple dimensions.
   // The "gathered batch" is a cumulative result combining indexed blocks.
-  auto N = indices.size();
+  auto N = indices.numel();
   auto gathered_batch_bytesize = N * block_size * item_bytesize;
 
   check_indexarray_range<Index>(idxs, N, src_indexing_axis_dim, wrap_indices);
@@ -149,8 +149,9 @@ class GatherOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  GatherOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit GatherOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "axis", axis_, 0) {
     // TBD: We may want to fix the old index wrap behaviour once we have
     // operator versioning, to only apply it when needed as otherwise its likely

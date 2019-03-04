@@ -23,9 +23,9 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       }
     }
     out << ")";
-  } else if (auto value = t.cast<TensorType>()) {
+  } else if (auto value = t.cast<DimensionedTensorType>()) {
     out << toString(value->scalarType()) << "(";
-    for (int i = 0; i < value->dim(); ++i) {
+    for (int64_t i = 0; i < value->dim(); ++i) {
       if (i > 0) {
         out << ", ";
       }
@@ -55,12 +55,12 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   return out;
 }
 
-DynamicTypePtr DynamicType::get() {
-  static auto value = DynamicType::create();
+TensorTypePtr TensorType::get() {
+  static auto value = TensorType::create();
   return value;
 }
-UndefinedTensorTypePtr UndefinedTensorType::get() {
-  static auto value = UndefinedTensorType::create();
+AutogradZeroTensorTypePtr AutogradZeroTensorType::get() {
+  static auto value = AutogradZeroTensorType::create();
   return value;
 }
 NumberTypePtr NumberType::get() {
@@ -96,11 +96,11 @@ DeviceObjTypePtr DeviceObjType::get() {
   return value;
 }
 OptionalTypePtr OptionalType::ofTensor() {
-  static auto value = OptionalType::create(DynamicType::get());
+  static auto value = OptionalType::create(TensorType::get());
   return value;
 }
 ListTypePtr ListType::ofTensors() {
-  static auto value = ListType::create(DynamicType::get());
+  static auto value = ListType::create(TensorType::get());
   return value;
 }
 ListTypePtr ListType::ofInts() {
@@ -150,18 +150,28 @@ TypePtr incompleteInferTypeFrom(const IValue& value) {
 }
 
 // This attempts to recover the type from an IValue, including nested Generic
-// Lists. It only examines the first element of each generic container,
+// Lists. It only examines the first element (the first of the iterator in the
+// case of a dict) of each generic container,
 // and if a generic container is empty returns typevar as the base element.
 // XXX: only used for better error messages, should not be used elsewhere
-TypePtr attemptToRecoverType(const IValue& input_ivalue) {
-  if (input_ivalue.isGenericList()) {
-    auto& ivalue_list = input_ivalue.toGenericListRef();
+TypePtr attemptToRecoverType(const IValue& ivalue) {
+  if (ivalue.isGenericList()) {
+    auto& ivalue_list = ivalue.toGenericListRef();
     if (ivalue_list.size() == 0) {
       return ListType::create(VarType::create("t"));
     }
     return ListType::create(attemptToRecoverType(ivalue_list[0]));
   }
-  return incompleteInferTypeFrom(input_ivalue);
+  if (ivalue.isGenericDict()) {
+    const auto& dict = ivalue.toGenericDictRef();
+    if (dict.size() == 0) {
+      return DictType::create(VarType::create("t"), VarType::create("t"));
+    }
+    auto item = dict.begin();
+    return DictType::create(
+        attemptToRecoverType(item->first), attemptToRecoverType(item->second));
+  }
+  return incompleteInferTypeFrom(ivalue);
 }
 
 // Checks if input_ivalue is a subvalue of type.
@@ -177,23 +187,39 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
       return isSubvalueOf(list_elem, element_type);
     });
   }
+  if (ivalue.isGenericDict()) {
+    auto dict_type = type->expect<DictType>();
+    const auto& dict = ivalue.toGenericDictRef();
+    return std::all_of(
+        dict.begin(), dict.end(), [=](const std::pair<IValue, IValue>& item) {
+          return isSubvalueOf(item.first, dict_type->getKeyType()) &&
+              isSubvalueOf(item.second, dict_type->getValueType());
+        });
+  }
   return incompleteInferTypeFrom(ivalue)->isSubtypeOf(type);
 }
 
-
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
-  //cases that t1 == t2, or t1 is a type refinement of t2 and vice versa
+c10::optional<TypePtr> tryEitherIsTheSuperType(const TypePtr& t1, const TypePtr& t2) {
   if (t1->isSubtypeOf(t2)) {
     return t2;
   } else if (t2->isSubtypeOf(t1)) {
     return t1;
+  } else {
+    return c10::nullopt;
+  }
+}
+
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
+  //cases that t1 == t2, or t1 is a type refinement of t2 and vice versa
+  if (auto maybe_supertype = tryEitherIsTheSuperType(t1, t2)) {
+    return *maybe_supertype;
   }
 
   // NB: we do not return NumberType because there is not currently enough
   // operator support for it
 
-  if (t1->isSubtypeOf(DynamicType::get()) && t2->isSubtypeOf(DynamicType::get())) {
-    return static_cast<TypePtr>(DynamicType::get());;
+  if (t1->isSubtypeOf(TensorType::get()) && t2->isSubtypeOf(TensorType::get())) {
+    return static_cast<TypePtr>(TensorType::get());;
   }
 
   // if t1 is None and t2 is a concrete type, return Optional[t2] and vice versa
@@ -205,12 +231,14 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
 
   //types which contain other types
   if (t1->cast<ListType>() && t2->cast<ListType>()) {
-    auto unified_type = unifyTypes(t1->cast<ListType>()->getElementType(), t2->cast<ListType>()->getElementType());
-    if (unified_type) {
-      return static_cast<TypePtr>(ListType::create(*unified_type));
-    } else {
-      return c10::nullopt;
-    }
+    // because we have runtime specializations of lists, e.g. int[] = std::vector<int64_t>
+    // int?[] = std::vector<IValue>  we don't allow type coercion,
+    // since t1 & t2 may have different runtime representations.
+
+    // allow Lists of different tensor types
+    auto unshaped_t1 = unshapedType(t1);
+    auto unshaped_t2 = unshapedType(t2);
+    return tryEitherIsTheSuperType(unshaped_t1, unshaped_t2);
   } else if(t1->cast<TupleType>() && t2->cast<TupleType>()) {
     auto tuple1 = t1->cast<TupleType>();
     auto tuple2 = t2->cast<TupleType>();
@@ -331,6 +359,32 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       ret.errMsg = "cannot match an Optional[T] to None, because there is no way to determine T from None.";
       return ret;
     }
+  } else if (auto dict_formal = formal->cast<DictType>()) {
+    if (auto dict_actual = actual->cast<DictType>()) {
+      auto key_type = matchTypeVariables(
+        dict_formal->getKeyType(),
+        dict_actual->getKeyType(),
+        type_env
+      );
+      if (!key_type.type) {
+        return key_type;
+      }
+      auto value_type = matchTypeVariables(
+        dict_formal->getValueType(),
+        dict_actual->getValueType(),
+        type_env
+      );
+      if (!value_type.type) {
+        return value_type;
+      }
+      ret.type = DictType::create(*key_type.type, *value_type.type);
+      return ret;
+    } else {
+      std::stringstream ss;
+      ss << "cannot match a dict to " << actual->str();
+      ret.errMsg = ss.str();
+      return ret;
+    }
   }
 
   AT_ERROR("unhandled free variable container: ", formal->str());
@@ -370,4 +424,43 @@ bool Type::isSubtypeOf(const TypePtr rhs) const {
   return *this == *rhs;
 }
 
+namespace {
+class ClassTypeRegistry {
+ public:
+  void registerType(std::string name, ClassTypePtr type) {
+    std::lock_guard<std::mutex> g(mutex_);
+    // TODO: new type registrations will override the old ones. Is this safe?
+    reg_[name] = type;
+  }
+
+  ClassTypePtr getType(const std::string& name) {
+    std::lock_guard<std::mutex> g(mutex_);
+    if (reg_.count(name)) {
+      return reg_.at(name);
+    }
+    return nullptr;
+  }
+
+ private:
+  std::mutex mutex_;
+  std::unordered_map<std::string, ClassTypePtr> reg_;
+};
+
+ClassTypeRegistry& getRegistry() {
+  static ClassTypeRegistry r;
+  return r;
+}
+} // namespace
+
+ClassTypePtr ClassType::create(
+    const std::string& name,
+    std::shared_ptr<Module> module) {
+  auto ptr = ClassTypePtr(new ClassType(name, std::move(module)));
+  getRegistry().registerType(name, ptr);
+  return ptr;
+}
+
+ClassTypePtr ClassType::get(const std::string& name) {
+  return getRegistry().getType(name);
+}
 } // namespace c10

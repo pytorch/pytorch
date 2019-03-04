@@ -7,6 +7,30 @@ from caffe2.python import core, workspace
 from hypothesis import given
 
 
+def compare_rowwise(emb_orig, emb_reconstructed, fp16):
+    # there is an absolute error introduced per row through int8 quantization
+    # and a relative error introduced when quantizing back from fp32 to fp16
+    assert(emb_orig.shape == emb_reconstructed.shape)
+    rtol = 1e-8
+    if fp16:
+        rtol = 1e-3
+    erange = np.amax(emb_orig, axis=1) - np.amin(emb_orig, axis=1)
+
+    threshold = erange / 255.0 / 1.9
+
+    for i in range(emb_orig.shape[0]):
+        r_orig = emb_orig[i, :]
+        r_reconstructed = emb_reconstructed[i, :]
+
+        isclose = np.isclose(r_orig, r_reconstructed, atol=threshold[i], rtol=rtol)
+        n_violated = isclose.size - isclose.sum()
+
+        if n_violated > 0:
+            print(isclose, threshold[i])
+            print(i, r_orig, r_reconstructed, threshold[i], r_orig - r_reconstructed)
+        assert(n_violated == 0)
+
+
 class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
     @given(
         batchsize=st.integers(1, 20),
@@ -14,15 +38,19 @@ class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
         weighted=st.booleans(),
         seed=st.integers(0, 2 ** 32 - 1),
         empty_indices=st.booleans(),
+        fp16=st.booleans(),
     )
     def test_sparse_lengths_sum(
-        self, batchsize, blocksize, weighted, seed, empty_indices
+        self, batchsize, blocksize, weighted, seed, empty_indices, fp16
     ):
         net = core.Net("bench")
 
         np.random.seed(seed)
 
-        input_data = np.random.rand(batchsize, blocksize).astype(np.float32)
+        if (fp16):
+            input_data = np.random.rand(batchsize, blocksize).astype(np.float16)
+        else:
+            input_data = np.random.rand(batchsize, blocksize).astype(np.float32)
         if empty_indices:
             lengths = np.zeros(batchsize, dtype=np.int32)
             num_indices = 0
@@ -42,12 +70,20 @@ class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
         )
         weights = np.random.uniform(size=[len(indices)]).astype(np.float32)
 
-        quantized_data = net.FloatToFused8BitRowwiseQuantized(
-            "input_data", "quantized_data"
-        )
-        dequantized_data = net.Fused8BitRowwiseQuantizedToFloat(
-            quantized_data, "dequantized_data"
-        )
+        if fp16:
+            quantized_data = net.HalfFloatToFused8BitRowwiseQuantized(
+                "input_data", "quantized_data"
+            )
+            dequantized_data = net.Fused8BitRowwiseQuantizedToHalfFloat(
+                quantized_data, "dequantized_data"
+            )
+        else:
+            quantized_data = net.FloatToFused8BitRowwiseQuantized(
+                "input_data", "quantized_data"
+            )
+            dequantized_data = net.Fused8BitRowwiseQuantizedToFloat(
+                quantized_data, "dequantized_data"
+            )
 
         if weighted:
             net.SparseLengthsWeightedSum(
@@ -74,22 +110,34 @@ class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
         workspace.CreateNet(net)
         workspace.RunNetOnce(net)
 
+        dequantized_data = workspace.FetchBlob("dequantized_data")
+        np.testing.assert_array_almost_equal(input_data, workspace.FetchBlob("input_data"))
+        compare_rowwise(input_data, dequantized_data, fp16)
+
         sum_reference = workspace.FetchBlob("sum_reference")
         sum_quantized = workspace.FetchBlob("sum_quantized")
-        np.testing.assert_array_almost_equal(sum_reference, sum_quantized)
+        if fp16:
+            np.testing.assert_array_almost_equal(sum_reference, sum_quantized, decimal=3)
+        else:
+            np.testing.assert_array_almost_equal(sum_reference, sum_quantized)
 
     @given(
         batchsize=st.integers(1, 20),
         blocksize=st.sampled_from([8, 16, 32, 64, 85, 96, 128, 163]),
         seed=st.integers(0, 2 ** 32 - 1),
         empty_indices=st.booleans(),
+        fp16=st.booleans(),
     )
-    def test_sparse_lengths_mean(self, batchsize, blocksize, seed, empty_indices):
+    def test_sparse_lengths_mean(self, batchsize, blocksize, seed, empty_indices, fp16):
         net = core.Net("bench")
 
         np.random.seed(seed)
 
-        input_data = np.random.rand(batchsize, blocksize).astype(np.float32)
+        if fp16:
+            input_data = np.random.rand(batchsize, blocksize).astype(np.float16)
+        else:
+            input_data = np.random.rand(batchsize, blocksize).astype(np.float32)
+
         if empty_indices:
             lengths = np.zeros(batchsize, dtype=np.int32)
             num_indices = 0
@@ -109,12 +157,20 @@ class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
         )
         print(indices, lengths)
 
-        quantized_data = net.FloatToFused8BitRowwiseQuantized(
-            "input_data", "quantized_data"
-        )
-        dequantized_data = net.Fused8BitRowwiseQuantizedToFloat(
-            quantized_data, "dequantized_data"
-        )
+        if fp16:
+            quantized_data = net.HalfFloatToFused8BitRowwiseQuantized(
+                "input_data", "quantized_data"
+            )
+            dequantized_data = net.Fused8BitRowwiseQuantizedToHalfFloat(
+                quantized_data, "dequantized_data"
+            )
+        else:
+            quantized_data = net.FloatToFused8BitRowwiseQuantized(
+                "input_data", "quantized_data"
+            )
+            dequantized_data = net.Fused8BitRowwiseQuantizedToFloat(
+                quantized_data, "dequantized_data"
+            )
 
         net.SparseLengthsMean(
             [dequantized_data, "indices", "lengths"], "mean_reference"
@@ -131,6 +187,13 @@ class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
         workspace.CreateNet(net)
         workspace.RunNetOnce(net)
 
+        dequantized_data = workspace.FetchBlob("dequantized_data")
+        np.testing.assert_array_almost_equal(input_data, workspace.FetchBlob("input_data"))
+        compare_rowwise(input_data, dequantized_data, fp16)
+
         mean_reference = workspace.FetchBlob("mean_reference")
         mean_quantized = workspace.FetchBlob("mean_quantized")
-        np.testing.assert_array_almost_equal(mean_reference, mean_quantized)
+        if fp16:
+            np.testing.assert_array_almost_equal(mean_reference, mean_quantized, decimal=3)
+        else:
+            np.testing.assert_array_almost_equal(mean_reference, mean_quantized)

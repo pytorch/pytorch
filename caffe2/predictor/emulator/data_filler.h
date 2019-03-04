@@ -31,12 +31,14 @@ class Filler {
     for (const auto& item : *input_data) {
       bytes += item.nbytes();
     }
-    CAFFE_ENFORCE(bytes > 0, "input bytes should be positive");
+    if (bytes == 0) {
+      LOG(WARNING) << "0 input bytes filled";
+    }
 
     return bytes;
   }
 
-  std::vector<std::string> get_input_names() const {
+  const std::vector<std::string>& get_input_names() const {
     CAFFE_ENFORCE(!input_names_.empty(), "input names is not initialized");
     return input_names_;
   }

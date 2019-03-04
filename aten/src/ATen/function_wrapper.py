@@ -63,8 +63,8 @@ PURE_VIRTUAL_TYPE_METHOD_DECLARATION = CodeTemplate("""\
 virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const = 0;
 """)
 DEPRECATED_PURE_VIRTUAL_TYPE_METHOD_DECLARATION = CodeTemplate("""\
-C10_DEPRECATED(virtual ${return_type} \
-${method_prefix_derived}${api_name}(${type_method_formals}) const = 0);
+C10_DEPRECATED virtual ${return_type} \
+${method_prefix_derived}${api_name}(${type_method_formals}) const = 0;
 """)
 PURE_VIRTUAL_TYPE_METHOD_DECLARATION_BROADCAST = CodeTemplate("""\
 virtual ${return_type} ${api_name}(${type_method_formals}) const = 0;
@@ -139,7 +139,7 @@ static inline ${return_type} ${api_name}(${formals_with_defaults});
 """)
 # add a method declaration in Functions.h
 DEPRECATED_FUNCTION_DECLARATION = CodeTemplate("""\
-C10_DEPRECATED(static inline ${return_type} ${api_name}(${formals_with_defaults}));
+C10_DEPRECATED static inline ${return_type} ${api_name}(${formals_with_defaults});
 """)
 # add method definition in Functions.h
 FUNCTION_DEFINITION = CodeTemplate("""\
@@ -208,7 +208,7 @@ TYPE_FORMAL_GENERIC = {
     'THDenseIndexTensor*': 'Tensor &',
     'THStorage*': 'Storage',
     'THGenerator*': 'Generator *',
-    'IntListSize': 'IntList',
+    'IntArrayRefSize': 'IntArrayRef',
     'accreal': 'Scalar',
     'real': 'Scalar',
     'long': 'int64_t',
@@ -224,7 +224,7 @@ DYNAMIC_TYPE = {
     'THDenseIndexTensor*': 'IndexTensor',
     'THStorage*': 'Storage',
     'THGenerator*': 'Generator*',
-    'IntListSize': 'IntList',
+    'IntArrayRefSize': 'IntArrayRef',
     'accreal': 'accreal',
     'real': 'real',
     'long': 'int64_t',
@@ -295,13 +295,13 @@ CHECKED_CAST = {
         CodeTemplate(
             'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(device_type()))'),
     # This is a cast done via direct-construction
-    'IntListStride': CodeTemplate('at::IntList ${result_name} = get_intlist_stride_th(${arg_name});'),
+    'IntArrayRefStride': CodeTemplate('at::IntArrayRef ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate(
             'checked_tensor_list_unwrap(${arg_name},"${arg_name}",${arg_pos}, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
-    'IntList': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos}${,default_init})')
+    'IntArrayRef': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos}${,default_init})')
 }
 
 CHECKED_USE = {
@@ -834,12 +834,10 @@ def create_generic(top_env, declarations):
 
         option['const_mark'] = '' if option['inplace'] else ' const'
 
-        is_method = 'method' in option['variants']
+        assert 'method' not in option['variants'], 'TH functions cannot be methods'
         is_function = 'function' in option['variants']
         dispatch_tensor = find_dispatch_tensor(formals)
         is_namespace_function = is_function and dispatch_tensor is not None
-
-        check_methods_do_not_start_with_underscore(option['name'], is_method)
 
         broadcast_arg = get_broadcast_argument(option)
         # "s_" for "same size".
@@ -902,13 +900,6 @@ def create_generic(top_env, declarations):
                 TYPE_METHOD_DEFINITION_BROADCAST.substitute(env))
 
         method_of = ['Type']
-        if is_method:
-            top_env['tensor_method_declarations'].append(
-                TENSOR_METHOD_DECLARATION.substitute(env))
-            top_env['tensor_method_definitions'].append(
-                TENSOR_METHOD_DEFINITION.substitute(env))
-            method_of.append('Tensor')
-
         if is_namespace_function:
             option['inferred_type'] = 'detail::infer_type({})'.format(dispatch_tensor)
             top_env['function_declarations'].append(
@@ -979,6 +970,7 @@ def create_generic(top_env, declarations):
                     'IndexTensor': 'const Tensor &' if const else 'Tensor &',
                     'Type': 'const Type &' if const else 'Type &',
                     'TensorOptions': 'const TensorOptions &' if const else 'TensorOptions &',
+                    'TensorList': 'TensorList',
                 }
 
             if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():
@@ -1211,7 +1203,7 @@ def create_derived(backend_type_env, declarations):
 
     def requires_checked_cast(argument):
         # type: (THFormal) -> bool
-        if argument['type'] == 'IntList':
+        if argument['type'] == 'IntArrayRef':
             return 'size' in argument
         return argument['type'] in CHECKED_CAST
 
@@ -1388,7 +1380,7 @@ def create_derived(backend_type_env, declarations):
         output_count = 0
 
         # scalar_check is the heuristic conditions when a result may be a scalar_check
-        # if there is a IntListSize argument, then its dimensions are used to determine scalar.
+        # if there is a IntArrayRefSize argument, then its dimensions are used to determine scalar.
         # otherwise, it is true if all the input tensors are scalars,
         scalar_check_is_from_size = False
         scalar_check_is_from_option = False
@@ -1404,7 +1396,7 @@ def create_derived(backend_type_env, declarations):
         for arg in option['arguments']:
             if is_real_argument_to_wrapper(arg):
                 count += 1
-            if arg['type'] == 'IntListSize' and not scalar_check_is_from_option:
+            if arg['type'] == 'IntArrayRefSize' and not scalar_check_is_from_option:
                 scalar_check_is_from_size = True
                 scalar_check = '{}.size() == 0'.format(arg['name'])
             if arg['type'] == 'TensorList':

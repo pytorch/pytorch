@@ -12,7 +12,7 @@ namespace caffe2 {
 
 class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
  public:
-  CudnnConvOpBase(const OperatorDef& operator_def, Workspace* ws)
+  explicit CudnnConvOpBase(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_),
         cudnn_ws_nbytes_limit_(OperatorBase::GetSingleArgument<size_t>(
@@ -87,7 +87,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
     CUDNN_ENFORCE(cudnnCreateConvolutionDescriptor(&conv_desc_));
   }
 
-  ~CudnnConvOpBase() {
+  ~CudnnConvOpBase() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(bottom_desc_));
     CUDNN_ENFORCE(cudnnDestroyFilterDescriptor(filter_desc_));
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(bias_desc_));
@@ -432,10 +432,10 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
 
 class CudnnConvOp final : public CudnnConvOpBase {
  public:
-  CudnnConvOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit CudnnConvOp(const OperatorDef& operator_def, Workspace* ws)
       : CudnnConvOpBase(operator_def, ws) {}
 
-  ~CudnnConvOp() {}
+  ~CudnnConvOp() override {}
 
   template <typename T_X, typename T_W, typename T_B, typename T_Y>
   bool DoRunWithType();
@@ -453,7 +453,7 @@ class CudnnConvOp final : public CudnnConvOpBase {
 
 class CudnnConvGradientOp final : public CudnnConvOpBase {
  public:
-  CudnnConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit CudnnConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : CudnnConvOpBase(operator_def, ws),
         no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(
@@ -464,7 +464,7 @@ class CudnnConvGradientOp final : public CudnnConvOpBase {
     CUDNN_ENFORCE(cudnnCreateConvolutionDescriptor(&bwd_filter_conv_desc_));
   }
 
-  ~CudnnConvGradientOp() {
+  ~CudnnConvGradientOp() override {
     CUDNN_ENFORCE(cudnnDestroyConvolutionDescriptor(bwd_data_conv_desc_));
     CUDNN_ENFORCE(cudnnDestroyConvolutionDescriptor(bwd_filter_conv_desc_));
   }

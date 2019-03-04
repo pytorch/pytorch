@@ -387,11 +387,4 @@ at::Type& get_default_tensor_type() {
   AT_ASSERT(default_tensor_type);
   return *default_tensor_type;
 }
-
-Device getDevice(const at::Tensor& tensor) {
-  if (tensor.is_cuda()) {
-    return at::Device(at::DeviceType::CUDA, tensor.get_device());
-  }
-  return at::Device(at::DeviceType::CPU);
-}
 }} // namespace torch::tensors

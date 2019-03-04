@@ -244,7 +244,7 @@ bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
   if (InputSize() > 1) {
     const auto& lengths = Input(1);
     lengths_ptr = lengths.data<int32_t>();
-    lengths_size = lengths.size();
+    lengths_size = lengths.numel();
   }
 
   auto out_dims = in.sizes().vec();

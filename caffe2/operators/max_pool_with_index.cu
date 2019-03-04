@@ -109,11 +109,10 @@ template <typename T>
 bool MaxPoolWithIndexOp::DoRunWithType() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  auto* mask = Output(1);
 
   ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, X.dim32(1));
-  int output_size = Y->size();
-  mask->Resize(output_size);
+  int output_size = Y->numel();
+  auto* mask = Output(1, {output_size}, at::dtype<int>());
 
   MaxPoolForward<T>
       <<<CAFFE_GET_BLOCKS(output_size),
@@ -158,19 +157,18 @@ bool MaxPoolWithIndexGradientOp::DoRunWithType() {
   auto& X = Input(0);
   auto& dY = Input(1);
   auto& mask = Input(2);
-  auto* dX = Output(0);
 
   CAFFE_ENFORCE(X.dim() == 4, "Operator only supports 4D tensors");
 
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<T>());
   ConvPoolOpBase<CUDAContext>::ComputePads(vector<int>{X.dim32(2), X.dim32(3)});
 
   MaxPoolBackward<T><<<
-      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_GET_BLOCKS(X.numel()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(),
+      X.numel(),
       dY.data<T>(),
       mask.data<int>(),
       X.dim32(0),
