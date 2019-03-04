@@ -945,6 +945,9 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& p : params) {
               NamedInput* np =
                   std::get<0>(p)->find_parameter(std::get<1>(p));
+              if (np == nullptr) {
+                np = std::get<0>(p)->find_buffer(std::get<1>(p));
+              }
               AT_ASSERT(np != nullptr);
               member_inputs.push_back(np->slot());
             }
