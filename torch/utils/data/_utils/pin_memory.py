@@ -55,5 +55,7 @@ def pin_memory_data(data):
         return type(data)(*(pin_memory_data(sample) for sample in data))
     elif isinstance(data, container_abcs.Sequence):
         return [pin_memory_data(sample) for sample in data]
+    elif hasattr(data, "pin_memory"):
+        return data.pin_memory()
     else:
         return data
