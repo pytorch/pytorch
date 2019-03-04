@@ -140,7 +140,7 @@ class TensorDataset(Dataset):
 class ConcatDataset(Dataset):
     r"""Dataset to concatenate multiple datasets.
 
-    This classuseful to assemble different existing datasets, possibly
+    This class is useful to assemble different existing datasets, possibly
     large-scale datasets as the concatenation operation is done in an
     on-the-fly manner.
 
@@ -190,9 +190,9 @@ class ConcatDataset(Dataset):
 class ChainDataset(IterableDataset):
     r"""Dataset to chain multiple :class:`IterableDataset` s.
 
-    This classuseful to assemble different existing dataset streamss, possibly
-    large-scale datasets as the concatenation operation is done in an
-    on-the-fly manner.
+    This class is useful to assemble different existing dataset streams. The
+    chainning operation is done on-the-fly, so concatenating large-scale
+    datasets with this class will be efficient.
 
     Arguments:
         datasets (iterable of IterableDataset): datasets to be chained together
