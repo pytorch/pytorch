@@ -95,10 +95,10 @@ def jit_type_of(arg):
 # TODO: Device? and Layout? need toOptional?
 FROM_IVALUE = {
     'Device': '{}.toDevice()',
-    'Device?': '{}.toDevice()',
+    'Device?': '{}.toOptional<c10::Device>()',
     'IntArrayRef': '{}.toIntList()->elements()',
     'Layout': '{}.toLayout()',
-    'Layout?': '{}.toLayout()',
+    'Layout?': '{}.toOptional<c10::Layout>()',
     'Scalar': '{}.toScalar()',
     'Scalar?': '{}.toOptional<Scalar>()',
     'ScalarType': '{}.toScalarType()',
