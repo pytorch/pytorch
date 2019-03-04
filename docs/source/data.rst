@@ -2,13 +2,13 @@ torch.utils.data
 ===================================
 
 .. automodule:: torch.utils.data
+.. autoclass:: DataLoader
 .. autoclass:: Dataset
 .. autoclass:: IterableDataset
 .. autoclass:: TensorDataset
 .. autoclass:: ConcatDataset
 .. autoclass:: ChainDataset
 .. autoclass:: Subset
-.. autoclass:: DataLoader
 .. autofunction:: torch.utils.data.get_worker_info
 .. autofunction:: torch.utils.data.random_split
 .. autoclass:: torch.utils.data.Sampler

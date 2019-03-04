@@ -35,6 +35,62 @@ class DataLoader(object):
     Data loader. Combines a dataset and a sampler, and provides
     single- or multi-process iterators over the dataset.
 
+    :class:`~torch.utils.data.DataLoader` supports two different styles of
+    datasets:
+
+    * Map-style datasets
+
+      A map-style dataset is one that implements the ``__getitem__`` protocol,
+      and represents a map from indices/keys to data samples.  E.g., such a
+      dataset, when called ``dataset[idx]`` could read and the ``idx``-th image
+      and its corresponding label from a folder on the disk.
+
+      See :class:`~torch.utils.data.Dataset` for more details.
+
+    * Iterable-style datasets
+
+      An iterable-style dataset is one that implements the ``__iter__`` protocol,
+      and represents an iterable over data samples.  E.g., such a dataset, when
+      called ``iter(dataset)``, could return a stream of data reading from a
+      database, a remote server, or even logs generated in real time.
+
+      See :class:`~torch.utils.data.IterableDataset` for more details.
+
+    :class:`~torch.utils.data.DataLoader` constructor receives a
+    :attr:`dataset` object as its first argument. Based on the other provided
+    arguments, a :class:`~torch.utils.data.DataLoader` operates in one of three
+    following modes:
+
+    * Batched loading from a map-style dataset (default).
+
+      This is the most common case, and corresponds to fetching a minibatch of
+      data and collate them into batched Tensors, i.e., Tensors with one dimension
+      being the batch dimension (usually the first). Two combinations of configs
+      that starts this mode are:
+
+      * (default) Using :attr:`batch_size`, :attr:`shuffle`, :attr:`sampler`, and
+        :attr:`drop_last` to specify the batch indices sampling behavior.
+
+        With the default arguments, a :class:`~torch.utils.data.DataLoader`
+        loads data as batches of size ``1`` with indices sampled with replacement.
+
+      * Setting :attr:`batch_sampler` as a custom sampler returning a list of
+        indices to the :attr:`dataset`at a time.
+
+      At each time, :attr:`collate_fn` is used to collate the list of samples
+      into batched Tensors. Users may use customized :attr:`collate_fn` to
+      achieve custom batching, e.g., along a dimension other than the first.
+
+      The behavior of this mode is roughly equivalent with::
+
+          for indices in batch_sampler:
+              yield collate_fn([dataset[i] for i in indices])
+
+    * Loading individual elements from a map-style dataset.
+
+    * Loading from an iterable-style dataset.
+
+
     Arguments:
         dataset (Dataset): dataset from which to load the data.
         batch_size (int, optional): how many samples per batch to load
@@ -42,17 +98,18 @@ class DataLoader(object):
         shuffle (bool, optional): set to ``True`` to have the data reshuffled
             at every epoch (default: ``False``).
         sampler (Sampler, optional): defines the strategy to draw samples from
-            the dataset. If specified, ``shuffle`` must be False.
-        batch_sampler (Sampler, optional): like sampler, but returns a batch of
+            the dataset. If specified, :attr:`shuffle must be False.
+        batch_sampler (Sampler, optional): like :attr:`sampler`, but returns a batch of
             indices at a time. Mutually exclusive with :attr:`batch_size`,
             :attr:`shuffle`, :attr:`sampler`, and :attr:`drop_last`.
         num_workers (int, optional): how many subprocesses to use for data
-            loading. 0 means that the data will be loaded in the main process.
+            loading. ``0`` means that the data will be loaded in the main process.
             (default: ``0``)
-        collate_fn (callable, optional): merges a list of samples to form a mini-batch.
-        pin_memory (bool, optional): If ``True``, the data loader will copy tensors
+        convert_fn (callable, optional): converts a sample to Tensor(s).
+        collate_fn (callable, optional): merges a list of samples to form a mini-batch of Tensor(s).
+        pin_memory (bool, optional): If ``True``, the data loader will copy Tensors
             into CUDA pinned memory before returning them.  If your data elements
-            are a custom type, or your ``collate_fn`` returns a batch that is a custom type
+            are a custom type, or your :attr:`collate_fn` returns a batch that is a custom type,
             see the example below.
         drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
             if the dataset size is not divisible by the batch size. If ``False`` and
@@ -274,7 +331,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
                 data = self.convert_fn(self.dataset[index])
             else:
                 # mode == _DataLoaderMode.MapWithBatchedRead:
-                data = self.collate_fn([self.convert_fn(self.dataset[i]) for i in index])
+                data = self.collate_fn([self.dataset[i] for i in index])
         if self.pin_memory:
             data = _utils.pin_memory.pin_memory_data(data)
         return data

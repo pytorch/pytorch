@@ -183,7 +183,7 @@ def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
                     data = convert_fn(dataset[index])
                 else:
                     # mode == _DataLoaderMode.MapWithBatchedRead:
-                    data = collate_fn([convert_fn(dataset[i]) for i in index])
+                    data = collate_fn([dataset[i] for i in index])
             except Exception:
                 # It is important that we don't store exc_info in a variable,
                 # see NOTE [ Python Traceback Reference Cycle Problem ]

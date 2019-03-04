@@ -12,9 +12,9 @@ class Dataset(object):
     All datasets that represent a map from keys to data samples should subclass
     it. All subclasses should overrite ``__getitem__``, supporting fetching a
     data sample for a given key. Subclasses could also optionally overwrite
-    ``__len__``, which is expected to return the size of the dataset for many
-    :class:`~torch.data.utils.Sampler` implementations and the default options
-    of :class:`~torch.data.utils.DataLoader`.
+    ``__len__``, which is expected to return the size of the dataset by many
+    :class:`~torch.utils.data.Sampler` implementations and the default options
+    of :class:`~torch.utils.data.DataLoader`.
     """
 
     def __getitem__(self, index):
@@ -36,15 +36,15 @@ class IterableDataset(Dataset):
     All subclasses should overrite ``__iter__``, which would return an iterator
     of samples in this dataset.
 
-    When a subclass is used with :class:`~torch.data.utils.DataLoader`, each
-    item in the dataset will be yielded from the :class:`~torch.data.utils.DataLoader`
+    When a subclass is used with :class:`~torch.utils.data.DataLoader`, each
+    item in the dataset will be yielded from the :class:`~torch.utils.data.DataLoader`
     iterator. When ``num_workers > 0``, each worker process will have a
     different copy of the dataset object, so it is often desired to configure
     each copy independently to avoid having duplicate data returned from the
-    workers. :func:`~torch.data.utils.get_worker_info`, when called in a worker
+    workers. :func:`~torch.utils.data.get_worker_info`, when called in a worker
     process, returns information about the worker. It can be used in either the
-    dataset's ``__iter__`` method or the :class:`~torch.data.utils.DataLoader` 's
-    ``worker_init_fn`` option to modify each copy's behavior.
+    dataset's ``__iter__`` method or the :class:`~torch.utils.data.DataLoader` 's
+    :attr:`worker_init_fn` option to modify each copy's behavior.
 
     Examples::
 
@@ -138,11 +138,9 @@ class TensorDataset(Dataset):
 
 
 class ConcatDataset(Dataset):
-    r"""Dataset to concatenate multiple datasets.
+    r"""Dataset as a concatenation of multiple datasets.
 
-    This class is useful to assemble different existing datasets, possibly
-    large-scale datasets as the concatenation operation is done in an
-    on-the-fly manner.
+    This class is useful to assemble different existing datasets.
 
     Arguments:
         datasets (sequence): List of datasets to be concatenated
@@ -188,7 +186,7 @@ class ConcatDataset(Dataset):
 
 
 class ChainDataset(IterableDataset):
-    r"""Dataset to chain multiple :class:`IterableDataset` s.
+    r"""Dataset for chainning multiple :class:`IterableDataset` s.
 
     This class is useful to assemble different existing dataset streams. The
     chainning operation is done on-the-fly, so concatenating large-scale
