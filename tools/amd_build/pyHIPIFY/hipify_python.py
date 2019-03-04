@@ -770,6 +770,8 @@ def get_hip_file_path(filepath):
 def is_out_of_place(filepath):
     if filepath.startswith("torch/"):
         return False
+    if filepath.startswith("tools/autograd/templates/"):
+        return False
     return True
 
 
@@ -780,6 +782,8 @@ def is_pytorch_file(filepath):
             return False
         return True
     if filepath.startswith("torch/"):
+        return True
+    if filepath.startswith("tools/autograd/templates/"):
         return True
     return False
 

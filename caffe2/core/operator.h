@@ -150,11 +150,23 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         throw enf;
       }
     }
-    DCHECK_LT(idx, ivalue_inputs_.size());
-    auto ival = ivalue_inputs_[idx];
+    DCHECK_LT(0, ivalue_inputs_.size());
+    IValue ival;
+    if (ivalue_inputs_[0].isTensorList()) {
+      // if the first input is a tensor list, we get input tensors by indexing into that list.
+      // currently, this means that only tensors from that list are accessible as inputs.
+      // any hypothetical input tensors that come after the list are not accessible.
+      const auto& tensorList = ivalue_inputs_[0].toTensorListRef();
+      DCHECK_LT(idx, tensorList.size());
+      ival = tensorList[idx];
+    } else {
+      // if the first input is not a tensor list, we get input tensors by indexing into the inputs.
+      DCHECK_LT(idx, ivalue_inputs_.size());
+      ival = ivalue_inputs_[idx];
+    }
     CAFFE_ENFORCE(
         ival.isTensor(),
-        "Inpput(int, DeviceType) is only available for IValues that store Tensors");
+        "Input(int, DeviceType) is only available for IValues that store Tensors");
     Tensor tensor = caffe2::Tensor(ival.toTensor());
     CAFFE_ENFORCE_EQ(tensor.GetDeviceType(), type);
     input_tensors_[idx] = std::move(tensor);

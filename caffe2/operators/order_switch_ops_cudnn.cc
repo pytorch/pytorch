@@ -16,10 +16,8 @@ class CuDNNOrderSwithOpBase : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
 
-  template <class... Args>
-  explicit CuDNNOrderSwithOpBase(Args&&... args)
-      : Operator<CUDAContext>(std::forward<Args>(args)...),
-        cudnn_wrapper_(&context_) {
+  CuDNNOrderSwithOpBase(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws), cudnn_wrapper_(&context_) {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&X_desc_));
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&Y_desc_));
   }
@@ -75,9 +73,8 @@ class CuDNNOrderSwithOpBase : public Operator<CUDAContext> {
 
 class CuDNNNHWC2NCHWOp final : public CuDNNOrderSwithOpBase {
  public:
-  template <class... Args>
-  explicit CuDNNNHWC2NCHWOp(Args&&... args)
-      : CuDNNOrderSwithOpBase(std::forward<Args>(args)...) {}
+  CuDNNNHWC2NCHWOp(const OperatorDef& operator_def, Workspace* ws)
+      : CuDNNOrderSwithOpBase(operator_def, ws) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
@@ -119,9 +116,8 @@ class CuDNNNHWC2NCHWOp final : public CuDNNOrderSwithOpBase {
 
 class CuDNNNCHW2NHWCOp final : public CuDNNOrderSwithOpBase {
  public:
-  template <class... Args>
-  explicit CuDNNNCHW2NHWCOp(Args&&... args)
-      : CuDNNOrderSwithOpBase(std::forward<Args>(args)...) {}
+  CuDNNNCHW2NHWCOp(const OperatorDef& operator_def, Workspace* ws)
+      : CuDNNOrderSwithOpBase(operator_def, ws) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
