@@ -12,13 +12,23 @@ from torch._six import container_abcs, string_classes, int_classes
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
 
 
+default_convert_err_msg_format = (
+    "default_convert: data must contain tensors, numpy arrays, numbers, "
+    "dicts or lists; found {}")
+
+
 def default_convert(data):
     r"""Puts each data field into a tensor"""
 
     elem_type = type(data)
     if isinstance(data, torch.Tensor):
         return data
-    elif elem_type.__module__ == 'numpy':
+    elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
+            and elem_type.__name__ != 'string_':
+        # array of string classes and object
+        if elem_type.__name__ == 'ndarray' \
+                and np_str_obj_array_pattern.search(elem.dtype.str) is not None:
+            raise TypeError(default_convert_err_msg_format.format(elem.dtype))
         return torch.as_tensor(data)
     elif isinstance(data, int_classes):
         return torch.tensor(data, dtype=torch.long)
@@ -35,7 +45,7 @@ def default_convert(data):
 
 
 _use_shared_memory = False
-r"""Whether to use shared memory in default_collate"""
+r"""Whether to collate into shared memory in default_collate"""
 
 
 default_collate_err_msg_format = (
@@ -65,10 +75,9 @@ def default_collate(batch):
             if np_str_obj_array_pattern.search(elem.dtype.str) is not None:
                 raise TypeError(default_collate_err_msg_format.format(elem.dtype))
 
-            return default_collate([torch.from_numpy(b) for b in batch])
-        if elem.shape == ():  # scalars
-            py_type = float if elem.dtype.name.startswith('float') else int
-            return numpy_type_map[elem.dtype.name](list(map(py_type, batch)))
+            return default_collate([torch.as_tensor(b) for b in batch])
+        elif elem.shape == ():  # scalars
+            return torch.as_tensor(batch)
     elif isinstance(elem, float):
         return torch.tensor(batch, dtype=torch.float64)
     elif isinstance(elem, int_classes):
