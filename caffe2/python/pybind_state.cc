@@ -13,6 +13,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/stats.h"
 #include "caffe2/core/transform.h"
+#include "caffe2/observers/profile_observer.h"
 #include "caffe2/observers/runcnt_observer.h"
 #include "caffe2/observers/time_observer.h"
 #include "caffe2/onnx/backend.h"
@@ -1136,6 +1137,7 @@ void addGlobalMethods(py::module& m) {
     }                                                         \
   }
 
+        REGISTER_PYTHON_EXPOSED_OBSERVER(ProfileObserver);
         REGISTER_PYTHON_EXPOSED_OBSERVER(TimeObserver);
 #undef REGISTER_PYTHON_EXPOSED_OBSERVER
 
