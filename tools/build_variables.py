@@ -161,7 +161,6 @@ def add_torch_libs():
             "-DUSE_NCCL",
             "-DUSE_NUMPY",
             "-DUSE_SCALARS",
-            "-DTH_INDEX_BASE=0",
             "-DNO_CUDNN_DESTROY_HANDLE",
             "-DPYTORCH_ONNX_CAFFE2_BUNDLE",
             "-Wno-write-strings",
