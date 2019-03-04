@@ -49,7 +49,7 @@ ConvDNNLowPOp<T, ReluFused>::ConvDNNLowPOp(
   // Create shared buffer mutex in the constructor
   // to avoid race-condition in DAGNet.
   if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
-    createSharedBuffer<CPUContext>(ws_);
+    createSharedBuffer<CPUContext>(ws);
   }
 
   if (FLAGS_caffe2_dnnlowp_shared_int32_buffer) {

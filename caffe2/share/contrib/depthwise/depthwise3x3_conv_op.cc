@@ -427,9 +427,8 @@ void runDepthwise3x3Conv(
 class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext, true> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(CPUContext, true);
-  template<class... Args>
-  explicit Depthwise3x3ConvOp(Args&&... args)
-      : ConvPoolOpBase<CPUContext, true>(std::forward<Args>(args)...) {
+  explicit Depthwise3x3ConvOp(const OperatorDef& operator_def, Workspace* ws)
+      : ConvPoolOpBase<CPUContext, true>(operator_def, ws), ws_(ws) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NCHW,
         "Depthwise3x3ConvOp only supports NCHW order");
@@ -540,6 +539,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext, true> {
 
  private:
   Tensor bias_{CPU};
+  Workspace* ws_;
 };
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv, DEPTHWISE_3x3, Depthwise3x3ConvOp);

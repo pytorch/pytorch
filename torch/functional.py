@@ -35,7 +35,7 @@ __all__ = [
 def broadcast_tensors(*tensors):
     r"""broadcast_tensors(*tensors) -> List of Tensors
 
-    Broadcasts the given tensors according to :ref:`_broadcasting-semantics`.
+    Broadcasts the given tensors according to :ref:`broadcasting-semantics`.
 
     Args:
         *tensors: any number of tensors of the same type
