@@ -265,7 +265,7 @@ struct THCCachingAllocator
       block->next = remaining;
 
       remaining->prev = block;
-      remaining->ptr = (char*)remaining->ptr + size;
+      remaining->ptr = static_cast<char*>(remaining->ptr) + size;
       remaining->size -= size;
       pool.insert(remaining);
     }
@@ -273,7 +273,7 @@ struct THCCachingAllocator
     block->allocated = true;
     allocated_blocks[block->ptr] = block;
 
-    *devPtr = (void*)block->ptr;
+    *devPtr = block->ptr;
 
     stats.increaseAllocated(block->size);
   }
