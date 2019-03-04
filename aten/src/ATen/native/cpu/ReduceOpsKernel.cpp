@@ -38,8 +38,8 @@ static void std_var_kernel_impl(TensorIterator &iter, bool unbiased, bool take_s
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.type(), "std", [&] {
     binary_kernel_reduce(
       iter,
-      WelfordOps<scalar_t, double> { unbiased, take_sqrt },
-      WelfordData<double>()
+      WelfordOps<scalar_t, double, int64_t, double> { unbiased, take_sqrt },
+      WelfordData<double, int64_t, double>()
     );
   });
 }

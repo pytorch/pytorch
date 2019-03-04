@@ -77,7 +77,7 @@ void THTensor_(preserveReduceDimSemantics)(
 void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
-      dimension + TH_INDEX_BASE);
+      dimension);
 
   int in_dims = THTensor_(nDimensionLegacyAll)(t);
   THTensor_(preserveReduceDimSemantics)(values_, in_dims, dimension, keepdim);
@@ -160,7 +160,7 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
 void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
-      dimension + TH_INDEX_BASE);
+      dimension);
 
   int in_dims = THTensor_(nDimensionLegacyAll)(t);
   THTensor_(preserveReduceDimSemantics)(values_, in_dims, dimension, keepdim);
@@ -243,7 +243,7 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
 void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
-      dimension + TH_INDEX_BASE);
+      dimension);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
   std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
@@ -320,7 +320,7 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
-      dimension + TH_INDEX_BASE);
+      dimension);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
   std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
@@ -397,7 +397,7 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
-      dimension + TH_INDEX_BASE);
+      dimension);
 
   THTensor_(resizeAs)(r_, t);
 
@@ -414,7 +414,7 @@ void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
 void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
-      dimension + TH_INDEX_BASE);
+      dimension);
 
   THTensor_(resizeAs)(r_, t);
 
@@ -501,9 +501,9 @@ void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, int dimension)
   }
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(a), 3, "dimension %d out of range",
-      dimension + TH_INDEX_BASE);
+      dimension);
   THArgCheck(THTensor_sizeLegacyNoScalars(a, dimension) == 3, 3, "dimension %d does not have size 3",
-      dimension + TH_INDEX_BASE);
+      dimension);
 
   THTensor_(resizeAs)(r_, a);
 
@@ -863,7 +863,7 @@ static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t ele
 void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "invalid dimension %d",
-      dimension + TH_INDEX_BASE);
+      dimension);
 
   THTensor_(resizeAs)(rt_, t);
   at::Tensor rt__wrap = THTensor_wrap(rt_);
@@ -1479,7 +1479,7 @@ void THTensor_(lerp)(THTensor *r_, THTensor *a, THTensor *b, scalar_t weight)
 void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "invalid dimension %d",
-      dimension + TH_INDEX_BASE);
+      dimension);
 
   THTensor_(sum)(r_, t, dimension, keepdim);
   THTensor_(div)(r_, r_, THTensor_sizeLegacyNoScalars(t, dimension));
@@ -1488,7 +1488,7 @@ void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
-      dimension + TH_INDEX_BASE);
+      dimension);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
   std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
@@ -1529,7 +1529,7 @@ void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int ke
 void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
-      dimension + TH_INDEX_BASE);
+      dimension);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
   std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
@@ -1570,7 +1570,7 @@ void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int biased, int ke
 void THTensor_(norm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
-      dimension + TH_INDEX_BASE);
+      dimension);
 
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
   std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
@@ -1648,7 +1648,7 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
   THTensor *rowR, *rowS;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(src), 3, "invalid dimension %d",
-      dimension + TH_INDEX_BASE);
+      dimension);
   THArgCheck(value > 0, 2, "non-positive-norm not supported");
   THArgCheck(THTensor_(nDimensionLegacyNoScalars)(src) > 1, 1, "need at least 2 dimensions, got %d dimensions",
       THTensor_(nDimensionLegacyNoScalars)(src));
@@ -1786,7 +1786,7 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t
 
   int dimension = 1;
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(tensor), 2, "invalid dimension %d",
-      dimension + TH_INDEX_BASE);
+      dimension);
 
   scalar_t minval;
   scalar_t maxval;

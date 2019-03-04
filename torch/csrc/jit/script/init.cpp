@@ -650,7 +650,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
 
   return FunctionSchema(
       new_name.value_or(schema.name()),
-      "",
+      schema.overload_name(),
       new_args,
       schema.returns(),
       schema.is_vararg(),
