@@ -464,7 +464,6 @@ class Module(object):
         return None
 
     def _slow_forward(self, *input, **kwargs):
-        input_vars = tuple(torch.autograd.function._iter_tensors(input))
         tracing_state = torch._C._get_tracing_state()
         if not tracing_state:
             return self.forward(*input, **kwargs)
@@ -928,11 +927,11 @@ class Module(object):
             >>> for idx, m in enumerate(net.modules()):
                     print(idx, '->', m)
 
-            0 -> Sequential (
-              (0): Linear (2 -> 2)
-              (1): Linear (2 -> 2)
+            0 -> Sequential(
+              (0): Linear(in_features=2, out_features=2, bias=True)
+              (1): Linear(in_features=2, out_features=2, bias=True)
             )
-            1 -> Linear (2 -> 2)
+            1 -> Linear(in_features=2, out_features=2, bias=True)
 
         """
         for name, module in self.named_modules():
@@ -956,11 +955,11 @@ class Module(object):
             >>> for idx, m in enumerate(net.named_modules()):
                     print(idx, '->', m)
 
-            0 -> ('', Sequential (
-              (0): Linear (2 -> 2)
-              (1): Linear (2 -> 2)
+            0 -> ('', Sequential(
+              (0): Linear(in_features=2, out_features=2, bias=True)
+              (1): Linear(in_features=2, out_features=2, bias=True)
             ))
-            1 -> ('0', Linear (2 -> 2))
+            1 -> ('0', Linear(in_features=2, out_features=2, bias=True))
 
         """
 

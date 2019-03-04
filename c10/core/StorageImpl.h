@@ -21,6 +21,10 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
         numel_(numel),
         resizable_(resizable),
         allocator_(allocator) {
+    if (resizable) {
+      AT_ASSERTM(
+          allocator_, "For resizable storage, allocator must be provided");
+    }
     if (numel > 0) {
       if (data_type_.id() == caffe2::TypeIdentifier::uninitialized()) {
         AT_ERROR(
@@ -40,13 +44,6 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
             allocator->allocate(data_type.itemsize() * numel),
             allocator,
             resizable) {}
-
-  explicit StorageImpl(at::Device device)
-      : StorageImpl(device, caffe2::TypeMeta()) {}
-
-  StorageImpl(at::Device device, caffe2::TypeMeta data_type)
-      : StorageImpl(data_type, 0, at::DataPtr(nullptr, device), nullptr, true) {
-  }
 
   StorageImpl& operator=(StorageImpl&& other) = default;
   StorageImpl& operator=(const StorageImpl&) = delete;
@@ -171,6 +168,10 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
   }
 
   void set_resizable(bool resizable) {
+    if (resizable) {
+      // We need an allocator to be resizable
+      AT_ASSERT(allocator_);
+    }
     resizable_ = resizable;
   }
 
@@ -208,6 +209,8 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
     // capacity() might not return the value that was set here, if itemsize does
     // not evenly divide it.
     numel_ = capacity / data_type_.itemsize();
+    allocator_ = nullptr;
+    resizable_ = false;
   }
 
  private:

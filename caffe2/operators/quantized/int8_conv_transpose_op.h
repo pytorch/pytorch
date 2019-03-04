@@ -17,8 +17,9 @@ namespace int8 {
 class Int8ConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
  public:
   USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS(CPUContext);
-  Int8ConvTransposeOp(const OperatorDef& def, Workspace* ws)
-      : ConvTransposeUnpoolBase(def, ws) {
+  template <class... Args>
+  explicit Int8ConvTransposeOp(Args&&... args)
+      : ConvTransposeUnpoolBase(std::forward<Args>(args)...) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NHWC,
         "Int8ConvTransposeOp only supports NHWC order");
@@ -87,8 +88,13 @@ class Int8ConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
             X.scale,
             W.zero_point,
             W.scale,
+#ifndef _MSC_VER
             W.t.template data<uint8_t>(),
             B.t.template data<int32_t>(),
+#else
+            W.t.data<uint8_t>(),
+            B.t.data<int32_t>(),
+#endif
             Y->zero_point,
             Y->scale,
             std::numeric_limits<uint8_t>::min(),

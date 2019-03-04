@@ -5,6 +5,8 @@ The testing package contains testing-specific utilities.
 import torch
 import random
 
+FileCheck = torch._C.FileCheck
+
 __all__ = [
     'assert_allclose', 'make_non_contiguous', 'rand_like', 'randn_like'
 ]

@@ -160,6 +160,9 @@ net models. In particular TorchScript supports:
 ``Tuple[T0, T1, ...]``
     A tuple containing subtypes ``T0``, ``T1``, etc. (e.g. ``Tuple[Tensor, Tensor]``)
 
+``bool``
+    A boolean value
+
 ``int``
     A scalar integer
 
@@ -171,6 +174,10 @@ net models. In particular TorchScript supports:
 
 ``Optional[T]``
     A value which is either None or type ``T``
+
+```Dict[K, V]``
+    A dict with key type ``K`` and value type ``V``. Only ``str``, ``int``, and
+    ``float`` are allowed as key types.
 
 Unlike Python, each variable in TorchScript function must have a single static type.
 This makes it easier to optimize TorchScript functions.
@@ -189,7 +196,7 @@ Example::
 
 There are 2 scenarios in which you can annotate:
 
-1. Function Argument Type annotation
+1. Function Argument Type Annotation
 
 By default, all parameters to a TorchScript function are assumed to be Tensor
 because this is the most common type used in modules. To specify that an
@@ -214,8 +221,9 @@ Example::
 
 2. Variable Type Annotation
 
-For example, a list by default is assumed to be List[Tensor]. If you would like to
-have a list of other types. PyTorch provides annotation functions.
+A list by default is assumed to be ``List[Tensor]`` and empty dicts
+``Dict[str, Tensor]``. To instantiate an empty list or dict of other types,
+use ``torch.jit.annotate``.
 
 Example::
 
@@ -223,20 +231,22 @@ Example::
     from torch.jit import Tensor
     from typing import List, Tuple
 
-    class ListOfTupleOfTensor(torch.jit.ScriptModule):
+    class EmptyDataStructures(torch.jit.ScriptModule):
         def __init__(self):
-            super(ListOfTupleOfTensor, self).__init__()
+            super(EmptyDataStructures, self).__init__()
 
         @torch.jit.script_method
         def forward(self, x):
-            # type: (Tensor) -> List[Tuple[Tensor, Tensor]]
+            # type: (Tensor) -> Tuple[List[Tuple[Tensor, Tensor]], Dict[int, Tensor]]
 
-            # This annotates the list to be a List[Tuple[Tensor, Tensor]]
-            returns = torch.jit.annotate(List[Tuple[Tensor, Tensor]], [])
+            # This annotates the list to be a `List[Tuple[Tensor, Tensor]]`
+            list_of_tuple = torch.jit.annotate(List[Tuple[Tensor, Tensor]], [])
             for i in range(10):
-                returns.append((x, x))
+                list_of_tuple.append((x, x))
 
-            return returns
+                # This annotates the list to be a `Dict[int, Tensor]`
+            int_tensor_dict = torch.jit.annotate(Dict[int, Tensor], {})
+            return list_of_tuple, int_tensor_dict
 
 
 Optional Type Refinement:
@@ -289,6 +299,13 @@ List Construction
     .. note::
         an empty list is assumed have type ``List[Tensor]``.
         The types of other list literals are derived from the type of the members.
+
+Dict Construction
+    ``{'hello': 3}``, ``{}``, ``{'a': torch.rand(3), 'b': torch.rand(4)}``
+
+    .. note::
+        an empty dict is assumed have type ``Dict[str, Tensor]``.
+        The types of other dict literals are derived from the type of the members.
 
 Arithmetic Operators
   ``a + b``
@@ -493,9 +510,10 @@ Return
     ``return a, b``
 
     .. note::
-        there must be a return statement as the last member of the function
-        and return statements cannot appear anywhere else in the function. This
-        restriction will be removed in the future.
+        TorchScript allows returns in the following circumstances:
+           1. At the end of a function
+           2. In an if-statement where <true> and <false> both return
+           3. In an if-statement where <true> returns and <false> is empty (an early return)
 
 Variable Resolution
 ~~~~~~~~~~~~~~~~~~~
@@ -851,10 +869,10 @@ Tracer Warnings
 Builtin Functions
 ~~~~~~~~~~~~~~~~~
 
-Torch Script supports a subset of the builtin tensor and neural network
+TorchScript supports a subset of the builtin tensor and neural network
 functions that PyTorch provides. Most methods on Tensor as well as functions in
 the ``torch`` namespace, all functions in ``torch.nn.functional`` and all
-modules from ``torch.nn`` are supported in Torch Script, excluding those in the
+modules from ``torch.nn`` are supported in TorchScript, excluding those in the
 table below. For unsupported modules, we suggest using :meth:`torch.jit.trace`.
 
 Unsupported ``torch.nn`` Modules  ::
@@ -872,3 +890,32 @@ Unsupported ``torch.nn`` Modules  ::
 
 
 .. automodule:: torch.jit.supported_ops
+
+Frequently Asked Questions
+--------------------------
+
+Q: I would like to train a model on GPU and do inference on CPU. What are the
+best practices?
+   First convert your model from GPU to CPU and then save it, like so: ::
+
+      cpu_model = gpu_model.cpu()
+      sample_input_cpu = sample_input_gpu.cpu()
+      traced_cpu = torch.jit.trace(traced_cpu, sample_input_cpu)
+      torch.jit.save(traced_cpu, "cpu.pth")
+
+      traced_gpu = torch.jit.trace(traced_gpu, sample_input_gpu)
+      torch.jit.save(traced_gpu, "gpu.pth")
+
+      # ... later, when using the model:
+
+      if use_gpu:
+         model = torch.jit.load("gpu.pth")
+      else:
+         model = torch.jit.load("cpu.pth")
+
+      model(input)
+
+   This is recommended because the tracer may witness tensor creation on a
+   specific device, so casting an already-loaded model may have unexpected
+   effects. Casting the model *before* saving it ensures that the tracer has
+   the correct device information.

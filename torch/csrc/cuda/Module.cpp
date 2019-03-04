@@ -149,7 +149,8 @@ PyObject * THCPModule_getRNGState(PyObject *_unused)
 PyObject * THCPModule_setRNGState(PyObject *_unused, PyObject *obj)
 {
   HANDLE_TH_ERRORS
-  if (!THPVariable_Check(obj) || THPVariable_UnpackData(obj).type().ID() != at::TypeID::CPUByte) {
+  if (!THPVariable_Check(obj) ||
+      at::globalContext().getNonVariableType(THPVariable_Unpack(obj).type().backend(), THPVariable_Unpack(obj).type().scalarType()).ID() != at::TypeID::CPUByte) {
     throw TypeError("set_rng_state expects a torch.ByteTensor, but got %s",
         Py_TYPE(obj)->tp_name);
   }
@@ -374,6 +375,7 @@ static PyObject * THCPModule_initExtension(PyObject *self)
   THCPShortStorage_postInit(m);
   THCPCharStorage_postInit(m);
   THCPByteStorage_postInit(m);
+  THCPBoolStorage_postInit(m);
 
   bool has_magma = at::hasMAGMA();
   if (has_magma) {

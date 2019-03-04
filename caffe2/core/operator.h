@@ -37,8 +37,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
   explicit OperatorBase(
       const c10::FunctionSchema&,
-      const std::vector<c10::IValue>&,
-      const std::vector<c10::IValue*>&);
+      std::vector<c10::IValue>,
+      std::vector<c10::IValue*>);
 
   virtual ~OperatorBase() noexcept {}
 
@@ -86,12 +86,23 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         *operator_def_, name);
   }
   template <typename T>
+  inline vector<T> GetVectorFromIValueList(const c10::IValue& value) const {
+    return value.template to<vector<T>>();
+  }
+
+  template <typename T>
   inline vector<T> GetRepeatedArgument(
       const string& name,
       const vector<T>& default_value = {}) const {
-    CAFFE_ENFORCE(operator_def_, "operator_def was null!");
-    return ArgumentHelper::GetRepeatedArgument<OperatorDef, T>(
-        *operator_def_, name, default_value);
+    if (isLegacyOperator()) {
+      CAFFE_ENFORCE(operator_def_, "operator_def was null!");
+      return ArgumentHelper::GetRepeatedArgument<OperatorDef, T>(
+          *operator_def_, name, default_value);
+    }
+    auto index = getFunctionSchema().argumentIndexWithName(name);
+    CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
+    const auto& value = ivalue_inputs_[index.value()];
+    return GetVectorFromIValueList<T>(value);
   }
 
   // Get the inputs and outputs as specific types.
@@ -139,11 +150,23 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         throw enf;
       }
     }
-    DCHECK_LT(idx, ivalue_inputs_.size());
-    auto ival = ivalue_inputs_[idx];
+    DCHECK_LT(0, ivalue_inputs_.size());
+    IValue ival;
+    if (ivalue_inputs_[0].isTensorList()) {
+      // if the first input is a tensor list, we get input tensors by indexing into that list.
+      // currently, this means that only tensors from that list are accessible as inputs.
+      // any hypothetical input tensors that come after the list are not accessible.
+      const auto& tensorList = ivalue_inputs_[0].toTensorListRef();
+      DCHECK_LT(idx, tensorList.size());
+      ival = tensorList[idx];
+    } else {
+      // if the first input is not a tensor list, we get input tensors by indexing into the inputs.
+      DCHECK_LT(idx, ivalue_inputs_.size());
+      ival = ivalue_inputs_[idx];
+    }
     CAFFE_ENFORCE(
         ival.isTensor(),
-        "Inpput(int, DeviceType) is only available for IValues that store Tensors");
+        "Input(int, DeviceType) is only available for IValues that store Tensors");
     Tensor tensor = caffe2::Tensor(ival.toTensor());
     CAFFE_ENFORCE_EQ(tensor.GetDeviceType(), type);
     input_tensors_[idx] = std::move(tensor);
@@ -174,7 +197,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         ival->isTensor(),
         "Output(int, DeviceType) is only available for IValues that store Tensors");
     Tensor tensor = caffe2::Tensor(ival->toTensor());
-    if (tensor.GetDeviceType() != type) {
+    if (!tensor.defined() || tensor.GetDeviceType() != type) {
       // Fix tensor type
       tensor = Tensor(type);
       auto at_tensor = at::Tensor(std::move(tensor.getIntrusivePtr()));
@@ -185,15 +208,29 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline Tensor
-  XOutputTensor(int idx, at::IntList dims, at::TensorOptions options) {
+  XOutputTensor(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     CAFFE_ENFORCE_WITH_CALLER(
         options.device_opt() != c10::nullopt,
         "device must be provided in option.");
     return XBlobGetMutableTensor(outputs_.at(idx), dims, options);
   }
 
+  void SetOutputTensor(int idx, Tensor tensor) {
+    // also update the tensor in the hack
+    if (!isLegacyOperator()) {
+      output_tensors_[idx] = tensor.UnsafeSharedInstance();
+    }
+
+    // update the tensor in the workspace
+    BlobSetTensor(outputs_.at(idx), std::move(tensor));
+  }
+
+  Tensor OutputTensorOrUndefined(int idx) {
+    return BlobGetTensorOrUndefined(*outputs_.at(idx));
+  }
+
   inline Tensor*
-  OutputTensor(int idx, at::IntList dims, at::TensorOptions options) {
+  OutputTensor(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     if (isLegacyOperator()) {
       CAFFE_ENFORCE_WITH_CALLER(
           options.device_opt() != c10::nullopt,
@@ -553,6 +590,38 @@ inline NetDef OperatorBase::GetSingleArgument<NetDef>(
   return NetDef();
 }
 
+template <>
+inline vector<int> OperatorBase::GetVectorFromIValueList<int>(
+    const c10::IValue& value) const {
+  const auto& vs = value.toIntListRef();
+  vector<int> out;
+  out.reserve(vs.size());
+  for (const auto& v : vs) {
+    out.emplace_back(v);
+  }
+  return out;
+}
+
+template <>
+inline vector<float> OperatorBase::GetVectorFromIValueList<float>(
+    const c10::IValue& value) const {
+  const auto& vs = value.toDoubleListRef();
+  vector<float> out;
+  out.reserve(vs.size());
+  for (const auto& v : vs) {
+    out.emplace_back(v);
+  }
+  return out;
+}
+
+template <>
+inline vector<string> OperatorBase::GetVectorFromIValueList<string>(
+    const c10::IValue& value) const {
+  CAFFE_THROW("Cannot extract vector<string> from ivalue.");
+  vector<string> out;
+  return out;
+}
+
 // OP_SINGLE_ARG provides a shorter initialization choice for initialization of
 // member variables for the class constructors.
 // This is a workaround for CUDA9.2 and GCC7
@@ -593,8 +662,8 @@ class Operator : public OperatorBase {
   }
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
-      const std::vector<c10::IValue>& inputs,
-      const std::vector<c10::IValue*>& outputs)
+      std::vector<c10::IValue> inputs,
+      std::vector<c10::IValue*> outputs)
       : OperatorBase(fn_schema, inputs, outputs) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
@@ -614,7 +683,10 @@ class Operator : public OperatorBase {
     return OperatorBase::template Input<Tensor>(idx, type);
   }
 
-  Tensor XOutput(int idx, at::IntList dims, at::TensorOptions options) {
+  /// XOutput is a modernized version of Output which returns a Tensor
+  /// rather than a Tensor* (the raw pointer in the latter case is
+  /// useless, as Tensor is a pointer type.)
+  Tensor XOutput(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     // We'll default device to the device of the current Operator Context
     if (options.device_opt() == c10::nullopt) {
       return OperatorBase::XOutputTensor(
@@ -671,7 +743,7 @@ class Operator : public OperatorBase {
   /// helpful, as we may be able to fit the output in the same
   /// space that was previously used.
   ///
-  Tensor* Output(int idx, at::IntList dims, at::TensorOptions options) {
+  Tensor* Output(int idx, at::IntArrayRef dims, at::TensorOptions options) {
     // We'll default device to the device of the current Operator Context
     if (options.device_opt() == c10::nullopt) {
       return OperatorBase::OutputTensor(
@@ -680,10 +752,19 @@ class Operator : public OperatorBase {
     return OperatorBase::OutputTensor(idx, dims, options);
   }
 
+  /// Legacy: please consider using the version of Output() which also takes
+  /// dtype and size as arguments.
   inline Tensor* Output(int idx, DeviceType type = Context::GetDeviceType()) {
     return OperatorBase::template Output<Tensor>(idx, type);
   }
 
+  /// Get the output Tensor of an operator (allocating it if it is not
+  /// already initialized), and copy the contents of src into it.
+  /// You probably don't actually want to use this function (the fact
+  /// that you have a Tensor to copy from is probably a mistake:
+  /// you should have written the output into the output tensor,
+  /// from Output, directly in the first place), but this method
+  /// is situationally useful.
   Tensor* OutputTensorCopyFrom(
       int idx,
       at::TensorOptions options,
@@ -876,8 +957,8 @@ class Operator : public OperatorBase {
 #define USE_OPERATOR_CONTEXT_FUNCTIONS USE_OPERATOR_FUNCTIONS(Context)
 
 #define USE_SIMPLE_CTOR_DTOR(name)                                             \
-  name(const OperatorDef& operator_def, Workspace* ws)                         \
-      : Operator<Context>(operator_def, ws) {}                                 \
+  template<class... Args> explicit name(Args&&... args)                        \
+      : Operator<Context>(std::forward<Args>(args)...) {}                      \
   virtual ~name() noexcept {}
 
 // Helpers to implement runtime op polymorphism. Often it's convenient to make
@@ -1144,8 +1225,8 @@ C10_DECLARE_REGISTRY(
     FunctionSchemaOperatorRegistry,
     OperatorBase,
     const c10::FunctionSchema,
-    const std::vector<c10::IValue>&,
-    const std::vector<c10::IValue*>&);
+    std::vector<c10::IValue>,
+    std::vector<c10::IValue*>);
 
 struct FunctionSchemaStorageBase {
   FunctionSchemaStorageBase() {}
@@ -1154,6 +1235,9 @@ struct FunctionSchemaStorageBase {
 };
 
 C10_DECLARE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
+
+// Prefer to use the {DECLARE,DEFINE}_FUNCTION_SCHEMA_OPERATOR macros,
+// as they wrap it all in a Meyer's singleton accessible from Torch.
 
 #define REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl)        \
   C10_REGISTER_CLASS(FunctionSchemaOperatorRegistry, name, impl)              \
@@ -1164,6 +1248,21 @@ C10_DECLARE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
   };                                                                          \
   C10_REGISTER_CLASS(                                                         \
       FunctionSchemaRegistry, name, FunctionSchemaStorageBase##name)
+
+#define DEFINE_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl) \
+  void CAFFE2_MEYERS_OP_REGISTRATION_##name() {                      \
+    REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl);  \
+  }                                                                  \
+  static CAFFE2_STRUCT_OP_REGISTRATION_##name                        \
+      CAFFE2_STRUCT_OP_REGISTRATION_DEFN_##name;
+
+#define DECLARE_FUNCTION_SCHEMA_OPERATOR(name)             \
+  CAFFE2_API void CAFFE2_MEYERS_OP_REGISTRATION_##name();  \
+  struct CAFFE2_API CAFFE2_STRUCT_OP_REGISTRATION_##name { \
+    CAFFE2_STRUCT_OP_REGISTRATION_##name() {               \
+      CAFFE2_MEYERS_OP_REGISTRATION_##name();              \
+    }                                                      \
+  };
 
 #define GET_FUNCTION_SCHEMA(name) \
   FunctionSchemaRegistry()->Create(name)->getSchema()
@@ -1229,8 +1328,8 @@ CAFFE2_API unique_ptr<OperatorBase> CreateOperator(
 // instantiate and run the operator.
 CAFFE2_API void RunOperator(
     c10::Symbol name,
-    std::vector<c10::IValue>& inputs,
-    std::vector<c10::IValue*>& outputs);
+    const std::vector<c10::IValue>& inputs,
+    const std::vector<c10::IValue*>& outputs);
 
 CAFFE2_API const std::string OpRegistryKey(
     const std::string& op_type,
@@ -1284,5 +1383,7 @@ CAFFE2_API void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer
 std::function<void(const OperatorDef&)> GetOperatorLogger();
 
 }  // namespace caffe2
+
+#include "caffe2/core/c10_operator.h"
 
 #endif  // CAFFE2_CORE_OPERATOR_H_

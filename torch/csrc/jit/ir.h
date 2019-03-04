@@ -7,11 +7,11 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/disallow_copy.h>
-#include <torch/csrc/utils/functional.h>
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
@@ -60,6 +60,8 @@ using ::c10::TypePtr;
 using ::c10::getTypePtr;
 using ::c10::MatchTypeReturn;
 using ::c10::TypeKind;
+
+using ::c10::fmap;
 
 namespace prim {
 using namespace ::c10::prim;
@@ -137,6 +139,7 @@ template <typename T>
 using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
 using topo_position_t = int64_t;
+using ValueSet = std::unordered_set<const Value*>;
 
 struct Value {
   TH_DISALLOW_COPY_AND_ASSIGN(Value);
@@ -174,6 +177,7 @@ struct Value {
   bool hasUniqueName() const {
     return !unique_name_.empty();
   }
+  static bool isValidName(const std::string& name);
   TORCH_API Value* setUniqueName(const std::string& name);
   std::string uniqueName() const {
     if (hasUniqueName()) {
@@ -389,6 +393,7 @@ struct Node {
   bool is_constant(Symbol name) const {
     return static_cast<bool>(get(name));
   }
+  TORCH_API bool mustBeNone() const;
 
   TORCH_API bool isNondeterministic() const;
   TORCH_API bool hasSideEffects() const;
@@ -693,7 +698,7 @@ struct Node {
 
   // does not use CREATE_ACCESSOR because we need additional asserts
   Node* t_(Symbol name, TensorAttr::ConstructorType v) {
-    AT_ASSERT(!v.defined() || !v.is_variable());
+    AT_ASSERT(!v.defined() || v.is_variable());
     return setAttr<TensorAttr>(
         name, std::forward<TensorAttr::ConstructorType>(v));
   }
@@ -703,7 +708,7 @@ struct Node {
 
   Node* ts_(Symbol name, TensorsAttr::ConstructorType v) {
     for (const at::Tensor& t : v) {
-      AT_ASSERT(!t.defined() || !t.is_variable());
+      AT_ASSERT(!t.defined() || t.is_variable());
     }
     return setAttr<TensorsAttr>(
         name, std::forward<TensorsAttr::ConstructorType>(v));
@@ -1036,10 +1041,12 @@ struct Graph {
 
   TORCH_API Node* createNone(
       TypePtr typ); // value of None with type Optional[typ]
-  TORCH_API Node* createUndefined();
+  TORCH_API Node* createAutogradZero();
   TORCH_API Node* createFusionGroup();
   TORCH_API Node* createDifferentiableSubgraph();
-  TORCH_API Node* createTuple(at::ArrayRef<Value*> values);
+  TORCH_API Node* createTuple(
+      at::ArrayRef<Value*> values,
+      c10::OptNameList field_names = c10::nullopt);
   TORCH_API Node* createTupleUnpack(Value* v);
   TORCH_API Node* createTupleIndex(Value* tup, int64_t index);
   TORCH_API Node* createTupleSlice(Value* tup, int64_t beg, int64_t end);
@@ -1047,8 +1054,20 @@ struct Graph {
       const TypePtr& elem_type,
       at::ArrayRef<Value*> values);
   TORCH_API Node* createListUnpack(Value* v, size_t size);
+  TORCH_API Node* createDict(
+      const TypePtr& key_type,
+      const TypePtr& value_type,
+      at::ArrayRef<Value*> keys,
+      at::ArrayRef<Value*> values);
+  TORCH_API Node* createDictIndex(Value* dict, Value* index);
   TORCH_API Node* createNumToTensor(Value* value);
   TORCH_API Node* createImplicitTensorToNum(const TypePtr& type, Value* value);
+  TORCH_API Node* createObject(const ClassTypePtr& type);
+  TORCH_API Node* createSetAttr(
+      Value* obj,
+      const std::string& field,
+      Value* newValue);
+  TORCH_API Node* createGetAttr(Value* obj, const std::string& field);
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
@@ -1062,8 +1081,11 @@ struct Graph {
       const std::function<Value*(Value*)>& value_map,
       bool copy_blocks = true);
 
+  // Insert constant IValue into the graph. If the type cannot be fully deduced
+  // from the ivalue, as with a None that is set to t?, use result_type
   TORCH_API Value* insertConstant(
       IValue val,
+      const TypePtr& result_type = nullptr,
       c10::optional<SourceRange> loc = c10::nullopt,
       c10::optional<ScopePtr> scope = c10::nullopt);
 
@@ -1186,7 +1208,7 @@ inline Value::Value(Node* node_, size_t offset_)
     : node_(node_),
       offset_(offset_),
       unique_(node_->graph_->next_unique_++),
-      type_(DynamicType::get()) {
+      type_(TensorType::get()) {
   node_->graph_->all_values.emplace(this);
 }
 
@@ -1243,6 +1265,10 @@ struct PythonOp : public Node {
   // was originally SomeFunction.apply
   // used in ONNX for discovering symbolics
   virtual c10::optional<THPObjectPtr> autogradFunction() const = 0;
+
+  // should this Python function be skipped over when exported (i.e. for
+  // debugging functions that only run in Python)
+  bool ignore_on_export = false;
 };
 // patched in when python bindings are loaded
 TORCH_API PythonOp* allocPythonOp(Graph* g);

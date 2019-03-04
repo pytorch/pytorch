@@ -49,12 +49,12 @@ if platform.system() == 'Windows':
         NVTOOLEXT_HOME = _dl_flags.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt')
 
         if _dl_flags.path.exists(NVTOOLEXT_HOME):
-            return NVTOOLEXT_HOME + '\\bin\\x64\\'
+            return _dl_flags.path.join(NVTOOLEXT_HOME, 'bin', 'x64')
         else:
             return ''
 
-    py_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(sys.executable), 'Library\\bin')
-    th_dll_path = _dl_flags.path.dirname(__file__) + '\\lib\\'
+    py_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(sys.executable), 'Library', 'bin')
+    th_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(__file__), 'lib')
 
     dll_paths = [th_dll_path, py_dll_path, get_nvToolsExt_path(), _dl_flags.environ['PATH']]
 
@@ -75,11 +75,6 @@ else:
     sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
 
 del _dl_flags
-
-try:
-    import torch._nvrtc
-except ImportError:
-    pass
 
 from torch._C import *
 
@@ -224,9 +219,12 @@ class ByteStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
 
+class BoolStorage(_C.BoolStorageBase, _StorageBase):
+    pass
+
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
-    CharStorage, ByteStorage, HalfStorage
+    CharStorage, ByteStorage, HalfStorage, BoolStorage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
@@ -240,7 +238,7 @@ _tensor_classes = set()
 def manager_path():
     if platform.system() == 'Windows':
         return b""
-    path = get_file_path('torch', 'lib', 'torch_shm_manager')
+    path = get_file_path('torch', 'bin', 'torch_shm_manager')
     prepare_multiprocessing_environment(get_file_path('torch'))
     if not os.path.exists(path):
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
@@ -275,6 +273,7 @@ del IntStorageBase
 del ShortStorageBase
 del CharStorageBase
 del ByteStorageBase
+del BoolStorageBase
 
 ################################################################################
 # Import most common subpackages
@@ -295,6 +294,7 @@ import torch.distributions
 import torch.testing
 import torch.backends.cuda
 import torch.backends.mkl
+import torch.backends.openmp
 import torch.utils.data
 
 _C._init_names(list(torch._storage_classes))

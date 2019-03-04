@@ -53,13 +53,13 @@
 namespace at {
 
 struct DimCounter {
-  DimCounter(IntList shape, Range range);
+  DimCounter(IntArrayRef shape, Range range);
 
   void increment(const std::array<int64_t, 2>& step);
   bool is_done() const;
   std::array<int64_t, 2> max_2d_step() const;
 
-  IntList shape;
+  IntArrayRef shape;
   Range range;
   DimVector values;
   int64_t offset;
@@ -129,7 +129,7 @@ struct CAFFE2_API TensorIterator {
   static std::unique_ptr<TensorIterator> reduce_op(Tensor& out, const Tensor& a);
 
   int ndim() const { return shape_.size(); }
-  IntList shape() const { return shape_; }
+  IntArrayRef shape() const { return shape_; }
   int64_t numel() const;
   int ntensors() const { return operands_.size(); }
 
@@ -145,7 +145,7 @@ struct CAFFE2_API TensorIterator {
   bool is_dim_reduced(int dim) const;
 
   /// Accessors for each operand
-  IntList strides(int arg) const { return operands_[arg].stride_bytes; }
+  IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
   void* data_ptr(int arg) const;
   const Type& type(int arg=0) const {
     AT_ASSERT(operands_[arg].type);
@@ -172,9 +172,9 @@ struct CAFFE2_API TensorIterator {
   /// Shrinks an iterated dimension
   void narrow(int dim, int64_t start, int64_t size);
   /// Narrows every dim after and including `start_dim` to size one.
-  void select_all_keeping_dim(int start_dim, IntList starts);
+  void select_all_keeping_dim(int start_dim, IntArrayRef starts);
   /// Replaces the data pointer and strides for the operand at index `arg`
-  void replace_operand(int arg, void* data, IntList stride);
+  void replace_operand(int arg, void* data, IntArrayRef stride);
 
   /// Splits this TensorIterator into two iterators. Together they iterate over
   /// the entire operation. Used by `with_32bit_indexing()`.
@@ -204,13 +204,13 @@ struct CAFFE2_API TensorIterator {
 
   /// Inverts the re-ordering done by reorder_dimensions. This can only be
   /// called *before* coalesce_dimensions() is called.
-  DimVector invert_perm(IntList input) const;
+  DimVector invert_perm(IntArrayRef input) const;
 
   /// Helper functions for CPU iteration
   DimVector get_dim_strides(int dim) const;
   DimVector get_strides() const;
   DimVector get_inner_strides() const { return get_dim_strides(0); }
-  PtrVector get_data_ptrs(ArrayRef<char*> base, IntList counter) const;
+  PtrVector get_data_ptrs(ArrayRef<char*> base, IntArrayRef counter) const;
   PtrVector get_base_ptrs() const;
 
   /// true if the stride computation can use 32-bit arithmetic. Used by GPU kernels
@@ -234,7 +234,7 @@ protected:
   void compute_shape();
   void compute_strides();
   void reorder_dimensions();
-  void permute_dimensions(IntList perm);
+  void permute_dimensions(IntArrayRef perm);
   void compute_types();
   Type& compute_common_type();
   void allocate_outputs();

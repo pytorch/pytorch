@@ -62,5 +62,10 @@ if (USE_OBSERVERS)
   caffe2_binary_target(caffe2_benchmark "caffe2_benchmark.cc" "benchmark_helper.cc")
 endif()
 
+if (USE_OBSERVERS AND USE_OPENCV)
+  caffe2_binary_target("convert_and_benchmark.cc")
+  target_link_libraries(convert_and_benchmark ${OpenCV_LIBS})
+endif()
+
 # ---[ tutorials
 caffe2_binary_target("tutorial_blob.cc")

@@ -1404,9 +1404,13 @@ LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs)
 #endif /* int64_t only part */
 
-#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT)
+#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_CHAR)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
 #endif /* int only part */
+
+#if defined(TH_REAL_IS_BYTE)
+LAB_IMPLEMENT_BASIC_FUNCTION(abs,)
+#endif /* for byte, identity due to it being unsigned */
 
 /* floating point only now */
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
@@ -1744,6 +1748,9 @@ accreal THTensor_(stdall)(THTensor *tensor, int biased)
 
 void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue)
 {
+  if (nbins <= 0) {
+      THError("bins must be > 0");
+  }
   scalar_t minval;
   scalar_t maxval;
   scalar_t *h_data;

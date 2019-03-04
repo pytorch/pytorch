@@ -545,7 +545,7 @@ class BCEWithLogitsLoss(_Loss):
         l_n = - w_n \left[ p_n y_n \cdot \log \sigma(x_n)
         + (1 - y_n) \cdot \log (1 - \sigma(x_n)) \right],
 
-    where :math:`p_n` is the positive weight of class :math:`n`.
+    where :math:`p_n` is the weight of the positive class for sample :math:`n` in the batch.
     :math:`p_n > 1` increases the recall, :math:`p_n < 1` increases the precision.
 
     For example, if a dataset contains 100 positive and 300 negative examples of a single class,
@@ -707,7 +707,7 @@ class MultiLabelMarginLoss(_Loss):
     Shape:
         - Input: :math:`(C)` or :math:`(N, C)` where `N` is the batch size and `C`
           is the number of classes.
-        - Target: :math:`(C)` or :math:`(N, C)`, same shape as the input.
+        - Target: :math:`(C)` or :math:`(N, C)`, label targets padded by -1 ensuring same shape as the input.
         - Output: scalar. If `reduce` is False, then :math:`(N)`.
     """
     __constants__ = ['reduction']
@@ -949,7 +949,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
 
     Shape:
         - Input: :math:`(N, C)` where `N` is the batch size and `C` is the number of classes.
-        - Target: :math:`(N, C)`, same shape as the input.
+        - Target: :math:`(N, C)`, label targets padded by -1 ensuring same shape as the input.
         - Output: scalar. If `reduce` is False, then :math:`(N)`.
     """
     __constants__ = ['weight', 'reduction']
@@ -1206,6 +1206,11 @@ class CTCLoss(_Loss):
             'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
             'mean': the output losses will be divided by the target lengths and
             then the mean over the batch is taken. Default: 'mean'
+        zero_infinity (bool, optional):
+            Whether to zero infinite losses and the associated gradients.
+            Default: ``False``
+            Infinite losses mainly occur when the inputs are too short
+            to be aligned to the targets.
 
     Inputs:
         log_probs: Tensor of size :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
@@ -1218,7 +1223,6 @@ class CTCLoss(_Loss):
             Lengths of the inputs (must each be :math:`\leq T`)
         target_lengths: Tuple or tensor of size  :math:`(N)`.
             Lengths of the targets
-
 
     Example::
 
@@ -1250,13 +1254,15 @@ class CTCLoss(_Loss):
     """
     __constants__ = ['blank', 'reduction']
 
-    def __init__(self, blank=0, reduction='mean'):
+    def __init__(self, blank=0, reduction='mean', zero_infinity=False):
         super(CTCLoss, self).__init__(reduction=reduction)
         self.blank = blank
+        self.zero_infinity = zero_infinity
 
     @weak_script_method
     def forward(self, log_probs, targets, input_lengths, target_lengths):
-        return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, self.blank, self.reduction)
+        return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, self.blank, self.reduction,
+                          self.zero_infinity)
 
 # TODO: L1HingeEmbeddingCriterion
 # TODO: MSECriterion weight

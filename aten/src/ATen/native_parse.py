@@ -26,6 +26,7 @@ def type_argument_translations(arg):
     t = type_and_name[0]
     name = name.split('=')
     default = None
+    nullable = False
     size = None  # Only applies to int[\d+] and Tensor[\d+] arguments
     if len(name) > 1:
         default = name[1]
@@ -37,6 +38,12 @@ def type_argument_translations(arg):
         t = match.group(1) + match.group(3)
         annotation = match.group(2)
 
+    # XXX: is_nullable flag can only annotate entire type as optional type,
+    # need to special case Generator? logic to make ? only available in jit
+    # TODO: deprecate is_nullable global flag, and parse the type
+    # to support annotating complicated types with optional annotation
+    nullable = (t != 'Generator?' and '?' in t)
+
     # This enables "Generator? x = None and translates to legacy
     # "Generator* x = nullptr". See [temp translations].
     if t == 'Generator?' and default == 'None':
@@ -46,28 +53,43 @@ def type_argument_translations(arg):
     elif t == "Generator?":
         t = 'Generator*'
     # Enables Tensor[] by translating to legacy TensorList.
-    elif t == 'Tensor[]':
+    elif t == 'Tensor[]' or t == 'Tensor?[]':
         t = 'TensorList'
-    # Enables int[] by translating to legacy IntList.
+    # Enables int[] by translating to legacy IntArrayRef.
     elif t == 'int[]':
-        t = 'IntList'
+        t = 'IntArrayRef'
     # Enables int by translating to legacy int64_t.
     elif t == 'int':
         t = 'int64_t'
     elif t == 'int?':
         t = 'int64_t?'
+    elif t == 'int64_t':
+        raise RuntimeError("Please use int and not int64_t. "
+                           "See [temp translations] for details.")
+    elif t == 'int64_t?':
+        raise RuntimeError("Please use int? and not int64_t?. "
+                           "See [temp translations] for details.")
     # Enables float by translating to legacy double.
     elif t == 'float':
         t = 'double'
-    # Enables int[x] by translating to legacy IntList[x]. See [temp translations]
+    # Enables str by translating to legacy std::string.
+    elif t == 'str':
+        t = 'std::string'
+    elif t == 'double':
+        raise RuntimeError("Please use float and not double. "
+                           "See [temp translations] for details.")
+    # Enables int[x] by translating to legacy IntArrayRef[x]. See [temp translations]
     elif re.match(r'int\[(\d+)\]', t):
         match = re.match(r'int\[(\d+)\]', t)
-        t = 'IntList'
+        t = 'IntArrayRef'
         size = int(match.group(1))
     # Enables bool[x] by translating to legacy std::array<bool,x>. See [temp translations]
     elif re.match(r'bool\[(\d+)\]', t):
         match = re.match(r'bool\[(\d+)\]', t)
         t = 'std::array<bool,{}>'.format(match.group(1))
+    elif re.match(r'std::array', t):
+        raise RuntimeError("Please use array notation, e.g. bool[3] and not std::aray. "
+                           "See [temp translations] for details.")
 
     # Legacy type sanitization. TODO: Do we really need this?
     if t == 'Generator*':
@@ -113,7 +135,7 @@ def type_argument_translations(arg):
             except ValueError:
                 pass
 
-    return t, name, default, size, annotation
+    return t, name, default, nullable, size, annotation
 
 
 def parse_arguments(args, func_variants, declaration, func_return):
@@ -132,9 +154,9 @@ def parse_arguments(args, func_variants, declaration, func_return):
             kwarg_only = True
             continue
 
-        t, name, default, size, annotation = type_argument_translations(arg)
+        t, name, default, nullable, size, annotation = type_argument_translations(arg)
 
-        argument_dict = {'type': t.rstrip('?'), 'name': name, 'is_nullable': t.endswith('?'), 'annotation': annotation}
+        argument_dict = {'type': t.rstrip('?'), 'name': name, 'is_nullable': nullable, 'annotation': annotation}
         if size:
             argument_dict['size'] = size
         if default is not None:
@@ -202,7 +224,8 @@ def parse_arguments(args, func_variants, declaration, func_return):
                 assert argument['annotation'] == func_return[arg_idx]['annotation'], \
                     "Inplace function annotations of function {} need to match between " \
                     "input and correponding output.".format(name)
-                assert argument['name'] == func_return[arg_idx]['name']
+                assert argument['name'] == func_return[arg_idx]['name'] or \
+                    argument['name'] == func_return[arg_idx]['name'] + "_return"
                 assert argument['type'] == func_return[arg_idx]['type']
         assert found_self, "Inplace function \"{}\" needs Tensor argument named self.".format(name)
 
@@ -218,8 +241,13 @@ def parse_return_arguments(return_decl, inplace, func_decl):
     multiple_args = len(return_decl.split(', ')) > 1
 
     for arg_idx, arg in enumerate(return_decl.split(', ')):
-        t, name, default, size, annotation = type_argument_translations(arg)
-        argument_dict = {'type': t, 'name': name, 'annotation': annotation}
+        t, name, default, nullable, size, annotation = type_argument_translations(arg)
+        # name of arguments and name of return sometimes have collision
+        # in this case, we rename the return name to <name>_return.
+        return_name = name
+        if name in func_decl['func'].split('->')[0]:
+            return_name = name + "_return"
+        argument_dict = {'type': t, 'name': return_name, 'annotation': annotation}
         if name:
             # See Note [field_name versus name]
             argument_dict['field_name'] = name

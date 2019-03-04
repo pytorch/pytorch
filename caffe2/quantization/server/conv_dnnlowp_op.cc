@@ -227,13 +227,16 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeBias_() {
   const auto& filter = InputTensorCPU_(FILTER);
   int M = filter.dim32(0);
 
+  bool has_packed_bias =
+      this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER) &&
+      this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER).bias.get();
+  bool has_bias = InputSize() == 3 || has_packed_bias;
+
   // Quantize bias
-  if (InputSize() == 3 &&
+  if (has_bias &&
       (!b_quantized_data_ ||
        in_qparams_[INPUT].scale != in_qparams_scale_old_)) {
-    if (this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER) &&
-        this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER)
-            .bias.get()) {
+    if (has_packed_bias) {
       const auto& packed_filter =
           this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER);
       b_quantized_ = packed_filter.bias;
@@ -338,12 +341,10 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
       }
     }
 
-    filter_scales_.resize(filter_qparams_.size());
     filter_zero_points_.resize(filter_qparams_.size());
     requantization_params_.resize(filter_qparams_.size());
     requantization_multipliers_.resize(filter_qparams_.size());
     for (int i = 0; i < filter_qparams_.size(); ++i) {
-      filter_scales_[i] = filter_qparams_[i].scale;
       filter_zero_points_[i] = filter_qparams_[i].zero_point;
     }
 
@@ -532,7 +533,7 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNCHW_(
   for (int i = 0; i < M / group_; ++i) {
     int32_t row_offset = row_offsets_[i_offset + i];
     row_offset *= -in_qparams_[INPUT].zero_point;
-    if (InputSize() == 3) {
+    if (b_quantized_data_) {
       row_offset += b_quantized_data_[i_offset + i];
     }
     for (int j = 0; j < Y_HxW; ++j) {
@@ -559,6 +560,7 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHW() {
 
   const Tensor& X = InputTensorCPU_(INPUT);
   auto& filter = InputTensorCPU_(FILTER);
+  Tensor* Y = OutputTensorCPU_(0);
   const int N = X.dim32(0), C = X.dim32(1);
   CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
   const int M = filter.dim32(0);
@@ -576,8 +578,7 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNCHW() {
       0,
       "The number of output channels is not divisible by group.");
 
-  auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, filter.dim32(0));
-  Tensor* Y = OutputTensorCPU_(0, sizes, at::dtype<T>());
+  ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
 
   const vector<int> input_dims = GetDims(X);
   const vector<int> output_dims = GetDims(*Y);
@@ -1009,7 +1010,7 @@ void ConvDNNLowPOp<T, ReluFused>::DispatchFBGEMM_(
       filter_zero_points_.data(),
       packA.getRowOffsetBuffer(),
       column_offsets_->data(),
-      InputSize() == 3 ? b_quantized_data_ : nullptr,
+      b_quantized_data_,
       M,
       group_);
 
@@ -1201,7 +1202,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             filter_zero_points_.data(),
             row_offsets_.data() + tid * row_offset_size_per_thread,
             column_offsets_->data(),
-            InputSize() == 3 ? b_quantized_data_ : nullptr,
+            b_quantized_data_,
             conv_p.OC,
             conv_p.G);
 
@@ -1225,7 +1226,7 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             filter_zero_points_.data(),
             row_offsets_.data() + tid * row_offset_size_per_thread,
             column_offsets_->data(),
-            InputSize() == 3 ? b_quantized_data_ : nullptr,
+            b_quantized_data_,
             conv_p.OC,
             conv_p.G);
 
@@ -1417,6 +1418,7 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWC() {
 
   const Tensor& X = InputTensorCPU_(INPUT);
   auto& filter = InputTensorCPU_(FILTER);
+  Tensor* Y = OutputTensorCPU_(0);
   const int C = X.dim32(X.dim() - 1);
   const int G = group_;
   CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
@@ -1433,8 +1435,7 @@ bool ConvDNNLowPOp<T, ReluFused>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(
       M % G, 0, "The number of output channels is not divisible by group.");
 
-  auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, filter.dim32(0));
-  Tensor* Y = OutputTensorCPU_(0, sizes, at::dtype<T>());
+  ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
 
   // The col buffer is stored in HWC order as well - kernel_dim, and the height
   // and width.

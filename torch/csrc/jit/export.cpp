@@ -5,10 +5,10 @@
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/onnx/onnx.h>
 
+#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/python_print.h>
-#include <torch/csrc/utils/functional.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -87,8 +87,7 @@ void validateBlock(
       bool is_aten_enabled = operator_export_type ==
               onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
           operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
-      if (!node->kind().is_onnx() && !is_aten_enabled &&
-          node->kind() != prim::Undefined) {
+      if (!node->kind().is_onnx() && !is_aten_enabled && !node->mustBeNone()) {
         FAIL_EXPORT(
             "Couldn't export operator " + node->kind().toDisplayString() +
             "\n\nDefined at:\n" + getNodeStackTraceString(node));
@@ -182,7 +181,8 @@ EncoderBase::EncoderBase(
       strip_doc_(strip_doc) {
   model_proto_.set_producer_name("pytorch");
   model_proto_.set_ir_version(onnx::IR_VERSION);
-  model_proto_.set_producer_version("0.4");
+  // TODO: set the producer version using appropriate function call
+  model_proto_.set_producer_version("1.1");
 }
 
 void EncoderBase::EncodeValueInfo(
@@ -236,8 +236,8 @@ void EncoderBase::EncodeBlock(
   for (auto node : block->nodes()) {
     bool is_raw_export =
         operator_export_type_ == onnx_torch::OperatorExportTypes::RAW;
-    if (node->kind() == prim::Undefined && !is_raw_export) {
-      // Undefined nodes are used to implement optional inputs. One
+    if (node->mustBeNone() && !is_raw_export) {
+      // None nodes are used to implement optional inputs. One
       // way to "not provide" an optional input is to create an
       // Undefined node, and pass its output as that input.
       continue;
@@ -249,7 +249,7 @@ void EncoderBase::EncodeBlock(
       p_n->set_doc_string(ss.str());
     }
     for (auto input : node->inputs()) {
-      if (input->node()->kind() == prim::Undefined && !is_raw_export) {
+      if (input->node()->mustBeNone() && !is_raw_export) {
         p_n->add_input("");
       } else {
         p_n->add_input(input->uniqueName());
@@ -464,10 +464,15 @@ class ScriptModuleSerializer final {
 
   ScriptModuleSerializer(std::ostream* ofs);
 
-  void serialize(const script::Module& module);
+  void serialize(
+      const script::Module& module,
+      const script::ExtraFilesMap& extra_files = script::ExtraFilesMap());
 
  private:
-  void convertModel(const script::Module& module, torch::ModelDef* model_def);
+  void convertModel(
+      const script::Module& module,
+      torch::ModelDef* model_def,
+      const script::ExtraFilesMap& extra_files);
 
   // add a tensor to the tensorTable
   // returns the offset into the tensor table
@@ -513,9 +518,11 @@ ScriptModuleSerializer::ScriptModuleSerializer(const std::string& filename)
 ScriptModuleSerializer::ScriptModuleSerializer(std::ostream* ofs)
     : ofs_(), writer_(ofs) {}
 
-void ScriptModuleSerializer::serialize(const script::Module& module) {
+void ScriptModuleSerializer::serialize(
+    const script::Module& module,
+    const script::ExtraFilesMap& extra_files) {
   torch::ModelDef model_def;
-  convertModel(module, &model_def);
+  convertModel(module, &model_def, extra_files);
   std::string output;
   // NB: cannot use MessageToJsonString, since fbcode's protobuf is too old
   // be consistent with MessageToJsonString
@@ -540,7 +547,8 @@ void ScriptModuleSerializer::serialize(const script::Module& module) {
 
 void ScriptModuleSerializer::convertModel(
     const script::Module& module,
-    torch::ModelDef* model_def) {
+    torch::ModelDef* model_def,
+    const script::ExtraFilesMap& extra_files) {
   model_def->set_producer_name("pytorch");
   model_def->set_producer_version("1.0"); // TODO: set the producer version
                                           // using appropriate function call
@@ -548,6 +556,12 @@ void ScriptModuleSerializer::convertModel(
   convertModule(
       module, "", writer_.archiveName(), model_def->mutable_main_module());
   writeTensorTable(model_def);
+
+  // Write out extra files.
+  for (const auto& kv : extra_files) {
+    const std::string key = "extra/" + kv.first;
+    writer_.writeRecord(key, kv.second.data(), kv.second.size());
+  }
 }
 
 size_t ScriptModuleSerializer::addTensor(const at::Tensor& tensor) {
@@ -885,14 +899,20 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       graph_encoder.get_raw_data_export_map());
 }
 
-void ExportModule(const script::Module& module, std::ostream& out) {
+void ExportModule(
+    const script::Module& module,
+    std::ostream& out,
+    const script::ExtraFilesMap& extra_files) {
   ScriptModuleSerializer serializer(&out);
-  serializer.serialize(module);
+  serializer.serialize(module, extra_files);
 }
 
-void ExportModule(const script::Module& module, const std::string& filename) {
+void ExportModule(
+    const script::Module& module,
+    const std::string& filename,
+    const script::ExtraFilesMap& extra_files) {
   ScriptModuleSerializer serializer(filename);
-  serializer.serialize(module);
+  serializer.serialize(module, extra_files);
 }
 
 } // namespace jit

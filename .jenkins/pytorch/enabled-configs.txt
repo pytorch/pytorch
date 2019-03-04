@@ -42,11 +42,13 @@ pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
 pytorch-docker-build-test
 short-perf-test-cpu
 short-perf-test-gpu
-py2-clang7-rocmdeb-ubuntu16.04-build
-py2-clang7-rocmdeb-ubuntu16.04-test
-py2-devtoolset7-rocmrpm-centos7.5-build
-py2-devtoolset7-rocmrpm-centos7.5-test
+py2-clang7-rocmdeb-ubuntu16.04
+py2-devtoolset7-rocmrpm-centos7.5
 pytorch-ppc64le-cuda9.2-cudnn7-py3-build
 pytorch-ppc64le-cuda9.2-cudnn7-py3-test
 pytorch-ppc64le-cuda9.1-cudnn7-py3-build
 pytorch-ppc64le-cuda9.1-cudnn7-py3-test
+pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX2-test
+pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX-NO_AVX2-test
+pytorch-xla-linux-trusty-py3.6-gcc5.4-build
+pytorch-xla-linux-trusty-py3.6-gcc5.4-test

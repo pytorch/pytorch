@@ -141,7 +141,7 @@ template
    typename FinalizeOp,
    int ADims, int BDims>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS(512, 4)
+C10_LAUNCH_BOUNDS_2(512, 4)
 #endif
 __global__ void kernelReduceNoncontigDim_shared
   (TensorInfo<T, IndexType> out,
@@ -256,7 +256,7 @@ template <typename T,
           typename FinalizeOp,
           int ADims, int BDims>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS(512, 4)
+C10_LAUNCH_BOUNDS_2(512, 4)
 #endif
 __global__ void
 kernelReduceNoncontigDim(TensorInfo<T, IndexType> out,

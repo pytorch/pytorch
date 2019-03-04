@@ -84,7 +84,7 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
   );
   iter.foreach_reduced_elt([&](TensorIterator &sub_iter) {
     auto reduction_body = [&](acc_t acc, int64_t begin, int64_t end) -> acc_t {
-      sub_iter.serial_for_each([&acc, &ops, &init](int ntensors, char** data, const int64_t* strides, int64_t size) {
+      sub_iter.serial_for_each([&acc, &ops](int ntensors, char** data, const int64_t* strides, int64_t size) {
         AT_ASSERT(ntensors == 2);
         char *in = data[1];
         int64_t stride = strides[1];
