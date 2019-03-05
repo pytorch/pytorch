@@ -425,7 +425,7 @@ static std::unique_ptr<TensorIterator> make_index_put_iterator(const AdvancedInd
   builder.dont_compute_common_dtype();
   builder.dont_resize_outputs();
   builder.add_output(info.src);
-  builder.add_output(Tensor(), info.src.type().backend(), info.src.scalar_type());
+  builder.add_input(value, info.src.type().backend(), info.src.scalar_type());
   for (auto& index : info.indices) {
     builder.add_input(index);
   }
