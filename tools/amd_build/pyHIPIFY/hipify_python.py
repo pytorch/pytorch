@@ -1222,4 +1222,3 @@ def hipify(
       sys.exit(1)
     rccl_compat_dst_filepath = os.path.join(rccl_compat_dst_dir, rccl_compat_file)
     shutil.copy(rccl_compat_src_filepath, rccl_compat_dst_filepath)
->>>>>>> 9b73dca2b... Add '--hip-clang-launch' to favor <<<>>>-based launch.
