@@ -17,8 +17,9 @@ struct ${name}Generator : public CloneableGenerator<${name}Generator, Generator>
   CAFFE2_API ${name}Generator& free();
 
   CAFFE2_API uint64_t seed();
-  CAFFE2_API uint64_t getCurrentSeed() const override;
-  CAFFE2_API void setCurrentSeed(uint64_t seed) override;
+  CAFFE2_API uint64_t current_seed() const override;
+  CAFFE2_API void set_current_seed(uint64_t seed) override;
+  CAFFE2_API static DeviceType device_type();
   CAFFE2_API ${name}Generator& manualSeedAll(uint64_t seed) override;
   CAFFE2_API void * unsafeGetTH();
 

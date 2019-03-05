@@ -220,15 +220,13 @@ static inline bool hasMAGMA() {
 }
 
 static inline void manual_seed(uint64_t seed) {
-  detail::getDefaultCPUGenerator()->setCurrentSeed(seed);
+  detail::getDefaultCPUGenerator()->set_current_seed(seed);
   // NB: Sometimes we build with CUDA, but we don't have any GPUs
   // available. In that case, we must not seed CUDA; it will fail!
   if (hasCUDA() && detail::getCUDAHooks().getNumGPUs() > 0) {
     globalContext().lazyInitCUDA();
     auto& generator = globalContext().generator_registry[static_cast<int>(DeviceType::CUDA)];
-    if(!generator) {
-      AT_ERROR(DeviceTypeName(DeviceType::CUDA), " backend type not enabled.");
-    }
+    AT_ASSERT(generator);
     generator->manualSeedAll(seed);
   }
 }

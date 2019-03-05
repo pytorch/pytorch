@@ -18,7 +18,7 @@ std::unique_ptr<Generator> Generator::clone() const {
 /*
 * Gets the device of a generator.
 */
-Device Generator::getDevice() const {
+Device Generator::device() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return device_;
 }

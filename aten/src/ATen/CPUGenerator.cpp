@@ -44,7 +44,7 @@ CPUGenerator::CPUGenerator(uint64_t seed_in, Philox4_32_10 engine_in)
 /**
  * Manually seeds the engine with the seed input
  */
-void CPUGenerator::setCurrentSeed(uint64_t seed) {
+void CPUGenerator::set_current_seed(uint64_t seed) {
   std::lock_guard<std::mutex> lock(mutex_);
   current_seed_ = seed;
   engine_ = Philox4_32_10(seed);
@@ -53,9 +53,17 @@ void CPUGenerator::setCurrentSeed(uint64_t seed) {
 /*
  * Gets the current seed of CPUGenerator.
  */
-uint64_t CPUGenerator::getCurrentSeed() const {
+uint64_t CPUGenerator::current_seed() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return current_seed_;
+}
+
+/*
+ * Gets the DeviceType of CPUGenerator.
+ * Used for type checking during run time.
+ */
+DeviceType CPUGenerator::device_type() {
+  return DeviceType::CPU;
 }
 
 /* 

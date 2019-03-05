@@ -35,12 +35,20 @@ uint64_t CUDAGenerator::seed() {
   return THCRandom_initialSeed(context->getTHCState());
 }
 
-uint64_t CUDAGenerator::getCurrentSeed() const {
+uint64_t CUDAGenerator::current_seed() const {
   return THCRandom_initialSeed(context->getTHCState());
 }
 
-void CUDAGenerator::setCurrentSeed(uint64_t seed) {
+void CUDAGenerator::set_current_seed(uint64_t seed) {
   THCRandom_manualSeed(context->getTHCState(), seed);
+}
+
+/*
+ * Gets the DeviceType of CUDAGenerator.
+ * Used for type checking during run time.
+ */
+DeviceType CUDAGenerator::device_type() {
+  return DeviceType::CUDA;
 }
 
 CUDAGenerator& CUDAGenerator::manualSeedAll(uint64_t seed) {

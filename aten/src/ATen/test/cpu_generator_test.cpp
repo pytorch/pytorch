@@ -63,29 +63,29 @@ TEST(CPUGenerator, TestGetSetCurrentSeed) {
   // Test Description: 
   // Test current seed getter and setter
   auto& foo = at::detail::getDefaultCPUGenerator();
-  foo->setCurrentSeed(123);
-  auto current_seed = foo->getCurrentSeed();
+  foo->set_current_seed(123);
+  auto current_seed = foo->current_seed();
   ASSERT_EQ(current_seed, 123);
 }
 
 void thread_func_get_set_current_seed(CPUGenerator* generator) {
-  auto current_seed = generator->getCurrentSeed();
+  auto current_seed = generator->current_seed();
   current_seed++;
-  generator->setCurrentSeed(current_seed);
+  generator->set_current_seed(current_seed);
 }
 
 TEST(CPUGenerator, TestMultithreadingGetSetCurrentSeed) {
   // Test Description: 
   // Test current seed getter and setter are thread safe
   auto& gen1 = at::detail::getDefaultCPUGenerator();
-  auto initial_seed = gen1->getCurrentSeed();
+  auto initial_seed = gen1->current_seed();
   std::thread t0{thread_func_get_set_current_seed, gen1.get()};
   std::thread t1{thread_func_get_set_current_seed, gen1.get()};
   std::thread t2{thread_func_get_set_current_seed, gen1.get()};
   t0.join();
   t1.join();
   t2.join();
-  ASSERT_EQ(gen1->getCurrentSeed(), initial_seed+3);
+  ASSERT_EQ(gen1->current_seed(), initial_seed+3);
 }
 
 TEST(CPUGenerator, TestRNGForking) {

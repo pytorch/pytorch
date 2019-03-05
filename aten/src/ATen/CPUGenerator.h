@@ -11,8 +11,9 @@ struct CAFFE2_API CPUGenerator : public CloneableGenerator<CPUGenerator, Generat
                Philox4_32_10 engine_in = Philox4_32_10(default_rng_seed_val));
 
   // CPUGenerator methods
-  void setCurrentSeed(uint64_t seed) override;
-  uint64_t getCurrentSeed() const override;
+  void set_current_seed(uint64_t seed) override;
+  uint64_t current_seed() const override;
+  static DeviceType device_type();
   uint32_t random();
   uint64_t random64();
 

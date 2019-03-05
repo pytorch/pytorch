@@ -485,7 +485,7 @@ void THTensor_(setRNGState)(at::Generator *_generator, THTensor *self)
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
   rng_state = (at::CPUGenerator*)self->data<scalar_t>();
   int64_t is_valid = 0;
-  if (_generator->getDevice().type() == rng_state->getDevice().type()) {
+  if (_generator->device().type() == rng_state->device().type()) {
     is_valid = 1;
   }
   THArgCheck(is_valid, 1, "Invalid RNG state");

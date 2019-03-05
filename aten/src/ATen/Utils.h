@@ -136,11 +136,12 @@ inline int64_t prod_intlist(ArrayRef<int64_t> list) {
 */
 template <typename T>
 static inline T * check_generator_with_default(Generator * expr, Generator * defaultValue) {
-  if (!expr)
+  if (!expr) {
     expr = defaultValue;
-  T temp_gen;
-  if (temp_gen.getDevice().type() == expr->getDevice().type())
+  }
+  if (T::device_type() == expr->device().type()) {
     return static_cast<T*>(expr);
+  }
   AT_ERROR("Expected a '", typeid(T).name(), "' but found '", typeid(expr).name(), "'");
 }
 
@@ -150,9 +151,9 @@ static inline T * check_generator_with_default(Generator * expr, Generator * def
 */
 template <typename T>
 static inline T * check_generator(Generator * expr) {
-  T temp_gen;
-  if (temp_gen.getDevice().type() == expr->getDevice().type())
+  if (T::device_type() == expr->device().type()) {
     return static_cast<T*>(expr);
+  }
   AT_ERROR("Expected a '", typeid(T).name(), "' but found '", typeid(expr).name(), "'");
 }
 

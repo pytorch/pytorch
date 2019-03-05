@@ -63,17 +63,15 @@ struct CAFFE2_API Generator {
   // Delete all copy and move assignment in favor of clone()
   // method
   Generator(const Generator& other) = delete;
-  Generator(Generator&& other) = delete;
-  Generator& operator=(Generator& other) = delete;
-  Generator& operator=(Generator&& other) = delete;
+  Generator& operator=(const Generator& other) = delete;
 
   virtual ~Generator() = default;
   std::unique_ptr<Generator> clone() const;
 
   // Common methods for all generators
-  virtual void setCurrentSeed(uint64_t seed) = 0;
-  virtual uint64_t getCurrentSeed() const = 0;
-  Device getDevice() const;
+  virtual void set_current_seed(uint64_t seed) = 0;
+  virtual uint64_t current_seed() const = 0;
+  Device device() const;
 
   // stubbed. will be removed
   virtual Generator& manualSeedAll(uint64_t seed);
