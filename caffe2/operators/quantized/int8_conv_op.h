@@ -18,8 +18,9 @@ template <Activation Ac>
 class Int8ConvOp final : public ConvPoolOpBase<CPUContext> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
-  Int8ConvOp(const OperatorDef& def, Workspace* ws)
-      : ConvPoolOpBase(def, ws) {
+  template <class... Args>
+  explicit Int8ConvOp(Args&&... args)
+      : ConvPoolOpBase(std::forward<Args>(args)...) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NHWC,
         "Int8Conv only supports NHWC order");

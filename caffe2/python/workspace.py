@@ -364,6 +364,11 @@ def FetchBlob(name):
     return result
 
 
+def FetchTorch(name):
+    ws = C.Workspace.current
+    return ws.blobs[name].to_torch()
+
+
 Int8Tensor = collections.namedtuple(
     'Int8Tensor', ['data', 'scale', 'zero_point']
 )
@@ -701,13 +706,45 @@ Workspace.run = _Workspace_run
 Workspace.feed_blob = _Workspace_feed_blob
 Workspace.remove_blob = _Workspace_remove_blob
 
-
 # C.Blob methods.
 
+
 def _Blob_feed(blob, arg, device_option=None):
+    # conservative type check to avoid unnecessary import
+    if type(arg).__name__ == 'Tensor' and type(arg).__module__ == 'torch':
+        import torch
+        if isinstance(arg, torch.Tensor):
+            assert device_option is None, \
+                "device_option doesn't make sense with PyTorch tensors"
+            handle = torch._C._tensor_impl_raw_handle(arg)
+            blob._wrap_tensor_impl(handle)
+            return True  # _feed() returns True for some reason
     if device_option is not None:
         device_option = StringifyProto(device_option)
     return blob._feed(arg, device_option)
 
 
 C.Blob.feed = _Blob_feed
+
+
+def _Tensor_to_torch(tensor):
+    """
+    PyTorch tensor interop (TensorCPU methods)
+
+    Can be accessed as:
+      workspace.Workspace.current.blobs['foo'].tensor().to_torch()
+    """
+    # avoiding circular dependency
+    import torch
+    handle = tensor._tensor_impl_raw_handle()
+    return torch._C._wrap_tensor_impl(handle)
+
+C.TensorCPU.to_torch = _Tensor_to_torch
+
+
+def _Blob_to_torch(blob):
+    if not blob.is_tensor():
+        raise RuntimeError("Blob has to be a tensor")
+    return blob.as_tensor().to_torch()
+
+C.Blob.to_torch = _Blob_to_torch

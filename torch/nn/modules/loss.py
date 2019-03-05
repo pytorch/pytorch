@@ -545,7 +545,7 @@ class BCEWithLogitsLoss(_Loss):
         l_n = - w_n \left[ p_n y_n \cdot \log \sigma(x_n)
         + (1 - y_n) \cdot \log (1 - \sigma(x_n)) \right],
 
-    where :math:`p_n` is the positive weight of class :math:`n`.
+    where :math:`p_n` is the weight of the positive class for sample :math:`n` in the batch.
     :math:`p_n > 1` increases the recall, :math:`p_n < 1` increases the precision.
 
     For example, if a dataset contains 100 positive and 300 negative examples of a single class,

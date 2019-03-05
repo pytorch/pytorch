@@ -67,6 +67,7 @@ Value* insertConstant(
   } else if (val.isNone()) {
     n->output()->setType(NoneType::get());
   } else {
+    n->destroy();
     throw constant_not_supported_error(
         "Unsupported value kind: " + val.tagKind());
   }
@@ -77,7 +78,8 @@ Value* insertConstant(
   if (result_type) {
     auto inferred_type = n->output()->type();
     // Retain more type information in case of tensor constant
-    if (!(inferred_type->isSubtypeOf(TensorType::get()) && result_type->isSubtypeOf(inferred_type))) {
+    if (!(inferred_type->isSubtypeOf(TensorType::get()) &&
+          result_type->isSubtypeOf(inferred_type))) {
       n->output()->setType(result_type);
     }
   }
