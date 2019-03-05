@@ -604,7 +604,7 @@ def softplus(g, self, beta, threshold):
 
 def get_pool_ceil_padding(input, kernel_size, stride, padding):
     dim = input.type().sizes()[-len(padding):]
-    ceiled_output_dim = [math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / stride[i]) + 1
+    ceiled_output_dim = [int(math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i]))) + 1
                          for i in range(0, len(padding))]
     # ensure last pooling starts inside
     ceiled_output_dim = [ceiled_output_dim[i] - 1
