@@ -146,6 +146,19 @@ If you want to compile with CUDA support, install
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 Other potentially useful environment variables may be found in `setup.py`.
 
+PyTorch supports only 64-bit version of python.
+To check your python version, you may run:
+```python
+python
+import platform
+platform.architecture()
+```
+The output should be:
+```python
+('64bit', ...)
+```
+In case of '32bit', please install a 64-bit version of python (if it is not installed as well) and set the path to it in your environment.
+
 #### Install Dependencies
 
 Common
