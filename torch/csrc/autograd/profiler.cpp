@@ -45,7 +45,9 @@ RangeEventList& getEventList() {
     if (thread_id == -1) {
       thread_id = next_thread_id++;
     }
-    event_list = invocation_state->all_event_lists[thread_id];
+    if (!invocation_state->all_event_lists[thread_id]) {
+      event_list = invocation_state->all_event_lists[thread_id] = std::make_shared<RangeEventList>();
+    }
     associated_invocation_state = invocation_state.get();
   }
   return *event_list;
