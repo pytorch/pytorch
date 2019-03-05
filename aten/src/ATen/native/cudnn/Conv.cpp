@@ -112,6 +112,11 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
 // the best algo and the updated descriptor. If we don't update the descriptor but just run
 // with the best algo, under the hood, cudnn will run with the slower kernel 
 // since it sees fastest algorithm combination with a sub optimal mathType.
+
+// Note [blacklist fft algorithms for strided dgrad]
+// This is a workaround for a CuDNN bug that gave wrong results in certain strided convolution 
+// gradient setups. Check Issue #16610 for bug details. Bug is there for CUDNN version < 7.5 .
+
 namespace at { namespace native {
 
 // TODO: Go through all the checking code again and make sure
@@ -452,21 +457,48 @@ size_t getMaxWorkspaceSize(
 }
 
 template<typename perf_t>
-perf_t getBestAlgorithm(perf_t *perfResults, bool deterministic, int n_algo) {
-  if (deterministic) {
+perf_t getBestAlgorithm(perf_t *perfResults, const ConvolutionArgs& args, int n_algo) {
+  int best_algo_idx;
+  bool is_deterministic = false;
+  if (args.params.deterministic) {
     // iterate over perf results of all algorithms and find the best deterministic algo
     for (int i = 0; i < n_algo; i++) {
       // TODO: Shouldn't all returned results be successful?
       // Double check documentation for cudnnFindConvolutionForwardAlgorithmEx
       if (perfResults[i].status == CUDNN_STATUS_SUCCESS &&
           perfResults[i].determinism == CUDNN_DETERMINISTIC) {
-        return perfResults[i];
+        best_algo_idx = i;
+        is_deterministic = true;
+        break;
       }
     }
-    AT_ERROR("no deterministic convolution algorithms available in CuDNN");
+    if (!is_deterministic) {
+      AT_ERROR("no deterministic convolution algorithms available in CuDNN");
+    }
   } else {
-    return perfResults[0];
+    best_algo_idx = 0;
   }
+
+  // See Note [blacklist fft algorithms for strided dgrad]
+#if CUDNN_VERSION < 7500
+  if (std::is_same<decltype(perfResults[best_algo_idx].algo), cudnnConvolutionBwdDataAlgo_t>::value) {
+    int stride_dim = args.input.dim() - 2;
+    bool blacklist = std::any_of(std::begin(args.params.stride),
+                                std::begin(args.params.stride) + stride_dim,
+                                [=](int n){return n != 1;});
+    if (blacklist && (static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[best_algo_idx].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING 
+                  || static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[best_algo_idx].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT)) {
+      perfResults[best_algo_idx].algo = algorithm_search<perf_t>::DEFAULT_ALGO;
+      if (args.params.dataType == CUDNN_DATA_HALF) {
+        perfResults[best_algo_idx].mathType = CUDNN_TENSOR_OP_MATH;
+      } else {
+        perfResults[best_algo_idx].mathType = CUDNN_DEFAULT_MATH;
+      }
+    }
+  }
+#endif
+
+  return perfResults[best_algo_idx];
 }
 
 template<>
@@ -518,7 +550,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
           ws.data,
           ws.size));
     }
-    return getBestAlgorithm<perf_t>(perf_results.get(), args.params.deterministic, perf_count);
+    return getBestAlgorithm<perf_t>(perf_results.get(), args, perf_count);
   }
 
   static void getWorkspaceSize(
@@ -583,7 +615,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
           ws.data,
           ws.size));
     }
-    return getBestAlgorithm<perf_t>(perf_results.get(), args.params.deterministic, perf_count);
+    return getBestAlgorithm<perf_t>(perf_results.get(), args, perf_count);
   }
 
   static void getWorkspaceSize(
@@ -650,7 +682,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
           ws.data,
           ws.size));
     }
-    return getBestAlgorithm<perf_t>(perf_results.get(), args.params.deterministic, perf_count);
+    return getBestAlgorithm<perf_t>(perf_results.get(), args, perf_count);
   }
 
   static void getWorkspaceSize(const ConvolutionArgs& args, algo_t algo, size_t* workspaceSize)
@@ -667,7 +699,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
 };
 
 template<typename perf_t>
-void findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, bool benchmark, perf_t* algoPerf) {
+void findAlgorithm(const ConvolutionArgs& args, bool benchmark, perf_t* algoPerf) {
   using search = algorithm_search<perf_t>;
   auto& cache = search::cache();
 
@@ -677,7 +709,7 @@ void findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, 
 
   if (args.params.deterministic && !benchmark) {
     algoPerf->algo = search::DEFAULT_ALGO;
-    if (dataType == CUDNN_DATA_HALF) {
+    if (args.params.dataType == CUDNN_DATA_HALF) {
       algoPerf->mathType = CUDNN_TENSOR_OP_MATH;
     } else {
       algoPerf->mathType = CUDNN_DEFAULT_MATH;
@@ -712,7 +744,7 @@ void findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, 
       *algoPerf = perfResults;
   } else {
       algoPerf->algo = search::DEFAULT_ALGO;
-      if (dataType == CUDNN_DATA_HALF) {
+      if (args.params.dataType == CUDNN_DATA_HALF) {
         algoPerf->mathType = CUDNN_TENSOR_OP_MATH;
       } else {
         algoPerf->mathType = CUDNN_DEFAULT_MATH;
@@ -723,12 +755,11 @@ void findAlgorithm(const cudnnDataType_t dataType, const ConvolutionArgs& args, 
 
 template<typename perf_t>
 Workspace chooseAlgorithm(
-    const cudnnDataType_t dataType,
     const ConvolutionArgs& args,
     bool benchmark,
     perf_t* algoPerf)
 {
-  findAlgorithm(dataType, args, benchmark, algoPerf);
+  findAlgorithm(args, benchmark, algoPerf);
 
   using search = algorithm_search<perf_t>;
   try {
@@ -739,7 +770,7 @@ Workspace chooseAlgorithm(
     // switch to default algorithm and record it in the cache to prevent
     // further OOM errors
     algoPerf->algo = search::DEFAULT_ALGO;
-    if (dataType == CUDNN_DATA_HALF) {
+    if (args.params.dataType == CUDNN_DATA_HALF) {
       algoPerf->mathType = CUDNN_TENSOR_OP_MATH;
     } else {
       algoPerf->mathType = CUDNN_DEFAULT_MATH;
@@ -841,7 +872,7 @@ void raw_cudnn_convolution_forward_out(
   // convolution support is already pretty slow, so this might not
   // matter.  (This applies to raw_cudnn_convolution_backward_input as well.)
   cudnnConvolutionFwdAlgoPerf_t fwdAlgPerf;
-  Workspace workspace = chooseAlgorithm(dataType, args, benchmark, &fwdAlgPerf);
+  Workspace workspace = chooseAlgorithm(args, benchmark, &fwdAlgPerf);
   
   // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
   // whether to use Tensor core kernels or not
@@ -965,7 +996,7 @@ void raw_cudnn_convolution_backward_input_out(
   args.cdesc.set(dataType, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
   cudnnConvolutionBwdDataAlgoPerf_t bwdDataAlgPerf;
-  Workspace workspace = chooseAlgorithm(dataType, args, benchmark, &bwdDataAlgPerf);
+  Workspace workspace = chooseAlgorithm(args, benchmark, &bwdDataAlgPerf);
 
   // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
   // whether to use Tensor core kernels or not
@@ -1106,7 +1137,7 @@ void raw_cudnn_convolution_backward_weight_out(
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
   cudnnConvolutionBwdFilterAlgoPerf_t bwdFilterAlgPerf;
-  Workspace workspace = chooseAlgorithm(dataType, args, benchmark, &bwdFilterAlgPerf);
+  Workspace workspace = chooseAlgorithm(args, benchmark, &bwdFilterAlgPerf);
 
   // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
   // whether to use Tensor core kernels or not

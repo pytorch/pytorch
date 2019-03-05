@@ -13,9 +13,8 @@ class OneHotOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  template <class... Args>
-  explicit OneHotOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...) {}
+  OneHotOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
 
   bool RunOnDevice() override {
     auto& indices = Input(0);
@@ -56,9 +55,8 @@ template <class Context>
 class BatchOneHotOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template <class... Args>
-  explicit BatchOneHotOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...) {}
+  BatchOneHotOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(X));
@@ -81,9 +79,8 @@ template <class Context>
 class BatchBucketOneHotOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template <class... Args>
-  explicit BatchBucketOneHotOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...) {}
+  BatchBucketOneHotOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
 
   bool RunOnDevice() override;
 

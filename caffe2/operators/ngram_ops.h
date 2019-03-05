@@ -12,9 +12,8 @@ class NGramFromCategoricalOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  template <class... Args>
-  explicit NGramFromCategoricalOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  NGramFromCategoricalOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         col_ids_(this->template GetRepeatedArgument<int>("col_ids")),
         categorical_limits_(
             this->template GetRepeatedArgument<int>("categorical_limits")),

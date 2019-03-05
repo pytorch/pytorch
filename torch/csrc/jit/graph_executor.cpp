@@ -26,7 +26,7 @@
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/passes/specialize_undef.h>
+#include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/symbolic_variable.h>
 #include <torch/csrc/jit/tracer.h>
 
@@ -635,7 +635,7 @@ void GraphExecutor::debugDisableAutodiffSubgraphInlining() {
 }
 
 void runRequiredPasses(const std::shared_ptr<Graph>& g) {
-  specializeUndef(*g);
+  specializeAutogradZero(*g);
   LowerGradOf(*g);
   // implicit inserted expand nodes are not necessarily always valid
   // when used inside script methods that might have unstable shapes

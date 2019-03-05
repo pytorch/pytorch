@@ -1581,6 +1581,24 @@ class TestJit(JitTestCase):
         self.assertEqual(out, out_state)
         self.assertNotEqual(out, out_ones)
 
+    def test_export_no_reorder(self):
+        def func(a, b):
+            return a * b / (a - 2 * b) + b
+
+        recording_inputs = [torch.tensor([0.55619788169860839844], dtype=torch.float32, requires_grad=True),
+                            torch.tensor([0.25947844982147216797], dtype=torch.float32, requires_grad=True)]
+
+        ge1 = torch.jit.trace(func, recording_inputs, optimize=True)
+        ge2 = self.getExportImportCopy(ge1)
+
+        outputs_ge1 = ge1(*recording_inputs)
+        outputs_ge2 = ge2(*recording_inputs)
+
+        grad_ge1 = torch.autograd.grad(outputs_ge1, recording_inputs)
+        grad_ge2 = torch.autograd.grad(outputs_ge2, recording_inputs)
+        self.assertTrue(outputs_ge1 == outputs_ge2)
+        self.assertTrue(grad_ge1 == grad_ge2)
+
     def test_python_function(self):
         class MyFn(Function):
             @staticmethod
@@ -8352,7 +8370,8 @@ a")
 
         # Note: the parameter self.param from the Python module is inlined
         # into the graph
-        self.assertExpected(canonical(traced_fn.graph))
+        self.assertTrue(len(list(traced_fn.graph.inputs())) == 1)
+        FileCheck().check("aten::mm").check("aten::add").run(str(traced_fn.graph))
 
     def test_call_traced_fn_from_tracing_fn(self):
         @_trace(torch.rand(3, 4))
@@ -8363,7 +8382,8 @@ a")
         def traced_fn(x):
             return traced_fn1(x) + 1
 
-        self.assertExpected(canonical(traced_fn.graph))
+        FileCheck().check("aten::neg").check_same("scope: traced_fn1").check("aten::add") \
+            .run(str(traced_fn.graph))
 
     def test_call_traced_mod_from_tracing_fn(self):
         class TracedModule(torch.nn.Module):
@@ -8382,7 +8402,8 @@ a")
 
         # Note: the parameter self.param from the Python module is inlined
         # into the graph
-        self.assertExpected(canonical(traced_fn.graph))
+        FileCheck().check("prim::Constant[value=<Tensor>]").check("aten::mm") \
+            .check("aten::add").run(str(traced_fn.graph))
 
     def test_call_script_fn_from_tracing_fn(self):
         @torch.jit.script
@@ -8393,25 +8414,30 @@ a")
         def traced_fn(x):
             return script_fn(x) + 1
 
-        self.assertExpected(canonical(traced_fn.graph))
+        FileCheck().check("aten::neg").check("aten::add").run(str(traced_fn.graph))
 
     def test_call_script_mod_from_tracing_fn(self):
-        class ScriptMod(torch.jit.ScriptModule):
-            def __init__(self):
-                super(ScriptMod, self).__init__()
-                self.param = torch.nn.Parameter(torch.rand(4, 3), requires_grad=False)
+        with self.disableModuleHook():
+            class ScriptMod(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(ScriptMod, self).__init__()
+                    self.param = torch.nn.Parameter(torch.rand(3, 4), requires_grad=False)
 
-            @torch.jit.script_method
-            def forward(self, x):
-                return torch.mm(x, self.param)
+                @torch.jit.script_method
+                def forward(self, x):
+                    for _i in range(4):
+                        x += self.param
+                    return x
 
-        sm = ScriptMod()
+            sm = ScriptMod()
 
-        @_trace(torch.rand(3, 4))
-        def traced_fn(x):
-            return sm(x) + 1.0
+            @_trace(torch.rand(3, 4))
+            def traced_fn(x):
+                return sm(x) + 1.0
 
-        self.assertExpected(canonical(traced_fn.graph))
+            # parameter turns into constant and loop is perserved
+            FileCheck().check("prim::Constant[value=<Tensor>]").check("Loop") \
+                .run(str(traced_fn.graph))
 
     def test_call_python_fn_from_traced_module(self):
         def python_fn(x):
@@ -8430,7 +8456,8 @@ a")
         # Note: parameter self.param from the traced module should appear as
         # an input to the graph and the neg op from the Python function should
         # be properly inlined
-        self.assertExpected(canonical(tm.graph))
+        self.assertTrue(len(list(tm.graph.inputs())) == 2)
+        FileCheck().check("aten::neg").check("aten::mm").run(str(tm.graph))
 
     def test_call_python_mod_from_traced_module(self):
         class PythonModule(torch.nn.Module):
@@ -8454,7 +8481,9 @@ a")
 
         # Note: the parameters from both modules should appear in the flattened
         # inputs of the graph. All ops from both modules should be inlined.
-        self.assertExpected(canonical(tm.graph))
+        self.assertTrue(len(list(tm.graph.inputs())) == 3)
+        FileCheck().check_not("value=<Tensor>").check_count("aten::mm", 2).check("aten::add") \
+            .run(str(tm.graph))
 
     def test_call_traced_fn_from_traced_module(self):
         @_trace(torch.rand(3, 4))
@@ -8471,7 +8500,9 @@ a")
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
         # Note: neg op from the traced function should be properly inlined
-        self.assertExpected(canonical(tm.graph))
+        FileCheck().check("aten::mm").check_same("scope: TracedModule") \
+            .check_next("aten::neg").check("scope: TracedModule/traced_fn") \
+            .run(str(tm.graph))
 
     def test_trace_hierarchy(self):
         # Test that we preserve the module hierarchy for a ScriptModule
@@ -8587,7 +8618,8 @@ a")
 
         # Note: the parameters from both modules should appear in the flattened
         # inputs of the graph. All ops from both modules should be inlined.
-        self.assertExpected(canonical(tm.graph))
+        self.assertTrue(len(list(tm.graph.inputs())) == 3)
+        FileCheck().check_count("aten::mm", 2).check("aten::add").run(str(tm.graph))
 
     def test_call_script_fn_from_traced_module(self):
         @torch.jit.script
@@ -8604,7 +8636,7 @@ a")
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
         # Note: neg op from the script function should be properly inlined
-        self.assertExpected(canonical(tm.graph))
+        FileCheck().check("aten::mm").check("aten::neg").run(str(tm.graph))
 
     def test_call_script_module_from_traced_module(self):
         class ScriptMod(torch.jit.ScriptModule):
@@ -8629,7 +8661,8 @@ a")
 
         # Note: the parameters from both modules should appear in the flattened
         # inputs of the graph. All ops from both modules should be inlined.
-        self.assertExpected(canonical(tm.graph))
+        self.assertTrue(len(list(tm.graph.inputs())) == 3)
+        FileCheck().check_count("aten::mm", 2).check("aten::add").run(str(tm.graph))
 
     def test_call_python_fn_from_script_fn(self):
         def python_fn(x):
@@ -8641,7 +8674,9 @@ a")
 
         # Note: the call to python_fn appears as `^python_fn()` and is called
         # as a PythonOp in the interpreter
-        self.assertExpected(canonical(script_fn.graph))
+        a = torch.tensor(1)
+        self.assertEqual(script_fn(a), torch.tensor(0))
+        FileCheck().check("python_fn").run(str(script_fn.graph))
 
     def test_call_python_mod_from_script_fn(self):
         class PythonModule(torch.nn.Module):
@@ -8660,7 +8695,7 @@ a")
 
         # Note: call to pm(x) appears as ^<python_value>() in the trace.
         # Parameters are NOT inlined.
-        self.assertExpected(str(script_fn.graph))
+        FileCheck().check("python_value").check("aten::add").run(str(script_fn.graph))
 
     def test_call_traced_fn_from_script_fn(self):
         @_trace(torch.rand(3, 4))
@@ -8673,7 +8708,7 @@ a")
 
         # Note: the neg op from traced_fn should be properly inlined into the
         # script function's graph
-        self.assertExpected(str(script_fn.graph))
+        FileCheck().check("aten::neg").check("aten::add").run(str(script_fn.graph))
 
     def test_call_traced_mod_from_script_fn(self):
         class TracedModule(torch.nn.Module):
@@ -8689,7 +8724,8 @@ a")
         def script_fn(x):
             return tm(x) + 1
 
-        self.assertExpected(str(script_fn.graph))
+        FileCheck().check("aten::zeros").check_same("scope: TracedModule").check("aten::mm") \
+            .check("aten::add").run(str(script_fn.graph))
 
     def test_call_script_fn_from_script_fn(self):
         @torch.jit.script
@@ -8702,7 +8738,7 @@ a")
 
         # Note: the neg op from script_fn1 should be properly inlined into the
         # graph of script_fn
-        self.assertExpected(canonical(script_fn.graph))
+        FileCheck().check("aten::neg").run(str(script_fn.graph))
 
     def test_call_script_mod_from_script_fn(self):
         class ScriptMod(torch.jit.ScriptModule):
@@ -8719,7 +8755,7 @@ a")
         def script_fn(x):
             return sm(x) + 1
 
-        self.assertExpected(canonical(script_fn.graph))
+        FileCheck().check("zeros").check("aten::mm").check("add").run(str(script_fn.graph))
 
     def test_call_python_fn_from_script_module(self):
         def python_fn(x):
@@ -8735,7 +8771,8 @@ a")
                 return python_fn(torch.mm(x, self.param))
 
         sm = ScriptMod()
-        self.assertExpected(str(sm.__getattr__('forward').graph))
+        FileCheck().check("aten::mm").check("python_fn") \
+            .run(str(sm.__getattr__('forward').graph))
 
     def test_call_python_mod_from_script_module(self):
         class PythonMod(torch.nn.Module):
@@ -8759,7 +8796,7 @@ a")
         sm = ScriptMod()
         # Note: the call into PythonMod appears as ^<python_value>(). Parameters
         # are NOT inlined
-        self.assertExpected(str(sm.graph))
+        FileCheck().check("aten::mm").check("python_value").run(str(sm.graph))
 
     def test_call_tracing_fn_from_script_module(self):
         @_trace(torch.rand(3, 3))
@@ -8776,7 +8813,7 @@ a")
                 return traced_fn(torch.mm(x, self.param))
 
         sm = ScriptMod()
-        self.assertExpected(str(sm.__getattr__('forward').graph))
+        FileCheck().check("aten::mm").check("aten::neg").run(str(sm.__getattr__('forward').graph))
 
     def test_call_tracing_mod_from_script_module(self):
         class TracedMod(torch.nn.Module):
@@ -8801,7 +8838,8 @@ a")
         # Note: the parameters from both modules should appear in the flattened
         # input list to the graph. The mm op from TracedMod should be properly
         # inlined
-        self.assertExpected(str(sm.graph))
+        self.assertTrue(len(list(sm.graph.inputs())) == 3)
+        FileCheck().check("aten::mm").check("aten::mm").run(str(sm.graph))
 
     def test_call_script_fn_from_script_module(self):
         @torch.jit.script
@@ -8818,7 +8856,8 @@ a")
                 return script_fn(torch.mm(x, self.param))
 
         sm = ScriptMod()
-        self.assertExpected(canonical(sm.__getattr__('forward').graph))
+        graph = (sm.__getattr__('forward').graph)
+        FileCheck().check("aten::mm").check("aten::neg").run(str(graph))
 
     def test_call_script_mod_from_script_module(self):
         class ScriptMod1(torch.jit.ScriptModule):
@@ -8844,7 +8883,8 @@ a")
         # Note: the parameters from both modules should appear in the flattened
         # input list to the graph. The mm op from ScriptMod1 should be properly
         # inlined
-        self.assertExpected(canonical(sm.graph))
+        # 3 % values in graph input lists, two mms in body
+        FileCheck().check_count('%', 3).check(":").check_count("mm", 2).run(str(sm.graph))
 
     def test_module_with_params_called_fails(self):
         with self.assertRaisesRegex(RuntimeError, "Attempted to inline a Module with parameters. Stateful "
@@ -9963,7 +10003,7 @@ a")
             a /= b
             a *= b
             return a, b
-        self.checkScript(foo, (torch.rand(3), torch.rand(3)), check_expected=True)
+        self.checkScript(foo, (torch.rand(3), torch.rand(3)))
 
     def test_pass(self):
         def foo(x):
@@ -11658,15 +11698,23 @@ class TestFuser(JitTestCase):
         def funcInf(a, b):
             return torch.clamp(a + b, min=0, max=float('inf'))
 
+        def funcOptMin(a, b):
+            return torch.clamp(a + b, max=2)
+
+        def funcOptMax(a, b):
+            return torch.clamp(a + b, min=0)
+
         a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
         b = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        nan = torch.tensor(float('nan'))
 
-        funcs = (func2, funcInf)
-        for f in funcs:
-            s = self.checkScript(f, (a, b))
-            self.assertAllFused(s.graph_for(a, b), except_for={'aten::size'})
+        funcs = (func2, funcInf, funcOptMin, funcOptMax)
+        for f, inputs in product(funcs, [[a, b], [a, nan]]):
+            inp1, inp2 = inputs
+            s = self.checkScript(f, (inp1, inp2))
+            self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size'})
 
-            c = s(a, b)
+            c = s(inp1, inp2)
             c.sum().backward()
             graph = backward_graph(s)
             self.assertAllFused(graph)
@@ -12460,6 +12508,9 @@ graph(%x : Tensor):
   return (%1)
 ''')
 
+    def test_generic_list(self):
+        self.assertEqual(torch.ops._test.get_first([['hello']]), 'hello')
+
 
 class TestJitGeneratedAutograd(JitTestCase):
     pass
@@ -13249,7 +13300,7 @@ class TestAsync(JitTestCase):
 
         # two futures with a different error
         x = torch.rand(3, 4, 5)
-        with self.assertRaisesRegex(Exception, 'expects a 1D or 2D tensor'):
+        with self.assertRaisesRegex(Exception, 'expects a tensor with <= 2 dimensions'):
             wait_script_nest(x)
 
     def test_async_grad_guard_with_grad(self):
@@ -13521,22 +13572,22 @@ class TestDataParallel(JitTestCase):
         self.assertEqual(first_forward, r1_forward)
 
 
-class TestUserType(JitTestCase):
+class TestClassType(JitTestCase):
     def test_get_with_method(self):
         # Remove this when import/export is implemented for classes
         with self.disableModuleHook():
             @torch.jit.script
-            class Foo:
+            class FooTest:
                 def __init__(self, x):
                     self.foo = x
 
-                def getFoo(self):
+                def getFooTest(self):
                     return self.foo
 
             @torch.jit.script
             def fn(x):
-                foo = Foo(x)
-                return foo.getFoo()
+                foo = FooTest(x)
+                return foo.getFooTest()
 
             input = torch.ones(2, 3)
             self.assertEqual(fn(input), input)
@@ -13545,13 +13596,13 @@ class TestUserType(JitTestCase):
         # Remove this when import/export is implemented for classes
         with self.disableModuleHook():
             @torch.jit.script
-            class Foo:
+            class FooTest:
                 def __init__(self, x):
                     self.foo = x
 
             @torch.jit.script
             def fn(x):
-                foo = Foo(x)
+                foo = FooTest(x)
                 return foo.foo
 
             input = torch.ones(2, 3)
@@ -13561,20 +13612,20 @@ class TestUserType(JitTestCase):
         # Remove this when import/export is implemented for classes
         with self.disableModuleHook():
             @torch.jit.script
-            class Foo:
+            class FooTest:
                 def __init__(self, x):
                     # type: (int)
                     self.foo = x
 
-                def incFoo(self, y):
+                def incFooTest(self, y):
                     # type: (int)
                     self.foo = self.foo + y
 
             @torch.jit.script
             def fn(x):
                 # type: (int)
-                foo = Foo(x)
-                foo.incFoo(2)
+                foo = FooTest(x)
+                foo.incFooTest(2)
                 return foo.foo
 
             self.assertEqual(fn(1), 3)
@@ -13584,7 +13635,7 @@ class TestUserType(JitTestCase):
         with self.disableModuleHook():
             with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):
                 @torch.jit.script
-                class Foo:
+                class FooTest:
                     def __init__(self, x):
                         self.foo = x
                         self.foo = 10  # should error since int != Tensor
@@ -13594,7 +13645,7 @@ class TestUserType(JitTestCase):
         with self.disableModuleHook():
             with self.assertRaisesRegex(RuntimeError, "Tried to access to nonexistent attribute"):
                 @torch.jit.script
-                class Foo:
+                class FooTest:
                     def __init__(self, x):
                         self.foo = x
 
@@ -13606,7 +13657,7 @@ class TestUserType(JitTestCase):
         with self.disableModuleHook():
             with self.assertRaisesRegex(RuntimeError, "Tried to set nonexistent attribute"):
                 @torch.jit.script
-                class Foo:
+                class FooTest:
                     def __init__(self, x):
                         self.foo = x
 
@@ -13618,14 +13669,14 @@ class TestUserType(JitTestCase):
         with self.disableModuleHook():
             with self.assertRaisesRegex(RuntimeError, "expected a value of type bool"):
                 @torch.jit.script
-                class Foo:
+                class FooTest:
                     def __init__(self, x):
                         # type: (bool)
                         self.foo = x
 
                 @torch.jit.script
                 def fn(x):
-                    Foo(x)
+                    FooTest(x)
 
                 fn(2)
 
@@ -13634,27 +13685,27 @@ class TestUserType(JitTestCase):
         with self.disableModuleHook():
             with self.assertRaisesRegex(RuntimeError, "assignment cannot be in a control-flow block"):
                 @torch.jit.script
-                class Foo:
+                class FooTest:
                     def __init__(self, x):
                         if True:
                             self.attr = x
 
-    def test_user_type_as_param(self):
+    def test_class_type_as_param(self):
         # Remove this when import/export is implemented for classes
         with self.disableModuleHook():
             @torch.jit.script
-            class Foo:
+            class FooTest:
                 def __init__(self, x):
                     self.attr = x
 
             @torch.jit.script
             def fn(foo):
-                # type: (Foo)
+                # type: (FooTest)
                 return foo.attr
 
             @torch.jit.script
             def fn2(x):
-                foo = Foo(x)
+                foo = FooTest(x)
                 return fn(foo)
 
             input = torch.ones(1)

@@ -137,15 +137,18 @@ void LSTMUnitGradient(
 template <typename Context>
 class LSTMUnitOp : public Operator<Context> {
  public:
-  template <class... Args>
-  explicit LSTMUnitOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
-        forget_bias_(static_cast<float>(
-            this->template GetSingleArgument<float>("forget_bias", 0.0))),
-        sequence_lengths_(
-            this->template GetSingleArgument<bool>("sequence_lengths", true)),
-        drop_states_(
-            this->template GetSingleArgument<bool>("drop_states", false)) {}
+  LSTMUnitOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        forget_bias_(
+            static_cast<float>(this->template GetSingleArgument<float>(
+                "forget_bias",
+                0.0))),
+        sequence_lengths_(this->template GetSingleArgument<bool>(
+            "sequence_lengths",
+            true)),
+        drop_states_(this->template GetSingleArgument<bool>(
+            "drop_states",
+            false)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   using Operator<Context>::Operator;
 
@@ -215,15 +218,18 @@ class LSTMUnitOp : public Operator<Context> {
 template <typename Context>
 class LSTMUnitGradientOp : public Operator<Context> {
  public:
-  template <class... Args>
-  explicit LSTMUnitGradientOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
-        forget_bias_(static_cast<float>(
-            this->template GetSingleArgument<float>("forget_bias", 0.0))),
-        sequence_lengths_(
-            this->template GetSingleArgument<bool>("sequence_lengths", true)),
-        drop_states_(
-            this->template GetSingleArgument<bool>("drop_states", false)) {}
+  LSTMUnitGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        forget_bias_(
+            static_cast<float>(this->template GetSingleArgument<float>(
+                "forget_bias",
+                0.0))),
+        sequence_lengths_(this->template GetSingleArgument<bool>(
+            "sequence_lengths",
+            true)),
+        drop_states_(this->template GetSingleArgument<bool>(
+            "drop_states",
+            false)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   template <typename T>

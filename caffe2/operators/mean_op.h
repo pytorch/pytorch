@@ -79,9 +79,8 @@ class MeanGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  template <class... Args>
-  explicit MeanGradientOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...) {}
+  MeanGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
 
   template <typename T>
   bool DoRunWithType() {

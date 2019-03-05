@@ -117,9 +117,8 @@ class SelectGradientOpBase : public Operator<Context> {
 template <typename T, class Context>
 class MaxGradientOp final : public SelectGradientOpBase<T, Context> {
  public:
-  template <class... Args>
-  explicit MaxGradientOp(Args&&... args)
-      : SelectGradientOpBase<T, Context>(std::forward<Args>(args)...) {}
+  MaxGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : SelectGradientOpBase<T, Context>(operator_def, ws) {}
 
   ~MaxGradientOp() = default;
 };
@@ -127,9 +126,8 @@ class MaxGradientOp final : public SelectGradientOpBase<T, Context> {
 template <typename T, class Context>
 class MinGradientOp final : public SelectGradientOpBase<T, Context> {
  public:
-  template <class... Args>
-  explicit MinGradientOp(Args&&... args)
-      : SelectGradientOpBase<T, Context>(std::forward<Args>(args)...) {}
+  MinGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : SelectGradientOpBase<T, Context>(operator_def, ws) {}
 
   ~MinGradientOp() = default;
 };
