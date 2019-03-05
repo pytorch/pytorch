@@ -178,9 +178,9 @@ thread_event_lists disableProfiler(
   if (invocation_state->state == ProfilerState::Disabled) {
     throw std::runtime_error("can't disable profiler when it's not running");
   }
-  auto old_state = invocation_state;
   mark("__stop_profile");
-  invocation_state = orig_state;
+  auto old_state = std::move(invocation_state);
+  invocation_state = std::move(orig_state);
   if (old_state->state == ProfilerState::NVTX) {
     return thread_event_lists();
   } else {
