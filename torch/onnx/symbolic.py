@@ -617,10 +617,10 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
                     (kernel_size[i] - (dim[i] + 2 * padding[i] - ((ceiled_output_dim[i] - 1) * stride[i] + 1)))
                     for i in range(0, len(padding))]
     # ensure padding is not > kernel_size
-    padding_ceil = [(padding_ceil[i] if padding_ceil[i] < kernel_size[i] - 1 else kernel_size[i] - 1)
+    padding_ceil = [(int(padding_ceil[i]) if padding_ceil[i] < kernel_size[i] - 1 else int(kernel_size[i] - 1))
                     if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
                     else
-                    padding_ceil[i]
+                    int(padding_ceil[i])
                     for i in range(0, len(padding_ceil))]
     return padding_ceil
 
@@ -641,7 +641,7 @@ def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         padding = padding * 2
     r, indices = g.op("MaxPool", input, outputs=2,
                       kernel_shape_i=_single(kernel_size),
-                      pads_i=_single(padding) * 2,
+                      pads_i=padding,
                       strides_i=_single(stride))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened.
@@ -681,7 +681,7 @@ def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         padding = padding * 2
     r, indices = g.op("MaxPool", input, outputs=2,
                       kernel_shape_i=_pair(kernel_size),
-                      pads_i=_pair(padding) * 2,
+                      pads_i=padding,
                       strides_i=_pair(stride))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened
@@ -711,7 +711,7 @@ def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         padding = padding * 2
     r, indices = g.op("MaxPool", input, outputs=2,
                       kernel_shape_i=_triple(kernel_size),
-                      pads_i=_triple(padding) * 2,
+                      pads_i=padding,
                       strides_i=_triple(stride))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened
