@@ -543,7 +543,7 @@ std::tuple<Tensor, Tensor, Tensor> _btrifact_helper_cuda(const Tensor& self, boo
   auto infos_tensor = at::zeros(req_size, self.options().dtype(kInt));
 
   Tensor self_working_copy;
-  if (self.size(-1) == 0) {
+  if (self.numel() == 0) {
     self_working_copy = at::empty_like(self);
   } else {
     self_working_copy = cloneBatchedColumnMajor(self);

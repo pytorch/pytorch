@@ -430,7 +430,7 @@ std::tuple<Tensor, Tensor, Tensor> _btrifact_helper_cpu(const Tensor& self, bool
   auto infos_tensor = at::zeros(req_size, self.options().dtype(kInt));
 
   Tensor self_working_copy;
-  if (self.size(-1) == 0) {
+  if (self.numel() == 0) {
     self_working_copy = at::empty_like(self);
   } else {
     self_working_copy = cloneBatchedColumnMajor(self);
@@ -453,9 +453,11 @@ std::tuple<Tensor&, Tensor&> btrifact_out(
     Tensor& pivots,
     const Tensor& self,
     bool pivot) {
-  Tensor infos;
-  std::tie(A_LU, pivots, infos) = at::_btrifact_helper(self, pivot);
+  Tensor infos, A_LU_tmp, pivots_tmp;
+  std::tie(A_LU_tmp, pivots_tmp, infos) = at::_btrifact_helper(self, pivot);
   batchCheckErrors(infos, "btrifact");
+  A_LU.resize_as_(A_LU_tmp).copy_(A_LU_tmp);
+  pivots.resize_as_(pivots_tmp).copy_(pivots_tmp);
   return std::tuple<Tensor&, Tensor&>(A_LU, pivots);
 }
 
@@ -473,7 +475,11 @@ std::tuple<Tensor&, Tensor&, Tensor&> btrifact_with_info_out(
     Tensor& info,
     const Tensor& self,
     bool pivot) {
-  std::tie(A_LU, pivots, info) = at::_btrifact_helper(self, pivot);
+  Tensor info_tmp, A_LU_tmp, pivots_tmp;
+  std::tie(A_LU_tmp, pivots_tmp, info_tmp) = at::_btrifact_helper(self, pivot);
+  A_LU.resize_as_(A_LU_tmp).copy_(A_LU_tmp);
+  pivots.resize_as_(pivots_tmp).copy_(pivots_tmp);
+  info.resize_as_(info_tmp).copy_(info_tmp);
   return std::tuple<Tensor&, Tensor&, Tensor&>(A_LU, pivots, info);
 }
 
