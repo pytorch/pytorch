@@ -1061,7 +1061,7 @@ class TestCaffe2Backend(unittest.TestCase):
         class IsNaNModel(torch.nn.Module):
             def forward(self, input):
                 return torch.isnan(input)
-        
+
         x = torch.tensor([1.0, float('nan'), 2.0])
         self.run_model_test(IsNaNModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
