@@ -38,11 +38,11 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     for (i = 0; i < batch_size; i++) {
       int cur_target = THLongTensor_fastGetLegacy1dNoScalars(target, i);
 
+      if (cur_target == ignore_index) {
+	THTensor_(fastSet1d)(output, i, 0.0f);
+	continue;
+      }
       if (cur_target >= 0 && cur_target < n_classes) {
-          if (cur_target == ignore_index) {
-            THTensor_(fastSet1d)(output, i, 0.0f);
-            continue;
-          }
           scalar_t cur_weight = weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f;
           THTensor_(fastSet1d)(output, i, -THTensor_(fastGet2d)(input, i, cur_target) * cur_weight);
       } else {
