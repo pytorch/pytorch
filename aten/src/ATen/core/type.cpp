@@ -177,7 +177,7 @@ TypePtr attemptToRecoverType(const IValue& ivalue) {
 // Checks if input_ivalue is a subvalue of type.
 bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
   if (ivalue.isTuple()) {
-    auto ivalue_elem = ivalue.toTuple()->elements();
+    const auto& ivalue_elem = ivalue.toTuple()->elements();
     auto tuple_type = type->cast<TupleType>();
     if (!tuple_type || tuple_type->elements().size() != ivalue_elem.size()) {
       return false;
