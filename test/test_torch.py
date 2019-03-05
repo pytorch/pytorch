@@ -14,6 +14,7 @@ import warnings
 import pickle
 import gzip
 import types
+import textwrap
 import re
 from torch._utils_internal import get_file_path, get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
@@ -3470,6 +3471,7 @@ class _TestTorchMixin(object):
 
         for fn in fns:
             (dims_small, dims_large, dims_full) = self._select_broadcastable_dims()
+            full1d = cast(torch.randn(*dims_full).flatten().float())
             small = cast(torch.randn(*dims_small).float())
             large = cast(torch.randn(*dims_large).float())
             small_expanded = small.expand(*dims_full)
@@ -3486,8 +3488,7 @@ class _TestTorchMixin(object):
                 # map and map2 are not implementd on CUDA tensors
                 continue
 
-            # TODO: fix masked_scatter and masked_fill broadcasting
-            if hasattr(large_expanded, fn) and fn not in ['masked_scatter', 'masked_fill']:
+            if hasattr(large_expanded, fn):
                 # run through tensor versions of functions
                 # and verify fully expanded inputs give same results
                 expanded = {large: large_expanded, small: small_expanded, small2: small2_expanded}
@@ -3497,6 +3498,10 @@ class _TestTorchMixin(object):
                         return myfn(t1, 0.5)
                     elif fn == "masked_select":
                         return myfn(t1 < 0)
+                    elif fn == "masked_scatter":
+                        return myfn(t1 < 0.5, full1d)
+                    elif fn == "masked_fill":
+                        return myfn(t1 < 0.5, 1.0)
                     elif fn in fns_3_args:
                         return myfn(1, t1, t2)
                     else:
@@ -3524,7 +3529,7 @@ class _TestTorchMixin(object):
                     elif fn == "masked_select":
                         return fntorch(t1, t2 < 0)
                     elif fn == "masked_scatter":
-                        return fntorch(t1, t2 < 0.5, cast(torch.arange(1, t1.nelement() + 1).float()))
+                        return fntorch(t1, t2 < 0.5, full1d)
                     elif fn == "masked_fill":
                         return fntorch(t1, t2 < 0.5, 1.0)
                     elif fn in fns_3_args:
@@ -3555,7 +3560,7 @@ class _TestTorchMixin(object):
                 if fn == "lerp":
                     return t0_fn(t1, 0.5)
                 elif fn == "masked_scatter":
-                    return t0_fn(t1 < 0.5, cast(torch.arange(1, t0.nelement() + 1).float()))
+                    return t0_fn(t1 < 0.5, full1d)
                 elif fn == "masked_fill":
                     return t0_fn(t1 < 0.5, 1.0)
                 elif fn == "map":
@@ -4160,18 +4165,14 @@ class _TestTorchMixin(object):
                         assert not x_nc.is_contiguous(), "x is intentionally non-contiguous"
                         exp_nc = torch.where(exp_mask, torch.tensor(0).type_as(x), x_nc)
                         self.assertEqual(torch_tri_func(x_nc, diagonal), exp_nc, 0)
+                        x_nc_is_contiguous = x_nc.is_contiguous()
                         if upper:
                             self.assertEqual(x_nc.triu_(diagonal), exp_nc, 0)
                         else:
                             self.assertEqual(x_nc.tril_(diagonal), exp_nc, 0)
 
-                        # any 3-dimensional tensor should be fine
-                        if len(shape) <= 3 or s == -2:
-                            self.assertFalse(x_nc.is_contiguous(),
-                                             "x_nc should remain non-contiguous")
-                        elif s < -3:
-                            self.assertTrue(x_nc.is_contiguous(),
-                                            "x_nc should become contiguous")
+                        self.assertTrue(x_nc.is_contiguous() == x_nc_is_contiguous,
+                                        "contiguity of x_nc should not be changed")
 
                     # expanded tensors
                     expanded_size = (x.size(0),) + x.size()
@@ -6455,9 +6456,9 @@ class _TestTorchMixin(object):
             for err_idx in (10, -11):
                 with self.assertRaisesRegex(IndexError, r'out of'):
                     reference[err_idx]
-                with self.assertRaisesRegex(RuntimeError, r'out of'):
+                with self.assertRaisesRegex(IndexError, r'out of'):
                     reference[conv_fn(torch.LongTensor([err_idx]))]
-                with self.assertRaisesRegex(RuntimeError, r'out of'):
+                with self.assertRaisesRegex(IndexError, r'out of'):
                     reference[[err_idx]]
 
         if TEST_NUMPY:
@@ -6840,6 +6841,33 @@ class _TestTorchMixin(object):
         out.fill_(0.123)
         self.assertEqual(out, dest.view(-1))  # Must point to the same storage.
 
+    def test_t(self):
+        # Test 0D tensors
+        x = torch.randn(())
+        self.assertEqual(x, x.t())
+        x = x.to_sparse()
+        self.assertEqual(x, x.t())
+
+        # Test 1D tensors
+        x = torch.arange(4)
+        self.assertEqual(x, x.t())
+        x = x.to_sparse()
+        self.assertEqual(x, x.t())
+
+        # Test 2D tensors
+        x = torch.rand((2, 2))
+        self.assertEqual(x.t(), x.transpose(0, 1))
+        x = x.to_sparse()
+        self.assertEqual(x.t(), x.transpose(0, 1))
+
+        # Test 3D tensor
+        x = torch.rand((2, 2, 2))
+        with self.assertRaisesRegex(RuntimeError, 'expects a tensor with <= 2 dimensions, but self is 3D'):
+            x.t()
+        x = x.to_sparse()
+        with self.assertRaisesRegex(RuntimeError, 'expects a tensor with <= 2 sparse and 0 dense dimensions'):
+            x.t()
+
     def test_take(self):
         def check(src, idx):
             expected = src.contiguous().view(-1).index_select(
@@ -6934,7 +6962,7 @@ class _TestTorchMixin(object):
         self.assertEqual(flat, src)
 
         # out of bounds index
-        with self.assertRaisesRegex(RuntimeError, 'Dimension out of range'):
+        with self.assertRaisesRegex(IndexError, 'Dimension out of range'):
             src.flatten(5, 10)
 
         # invalid start and end
@@ -7122,11 +7150,22 @@ class _TestTorchMixin(object):
     def test_namedtuple_return(self):
         a = torch.randn(5, 5)
 
-        # test max
-        ret = a.max(dim=0)
+        # test max, min, median, mode
+        for f in ['max', 'min', 'median', 'mode']:
+            ret = getattr(a, f)(dim=0)
+            self.assertEqual(ret.values, ret[0])
+            self.assertEqual(ret.indices, ret[1])
+            ret1 = getattr(torch, f)(a, dim=0, out=tuple(ret))
+            self.assertEqual(ret1.values, ret1[0])
+            self.assertEqual(ret1.indices, ret1[1])
+            self.assertEqual(ret1.values, ret[0])
+            self.assertEqual(ret1.indices, ret[1])
+
+        # test kthvalue
+        ret = a.kthvalue(1, dim=0)
         self.assertEqual(ret.values, ret[0])
         self.assertEqual(ret.indices, ret[1])
-        ret1 = torch.max(a, dim=0, out=tuple(ret))
+        ret1 = torch.kthvalue(a, 1, dim=0, out=tuple(ret))
         self.assertEqual(ret1.values, ret1[0])
         self.assertEqual(ret1.indices, ret1[1])
         self.assertEqual(ret1.values, ret[0])
@@ -7144,6 +7183,48 @@ class _TestTorchMixin(object):
         self.assertEqual(ret1.U, ret[0])
         self.assertEqual(ret1.S, ret[1])
         self.assertEqual(ret1.V, ret[2])
+
+        # test symeig, eig
+        fn = ['symeig', 'eig']
+        for f in fn:
+            ret = getattr(torch, f)(a, eigenvectors=True)
+            self.assertEqual(ret.eigenvalues, ret[0])
+            self.assertEqual(ret.eigenvectors, ret[1])
+            ret1 = getattr(torch, f)(a, out=tuple(ret))
+            self.assertEqual(ret1.eigenvalues, ret[0])
+            self.assertEqual(ret1.eigenvectors, ret[1])
+            self.assertEqual(ret1.eigenvalues, ret1[0])
+            self.assertEqual(ret1.eigenvectors, ret1[1])
+
+        # test pstrf
+        b = torch.mm(a, a.t())
+        # add a small number to the diagonal to make the matrix numerically positive semidefinite
+        for i in range(a.size(0)):
+            b[i][i] = b[i][i] + 1e-7
+        ret = b.pstrf()
+        self.assertEqual(ret.u, ret[0])
+        self.assertEqual(ret.pivot, ret[1])
+        ret1 = torch.pstrf(b, out=tuple(ret))
+        self.assertEqual(ret1.u, ret1[0])
+        self.assertEqual(ret1.pivot, ret1[1])
+        self.assertEqual(ret1.u, ret[0])
+        self.assertEqual(ret1.pivot, ret[1])
+
+        # test qr
+        ret = a.qr()
+        self.assertEqual(ret.Q, ret[0])
+        self.assertEqual(ret.R, ret[1])
+        ret1 = torch.qr(a, out=tuple(ret))
+        self.assertEqual(ret1.Q, ret1[0])
+        self.assertEqual(ret1.R, ret1[1])
+
+        # test geqrf
+        ret = a.geqrf()
+        self.assertEqual(ret.a, ret[0])
+        self.assertEqual(ret.tau, ret[1])
+        ret1 = torch.geqrf(a, out=tuple(ret))
+        self.assertEqual(ret1.a, ret1[0])
+        self.assertEqual(ret1.tau, ret1[1])
 
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
@@ -7181,6 +7262,22 @@ class _TestTorchMixin(object):
         self.assertEqual(tensor.std(), tensor.std(unbiased=True))
         self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False))
 
+    def test_structseq_repr(self):
+        a = torch.arange(250).reshape(5, 5, 10)
+        expected = """
+        torch.return_types.max(
+        values=tensor([[ 40,  41,  42,  43,  44,  45,  46,  47,  48,  49],
+                [ 90,  91,  92,  93,  94,  95,  96,  97,  98,  99],
+                [140, 141, 142, 143, 144, 145, 146, 147, 148, 149],
+                [190, 191, 192, 193, 194, 195, 196, 197, 198, 199],
+                [240, 241, 242, 243, 244, 245, 246, 247, 248, 249]]),
+        indices=tensor([[4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4]]))"""
+        self.assertEqual(repr(a.max(1)), textwrap.dedent(expected).strip())
+
     def test_var_stability(self):
         tensor = torch.FloatTensor([2281.5, 2281.25])
         self.assertEqual(tensor.var(dim=0), 0.03125)
@@ -7190,7 +7287,7 @@ class _TestTorchMixin(object):
     def _test_view(self, cast):
         tensor = cast(torch.rand(15))
         template = cast(torch.rand(3, 5))
-        empty = cast(torch.Tensor())
+        empty = cast(torch.empty(0))
         target = template.size()
         self.assertEqual(tensor.view_as(template).size(), target)
         self.assertEqual(tensor.view(3, 5).size(), target)
@@ -7201,9 +7298,23 @@ class _TestTorchMixin(object):
         tensor_view.fill_(random.uniform(0, 1))
         self.assertEqual(empty.view_as(empty), empty)
         self.assertEqual(empty.view(0), empty)
+        self.assertEqual(empty.view(0, 3, 0, 1).size(), torch.Size([0, 3, 0, 1]))
+        self.assertEqual(empty.view(0, 3, 0, 1).view(0), empty)
+
+        # test size inference with empty tensors
+        self.assertEqual(empty.view(-1).size(), torch.Size([0]))
+        self.assertEqual(empty.view(10, 3, -1).size(), torch.Size([10, 3, 0]))
+
+        with self.assertRaisesRegex(RuntimeError, r"because the unspecified dimension size -1 can be any value"):
+            empty.view(-1, 0)
+
+        with self.assertRaisesRegex(RuntimeError, r"because the unspecified dimension size -1 can be any value"):
+            empty.view(3, 0, -1, 0)
+
         self.assertRaises(RuntimeError, lambda: tensor.view(15, 0))
         self.assertRaises(RuntimeError, lambda: tensor.view(7, -1))
         self.assertRaises(RuntimeError, lambda: tensor.view(15, -1, -1))
+
         # test view when tensor is not contiguous in every dimension, but only
         # contiguous dimensions are touched.
         tensor = cast(torch.rand(4, 2, 5, 1, 6, 2, 9, 3)).transpose(-1, 2).transpose(-2, 3)
@@ -7240,7 +7351,7 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: tensor.view(8, 3, 54, 2, 1, 5))
 
         # view with stride 0 dims
-        tensor = cast(torch.Tensor(1, 1)).expand(3, 4)  # all dims are contiguous
+        tensor = cast(torch.empty(1, 1)).expand(3, 4)  # all dims are contiguous
         contig_tensor = tensor.clone()
         self.assertEqual(tensor.view(-1), contig_tensor.view(-1))
         self.assertEqual(tensor.view(1, -1, 1), contig_tensor.view(1, -1, 1))
@@ -7800,6 +7911,7 @@ class _TestTorchMixin(object):
         long = torch.LongStorage().element_size()
         float = torch.FloatStorage().element_size()
         double = torch.DoubleStorage().element_size()
+        bool = torch.BoolStorage().element_size()
 
         self.assertEqual(byte, torch.ByteTensor().element_size())
         self.assertEqual(char, torch.CharTensor().element_size())
@@ -7816,10 +7928,12 @@ class _TestTorchMixin(object):
         self.assertGreater(long, 0)
         self.assertGreater(float, 0)
         self.assertGreater(double, 0)
+        self.assertGreater(bool, 0)
 
         # These tests are portable, not necessarily strict for your system.
         self.assertEqual(byte, 1)
         self.assertEqual(char, 1)
+        self.assertEqual(bool, 1)
         self.assertGreaterEqual(short, 2)
         self.assertGreaterEqual(int, 2)
         self.assertGreaterEqual(int, short)
@@ -7931,10 +8045,11 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: data.flip(0, 1, 1))
         # not allow empty list as input
         self.assertRaises(TypeError, lambda: data.flip())
+
         # not allow size of flip dim > total dims
-        self.assertRaises(RuntimeError, lambda: data.flip(0, 1, 2, 3))
+        self.assertRaises(IndexError, lambda: data.flip(0, 1, 2, 3))
         # not allow dim > max dim
-        self.assertRaises(RuntimeError, lambda: data.flip(3))
+        self.assertRaises(IndexError, lambda: data.flip(3))
 
         # test for non-contiguous case
         expanded_data = torch.arange(1, 4, device=device).view(3, 1).expand(3, 2)
@@ -8134,6 +8249,14 @@ class _TestTorchMixin(object):
             y = torch.nonzero(x)
             self.assertEqual(0, y.numel())
             self.assertEqual(torch.Size([0, 5]), y.shape)
+
+            x = torch.tensor(0.5, device=device)
+            y = torch.nonzero(x)
+            self.assertEqual(torch.Size([1, 0]), y.shape)
+
+            x = torch.zeros((), device=device)
+            y = torch.nonzero(x)
+            self.assertEqual(torch.Size([0, 0]), y.shape)
 
     def test_deepcopy(self):
         from copy import deepcopy
@@ -8887,6 +9010,75 @@ class _TestTorchMixin(object):
         self.assertEqual(floats.size(), 1)
         self.assertEqual(floats[0], 2.25)
 
+        f = bytearray([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x40])
+        bools = torch.BoolStorage.from_buffer(f, 'big')
+        self.assertEqual(bools.size(), 8)
+        self.assertEqual(bools.tolist(), [False, True, True, True, True, True, True, True])
+        self.assertEqual(bools.type(), 'torch.BoolStorage')
+
+        f = bytearray(b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9')
+        bools = torch.BoolStorage.from_buffer(f, 'big')
+        self.assertEqual(bools.size(), 19)
+
+        f = bytearray(b'\0x4A')
+        bools = torch.BoolStorage.from_buffer(f, 'big')
+        self.assertEqual(bools.size(), 4)
+        self.assertEqual(bools.tolist(), [False, True, True, True])
+
+    def test_storage_casts(self):
+        storage = torch.IntStorage([-1, 0, 1, 2, 3, 4])
+        self.assertEqual(storage.size(), 6)
+        self.assertEqual(storage.tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertEqual(storage.type(), 'torch.IntStorage')
+
+        floatStorage = storage.float()
+        self.assertEqual(floatStorage.size(), 6)
+        self.assertEqual(floatStorage.tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertEqual(floatStorage.type(), 'torch.FloatStorage')
+        self.assertEqual(floatStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
+
+        halfStorage = storage.half()
+        self.assertEqual(halfStorage.size(), 6)
+        self.assertEqual(halfStorage.tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertEqual(halfStorage.type(), 'torch.HalfStorage')
+        self.assertEqual(halfStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
+
+        longStorage = storage.long()
+        self.assertEqual(longStorage.size(), 6)
+        self.assertEqual(longStorage.tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertEqual(longStorage.type(), 'torch.LongStorage')
+        self.assertEqual(longStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
+
+        shortStorage = storage.short()
+        self.assertEqual(shortStorage.size(), 6)
+        self.assertEqual(shortStorage.tolist(), [-1, 0, 1, 2, 3, 4])
+        self.assertEqual(shortStorage.type(), 'torch.ShortStorage')
+        self.assertEqual(shortStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
+
+        doubleStorage = storage.double()
+        self.assertEqual(doubleStorage.size(), 6)
+        self.assertEqual(doubleStorage.tolist(), [-1.0, 0.0, 1.0, 2.0, 3.0, 4.0])
+        self.assertEqual(doubleStorage.type(), 'torch.DoubleStorage')
+        self.assertEqual(doubleStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
+
+        charStorage = storage.char()
+        self.assertEqual(charStorage.size(), 6)
+        self.assertEqual(charStorage.tolist(), [-1.0, 0.0, 1.0, 2.0, 3.0, 4.0])
+        self.assertEqual(charStorage.type(), 'torch.CharStorage')
+        self.assertEqual(charStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
+
+        byteStorage = storage.byte()
+        self.assertEqual(byteStorage.size(), 6)
+        self.assertEqual(byteStorage.tolist(), [255, 0, 1, 2, 3, 4])
+        self.assertEqual(byteStorage.type(), 'torch.ByteStorage')
+        self.assertEqual(byteStorage.int().tolist(), [255, 0, 1, 2, 3, 4])
+
+        boolStorage = storage.bool()
+        self.assertEqual(boolStorage.size(), 6)
+        self.assertEqual(boolStorage.tolist(), [True, False, True, True, True, True])
+        self.assertEqual(boolStorage.type(), 'torch.BoolStorage')
+        self.assertEqual(boolStorage.int().tolist(), [1, 0, 1, 1, 1, 1])
+
     @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_from_file(self):
         size = 10000
@@ -8928,7 +9120,10 @@ class _TestTorchMixin(object):
         for t in torch._storage_classes:
             if t.is_cuda and not torch.cuda.is_available():
                 continue
-            obj = t(100).fill_(1)
+            if t == torch.BoolStorage or t == torch.cuda.BoolStorage:
+                obj = t(100).fill_(True)
+            else:
+                obj = t(100).fill_(1)
             obj.__repr__()
             str(obj)
 

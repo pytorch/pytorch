@@ -5,6 +5,13 @@ namespace torch {
 namespace jit {
 namespace {
 
+at::Tensor unwrap(at::Tensor&& tensor) {
+  if (tensor.requires_grad()) {
+    throw std::runtime_error("Autograd not yet supported for c10 ops.");
+  }
+  return torch::autograd::Variable(std::move(tensor)).data();
+}
+
 // TODO This currently only handles tensors with requires_grad==False correctly.
 //      It should also handle autograd.
 Operator createOperatorFromC10(const c10::OperatorHandle& op) {
@@ -16,11 +23,11 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
       for (auto iter = stack.end() - input_size; iter != stack.end(); ++iter) {
         // TODO Remove the .defined() check once we don't have undefined tensors on the stack anymore (@wanchaol is working on this)
         if (iter->isTensor() && iter->toTensor().defined()) {
-          at::Tensor tensor = std::move(*iter).toTensor();
-          if (tensor.requires_grad()) {
-            throw std::runtime_error("Autograd not yet supported for c10 ops.");
+          *iter = unwrap(std::move(*iter).toTensor());
+        } else if (iter->isTensorList()) {
+          for (auto& item : iter->toTensorList()->elements()) {
+            item = unwrap(std::move(item));
           }
-          *iter = torch::autograd::Variable(std::move(tensor)).data();
         }
       }
 

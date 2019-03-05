@@ -177,6 +177,7 @@ struct Value {
   bool hasUniqueName() const {
     return !unique_name_.empty();
   }
+  static bool isValidName(const std::string& name);
   TORCH_API Value* setUniqueName(const std::string& name);
   std::string uniqueName() const {
     if (hasUniqueName()) {
@@ -392,6 +393,7 @@ struct Node {
   bool is_constant(Symbol name) const {
     return static_cast<bool>(get(name));
   }
+  TORCH_API bool mustBeNone() const;
 
   TORCH_API bool isNondeterministic() const;
   TORCH_API bool hasSideEffects() const;
@@ -1039,10 +1041,12 @@ struct Graph {
 
   TORCH_API Node* createNone(
       TypePtr typ); // value of None with type Optional[typ]
-  TORCH_API Node* createUndefined();
+  TORCH_API Node* createAutogradZero();
   TORCH_API Node* createFusionGroup();
   TORCH_API Node* createDifferentiableSubgraph();
-  TORCH_API Node* createTuple(at::ArrayRef<Value*> values, c10::OptNameList field_names=c10::nullopt);
+  TORCH_API Node* createTuple(
+      at::ArrayRef<Value*> values,
+      c10::OptNameList field_names = c10::nullopt);
   TORCH_API Node* createTupleUnpack(Value* v);
   TORCH_API Node* createTupleIndex(Value* tup, int64_t index);
   TORCH_API Node* createTupleSlice(Value* tup, int64_t beg, int64_t end);
@@ -1058,6 +1062,12 @@ struct Graph {
   TORCH_API Node* createDictIndex(Value* dict, Value* index);
   TORCH_API Node* createNumToTensor(Value* value);
   TORCH_API Node* createImplicitTensorToNum(const TypePtr& type, Value* value);
+  TORCH_API Node* createObject(const ClassTypePtr& type);
+  TORCH_API Node* createSetAttr(
+      Value* obj,
+      const std::string& field,
+      Value* newValue);
+  TORCH_API Node* createGetAttr(Value* obj, const std::string& field);
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
@@ -1071,8 +1081,11 @@ struct Graph {
       const std::function<Value*(Value*)>& value_map,
       bool copy_blocks = true);
 
+  // Insert constant IValue into the graph. If the type cannot be fully deduced
+  // from the ivalue, as with a None that is set to t?, use result_type
   TORCH_API Value* insertConstant(
       IValue val,
+      const TypePtr& result_type = nullptr,
       c10::optional<SourceRange> loc = c10::nullopt,
       c10::optional<ScopePtr> scope = c10::nullopt);
 

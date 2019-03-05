@@ -23,7 +23,7 @@ class FullyConnectedDNNLowPOp
   std::size_t axis_w_{1};
   vector<std::int64_t> Y_shape_cache_;
 
-  dnnlowp::RequantizationParams requantization_params_;
+  std::vector<dnnlowp::RequantizationParams> requantization_params_;
   bool requantization_param_selected_{false};
 
   // x86 only provides SIMD instructions that multiply a signed integer with an
@@ -35,6 +35,12 @@ class FullyConnectedDNNLowPOp
   std::vector<std::uint8_t> X_pack_buf_;
 
   std::vector<std::int32_t> Y_int32_;
+  std::vector<dnnlowp::TensorQuantizationParams> filter_qparams_;
+  std::vector<float> filter_scales_;
+  std::vector<std::int32_t> filter_zero_points_;
+
+  std::vector<float> requantization_multipliers_;
+  bool quantize_channelwise_;
 
   // used in slow path for T != uint8_t
   std::vector<T_signed> W_quantized_;
