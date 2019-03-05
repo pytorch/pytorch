@@ -122,7 +122,7 @@ RegisterOperators reg(
            };
          }),
      Operator(
-         "prim::range(int n) -> int[]",
+         "prim::rangelist(int n) -> int[]",
          [](Stack& stack) {
            int64_t n;
            pop(stack, n);
