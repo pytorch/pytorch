@@ -808,6 +808,7 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(4, 3, 2, 1, requires_grad=True)
         self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
+    @unittest.skip("Temporary - waiting for https://github.com/onnx/onnx/pull/1773.")
     def test_upsample(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         model = nn.Upsample(scale_factor=2, mode='nearest')
