@@ -18,7 +18,7 @@ from torch.cuda._utils import _get_device_index
 
 class DistributedDataParallel(Module):
     r"""Implements distributed data parallelism that is based on
-    torch.distributed package at the module level.
+    ``torch.distributed`` package at the module level.
 
     This container parallelizes the application of the given module by
     splitting the input across the specified devices by chunking in the batch
@@ -32,7 +32,7 @@ class DistributedDataParallel(Module):
     The same constraints on input as in :class:`torch.nn.DataParallel` apply.
 
     Creation of this class requires that ``torch.distributed`` to be already
-    initialized, by calling :func:`torch.distributed.init_process_group`
+    initialized, by calling :func:`torch.distributed.init_process_group`.
 
     ``DistributedDataParallel`` can be used in the following two ways:
 
@@ -152,17 +152,17 @@ class DistributedDataParallel(Module):
         output_device (int or torch.device): device location of output (default: device_ids[0])
         broadcast_buffers (bool): flag that enables syncing (broadcasting) buffers of
                            the module at beginning of the forward function.
-                           (default: True)
+                           (default: ``True``)
         process_group: the process group to be used for distributed data
-                       all-reduction. If None, the default process group, which
+                       all-reduction. If ``None``, the default process group, which
                        is created by ```torch.distributed.init_process_group```,
-                       will be used. (default: None)
+                       will be used. (default: ``None``)
         bucket_cap_mb: DistributedDataParallel will bucket parameters into
                        multiple buckets so that gradient reduction of each
                        bucket can potentially overlap with backward computation.
-                       bucket_cap_mb controls the bucket size in MegaBytes (MB)
+                       :attr:`bucket_cap_mb` controls the bucket size in MegaBytes (MB)
                        (default: 25)
-        check_reduction: when setting to True, it enables DistributedDataParallel
+        check_reduction: when setting to ``True``, it enables DistributedDataParallel
                          to automatically check if the previous iteration's
                          backward reductions were successfully issued at the
                          beginning of every iteration's forward function.
@@ -170,12 +170,13 @@ class DistributedDataParallel(Module):
                          are observing weird behaviors such as different ranks
                          are getting different gradients, which should not
                          happen if DistributedDataParallel is corrected used.
-                         (default: False)
+                         (default: ``False``)
 
     Attributes:
         module (Module): the module to be parallelized
 
     Example::
+
         >>> torch.distributed.init_process_group(backend='nccl', world_size=4, init_method='...')
         >>> net = torch.nn.DistributedDataParallel(model, pg)
     """
