@@ -664,7 +664,7 @@ class CAFFE2_API Tensor {
   Tensor index_select(int64_t dim, const Tensor & index) const;
   Tensor masked_select(const Tensor & mask) const;
   Tensor nonzero() const;
-  Tensor gather(int64_t dim, const Tensor & index) const;
+  Tensor gather(int64_t dim, const Tensor & index, bool sparse_grad=false) const;
   Tensor addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   Tensor addcdiv(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   std::tuple<Tensor,Tensor> gels(const Tensor & A) const;
@@ -706,6 +706,7 @@ class CAFFE2_API Tensor {
   Tensor max() const;
   Tensor median() const;
   std::tuple<Tensor,Tensor> sort(int64_t dim=-1, bool descending=false) const;
+  Tensor argsort(int64_t dim=-1, bool descending=false) const;
   std::tuple<Tensor,Tensor> topk(int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) const;
   Tensor all() const;
   Tensor any() const;

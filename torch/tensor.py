@@ -255,10 +255,6 @@ class Tensor(torch._C._TensorBase):
         r"""See :func:`torch.argmin`"""
         return torch.argmin(self, dim, keepdim)
 
-    def argsort(self, dim=None, descending=False):
-        r"""See :func:`torch.argsort`"""
-        return torch.argsort(self, dim, descending)
-
     def norm(self, p="fro", dim=None, keepdim=False, dtype=None):
         r"""See :func:`torch.norm`"""
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
