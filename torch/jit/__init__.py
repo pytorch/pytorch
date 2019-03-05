@@ -918,8 +918,8 @@ class OrderedBufferDict(OrderedDictWrapper):
         super(OrderedBufferDict, self).__init__(module)
 
     def items(self):
-        return [(name, param) for name, _, param in \
-            self.module._get_attributes() if isinstance(param, torch.Tensor)]
+        return [(name, param) for name, _, param in
+                self.module._get_attributes() if isinstance(param, torch.Tensor)]
 
     def __setitem__(self, k, v):
         self.module._register_buffer(k, v)
