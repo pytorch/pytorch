@@ -73,7 +73,7 @@ void THNN_(LookupTable_accGradParameters)(
       origIndicesIter(THCIndexTensor_(data)(state, origIndices));
 
     // Fill sortedOrigIndices with sequential indices
-    thrust::counting_iterator<THCIndex_t> countIter(TH_INDEX_BASE);
+    thrust::counting_iterator<THCIndex_t> countIter(0);
 
     thrust::copy(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__

@@ -325,7 +325,9 @@ struct alignas(2) Half {
   unsigned short x;
 
   struct from_bits_t {};
-  static constexpr from_bits_t from_bits = from_bits_t();
+  static constexpr from_bits_t from_bits() {
+    return from_bits_t();
+  }
 
   // HIP wants __host__ __device__ tag, CUDA does not
 #ifdef __HIP_PLATFORM_HCC__
