@@ -139,8 +139,6 @@ struct SchemaParser {
           return static_cast<int64_t>(at::kFloat);
         } else if ("long" == text) {
           return static_cast<int64_t>(at::kLong);
-        } else if ("None" == text) {
-          return static_cast<int64_t>(at::kFloat);
         } else if ("strided" == text) {
           return static_cast<int64_t>(at::kStrided);
         } else if ("Mean" == text) {
