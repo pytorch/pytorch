@@ -357,7 +357,6 @@ OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
   initializers_arg->set_name("initializers");
   for (const auto& s : initialization_list) {
     initializers_arg->add_strings(s);
-    initializers_arg->add_strings(input_mapping_.at(s));
   }
 
   // Add the input/output
@@ -576,9 +575,6 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
 
       // Add mappings
       extra_weights.emplace_back(t.name());
-      CAFFE_ENFORCE(
-          input_mapping_.emplace(t.name(), t.name()).second,
-          c10::str("Tensor ", t.name(), " already exists in the workspace"));
     }
   }
 
@@ -948,9 +944,15 @@ void OnnxifiTransformer::transform(
 
   // SSA Rewrite the net
   auto shape_hints_mapped =
-      ssaRewriteAndMapNames(ws, pred_net, weights, input_shape_hints);
+      ssaRewriteAndMapNames(ws, pred_net, input_shape_hints);
 
   // Populate shape info
+  // TODO(yingz): We should not need to create mapped_ws since we did not change
+  // any input mappings during ssarewrite. However this is here for the
+  // following reason: BlackBoxPredictor calls RunNetOnce before onnxifi to
+  // populate dimension info. However during this, it was observed, that new
+  // blob for output is created. This causes problem if inferShape uses original
+  // ws since it does not expect the output blob to be present.
   Workspace mapped_ws(ws, input_mapping_);
   ShapeInfoMap shape_hints = inferShapes(
       &mapped_ws, pred_net, shape_hints_mapped, opts_.bound_shape_spec);

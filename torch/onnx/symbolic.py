@@ -28,9 +28,9 @@ import itertools
 #   transparently dispatched to their non inplace versions in
 #   'run_symbolic_function'.   See Note [Export inplace]
 #
-# ---------------------------------------------------------------------
+# ----------------------------------------------------------------------------------
 # A note on Tensor types
-# ---------------------------------------------------------------------
+# ----------------------------------------------------------------------------------
 #
 # In general, we should avoid depending on the type of Tensor Values contained
 # within the trace graph. However, this is sometimes unavoidable (due to ONNX
@@ -41,17 +41,16 @@ import itertools
 # TensorType - This is a Tensor, but we don't know anything about its
 #               properties (e.g. scalar type, # dims, shapes).
 #               Appears as `Tensor` in graph print-outs.
-# UndefinedTensorType <: TensorType - Denotes an undefined Tensor
 # DimensionedTensorType <: TensorType - Denotes a Tensor for which we know the scalar
 #                             type and number of dimensions, but not the concrete
 #                             shapes. For example, appears as 'Float(*, *)' in
 #                             graph print-outs. Useful accessor methods include
 #                             dim() and scalarType()
-# CompleteTensorType <: TensorType - Denotes a Tensor for which we know the
-#                                    concrete sizes in addition to the information
-#                                    contained in TensorTyper. This adds a sizes()
-#                                    method which can be used to retrieve the
-#                                    concrete sizes.
+# CompleteTensorType <: DimensionedTensorType - Denotes a Tensor for which we know the
+#                                               concrete sizes in addition to the information
+#                                               contained in TensorTyper. This adds a sizes()
+#                                               method which can be used to retrieve the
+#                                               concrete sizes.
 #
 # In general, we should prefer to rely on the least specific information possible.
 # For example, not relying on tensor properties at all is better than relying
@@ -59,9 +58,9 @@ import itertools
 # concrete shapes (CompleteTensorType). Doing so will make the export symbolics
 # more robust to different graphs.
 
-# ---------------------------------------------------------------------
+# ---------------------------------------------------------------------------------
 # Helper functions
-# ---------------------------------------------------------------------
+# ---------------------------------------------------------------------------------
 
 # Save some builtins as locals, because we'll shadown them below
 _sum = sum
@@ -115,7 +114,8 @@ def _unpack_list(list_value):
 def parse_args(*arg_descriptors):
     def decorator(fn):
         def wrapper(g, *args):
-            assert len(arg_descriptors) == len(args)
+            # some args may be optional, so the length may be smaller
+            assert len(arg_descriptors) >= len(args)
             args = [_parse_arg(arg, arg_desc) for arg, arg_desc in zip(args, arg_descriptors)]
             return fn(g, *args)
         # In Python 2 functools.wraps chokes on partially applied functions, so we need this as a workaround
@@ -568,8 +568,8 @@ def glu(g, input, dim):
     return g.op('Mul', first, g.op('Sigmoid', second))
 
 
-@parse_args('v', 'i')
-def softmax(g, input, dim):
+@parse_args('v', 'i', 'i')
+def softmax(g, input, dim, dtype=None):
     # Softmax does normalization at vector level.
     # PyTorch and ONNX use different strategies to split the input tensor into vectors.
     # Thus dim and axis have different meanings.
@@ -590,7 +590,10 @@ def softmax(g, input, dim):
         dim = input.type().dim() + dim
     if input.type().dim() != dim + 1:
         return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
-    return g.op('Softmax', input, axis_i=dim)
+    return_op = g.op('Softmax', input, axis_i=dim)
+    if dtype:
+        return_op = g.op("Cast", return_op, to_i=scalar_type_to_onnx[dtype])
+    return return_op
 
 
 @parse_args('v', 't', 'v')
@@ -871,15 +874,18 @@ def where(g, condition, self, other):
     return g.op("ATen", condition, self, other, operator_s="where")
 
 
-@parse_args('v', 'i')
-def log_softmax(g, input, dim=None):
+@parse_args('v', 'i', 'i')
+def log_softmax(g, input, dim=None, dtype=None):
     # PyTorch dim and ONNX axis have different meanings.
     # See Softmax comment for details.
     if dim < 0:
         dim = input.type().dim() + dim
     if input.type().dim() != dim + 1:
         return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
-    return g.op("LogSoftmax", input, axis_i=dim)
+    return_op = g.op("LogSoftmax", input, axis_i=dim)
+    if dtype:
+        return_op = g.op("Cast", return_op, to_i=scalar_type_to_onnx[dtype])
+    return return_op
 
 
 @parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is', 'i', 'i', 'i', 'i')
@@ -1618,3 +1624,13 @@ def flatten(g, input, start_dim, end_dim):
 @parse_args('v')
 def nonzero(g, input):
     return g.op('NonZero', input)
+
+
+@parse_args('v', 'i', 'i')
+def _argmax(g, input, dim, keepdim):
+    return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim)
+
+
+@parse_args('v', 'i', 'i')
+def _argmin(g, input, dim, keepdim):
+    return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)
