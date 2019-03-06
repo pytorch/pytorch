@@ -540,7 +540,7 @@ class LSTM(RNNBase):
     def forward_packed(self, input, hx=None):
         # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
         input, batch_sizes, sorted_indices, unsorted_indices = input
-        max_batch_size = int(batch_sizes[0])
+        max_batch_size = batch_sizes[0]
 
         output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
 
