@@ -301,8 +301,8 @@ class ModuleDict(Module):
         return self._modules.values()
 
     def update(self, modules):
-        r"""Update the ModuleDict with the key/value pairs from a mapping or
-        an iterable, overwriting existing keys.
+        r"""Update the :class:`~torch.nn.ModuleDict` with the key-value pairs from a
+        mapping or an iterable, overwriting existing keys.
 
         .. note::
             If :attr:`modules` is an ``OrderedDict``, a :class:`~torch.nn.ModuleDict`, or
@@ -527,11 +527,11 @@ class ParameterDict(Module):
         return self._parameters.values()
 
     def update(self, parameters):
-        r"""Update the ParameterDict with the key/value pairs from a mapping or
-        an iterable, overwriting existing keys.
+        r"""Update the :class:`~torch.nn.ParameterDict` with the key-value pairs from a
+        mapping or an iterable, overwriting existing keys.
 
         .. note::
-            If :attr:`modules` is an ``OrderedDict``, a :class:`~torch.nn.ParameterDict`, or
+            If :attr:`parameters` is an ``OrderedDict``, a :class:`~torch.nn.ParameterDict`, or
             an iterable of key-value pairs, the order of new elements in it is preserved.
 
         Arguments:
