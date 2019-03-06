@@ -861,6 +861,7 @@
   device_guard: False
 
 - func: empty_strided(int[] size, int[] stride, *, TensorOptions options=[]) -> Tensor
+  cpu_half: True
   dispatch:
     CPU: empty_strided_cpu
     CUDA: empty_strided_cuda
@@ -1511,6 +1512,26 @@
   dispatch:
     CUDA: miopen_convolution_transpose_backward_weight
 
+- func: miopen_depthwise_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
+  matches_jit_signature: True
+  dispatch:
+    CUDA: miopen_depthwise_convolution
+
+- func: miopen_depthwise_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
+  matches_jit_signature: True
+  dispatch:
+    CUDA: miopen_depthwise_convolution_backward_input
+
+- func: miopen_depthwise_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
+  dispatch:
+    CUDA: miopen_depthwise_convolution_backward
+
+- func: miopen_depthwise_convolution_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
+  matches_jit_signature: True
+  dispatch:
+    CUDA: miopen_depthwise_convolution_backward_weight
+
 - func: mm(Tensor self, Tensor mat2) -> Tensor
   matches_jit_signature: True
   variants: function, method
@@ -1583,11 +1604,31 @@
     CPU: batch_norm_cpu
     CUDA: batch_norm_cuda
 
+- func: batch_norm_stats(Tensor input, float eps) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: batch_norm_stats_cuda
+
+- func: batch_norm_elemt(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor invstd, float eps) -> Tensor
+  dispatch:
+    CUDA: batch_norm_elemt_cuda
+
+- func: batch_norm_gather_stats(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, int count) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: batch_norm_gather_stats_cuda
+
 - func: native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   matches_jit_signature: True
   dispatch:
     CPU: batch_norm_backward_cpu
     CUDA: batch_norm_backward_cuda
+
+- func: batch_norm_backward_reduce(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, bool input_g, bool weight_g, bool bias_g) -> (Tensor, Tensor, Tensor, Tensor)
+  dispatch:
+    CUDA: batch_norm_backward_reduce_cuda
+
+- func: batch_norm_backward_elemt(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, Tensor mean_dy, Tensor mean_dy_xmu) -> Tensor
+  dispatch:
+    CUDA: batch_norm_backward_elemt_cuda
 
 - func: batch_norm_update_stats(Tensor input, Tensor? running_mean, Tensor? running_var, float momentum) -> (Tensor, Tensor)
   matches_jit_signature: True

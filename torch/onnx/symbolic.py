@@ -1624,3 +1624,13 @@ def isnan(g, input):
     output = g.op('IsNaN', input)
     output = _cast_func_template(cast_pytorch_to_onnx['Byte'], g, output, None)
     return output
+
+
+@parse_args('v', 'i', 'i')
+def _argmax(g, input, dim, keepdim):
+    return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim)
+
+
+@parse_args('v', 'i', 'i')
+def _argmin(g, input, dim, keepdim):
+    return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)
