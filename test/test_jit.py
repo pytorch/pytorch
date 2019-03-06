@@ -8015,31 +8015,34 @@ a")
         def fn(x):
             y = 0
             for i in range(int(x)):
-                y += i
+                y -= i
             return y
 
         graph = torch.jit.script(fn).graph
         self.run_pass('loop_unrolling', graph)
-        self.assertExpectedGraph(graph)
+        unroll_factor = 8
+        FileCheck().check("prim::Loop").check_count("aten::sub", unroll_factor) \
+            .check("prim::Loop").check("aten::sub").run(str(graph))
         self.checkScript(fn, (torch.tensor(10),))
 
     def test_loop_unrolling_const(self):
         def fn():
             y = 0
             for _ in range(10):
-                y += 1
+                y -= 1
             return y
 
         def fn2():
             y = 0
             for i in range(10):
-                y += i
+                y -= i
             return y
 
         def check(fn, name):
             graph = torch.jit.script(fn).graph
             self.run_pass('loop_unrolling', graph)
-            self.assertExpectedGraph(graph, subname=name)
+            # entirely unrolled
+            FileCheck().check_not("prim::Loop'").run(str(graph))
             self.checkScript(fn, ())
 
         check(fn, 'add_const')
@@ -8050,24 +8053,28 @@ a")
             y = 0
             for _ in range(10):
                 for j in range(int(x)):
-                    y += j
+                    y -= j
             return y
 
         graph = torch.jit.script(fn).graph
         self.run_pass('loop_unrolling', graph)
-        self.assertExpectedGraph(graph)
+        # inner loop with 8 subs followed by loop epilogue
+        unroll_factor = 8
+        FileCheck().check("prim::Loop").check("prim::Loop").check_count('aten::sub', unroll_factor) \
+            .check("prim::Loop").check("aten::sub").run(str(graph))
         self.checkScript(fn, (torch.tensor(10),))
 
     def test_loop_unroll_unused_counter(self):
         def fn(x):
             y = 0
             for _ in range(int(x)):
-                y += 1
+                y -= 1
             return y
 
         graph = torch.jit.script(fn).graph
         self.run_pass('loop_unrolling', graph)
-        self.assertExpectedGraph(graph)
+        FileCheck().check("prim::Loop").check_not("aten::add").check("return") \
+            .run(str(graph))
 
     def test_loop_unroll_negative(self):
         def fn(x):
