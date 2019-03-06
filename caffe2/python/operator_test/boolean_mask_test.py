@@ -47,10 +47,10 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
     @staticmethod
     def _dtype_conversion(x, dtype, gc, dc):
-        """SequenceMask only supports fp16 with CUDA."""
+        """SequenceMask only supports fp16 with CUDA/ROCm."""
         if dtype == np.float16:
-            assume(gc.device_type == caffe2_pb2.CUDA)
-            dc = [d for d in dc if d.device_type == caffe2_pb2.CUDA]
+            assume(core.IsGPUDeviceType(gc.device_type))
+            dc = [d for d in dc if core.IsGPUDeviceType(d.device_type)]
             x = x.astype(dtype)
         return x, dc
 

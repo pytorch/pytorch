@@ -21,6 +21,7 @@
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
+#include "torch/csrc/utils/structseq.h"
 
 #include <ATen/ATen.h>
 

@@ -9,8 +9,9 @@ template <class Context>
 class AdjustBatchOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  AdjustBatchOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit AdjustBatchOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         max_batch_size_(
             this->template GetSingleArgument<int64_t>("max_batch_size", -1)) {}
 
