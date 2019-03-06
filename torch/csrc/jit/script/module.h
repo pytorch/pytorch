@@ -122,14 +122,7 @@ struct Method {
   }
   TORCH_API Value* get_or_add_parameter(IValue* slot) {
     AT_ASSERT(slot->isTensor());
-    auto it = initial_ivalue_index.find(slot);
-    if (it != initial_ivalue_index.end()) {
-      return graph()->inputs().at(it->second);
-    }
-    // add it as a new parameter
-    initial_ivalues_.push_back(slot);
-    initial_ivalue_index[slot] = graph()->inputs().size();
-    return graph()->addInput();
+    return get_or_add_attribute(TensorType::get(), slot);
   }
 
   TORCH_API Value* get_or_add_attribute(TypePtr type, IValue* slot) {

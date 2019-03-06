@@ -322,17 +322,6 @@ struct ModuleValue : public SugaredValue {
     // python method. If so return this as a python value.
     py::object py_module = py::cast(module);
     if (py::object attr = py::getattr(py_module, field.c_str(), py::none())) {
-      if (py::isinstance(
-              attr, py::module::import("torch.jit").attr("Attribute"))) {
-        // TODO: get the real type
-        TypePtr type =
-            py::cast<TypePtr>(py::module::import("torch.jit.annotations")
-                                  .attr("ann_to_type")(attr.attr("type")));
-        module->register_attribute(
-            field, type, toIValue(attr.attr("value"), type));
-        auto v = module->find_attribute(field);
-        return toSimple(m.get_or_add_attribute(type, v->slot()));
-      }
       if (py::isinstance<py::function>(attr) &&
           py::hasattr(attr, "_is_parameter_list") &&
           py::cast<bool>(py::getattr(attr, "_is_parameter_list"))) {

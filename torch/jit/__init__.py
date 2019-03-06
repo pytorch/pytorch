@@ -1160,6 +1160,10 @@ if _enabled:
                         self.__dict__['training'] = value
                         self._get_buffer('training').fill_(int(value))
                         return
+                if isinstance(value, Attribute):
+                    the_type = torch.jit.annotations.ann_to_type(value.type)
+                    self._register_attribute(attr, the_type, value.value)
+                    return
                 return super(ScriptModule, self).__setattr__(attr, value)
 
             if hasattr(self, attr):
