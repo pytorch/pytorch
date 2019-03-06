@@ -152,6 +152,7 @@ import distutils.command.clean
 import distutils.sysconfig
 import filecmp
 import platform
+import struct
 import subprocess
 import shutil
 import sys
@@ -257,6 +258,10 @@ def build_deps():
         # this would claim to be a release build when it's not.)
         f.write("debug = {}\n".format(repr(DEBUG)))
         f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
+
+    if struct.calcsize("P") != 8:
+        report('PyTorch is only supported to run with 64-bit python.')
+        exit(1)
 
     def check_file(f):
         if not os.path.exists(f):
