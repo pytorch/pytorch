@@ -15,7 +15,7 @@ import unittest
 device_opts = caffe2_pb2.DeviceOption()
 
 class TestGatherOpCPU(serial.SerializedTestCase):
-    device_type = caffe2_pb2.CPU
+    device_type = caffe2_pb2.PROTO_CPU
 
     def setUp(self):
            device_opts.device_type = self.device_type
@@ -74,7 +74,7 @@ if(workspace.has_gpu_support):
     TestGatherOpGPU = type(str("TestTestGatherOpGPU"),
                               (unittest.TestCase,),
                               dict(TestGatherOpCPU.__dict__,
-                                  device_type = caffe2_pb2.CUDA))
+                                  device_type = workspace.GpuDeviceType))
 
 
 if __name__ == "__main__":
