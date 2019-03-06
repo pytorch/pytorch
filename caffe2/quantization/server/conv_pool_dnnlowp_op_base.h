@@ -34,6 +34,14 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
       omp_set_num_threads(FLAGS_caffe2_omp_num_threads);
     }
 #endif
+
+    if (this->debug_def().engine() == "DNNLOWP_16" ||
+        this->debug_def().engine() == "DNNLOWP_ROWWISE_16") {
+      LOG(WARNING)
+          << this->debug_def().engine()
+          << " is an experimental feature mostly for testing accuracy with "
+             "fixed-point precision higher than 8 and performance is very slow";
+    }
   }
 
   virtual ~ConvPoolDNNLowPOpBase() {
