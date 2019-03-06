@@ -639,6 +639,7 @@ class TestMSNPUTensor(common.TestCase):
         self.assertEqual(a.sum(), 0)
 
         b = torch.zeros(5, 5, device='msnpu')
+        self.assertEqual(b.device, torch.device('msnpu', 1))
         self.assertEqual(msnpu_extension.get_test_int(), 0)
         self.assertEqual(torch.get_default_dtype(), b.dtype)
 

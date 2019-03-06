@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#include "caffe2/core/logging.h"
 #include "profile_observer.h"
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -64,52 +64,11 @@ void ProfileOperatorObserver::Dump() const {
 }
 
 void ProfileOperatorObserver::Start() {
-  auto cudaOp = dynamic_cast_if_rtti<const Operator<CUDAContext>*>(subject_);
-  if (cudaOp) {
-    auto context = cudaOp->getContext();
-    int device;
-    cudaGetDevice(&device);
-
-    cudaSetDevice(context->device_id());
-    cudaEventCreate(&start_);
-    cudaEventRecord(start_, context->cuda_stream());
-
-    cudaSetDevice(device);
-
-    cudaError_t error = cudaGetLastError();
-    if (error != cudaSuccess) {
-      CAFFE_THROW("Encountered CUDA error Start: ", cudaGetErrorString(error));
-    }
-  } else {
-    start_time_ = timer_.MilliSeconds();
-  }
+  start_time_ = timer_.MilliSeconds();
 }
 
 void ProfileOperatorObserver::Stop() {
-  auto cudaOp = dynamic_cast_if_rtti<const Operator<CUDAContext>*>(subject_);
-  if (cudaOp) {
-    auto context = cudaOp->getContext();
-    int device;
-    cudaGetDevice(&device);
-
-    cudaSetDevice(context->device_id());
-    cudaEventCreate(&stop_);
-    cudaEventRecord(stop_, context->cuda_stream());
-    cudaEventSynchronize(stop_);
-    cudaEventElapsedTime(&run_time_, start_, stop_);
-    cudaEventDestroy(start_);
-    cudaEventDestroy(stop_);
-
-    cudaSetDevice(device);
-
-    cudaError_t error = cudaGetLastError();
-    if (error != cudaSuccess) {
-      CAFFE_THROW("Encountered CUDA error Stop: ", cudaGetErrorString(error));
-    }
-  } else {
-    run_time_ = timer_.MilliSeconds() - start_time_;
-  }
-
+  run_time_ = timer_.MilliSeconds() - start_time_;
   Dump();
 }
 

@@ -79,7 +79,7 @@ static void THNN_(VolumetricAdaptiveMaxPooling_updateOutput_frame)(
           *op = maxval;
 
           /* store location of max */
-          *indp = maxindex + TH_INDEX_BASE;
+          *indp = maxindex;
         }
       }
     }
@@ -213,7 +213,7 @@ static void THNN_(VolumetricAdaptiveMaxPooling_updateGradInput_frame)(
         for(ow = 0; ow < osizeW; ow++)
         {
           /* retrieve position of max */
-          int64_t maxp = ind_p_d[ot*osizeH*osizeW + oh*osizeW + ow] - TH_INDEX_BASE;
+          int64_t maxp = ind_p_d[ot*osizeH*osizeW + oh*osizeW + ow];
 
           /* update gradient */
           gradInput_p_d[maxp] += gradOutput_p_d[ot*osizeH*osizeW + oh*osizeW + ow];

@@ -65,8 +65,8 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
 
 
   // Fill sortedOrigIndices with sequential indices
-  thrust::counting_iterator<int64_t> countIterI(TH_INDEX_BASE);
-  thrust::counting_iterator<int64_t> countIterO(TH_INDEX_BASE);
+  thrust::counting_iterator<int64_t> countIterI(0);
+  thrust::counting_iterator<int64_t> countIterO(0);
 
   thrust::copy(policy, countIterI, countIterI + nnz, origIndicesIter);
   thrust::copy(policy, countIterO, countIterO + nnz, uniqueOffsetsIter);
@@ -131,9 +131,6 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
     newIndices = indices1D;
   } else {
     newIndices = at::empty({sparse_dim, newNnz}, origIndices.options());
-    if (TH_INDEX_BASE != 0) {
-      indices1D.add_(-1);
-    }
     for (int64_t d = sparse_dim - 1; d >= 0; d--) {
       // NB: Not a select, so I can preserve the outer dimension
       LongTensor indicesSlice = newIndices.narrow(0, d, 1);
@@ -143,9 +140,6 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
       indicesSlice.copy_(indices1D);
       indices1D.div_(self.size(d));
       indicesSlice.add_(indices1D, -self.size(d));
-    }
-    if (TH_INDEX_BASE != 0) {
-      indices1D.add_(1); // "lol"
     }
   }
   ////////////////////////////////////////////////////////////

@@ -134,8 +134,6 @@ auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
          && input.dim() <= MIOPEN_DIM_MAX
          && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
          && !transposed
-         && (dilation.at(0) == dilation.at(1)) //MIOpen currently does not support assymetric dilation values.
-         && (stride.at(0) == stride.at(1)) //Line 549 & 635 (swapping stride and dilation values) leads to assymetric dilation values.
          ;
 }
 
@@ -158,7 +156,7 @@ auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
          !is_dilated() && // or dilation
          !transposed &&   // or transposed tensors
          input.ndimension() == 4 // must be in NCHW format
-#if !C10_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+#if !defined(C10_MOBILE) && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
          && input.size(0) >= 16 // ensure large enough batch size to ensure perf, tuneable
 #endif
      ;
@@ -356,7 +354,14 @@ at::Tensor _convolution(
       auto padding = params.padding;
       auto dilation = params.dilation;
 
-      output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
+      if(params.use_miopen(input)) {
+        output = at::miopen_depthwise_convolution(
+          input, weight, bias,
+          params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+      } else {
+        output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
+      }
+
   } else if (params.use_cudnn(input)) {
     AT_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
