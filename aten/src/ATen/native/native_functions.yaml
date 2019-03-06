@@ -1511,6 +1511,26 @@
   dispatch:
     CUDA: miopen_convolution_transpose_backward_weight
 
+- func: miopen_depthwise_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
+  matches_jit_signature: True
+  dispatch:
+    CUDA: miopen_depthwise_convolution
+
+- func: miopen_depthwise_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
+  matches_jit_signature: True
+  dispatch:
+    CUDA: miopen_depthwise_convolution_backward_input
+
+- func: miopen_depthwise_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
+  dispatch:
+    CUDA: miopen_depthwise_convolution_backward
+
+- func: miopen_depthwise_convolution_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
+  matches_jit_signature: True
+  dispatch:
+    CUDA: miopen_depthwise_convolution_backward_weight
+
 - func: mm(Tensor self, Tensor mat2) -> Tensor
   matches_jit_signature: True
   variants: function, method
