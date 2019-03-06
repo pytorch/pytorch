@@ -13614,16 +13614,16 @@ class TestClassType(JitTestCase):
             @torch.jit.script
             class FooTest:
                 def __init__(self, x):
-                    # type: (int)
+                    # type: (int) -> None
                     self.foo = x
 
                 def incFooTest(self, y):
-                    # type: (int)
+                    # type: (int) -> None
                     self.foo = self.foo + y
 
             @torch.jit.script
             def fn(x):
-                # type: (int)
+                # type: (int) -> int
                 foo = FooTest(x)
                 foo.incFooTest(2)
                 return foo.foo
@@ -13671,7 +13671,7 @@ class TestClassType(JitTestCase):
                 @torch.jit.script
                 class FooTest:
                     def __init__(self, x):
-                        # type: (bool)
+                        # type: (bool) -> None
                         self.foo = x
 
                 @torch.jit.script
@@ -13700,7 +13700,7 @@ class TestClassType(JitTestCase):
 
             @torch.jit.script
             def fn(foo):
-                # type: (FooTest)
+                # type: (FooTest) -> Tensor
                 return foo.attr
 
             @torch.jit.script
