@@ -246,7 +246,8 @@ def preprocess(
         output_directory,
         all_files,
         show_detailed=False,
-        show_progress=True):
+        show_progress=True,
+        hip_clang_launch=False):
     """
     Call preprocessor on selected files.
 
@@ -258,7 +259,7 @@ def preprocess(
     stats = {"unsupported_calls": [], "kernel_launches": []}
 
     for filepath in all_files:
-        preprocessor(output_directory, filepath, stats)
+        preprocessor(output_directory, filepath, stats, hip_clang_launch)
         # Show what happened
         if show_progress:
             print(
@@ -880,7 +881,7 @@ RE_ANGLE_HEADER = re.compile(r'#include <([^>]+)>')
 RE_THC_GENERIC_FILE = re.compile(r'#define THC_GENERIC_FILE "([^"]+)"')
 RE_CU_SUFFIX = re.compile(r'\.cu\b')  # be careful not to pick up .cuh
 
-def preprocessor(output_directory, filepath, stats):
+def preprocessor(output_directory, filepath, stats, hip_clang_launch):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = os.path.join(output_directory, filepath)
     with open(fin_path, 'r') as fin:
@@ -920,7 +921,8 @@ def preprocessor(output_directory, filepath, stats):
             output_source = RE_CU_SUFFIX.sub('.hip', output_source)
 
         # Perform Kernel Launch Replacements
-        output_source = processKernelLaunches(output_source, stats)
+        if not hip_clang_launch:
+            output_source = processKernelLaunches(output_source, stats)
 
         # Disable asserts
         # if not filepath.endswith("THCGeneral.h.in"):
@@ -1089,6 +1091,7 @@ def hipify(
     out_of_place_only=False,
     ignores=(),
     show_progress=True,
+    hip_clang_launch=False,
 ):
     if project_directory == "":
         project_directory = os.getcwd()
@@ -1204,4 +1207,5 @@ def hipify(
         output_directory,
         all_files,
         show_detailed=show_detailed,
-        show_progress=show_progress)
+        show_progress=show_progress,
+        hip_clang_launch=hip_clang_launch)
