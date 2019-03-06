@@ -58,11 +58,11 @@ set LIB=%TMP_DIR_WIN%\\mkl\\lib;%LIB
 :: Install MAGMA
 if "%REBUILD%"=="" (
   if "%BUILD_ENVIRONMENT%"=="" (
-    curl -k https://s3.amazonaws.com/ossci-windows/magma_2.4.0_cuda90_release.7z --output %TMP_DIR_WIN%\\magma_2.4.0_cuda90_release.7z
+    curl -k https://s3.amazonaws.com/ossci-windows/magma_2.5.0_cuda90_release.7z --output %TMP_DIR_WIN%\\magma_2.5.0_cuda90_release.7z
   ) else (
-    aws s3 cp s3://ossci-windows/magma_2.4.0_cuda90_release.7z %TMP_DIR_WIN%\\magma_2.4.0_cuda90_release.7z --quiet
+    aws s3 cp s3://ossci-windows/magma_2.5.0_cuda90_release.7z %TMP_DIR_WIN%\\magma_2.5.0_cuda90_release.7z --quiet
   )
-  7z x -aoa %TMP_DIR_WIN%\\magma_2.4.0_cuda90_release.7z -o%TMP_DIR_WIN%\\magma
+  7z x -aoa %TMP_DIR_WIN%\\magma_2.5.0_cuda90_release.7z -o%TMP_DIR_WIN%\\magma
 )
 set MAGMA_HOME=%TMP_DIR_WIN%\\magma
 
