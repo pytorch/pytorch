@@ -401,6 +401,7 @@ struct Environment {
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
+          {"range", std::make_shared<BuiltinFunction>(prim::range, at::nullopt)},
       };
       auto it = globals.find(ident);
       if (it != globals.end())
@@ -724,8 +725,8 @@ struct to_ir {
     if (self) {
       AT_ASSERT(it != end);
       const auto& name = (*it).ident().name();
-      if (auto userType = dynamic_cast<UserTypeValue*>(self.get())) {
-        const auto type = userType->type_;
+      if (auto classType = dynamic_cast<ClassValue*>(self.get())) {
+        const auto type = classType->type_;
         Value* new_input =
             block->addInput()->setUniqueName(name)->setType(type);
         environment_stack->setVar((*it).ident().range(), name, new_input);

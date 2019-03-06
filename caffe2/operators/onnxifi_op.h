@@ -192,6 +192,19 @@ class OnnxifiOp final : public Operator<Context> {
     backend_id_ = backend_graph_shared_ptr_->backend_id;
     backend_ = backend_graph_shared_ptr_->backend;
     graph_ = backend_graph_shared_ptr_->graph;
+
+// Set up function pointer if onnxifi_ext is enabled
+#ifdef ONNXIFI_ENABLE_EXT
+    onnxExtensionFunctionPointer p;
+    if (lib_->onnxGetExtensionFunctionAddress(
+            backend_id_, "onnxSetIOAndRunGraphFunction", &p) !=
+        ONNXIFI_STATUS_SUCCESS) {
+      onnxSetIOAndRunGraphPointer_ = nullptr;
+      return;
+    }
+    onnxSetIOAndRunGraphPointer_ =
+        reinterpret_cast<decltype(onnxSetIOAndRunGraphPointer_)>(p);
+#endif
   }
 
   std::vector<onnxTensorDescriptorV1> buildInitializationList(
@@ -213,6 +226,17 @@ class OnnxifiOp final : public Operator<Context> {
   // input/output descriptors
   std::vector<onnxTensorDescriptorV1> input_desc_;
   std::vector<onnxTensorDescriptorV1> output_desc_;
+
+#ifdef ONNXIFI_ENABLE_EXT
+  // onnxifi extension mode function pointer
+  onnxStatus (*onnxSetIOAndRunGraphPointer_)(
+      onnxGraph,
+      uint32_t,
+      const onnxTensorDescriptorV1*,
+      uint32_t,
+      const onnxTensorDescriptorV1*,
+      onnxMemoryFenceV1*);
+#endif
 
   // We bind the op input/output by position while ONNXIFI binds input/output by
   // names. In addition, op input/output names can be writtten by, for example,

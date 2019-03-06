@@ -449,7 +449,7 @@ def match_signature(decl, constructed_string, should_match_schema):
 
 def signature(decl, should_match_schema=True):
     def format_arg(arg):
-        name = arg['name'] if not arg.get('output') else 'out'
+        name = arg['name']
         typ = jit_type_of(arg)
         decl = '{} {}'.format(typ, name)
         if 'default' in arg:

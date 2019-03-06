@@ -16,8 +16,9 @@ class PoolOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(Context);
 
-  PoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws), functor_(*this) {
+  template <class... Args>
+  explicit PoolOp(Args&&... args)
+      : ConvPoolOpBase<Context>(std::forward<Args>(args)...), functor_(*this) {
     const int kernel_size = kernel_.size();
     for (int i = 0; i < kernel_size; ++i) {
       CAFFE_ENFORCE_EQ(
@@ -107,8 +108,9 @@ template <typename T, class Context, class Functor>
 class PoolGradientOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(Context);
-  PoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws), functor_(*this) {}
+  template <class... Args>
+  explicit PoolGradientOp(Args&&... args)
+      : ConvPoolOpBase<Context>(std::forward<Args>(args)...), functor_(*this) {}
 
   ~PoolGradientOp() = default;
 

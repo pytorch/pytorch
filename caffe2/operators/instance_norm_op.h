@@ -11,8 +11,9 @@ template <typename T, class Context>
 class InstanceNormOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  InstanceNormOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit InstanceNormOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         epsilon_(this->template GetSingleArgument<T>("epsilon", 1e-5f)),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))) {
@@ -51,8 +52,9 @@ template <typename T, class Context>
 class InstanceNormGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  InstanceNormGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit InstanceNormGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         epsilon_(this->template GetSingleArgument<T>("epsilon", 1e-5f)),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))) {

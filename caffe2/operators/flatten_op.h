@@ -10,8 +10,9 @@ class FlattenOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  FlattenOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit FlattenOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         axis_(this->template GetSingleArgument<int>("axis", 1)) {}
 
   bool RunOnDevice() override {
