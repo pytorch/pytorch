@@ -3,6 +3,7 @@
 #include "test/cpp/jit/test_base.h"
 
 #include "ATen/core/interned_strings.h"
+#include "torch/csrc/api/include/torch/jit.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/argument_spec.h"
@@ -836,17 +837,17 @@ void testADFormulas() {
 }
 
 void testDifferentiate(std::ostream& out = std::cout) {
-  auto graph = std::make_shared<Graph>();
-  at::ScalarType s = at::ScalarType::Float;
-  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
-
   // Build up a fake graph
-  auto a = SymbolicVariable::asNewInput(*graph, type);
-  auto b = SymbolicVariable::asNewInput(*graph, type);
-  auto c = a * b * a + b;
-  graph->registerOutput(c.value());
+  auto module = compile(R"PT(
+def graph(_0: Tensor, _1: Tensor) -> Tensor:
+  _2 = torch.add(torch.mul(torch.mul(_0, _1), _0), _1, alpha=1)
+  return _2
+  )PT");
+  auto graph = module->get_method("graph").graph();
 
-  auto grad_spec = differentiate(graph);
+  auto graph_clone =
+      graph->copy(); // We need a copy for calling `differentiate`.
+  auto grad_spec = differentiate(graph_clone);
   std::vector<size_t> expected_captured_inputs = {0, 1};
   std::vector<size_t> expected_captured_outputs = {1, 2};
   std::vector<size_t> expected_input_vjps = {0, 1};
@@ -1512,9 +1513,7 @@ void testSchemaParser() {
         Symbol::fromQualString("alias::b"),
     };
     const auto expectedAfter = std::unordered_set<Symbol>{
-        Symbol::fromQualString("alias::b"),
-        Symbol::fromQualString("alias::c")
-    };
+        Symbol::fromQualString("alias::b"), Symbol::fromQualString("alias::c")};
     ASSERT_TRUE(containedAliasInfo.beforeSets() == expectedBefore);
     ASSERT_TRUE(containedAliasInfo.afterSets() == expectedAfter);
     ASSERT_FALSE(containedAliasInfo.isWrite());
