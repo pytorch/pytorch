@@ -9,16 +9,16 @@ import inspect
 from torch._six import builtins
 
 # Tracks standalone weak script functions
-compiled_weak_fns = weakref.WeakKeyDictionary() # noqa: T484
+compiled_weak_fns = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Tracks which methods should be converted to strong methods
-weak_script_methods = weakref.WeakKeyDictionary() # noqa: T484
+weak_script_methods = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Converted modules and their corresponding WeakScriptModuleProxy objects
-weak_modules = weakref.WeakKeyDictionary() # noqa: T484
+weak_modules = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Types that have been declared as weak modules
-weak_types = weakref.WeakKeyDictionary() # noqa: T484
+weak_types = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
@@ -26,7 +26,7 @@ boolean_dispatched = weakref.WeakKeyDictionary() # noqa: T484
 
 # Python Op functions that should be ignored by the compiler. These will be replaced
 # with an operator that always throws an error
-ignored_fns = weakref.WeakSet() # noqa: T484
+ignored_fns = weakref.WeakSet()  # noqa: T484
 
 COMPILATION_PENDING = object()
 COMPILED = object()
@@ -223,9 +223,9 @@ except ImportError:
         def __getitem__(self, types):
             return DictInstance(types)
 
-    Tuple = TupleCls() # noqa: T484
-    List = ListCls() # noqa: T484
-    Dict = DictCls() # noqa: T484
+    Tuple = TupleCls()  # noqa: T484
+    List = ListCls()  # noqa: T484
+    Dict = DictCls()  # noqa: T484
 
     def is_tuple(ann):
         return isinstance(ann, TupleInstance)
