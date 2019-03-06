@@ -404,9 +404,8 @@ def get_selected_tests(options):
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
     if sys.platform == 'win32' and not options.ignore_win_blacklist:
-        ostype = os.environ.get('MSYSTEM')
         target_arch = os.environ.get('VSCMD_ARG_TGT_ARCH')
-        if ostype != 'MINGW64' or target_arch != 'x64':
+        if target_arch != 'x64':
             WINDOWS_BLACKLIST.append('cpp_extensions')
 
         selected_tests = exclude_tests(WINDOWS_BLACKLIST, selected_tests, 'on Windows')
