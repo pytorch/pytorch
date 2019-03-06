@@ -72,8 +72,8 @@ class IterableDataset(Dataset):
         ...
         >>> ds = MyIterableDataset(start=3, end=11)
         >>>
-        >>> # The `worker_init_fn` splits workload using `worker_info.num_workers` so it works for
-        >>> # different `num_workers` values.
+        >>> # The `worker_init_fn` splits workload using `worker_info.num_workers`
+        >>> # so it works for different `num_workers` values.
         >>>
         >>> loader = torch.utils.data.DataLoader(ds, num_workers=0, worker_init_fn=worker_init_fn)
         >>> print(list(loader))
@@ -97,8 +97,9 @@ class IterableDataset(Dataset):
         ...
         >>> ds = MyIterableDataset()
         >>> loader = torch.utils.data.DataLoader(ds, num_workers=2)
+        >>>
+        >>> # Worker 0 fetched [-1, 1, 10]. Worker 1 fetched [-1, 2, 20].
         >>> print(list(loader))
-        # Worker 0 fetched [-1, 1, 10]. Worker 1 fetched [-1, 2, 20].
         [tensor(-1), tensor(-1), tensor(1), tensor(2), tensor(10), tensor(20)]
     """
 

@@ -13,7 +13,7 @@ Dataset Types
 :class:`~torch.utils.data.DataLoader` supports two different types of datasets:
 
 Map-style datasets
-^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^
 
 A map-style dataset is one that implements the ``__getitem__`` protocol,
 and represents a map from indices/keys to data samples.  E.g., such a
@@ -46,36 +46,39 @@ Data Loading Modes
 arguments, a :class:`~torch.utils.data.DataLoader` operates in one of three
 following modes:
 
-* Batched loading from a map-style dataset (default).
+Batched loading from a map-style dataset (default)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-  This is the most common case, and corresponds to fetching a minibatch of
-  data and collate them into batched Tensors, i.e., Tensors with one dimension
-  being the batch dimension (usually the first). Two combinations of arguments
-  that starts this mode are:
+This is the most common case, and corresponds to fetching a minibatch of
+data and collating them into batched Tensors, i.e., Tensors with one dimension
+being the batch dimension (usually the first). Two combinations of arguments
+that starts this mode are:
 
-  * (default) Using arguments :attr:`batch_size`, :attr:`shuffle`,
-    :attr:`sampler`, and :attr:`drop_last` to specify the batch indices sampling
-    behavior.
+* (default) Using arguments :attr:`batch_size`, :attr:`shuffle`,
+  :attr:`sampler`, and :attr:`drop_last` to specify the batch indices sampling
+  behavior.
 
-    With the default arguments, a :class:`~torch.utils.data.DataLoader`
-    loads data as batches of size ``1`` with indices sampled with replacement.
+  With the default arguments, a :class:`~torch.utils.data.DataLoader`
+  loads data as batches of size ``1`` with indices sampled with replacement.
 
-  * Setting argument :attr:`batch_sampler` to a custom sampler returning a list
-    of indices at each time, representing the indices for a batch.
+* Setting argument :attr:`batch_sampler` to a custom sampler returning a list
+  of indices at each time, representing the indices for a batch.
 
-  After fetching a list of samples using the indices from sampler, :attr:`collate_fn`
-  is used to collate the list of samples into batched Tensors. Users may use
-  customized :attr:`collate_fn` to achieve custom batching, e.g., along a
-  dimension other than the first.
+After fetching a list of samples using the indices from sampler, :attr:`collate_fn`
+is used to collate the list of samples into batched Tensors. Users may use
+customized :attr:`collate_fn` to achieve custom batching, e.g., along a
+dimension other than the first.
 
-  The behavior of this mode is roughly equivalent with::
+The behavior of this mode is roughly equivalent with::
 
-      for indices in batch_sampler:
-          yield collate_fn([dataset[i] for i in indices])
+    for indices in batch_sampler:
+        yield collate_fn([dataset[i] for i in indices])
 
-* Loading individual elements from a map-style dataset.
+Loading individual elements from a map-style dataset
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-* Loading from an iterable-style dataset.
+Loading from an iterable-style dataset
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Memory Pinning
 ^^^^^^^^^^^^^^
