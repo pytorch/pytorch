@@ -230,7 +230,7 @@ struct TORCH_API Variable : public at::Tensor {
       bool keep_graph,
       bool create_graph) const;
 
-  /// Sets the type of the Variable.
+  /// Sets the metadata (data and type)
   void set_data(Tensor new_data) const;
 
   /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
