@@ -1617,3 +1617,13 @@ def flatten(g, input, start_dim, end_dim):
 @parse_args('v')
 def nonzero(g, input):
     return g.op('NonZero', input)
+
+
+@parse_args('v', 'i', 'i')
+def _argmax(g, input, dim, keepdim):
+    return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim)
+
+
+@parse_args('v', 'i', 'i')
+def _argmin(g, input, dim, keepdim):
+    return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)
