@@ -692,8 +692,9 @@ class TestJit(JitTestCase):
             return x.type_as(y)
 
         tf = torch.jit.trace(f, (a, b))
+        FileCheck().check("type_as").run(str(tf.graph))
         self.run_pass('peephole', tf.graph)
-        self.assertExpectedGraph(tf.graph)
+        FileCheck().check_not("type_as").run(str(tf.graph))
         tf2 = torch.jit.trace(f, (a, c))
         s = str(tf2.graph)
         self.run_pass('peephole', tf2.graph)
@@ -723,7 +724,7 @@ class TestJit(JitTestCase):
         self.assertEqual(s, str(trace.graph))
         trace = torch.jit.trace(f, (b, c))
         self.run_pass('peephole', trace.graph)
-        self.assertExpectedGraph(trace.graph, subname="same_device")
+        self.assertTrue(len(list(trace.graph.nodes())) == 0)
 
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
@@ -1306,7 +1307,8 @@ class TestJit(JitTestCase):
         self.assertEqual(t_node.attributeNames(), ["a"])
         g2.appendNode(t_node)
         self.assertTrue(torch.equal(torch.ones(2, 2), t_node.t("a")))
-        self.assertExpected(str(g2))
+        for node in g.nodes():
+            self.assertTrue(g2.findNode(node.kind()) is not None)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
@@ -1638,26 +1640,35 @@ class TestJit(JitTestCase):
         fn(y)
 
     def test_decompose_addmm(self):
-        @torch.jit.script
-        def addmm(mat, mat1, mat2, alpha, beta):
-            a = mat.addmm(mat1, mat2)
-            b = mat.addmm(mat1, mat2, alpha=1.0, beta=1.0)
-            c = mat.addmm(mat1, mat2, alpha=4.20, beta=2.0)
-            d = mat.addmm(mat1, mat2, alpha=int(alpha), beta=int(beta))
+        def does_decompose():
+            @torch.jit.script
+            def addmm(mat, mat1, mat2, alpha, beta):
+                a = mat.addmm(mat1, mat2, alpha=4.20, beta=2.0)
+                b = mat.addmm(mat1, mat2, alpha=int(alpha), beta=int(beta))
 
-            return a + b + c + d
+                return a + b
 
-        mat = torch.randn(2, 2)
-        mat1 = torch.randn(2, 4)
-        mat2 = torch.randn(4, 2)
-        alpha = torch.FloatTensor([123.0])
-        beta = torch.FloatTensor([321.0])
+            mat = torch.randn(2, 2)
+            mat1 = torch.randn(2, 4)
+            mat2 = torch.randn(4, 2)
+            alpha = torch.FloatTensor([123.0])
+            beta = torch.FloatTensor([321.0])
 
-        out_ref = addmm(mat, mat1, mat2, alpha, beta)
-        self.run_pass('canonicalize_ops', addmm.graph)
-        out_test = addmm(mat, mat1, mat2, alpha, beta)
-        self.assertEqual(out_ref, out_test)
-        self.assertExpected(canonical(addmm.graph))
+            out_ref = addmm(mat, mat1, mat2, alpha, beta)
+            self.run_pass('canonicalize_ops', addmm.graph)
+            out_test = addmm(mat, mat1, mat2, alpha, beta)
+            self.assertEqual(out_ref, out_test)
+            FileCheck().check_not("addmm").run(str(addmm.graph))
+
+        def doesnt_decompose():
+            @torch.jit.script
+            def addmm(mat, mat1, mat2, alpha, beta):
+                a = mat.addmm(mat1, mat2)
+                b = mat.addmm(mat1, mat2, alpha=1.0, beta=1.0)
+
+            orig = str(addm.graph)
+            self.run_pass('canonicalize_ops', addmm.graph)
+            self.assertTrue(orig == str(addmm.graph))
 
     def test_index_put(self):
         ten = torch.zeros(3, 3)
@@ -2571,8 +2582,7 @@ class TestBatched(TestCase):
         self.assertEqual(res, res_batch.examples())
 
         script_if = torch.jit.script(single_if)
-        graph = torch.to_batch_graph(script_if.graph)
-        self.assertExpected(canonical(graph))
+        torch.to_batch_graph(script_if.graph)
 
     def test_if_else_with_scalar(self):
         def single_if(a, b):
@@ -2591,8 +2601,7 @@ class TestBatched(TestCase):
         self.assertEqual(res, res_batch.examples())
 
         script_if = torch.jit.script(single_if)
-        graph = torch.to_batch_graph(script_if.graph)
-        self.assertExpected(canonical(graph))
+        torch.to_batch_graph(script_if.graph)
 
     def test_if_noelse(self):
         def single_if(a, b):
@@ -2609,8 +2618,7 @@ class TestBatched(TestCase):
         self.assertEqual(res, res_batch.examples())
 
         script_if = torch.jit.script(single_if)
-        graph = torch.to_batch_graph(script_if.graph)
-        self.assertExpected(canonical(graph))
+        torch.to_batch_graph(script_if.graph)
 
     def test_if_noelse_with_scalar(self):
         def single_if(a, b):
@@ -2627,8 +2635,7 @@ class TestBatched(TestCase):
         self.assertEqual(res, res_batch.examples())
 
         script_if = torch.jit.script(single_if)
-        graph = torch.to_batch_graph(script_if.graph)
-        self.assertExpected(canonical(graph))
+        torch.to_batch_graph(script_if.graph)
 
     def test_while(self):
         def single_while(a, b):
@@ -2646,8 +2653,7 @@ class TestBatched(TestCase):
         self.assertEqual(res, res_batch.examples())
 
         script_while = torch.jit.script(single_while)
-        graph = torch.to_batch_graph(script_while.graph)
-        self.assertExpected(canonical(graph))
+        torch.to_batch_graph(script_while.graph)
 
     def test_for(self):
         def single_for(x, y):
@@ -2664,8 +2670,7 @@ class TestBatched(TestCase):
         self.assertEqual(res, res_batch.examples())
 
         script_for = torch.jit.script(single_for)
-        graph = torch.to_batch_graph(script_for.graph)
-        self.assertExpected(canonical(graph))
+        torch.to_batch_graph(script_for.graph)
 
     def test_lstm(self):
         def LSTM(x_all, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
@@ -3736,11 +3741,17 @@ a")
         def func2(x):
             return x.sum(dim=4)
 
-        self.assertExpected(canonical(func.graph), subname='1')
         # test that shape analysis is written correctly for sum with IntArrayRef[1] dim argument
+        self.run_pass('constant_propagation', func.graph)
+        self.run_pass('constant_propagation', func2.graph)
+        torch._C._jit_pass_shape_analysis(
+            func.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
         torch._C._jit_pass_shape_analysis(
             func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
-        self.assertExpected(canonical(func2.graph), subname='2')
+        self.assertTrue(func.graph.findNode("aten::sum").output().type().kind()
+                        == "DimensionedTensorType")
+        self.assertTrue(func2.graph.findNode("aten::sum").output().type().kind()
+                        == "DimensionedTensorType")
 
     def test_cat(self):
         @torch.jit.script
@@ -3771,10 +3782,8 @@ a")
         def foo3(x):
             return torch.cat([x], dim=1)
 
-        self.assertExpected(
-            canonical(foo.graph) +
-            canonical(foo2.graph) +
-            canonical(foo3.graph))
+        for g in [foo.graph, foo2.graph, foo3.graph]:
+            FileCheck().check("int =").check("ListConstruct").check("aten::cat").run(str(g))
 
     def test_list_literal(self):
         def reassign():
@@ -8358,7 +8367,7 @@ a")
 
         # The neg op in the python function should be properly inlined to the
         # graph
-        self.assertExpected(canonical(traced_fn.graph))
+        FileCheck().check("aten::neg").run(str(traced_fn.graph))
 
     def test_call_python_mod_from_tracing_fn(self):
         class PythonMod(torch.nn.Module):
@@ -9505,21 +9514,6 @@ a")
 
         self.checkScript(code, (101,), name='elif_test', outputs=3028)
 
-    def test_addmm_fusion(self):
-        class AddmmWrapper(torch.nn.Module):
-            def forward(self, x, y, c):
-                return torch.mm(x, y) + c
-
-        # Test addmm fusion is disabled for normal Jit
-        x, y, c = torch.rand(3, 4), torch.rand(4, 5), torch.rand(3, 5)
-        f = io.BytesIO()
-        pretty = torch.onnx.export_to_pretty_string(AddmmWrapper(), (x, y, c), f)
-        self.assertExpected(pretty, 'onnx')
-
-        jit_trace = torch.jit.trace(AddmmWrapper(), (x, y, c))
-        ge_graph = jit_trace.__getattr__('forward').graph_for(x, y, c)
-        self.assertExpectedGraph(ge_graph, 'jit')
-
     def test_pyop_exception_message(self):
         class Foo(torch.jit.ScriptModule):
             def __init__(self):
@@ -9689,7 +9683,7 @@ a")
 
         x = torch.rand(2, 3, 4)
         traced = torch.jit.trace(foo, (x,))
-        self.assertExpectedGraph(traced.graph)
+        FileCheck().check("aten::contiguous").run(str(traced.graph))
 
     def test_weak_module(self):
 
@@ -11525,7 +11519,7 @@ class TestFuser(JitTestCase):
             torch.randn(4, dtype=torch.float, device='cuda'),
         ]
         ge = self.checkTrace(scaleshift, inputs)
-        self.assertExpectedGraph(ge.graph_for(*inputs))
+        self.assertAllFused(ge.graph_for(*inputs))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -11593,7 +11587,9 @@ class TestFuser(JitTestCase):
         inputs = [torch.randn(10, 6, dtype=torch.float, device='cuda')]
 
         ge = self.checkScript(fn, inputs)
-        self.assertExpectedGraph(ge.graph_for(*inputs))
+        graph = ge.graph_for(*inputs)
+        self.assertAllFused(graph)
+        FileCheck().check("prim::ConstantChunk[chunks=3, dim=1]").run(str(graph))
 
     @staticmethod
     def _test_chunk_correctness(self, device='cpu'):
@@ -11647,7 +11643,9 @@ class TestFuser(JitTestCase):
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
         ge = self.checkTrace(f, (x, y))
-        self.assertExpectedGraph(ge.graph_for(x, y))
+        graph = ge.graph_for(x, y)
+        FileCheck().check("broadcast_tensors").check('with prim::FusionGroup_0') \
+            .check_count('ConstantChunk', 2, exactly=True).run(str(graph))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -11693,7 +11691,7 @@ class TestFuser(JitTestCase):
         ]
 
         ge = self.checkScript(fn, inputs)
-        self.assertExpectedGraph(ge.graph_for(*inputs))
+        self.assertAllFused(ge.graph_for(*inputs))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -11792,7 +11790,9 @@ class TestFuser(JitTestCase):
             return torch.cat((hx + cx, hx * cx))
 
         ge = self.checkTrace(foo, (hx, cx))
-        self.assertExpectedGraph(ge.graph_for(hx, cx))
+        graph = ge.graph_for(hx, cx)
+        self.assertAllFused(graph)
+        FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -11810,7 +11810,9 @@ class TestFuser(JitTestCase):
         y = torch.randn(2, 2, dtype=torch.float, device='cuda')
         z = torch.randn(4, 2, dtype=torch.float, device='cuda')
         ge = self.checkTrace(fn, (x, y, z))
-        self.assertExpectedGraph(ge.graph_for(x, y, z))
+        graph = ge.graph_for(x, y, z)
+        self.assertAllFused(graph, except_for={'aten::add'})
+        FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
     @staticmethod
     def fn_test_exp(x, y):
@@ -12018,11 +12020,16 @@ class TestFuser(JitTestCase):
         forward_graph = module.graph_for(*inputs)
         self.assertGraphContainsExactly(
             forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
-        self.assertExpectedGraph(forward_graph, subname='forward')
+        self.assertTrue(len(list(forward_graph.nodes())) == 2)
+        # Everything is differentiable but TupleConstruct return
+        FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
+            .check_next("return").run(str(forward_graph))
 
         hy, cy = module(*inputs)
         (hy + cy).sum().backward()
-        self.assertExpectedGraph(backward_graph(module), subname='backward')
+        backward = backward_graph(module)
+        FileCheck().check("FusionGroup_0").check_next("FusionGroup_1") \
+            .check_not("FusionGroup_2").run(str(backward))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -12030,7 +12037,8 @@ class TestFuser(JitTestCase):
     def test_lstm_concat_cuda(self):
         inputs = get_lstm_inputs('cuda')
         ge = self.checkTrace(LSTMCellC, inputs)
-        self.assertExpectedGraph(ge.graph_for(*inputs))
+        graph = ge.graph_for(*inputs)
+        FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -12063,7 +12071,10 @@ class TestFuser(JitTestCase):
     def test_lstm_traced_cuda(self):
         inputs = get_lstm_inputs('cuda')
         ge = self.checkTrace(LSTMCellF, inputs)
-        self.assertExpectedGraph(ge.graph_for(*inputs))
+        graph = ge.graph_for(*inputs)
+        FileCheck().check_not("Chunk").check_not("aten::add").check_not("aten::sigmoid") \
+            .check_not("aten::tanh").check("FusionGroup").check_next("TupleConstruct") \
+            .check_next("return").check_not("FusionGroup_1").run(str(graph))
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
@@ -12072,7 +12083,8 @@ class TestFuser(JitTestCase):
         inputs = get_lstm_inputs('cpu')
         try:
             ge = self.checkTrace(LSTMCellF, inputs)
-            self.assertExpectedGraph(ge.graph_for(*inputs))
+            graph = ge.graph_for(*inputs)
+            FileCheck.check("FusionGroup").run(str(graph))
         except RuntimeError as e:
             if 'Failed to compile' in e.args[0]:
                 warnings.warn('CPU fuser test has failed! This is not a hard failure, '
@@ -12091,11 +12103,10 @@ class TestFuser(JitTestCase):
         forward_graph = module.graph_for(*inputs)
         self.assertGraphContainsExactly(
             forward_graph, 'prim::FusionGroup', 1, consider_subgraphs=True)
-        self.assertExpectedGraph(forward_graph, subname='forward')
-
+        FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
+            .check_next("return").check("FusionGroup").run(str(forward_graph))
         hy, cy = module(*inputs)
         (hy + cy).sum().backward()
-        self.assertExpectedGraph(backward_graph(module), subname='backward')
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -12180,7 +12191,7 @@ class TestFuser(JitTestCase):
         x = torch.tensor(0.1, dtype=torch.float, device='cpu')
         y = torch.tensor(1, dtype=torch.float, device='cpu')
         ge = self.checkScript(fn, (x, y))
-        self.assertExpectedGraph(ge.graph_for(x, y))
+        self.assertAllFused(ge.graph_for(x, y))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
