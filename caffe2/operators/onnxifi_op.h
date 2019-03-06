@@ -75,20 +75,15 @@ class OnnxifiOp final : public Operator<Context> {
     // map the weight names
     auto initializers =
         this->template GetRepeatedArgument<std::string>("initializers");
-    CAFFE_ENFORCE_EQ(
-        initializers.size() % 2, 0, "initializers should come in pairs");
     std::unordered_set<std::string> initializer_set;
-    std::unordered_map<std::string, std::string> input_mapping;
     for (auto it = initializers.begin(); it != initializers.end(); ++it) {
-      auto key = *it++;
-      input_mapping.emplace(key, *it);
+      auto key = *it;
       initializer_set.emplace(key);
     }
-    Workspace mapped_ws(ws, input_mapping);
     std::vector<std::string> weight_names;
     std::vector<std::vector<uint64_t>> weight_shapes;
     auto weight_descs = buildInitializationList(
-        &mapped_ws, &initializer_set, &weight_names, &weight_shapes);
+        ws, &initializer_set, &weight_names, &weight_shapes);
 
     BuildBackendAndGraph(property_pointers, onnx_model_str, weight_descs);
   }
