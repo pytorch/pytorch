@@ -44,10 +44,11 @@ from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType
 from copy import deepcopy
 import random
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from torch.jit.frontend import NotSupportedError
 from torch.jit import BatchTensor
 from torch import Tensor
+from
 
 # For testing truediv in python 2
 from test_module.future_div import div_int_future, div_float_future

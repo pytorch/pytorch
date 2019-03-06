@@ -22,7 +22,7 @@ weak_types = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
-boolean_dispatched = weakref.WeakKeyDictionary() # noqa: T484
+boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Python Op functions that should be ignored by the compiler. These will be replaced
 # with an operator that always throws an error
