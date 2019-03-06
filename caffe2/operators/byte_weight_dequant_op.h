@@ -10,8 +10,9 @@ namespace caffe2 {
 template <typename Context>
 class ByteWeightDequantOp : public Operator<Context> {
  public:
-  ByteWeightDequantOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ByteWeightDequantOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         min_(this->template GetSingleArgument<float>("min", -3)),
         max_(this->template GetSingleArgument<float>("max", 3)),
         shape_(this->template GetRepeatedArgument<int64_t>("shape")) {}
