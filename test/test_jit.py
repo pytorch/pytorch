@@ -98,7 +98,7 @@ if WINDOWS:
         finally:
             os.unlink(f.name)
 else:
-    @contextmanager
+    @contextmanager  # noqa: T484
     def TemporaryFileName():
         with tempfile.NamedTemporaryFile() as f:
             yield f.name
@@ -6808,7 +6808,7 @@ a")
             print(int_fn((1, 1, 1)))
 
         with self.assertRaisesRegex(RuntimeError, "must be a positive integer:"):
-            @torch.jit.script
+            @torch.jit.script  # noqa: T484
             def fn(x):
                 # type: (BroadcastingListx[int]) -> List[int]  # noqa: T484
                 return x
@@ -6818,7 +6818,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "Unknown type constructor"):
             @torch.jit.script
             def nested(x, y):
-                # type: (int, Tuple[int, int[2]]) -> List[int] # noqa: T484
+                # type: (int, Tuple[int, int[2]]) -> List[int]  # noqa: T484
                 return x  # noqa: T484
 
     def test_ntuple_builtins(self):
@@ -8335,7 +8335,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, 'but instead got value of type tuple'):
             def somefunc():
                 # type: () -> Tuple[Tuple[Tensor, Tensor]]
-                return torch.zeros(3, 4), torch.zeros(4, 5)
+                return torch.zeros(3, 4), torch.zeros(4, 5)  # noqa: T484
 
             @torch.jit.script
             def wrong_return_type():
@@ -9075,7 +9075,7 @@ a")
             @torch.jit.script
             def tuple_arg(x):
                 # type: (Tuple[Tensor, Tensor]) -> Tensor
-                return x + 1
+                return x + 1  # noqa: T484
 
     def test_script_non_tensor_args_outputs(self):
         @torch.jit.script

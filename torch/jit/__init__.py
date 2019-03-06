@@ -1479,6 +1479,7 @@ _builtin_table = None
 
 _modules_containing_builtins = (torch, torch._C._nn)
 
+
 def _unwrap_optional(x):
     assert x is not None, "Unwrapping null optional"
     return x
