@@ -234,6 +234,7 @@ also preserve :class:`torch.device` and :class:`torch.dtype` of a Tensor).
     y_cpu = torch.ones_like(x_cpu)
     y_gpu = torch.zeros_like(x_gpu)
 
+.. _cuda-memory-pinning:
 
 Use pinned memory buffers
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -249,8 +250,9 @@ memory. CPU tensors and storages expose a :meth:`~torch.Tensor.pin_memory`
 method, that returns a copy of the object, with data put in a pinned region.
 
 Also, once you pin a tensor or storage, you can use asynchronous GPU copies.
-Just pass an additional ``non_blocking=True`` argument to a :meth:`~torch.Tensor.cuda`
-call. This can be used to overlap data transfers with computation.
+Just pass an additional ``non_blocking=True`` argument to a
+:meth:`~torch.Tensor.to` or a :meth:`~torch.Tensor.cuda` call. This can be used
+to overlap data transfers with computation.
 
 You can make the :class:`~torch.utils.data.DataLoader` return batches placed in
 pinned memory by passing ``pin_memory=True`` to its constructor.

@@ -41,7 +41,7 @@ def default_convert(data):
     elif isinstance(data, container_abcs.Sequence):
         return [default_convert(d) for d in data]
 
-    raise TypeError(("default_convert: found unexpected input type {}".format(elem_type)))
+    raise TypeError("default_convert: found unexpected input type {}".format(elem_type))
 
 
 _use_shared_memory = False
