@@ -147,15 +147,15 @@ at::TypeExtendedInterface* VariableType::getVariableTypeFromBaseType(const at::T
 }
 
 namespace {
-std::vector<at::Type*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
+std::vector<std::pair<Backend, ScalarType>> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
   auto& context = at::globalContext();
-  std::vector<Type*> res;
+  std::vector<std::pair<Backend, ScalarType>> res;
   res.reserve(backends.size() * static_cast<int>(ScalarType::NumOptions));
   for (auto p : backends) {
     for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
       auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
       if (baseType) {
-        res.emplace_back(VariableType::getVariableTypeFromBaseType(*baseType));
+        res.emplace_back(std::make_pair(static_cast<Backend>(p), static_cast<ScalarType>(s)));
       }
     }
   }
@@ -163,11 +163,11 @@ std::vector<at::Type*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
 }
 }
 
-std::vector<at::Type*> VariableType::allCPUTypes() {
+std::vector<std::pair<Backend, ScalarType>> VariableType::allCPUTypes() {
   return allTypesForBackends({ Backend::CPU, Backend::SparseCPU });
 }
 
-std::vector<at::Type*> VariableType::allCUDATypes() {
+std::vector<std::pair<Backend, ScalarType>> VariableType::allCUDATypes() {
   at::globalContext().lazyInitCUDA();
   return allTypesForBackends({ Backend::CUDA, Backend::SparseCUDA });
 }
