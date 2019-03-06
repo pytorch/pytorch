@@ -25,12 +25,12 @@ void sum_kernel_impl(TensorIterator& iter) {
 
 template <typename scalar_t>
 void std_var_kernel_impl(TensorIterator& iter, bool unbiased, bool take_sqrt) {
-  gpu_reduce_kernel<scalar_t, scalar_t>(iter, WelfordOps<scalar_t, scalar_t> { unbiased, take_sqrt }, WelfordData<scalar_t> {});
+  gpu_reduce_kernel<scalar_t, scalar_t>(iter, WelfordOps<scalar_t, scalar_t, int32_t, float> { unbiased, take_sqrt }, WelfordData<scalar_t, int32_t, float> {});
 }
 
 template <>
 void std_var_kernel_impl<at::Half>(TensorIterator& iter, bool unbiased, bool take_sqrt) {
-  gpu_reduce_kernel<at::Half, at::Half>(iter, WelfordOps<at::Half, float> { unbiased, take_sqrt }, WelfordData<float> {});
+  gpu_reduce_kernel<at::Half, at::Half>(iter, WelfordOps<at::Half, float, int32_t, float> { unbiased, take_sqrt }, WelfordData<float, int32_t, float> {});
 }
 
 template <typename scalar_t, typename acc_t=scalar_t>

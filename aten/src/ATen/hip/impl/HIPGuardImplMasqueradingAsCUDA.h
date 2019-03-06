@@ -11,26 +11,46 @@
 
 #include <c10/hip/impl/HIPGuardImpl.h>
 
+#include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
+
 // Use of c10::hip namespace here makes hipification easier, because
 // I don't have to also fix namespaces.  Sorry!
 namespace c10 { namespace hip {
 
 // Note [Masquerading as CUDA]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// HIPGuardImplMasqueradingAsCUDA is like a HIPGuardImpl, but
-// it reports its DeviceType as CUDA (e.g., type() returns CUDA,
-// getDevice() reports the current HIP device as a CUDA device.)
-// We can't directly use HIPGuardImpl, since it (piously) requires
-// the DeviceType to be HIP.
+// c10_hip is very easy to understand: it is HIPified from c10_cuda,
+// and anywhere you said CUDA, the source code now says HIP.  HIPified
+// PyTorch is much harder to understand: it is HIPified from regular
+// PyTorch, yes, but NO source-to-source translation from CUDA to
+// HIP occurs; instead, anywhere we see "CUDA", it actually means "HIP".
+// For example, when you use HIPified PyTorch, you say x.cuda() to
+// move a tensor onto ROCm device.  We call this situation "HIP
+// maquerading as CUDA".
 //
-// This is necessary for PyTorch at the moment, which is implemented
-// by pretending that CUDA is actually HIP.  Eventually, we want
-// to make PyTorch treat HIP as a separate DeviceType, and then we
-// can delete this class.
+// This leads to a very awkward situation when we want to call c10_hip
+// code from PyTorch, since c10_hip is expecting things to be called
+// HIP, but PyTorch is calling them CUDA (masquerading as HIP).  To
+// fix this impedance mismatch, we have MasqueradingAsCUDA variants
+// for all c10_hip classes.  These translate between the "HIP" and "CUDA
+// masquerading as HIP" worlds.  For example,
+// HIPGuardImplMasqueradingAsCUDA (this file) provides something like a
+// HIPGuardImpl, but it reports its DeviceType as CUDA (e.g., type()
+// returns CUDA, getDevice() reports the current HIP device as a CUDA
+// device.)
 //
-// Also, note that the cpp file associated with this also *overwrites*
-// the entry in the DeviceGuardImpl registry for CUDA with this HIP
-// implementation.
+// We should be able to delete all of these classes entirely once
+// we switch PyTorch to calling a HIP a HIP.
+//
+// When you add a new MasqueradingAsCUDA class/function, you need to
+// also update the rewrite rules in tools/amd_build/pyHIPIFY/cuda_to_hip_mappings.py
+//
+//
+//
+// By the way, note that the cpp file associated with this also
+// *overwrites* the entry in the DeviceGuardImpl registry for CUDA with
+// this HIP implementation.
+
 struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
   HIPGuardImplMasqueradingAsCUDA() {}
@@ -61,12 +81,12 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     hipSetDevice(d.index());
   }
   Stream getStream(Device d) const noexcept override {
-    return getCurrentHIPStream().unwrap();
+    return getCurrentHIPStreamMasqueradingAsCUDA().unwrap();
   }
   Stream exchangeStream(Stream s) const noexcept override {
-    HIPStream cs(s);
-    auto old_stream = getCurrentHIPStream(s.device().index());
-    setCurrentHIPStream(cs);
+    HIPStreamMasqueradingAsCUDA cs(s);
+    auto old_stream = getCurrentHIPStreamMasqueradingAsCUDA(s.device().index());
+    setCurrentHIPStreamMasqueradingAsCUDA(cs);
     return old_stream.unwrap();
   }
   DeviceIndex deviceCount() const override {
@@ -134,11 +154,11 @@ struct HIPStreamGuardMasqueradingAsCUDA {
 
   void reset_stream(Stream stream) { guard_.reset_stream(stream); }
 
-  HIPStream original_stream() const {
-    return HIPStream(HIPStream::UNCHECKED, guard_.original_stream());
+  HIPStreamMasqueradingAsCUDA original_stream() const {
+    return HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, guard_.original_stream());
   }
-  HIPStream current_stream() const {
-    return HIPStream(HIPStream::UNCHECKED, guard_.current_stream());
+  HIPStreamMasqueradingAsCUDA current_stream() const {
+    return HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, guard_.current_stream());
   }
 
   Device current_device() const { return guard_.current_device(); }
@@ -160,19 +180,19 @@ struct OptionalHIPStreamGuardMasqueradingAsCUDA {
 
   void reset_stream(Stream stream) { guard_.reset_stream(stream); }
 
-  optional<HIPStream> original_stream() const {
+  optional<HIPStreamMasqueradingAsCUDA> original_stream() const {
     auto r = guard_.original_stream();
     if (r.has_value()) {
-      return make_optional(HIPStream(HIPStream::UNCHECKED, r.value()));
+      return make_optional(HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value()));
     } else {
       return nullopt;
     }
   }
 
-  optional<HIPStream> current_stream() const {
+  optional<HIPStreamMasqueradingAsCUDA> current_stream() const {
     auto r = guard_.current_stream();
     if (r.has_value()) {
-      return make_optional(HIPStream(HIPStream::UNCHECKED, r.value()));
+      return make_optional(HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value()));
     } else {
       return nullopt;
     }

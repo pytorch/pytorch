@@ -523,6 +523,7 @@ binary_populate_env: &binary_populate_env
   name: Set up env
   command: |
     set -ex
+    export TZ=UTC
 
     # We need to write an envfile to persist these variables to following
     # steps, but the location of the envfile depends on the circleci executor
@@ -559,18 +560,22 @@ binary_populate_env: &binary_populate_env
     fi
 
     # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
-    export PYTORCH_BUILD_VERSION="1.0.0.dev$(date +%Y%m%d)"
+    export DATE="$(date -u +%Y%m%d)"
+    export PYTORCH_BUILD_VERSION="1.0.0.dev$DATE"
     export PYTORCH_BUILD_NUMBER=1
 
     cat >>"$envfile" <<EOL
     # =================== The following code will be executed inside Docker container ===================
+    export TZ=UTC
+    echo "Running on $(uname -a) at $(date)"
+
     export PACKAGE_TYPE="$PACKAGE_TYPE"
     export DESIRED_PYTHON="$DESIRED_PYTHON"
     export DESIRED_CUDA="$DESIRED_CUDA"
     export LIBTORCH_VARIANT="$LIBTORCH_VARIANT"
     export BUILD_PYTHONLESS="$BUILD_PYTHONLESS"
 
-    export DATE=today
+    export DATE="$DATE"
     export NIGHTLIES_DATE_PREAMBLE=1.0.0.dev
     export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
     export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
@@ -634,7 +639,7 @@ binary_checkout: &binary_checkout
       git checkout -q -B master
     else
       # nightly binary builds. These run at 05:05 UTC every day. 
-      last_commit="$(git rev-list --before "$(date +%Y-%m-%d) 05:00" --max-count 1 HEAD)"
+      last_commit="$(git rev-list --before "$(date -u +%Y-%m-%d) 05:00" --max-count 1 HEAD)"
       git checkout "$last_commit"
     fi
     git submodule update --init --recursive --quiet
@@ -679,7 +684,8 @@ binary_install_miniconda: &binary_install_miniconda
     export PATH="$MINICONDA_ROOT/bin:$PATH"
     source "$MINICONDA_ROOT/bin/activate"
     # We can't actually add miniconda to the PATH in the envfile, because that
-    # breaks 'unbuffer' in Mac jobs
+    # breaks 'unbuffer' in Mac jobs. This is probably because conda comes with
+    # a tclsh, which then gets inserted before the tclsh needed in /usr/bin
 
 
 # This section is used in the binary_test and smoke_test jobs. It expects
@@ -723,6 +729,14 @@ binary_linux_build: &binary_linux_build
       <<: *binary_populate_env
   - run:
       <<: *binary_checkout
+  - run:
+      name: Install unbuffer and ts
+      command: |
+        set -ex
+        source /env
+        retry yum -q -y install epel-release
+        retry yum -q -y install expect moreutils
+
 
   - run:
       name: Build
@@ -744,8 +758,18 @@ binary_linux_build: &binary_linux_build
           build_script='manywheel/build.sh'
         fi
 
+        # We want to call unbuffer, which calls tclsh which finds the expect
+        # package. The expect was installed by yum into /usr/bin so we want to
+        # find /usr/bin/tclsh, but this is shadowed by /opt/conda/bin/tclsh in
+        # the conda docker images.
+        if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
+          mkdir /just_tclsh_bin
+          ln -s /usr/bin/tclsh /just_tclsh_bin/tclsh
+          export PATH=/just_tclsh_bin:$PATH
+        fi
+
         # Build the package
-        SKIP_ALL_TESTS=1 "/builder/$build_script"
+        SKIP_ALL_TESTS=1 unbuffer "/builder/$build_script" | ts
   - persist_to_workspace:
       root: /
       paths: final_pkgs
@@ -1063,118 +1087,118 @@ jobs:
   pytorch_linux_trusty_py2_7_9_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-trusty-py2.7.9-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7.9:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7.9:291"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py2_7_9_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-trusty-py2.7.9-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7.9:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7.9:291"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_py2_7_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-trusty-py2.7-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7:291"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py2_7_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-trusty-py2.7-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py2.7:291"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_py3_5_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.5-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:291"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py3_5_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.5-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:291"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_py3_6_gcc4_8_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.6-gcc4.8-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc4.8:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc4.8:291"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py3_6_gcc4_8_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.6-gcc4.8-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc4.8:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc4.8:291"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_py3_6_gcc5_4_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.6-gcc5.4-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:291"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py3_6_gcc5_4_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.6-gcc5.4-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:291"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_xla_linux_trusty_py3_6_gcc5_4_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-xla-linux-trusty-py3.6-gcc5.4-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:291"
     <<: *pytorch_linux_build_defaults
 
   pytorch_xla_linux_trusty_py3_6_gcc5_4_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-xla-linux-trusty-py3.6-gcc5.4-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc5.4:291"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_py3_6_gcc7_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.6-gcc7-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:291"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_py3_6_gcc7_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.6-gcc7-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:291"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_trusty_pynightly_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-trusty-pynightly-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:291"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_trusty_pynightly_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-trusty-pynightly-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:291"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_xenial_py3_clang5_asan_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-asan-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:291"
       PYTHON_VERSION: "3.6"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_xenial_py3_clang5_asan_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-asan-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:291"
       PYTHON_VERSION: "3.6"
     resource_class: large
     <<: *pytorch_linux_test_defaults
@@ -1182,14 +1206,14 @@ jobs:
   pytorch_linux_xenial_cuda8_cudnn7_py3_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda8-cudnn7-py3-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:291"
       PYTHON_VERSION: "3.6"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_xenial_cuda8_cudnn7_py3_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda8-cudnn7-py3-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:291"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -1198,7 +1222,7 @@ jobs:
   pytorch_linux_xenial_cuda8_cudnn7_py3_multigpu_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda8-cudnn7-py3-multigpu-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:291"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
       MULTI_GPU: "1"
@@ -1208,7 +1232,7 @@ jobs:
   pytorch_linux_xenial_cuda8_cudnn7_py3_NO_AVX2_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX2-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:291"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -1217,7 +1241,7 @@ jobs:
   pytorch_linux_xenial_cuda8_cudnn7_py3_NO_AVX_NO_AVX2_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda8-cudnn7-py3-NO_AVX-NO_AVX2-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:291"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -1226,14 +1250,14 @@ jobs:
   pytorch_linux_xenial_cuda9_cudnn7_py2_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py2-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:291"
       PYTHON_VERSION: "2.7"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_xenial_cuda9_cudnn7_py2_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py2-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:291"
       PYTHON_VERSION: "2.7"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -1242,14 +1266,14 @@ jobs:
   pytorch_linux_xenial_cuda9_cudnn7_py3_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py3-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:291"
       PYTHON_VERSION: "3.6"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_xenial_cuda9_cudnn7_py3_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py3-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:291"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -1258,14 +1282,14 @@ jobs:
   pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:291"
       PYTHON_VERSION: "3.6"
     <<: *pytorch_linux_build_defaults
 
   pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:291"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -1274,14 +1298,14 @@ jobs:
   pytorch_linux_xenial_cuda10_cudnn7_py3_gcc7_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7:291"
       PYTHON_VERSION: "3.6"
     <<: *pytorch_linux_build_defaults
 
   pytorch_short_perf_test_gpu:
     environment:
       BUILD_ENVIRONMENT: pytorch-short-perf-test-gpu
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:291"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -1314,7 +1338,7 @@ jobs:
   pytorch_doc_push:
     environment:
       BUILD_ENVIRONMENT: pytorch-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:282"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:291"
     resource_class: large
     machine:
       image: default
