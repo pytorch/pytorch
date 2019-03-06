@@ -883,14 +883,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * The device of a Tensor; e.g., Device(kCUDA, 1) (the 1-index CUDA
-   * device).
-   */
-  Device GetDevice() const {
-    return storage_.device();
-  }
-
-  /**
    * @brief Extends the outer-most dimension of this tensor by num elements,
    * preserving the existing data.
    *
