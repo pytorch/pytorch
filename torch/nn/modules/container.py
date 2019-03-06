@@ -535,7 +535,7 @@ class ParameterDict(Module):
             an iterable of key-value pairs, the order of new elements in it is preserved.
 
         Arguments:
-            parameters (iterable): a mapping (dictionary) from strin to
+            parameters (iterable): a mapping (dictionary) from string to
                 :class:`~torch.nn.Parameter`, or an iterable of
                 key-value pairs of type (string, :class:`~torch.nn.Parameter`)
         """
