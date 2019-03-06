@@ -8024,7 +8024,7 @@ a")
             graph = torch.jit.script(fn).graph
             self.run_pass('loop_unrolling', graph)
             # entirely unrolled
-            FileCheck().check_not("aten::sub").run(str(graph))
+            FileCheck().check_not("prim::Loop'").run(str(graph))
             self.checkScript(fn, ())
 
         check(fn, 'add_const')
