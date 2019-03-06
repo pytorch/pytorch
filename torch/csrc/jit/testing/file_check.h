@@ -21,7 +21,7 @@ struct FileCheck {
   TORCH_API FileCheck* check(const std::string& str);
 
   // Checks that the string does not occur between the previous match and next
-  // match Consecutive check_nots test against the same previous match and next
+  // match. Consecutive check_nots test against the same previous match and next
   // match
   TORCH_API FileCheck* check_not(const std::string& str);
 
@@ -32,15 +32,19 @@ struct FileCheck {
   // previous match
   TORCH_API FileCheck* check_next(const std::string& str);
 
-  // Checks that the string occurs count number of times. If exactly is true,
-  // checks that there are exactly count many matches
+  // Checks that the string occurs count number of times, starting at the end
+  // of the previous match. If exactly is true, checks that there are exactly
+  // count many matches
   TORCH_API FileCheck* check_count(
       const std::string& str,
       size_t count,
       bool exactly = false);
 
   // A series of consecutive check_dags get turned into a group of checks
-  // which can appear in any order relative to each other.
+  // which can appear in any order relative to each other. The checks begin
+  // at the end of the previous match, and the match for the check_dag group
+  // is the minimum match of all individual checks to the maximum match of all
+  // individual checks.
   TORCH_API FileCheck* check_dag(const std::string& str);
 
   // reset checks

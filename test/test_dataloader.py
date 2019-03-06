@@ -53,7 +53,7 @@ JOIN_TIMEOUT = 17.0 if (IS_WINDOWS or IS_PPC) else 13.0
 
 
 class TestDatasetRandomSplit(TestCase):
-    def test_lengths_must_equal_datset_size(self):
+    def test_lengths_must_equal_dataset_size(self):
         with self.assertRaises(ValueError):
             random_split([1, 2, 3, 4], [1, 2])
 
