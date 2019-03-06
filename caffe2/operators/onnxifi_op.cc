@@ -151,42 +151,69 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
     SetOutputTensorDescriptorTypeAndBuffer(
         type, output_tensor, &tensor_descriptor);
   }
-
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxSetGraphIO(
-          graph_,
-          input_desc_.size(),
-          input_desc_.data(),
-          output_desc_.size(),
-          output_desc_.data()),
-      ONNXIFI_STATUS_SUCCESS);
-
+  bool ext_supported = false;
   onnxMemoryFenceV1 input_fence;
-  input_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
-  input_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxInitEvent(backend_, &input_fence.event),
-      ONNXIFI_STATUS_SUCCESS);
   onnxMemoryFenceV1 output_fence;
-  output_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
-  output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
+#ifdef ONNXIFI_ENABLE_EXT
+  /**
+   * If onnxifi extension mode is enabled,
+   * and onnxSetIOAndRunGraph is supported in backend,
+   * then we run throw this workflow;
+   * Else we fallback to non-onnxifi-extension workflow.
+   **/
+  if (onnxSetIOAndRunGraphPointer_ != nullptr) {
+    ext_supported = true;
+    output_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
+    output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
+    CAFFE_ENFORCE_EQ(
+        (*onnxSetIOAndRunGraphPointer_)(
+            graph_,
+            input_desc_.size(),
+            input_desc_.data(),
+            output_desc_.size(),
+            output_desc_.data(),
+            &output_fence),
+        ONNXIFI_STATUS_SUCCESS);
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
+  }
+#endif
+  if (!ext_supported) {
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxSetGraphIO(
+            graph_,
+            input_desc_.size(),
+            input_desc_.data(),
+            output_desc_.size(),
+            output_desc_.data()),
+        ONNXIFI_STATUS_SUCCESS);
 
-  // Call the asycn run on backend, singal event on input fence and wait for the
-  // event on output fence
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxSignalEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxRunGraph(graph_, &input_fence, &output_fence),
-      ONNXIFI_STATUS_SUCCESS);
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
+    input_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
+    input_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxInitEvent(backend_, &input_fence.event),
+        ONNXIFI_STATUS_SUCCESS);
+    output_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
+    output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
 
-  // Destroy the event objects
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxReleaseEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
+    // Call the async run on backend, signal event on input fence and wait for
+    // the event on output fence
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxRunGraph(graph_, &input_fence, &output_fence),
+        ONNXIFI_STATUS_SUCCESS);
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxSignalEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
 
+    // Destroy the event objects
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxReleaseEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
+  }
   return true;
 }
 

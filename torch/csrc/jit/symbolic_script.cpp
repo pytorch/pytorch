@@ -338,7 +338,7 @@ const std::vector<std::string> functions = {
             elif dim == 2:
                 out = mat.t()
             else:
-                dims = range(dim)
+                dims = rangelist(dim)
                 dims[-1] = dim - 2
                 dims[-2] = dim - 1
                 out = mat.permute(dims)

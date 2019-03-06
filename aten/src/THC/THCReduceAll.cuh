@@ -27,7 +27,7 @@ template <typename T,
           int ADims>
 __global__ void
 #if defined(__HIP_PLATFORM_HCC__)
-C10_LAUNCH_BOUNDS(THC_REDUCE_ALL_BLOCK_SIZE)
+C10_LAUNCH_BOUNDS_1(THC_REDUCE_ALL_BLOCK_SIZE)
 #endif
 kernelReduceAll(TensorInfo<T, IndexType> in,
                 IndexType totalElements,
@@ -299,7 +299,7 @@ bool THC_reduceAll(THCState* state,
 
     /*
     Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time. 
+    large (64-bit indexed) tensors to reduce compilation time.
     */
     if (inInfo.dims == 1) {
       HANDLE_IN_CASE(uint64_t, 1);
