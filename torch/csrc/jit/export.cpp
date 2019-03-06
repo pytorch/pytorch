@@ -115,17 +115,23 @@ class EncoderBase {
   }
 
  protected:
+  // Using std::map instead of std::unordered_map for initializers
+  // in EncodeGraph cosntructor so that the order in which initializers
+  // get written to the ONNX graph is always the deterministic and 
+  // predictable. While this is not a ONNX requirement, it is needed 
+  // for testing purposes in tests that use _export_to_pretty_string()
+  // for validating ONNX graphs.
   void EncodeGraph(
       onnx::GraphProto* graph_proto,
       const std::shared_ptr<Graph>& graph,
-      const std::unordered_map<std::string, at::Tensor>& initializers = 
-        std::unordered_map<std::string, at::Tensor>());
+      const std::map<std::string, at::Tensor>& initializers = 
+        std::map<std::string, at::Tensor>());
 
   void EncodeBlock(
       onnx::GraphProto* graph_proto,
       const Block* block,
-      const std::unordered_map<std::string, at::Tensor>& initializers = 
-        std::unordered_map<std::string, at::Tensor>());
+      const std::map<std::string, at::Tensor>& initializers = 
+        std::map<std::string, at::Tensor>());
 
   virtual void EncodeTensor(
       onnx::TensorProto* tensor_proto,
@@ -211,14 +217,14 @@ void EncoderBase::EncodeValueInfo(
 void EncoderBase::EncodeGraph(
     onnx::GraphProto* graph_proto,
     const std::shared_ptr<Graph>& graph,
-    const std::unordered_map<std::string, at::Tensor>& initializers) {
+    const std::map<std::string, at::Tensor>& initializers) {
   EncodeBlock(graph_proto, graph->block(), initializers);
 }
 
 void EncoderBase::EncodeBlock(
     onnx::GraphProto* graph_proto,
     const Block* block,
-    const std::unordered_map<std::string, at::Tensor>& initializers) {
+    const std::map<std::string, at::Tensor>& initializers) {
   AT_ASSERT(graph_proto != nullptr);
   std::string block_name = "torch-jit-export";
   if (num_blocks_) {
@@ -306,11 +312,7 @@ void EncoderBase::EncodeBlock(
     }
   }
   AT_ASSERT(block->inputs().size() >= initializers.size());
-  // Copying initializers to into an (ordered) stdd::map so that
-  // initializers always gets written into ONNX graph in the same 
-  // order. Mostly done for testing purpose.
-  for (auto& name_tensor_pair : 
-        std::map<std::string, at::Tensor>(initializers.begin(), initializers.end())) {
+  for (auto& name_tensor_pair : initializers) {
     auto p = graph_proto->add_initializer();
     p->set_name(name_tensor_pair.first);
     EncodeTensor(p, name_tensor_pair.second, name_tensor_pair.first);
@@ -387,7 +389,7 @@ class GraphEncoder : public EncoderBase {
       const std::shared_ptr<Graph>& graph,
       int64_t onnx_opset_version,
       onnx_torch::OperatorExportTypes operator_export_type,
-      const std::unordered_map<std::string, at::Tensor>& initializers,
+      const std::map<std::string, at::Tensor>& initializers,
       bool defer_weight_export,
       bool strip_doc);
 
@@ -409,7 +411,7 @@ GraphEncoder::GraphEncoder(
     const std::shared_ptr<Graph>& graph,
     int64_t onnx_opset_version,
     onnx_torch::OperatorExportTypes operator_export_type,
-    const std::unordered_map<std::string, at::Tensor>& initializers,
+    const std::map<std::string, at::Tensor>& initializers,
     bool defer_weight_export,
     bool strip_doc)
     : EncoderBase(operator_export_type, strip_doc),
@@ -859,7 +861,7 @@ std::string prettyPrint(const onnx::ModelProto& model) {
 
 std::string pretty_print_onnx(
     const std::shared_ptr<Graph>& graph,
-    const std::unordered_map<std::string, at::Tensor>& initializers,
+    const std::map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
     bool defer_weight_export,
     ::torch::onnx::OperatorExportTypes operator_export_type,
@@ -884,7 +886,7 @@ std::string pretty_print_onnx(
 // libtorch will be able to import the IR and play it back.
 std::tuple<std::string, RawDataExportMap> export_onnx(
     const std::shared_ptr<Graph>& graph,
-    const std::unordered_map<std::string, at::Tensor>& initializers,
+    const std::map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
     bool defer_weight_export,
     ::torch::onnx::OperatorExportTypes operator_export_type) {
