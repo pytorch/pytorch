@@ -293,7 +293,7 @@ struct ModuleValue : public SugaredValue {
     // it adds a buffer 'training' to the model if one doesn't exist
     // and then loads that parameter, casting it to bool
     if (field == "training") {
-      NamedInput* v = module->find_buffer(field);
+      NamedIValue* v = module->find_buffer(field);
       if (!v) {
         py::object py_module = py::cast(module);
         bool training = py::cast<bool>(py::getattr(py_module, "training"));
@@ -311,9 +311,9 @@ struct ModuleValue : public SugaredValue {
       return std::make_shared<ModuleValue>(v->module);
     } else if (Method* v = module->find_method(field)) {
       return std::make_shared<MethodValue>(shared_from_this(), *v);
-    } else if (NamedInput* v = module->find_parameter(field)) {
+    } else if (NamedIValue* v = module->find_parameter(field)) {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
-    } else if (NamedInput* v = module->find_attribute(field)) {
+    } else if (NamedIValue* v = module->find_attribute(field)) {
       return std::make_shared<SimpleValue>(
           m.get_or_add_attribute(v->type, v->slot()));
     }
@@ -932,7 +932,7 @@ void initJitScriptBindings(PyObject* module) {
              std::shared_ptr<Module> orig) {
             std::vector<IValue*> member_inputs;
             for (auto& p : params) {
-              NamedInput* np =
+              NamedIValue* np =
                   std::get<0>(p)->find_parameter(std::get<1>(p));
               if (np == nullptr) {
                 np = std::get<0>(p)->find_buffer(std::get<1>(p));

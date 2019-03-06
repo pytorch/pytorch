@@ -499,7 +499,7 @@ class ScriptModuleSerializer final {
       torch::ModuleDef* module_def);
 
   void convertParameter(
-      const script::NamedInput& param,
+      const script::NamedIValue& param,
       torch::ParameterDef* param_def,
       bool is_parameter);
 
@@ -679,7 +679,7 @@ void ScriptModuleSerializer::convertModule(
 }
 
 void ScriptModuleSerializer::convertParameter(
-    const script::NamedInput& param,
+    const script::NamedIValue& param,
     torch::ParameterDef* param_def,
     bool is_parameter) {
   param_def->set_name(param.name_);

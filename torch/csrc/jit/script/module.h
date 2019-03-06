@@ -358,8 +358,8 @@ struct NamedModule {
   std::shared_ptr<Module> module;
 };
 
-struct NamedInput {
-  NamedInput(std::string name, TypePtr type, IValue ivalue)
+struct NamedIValue {
+  NamedIValue(std::string name, TypePtr type, IValue ivalue)
       : name_(name),
         type(type),
         ivalue(torch::make_unique<IValue>(std::move(ivalue))) {}
@@ -401,7 +401,7 @@ struct Module {
       *b->slot() = v;
       return;
     }
-    attributes.insert(name, NamedInput(name, TensorType::get(), std::move(v)));
+    attributes.insert(name, NamedIValue(name, TensorType::get(), std::move(v)));
   }
   void register_parameter(
       const std::string& name,
@@ -415,13 +415,13 @@ struct Module {
       *p->slot() = v;
       return;
     }
-    parameters.insert(name, NamedInput(name, TensorType::get(), std::move(v)));
+    parameters.insert(name, NamedIValue(name, TensorType::get(), std::move(v)));
   }
   void register_attribute(
       const std::string& name,
       const TypePtr type,
       IValue ivalue) {
-    attributes.insert(name, NamedInput(name, type, ivalue));
+    attributes.insert(name, NamedIValue(name, type, ivalue));
   }
   void register_module(
       const std::string& name,
@@ -485,11 +485,11 @@ struct Module {
   const torch::OrderedDict<std::string, NamedModule>& get_modules() const {
     return modules;
   }
-  const torch::OrderedDict<std::string, NamedInput>& get_parameters()
+  const torch::OrderedDict<std::string, NamedIValue>& get_parameters()
       const {
     return parameters;
   }
-  const torch::OrderedDict<std::string, NamedInput>& get_attributes()
+  const torch::OrderedDict<std::string, NamedIValue>& get_attributes()
       const {
     return attributes;
   }
@@ -498,13 +498,13 @@ struct Module {
     return methods;
   }
 
-  NamedInput* find_parameter(const std::string& name) {
+  NamedIValue* find_parameter(const std::string& name) {
     return parameters.find(name);
   }
-  NamedInput* find_attribute(const std::string& name) {
+  NamedIValue* find_attribute(const std::string& name) {
     return attributes.find(name);
   }
-  NamedInput* find_buffer(const std::string& name) {
+  NamedIValue* find_buffer(const std::string& name) {
     auto b = attributes.find(name);
     if (b && b->type->isSubtypeOf(TensorType::get())) {
       return b;
@@ -651,8 +651,8 @@ struct Module {
   // removing them will allow initial_ivalues to point to invalid parameters
   // no such restriction exists for methods
   torch::OrderedDict<std::string, NamedModule> modules;
-  torch::OrderedDict<std::string, NamedInput> parameters;
-  torch::OrderedDict<std::string, NamedInput> attributes;
+  torch::OrderedDict<std::string, NamedIValue> parameters;
+  torch::OrderedDict<std::string, NamedIValue> attributes;
   torch::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;
 };
