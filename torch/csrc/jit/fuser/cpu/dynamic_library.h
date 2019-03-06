@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/utils/disallow_copy.h>
 
 namespace torch {
@@ -16,6 +16,8 @@ struct DynamicLibrary {
   void* sym(const char* name);
 
   ~DynamicLibrary();
+
+  static std::string directoryOf(void* addr);
 
  private:
   void* handle = nullptr;

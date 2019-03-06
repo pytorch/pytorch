@@ -45,7 +45,7 @@ CAFFE_KNOWN_TYPE(BlobTestNonDefaultConstructible);
 class BlobTestFooSerializer : public BlobSerializerBase {
  public:
   BlobTestFooSerializer() {}
-  ~BlobTestFooSerializer() {}
+  ~BlobTestFooSerializer() override {}
   /**
    * Serializes a Blob. Note that this blob has to contain Tensor,
    * otherwise this function produces a fatal error.
@@ -212,8 +212,7 @@ TEST(TensorNonTypedTest, TensorChangeType) {
 
   // share the data with other tensor so that the pointer won't be reused
   // when we reallocate
-  Tensor other_tensor(dims, CPU);
-  other_tensor.ShareData(tensor);
+  Tensor other_tensor = tensor.Alias();
   // but double is bigger, so it should allocate a new one
   auto* doubleptr = tensor.mutable_data<double>();
   EXPECT_TRUE(doubleptr != (double*)ptr);
@@ -337,15 +336,14 @@ TYPED_TEST(TensorCPUTest, TensorInitializedScalar) {
   EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
 }
 
-TYPED_TEST(TensorCPUTest, TensorShareData) {
+TYPED_TEST(TensorCPUTest, TensorAlias) {
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
   dims[2] = 5;
   Tensor tensor(dims, CPU);
-  Tensor other_tensor(dims, CPU);
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
-  other_tensor.ShareData(tensor);
+  Tensor other_tensor = tensor.Alias();
   EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
   EXPECT_TRUE(other_tensor.data<TypeParam>() != nullptr);
   EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
@@ -391,7 +389,7 @@ TYPED_TEST(TensorCPUTest, TensorShareDataRawPointerWithMeta) {
   }
 }
 
-TYPED_TEST(TensorCPUTest, TensorShareDataCanUseDifferentShapes) {
+TYPED_TEST(TensorCPUTest, TensorAliasCanUseDifferentShapes) {
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
@@ -399,9 +397,9 @@ TYPED_TEST(TensorCPUTest, TensorShareDataCanUseDifferentShapes) {
   vector<int> alternate_dims(1);
   alternate_dims[0] = 2 * 3 * 5;
   Tensor tensor(dims, CPU);
-  Tensor other_tensor(alternate_dims, CPU);
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
-  other_tensor.ShareData(tensor);
+  Tensor other_tensor = tensor.Alias();
+  other_tensor.Resize(alternate_dims);
   EXPECT_EQ(other_tensor.dim(), 1);
   EXPECT_EQ(other_tensor.dim32(0), alternate_dims[0]);
   EXPECT_TRUE(tensor.data<TypeParam>() != nullptr);
@@ -415,15 +413,14 @@ TYPED_TEST(TensorCPUTest, TensorShareDataCanUseDifferentShapes) {
 }
 
 
-TYPED_TEST(TensorCPUTest, NoLongerSharesAfterResize) {
+TYPED_TEST(TensorCPUTest, NoLongerAliassAfterNumelChanges) {
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
   dims[2] = 5;
   Tensor tensor(dims, CPU);
-  Tensor other_tensor(dims, CPU);
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
-  other_tensor.ShareData(tensor);
+  Tensor other_tensor = tensor.Alias();
   EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
   auto* old_pointer = other_tensor.data<TypeParam>();
 
@@ -433,15 +430,14 @@ TYPED_TEST(TensorCPUTest, NoLongerSharesAfterResize) {
   EXPECT_NE(old_pointer, tensor.mutable_data<TypeParam>());
 }
 
-TYPED_TEST(TensorCPUTest, NoLongerSharesAfterFreeMemory) {
+TYPED_TEST(TensorCPUTest, NoLongerAliasAfterFreeMemory) {
   vector<int> dims(3);
   dims[0] = 2;
   dims[1] = 3;
   dims[2] = 5;
   Tensor tensor(dims, CPU);
-  Tensor other_tensor(dims, CPU);
   EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
-  other_tensor.ShareData(tensor);
+  Tensor other_tensor = tensor.Alias();
   EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
   auto* old_pointer = other_tensor.data<TypeParam>();
 
@@ -796,7 +792,7 @@ class VectorCursor : public db::Cursor {
   explicit VectorCursor(StringMap* data) : data_(data) {
     pos_ = 0;
   }
-  ~VectorCursor() {}
+  ~VectorCursor() override {}
   void Seek(const string& /* unused */) override {}
   void SeekToFirst() override {}
   void Next() override {
@@ -821,7 +817,7 @@ class VectorDB : public db::DB {
  public:
   VectorDB(const string& source, db::Mode mode)
       : DB(source, mode), name_(source) {}
-  ~VectorDB() {
+  ~VectorDB() override {
     data_.erase(name_);
   }
   void Close() override {}
@@ -953,7 +949,7 @@ struct DummyType {
 class DummyTypeSerializer : public BlobSerializerBase {
  public:
   DummyTypeSerializer() {}
-  ~DummyTypeSerializer() {}
+  ~DummyTypeSerializer() override {}
   void Serialize(
       const void* pointer,
       TypeMeta typeMeta,

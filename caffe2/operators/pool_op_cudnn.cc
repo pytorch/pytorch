@@ -50,8 +50,9 @@ void SetTensorDescriptor(
 template <class Functor>
 class CuDNNPoolOp final : public ConvPoolOpBase<CUDAContext> {
  public:
-  CuDNNPoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CUDAContext>(operator_def, ws),
+  template <class... Args>
+  explicit CuDNNPoolOp(Args&&... args)
+      : ConvPoolOpBase<CUDAContext>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_),
         functor_(*this),
         equal_padding_(std::equal(
@@ -86,26 +87,30 @@ class CuDNNPoolOp final : public ConvPoolOpBase<CUDAContext> {
     }
   }
 
-  ~CuDNNPoolOp() {
+  ~CuDNNPoolOp() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(X_desc_));
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(Y_desc_));
     CUDNN_ENFORCE(cudnnDestroyPoolingDescriptor(pooling_desc_));
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
   }
 
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
     ConvPoolOpBase<CUDAContext>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
+
+    if (N == 0) {
+      return true;
+    }
 
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
@@ -186,8 +191,9 @@ class CuDNNPoolOp final : public ConvPoolOpBase<CUDAContext> {
 template <class Functor>
 class CuDNNPoolGradientOp final : public ConvPoolOpBase<CUDAContext> {
  public:
-  CuDNNPoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CUDAContext>(operator_def, ws),
+  template <class... Args>
+  explicit CuDNNPoolGradientOp(Args&&... args)
+      : ConvPoolOpBase<CUDAContext>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_),
         functor_(*this),
         equal_padding_(std::equal(
@@ -222,14 +228,14 @@ class CuDNNPoolGradientOp final : public ConvPoolOpBase<CUDAContext> {
     }
   }
 
-  ~CuDNNPoolGradientOp() {
+  ~CuDNNPoolGradientOp() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(X_desc_));
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(Y_desc_));
     CUDNN_ENFORCE(cudnnDestroyPoolingDescriptor(pooling_desc_));
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
   }
 
   template <typename T>
@@ -238,7 +244,7 @@ class CuDNNPoolGradientOp final : public ConvPoolOpBase<CUDAContext> {
     const auto& Y = Input(1);
     const auto& dY = Input(2);
     auto* dX = Output(0, X.sizes(), at::dtype<T>());
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
     const std::vector<int> X_HW_dims = GetDims(X);
@@ -248,6 +254,10 @@ class CuDNNPoolGradientOp final : public ConvPoolOpBase<CUDAContext> {
     const T* X_data = X.template data<T>();
     const T* Y_data = Y.template data<T>();
     T* dX_data = dX->template mutable_data<T>();
+
+    if (N == 0) {
+      return true;
+    }
 
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
@@ -349,13 +359,8 @@ struct CuDNNAveragePoolFunctor {
       const T* X,
       T* Y,
       CUDAContext* context) const {
-    if (std::is_same<T, at::Half>::value) {
-      CAFFE_THROW("Float16 is not supported for average_pooling.");
-      return false;
-    } else {
       return avg_pool_functor.GlobalPoolingForward<T, kOrder>(
           N, C, HxW, X, Y, context);
-    }
   }
 
   template <typename T, StorageOrder kOrder>
@@ -371,13 +376,8 @@ struct CuDNNAveragePoolFunctor {
       const T* X,
       T* Y,
       CUDAContext* context) const {
-    if (std::is_same<T, at::Half>::value) {
-      CAFFE_THROW("Float16 is not supported for average_pooling.");
-      return false;
-    } else {
       return avg_pool_functor.Forward<T, kOrder>(
           N, C, X_dims, Y_dims, kernel, dilation, stride, pads, X, Y, context);
-    }
   }
 
   template <typename T, StorageOrder kOrder>
@@ -390,13 +390,8 @@ struct CuDNNAveragePoolFunctor {
       const T* Y,
       T* dX,
       CUDAContext* context) const {
-    if (std::is_same<T, at::Half>::value) {
-      CAFFE_THROW("Float16 is not supported for average_pooling.");
-      return false;
-    } else {
       return avg_pool_functor.GlobalPoolingBackward<T, kOrder>(
           N, C, HxW, dY, X, Y, dX, context);
-    }
   }
 
   template <typename T, StorageOrder kOrder>
@@ -414,10 +409,6 @@ struct CuDNNAveragePoolFunctor {
       const T* Y,
       T* dX,
       CUDAContext* context) const {
-    if (std::is_same<T, at::Half>::value) {
-      CAFFE_THROW("Float16 is not supported for average_pooling.");
-      return false;
-    } else {
       return avg_pool_functor.Backward<T, kOrder>(
           N,
           C,
@@ -432,7 +423,6 @@ struct CuDNNAveragePoolFunctor {
           Y,
           dX,
           context);
-    }
   }
 
   const AveragePoolFunctor<CUDAContext> avg_pool_functor;
@@ -459,13 +449,8 @@ struct CuDNNMaxPoolFunctor {
       const T* X,
       T* Y,
       CUDAContext* context) const {
-    if (std::is_same<T, at::Half>::value) {
-      CAFFE_THROW("Float16 is not supported for max_pooling.");
-      return false;
-    } else {
       return max_pool_functor.GlobalPoolingForward<T, kOrder>(
           N, C, HxW, X, Y, context);
-    }
   }
 
   template <typename T, StorageOrder kOrder>
@@ -481,13 +466,8 @@ struct CuDNNMaxPoolFunctor {
       const T* X,
       T* Y,
       CUDAContext* context) const {
-    if (std::is_same<T, at::Half>::value) {
-      CAFFE_THROW("Float16 is not supported for max_pooling.");
-      return false;
-    } else {
       return max_pool_functor.Forward<T, kOrder>(
           N, C, X_dims, Y_dims, kernel, dilation, stride, pads, X, Y, context);
-    }
   }
 
   template <typename T, StorageOrder kOrder>
@@ -500,13 +480,8 @@ struct CuDNNMaxPoolFunctor {
       const T* Y,
       T* dX,
       CUDAContext* context) const {
-    if (std::is_same<T, at::Half>::value) {
-      CAFFE_THROW("Float16 is not supported for max_pooling.");
-      return false;
-    } else {
       return max_pool_functor.GlobalPoolingBackward<T, kOrder>(
           N, C, HxW, dY, X, Y, dX, context);
-    }
   }
 
   template <typename T, StorageOrder kOrder>
@@ -524,10 +499,6 @@ struct CuDNNMaxPoolFunctor {
       const T* Y,
       T* dX,
       CUDAContext* context) const {
-    if (std::is_same<T, at::Half>::value) {
-      CAFFE_THROW("Float16 is not supported for max_pooling.");
-      return false;
-    } else {
       return max_pool_functor.Backward<T, kOrder>(
           N,
           C,
@@ -542,7 +513,6 @@ struct CuDNNMaxPoolFunctor {
           Y,
           dX,
           context);
-    }
   }
 
   const MaxPoolFunctor<CUDAContext> max_pool_functor;

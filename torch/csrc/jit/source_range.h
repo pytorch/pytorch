@@ -1,5 +1,5 @@
 #pragma once
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/source_location.h>
 
 #include <algorithm>
@@ -30,8 +30,8 @@ struct SourceRange : public SourceLocation {
       --begin_line;
     while (end_line < str.size() && str[end_line] != '\n')
       ++end_line;
-    JIT_ASSERT(begin_line == 0 || str[begin_line - 1] == '\n');
-    JIT_ASSERT(end_line == str.size() || str[end_line] == '\n');
+    AT_ASSERT(begin_line == 0 || str[begin_line - 1] == '\n');
+    AT_ASSERT(end_line == str.size() || str[end_line] == '\n');
 
     size_t begin_highlight = begin_line; // beginning of context, CONTEXT lines
                                          // before the highlight line
@@ -41,7 +41,7 @@ struct SourceRange : public SourceLocation {
       if (i >= CONTEXT)
         break;
     }
-    JIT_ASSERT(begin_highlight == 0 || str[begin_highlight - 1] == '\n');
+    AT_ASSERT(begin_highlight == 0 || str[begin_highlight - 1] == '\n');
 
     size_t end_highlight =
         end_line; // end of context, CONTEXT lines after the highlight line
@@ -51,7 +51,7 @@ struct SourceRange : public SourceLocation {
       if (i >= CONTEXT)
         break;
     }
-    JIT_ASSERT(end_highlight == str.size() || str[end_highlight] == '\n');
+    AT_ASSERT(end_highlight == str.size() || str[end_highlight] == '\n');
 
     out << str.substr(begin_highlight, end_line - begin_highlight) << "\n";
     out << std::string(start() - begin_line, ' ');

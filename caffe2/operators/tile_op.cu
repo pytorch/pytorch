@@ -5,19 +5,17 @@
 
 namespace caffe2 {
 namespace {
+template <typename T>
 __global__ void TileCopyKernel(
-    int item_size,
     int outer_dim,
     int inner_dim,
     int tiles,
-    const char* input_data,
-    char* output_data) {
-  CUDA_1D_KERNEL_LOOP(index, outer_dim * tiles) {
-    int i = index / tiles;
-    int t = index % tiles;
-    const char* input_ptr = input_data + inner_dim * item_size * i;
-    char* output_ptr = output_data + (i * tiles + t) * inner_dim * item_size;
-    memcpy(output_ptr, input_ptr, inner_dim * item_size);
+    const T* input_data,
+    T* output_data) {
+  CUDA_1D_KERNEL_LOOP(index, outer_dim * inner_dim * tiles) {
+    int col = index % inner_dim;
+    int row = index / (inner_dim * tiles);
+    output_data[index] = input_data[row * inner_dim + col];
   }
 }
 
@@ -58,12 +56,16 @@ void TileOp<CUDAContext>::DoTile(
     int inner_dim,
     const char* input_data,
     char* output_data) {
-  TileCopyKernel<<<
-      std::min(outer_dim * tiles_, CAFFE_MAXIMUM_NUM_BLOCKS),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      item_size, outer_dim, inner_dim, tiles_, input_data, output_data);
+  TileCopyKernel<float>
+      <<<std::min(outer_dim * inner_dim * tiles_, CAFFE_MAXIMUM_NUM_BLOCKS),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(
+          outer_dim,
+          inner_dim,
+          tiles_,
+          reinterpret_cast<const float*>(input_data),
+          reinterpret_cast<float*>(output_data));
 }
 
 template <>

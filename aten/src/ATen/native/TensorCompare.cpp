@@ -97,26 +97,6 @@ Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& o
   return ret;
 }
 
-std::tuple<Tensor, Tensor> kthvalue(const Tensor& self, int64_t k, int64_t dim, bool keepdim) {
-  Tensor values = at::empty({0}, self.options());
-  Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  return at::native::kthvalue_out(values, indices, self, k, dim, keepdim);
-}
-
-std::tuple<Tensor &,Tensor &> kthvalue_out(Tensor& values, Tensor& indices,
-                                           const Tensor& self, int64_t k, int64_t dim, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "kthvalue only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  dim = maybe_wrap_dim(dim, self.dim());
-  if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "kthvalue")) {
-    AT_ASSERT(values.dim() == 0);
-    indices.resize_({}).fill_(0);
-    return std::forward_as_tuple(values, indices);
-  } else {
-    return at::legacy::th::_th_kthvalue_out(values, indices, self, k, dim, keepdim);
-  }
-}
-
 std::tuple<Tensor, Tensor> median(const Tensor& self, int64_t dim, bool keepdim) {
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
@@ -196,10 +176,6 @@ std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
   }
 }
 
-Tensor max_values(const Tensor& self, int64_t dim, bool keepdim) {
-  return std::get<0>(self.max(dim, keepdim));
-}
-
 std::tuple<Tensor &,Tensor &> _min_out_cpu(Tensor& min, Tensor& min_indices,
                                         const Tensor& self, int64_t dim, bool keepdim) {
   if (self.is_contiguous() && min.is_contiguous() && min_indices.is_contiguous()) {
@@ -237,10 +213,6 @@ std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
       return _min_out_cpu(min, min_indices, self, dim, keepdim);
     }
   }
-}
-
-Tensor min_values(const Tensor& self, int64_t dim, bool keepdim) {
-  return std::get<0>(self.min(dim, keepdim));
 }
 
 // argmax and argmin

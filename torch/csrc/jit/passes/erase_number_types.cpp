@@ -9,7 +9,7 @@ static void EraseNumberTypesOnBlock(Block* block) {
        ++it) {
     for (auto inp : it->inputs()) {
       if (inp->type()->isSubtypeOf(NumberType::get())) {
-        inp->setType(DynamicType::get());
+        inp->setType(TensorType::get());
       }
     }
     for (auto sub : it->blocks()) {
@@ -24,7 +24,7 @@ static void EraseNumberTypesOnBlock(Block* block) {
           auto s = *constant_as<at::Scalar>(it->output());
           WithInsertPoint guard(*it);
           Value* r = block->owningGraph()->insertConstant(
-              scalar_to_tensor(s), c10::nullopt, it->scope());
+              scalar_to_tensor(s), nullptr, c10::nullopt, it->scope());
           it->output()->replaceAllUsesWith(r);
         }
       } break;

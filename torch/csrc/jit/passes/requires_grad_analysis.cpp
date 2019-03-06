@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/type.h>
+#include <ATen/core/jit_type.h>
 
 #include <vector>
 
@@ -15,7 +15,7 @@ bool getRequiresGrad(Value* value) {
 }
 
 void setRequiresGrad(Value* value, bool req_value) {
-  if (auto type = value->type()->cast<TensorType>()) {
+  if (auto type = value->type()->cast<DimensionedTensorType>()) {
     value->setType(type->withRequiresGrad(req_value));
   }
 }
@@ -23,7 +23,7 @@ void setRequiresGrad(Value* value, bool req_value) {
 void setRequiresGrad(
     at::ArrayRef<Value*> outputs,
     const std::vector<bool>& values) {
-  JIT_ASSERT(outputs.size() == values.size());
+  AT_ASSERT(outputs.size() == values.size());
   for (size_t i = 0; i < values.size(); ++i) {
     setRequiresGrad(outputs[i], values[i]);
   }
@@ -34,7 +34,7 @@ void setRequiresGrad(Node* node, const std::vector<bool>& values) {
 }
 
 std::vector<bool> bitwiseOr(std::vector<bool> a, const std::vector<bool>& b) {
-  JIT_ASSERT(a.size() == b.size());
+  AT_ASSERT(a.size() == b.size());
   for (size_t i = 0; i < a.size(); ++i) {
     a[i] = a[i] || b[i];
   }
@@ -71,7 +71,7 @@ void PropagateRequiresGradSimpleNode(Node* node) {
   bool should_require =
       std::any_of(inputs.begin(), inputs.end(), getRequiresGrad);
   for (Value* output : outputs) {
-    if (auto type = output->type()->cast<TensorType>()) {
+    if (auto type = output->type()->cast<DimensionedTensorType>()) {
       setRequiresGrad(
           output, should_require && at::isFloatingType(type->scalarType()));
     }

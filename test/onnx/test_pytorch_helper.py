@@ -64,5 +64,6 @@ class TestCaffe2Backend(unittest.TestCase):
 
         np.testing.assert_almost_equal(torch_out.data.cpu().numpy(), c2_out, decimal=3)
 
+
 if __name__ == '__main__':
     unittest.main()

@@ -16,6 +16,13 @@ IF(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DI
   SET(AT_INSTALL_SHARE_DIR "share" CACHE PATH "AT install include subdirectory")
 ENDIF()
 
+# this flag is used in Config but set externally, we must normalize it
+# to 0/1 otherwise `#if ON` will be evaluated to false.
+if (CAFFE2_STATIC_LINK_CUDA)
+  set(CAFFE2_STATIC_LINK_CUDA_INT 1)
+else()
+  set(CAFFE2_STATIC_LINK_CUDA_INT 0)
+endif()
 CONFIGURE_FILE(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 # TODO: Don't unconditionally generate CUDAConfig.h.in.  Unfortuantely,
 # this file generates AT_ROCM_ENABLED() which is required by the miopen

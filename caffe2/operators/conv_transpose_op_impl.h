@@ -19,7 +19,6 @@ template <typename T, class Context>
 bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const Tensor& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  Tensor* Y = Output(0);
   const int N = X.dim32(0), M = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   CAFFE_ENFORCE(filter.dim() == 4, "filter must be 4D tensor");
   CAFFE_ENFORCE(
@@ -32,7 +31,8 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE(
       filter.dim32(3) == this->kernel_w(),
       "filter width must be equal to kernel width");
-  ConvTransposeUnpoolBase<Context>::SetOutputSize(X, Y, C);
+  auto sizes = ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
+  Tensor* Y = Output(0, sizes, at::dtype<T>());
 
   const int kernel_dim = C * this->kernel_h() * this->kernel_w();
   const int input_image_size = H * W;
@@ -141,7 +141,6 @@ template <typename T, class Context>
 bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const Tensor& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  Tensor* Y = Output(0);
   const auto N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), M = X.dim32(3);
   CAFFE_ENFORCE(filter.dim() == 4, "filter must be 4D tensor");
   CAFFE_ENFORCE(
@@ -154,7 +153,8 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       filter.dim32(2) == this->kernel_w(),
       "filter width must be equal to kernel width");
   const int C = filter.dim32(3);
-  ConvTransposeUnpoolBase<Context>::SetOutputSize(X, Y, C);
+  auto sizes = ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
+  Tensor* Y = Output(0, sizes, at::dtype<T>());
 
   const auto kernel_dim = C * this->kernel_h() * this->kernel_w();
   const auto input_image_size = H * W;

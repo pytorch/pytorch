@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/fuser/codegen.h>
 
 #include <ATen/ATen.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/code_template.h>
 #include <torch/csrc/jit/fuser/compiler.h>
 #include <torch/csrc/jit/fuser/interface.h>
@@ -91,8 +91,8 @@ static std::string variableType(const std::shared_ptr<c10::Type>& t) {
     return "float";
   } else if (t->kind() == TypeKind::BoolType) {
     return "bool";
-  } else if (t->kind() == TypeKind::TensorType) {
-    auto const tt = t->cast<TensorType>();
+  } else if (t->kind() == TypeKind::DimensionedTensorType) {
+    auto const tt = t->cast<DimensionedTensorType>();
     return calcScalarTypeName(tt->scalarType());
   }
   // something went wrong with the type analysis during shape propagation
@@ -114,8 +114,8 @@ static std::string typeCastedValueName(
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
     return vn;
-  } else if (t->kind() == TypeKind::TensorType) {
-    auto const tt = t->cast<TensorType>();
+  } else if (t->kind() == TypeKind::DimensionedTensorType) {
+    auto const tt = t->cast<DimensionedTensorType>();
     if (tt->scalarType() != outtype) {
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
@@ -124,6 +124,36 @@ static std::string typeCastedValueName(
   // something went wrong with the type analysis during shape propagation
   throw std::runtime_error(
       "unknown scalar type during JIT fusion code generation");
+}
+
+// Writes RHS of special handling "simple mappable" ops
+static std::string encodeSpecialRHS(const Node* n, TemplateEnv& env) {
+  // special case for clamp fusion on missing min/max inputs
+  // Note: It may seem unusual to have the bounds as the first case below,
+  // this is so that if min or max is NaN, they are "ignored"
+  // and when the input is NaN, the output is, too
+  if (n->kind() == aten::clamp) {
+    const auto min = n->input(1);
+    const auto max = n->input(2);
+    env.s("0", valueName(n->input(0)));
+
+    if (!min->node()->mustBeNone() && !max->node()->mustBeNone()) {
+      env.s("1", valueName(min));
+      env.s("2", valueName(max));
+      return format("(${0} < ${1} ? ${1} : (${0} > ${2}? ${2} : ${0}))", env);
+    } else if (min->node()->mustBeNone()) {
+      env.s("1", valueName(max));
+      return format("(${0} > ${1} ? ${1} : ${0})", env);
+    } else if (max->node()->mustBeNone()) {
+      env.s("1", valueName(min));
+      return format("(${0} < ${1} ? ${1} : ${0})", env);
+    } else {
+      throw std::runtime_error(
+          "At least one of 'min' or 'max' must not be None");
+    }
+  } else {
+    throw std::runtime_error("Cannot encode RHS of the node, op not supported");
+  }
 }
 
 // Writes "simple mappable" ops
@@ -196,12 +226,6 @@ static std::string encodeRHS(const Node* n) {
       {aten::sub, "(${cast_0} - ${cast_2}*${cast_1})"},
       {aten::rand_like, "uniform(rnd())"},
 
-      // min, max
-      // It may seem unusual to have the bounds as the first case below,
-      // this is so that if min or max is NaN, they are "ignored"
-      // and when the input is NaN, the output is, too
-      {aten::clamp, "(${0}<${1}?${1}:(${0}>${2}?${2}:${0}))"},
-
       // where
       {aten::where, "(${0} ? ${1} : ${2})"},
 
@@ -217,27 +241,35 @@ static std::string encodeRHS(const Node* n) {
     } else if (val.isBool()) {
       return scalarValue(val.toBool());
     } else {
-      JIT_ASSERT(val.isInt());
+      AT_ASSERT(val.isInt());
       return scalarValue(val.toInt());
     }
   }
 
   TemplateEnv env;
-  size_t i = 0;
-  auto outtype =
-      n->output()->type()->expect<c10::TensorType const>()->scalarType();
-  for (auto in : n->inputs()) {
-    // PyTorch converts (scalar) argument types to result before applying the
-    // operator e.g. 1.4-torch.tensor(3) = -2
-    env.s(std::to_string(i), valueName(in));
-    env.s(
-        std::string("cast_") + std::to_string(i),
-        typeCastedValueName(in->type(), outtype, valueName(in)));
-    i++;
-  }
 
-  const auto& str = simple_map_ops.at(n->kind());
-  return format(str, env);
+  if (simple_map_ops.find(n->kind()) == simple_map_ops.end()) {
+    return encodeSpecialRHS(n, env);
+  } else {
+    size_t i = 0;
+    auto outtype = n->output()
+                       ->type()
+                       ->expect<c10::DimensionedTensorType const>()
+                       ->scalarType();
+
+    for (auto in : n->inputs()) {
+      // PyTorch converts (scalar) argument types to result before applying the
+      // operator e.g. 1.4-torch.tensor(3) = -2
+      env.s(std::to_string(i), valueName(in));
+      env.s(
+          std::string("cast_") + std::to_string(i),
+          typeCastedValueName(in->type(), outtype, valueName(in)));
+      i++;
+    }
+
+    const auto& str = simple_map_ops.at(n->kind());
+    return format(str, env);
+  }
 }
 
 static void emitIndexingFor(
@@ -317,7 +349,7 @@ std::string generateKernel(
   // Acquires input values
   bool has_half_tensor = false;
   size_t formal_count = 0;
-  for (const auto input : inputs) {
+  for (const auto& input : inputs) {
     auto p = input.first;
     env.s("node", valueName(p));
     env.d("formal", formal_count++);
@@ -328,7 +360,7 @@ std::string generateKernel(
     //  Access for other types is common to CUDA and CPU kernels.
     const auto is_half = (input.second.scalar_type == at::ScalarType::Half);
     if (is_half) {
-      JIT_ASSERT(use_cuda);
+      AT_ASSERT(use_cuda);
       env.s(
           "access",
           format("__half2float(t${formal}.data[t${formal}_offset])", env));
@@ -345,6 +377,8 @@ std::string generateKernel(
   // Generates code for intermediate nodes
   // Note: Concat and Chunk are implicitly generated
   // Note: Random number generation is only supported for CUDA kernels.
+  // Note: Constant None node is ignored and we will handle it in the
+  //       places where the constant None node is used
   for (const auto& n : graph.nodes()) {
     // Note: FusedConcat nodes work by narrowing the output Tensors before the
     // kernel runs
@@ -352,10 +386,13 @@ std::string generateKernel(
       continue;
     if (n->kind() == prim::ConstantChunk)
       continue;
+    if (n->mustBeNone())
+      continue;
     if (n->kind() == aten::rand_like) {
-      JIT_ASSERT(use_cuda);
+      AT_ASSERT(use_cuda);
       has_random = true;
     }
+
     env.s("node", valueName(n->output()));
     env.s("rhs", encodeRHS(n));
     env.s("lhs_type", variableType(n->output()->type()));
@@ -372,7 +409,7 @@ std::string generateKernel(
     // Note: conversion to half is only supported for CUDA kernels.
     const auto is_half = (output.second.scalar_type == at::ScalarType::Half);
     if (is_half) {
-      JIT_ASSERT(use_cuda);
+      AT_ASSERT(use_cuda);
       body << format("${access} = __float2half(${node});\n", env);
       has_half_tensor = true;
     } else {

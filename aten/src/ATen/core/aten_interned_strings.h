@@ -8,10 +8,8 @@
 // To explicitly use interned strings as symbols in your code, you must add
 // them to this list.
 
-#if !C10_MOBILE
+#ifndef C10_MOBILE
 #define FORALL_ATEN_BASE_SYMBOLS(_) \
-_(aten, RoiPooling2d_backward) \
-_(aten, RoiPooling2d_forward) \
 _(aten, __and__) \
 _(aten, __iand__) \
 _(aten, __ilshift__) \
@@ -516,6 +514,7 @@ _(aten, orgqr) \
 _(aten, ormqr) \
 _(aten, pairwise_distance) \
 _(aten, pdist) \
+_(aten, cdist) \
 _(aten, permute) \
 _(aten, pin_memory) \
 _(aten, pinverse) \
@@ -562,7 +561,9 @@ _(aten, replication_pad3d_forward) \
 _(aten, reshape) \
 _(aten, reshape_as) \
 _(aten, resize) \
+_(aten, resize_) \
 _(aten, resize_as) \
+_(aten, resize_as_) \
 _(aten, rfft) \
 _(aten, rnn_relu) \
 _(aten, rnn_relu_cell) \
@@ -905,6 +906,7 @@ _(attr, padding_mode) \
 _(attr, padding_value) \
 _(attr, params) \
 _(attr, pdist) \
+_(attr, cdist) \
 _(attr, periodic) \
 _(attr, pivot) \
 _(attr, pivots) \

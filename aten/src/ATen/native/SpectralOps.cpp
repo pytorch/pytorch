@@ -21,7 +21,7 @@ namespace at { namespace native {
 // at::_fft_with_size which dispatches to _fft_cufft (CUDA) or _fft_mkl (CPU).
 static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
            const bool complex_input, const bool complex_output,
-           const bool inverse, IntList signal_sizes, const bool normalized,
+           const bool inverse, IntArrayRef signal_sizes, const bool normalized,
            const bool onesided) {
 
   AT_CHECK(signal_ndim >= 1 && signal_ndim <= 3,
@@ -166,7 +166,7 @@ Tensor rfft(const Tensor& self, const int64_t signal_ndim, const bool normalized
 }
 
 Tensor irfft(const Tensor& self, const int64_t signal_ndim, const bool normalized,
-             const bool onesided,  IntList signal_sizes) {
+             const bool onesided,  IntArrayRef signal_sizes) {
   return _fft(self, signal_ndim, /* complex_input */ true,
               /* complex_output */ false, /* inverse */ true, signal_sizes,
               normalized, onesided);

@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 
 #include <ATen/ExpandUtils.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/fuser/interface.h>
@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/symbolic_variable.h>
 
+#include <queue>
 #include <unordered_map>
 
 namespace torch {
@@ -64,9 +65,7 @@ bool isSimpleMap(Node* node) {
       "aten::neg(Tensor self) -> Tensor",
       "aten::pow(Tensor self, Tensor exponent) -> Tensor",
       "aten::pow(Tensor self, Scalar exponent) -> Tensor",
-      // See https://github.com/pytorch/pytorch/issues/14674 and make sure you
-      // won't make the same mistake before you reenable this.
-      //"aten::rand_like(Tensor self) -> Tensor",
+      "aten::rand_like(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
@@ -108,7 +107,7 @@ bool isSimpleMap(Node* node) {
   }
   // Check that all non-tensor inputs are constant
   for (Value* input : node->inputs()) {
-    if (input->type()->isSubtypeOf(DynamicType::get())) {
+    if (input->type()->isSubtypeOf(TensorType::get())) {
       continue;
     }
     if (input->node()->kind() != prim::Constant) {
@@ -125,7 +124,7 @@ RegisterOperators reg_bn_unsqueeze({Operator(
         const int64_t ndim = pop(stack).toInt();
         auto self = pop(stack).toTensor();
         c10::SmallVector<int64_t, 8> sizes(ndim, 1);
-        JIT_ASSERT(self.dim() == 1);
+        AT_ASSERT(self.dim() == 1);
         sizes.at(1) = self.size(0);
         push(stack, self.reshape(sizes));
         return 0;
@@ -134,11 +133,10 @@ RegisterOperators reg_bn_unsqueeze({Operator(
 
 // Yes, no, or no value if we can't tell
 c10::optional<bool> isDefined(Value* tensor) {
-  if (tensor->type()->isSubtypeOf(DynamicType::get())) {
+  if (tensor->type()->isSubtypeOf(TensorType::get())) {
     return true;
   }
-  if (tensor->node()->kind() == prim::None ||
-      tensor->node()->kind() == prim::Undefined) {
+  if (tensor->node()->mustBeNone()) {
     return false;
   }
   return {};
@@ -157,7 +155,7 @@ bool isFusableBatchNorm(Node* batch_norm) {
 }
 
 Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
-  JIT_ASSERT(!sizes.empty());
+  AT_ASSERT(!sizes.empty());
   Graph* graph = sizes[0]->owningGraph();
   Node* broadcast_n =
       graph->insertNode(graph->create(prim::BroadcastSizes, sizes));
@@ -167,7 +165,7 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
 
 struct GraphFuser {
   Block* block_;
-  c10::optional<AliasDb> aliasDb_;
+  std::unique_ptr<AliasDb> aliasDb_;
   std::shared_ptr<Graph> graph_;
 
   GraphFuser(Block* block, std::shared_ptr<Graph> graph)
@@ -175,7 +173,14 @@ struct GraphFuser {
 
   value_list tensorInputs(Node* node) {
     return filter(node->inputs(), [](Value* v) {
-      return v->type()->isSubtypeOf(DynamicType::get());
+      return v->type()->isSubtypeOf(TensorType::get());
+    });
+  }
+
+  bool containsGradSumToSize(Node* fusion_group) {
+    auto nodes = getSubgraph(fusion_group).nodes();
+    return std::any_of(nodes.begin(), nodes.end(), [](Node* n) {
+      return n->kind() == aten::_grad_sum_to_size;
     });
   }
 
@@ -188,6 +193,14 @@ struct GraphFuser {
     // are not necessarily correct.
     if (node->owningBlock() != block_)
       return false;
+    if (node->kind() == aten::_grad_sum_to_size) {
+      // We only fuse _grad_sum_to_size if
+      // - we will fuse its input next (checked here)
+      // - we can commute the _grad_sum_to_size with everything
+      //   along the computation graph until we reach the outputs,
+      //   but this is checked later
+      return isFusable(node->inputs()[0]->node());
+    }
     return node->kind() == prim::FusionGroup || isSimpleMap(node);
   }
 
@@ -225,7 +238,7 @@ struct GraphFuser {
   }
 
   Graph& getSubgraph(Node* n) {
-    JIT_ASSERT(n->kind() == prim::FusionGroup);
+    AT_ASSERT(n->kind() == prim::FusionGroup);
     return *n->g(attr::Subgraph);
   }
 
@@ -254,7 +267,7 @@ struct GraphFuser {
         },
         &bn_graph);
 
-    JIT_ASSERT(isFusableBatchNorm(batch_norm));
+    AT_ASSERT(isFusableBatchNorm(batch_norm));
     WithInsertPoint insert_guard{batch_norm};
     Value* input = batch_norm->namedInput(attr::input);
     Value* input_dim = graph_->insert(aten::dim, {input});
@@ -344,22 +357,35 @@ struct GraphFuser {
   // DOES NOT WORK if n is a consumer of an output of the fusion group
   // returns the node _inside_ the group that represents the node
   Node* mergeNodeIntoGroup(Node* group, Node* n) {
-    JIT_ASSERT(n->kind() != prim::FusionGroup);
+    AT_ASSERT(n->kind() != prim::FusionGroup);
     auto& subgraph = getSubgraph(group);
     // map from nodes in the surrounding graph to parameters in the fusion
     // group's subgraph that correspond to them
     std::unordered_map<Value*, Value*> inputs_map;
     size_t i = 0;
-    JIT_ASSERT(group->inputs().size() == subgraph.inputs().size());
+    size_t tensor_insert_idx = 0;
+    AT_ASSERT(group->inputs().size() == subgraph.inputs().size());
     for (auto input : group->inputs()) {
       inputs_map[input] = subgraph.inputs()[i++];
+      if (input->type()->isSubtypeOf(TensorType::get()))
+        tensor_insert_idx = i;
     }
     // add n's inputs to the fusion group's input list if we don't already have
     // them
+    // we insert tensors first because the fuser assumes that to be the case
+    // (as a legacy from tensors only)
     WithInsertPoint guard(*subgraph.nodes().begin());
     for (auto input : n->inputs()) {
       if (inputs_map.count(input) == 0) {
-        if (input->type()->isSubtypeOf(DynamicType::get())) {
+        if (input->type()->isSubtypeOf(TensorType::get())) {
+          auto in_group = subgraph.insertInput(tensor_insert_idx);
+          in_group->setType(input->type());
+          inputs_map[input] = in_group;
+          group->insertInput(tensor_insert_idx, input);
+          tensor_insert_idx++;
+        } else if (
+            n->kind() == aten::_grad_sum_to_size &&
+            input->type()->isSubtypeOf(ListType::ofInts())) {
           auto in_group = subgraph.addInput();
           in_group->setType(input->type());
           inputs_map[input] = in_group;
@@ -369,7 +395,7 @@ struct GraphFuser {
           // so we generally don't allow fusing tensor-scalar operations unless
           // the scalar is constant. In those cases we inline the constants
           // directly in the body of the fused group.
-          JIT_ASSERT(input->node()->kind() == prim::Constant);
+          AT_ASSERT(input->node()->kind() == prim::Constant);
           Node* in_const =
               subgraph.createClone(input->node(), [](Value*) -> Value* {
                 throw std::runtime_error("unexpected input");
@@ -444,6 +470,22 @@ struct GraphFuser {
     if (!shouldFuse) {
       return at::nullopt;
     }
+    if (producer->node()->kind() == aten::_grad_sum_to_size &&
+        consumer->kind() == prim::FusionGroup) {
+      // check that we will be able to move the _grad_sum_to_size to be fused
+      // to the end of the fusion group in the fusion compiler
+      // the difficulty here is that the producer is not part of the fusion
+      // group yet
+      for (auto& u : producer->uses()) {
+        if (u.user == consumer) {
+          auto subgraph = &getSubgraph(consumer);
+          if (!trackSingleGradSumToSizeToOutputs(
+                  subgraph->inputs().at(u.offset), nullptr)) {
+            return at::nullopt;
+          }
+        }
+      }
+    }
 
     auto group = consumer;
     if (consumer->kind() != prim::FusionGroup) {
@@ -461,7 +503,7 @@ struct GraphFuser {
       mergeFusionGroups(group, producer->node());
       return group;
     }
-    JIT_ASSERT(producer->node()->outputs().size() == 1);
+    AT_ASSERT(producer->node()->outputs().size() == 1);
     Node* merged = mergeNodeIntoGroup(group, producer->node());
     // remaining uses of this producer can occur because we allow
     // fusion in cases where uses remain after the consumer
@@ -502,7 +544,7 @@ struct GraphFuser {
   }
 
   c10::optional<Node*> findFusedChunk(Node* group, Value* input) {
-    JIT_ASSERT(group->kind() == prim::FusionGroup);
+    AT_ASSERT(group->kind() == prim::FusionGroup);
     auto it = std::find(group->inputs().begin(), group->inputs().end(), input);
     if (it == group->inputs().end()) {
       return c10::nullopt;
@@ -513,7 +555,7 @@ struct GraphFuser {
     // If subgraph_input is an input to prim::ConstantChunk, it will have 1 use
     auto* node = subgraph_input->uses().at(0).user;
     if (node->kind() == prim::ConstantChunk) {
-      JIT_ASSERT(subgraph_input->uses().size() == 1);
+      AT_ASSERT(subgraph_input->uses().size() == 1);
       return node;
     }
     return c10::nullopt;
@@ -551,8 +593,8 @@ struct GraphFuser {
   // input.
   graph_node_list::iterator fuseChunk(Node* consumer, Value* producer) {
     auto* chunk = producer->node();
-    JIT_ASSERT(consumer->kind() == prim::FusionGroup);
-    JIT_ASSERT(chunk->kind() == prim::ConstantChunk);
+    AT_ASSERT(consumer->kind() == prim::FusionGroup);
+    AT_ASSERT(chunk->kind() == prim::ConstantChunk);
 
     // if producer's input is already an input to a prim::ConstantChunk node,
     // we cannot add a new prim::ConstantChunk node because of invariant (2).
@@ -605,15 +647,15 @@ struct GraphFuser {
     // Replace tensors inputs with broadcasted values
     auto new_tensors_it = new_tensors.begin();
     for (size_t i = 0; i < node->inputs().size(); ++i) {
-      if (node->inputs()[i]->type()->isSubtypeOf(DynamicType::get())) {
-        JIT_ASSERT(new_tensors_it != new_tensors.end());
+      if (node->inputs()[i]->type()->isSubtypeOf(TensorType::get())) {
+        AT_ASSERT(new_tensors_it != new_tensors.end());
         node->replaceInput(i, *(new_tensors_it++));
       }
     }
   }
 
   Node* promoteChunkToBroadcastingChunk(Node* chunk) {
-    JIT_ASSERT(chunk->kind() == prim::ConstantChunk);
+    AT_ASSERT(chunk->kind() == prim::ConstantChunk);
 
     size_t nchunks = chunk->i(attr::chunks);
     Node* bchunk =
@@ -728,7 +770,7 @@ struct GraphFuser {
     }
     // multiple return operators
     Node* producer_for_chunk_node = producer_for_chunk->node();
-    JIT_ASSERT(producer_for_chunk_node->outputs().size() == 1);
+    AT_ASSERT(producer_for_chunk_node->outputs().size() == 1);
 
     // Convert chunk to bchunk, if it isn't one already. The bchunk represents a
     // broadcast and one or more chunk operations.
@@ -754,7 +796,7 @@ struct GraphFuser {
       // XXX: we only work with pointwise ops in here, so we know it is valid to
       // push the concat only through tensor arguments (and all other args can
       // be safely ignored).
-      if (!input->type()->isSubtypeOf(DynamicType::get()))
+      if (!input->type()->isSubtypeOf(TensorType::get()))
         continue;
 
       // if 'input' is already an input to the bchunk, reuse it.
@@ -795,8 +837,8 @@ struct GraphFuser {
       chunked_op->output()->setType(chunk_sel->type());
       auto chunked_inputs_it = chunked_inputs.begin();
       for (Value* original_input : original_inputs) {
-        if (original_input->type()->isSubtypeOf(DynamicType::get())) {
-          JIT_ASSERT(chunked_inputs_it != chunked_inputs.end());
+        if (original_input->type()->isSubtypeOf(TensorType::get())) {
+          AT_ASSERT(chunked_inputs_it != chunked_inputs.end());
           chunked_op->addInput(
               chunked_inputs_it->at(chunk_sel->offset() % nchunks));
           ++chunked_inputs_it;
@@ -820,11 +862,11 @@ struct GraphFuser {
     if (!size_calc_uses.empty()) {
       auto tensor_inputs = filter(
           producer_for_chunk_node->inputs(),
-          [](Value* v) { return v->type()->isSubtypeOf(DynamicType::get()); });
+          [](Value* v) { return v->type()->isSubtypeOf(TensorType::get()); });
       auto tensor_sizes = fmap(tensor_inputs, [](Value* v) {
         return v->owningGraph()->insert(aten::size, {v});
       });
-      JIT_ASSERT(!tensor_sizes.empty());
+      AT_ASSERT(!tensor_sizes.empty());
       Value* output_size = tensor_sizes.size() == 1
           ? tensor_sizes[0]
           : broadcastSizes(tensor_sizes);
@@ -915,9 +957,11 @@ struct GraphFuser {
 
     auto inputs = fusion_group->inputs();
     auto sinputs = subgraph->inputs();
-    JIT_ASSERT(inputs.size() == sinputs.size());
+    AT_ASSERT(inputs.size() == sinputs.size());
     for (size_t i = 0; i < inputs.size(); ++i) {
-      shape_of[sinputs[i]] = graph->insert(aten::size, {inputs[i]});
+      if (inputs[i]->type()->isSubtypeOf(TensorType::get())) {
+        shape_of[sinputs[i]] = graph->insert(aten::size, {inputs[i]});
+      }
     }
 
     // When we have a guarantee that an output won't be removed, because it's
@@ -926,7 +970,7 @@ struct GraphFuser {
     // beginning of the kernel.
     auto outputs = fusion_group->outputs();
     auto soutputs = subgraph->outputs();
-    JIT_ASSERT(outputs.size() == soutputs.size());
+    AT_ASSERT(outputs.size() == soutputs.size());
     for (size_t i = 0; i < outputs.size(); ++i) {
       if (usedOnlyInSize(outputs[i]))
         continue;
@@ -963,11 +1007,11 @@ struct GraphFuser {
         continue;
       }
       auto tensor_inputs = filter(n->inputs(), [](Value* v) {
-        return v->type()->isSubtypeOf(DynamicType::get());
+        return v->type()->isSubtypeOf(TensorType::get());
       });
       auto shapes =
           fmap(tensor_inputs, [&](Value* v) { return shape_of.at(v); });
-      JIT_ASSERT(!shapes.empty());
+      AT_ASSERT(!shapes.empty());
       shape_of.emplace(
           n->output(), shapes.size() == 1 ? shapes[0] : broadcastSizes(shapes));
     }
@@ -991,7 +1035,7 @@ struct GraphFuser {
       if (usedOnlyInSize(output) && shape_of.count(soutput) > 0) {
         auto uses = output->uses();
         for (Use u : uses) {
-          JIT_ASSERT(u.user->matches("aten::size(Tensor self) -> int[]"));
+          AT_ASSERT(u.user->matches("aten::size(Tensor self) -> int[]"));
           u.user->output()->replaceAllUsesWith(shape_of.at(soutput));
           u.user->destroy();
         }
@@ -1002,7 +1046,7 @@ struct GraphFuser {
   }
 
   void refreshAliasDb() {
-    aliasDb_ = AliasAnalysis(graph_);
+    aliasDb_ = torch::make_unique<AliasDb>(graph_);
   }
 
   bool canFuseWithConcat(Value* producer, Node* before_check) {
@@ -1016,17 +1060,19 @@ struct GraphFuser {
       return false;
     }
     // Fusion groups can be merged with concat's group if and only if
-    // the value they produce isn't already coming from a concat.
+    // - the value they produce isn't already coming from a concat and
+    // - the fusion group does not contain GradSumToSize
     if (producer->node()->kind() == prim::FusionGroup) {
       auto subgraph = producer->node()->g(attr::Subgraph);
       auto* node = subgraph->outputs().at(producer->offset())->node();
-      return node->kind() != prim::FusedConcat;
+      return node->kind() != prim::FusedConcat &&
+          !containsGradSumToSize(producer->node());
     }
     return true;
   }
 
   Node* createFusedConcat(Node* node) {
-    JIT_ASSERT(node->kind() == aten::cat);
+    AT_ASSERT(node->kind() == aten::cat);
 
     Graph* graph = node->owningGraph();
     Node* list_construct = node->namedInput(attr::tensors)->node();
@@ -1062,7 +1108,7 @@ struct GraphFuser {
         }
         any_fused = true;
         auto maybe_group = tryFuse(fused_cat, input);
-        JIT_ASSERT(maybe_group && maybe_group == fused_cat);
+        AT_ASSERT(maybe_group && maybe_group == fused_cat);
         // We could have destroyed multiple inputs when performing this fusion,
         // so we have to recompute the list and iterate over it again.
         sorted_inputs = sortReverseTopological(fused_cat->inputs());
@@ -1201,6 +1247,83 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 }
 
 } // anonymous namespace
+
+// This takes a _grad_sum_to_size output and tracks it to the return
+// statements that depend on it, checking that it only hits nodes
+// that commute with _grad_sum_to_size on its path.
+// If a non-nullptr vector pointer outputGradSumToSizes is passed, the sizes
+// will be recorded as target sizes for the outputs as applicable.
+// In the graph_fuser pass we only need to check that we can go to the
+// outputs while in the fuser's compiler we want to record the sizes.
+// Note: This will only record a new sum_to_size if there is not one
+// already. As we want the last grad_sum_to_size, you need to call
+// it in reverse order when recording and removing outputs.
+bool trackSingleGradSumToSizeToOutputs(
+    Value* gradSumToSizeOutput,
+    std::vector<int64_t>* outputGradSumToSizes) {
+  static OperatorSet commutes_with_SumToSize{{
+      "aten::mul(Tensor self, Tensor other) -> Tensor",
+      "aten::div(Tensor self, Tensor other) -> Tensor",
+      // for div we might check whether we're the first argument
+      "aten::mul(Tensor self, Scalar other) -> Tensor",
+      "aten::div(Tensor self, Scalar other) -> Tensor",
+      "aten::neg(Tensor self) -> Tensor",
+      "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+      "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
+      // add this used to be prim::AutogradAdd
+  }};
+
+  std::queue<Use> uses_to_process{};
+  auto add_to_uses = [&](const use_list& uses) {
+    for (auto u : uses) {
+      uses_to_process.push(u);
+    }
+  };
+  add_to_uses(gradSumToSizeOutput->uses());
+  while (!uses_to_process.empty()) {
+    auto user = uses_to_process.front().user;
+    auto offset = uses_to_process.front().offset;
+    uses_to_process.pop();
+    if (user->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
+      // sometimes, a mask or similar is cast to the same type as the gradient,
+      // i.e. we see other. Then we don't need to do anything, as the shape is
+      // not used, only the type..
+      // But we might also see it as self, when the gradient is cast, then we
+      // want to track it.
+      if (offset == 0) {
+        add_to_uses(user->output()->uses());
+      }
+    } else if (commutes_with_SumToSize.find(user)) {
+      add_to_uses(user->output()->uses());
+    } else if (user->kind() == prim::Return) {
+      // During compilation and only if we don't already have a
+      // _grad_sum_to_size for this output we record the size to sum the output
+      // to. We only do this if we didn't see anything yet because we want later
+      // (in the graph) nodes to take precedence over earlier ones and we
+      // iterate backwards. The implicit assumption is that if we have several
+      // _grad_sumtosizes "in parallel" (from auto-diff added AutogradAdd as the
+      // backward of using an input in multiple places) they are the same. This
+      // is because AutogradAdd does not broadcast.
+      if (outputGradSumToSizes && (*outputGradSumToSizes)[offset] == -1) {
+        // note: we make the assumption that the sizes are inputs to the
+        // fusion group (rather than something calculated).
+        (*outputGradSumToSizes)[offset] =
+            gradSumToSizeOutput->node()->inputs()[1]->offset();
+      }
+    } else if (user->kind() == aten::_grad_sum_to_size) {
+      // do nothing
+      // this case only happens in the graph_fuser step because in the
+      // compile step because we iterate backwards and delete
+      // all _grad_sum_to_size nodes we see
+    } else {
+      // we find something we do not support. Note that this notably includes
+      // prim::FusedConcat, which we do not know how to deal with in conjunction
+      // with _grad_sum_to_size
+      return false;
+    }
+  }
+  return true;
+}
 
 void FuseGraph(std::shared_ptr<Graph>& graph) {
   if (canFuseOnCPU() || canFuseOnGPU()) {
