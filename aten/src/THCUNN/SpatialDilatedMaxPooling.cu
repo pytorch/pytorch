@@ -41,7 +41,7 @@ __global__ void MaxPoolForward(const int nthreads, const Dtype* bottom_data,
       }
     }
     top_data[index] = ScalarConvert<AccType, Dtype>::to(maxval);
-    top_mask[index] = maxidx + TH_INDEX_BASE;
+    top_mask[index] = maxidx;
   }
 }
 
@@ -49,9 +49,9 @@ const int BACKWARD_THREADS = 256;
 
 template <typename Dtype, typename AccType>
 #if defined (__HIP_PLATFORM_HCC__)
-C10_LAUNCH_BOUNDS(BACKWARD_THREADS, 4)
+C10_LAUNCH_BOUNDS_2(BACKWARD_THREADS, 4)
 #else
-C10_LAUNCH_BOUNDS(BACKWARD_THREADS, 8)
+C10_LAUNCH_BOUNDS_2(BACKWARD_THREADS, 8)
 #endif
 __global__ void MaxPoolBackward(const int nthreads, const Dtype* top_diff,
     const int64_t* top_mask, const int num, const int channels,
@@ -102,13 +102,13 @@ __global__ void MaxPoolBackward(const int nthreads, const Dtype* top_diff,
         if ((phstart + 1 != phend) || (pwstart + 1 != pwend)) {
         for (int ph = phstart; ph < phend; ++ph) {
           for (int pw = pwstart; pw < pwend; ++pw) {
-            if (top_mask[ph * pooled_width + pw] - TH_INDEX_BASE == h * width + w) {
+            if (top_mask[ph * pooled_width + pw] == h * width + w) {
               gradient += ScalarConvert<Dtype, AccType>::to(top_diff[ph * pooled_width + pw]);
             }
           }
         }
         } else {
-            if (top_mask[phstart * pooled_width + pwstart] - TH_INDEX_BASE == h * width + w) {
+            if (top_mask[phstart * pooled_width + pwstart] == h * width + w) {
               gradient += ScalarConvert<Dtype, AccType>::to(top_diff[phstart * pooled_width + pwstart]);
             }
         }
