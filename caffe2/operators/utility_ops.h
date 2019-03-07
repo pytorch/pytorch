@@ -64,10 +64,6 @@ class IsNanOp final : public Operator<Context> {
     }
     return true;
   }
-
- private:
-  TensorPrinter tensorPrinter_;
-  Tensor scratch_;
 };
 
 template <class Context>
