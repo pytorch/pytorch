@@ -26,7 +26,7 @@ C10_DEFINE_OP_SCHEMA(ConstantFill, FunctionSchema(
     })
 ));
 C10_DEFINE_OP_SCHEMA(UniformFill, FunctionSchema(
-    "_c10_experimental::ConstantFill",
+    "_c10_experimental::UniformFill",
     "",
     (std::vector<c10::Argument>{
       c10::Argument("inputs", ListType::ofTensors()),
@@ -40,7 +40,7 @@ C10_DEFINE_OP_SCHEMA(UniformFill, FunctionSchema(
     })
 ));
 C10_DEFINE_OP_SCHEMA(GivenTensorFill, FunctionSchema(
-    "_c10_experimental::ConstantFill",
+    "_c10_experimental::GivenTensorFill",
     "",
     (std::vector<c10::Argument>{
       c10::Argument("inputs", ListType::ofTensors()),
@@ -53,7 +53,7 @@ C10_DEFINE_OP_SCHEMA(GivenTensorFill, FunctionSchema(
     })
 ));
 C10_DEFINE_OP_SCHEMA(GivenTensorIntFill, FunctionSchema(
-    "_c10_experimental::ConstantFill",
+    "_c10_experimental::GivenTensorIntFill",
     "",
     (std::vector<c10::Argument>{
       c10::Argument("inputs", ListType::ofTensors()),
@@ -66,7 +66,7 @@ C10_DEFINE_OP_SCHEMA(GivenTensorIntFill, FunctionSchema(
     })
 ));
 C10_DEFINE_OP_SCHEMA(GivenTensorInt64Fill, FunctionSchema(
-    "_c10_experimental::ConstantFill",
+    "_c10_experimental::GivenTensorInt64Fill",
     "",
     (std::vector<c10::Argument>{
       c10::Argument("inputs", ListType::ofTensors()),

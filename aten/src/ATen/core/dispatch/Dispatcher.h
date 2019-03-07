@@ -76,10 +76,12 @@ private:
   struct OperatorDef final {
     explicit OperatorDef(FunctionSchema schema_)
     : dispatchTable(schema_)
-    , schema(std::move(schema_)) {}
+    , schema(std::move(schema_))
+    , refcount(0) {}
 
     DispatchTable dispatchTable;
     FunctionSchema schema;
+    size_t refcount;
   };
   friend class OperatorHandle;
 
@@ -95,12 +97,26 @@ public:
   /**
    * Register a new operator schema. The handle returned can be used to register
    * kernels to this operator or to call it.
+   *
+   * If a schema with the same operator name and overload name already exists,
+   * this function will check that both schemas are exactly identical and then
+   * return the existing schema.
+   *
+   * Each call to registerSchema() should have a corresponding call to
+   * deregisterSchema(), even if multiple calls register (or deregister)
+   * schemas with the same operator name and overload name.
    */
   OperatorHandle registerSchema(FunctionSchema schema);
 
   /**
    * Remove an operator from the dispatcher. Make sure you removed
-   * all kernels for this operatorbefore calling this.
+   * all kernels for this operator before calling this.
+   *
+   * If a schema was registered multiple times (see above how registerSchema()
+   * handles registering schemas that already exist), it must be deregistered
+   * the exact same number of times before it is actually deregistered.
+   * That is, each call to registerSchema() should have a corresponding call
+   * to deregisterSchema().
    */
   void deregisterSchema(const OperatorHandle& op);
 
@@ -129,6 +145,8 @@ public:
 
 private:
   Dispatcher();
+
+  std::list<Dispatcher::OperatorDef>::iterator findOrRegisterSchema_(FunctionSchema&& schema);
 
   std::list<OperatorDef> operators_;
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
