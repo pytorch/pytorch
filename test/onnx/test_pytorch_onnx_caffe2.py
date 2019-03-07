@@ -1107,6 +1107,14 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(2, 3, requires_grad=True)
         self.run_model_test(ReshapeAsModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    def test_narrow(self):
+        class NarrowModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.narrow(input, 0, 0, 2)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        self.run_model_test(NarrowModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
 # a bit of metaprogramming to set up all the rnn tests
 
 
