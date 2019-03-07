@@ -2696,6 +2696,21 @@ class TestCuda(TestCase):
     def test_triu_tril(self):
         _TestTorchMixin._test_triu_tril(self, lambda t: t.cuda())
 
+    def test_cuda_round(self):
+        # test half-to-even
+        a = [-5.8, -3.5, -2.3, -1.5, -0.5, 0.5, 1.5, 2.3, 3.5, 5.8]
+        res = [-6., -4., -2., -2., 0., 0., 2., 2., 4., 6.]
+
+        self.assertEqual(
+            torch.HalfTensor(a).cuda().round().cpu(),
+            torch.HalfTensor(res).cpu())
+        self.assertEqual(
+            torch.FloatTensor(a).cuda().round().cpu(),
+            torch.FloatTensor(res).cpu())
+        self.assertEqual(
+            torch.DoubleTensor(a).cuda().round().cpu(),
+            torch.DoubleTensor(res).cpu())
+
 
 def load_ignore_file():
     from os.path import join, dirname
