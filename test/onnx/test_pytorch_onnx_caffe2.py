@@ -155,7 +155,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def run_actual_test(self, model, train, batch_size, state_dict=None,
                         input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                        example_outputs=None):
+                        example_outputs=None, do_constant_folding=False):
         """
         This is what the user facing version will look like
         """
@@ -174,7 +174,7 @@ class TestCaffe2Backend(unittest.TestCase):
             model, input = self.convert_cuda(model, input)
 
         # Verify the model runs the same in Caffe2
-        verify.verify(model, input, c2, rtol=rtol, atol=atol)
+        verify.verify(model, input, c2, rtol=rtol, atol=atol, do_constant_folding=do_constant_folding)
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
@@ -827,6 +827,58 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(*shape)
         self.run_model_test(MyModel(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_lstm_constant_folding(self):
+        class LstmNet(nn.Module):
+            def __init__(self, input_size, hidden_size, num_layers, bidirectional):
+                super(LstmNet, self).__init__()
+                self.lstm = nn.LSTM(input_size, hidden_size, num_layers, bidirectional=bidirectional)
+
+            def forward(self, input, initial_state):
+                return self.lstm(input, initial_state)
+
+        def get_LstmNet_model_and_inputs(input_size, hidden_size, num_layers, batch_size, \
+            seq_len, bidirectional):
+            num_directions = 2 if bidirectional else 1
+            model = LstmNet(input_size, hidden_size, num_layers, bidirectional)
+            input = torch.randn(seq_len, batch_size, input_size)
+            h0 = torch.randn(num_layers*num_directions, batch_size, hidden_size)
+            c0 = torch.randn(num_layers*num_directions, batch_size, hidden_size)
+            return model, (input, (h0, c0))
+
+        batch_size1 = 3
+        model1, input1 = get_LstmNet_model_and_inputs(7, 3, 2, batch_size1, 5, True)
+        self.run_actual_test(model1, train=False, batch_size=batch_size1, input=input1, use_gpu=False, do_constant_folding=True)
+
+        batch_size2 = 4
+        model2, input2 = get_LstmNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
+        self.run_actual_test(model2, train=False, batch_size=batch_size2, input=input2, use_gpu=False, do_constant_folding=True)
+
+    def test_gru_constant_folding(self):
+        class GruNet(nn.Module):
+            def __init__(self, input_size, hidden_size, num_layers, bidirectional):
+                super(GruNet, self).__init__()
+                self.mygru = nn.GRU(input_size, hidden_size, num_layers, bidirectional=bidirectional)
+
+            def forward(self, input, initial_state):
+                out = self.mygru(input, initial_state)
+                return out
+
+        def get_GruNet_model_and_inputs(input_size, hidden_size, num_layers, batch_size, \
+            seq_len, bidirectional):
+            num_directions = 2 if bidirectional else 1
+            model = GruNet(input_size, hidden_size, num_layers, bidirectional)
+            input = torch.randn(seq_len, batch_size, input_size)
+            h0 = torch.randn(num_layers*num_directions, batch_size, hidden_size)
+            return model, (input, h0)
+
+        batch_size1 = 3
+        model1, input1 = get_GruNet_model_and_inputs(7, 3, 2, batch_size1, 5, True)
+        self.run_actual_test(model1, train=False, batch_size=batch_size1, input=input1, use_gpu=False, do_constant_folding=True)
+
+        batch_size2 = 4
+        model2, input2 = get_GruNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
+        self.run_actual_test(model2, train=False, batch_size=batch_size2, input=input2, use_gpu=False, do_constant_folding=True)
 
     def test_repeat(self):
         class MyModel(torch.nn.Module):

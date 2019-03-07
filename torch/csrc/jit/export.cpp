@@ -116,7 +116,7 @@ class EncoderBase {
 
  protected:
   // Using std::map instead of std::unordered_map for initializers
-  // in EncodeGraph cosntructor so that the order in which initializers
+  // in EncodeGraph cosntructor, so that the order in which initializers
   // get written to the ONNX graph is always the deterministic and 
   // predictable. While this is not a ONNX requirement, it is needed 
   // for testing purposes in tests that use _export_to_pretty_string()
@@ -312,7 +312,8 @@ void EncoderBase::EncodeBlock(
     }
   }
   AT_ASSERT(block->inputs().size() >= initializers.size());
-  for (auto& name_tensor_pair : initializers) {
+  for (auto& name_tensor_pair : 
+        std::map<std::string, at::Tensor>(initializers.begin(), initializers.end())) {
     auto p = graph_proto->add_initializer();
     p->set_name(name_tensor_pair.first);
     EncodeTensor(p, name_tensor_pair.second, name_tensor_pair.first);

@@ -209,10 +209,144 @@ def _trace_and_get_graph_from_model(model, args, training):
     return trace.graph(), torch_out
 
 
+def _get_source_node(block):
+    # NOTE: This method returns the first prim::Param node it encounters,
+    # which is fine assuming that there is always one and only one prim::Param
+    # node in a PyTorch IR graph.
+    for node in block.nodes():
+        for val in node.inputs():
+            if val.node().kind() == 'prim::Param':
+                return val.node()
+    return None
+
+
+def _run_torch_backend_for_onnx(node, input_tensor_values):    
+    if node.kind() == 'onnx::Slice':
+        assert len(input_tensor_values) == 1
+        attrs = {k: node[k] for k in node.attributeNames()}
+        if not ('axes' in attrs and 'starts' in attrs and 'ends' in attrs):
+            raise RuntimeError('\'onnx::Slice\' node must have attributes \'axes\', \
+                \'starts\', and \'ends\'.')
+        if (len(attrs['axes']) != len(attrs['starts'])) or \
+            (len(attrs['axes']) != len(attrs['ends'])):
+            raise RuntimeError('\'onnx::Slice\' node attributes \'axes\', \
+                \'starts\', and \'ends\' must have same length.')
+        updated_val = input_tensor_values[0]
+        for dim, start, end in zip(attrs['axes'], attrs['starts'], attrs['ends']):
+            updated_val = torch.narrow(updated_val, dim, start, end - start)
+
+    elif node.kind() == 'onnx::Concat':
+        attrs = {k: node[k] for k in node.attributeNames()}
+        updated_val = torch.cat(input_tensor_values, dim=attrs['axis'])
+
+    elif node.kind() == 'onnx::Unsqueeze':
+        assert len(input_tensor_values) == 1
+        attrs = {k: node[k] for k in node.attributeNames()}
+        if 'axes' not in attrs:
+            raise RuntimeError("\'onnx::Unsqueeze\' node must have attribute \'axes\'.")
+        updated_val = input_tensor_values[0]
+        for dim in attrs['axes']:
+            updated_val = torch.unsqueeze(updated_val, dim)
+
+    elif node.kind() == 'onnx::Transpose':
+        assert len(input_tensor_values) == 1
+        attrs = {k: node[k] for k in node.attributeNames()}
+        if 'perm' not in attrs:
+            raise RuntimeError("\'onnx::Transpose\' node must have attribute \'perm\'.")
+        updated_val = input_tensor_values[0].permute(attrs['perm'])
+
+    else:
+        updated_val = None
+
+    return updated_val
+
+
+def _erase_unused_node_outputs(node):
+    for k in reversed(range(node.outputsSize())):
+        if not node.outputsAt(k).hasUses():
+            node.eraseOutput(k)
+
+
+def _optimize_graph_constant_folding(block, params_dict):
+    # This method updates the block in-place to fold
+    # all the one-time constant-based computations/ops
+    # into an initializer node.
+    class ConstantLeafNodes:
+        # Currently only prim::Param and prim::Constant are supported.
+        # More can be added if needed.
+        PRIM_PARAM = 0
+        ONNX_CONSTANT = 1
+
+    source_node = _get_source_node(block)
+    if source_node is None:
+        return
+    for node in block.nodes():
+        # Only the root block in the graph is constant-folded. 
+        # Nested blocks are not supported for now.
+
+        input_vals = list(node.inputs())
+        # Check if a node is a leaf node or not, and if it is, 
+        # then get tensor values for all the inputs.
+        input_tensor_values = []
+        kind_of_leaf_node = []
+        for val in input_vals:
+            input_node = val.node()
+            is_param = input_node.kind() == 'prim::Param' and val.uniqueName() in params_dict
+            if is_param:
+                assert input_node is source_node # One and only one prim::Param source node in graph.
+            is_constant = input_node.kind() == "onnx::Constant" and \
+                not input_node.mustBeNone() and \
+                (input_node.kindOf("value") == "t" or input_node.kindOf("value") == "is")
+            if is_param:
+                input_tensor_values.append(params_dict[val.uniqueName()])
+                kind_of_leaf_node.append(ConstantLeafNodes.PRIM_PARAM)
+            elif is_constant:
+                input_tensor_values.append(input_node["value"])
+                kind_of_leaf_node.append(ConstantLeafNodes.ONNX_CONSTANT)
+
+        # If there are inputs, and if they all can be folded, then fold them.
+        if input_tensor_values and len(input_tensor_values) == len(input_vals):
+            updated_val = _run_torch_backend_for_onnx(node, input_tensor_values)
+            if updated_val is None:
+                # Constant folding not supported for this op. Skip it.
+                continue
+            if node.outputsSize() > 1:
+                # Constant folding for multiple-output ops not supported. No common use case yet.
+                continue 
+            # Disconnect the folded node. Create a new initializer for the folded  
+            # tensor and replace the output of the folded node with the 
+            # initializer as input for all downstream nodes.         
+            new_source_node_output = source_node.addOutput()
+            params_dict[new_source_node_output.uniqueName()] = updated_val
+            new_source_node_output.inferTypeFrom(updated_val)            
+            node.outputsAt(0).replaceAllUsesWith(new_source_node_output)
+
+            # Find the indices to outputs of the source node that are
+            # feeding into the folded node. Used below for removing 
+            # correspoding entried in params_dict.
+            source_output_names = [source_output.uniqueName() for source_output in source_node.outputs()]
+            idxs_matching_source_output = []
+            for idx, val in enumerate(input_vals):
+                if kind_of_leaf_node[idx] == ConstantLeafNodes.PRIM_PARAM:
+                    matching_idx = [i for i in range(len(source_output_names)) \
+                        if source_output_names[i] == val.uniqueName()]
+                    assert len(matching_idx) == 1 # Only one source output name should match the name of this input (val)
+                    idxs_matching_source_output.append(matching_idx[0])
+            # Remove inputs before removing entry from params_dict.
+            node.removeAllInputs() 
+            # Remove entries corresponding to folded node from params_dict
+            for node_idx_in_source_output in idxs_matching_source_output:
+                if not source_node.outputsAt(node_idx_in_source_output).hasUses():
+                         del params_dict[source_output_names[node_idx_in_source_output]]
+    # Remove all initializers that were folded from the source node.
+    if source_node is not None:
+        _erase_unused_node_outputs(source_node)
+
+
 def _model_to_graph(model, args, f, verbose=False, training=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
-                    example_outputs=None, propagate=False):
+                    example_outputs=None, propagate=False, do_constant_folding=False):
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
         args = (args, )
@@ -249,6 +383,11 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
             output.inferTypeFrom(tensor)
 
     _set_input_and_output_names(graph, input_names, output_names)
+
+    if do_constant_folding:
+        # Works on ONNX graphs, therefore must come after _optimize_graph() call.
+        _optimize_graph_constant_folding(graph.block(), params_dict)
+
     if verbose:
         print(graph)
 
@@ -275,7 +414,7 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
                              input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
-                             google_printer=False, opset_version=None):
+                             google_printer=False, opset_version=None, do_constant_folding=False):
     from torch.onnx.symbolic import _default_onnx_opset_version, _set_opset_version
     if opset_version is None:
         opset_version = _default_onnx_opset_version
@@ -283,7 +422,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
     graph, params, torch_out = _model_to_graph(model, args, f, verbose,
                                                training, input_names,
                                                output_names, operator_export_type,
-                                               example_outputs, propagate)
+                                               example_outputs, propagate, do_constant_folding)
 
     return graph._pretty_print_onnx(params, opset_version, False, operator_export_type, google_printer)
 
@@ -295,7 +434,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 def _export(model, args, f, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
-            opset_version=None):
+            opset_version=None, do_constant_folding=False):
     from torch.onnx.symbolic import _default_onnx_opset_version, _set_opset_version
     if opset_version is None:
         opset_version = _default_onnx_opset_version
@@ -303,7 +442,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     graph, params_dict, torch_out = _model_to_graph(model, args, f, verbose,
                                                     training, input_names,
                                                     output_names, operator_export_type,
-                                                    example_outputs, propagate)
+                                                    example_outputs, propagate, do_constant_folding)
 
     # TODO: Don't allocate a in-memory string for the protobuf
     defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE

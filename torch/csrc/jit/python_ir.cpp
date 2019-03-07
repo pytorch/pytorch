@@ -310,6 +310,7 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("recurse") = true)
       .def("addInput", [](Graph& g) { return g.addInput(); })
       .def("copy", [](Graph& g) { return g.copy(); })
+      .def("block", [](Graph& g) { return g.block(); })
       .GS(eraseInput)
       .GS(registerOutput)
       .def(
@@ -376,6 +377,7 @@ void initPythonIRBindings(PyObject* module_) {
       .VS(setUniqueName)
       .VS(offset)
       .VS(uses)
+      .VS(hasUses)
       .VS(replaceAllUsesWith)
       .def("node", [](Value& v) { return v.node(); })
       .def(
