@@ -1744,8 +1744,9 @@ class _TestTorchMixin(object):
 
         # Info should be positive for rank deficient matrices
         a = cast(fullrank(3, 5))
-        a[0, 1] = 2 * a[0, 0]  # Row 2 of a[0] is 2 times Row 1 of a[0], thereby causing a rank deficiency
-        self.assertGreater(a.btrifact_with_info()[2][0], 0)
+        if not (a.is_cuda and any(x in torch.version.cuda for x in ['8.0', '9.2'])):
+            a[0, 1] = 2 * a[0, 0]  # Row 2 of a[0] is 2 times Row 1 of a[0], thereby causing a rank deficiency
+            self.assertGreater(a.btrifact_with_info()[2][0], 0)
 
         # Error checking, no pivoting variant on CPU
         with self.assertRaisesRegex(RuntimeError,
@@ -1753,6 +1754,7 @@ class _TestTorchMixin(object):
             torch.btrifact(torch.empty(1, 2, 2), pivot=False)
 
     @skipIfNoLapack
+    @skipIfRocm
     def test_btrifact(self):
         self._test_btrifact(self, lambda t: t)
 
@@ -5360,9 +5362,18 @@ class _TestTorchMixin(object):
         eye = conv_fn(torch.eye(5))
         test_single_det(eye, torch.tensor(1, dtype=eye.dtype), 'identity')
 
+        # TODO: Remove when MAGMA 2.5.0 is built for CUDA 8 and CUDA 9.2
+        is_cuda_8_92 = False
+        if torch.cuda.is_available() and not TEST_WITH_ROCM:
+            is_cuda_8_92 = any(x in torch.version.cuda for x in ['8.0', '9.2'])
+
         def test(M):
             assert M.size(0) >= 5, 'this helper fn assumes M to be at least 5x5'
             M = conv_fn(M)
+
+            if M.is_cuda and is_cuda_8_92:
+                return
+
             M_det = M.det()
             ref_M_det = reference_det(M)
 
