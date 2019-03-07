@@ -6200,28 +6200,37 @@ class _TestTorchMixin(object):
             else:
                 return tuple(indices)
 
+        def validate_indexing(x):
+            self.assertEqual(x[[0]], consec((1,)))
+            self.assertEqual(x[ri([0]), ], consec((1,)))
+            self.assertEqual(x[ri([3]), ], consec((1,), 4))
+            self.assertEqual(x[[2, 3, 4]], consec((3,), 3))
+            self.assertEqual(x[ri([2, 3, 4]), ], consec((3,), 3))
+            self.assertEqual(x[ri([0, 2, 4]), ], torch.Tensor([1, 3, 5]))
+
+        def validate_setting(x):
+            dtype = x.type()
+            x[[0]] = -2
+            self.assertEqual(x[[0]], torch.Tensor([-2]).type(dtype))
+            x[[0]] = -1
+            self.assertEqual(x[ri([0]), ], torch.Tensor([-1]).type(dtype))
+            x[[2, 3, 4]] = 4
+            self.assertEqual(x[[2, 3, 4]], torch.Tensor([4, 4, 4]).type(dtype))
+            x[ri([2, 3, 4]), ] = 3
+            self.assertEqual(x[ri([2, 3, 4]), ], torch.Tensor([3, 3, 3]).type(dtype))
+            x[ri([0, 2, 4]), ] = conv_fn(torch.Tensor([5, 4, 3])).type(dtype)
+            self.assertEqual(x[ri([0, 2, 4]), ], torch.Tensor([5, 4, 3]).type(dtype))
+
         # First, we will test indexing to generate return values
 
         # Case 1: Purely Integer Array Indexing
         reference = conv_fn(consec((10,)))
-        self.assertEqual(reference[[0]], consec((1,)))
-        self.assertEqual(reference[ri([0]), ], consec((1,)))
-        self.assertEqual(reference[ri([3]), ], consec((1,), 4))
-        self.assertEqual(reference[[2, 3, 4]], consec((3,), 3))
-        self.assertEqual(reference[ri([2, 3, 4]), ], consec((3,), 3))
-        self.assertEqual(reference[ri([0, 2, 4]), ], torch.Tensor([1, 3, 5]))
+        validate_indexing(reference)
+        validate_indexing(reference.type(torch.half))
 
         # setting values
-        reference[[0]] = -2
-        self.assertEqual(reference[[0]], torch.Tensor([-2]))
-        reference[[0]] = -1
-        self.assertEqual(reference[ri([0]), ], torch.Tensor([-1]))
-        reference[[2, 3, 4]] = 4
-        self.assertEqual(reference[[2, 3, 4]], torch.Tensor([4, 4, 4]))
-        reference[ri([2, 3, 4]), ] = 3
-        self.assertEqual(reference[ri([2, 3, 4]), ], torch.Tensor([3, 3, 3]))
-        reference[ri([0, 2, 4]), ] = conv_fn(torch.Tensor([5, 4, 3]))
-        self.assertEqual(reference[ri([0, 2, 4]), ], torch.Tensor([5, 4, 3]))
+        validate_setting(reference)
+        validate_setting(reference.type(torch.half))
 
         # Tensor with stride != 1
 
@@ -10295,6 +10304,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         do_test(torch.tensor([[1, 2]]).detach())
 
     def test_c10_layer_norm_cpu(self):
+        print("Is pinned:")
+        print(torch.randn(1).is_pinned())
+
         # test that we can call c10 ops and they return a reasonable result
         X = torch.rand(5, 5, dtype=torch.float)
         epsilon = 1e-4
@@ -10304,9 +10316,15 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             torch.ops._caffe2.LayerNorm(torch.tensor(X), 1, epsilon)
         torch.testing.assert_allclose(expected_norm, actual_norm)
 
+        print("Is pinned:")
+        print(torch.randn(1).is_pinned())
+
     @unittest.skipIf(not torch.cuda.is_available(), "No GPU")
     @skipIfRocm
     def test_c10_layer_norm_cuda(self):
+        print("Is pinned:")
+        print(torch.randn(1).is_pinned())
+
         # test that we can call c10 ops and they return a reasonable result
         X = torch.rand(5, 5, dtype=torch.float).cuda()
         epsilon = 1e-4
@@ -10315,6 +10333,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         actual_norm, actual_mean, actual_stdev = \
             torch.ops._caffe2.LayerNorm(torch.tensor(X), 1, epsilon)
         torch.testing.assert_allclose(expected_norm, actual_norm)
+
+        print("Is pinned:")
+        print(torch.randn(1).is_pinned())
 
 # Functions to test negative dimension wrapping
 METHOD = 1

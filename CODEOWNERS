@@ -4,8 +4,8 @@
 /docs/cpp @goldsborough @ebetica @yf225
 /torch/csrc/api/ @ebetica @goldsborough @yf225
 /test/cpp/api/ @ebetica @goldsborough @yf225
-/torch/lib/c10d/ @apaszke @pietern @teng-li
-/torch/csrc/distributed/ @apaszke @pietern @teng-li
-/torch/distributed/ @apaszke @pietern @teng-li
-/test/test_c10d.py @apaszke @pietern @teng-li
+/torch/lib/c10d/ @apaszke @pietern @mrshenli
+/torch/csrc/distributed/ @apaszke @pietern @mrshenli
+/torch/distributed/ @apaszke @pietern @mrshenli
+/test/test_c10d.py @apaszke @pietern @mrshenli
 /torch/utils/cpp_extension.py @goldsborough @fmassa @apaszke @soumith @ezyang
