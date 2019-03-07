@@ -23,6 +23,13 @@ message TensorDef {
   optional string device = 7;
 }
 
+message AttributeDef {
+  // The mypy type of this attribute
+  optional string type = 1;
+
+  optional string name = 2;
+}
+
 message ParameterDef {
   // whether this parameter is registered as buffer or not
   optional bool is_buffer = 1;
@@ -58,6 +65,8 @@ message ModuleDef {
   // whether apply the optimizations to this module, only applicable to
   // script modules
   optional bool optimize = 8;
+
+  repeated AttributeDef attributes = 9;
 }
 
 enum ProtoVersion {

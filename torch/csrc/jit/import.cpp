@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/import_method.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/script/script_type_parser.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
@@ -56,6 +57,11 @@ class ScriptModuleDeserializer final {
   void convertModule(const torch::ModuleDef& module_def);
 
   void loadTensorTable(torch::ModelDef* model_def);
+  void loadAttributeTable(const torch::ModuleDef* model_def);
+  IValue loadIValue(
+      uint64_t byte_offset,
+      const TypePtr type,
+      const at::DataPtr& storage_ptr);
 
   caffe2::serialize::PyTorchStreamReader reader_;
   // this is a hack to make sure the script module created in C++ is the
@@ -65,6 +71,7 @@ class ScriptModuleDeserializer final {
   std::vector<std::string> moduleStack_;
 
   std::vector<at::Tensor> tensor_table_;
+  std::unordered_map<std::string, std::pair<TypePtr, IValue>> attribute_table_;
 };
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
@@ -126,6 +133,7 @@ void ScriptModuleDeserializer::deserialize(
   }
 
   loadTensorTable(&model_def);
+  loadAttributeTable(&module_def);
   // TODO: this can be simplified when C++/Python interop lands,
   // and the submodules would be created as the same in either C++ or Python
   convertModule(module_def);
@@ -136,6 +144,68 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
   for (const torch::TensorDef& tensor : model_def->tensors()) {
     tensor_table_.emplace_back(loadTensor(tensor, storageMap));
   }
+}
+
+void ScriptModuleDeserializer::loadAttributeTable(
+    const torch::ModuleDef* module_def) {
+  std::unordered_map<std::string, at::Storage> storageMap;
+  for (const torch::AttributeDef& attribute_def : module_def->attributes()) {
+    std::ostringstream filename;
+    filename << "attributes/" << attribute_def.name();
+    at::DataPtr storage_ptr;
+    uint64_t record_size;
+    std::tie(storage_ptr, record_size) = reader_.getRecord(filename.str());
+
+     auto type = script::parseType(attribute_def.type());
+
+     attribute_table_[attribute_def.name()] =
+        std::make_pair(type, loadIValue(0, type, storage_ptr));
+  }
+}
+
+/// Loads an IValue from a byte array
+///
+/// @param byte_offset the offset into the data array (as bytes) where the
+///                    IValue begins
+/// @param type the jit type of the IValue to be de-serialized
+/// @return storage_ptr the data itself
+IValue ScriptModuleDeserializer::loadIValue(
+    uint64_t byte_offset,
+    const TypePtr type,
+    const at::DataPtr& storage_ptr) {
+  const char* bytes = static_cast<const char*>(storage_ptr.get());
+
+  if (auto dict_type = type->cast<DictType>()) {
+    const uint64_t* data = static_cast<const uint64_t*>(storage_ptr.get());
+    // A byte offset into bytes that says where the mappings of key pointers
+    // to value pointers start
+    uint64_t dict_pairs_byte_offset = data[0];
+
+    // Number of key value pairs in the dict
+    uint64_t num_dict_entries = data[1];
+
+    c10::ivalue::UnorderedMap result;
+    const uint64_t* dict_data =
+        reinterpret_cast<const uint64_t*>(bytes + dict_pairs_byte_offset);
+
+    // Load each key/value pair and store the result
+    for (size_t i = 0; i < num_dict_entries * 2; i += 2) {
+      auto k =
+          loadIValue(dict_data[i + 0], dict_type->getKeyType(), storage_ptr);
+      auto v =
+          loadIValue(dict_data[i + 1], dict_type->getValueType(), storage_ptr);
+      result[k] = v;
+    }
+    return result;
+  } else if (auto string_type = type->cast<StringType>()) {
+    return std::string(bytes + byte_offset);
+  } else if (auto tensor_type = type->cast<TensorType>()) {
+    const uint64_t* tensor_id =
+        reinterpret_cast<const uint64_t*>(bytes + byte_offset);
+    return tensor_table_.at(tensor_id[0]);
+  }
+  // TODO: types other than dict and string
+  AT_ERROR("Unknown type for de-serialization:", type->python_str());
 }
 
 at::Tensor ScriptModuleDeserializer::loadTensor(
@@ -227,6 +297,14 @@ void ScriptModuleDeserializer::convertModule(
     } else {
       module->register_parameter(param_def.name(), tensor, /*is_buffer=*/false);
     }
+  }
+  for (int i = 0; i < module_def.attributes_size(); ++i) {
+    const torch::AttributeDef& attr_def = module_def.attributes(i);
+    auto attribute = attribute_table_.at(attr_def.name());
+    module->register_attribute(
+        attr_def.name(),
+        attribute.first,
+        attribute.second);
   }
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;

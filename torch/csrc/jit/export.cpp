@@ -117,20 +117,20 @@ class EncoderBase {
  protected:
   // Using std::map instead of std::unordered_map for initializers
   // in EncodeGraph cosntructor so that the order in which initializers
-  // get written to the ONNX graph is always the deterministic and 
-  // predictable. While this is not a ONNX requirement, it is needed 
+  // get written to the ONNX graph is always the deterministic and
+  // predictable. While this is not a ONNX requirement, it is needed
   // for testing purposes in tests that use _export_to_pretty_string()
   // for validating ONNX graphs.
   void EncodeGraph(
       onnx::GraphProto* graph_proto,
       const std::shared_ptr<Graph>& graph,
-      const std::map<std::string, at::Tensor>& initializers = 
+      const std::map<std::string, at::Tensor>& initializers =
         std::map<std::string, at::Tensor>());
 
   void EncodeBlock(
       onnx::GraphProto* graph_proto,
       const Block* block,
-      const std::map<std::string, at::Tensor>& initializers = 
+      const std::map<std::string, at::Tensor>& initializers =
         std::map<std::string, at::Tensor>());
 
   virtual void EncodeTensor(
@@ -494,6 +494,7 @@ class ScriptModuleSerializer final {
   // tensors has been collected. the method calls convertAndWriteTensor
   // to dump the content of a tensor
   void writeTensorTable(torch::ModelDef* model_def);
+  uint64_t writeIValue(const IValue& ivalue, std::vector<char>& data);
 
   void convertModule(
       const script::Module& module,
@@ -638,6 +639,95 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
   }
 }
 
+size_t pushBytes(size_t num_bytes, std::vector<char>& data) {
+  AT_ASSERT(num_bytes > 0);
+  data.push_back(0);
+  auto index = data.size() - 1;
+
+  for (size_t i = 1; i < num_bytes; ++i) {
+    data.push_back(0);
+  }
+  return index;
+}
+
+template <typename T>
+size_t pushValue(T value, std::vector<char>& data) {
+  auto index = pushBytes(sizeof(T), data);
+  T* ptr = reinterpret_cast<T*>(&data[index]);
+  *ptr = value;
+  return index;
+}
+
+// Estimate the number of bytes a serialized IValue will take
+size_t estimateIValueSize(const IValue& ivalue) {
+  if (ivalue.isString()) {
+    return ivalue.toStringRef().size() + 1;
+  } else if (ivalue.isGenericDict()) {
+    auto dict = ivalue.toGenericDictRef();
+    size_t dict_overhead = 2 * sizeof(uint64_t);
+    size_t element_size = 0;
+    if (dict.begin() != dict.end()) {
+      const auto item = dict.begin();
+      element_size =
+          estimateIValueSize(item->first) + estimateIValueSize(item->second);
+    }
+    return dict_overhead + element_size * dict.size();
+  }
+  return 0;
+}
+
+uint64_t ScriptModuleSerializer::writeIValue(
+    const IValue& ivalue,
+    std::vector<char>& data) {
+  // Write IValue into array as bytes, return pointer to start of data for the
+  // IValue. This may be anywhere in 'data' (i.e. if the IValue contains other)
+  // IValues, it will also write those
+  uint64_t ivalue_offset = data.size();
+  data.reserve(data.size() + estimateIValueSize(ivalue));
+
+  if (ivalue.isString()) {
+    auto string = ivalue.toStringRef();
+    data.insert(data.end(), string.begin(), string.end());
+    // Null-terminate strings
+    data.push_back('\0');
+  } else if (ivalue.isGenericDict()) {
+    auto dict = ivalue.toGenericDictRef();
+    // Add the pointer to the start of the key/value mappings
+    auto data_ptr_index = pushBytes(sizeof(uint64_t), data);
+
+    // Add the size of the dictionary
+    pushValue(uint64_t(dict.size()), data);
+
+    std::vector<size_t> item_data_offsets;
+    item_data_offsets.reserve(dict.size() * 2);
+    // Write all the key/value pairs into the data array and save their
+    // indices in the array
+    for (const auto& item : dict) {
+      item_data_offsets.push_back(writeIValue(item.first, data));
+      item_data_offsets.push_back(writeIValue(item.second, data));
+    }
+
+    // Add offsets into 'data' for each key/value pair in the dict
+    ivalue_offset = data.size();
+    for (uint64_t offset : item_data_offsets) {
+      pushValue(offset, data);
+    }
+
+    // At the start of the block of data for this dictionary, write where the
+    // dictionary key/value pairs begin
+    uint64_t* size_ptr = reinterpret_cast<uint64_t*>(&data[data_ptr_index]);
+    *size_ptr = uint64_t(ivalue_offset);
+  } else if (ivalue.isTensor()) {
+    auto tensor = ivalue.toTensor();
+    // Write it to the tensor table
+    pushValue(addTensor(tensor), data);
+  } else {
+    AT_ERROR("Cannot write data for ivalue");
+  }
+
+  return ivalue_offset;
+}
+
 void ScriptModuleSerializer::convertModule(
     const script::Module& module,
     const std::string& prefix,
@@ -654,6 +744,20 @@ void ScriptModuleSerializer::convertModule(
       torch::ParameterDef* param_def = module_def->add_parameters();
       convertParameter(elem.value(), param_def, /*is_buffer=*/true);
     }
+  }
+
+  for (const auto& item : module.get_attributes()) {
+    torch::AttributeDef* attribute_def = module_def->add_attributes();
+    auto& attribute = item.value();
+    attribute_def->set_name(attribute.name_);
+    attribute_def->set_type(attribute.type->python_str());
+
+    std::vector<char> bytes;
+    writeIValue(*attribute.slot(), bytes);
+    std::stringstream filename;
+    // TODO: this will clash if a submodule has an attribute of the same name
+    filename << "attributes/" << attribute.name_;
+    writer_.writeRecord(filename.str(), bytes.data(), bytes.size());
   }
 
   std::stringstream module_name;
