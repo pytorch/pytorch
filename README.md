@@ -150,14 +150,14 @@ PyTorch supports only 64-bit version of python.
 To check your python version, you may run:
 ```python
 python
-import platform
-platform.architecture()
+import struct
+print( 8 * struct.calcsize("P"))
 ```
 The output should be:
 ```python
-('64bit', ...)
+64
 ```
-In case of '32bit', please install a 64-bit version of python (if it is not installed as well) and set the path to it in your environment.
+Otherwise, please install a 64-bit version of python (if it is not installed as well) and set the path to it in your environment.
 
 #### Install Dependencies
 
