@@ -129,9 +129,8 @@ bool isDifferentiable(Node* n) {
     return true;
 
   if (n->matches(
-          "aten::dropout(Tensor input, float p, bool train) -> Tensor")) {
-    auto train = n->get<bool>(attr::train).value();
-    return train;
+          "aten::dropout(Tensor input, float p, bool train) -> Tensor", attr::train)) {
+    return n->get<bool>(attr::train).value();
   }
 
   auto schema = n->maybeSchema();
