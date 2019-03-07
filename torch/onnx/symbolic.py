@@ -200,16 +200,18 @@ def _try_get_scalar_type(*args):
 # and the symbolic functions should check it to determine the behavior
 # of the exporter.
 
-_default_onnx_opset_version = 10
-_export_onnx_opset_version = _default_onnx_opset_version
+
+_default_onnx_opset_version = 9
+_onnx_master_opset = 10
 _onnx_stable_opsets = [9]
+_export_onnx_opset_version = _default_onnx_opset_version
 
 
 def _set_opset_version(opset_version):
     global _export_onnx_opset_version
     if opset_version == _default_onnx_opset_version:
         return
-    if opset_version in _onnx_stable_opsets:
+    if opset_version in _onnx_stable_opsets + [_onnx_master_opset]:
         _export_onnx_opset_version = opset_version
         return
     raise ValueError("Unsupported ONNX opset version: " + str(opset_version))

@@ -547,10 +547,10 @@ class TestOperators(TestCase):
         x = torch.tensor([[[2., 2.], [1., 0.]], [[0., 0.], [1., 1.]]], requires_grad=True)
         self.assertONNX(lambda x: torch.nonzero(x), x)
 
-    def test_stable_opset(self):
+    def test_master_opset(self):
         x = torch.randn(2, 3).float()
         y = torch.randn(2, 3).float()
-        self.assertONNX(lambda x, y: x + y, (x, y), opset_version=9)
+        self.assertONNX(lambda x, y: x + y, (x, y), opset_version=10)
 
 
 if __name__ == '__main__':
