@@ -15,6 +15,9 @@ from collections import Iterable
 from functools import partial, wraps
 import itertools
 
+import numpy
+import math
+
 # EDITING THIS FILE? READ THIS FIRST!
 #
 # - This file is ONLY for ATen operators (e.g., operators that show up in the
@@ -603,17 +606,46 @@ def softplus(g, self, beta, threshold):
     return g.op('Softplus', self)
 
 
+def get_pool_ceil_padding(input, kernel_size, stride, padding):
+    dim = input.type().sizes()[-len(padding):]
+    ceiled_output_dim = [int(math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i]))) + 1
+                         for i in range(0, len(padding))]
+    # ensure last pooling starts inside
+    ceiled_output_dim = [ceiled_output_dim[i] - 1
+                         if (((ceiled_output_dim[i] - 1) * stride[i]) >= (dim[i] + padding[i]))
+                         else ceiled_output_dim[i]
+                         for i in range(0, len(ceiled_output_dim))]
+    padding_ceil = [0
+                    if (stride[i] == 1)
+                    else
+                    (kernel_size[i] - (dim[i] + 2 * padding[i] - ((ceiled_output_dim[i] - 1) * stride[i] + 1)))
+                    for i in range(0, len(padding))]
+    # ensure padding is not > kernel_size
+    padding_ceil = [(int(padding_ceil[i]) if padding_ceil[i] < kernel_size[i] - 1 else int(kernel_size[i] - 1))
+                    if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
+                    else
+                    int(padding_ceil[i])
+                    for i in range(0, len(padding_ceil))]
+    return padding_ceil
+
+
 @parse_args('v', 'is', 'is', 'is', 'is', 'i')
 def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode:
-        return _unimplemented("max_pool1d_with_indices", "ceil_mode")
+    if ceil_mode and input.type().kind() != "CompleteTensorType":
+        return _unimplemented("max_pool1d_with_indices", "input size not accesible")
     if set(_single(dilation)) != {1}:
         return _unimplemented("max_pool1d_with_indices", "dilation")
     if stride is None:
         stride = kernel_size
+    padding = tuple(_single(padding))
+    if ceil_mode:
+        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+        padding = padding + tuple(numpy.add(padding_ceil, padding))
+    else:
+        padding = padding * 2
     r, indices = g.op("MaxPool", input, outputs=2,
                       kernel_shape_i=_single(kernel_size),
-                      pads_i=_single(padding) * 2,
+                      pads_i=padding,
                       strides_i=_single(stride))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened.
@@ -639,15 +671,21 @@ def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
 
 @parse_args('v', 'is', 'is', 'is', 'is', 'i')
 def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode:
-        return _unimplemented("max_pool2d_with_indices", "ceil_mode")
+    if ceil_mode and input.type().kind() != "CompleteTensorType":
+        return _unimplemented("max_pool2d_with_indices", "input size not accesible")
     if set(_pair(dilation)) != {1}:
         return _unimplemented("max_pool2d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
+    padding = tuple(_pair(padding))
+    if ceil_mode:
+        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+        padding = padding + tuple(numpy.add(padding_ceil, padding))
+    else:
+        padding = padding * 2
     r, indices = g.op("MaxPool", input, outputs=2,
                       kernel_shape_i=_pair(kernel_size),
-                      pads_i=_pair(padding) * 2,
+                      pads_i=padding,
                       strides_i=_pair(stride))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened
@@ -663,15 +701,21 @@ def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
 
 @parse_args('v', 'is', 'is', 'is', 'is', 'i')
 def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode:
-        return _unimplemented("max_pool3d_with_indices", "ceil_mode")
+    if ceil_mode and input.type().kind() != "CompleteTensorType":
+        return _unimplemented("max_pool3d_with_indices", "input size not accesible")
     if set(_triple(dilation)) != {1}:
         return _unimplemented("max_pool3d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
+    padding = tuple(_triple(padding))
+    if ceil_mode:
+        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+        padding = padding + tuple(numpy.add(padding_ceil, padding))
+    else:
+        padding = padding * 2
     r, indices = g.op("MaxPool", input, outputs=2,
                       kernel_shape_i=_triple(kernel_size),
-                      pads_i=_triple(padding) * 2,
+                      pads_i=padding,
                       strides_i=_triple(stride))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened
@@ -688,23 +732,28 @@ def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
 def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
-        if ceil_mode:
-            return _unimplemented("avg_pool2d", "ceil_mode")
+        if ceil_mode and input.type().kind() != "CompleteTensorType":
+            return _unimplemented(name, "input size not accesible")
         if not stride:
             stride = kernel_size
-
         padding = tuple(tuple_fn(padding))
+        if ceil_mode:
+            padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
         if count_include_pad:
             input = g.op("Pad", input,
                          pads_i=((0,) * 2 + padding) * 2,
                          mode_s='constant',
                          value_f=0.)
             padding = (0,) * len(padding)
-
-        return g.op("AveragePool", input,
-                    kernel_shape_i=tuple_fn(kernel_size),
-                    strides_i=tuple_fn(stride),
-                    pads_i=padding * 2)
+        if ceil_mode:
+            padding = padding + tuple(numpy.add(padding_ceil, padding))
+        else:
+            padding = padding * 2
+        output = g.op("AveragePool", input,
+                      kernel_shape_i=tuple_fn(kernel_size),
+                      strides_i=tuple_fn(stride),
+                      pads_i=padding)
+        return output
     return symbolic_fn
 
 
