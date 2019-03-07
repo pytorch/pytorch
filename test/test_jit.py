@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.parallel as dp
 import torch.optim as optim
+import torch.nn.Module
+import torch.cuda
 import torch.jit.quantized
 from contextlib import contextmanager
 from itertools import product, chain
@@ -5050,10 +5052,11 @@ a")
         self.checkScript(multiple_returns, [a], optimize=True)
 
         with self.assertRaisesRegex(RuntimeError, "but is actually of type None"):
-            @torch.jit.script
+            torch.jit.CompilationUnit('''
             def no_return_bad_annotation(a):
                 # type: (Tensor) -> Tensor
                 a + 1
+            ''')
 
     def test_error(self):
         @torch.jit.script
@@ -6643,7 +6646,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, r"but instead got value of type tuple"):
             def foo():
                 # type: () -> Tensor
-                return ((3, 4),)
+                return ((3, 4),)  # noqa: T484
 
             @torch.jit.script
             def bar():
@@ -9068,7 +9071,7 @@ a")
             @torch.jit.script
             def return_tup(x):
                 # type: (Tensor) -> Tuple[Tuple[Tensor, Tensor], Tensor]
-                return x, x
+                return x, x  # noqa: T484
 
     def test_annotated_script_fn_arg_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, r"arguments for call are not valid"):
@@ -13250,7 +13253,7 @@ class TestAsync(JitTestCase):
                 # return a nested structure of tensors
                 return (tensor_list, tensor_tuple, tensor_tuple[1])
 
-        class Tuple(nn.Module):
+        class TupleCl(nn.Module):
             def __init__(self):
                 super(Tuple, self).__init__()
                 self.module = Module()
@@ -13262,7 +13265,7 @@ class TestAsync(JitTestCase):
                 return tuple(list)
 
         x = torch.rand(3, 3)
-        module = torch.jit.trace(Tuple(), (x), _force_outplace=True)
+        module = torch.jit.trace(TupleCl(), (x), _force_outplace=True)
 
         # Make sure we have forks
         self.assertGraphContainsExactly(module.graph, kind='prim::fork', num_kind_nodes=2)
