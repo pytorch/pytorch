@@ -206,7 +206,7 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ at::Half erfc(at::Half a) { return ::erfc(a); }
   static inline __host__ __device__ at::Half erfinv(at::Half a) { return ::erfinv(a); }
   static inline __host__ __device__ at::Half abs(at::Half a) { return std::abs(a); }
-  static inline __host__ __device__ at::Half round(at::Half a) { return ::round(a); }
+  static inline __host__ __device__ at::Half round(at::Half a) { return ::nearbyint(a); }
 
   static inline __host__ __device__ at::Half frac(at::Half a) {
     #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
@@ -292,7 +292,7 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float erf  (float a) { return   erff(a); }
   static inline __host__ __device__  float erfc (float a) { return  erfcf(a); }
   static inline __host__ __device__  float abs  (float a) { return  fabsf(a); }
-  static inline __host__ __device__  float round(float a) { return roundf(a); }
+  static inline __host__ __device__  float round(float a) { return nearbyintf(a); }
   static inline __host__ __device__  float frac (float a) { return a - truncf(a); }
   static inline __host__ __device__  float cinv (float a) { return 1.0f / a; }
   static inline __host__ __device__  float add  (float a, float b) { return a + b; }
@@ -351,7 +351,7 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double erf  (double a) { return   ::erf(a); }
   static inline __host__ __device__  double erfc (double a) { return  ::erfc(a); }
   static inline __host__ __device__  double abs  (double a) { return   fabs(a); }
-  static inline __host__ __device__  double round(double a) { return ::round(a); }
+  static inline __host__ __device__  double round(double a) { return ::nearbyint(a); }
   static inline __host__ __device__  double frac (double a) { return a - ::trunc(a); }
   static inline __host__ __device__  double cinv (double a) { return 1.0 / a; }
   static inline __host__ __device__  double add  (double a, double b) { return a + b; }
