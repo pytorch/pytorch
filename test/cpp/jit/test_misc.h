@@ -1108,7 +1108,9 @@ void testBlocks(std::ostream& out = std::cout) {
   }
   g.registerOutput((Var(r->output()) + c).value());
   g.lint();
-  out << "testBlocks\n" << g << "\n";
+  // FileCheck().check("add").check("prim::If").check("block").check("aten::add").
+  //   check("block").check("aten::add").check()
+  // out << "testBlocks\n" << g << "\n";
   r->eraseBlock(0);
   out << g << "\n";
   g.lint();
@@ -1508,9 +1510,7 @@ void testSchemaParser() {
         Symbol::fromQualString("alias::b"),
     };
     const auto expectedAfter = std::unordered_set<Symbol>{
-        Symbol::fromQualString("alias::b"),
-        Symbol::fromQualString("alias::c")
-    };
+        Symbol::fromQualString("alias::b"), Symbol::fromQualString("alias::c")};
     ASSERT_TRUE(containedAliasInfo.beforeSets() == expectedBefore);
     ASSERT_TRUE(containedAliasInfo.afterSets() == expectedAfter);
     ASSERT_FALSE(containedAliasInfo.isWrite());
