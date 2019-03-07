@@ -292,7 +292,20 @@ void THBlas_(ger)(int64_t m, int64_t n, scalar_t alpha, scalar_t *x, int64_t inc
   }
 }
 
-void THBlas_(gemm)(char transa, char transb, int64_t m, int64_t n, int64_t k, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *b, int64_t ldb, scalar_t beta, scalar_t *c, int64_t ldc)
+void THBlas_(gemm)(
+  char transa,
+  char transb,
+  int64_t m,
+  int64_t n,
+  int64_t k,
+  scalar_t alpha,
+  scalar_t *a,
+  int64_t lda,
+  scalar_t *b,
+  int64_t ldb,
+  scalar_t beta,
+  scalar_t *c,
+  int64_t ldc)
 {
   int transa_ = ((transa == 't') || (transa == 'T'));
   int transb_ = ((transb == 't') || (transb == 'T'));
