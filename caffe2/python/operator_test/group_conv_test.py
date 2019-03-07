@@ -42,7 +42,11 @@ class TestGroupConvolution(hu.HypothesisTestCase):
                 assume(group == 1 and engine != "CUDNN")
         else:
             # TODO: Group conv in NHWC not implemented for GPU yet.
-            assume(group == 1 or order == "NCHW" or gc.device_type != caffe2_pb2.CUDA)
+            assume(group == 1 or order == "NCHW" or gc.device_type == caffe2_pb2.CPU)
+           
+            if group != 1 and order == "NHWC":
+                dc = [d for d in dc if d.device_type == caffe2_pb2.CPU]
+
         # Group conv not implemented with EIGEN engine.
         assume(group == 1 or engine != "EIGEN")
 
