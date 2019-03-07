@@ -13255,7 +13255,7 @@ class TestAsync(JitTestCase):
 
         class TupleCl(nn.Module):
             def __init__(self):
-                super(Tuple, self).__init__()
+                super(TupleCl, self).__init__()
                 self.module = Module()
 
             def forward(self, x):
