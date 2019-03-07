@@ -58,12 +58,6 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
     } else {
       mode_ = miopenConvolution;
     }
-
-    if (mode_ == miopenGroupConv) {
-      OPERATOR_NEEDS_FEATURE(
-          dilation_h() == 1 && dilation_w() == 1,
-          "MIOpen convolution does not support dilation for groups > 1.");
-    }
   }
 
   ~MIOPENConvOpBase() {
