@@ -273,7 +273,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         op = core.CreateOperator(
             "Swish",
             ["X"],
-            ["Z"]
+            ["Y"]
         )
 
         self.assertReferenceChecks(
@@ -282,36 +282,10 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             inputs=[X],
             reference=swish,
         )
-
+        self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
 
-    @given(n=st.integers(0, 6), m=st.integers(4, 6),
-           seed=st.integers(0, 1000), **hu.gcs)
-    def test_swish_gradient_inplace(self, n, m, gc, dc, seed):
-        np.random.seed(seed)
-
-        def swish(X):
-            return [np.divide(X, (1. + np.exp(-X)))]
-
-        def swish_gradient(X, Y, dY):
-            return [dY * (Y + np.divide(1. - Y, 1. + np.exp(-X)))]
-
-        X = np.random.rand(n, m).astype(np.float32)
-        Y = swish(X)[0]
-        dY = np.random.rand(n, m).astype(np.float32)
-        op = core.CreateOperator(
-            "SwishGradient",
-            ["X", "Y", "grad"],
-            "grad"
-        )
-
-        self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X, Y, dY],
-            reference=swish_gradient,
-        )
 
     @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
@@ -674,5 +648,4 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
 
 if __name__ == "__main__":
-    import unittest
     unittest.main()

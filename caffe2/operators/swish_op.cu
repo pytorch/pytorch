@@ -1,80 +1,75 @@
 #include "caffe2/operators/swish_op.h"
 
+#include <thrust/execution_policy.h>
+#include <thrust/functional.h>
+#include <thrust/transform.h>
+
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
 namespace {
 
 template <typename T>
-__global__ void SwishCUDAKernel(const int N, const T* X, T* Y) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-#if __CUDA_ARCH__ >= 350
-    Y[i] = __ldg(X + i) / (T(1) + exp(-__ldg(X + i)));
-#else
-    Y[i] = X[i] / (T(1) + exp(-X[i]));
-#endif
-  }
-}
-
-template <typename T>
 __global__ void SwishGradientCUDAKernel(
     const int N,
+    const T* dY,
     const T* X,
     const T* Y,
-    const T* dY,
-    T* dX) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-#if __CUDA_ARCH__ >= 350
-    dX[i] = __ldg(dY + i) *
-        (__ldg(Y + i) + (T(1) - __ldg(Y + i)) / (T(1) + exp(-__ldg(X + i))));
-#else
-    dX[i] = dY[i] * (Y[i] + (T(1) - Y[i]) / (T(1) + exp(-X[i])));
-#endif
+    T* dX);
+
+#define DELEGATE_SWISH_GRADIENT_CUDA_KERNEL(T, DeviceExpFunc)                 \
+  template <>                                                                 \
+  __global__ void SwishGradientCUDAKernel<T>(                                 \
+      const int N, const T* dY, const T* X, const T* Y, T* dX) {              \
+    const int i = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;          \
+    if (i < N) {                                                              \
+      dX[i] = dY[i] * (Y[i] + (T(1) - Y[i]) / (T(1) + DeviceExpFunc(-X[i]))); \
+    }                                                                         \
   }
-}
+DELEGATE_SWISH_GRADIENT_CUDA_KERNEL(float, expf)
+DELEGATE_SWISH_GRADIENT_CUDA_KERNEL(double, exp)
+#undef DELEGATE_SWISH_GRADIENT_CUDA_KERNEL
 
 } // namespace
 
-template <>
-template <typename T>
-bool SwishFunctor<CUDAContext>::
-operator()(const int N, const T* X, T* Y, CUDAContext* context) const {
-  SwishCUDAKernel<T>
-      <<<CAFFE_GET_BLOCKS(N),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context->cuda_stream()>>>(N, X, Y);
-  return true;
-}
+#define DELEGATE_SWISH_FUNCTOR(T, DeviceExpFunc)                   \
+  template <>                                                      \
+  template <>                                                      \
+  bool SwishFunctor<CUDAContext>::operator()<T>(                   \
+      const int N, const T* X, T* Y, CUDAContext* context) const { \
+    if (N > 0) {                                                   \
+      thrust::transform(                                           \
+          thrust::cuda::par.on(context->cuda_stream()),            \
+          X,                                                       \
+          X + N,                                                   \
+          Y,                                                       \
+          [] __device__(const T x) {                               \
+            return x / (T(1) + DeviceExpFunc(-x));                 \
+          });                                                      \
+    }                                                              \
+    return true;                                                   \
+  }
+DELEGATE_SWISH_FUNCTOR(float, expf)
+DELEGATE_SWISH_FUNCTOR(double, exp)
+#undef DELEGATE_SWISH_FUNCTOR
 
 template <>
 template <typename T>
-bool SwishGradientOp<CUDAContext>::DoRunWithType() {
-  auto& Xin = Input(X);
-  auto& Yin = Input(Y);
-  auto& DYin = Input(DY);
-  auto* DXout = Output(DX);
-  CAFFE_ENFORCE_EQ(Xin.size(), Yin.size());
-  CAFFE_ENFORCE_EQ(DYin.size(), Yin.size());
-  DXout->ResizeLike(Yin);
-
-  const int n = Xin.size();
-  const T* x = Xin.template data<T>();
-  const T* y = Yin.template data<T>();
-  const T* dy = DYin.template data<T>();
-  T* dx = DXout->template mutable_data<T>();
-  SwishGradientCUDAKernel<T>
-      <<<CAFFE_GET_BLOCKS(n),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context_.cuda_stream()>>>(n, x, y, dy, dx);
+bool SwishGradientOp<CUDAContext>::SwishBackward(
+    const int N,
+    const T* dY,
+    const T* X,
+    const T* Y,
+    T* dX) {
+  if (N > 0) {
+    const int M = math::DivUp(N, CAFFE_CUDA_NUM_THREADS);
+    SwishGradientCUDAKernel<T>
+        <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+            N, dY, X, Y, dX);
+  }
   return true;
-}
-
-template <>
-bool SwishGradientOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<float, double>>::call(this, Input(X));
 }
 
 REGISTER_CUDA_OPERATOR(

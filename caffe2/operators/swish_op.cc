@@ -20,34 +20,24 @@ operator()(const int N, const T* X, T* Y, CPUContext* /* context */) const {
 
 template <>
 template <typename T>
-bool SwishGradientOp<CPUContext>::DoRunWithType() {
-  auto& Xin = Input(X);
-  auto& Yin = Input(Y);
-  auto& DYin = Input(DY);
-
-  CAFFE_ENFORCE_EQ(Xin.numel(), Yin.numel());
-  CAFFE_ENFORCE_EQ(DYin.numel(), Yin.numel());
-  auto* DXout = Output(DX, Yin.sizes(), at::dtype<float>());
-
-  const float* Xdata = Xin.template data<float>();
-  const float* Ydata = Yin.template data<float>();
-  const float* dYdata = DYin.template data<float>();
-  float* dXdata = DXout->template mutable_data<float>();
-
-  EigenVectorArrayMap<float> dXvec(dXdata, DXout->numel());
-  ConstEigenVectorArrayMap<float> Xvec(Xdata, Xin.numel());
-  ConstEigenVectorArrayMap<float> Yvec(Ydata, Yin.numel());
-  ConstEigenVectorArrayMap<float> dYvec(dYdata, DYin.numel());
-
-  // dx = dy * (y + sigmoid(x)*(1-y))
-  dXvec = dYvec * (Yvec + (T(1) / (T(1) + (-Xvec).exp())) * (T(1) - Yvec));
+bool SwishGradientOp<CPUContext>::SwishBackward(
+    const int N,
+    const T* dY,
+    const T* X,
+    const T* Y,
+    T* dX) {
+  ConstEigenVectorArrayMap<T> dY_arr(dY, N);
+  ConstEigenVectorArrayMap<T> X_arr(X, N);
+  ConstEigenVectorArrayMap<T> Y_arr(Y, N);
+  EigenVectorArrayMap<T> dX_arr(dX, N);
+  dX_arr = dY_arr * (Y_arr + (T(1) / (T(1) + (-X_arr).exp())) * (T(1) - Y_arr));
   return true;
 }
 
 REGISTER_CPU_OPERATOR(
     Swish,
     UnaryElementwiseOp<
-        TensorTypes<float>,
+        TensorTypes<float, double>,
         CPUContext,
         SwishFunctor<CPUContext>>);
 REGISTER_CPU_OPERATOR(SwishGradient, SwishGradientOp<CPUContext>);
