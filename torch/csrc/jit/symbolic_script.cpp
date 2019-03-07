@@ -579,6 +579,302 @@ const std::vector<std::string> functions = {
                 return grad_self, None
 
             return torch.view(self, size), backward
+
+    )",
+    R"(
+        def div(self, other):
+            def backward(grad_output):
+                grad_self = (grad_output / other)._grad_sum_to_size(self.size())
+                grad_other = (-grad_output * self / (other * other))._grad_sum_to_size(other.size())
+                return grad_self, grad_other
+
+            return self / other, backward
+
+        def max(self, other):
+            def backward(grad_output):
+                grad_self = grad_output.clone().masked_fill_(self <= other, 0)._grad_sum_to_size(self.size())
+                grad_other = grad_output.clone().masked_fill_(self > other, 0)._grad_sum_to_size(other.size())
+                return grad_self, grad_other
+
+            return torch.max(self, other), backward
+
+        def min(self, other):
+            def backward(grad_output):
+                grad_self = grad_output.clone().masked_fill_(self >= other, 0)._grad_sum_to_size(self.size())
+                grad_other = grad_output.clone().masked_fill_(self < other, 0)._grad_sum_to_size(other.size())
+                return grad_self, grad_other
+
+            return torch.min(self, other), backward
+
+        def sigmoid(self):
+            result = torch.sigmoid(self)
+            def backward(grad_output):
+                grad_self = (1 - result) * result * grad_output
+                return grad_self
+
+            return result, backward
+
+        def tanh(self):
+            result = torch.tanh(self)
+            def backward(grad_output):
+                grad_self = grad_output * (1 - result * result)
+                return grad_self
+
+            return result, backward
+
+        ## Share backward with threshold
+        def relu(self):
+            result = torch.relu(self)
+            self_size = self.size()
+            def backward(grad_output):
+                grad_self = grad_output.clone().masked_fill_(result <= 0, 0)._grad_sum_to_size(self_size)
+                return grad_self
+
+            return result, backward
+
+        def erfc(self):
+            def backward(grad_output):
+                # Precomputed constant C = -2.0 / math.sqrt(math.pi)
+                C = -1.1283791670955126
+                grad_self = C * torch.exp(-self * self) * grad_output
+                return grad_self
+
+            return torch.erfc(self), backward
+
+        def exp(self):
+            result = torch.exp(self)
+            def backward(grad_output):
+                grad_self = grad_output * result
+                return grad_self
+
+            return result, backward
+
+        def neg(self):
+            def backward(grad_output):
+                grad_self = grad_output.neg()
+                return grad_self
+
+            return torch.neg(self), backward
+
+        def where(condition, self, other):
+            self_size = self.size()
+            other_size = other.size()
+            def backward(grad_output):
+                grad_self = (grad_output * condition.type_as(grad_output))._grad_sum_to_size(self_size)
+                grad_other = (grad_output * (1 - condition).type_as(grad_output))._grad_sum_to_size(other_size)
+                return None, grad_self, grad_other
+
+            return torch.where(condition, self, other), backward
+
+        def type_as(self, other):
+            def backward(grad_output):
+                grad_self = grad_output.type_as(self)
+                return grad_self, None
+
+            return torch.type_as(self, other), backward
+
+        def unsqueeze(self, dim: int):
+            def backward(grad_output):
+                grad_self = grad_output.squeeze(dim)
+                return grad_self, None
+
+            return torch.unsqueeze(self, dim), backward
+
+        def lt(self, other):
+            def backward(grad_output):
+                return None, None
+
+            return torch.lt(self, other), backward
+
+        def gt(self, other):
+            def backward(grad_output):
+                return None, None
+
+            return torch.gt(self, other), backward
+
+        def ge(self, other):
+            def backward(grad_output):
+                return None, None
+
+            return torch.ge(self, other), backward
+
+        def eq(self, other):
+            def backward(grad_output):
+                return None, None
+
+            return torch.eq(self, other), backward
+
+        def ne(self, other):
+            def backward(grad_output):
+                return None, None
+
+            return torch.ne(self, other), backward
+
+        def abs(self):
+            def backward(grad_output):
+                grad_self = grad_output * self.sign()
+                return grad_self
+
+            return torch.abs(self), backward
+
+        def acos(self):
+            def backward(grad_output):
+                grad_self = grad_output * -((-self * self + 1).rsqrt())
+                return grad_self
+
+            return torch.acos(self), backward
+
+        def asin(self):
+            def backward(grad_output):
+                grad_self = grad_output * (-self * self + 1).rsqrt()
+                return grad_self
+
+            return torch.asin(self), backward
+
+        def atan(self):
+            def backward(grad_output):
+                grad_self = grad_output / (self * self + 1)
+                return grad_self
+
+            return torch.atan(self), backward
+
+        def ceil(self):
+            def backward(grad_output):
+                grad_self = torch.zeros_like(grad_output)
+                return grad_self
+
+            return torch.ceil(self), backward
+
+        def cos(self):
+            def backward(grad_output):
+                grad_self = grad_output * -self.sin()
+                return grad_self
+
+            return torch.cos(self), backward
+
+        def cosh(self):
+            def backward(grad_output):
+                grad_self = grad_output * self.sinh()
+                return grad_self
+
+            return torch.cosh(self), backward
+
+        def expm1(self):
+            result = torch.expm1(self)
+            def backward(grad_output):
+                grad_self = grad_output * (result + 1)
+                return grad_self
+
+            return result, backward
+
+        def floor(self):
+            def backward(grad_output):
+                grad_self = torch.zeros_like(grad_output)
+                return grad_self
+
+            return torch.floor(self), backward
+
+        def frac(self):
+            def backward(grad_output):
+                grad_self = grad_output
+                return grad_self
+
+            return torch.frac(self), backward
+
+        def log(self):
+            def backward(grad_output):
+                grad_self = grad_output.div(self)
+                return grad_self
+
+            return torch.log(self), backward
+
+        def log10(self):
+            def backward(grad_output):
+                grad_self = grad_output / (self * 2.3025850929940456)
+                return grad_self
+
+            return torch.log10(self), backward
+
+        def log1p(self):
+            def backward(grad_output):
+                grad_self = grad_output / (self + 1)
+                return grad_self
+
+            return torch.log1p(self), backward
+
+        def log2(self):
+            def backward(grad_output):
+                grad_self = grad_output / (self * 0.6931471805599453)
+                return grad_self
+
+            return torch.log2(self), backward
+
+        def rand_like(self):
+            def backward(grad_output):
+                return None
+
+            return torch.rand_like(self), backward
+
+        def reciprocal(self):
+            result = torch.reciprocal(self)
+            def backward(grad_output):
+                grad_self = -grad_output * result * result
+                return grad_self
+
+            return result, backward
+
+        def round(self):
+            def backward(grad_output):
+                grad_self = torch.zeros_like(grad_output)
+                return grad_self
+
+            return torch.round(self), backward
+
+        def rsqrt(self):
+            result = torch.rsqrt(self)
+            def backward(grad_output):
+                grad_self = grad_output * result * result * result / 2
+                return grad_self
+
+            return result, backward
+
+        def sin(self):
+            def backward(grad_output):
+                grad_self = grad_output * self.cos()
+                return grad_self
+
+            return torch.sin(self), backward
+
+        def sinh(self):
+            def backward(grad_output):
+                grad_self = grad_output * self.cosh()
+                return grad_self
+
+            return torch.sinh(self), backward
+
+        def tan(self):
+            result = torch.tan(self)
+            def backward(grad_output):
+                grad_self = grad_output * (1. + result * result)
+                return grad_self
+
+            return result, backward
+
+        def trunc(self):
+            def backward(grad_output):
+                grad_self = torch.zeros_like(grad_output)
+                return grad_self
+
+            return torch.trunc(self), backward
+
+        def _grad_sum_to_size(self,
+                              size: List[int]):
+            self_size = self.size()
+            def backward(grad_output):
+                grad_self = grad_output.expand(self_size)
+                return grad_self, None
+
+            return torch._grad_sum_to_size(self, size), backward
     )",
     R"(
         def AD_adaptive_avg_pool2d_backward(grad,
@@ -622,6 +918,18 @@ const std::vector<std::string> functions = {
                 return grad_self, None
 
             return torch.adaptive_avg_pool3d(self, output_size), backward
+
+        def avg_pool2d(self,
+                       kernel_size: List[int],
+                       stride: List[int],
+                       padding: List[int],
+                       ceil_mode: bool,
+                       count_include_pad: bool):
+            def backward(grad_output):
+                grad_self = torch.avg_pool2d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
+                return grad_self, None, None, None, None, None
+
+            return torch.avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad), backward
 
         def batch_norm(input : Tensor,
                        weight : Optional[Tensor],
@@ -671,6 +979,42 @@ const std::vector<std::string> functions = {
 
             return torch.embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse), backward
 
+        def log_softmax(self, dim: int):
+            result = torch.log_softmax(self, dim)
+            def backward(grad_output):
+                grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self)
+                return grad_self, None
+
+            return result, backward
+
+        def max_pool2d_with_indices(self,
+                                    kernel_size: List[int],
+                                    stride: List[int],
+                                    padding: List[int],
+                                    dilation: List[int],
+                                    ceil_mode: bool):
+            result0, result1 = torch.max_pool2d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)
+            def backward(grad_output):
+                grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, result1)
+                return grad_self, None, None, None, None, None
+
+            return result0, result1, backward
+
+        def native_batch_norm(input,
+                              weight: Optional[Tensor],
+                              bias: Optional[Tensor],
+                              running_mean: Optional[Tensor],
+                              running_var: Optional[Tensor],
+                              training: bool,
+                              momentum: float,
+                              eps: float):
+            result0, result1, result2 = torch.native_batch_norm(input, weight, bias, running_mean, running_var, training, momentum, eps)
+            def backward(grad_output):
+                grad_input, grad_weight, grad_bias = torch.native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, result1, result2, training, eps, [True, True, True])
+                return grad_input, grad_weight, grad_bias, None, None, None, None, None
+
+            return result0, result1, result2, backward
+
         def nll_loss(self, target, weight: Optional[Tensor], reduction: int, ignore_index: int):
             result, total_weight = torch.nll_loss_forward(self, target, weight, reduction, ignore_index)
             def backward(grad):
@@ -692,6 +1036,18 @@ const std::vector<std::string> functions = {
                 return grad_self, None, None
 
             return torch.softmax(self, dim, dtype), backward
+
+        def thnn_conv2d_forward(self, weight,
+                                kernel_size: List[int],
+                                bias: Optional[Tensor],
+                                stride: List[int],
+                                padding: List[int]):
+            result0, result1, result2 = torch.thnn_conv2d_forward(self, weight, kernel_size, bias, stride, padding)
+            def backward(grad_output):
+                grad_self, grad_weight, grad_bias = torch.thnn_conv2d_backward(grad_output, self, weight, kernel_size, stride, padding, result1, result2, [True, True, True])
+                return grad_self, grad_weight, None, grad_bias, None, None
+
+            return result0, result1, result2, backward
 
         def AD_interpolate_backward(grad,
                                     input,
@@ -875,6 +1231,7 @@ void loadModule(const std::shared_ptr<script::Module> &module) {
     // modify canonical string for function overloading
     // prefer not to modify the schema name
     auto schema_string = overloadedSchemaString(actual_schema);
+    //std::cout << "Adding " << schema_string << std::endl;
 
     schema_to_graphs[schema_string] = std::move(pair);
   }
@@ -899,6 +1256,7 @@ gradientInfoForSchema(const FunctionSchema &schema) {
     return cache_it->second;
   } else {
     auto schema_str = canonicalSchemaString(schema);
+    //std::cout << "Looking for " << schema_str << std::endl;
     auto sym_script_it = schema_to_graphs.find(schema_str);
 
     if (sym_script_it != schema_to_graphs.end()) {
