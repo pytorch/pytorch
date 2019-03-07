@@ -1,8 +1,8 @@
 #pragma once
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
-#include "caffe2/core/registry.h"
-#include "caffe2/core/typeid.h"
+#include <c10/util/typeid.h>
 
 #include <unordered_map>
 
@@ -33,7 +33,7 @@ struct BlobStatRegistry {
 
 #define REGISTER_BLOB_STAT_GETTER(Type, BlobStatGetterClass)    \
   static BlobStatRegistry::Registrar<Type, BlobStatGetterClass> \
-      CAFFE_ANONYMOUS_VARIABLE(BlobStatRegistry)
+      C10_ANONYMOUS_VARIABLE(BlobStatRegistry)
 
 namespace BlobStat {
 
@@ -41,6 +41,6 @@ namespace BlobStat {
  * Return size in bytes of the blob, if available for a blob of given type.
  * If not available, return 0.
  */
-size_t sizeBytes(const Blob& blob);
+CAFFE2_API size_t sizeBytes(const Blob& blob);
 }
 }

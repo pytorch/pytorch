@@ -43,36 +43,38 @@ class FullyConnectedOpDecomp final : public Operator<Context> {
     const auto& U = Input(1);
     const auto& V = Input(2);
     const auto& b = Input(3);
-    auto* Y = Output(0);
+
     //auto* buffer_ptr = Output(1);
     // Size M * middle;
     //auto& multi_buffer_ = *buffer_ptr;
-    CAFFE_ENFORCE_GE(X.ndim(), 1);
-    CAFFE_ENFORCE_GE(U.ndim(), 2);
-    CAFFE_ENFORCE_GE(V.ndim(), 2);
-    if (X.ndim() > 2 || U.ndim() > 2 || V.ndim() > 2) {
+    CAFFE_ENFORCE_GE(X.dim(), 1);
+    CAFFE_ENFORCE_GE(U.dim(), 2);
+    CAFFE_ENFORCE_GE(V.dim(), 2);
+    if (X.dim() > 2 || U.dim() > 2 || V.dim() > 2) {
       VLOG(1) << "Using legacy support for arbitrary input and weight "
                        "dimensions.";
     }
-    CAFFE_ENFORCE_EQ(b.ndim(), 1);
+    CAFFE_ENFORCE_EQ(b.dim(), 1);
     // batch size
-    int M = X.ndim() > 1 ? X.dim32(0) : 1;
+    int M = X.dim() > 1 ? X.dim32(0) : 1;
     // Feature dimension
-    int K = X.size() / M;
+    int K = X.numel() / M;
     // number of outputs.
     int N = U.dim32(0);
     int middle = U.dim32(0);
     CAFFE_ENFORCE_EQ(K, V.dim32(0));
     CAFFE_ENFORCE_EQ(N, b.dim32(0));
-    if (X.ndim() > 1) {
-      Y->Resize(M, N);
+    std::vector<int64_t> dims;
+    if (X.dim() > 1) {
+      dims = {M, N};
       multi_buffer_.Resize(M, middle);
     } else {
-      Y->Resize(N);
+      dims = {N};
       multi_buffer_.Resize(middle);
     }
-  // The col buffer is stored in CHW order as well - kernel_dim, and the height
-  // and width.
+    auto* Y = Output(0, dims, at::dtype<T>());
+    // The col buffer is stored in CHW order as well - kernel_dim, and the
+    // height and width.
     //  multi_buffer_.Resize(M, middle);
     T* multi_buffer_data = multi_buffer_.template mutable_data<T>();
     //  X * V * tans(U)
@@ -85,7 +87,7 @@ class FullyConnectedOpDecomp final : public Operator<Context> {
         U.template data<T>(), 0, Y->template mutable_data<T>(),
         &context_);
     // Add bias term
-    if (bias_multiplier_.size() != M) {
+    if (bias_multiplier_.numel() != M) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(M);
       math::Set<T, Context>(
@@ -117,31 +119,29 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
     const auto& U = Input(1);
     const auto& V = Input(2);
     const auto& dY = Input(3);
-    DCHECK_GE(X.ndim(), 1);
-    DCHECK_GE(U.ndim(), 2);
-    DCHECK_GE(V.ndim(), 2);
-    DCHECK_LE(dY.ndim(), 2);
+    DCHECK_GE(X.dim(), 1);
+    DCHECK_GE(U.dim(), 2);
+    DCHECK_GE(V.dim(), 2);
+    DCHECK_LE(dY.dim(), 2);
     // batch size
-    int M = X.ndim() > 1 ? X.dim32(0) : 1;
+    int M = X.dim() > 1 ? X.dim32(0) : 1;
     // Feature dimension
-    int K = X.size() / M;
+    int K = X.numel() / M;
     // number of outputs.
     int N = U.dim32(0);
     int middle = U.dim32(1);
     DCHECK_EQ(K, V.dim32(0));
-    if (dY.ndim() > 1) {
+    if (dY.dim() > 1) {
       DCHECK_EQ(M, dY.dim32(0));
       DCHECK_EQ(N, dY.dim32(1));
     } else {
-      DCHECK_EQ(X.ndim(), 1);
-      DCHECK_EQ(N, dY.size());
+      DCHECK_EQ(X.dim(), 1);
+      DCHECK_EQ(N, dY.numel());
     }
-    auto* dU = Output(0);
-    auto* dV = Output(1);
-    auto* db = Output(2);
-    dU->ResizeLike(U);
-    dV->ResizeLike(V);
-    db->Resize(N);
+
+    auto* dU = Output(0, U.sizes(), at::dtype<T>());
+    auto* dV = Output(1, V.sizes(), at::dtype<T>());
+    auto* db = Output(2, {N}, at::dtype<T>());
 
     // Compute dU
     // first compute X * V
@@ -171,7 +171,7 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
         dY.template data<T>(), du_buffer_data,
         0, dV->template mutable_data<T>(),
         &context_);
-    if (bias_multiplier_.size() != M) {
+    if (bias_multiplier_.numel() != M) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
       bias_multiplier_.Resize(M);
       math::Set<T, Context>(
@@ -187,8 +187,7 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
         &context_);
     // Compute dX if necessary.
     if (OutputSize() == 4) {
-      auto* dX = Output(3);
-      dX->ResizeLike(X);
+      auto* dX = Output(3, X.sizes(), at::dtype<T>());
       dx_buffer_.Resize(M, middle);
       T* dx_buffer_data = dx_buffer_.template mutable_data<T>();
       math::Gemm<T, Context, Engine>(

@@ -1,21 +1,25 @@
-#include "THCUNN.h"
-#include "common.h"
-#include "THCTensor.hpp"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
+#include <THC/THCTensor.hpp>
 
-#include "THCThrustAllocator.cuh"
+#include <THC/THCThrustAllocator.cuh>
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/transform_reduce.h>
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 #include <thrust/unique.h>
-#include "THCHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCTensorSort.cuh"
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCTensorSort.cuh>
 
+#if defined(__HIP_PLATFORM_HCC__)
+const int WARP_SIZE = 64;
+#else
 const int WARP_SIZE = 32;
+#endif
 const int MODE_SUM = 0;
 const int MODE_MEAN = 1;
 
@@ -37,17 +41,17 @@ __global__ void cunn_LookupTableBag_updateOutputKernel(
     if (featureDim < stride) {
       int64_t bag = chunk / chunksPerBag;
       Dtype*  weightFeat = weight + featureDim;
-      int64_t begin = offsets[bag] - TH_INDEX_BASE;
-      int64_t end = (bag < numBags - 1) ? (offsets[bag + 1] - TH_INDEX_BASE) : numIndices;
+      int64_t begin = offsets[bag];
+      int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
       assert(end >= begin);
       Acctype weightFeatSum = ScalarConvert<float, Acctype>::to(0);
       int64_t bag_size_ = 0;
       for (int64_t emb = begin; emb < end; emb++) {
-        const int weightRow = ((int) input[emb] - TH_INDEX_BASE) * stride;
+        const int weightRow = ((int) input[emb]) * stride;
         weightFeatSum += ScalarConvert<Dtype, Acctype>::to(weightFeat[weightRow]);
 	bag_size_ ++;
         if (featureDim == 0) {
-          offset2bag[emb] = bag + TH_INDEX_BASE;
+          offset2bag[emb] = bag;
         }
       }
       if (mode == MODE_MEAN) {
@@ -91,11 +95,11 @@ __global__ void cunn_LookupTableBag_accGradParametersKernel(
       && (idx == 0 || input[idx] != input[idx - 1])) {
     do {
       const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
-      const int weightRow = ((int) input[idx] - TH_INDEX_BASE) * stride;
+      const int weightRow = ((int) input[idx]) * stride;
 
       // Note: only this line changes from LookupTable_accgradParametersKernel
-      const int origRow = ((int) indices[idx] - TH_INDEX_BASE);
-      const int seq_number = offset2bag[origRow] - TH_INDEX_BASE;
+      const int origRow = ((int) indices[idx]);
+      const int seq_number = offset2bag[origRow];
       const int gradOutputRow = ((int) seq_number) * stride;
 
       const Acctype scale = count ? ScalarConvert<Dtype, Acctype>::to(defaultScale) / count[idx] : ScalarConvert<Dtype, Acctype>::to(defaultScale);
@@ -139,5 +143,5 @@ __global__ void cunn_LookupTableBag_accGradParametersKernel(
 }
 
 
-#include "generic/LookupTableBag.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/LookupTableBag.cu>
+#include <THC/THCGenerateFloatTypes.h>

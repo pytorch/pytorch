@@ -1,13 +1,13 @@
 #pragma once
 
-#include "ATen/ATenGeneral.h"
-#include "ATen/StorageImpl.h"
-#include "ATen/UndefinedTensor.h"
+#include <ATen/core/ATenGeneral.h>
+#include <c10/core/StorageImpl.h>
+#include <c10/core/UndefinedTensorImpl.h>
 
-#include <ATen/core/ScalarType.h>
-#include "ATen/Formatting.h"
-#include "ATen/core/ArrayRef.h"
-#include "ATen/core/Error.h"
+#include <c10/core/ScalarType.h>
+#include <ATen/Formatting.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <sstream>
@@ -24,55 +24,82 @@
 
 namespace at {
 
-AT_API int _crash_if_asan(int);
+CAFFE2_API int _crash_if_asan(int);
 
-template <typename T>
-static inline T* checked_cast_storage(Storage* expr, const char * name, int pos, Backend backend, ScalarType scalar_type) {
-  if (at::detail::get_backend(expr->pImpl()) != backend) {
-    AT_ERROR("Expected object of backend ", backend, " but got backend ", at::detail::get_backend(expr->pImpl()),
-             " for argument #", pos, " '", name, "'");
+static inline const Storage& checked_storage(
+    const Storage& expr,
+    const char* name,
+    int pos,
+    DeviceType device_type,
+    DataType data_type) {
+  if (expr.device_type() != device_type) {
+    AT_ERROR(
+        "Expected object of device type ",
+        device_type,
+        " but got device type ",
+        expr.data_ptr().device().type(),
+        " for argument #",
+        pos,
+        " '",
+        name,
+        "'");
   }
-  if (expr->pImpl()->scalar_type() != scalar_type) {
-    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->pImpl()->scalar_type(),
-             " for argument #", pos, " '", name, "'");
+  if (expr.dtype().id() != data_type) {
+    AT_ERROR(
+        "Expected object of data type ",
+        data_type,
+        " but got data type ",
+        expr.dtype().id(),
+        " for argument #",
+        pos,
+        " '",
+        name,
+        "'");
   }
-  return static_cast<T*>(expr);
+  return expr;
 }
 
-template <typename T, typename Base>
-inline T* checked_cast_tensor(Base* expr, const char * name, int pos, bool allowNull, Backend backend, ScalarType scalar_type) {
-  if(allowNull && expr == UndefinedTensor::singleton()) {
+// TODO: Change Backend into TensorTypeId
+// TODO: Stop unwrapping (this is blocked on getting rid of TH ;)
+static inline TensorImpl* checked_tensor_unwrap(const Tensor& expr, const char * name, int pos, bool allowNull, Backend backend, ScalarType scalar_type) {
+  if(allowNull && !expr.defined()) {
     return nullptr;
   }
-  if (expr->type().backend() != backend) {
-    AT_ERROR("Expected object of backend ", backend, " but got backend ", expr->type().backend(),
+  if (tensorTypeIdToBackend(expr.type_id()) != backend) {
+    AT_ERROR("Expected object of backend ", backend, " but got backend ", tensorTypeIdToBackend(expr.type_id()),
              " for argument #", pos, " '", name, "'");
   }
-  if (expr->type().scalarType() != scalar_type) {
-    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->type().scalarType(),
+  if (expr.scalar_type() != scalar_type) {
+    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),
              " for argument #", pos, " '", name, "'");
   }
-  return static_cast<T*>(expr);
+  if (expr.is_variable()) {  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
+    AT_ERROR("Expected Tensor (not Variable) for argument #", pos, " '", name, "'");
+  }
+  return expr.unsafeGetTensorImpl();
 }
 
-// Converts a TensorList (i.e. ArrayRef<Tensor> to the underlying TH* Tensor Pointer)
-template <typename T, typename TBase, typename TH>
-static inline std::vector<TH*> tensor_list_checked_cast(ArrayRef<TBase> tensors, const char * name, int pos, Backend backend, ScalarType scalar_type) {
-  std::vector<TH*> casted(tensors.size());
+// Converts a TensorList (i.e. ArrayRef<Tensor> to vector of TensorImpl*)
+static inline std::vector<TensorImpl*> checked_tensor_list_unwrap(ArrayRef<Tensor> tensors, const char * name, int pos, Backend backend, ScalarType scalar_type) {
+  std::vector<TensorImpl*> unwrapped;
+  unwrapped.reserve(tensors.size());
   for (unsigned int i = 0; i < tensors.size(); ++i) {
-    auto *expr = tensors[i].pImpl;
-    // TODO: Use the backend, scalar_type arguments to replace this
-    // dynamic cast for the test
-    auto result = dynamic_cast<T*>(expr);
-    if (result) {
-      casted[i] = result;
-    } else {
-      AT_ERROR("Expected a Tensor of RTTI type ", typeid(T).name(), " but found a type ", typeid(*expr).name(),
+    const auto& expr = tensors[i];
+    if (tensorTypeIdToBackend(expr.type_id()) != backend) {
+      AT_ERROR("Expected object of backend ", backend, " but got backend ", tensorTypeIdToBackend(expr.type_id()),
                " for sequence element ", i, " in sequence argument at position #", pos, " '", name, "'");
-
     }
+    if (expr.scalar_type() != scalar_type) {
+      AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),
+               " for sequence element ", i , " in sequence argument at position #", pos, " '", name, "'");
+    }
+    if (expr.is_variable()) {  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
+      AT_ERROR("Expected Tensor (not Variable) for sequence element ",
+               i , " in sequence argument at position #", pos, " '", name, "'");
+    }
+    unwrapped.emplace_back(expr.unsafeGetTensorImpl());
   }
-  return casted;
+  return unwrapped;
 }
 
 template <size_t N>
@@ -93,11 +120,11 @@ std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, 
 }
 
 inline int64_t sum_intlist(ArrayRef<int64_t> list) {
-  return std::accumulate(list.begin(), list.end(), 0);
+  return std::accumulate(list.begin(), list.end(), 0ll);
 }
 
 inline int64_t prod_intlist(ArrayRef<int64_t> list) {
-  return std::accumulate(list.begin(), list.end(), 1, std::multiplies<int64_t>());
+  return std::accumulate(list.begin(), list.end(), 1ll, std::multiplies<int64_t>());
 }
 
 } // at

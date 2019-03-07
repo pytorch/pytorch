@@ -45,7 +45,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
         torch_model = SuperResolutionNet(upscale_factor=3)
 
-        fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
+        fake_input = torch.randn(1, 1, 224, 224, requires_grad=True)
 
         # use ModelHelper to create a C2 net
         helper = ModelHelper(name="test_model")
@@ -63,6 +63,7 @@ class TestCaffe2Backend(unittest.TestCase):
         torch_out = torch.sigmoid(torch_model(torch.sigmoid(fake_input)))
 
         np.testing.assert_almost_equal(torch_out.data.cpu().numpy(), c2_out, decimal=3)
+
 
 if __name__ == '__main__':
     unittest.main()

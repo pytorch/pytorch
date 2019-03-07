@@ -1,9 +1,3 @@
-[submodule "third_party/catch"]
-	path = third_party/catch
-	url = https://github.com/catchorg/Catch2.git
-[submodule "third_party/nanopb"]
-	path = third_party/nanopb
-	url = https://github.com/nanopb/nanopb.git
 [submodule "third_party/pybind11"]
 	path = third_party/pybind11
 	url = https://github.com/pybind/pybind11.git
@@ -16,9 +10,6 @@
 [submodule "third_party/googletest"]
 	path = third_party/googletest
 	url = https://github.com/google/googletest.git
-[submodule "third_party/nervanagpu"]
-	path = third_party/nervanagpu
-	url = https://github.com/NervanaSystems/nervanagpu.git
 [submodule "third_party/benchmark"]
 	path = third_party/benchmark
 	url = https://github.com/google/benchmark.git
@@ -67,15 +58,30 @@
 [submodule "third_party/onnx"]
 	path = third_party/onnx
 	url = https://github.com/onnx/onnx.git
-[submodule "third_party/cereal"]
-	path = third_party/cereal
-	url = https://github.com/USCiLab/cereal
 [submodule "third_party/onnx-tensorrt"]
 	path = third_party/onnx-tensorrt
-	url = https://github.com/onnx/onnx-tensorrt
+	url = https://github.com/bddppq/onnx-tensorrt
 [submodule "third_party/sleef"]
 	path = third_party/sleef
-	url = https://github.com/shibatch/sleef
+	url = https://github.com/zdevito/sleef
 [submodule "third_party/ideep"]
 	path = third_party/ideep
 	url = https://github.com/intel/ideep
+[submodule "third_party/nccl/nccl"]
+	path = third_party/nccl/nccl
+	url = https://github.com/NVIDIA/nccl
+[submodule "third_party/gemmlowp/gemmlowp"]
+	path = third_party/gemmlowp/gemmlowp
+	url = https://github.com/google/gemmlowp.git
+[submodule "third_party/QNNPACK"]
+	path = third_party/QNNPACK
+	url = https://github.com/pytorch/QNNPACK
+[submodule "third_party/neon2sse"]
+	path = third_party/neon2sse
+	url = https://github.com/intel/ARM_NEON_2_x86_SSE.git
+[submodule "third_party/fbgemm"]
+	path = third_party/fbgemm
+	url = https://github.com/pytorch/fbgemm
+[submodule "third_party/foxi"]
+	path = third_party/foxi
+	url = https://github.com/houseroad/foxi.git

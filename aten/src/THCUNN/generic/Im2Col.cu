@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/Im2Col.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/Im2Col.cu"
 #else
 
 #include <ATen/div_rtn.h>

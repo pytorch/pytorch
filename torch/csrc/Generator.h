@@ -1,9 +1,9 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <ATen/ATen.h>
 
-#include "THP_export.h"
+#include <torch/csrc/THP_export.h>
 
 struct THPGenerator {
   PyObject_HEAD

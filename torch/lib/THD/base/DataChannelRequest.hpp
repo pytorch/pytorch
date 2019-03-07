@@ -1,6 +1,6 @@
 #pragma once
 
-#include "DataChannel.hpp"
+#include <THD/base/DataChannel.hpp>
 using THDRequest = thd::DataChannel::Request;
 
-#include "DataChannelRequest.h"
+#include <THD/base/DataChannelRequest.h>

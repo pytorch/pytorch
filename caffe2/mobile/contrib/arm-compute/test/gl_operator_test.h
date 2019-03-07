@@ -7,12 +7,12 @@
 
 namespace caffe2 {
 
-#define DECLARE_OPENGL_OPERATOR(_name)                                         \
-  OperatorDef _name;                                                           \
-  _name.mutable_device_option()->set_device_type(OPENGL);
+#define DECLARE_OPENGL_OPERATOR(_name) \
+  OperatorDef _name;                   \
+  _name.mutable_device_option()->set_device_type(PROTO_OPENGL);
 
-#define MAKE_OPENGL_OPERATOR(_op)                                              \
-  _op->mutable_device_option()->set_device_type(OPENGL);
+#define MAKE_OPENGL_OPERATOR(_op) \
+  _op->mutable_device_option()->set_device_type(PROTO_OPENGL);
 
 #define ADD_ARG(_op, _name, _type, _val)                                       \
   {                                                                            \
@@ -27,7 +27,7 @@ template<typename T = float>
 void PopulateCPUBlob(Workspace *ws, bool random, std::string name,
                      std::vector<int> dims, int val = 1, int dist_shift = 0, float variance = 1) {
   Blob *blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(dims);
   T *t_data = tensor->mutable_data<T>();
   std::random_device rd;

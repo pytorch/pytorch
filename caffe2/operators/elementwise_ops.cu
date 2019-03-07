@@ -110,9 +110,9 @@ void device_reduce(
 }
 
 template <>
-void device_reduce<float16>(
-    const float16* in,
-    float16* out,
+void device_reduce<at::Half>(
+    const at::Half* in,
+    at::Half* out,
     int N,
     Tensor* buffer,
     CUDAContext* context) {
@@ -121,13 +121,13 @@ void device_reduce<float16>(
 #else
   auto buffer_size = 1;
 
-  if (buffer->size() != buffer_size) {
+  if (buffer->numel() != buffer_size) {
     buffer->Resize(buffer_size);
 
-    math::Set<float16, CUDAContext>(
+    math::Set<at::Half, CUDAContext>(
         N,
-        convert::To<float, float16>(1.),
-        buffer->template mutable_data<float16>(),
+        convert::To<float, at::Half>(1.),
+        buffer->template mutable_data<at::Half>(),
         context);
   }
 
@@ -137,7 +137,7 @@ void device_reduce<float16>(
       in,
       CUDA_R_16F,
       1,
-      buffer->data<float16>(),
+      buffer->data<at::Half>(),
       CUDA_R_16F,
       0,
       out,
@@ -222,7 +222,7 @@ bool SumReduceLikeOp<CUDAContext>::DoRunWithType() {
 
 template <>
 bool SumReduceLikeOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+  return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
 }
 
 REGISTER_CUDA_OPERATOR(SumReduceLike, SumReduceLikeOp<CUDAContext>);

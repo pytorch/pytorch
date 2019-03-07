@@ -238,7 +238,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             param_name = parameter_sharing_context.get_parameter_name(
                 param_name)
         else:
-            raise "Unsupported type for param_name"
+            raise ValueError("Unsupported type for param_name")
 
         param_blob = core.BlobReference(param_name)
 
@@ -529,7 +529,8 @@ class LayerModelHelper(model_helper.ModelHelper):
                 return self.add_layer(new_layer)
             return wrapper
         else:
-            raise ValueError(
+            # this needs to be an AttributeError to fit hasattr semantics
+            raise AttributeError(
                 "Trying to create non-registered layer: {}".format(layer))
 
     @property
@@ -630,6 +631,10 @@ class LayerModelHelper(model_helper.ModelHelper):
                 param_to_device=blob_to_device,
                 default_device=CPU,
             )
+            if device is not None:
+                # extra info is not applicable for optimizers
+                del device.extra_info[:]
+
             with core.DeviceScope(device):
                 optimizer(
                     train_net, train_init_net, param, grad_map.get(str(param)))
@@ -651,5 +656,5 @@ class LayerModelHelper(model_helper.ModelHelper):
         # and change the assertion accordingly
         assert isinstance(breakdown_map, dict)
         assert all(isinstance(k, six.string_types) for k in breakdown_map)
-        assert sorted(list(breakdown_map.values())) == range(len(breakdown_map))
+        assert sorted(breakdown_map.values()) == list(range(len(breakdown_map)))
         self._breakdown_map = breakdown_map

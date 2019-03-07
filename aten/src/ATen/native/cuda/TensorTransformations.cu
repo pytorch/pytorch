@@ -1,8 +1,10 @@
-#include "ATen/native/TensorTransformations.h"
+#include <ATen/native/TensorTransformations.h>
 
-#include "ATen/cuda/detail/IndexUtils.cuh"
-#include "ATen/NativeFunctions.h"
-#include "ATen/cuda/CUDAContext.h"
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/macros/Macros.h>
 
 #include <cstddef>
 #include <vector>
@@ -10,12 +12,12 @@
 namespace at {
 namespace native {
 
-#define AT_APPLY_THREADS_PER_BLOCK 32 * 16
-#define AT_APPLY_BLOCKS_PER_SM 4
+constexpr uint32_t AT_APPLY_THREADS_PER_BLOCK = 512;
+constexpr uint32_t AT_APPLY_BLOCKS_PER_SM = 4;
 
 template <typename scalar_t, typename IndexType>
-#if __CUDA_ARCH__ >= 350
-__launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernel_pointwise_flip_apply2(const cuda::detail::TensorInfo<scalar_t, IndexType> in_tensor_info,
@@ -66,7 +68,7 @@ void flip_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N, int6
 }
 
 // Flip tensor given a list of dims
-Tensor flip_cuda(const Tensor& self, IntList dims) {
+Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
   auto in_tensor = self;
   const int64_t flip_dims_size = dims.size(), total_dims = in_tensor.dim(), N = in_tensor.numel();
   flip_check_errors(total_dims, flip_dims_size, dims);
@@ -121,6 +123,67 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
     flip_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
       in_tensor.data<scalar_t>(), out_tensor.data<scalar_t>(), N, flip_dims_t.toType(CUDA(kLong)).data<int64_t>(), flip_dims_size,
       strides_t.toType(CUDA(kLong)).data<int64_t>(), stride_contiguous.toType(CUDA(kLong)).data<int64_t>(), shape_t.toType(CUDA(kLong)).data<int64_t>(), total_dims);
+  });
+
+  return out_tensor;
+}
+
+template <typename scalar_t>
+__global__
+void roll_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N,
+                      int64_t roll_dim, int64_t start,
+                      int64_t size, int64_t stride, int64_t total_dims) {
+  int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (linear_index >= N) {
+    return;
+  }
+  // roll dim idx is the index of linear_index along the rolling dimension.
+  int64_t roll_dim_idx = linear_index % (stride * size) / stride;
+  // index into the source data to find appropriate value.
+  int64_t source_idx = 0;
+  if( roll_dim_idx >= (size - start) ) {
+    source_idx = linear_index - ((size - start) * stride);
+  } else {
+    source_idx = linear_index + (start * stride);
+  }
+  out_tensor[linear_index] = in_tensor[source_idx];
+}
+
+// Roll a tensor along a dimension
+Tensor roll_cuda(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
+  if (dims.size() != 1 || shifts.size() != 1) {
+    return roll_common(self, shifts, dims);
+  }
+
+  auto in_tensor = self;
+  if(!self.is_contiguous()) {
+    in_tensor = self.contiguous();
+  }
+  auto out_tensor = at::empty_like(in_tensor);
+  if (out_tensor.numel() == 0) {
+    return out_tensor;
+  }
+  const int64_t N = in_tensor.numel();
+  const int64_t dim = dims[0];
+  const int64_t size = in_tensor.size(dim);
+  int64_t start = (size - shifts[0]) % size;
+  // Behavior of % is different in C++ vs Python for negative numbers. This
+  // corrects the difference.
+  if( start < 0 ) start = start + size;
+
+  dim3 dim_block = cuda::getApplyBlock();
+  dim3 dim_grid;
+  AT_CHECK(cuda::getApplyGrid(N, dim_grid, in_tensor.get_device()), "unable to get dim grid");
+
+  auto total_dims = in_tensor.dim();
+
+  AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "roll_cuda", [&] {
+    roll_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+      in_tensor.data<scalar_t>(), out_tensor.data<scalar_t>(), N,
+      dim, start,
+      size,
+      in_tensor.stride(dim),
+      total_dims);
   });
 
   return out_tensor;

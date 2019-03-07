@@ -1,9 +1,9 @@
 #pragma once
 
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/autograd/symbolic.h"
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/symbolic.h>
 
 #include <memory>
 #include <string>
@@ -22,6 +22,18 @@ struct TORCH_API Error : public Function {
   variable_list apply(variable_list&& inputs) override;
 
   std::string msg;
+};
+
+// We print grad_fn names in tensor printing. For functions with backward
+// NYI, grad_fn=<Error> will be printed if we use Error, which is confusing. So
+// special case with a new NotImplemented function here.
+struct TORCH_API NotImplemented : public Error {
+  NotImplemented(const std::string& forward_fn, edge_list&& next_edges)
+    : Error("derivative for " + forward_fn + " is not implemented",
+            std::move(next_edges)) {}
+
+  NotImplemented(const std::string& forward_fn)
+    : Error("derivative for " + forward_fn + " is not implemented") {}
 };
 
 // Identity in forward, Error in backward. Used to implement @once_differentiable

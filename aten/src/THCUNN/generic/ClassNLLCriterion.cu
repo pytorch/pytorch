@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/ClassNLLCriterion.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/ClassNLLCriterion.cu"
 #else
 
 void THNN_(ClassNLLCriterion_updateOutput)(
@@ -17,7 +17,6 @@ void THNN_(ClassNLLCriterion_updateOutput)(
 
   int n_dims = THCTensor_(nDimensionLegacyNoScalars)(state, input);
   int n_classes = THCTensor_(sizeLegacyNoScalars)(state, input, n_dims - 1);
-  ignore_index -= TH_INDEX_BASE;
 
   if (weights) {
     THCUNN_assertSameGPU(
@@ -49,12 +48,12 @@ void THNN_(ClassNLLCriterion_updateOutput)(
       weights = THCTensor_(newContiguous)(state, weights);
     }
 
-    ClassNLLCriterion_updateOutput_no_reduce_kernel<real>
+    ClassNLLCriterion_updateOutput_no_reduce_kernel<scalar_t>
       <<<GET_BLOCKS(batch_size), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
         batch_size,
-        toDeviceTensor<real, 2>(state, input),
+        toDeviceTensor<scalar_t, 2>(state, input),
         toDeviceTensor<THCIndex_t, 1>(state, target),
-        toDeviceTensor<real, 1>(state, output),
+        toDeviceTensor<scalar_t, 1>(state, output),
         weights ? THCTensor_(data)(state, weights) : NULL,
         n_classes,
         ignore_index);
@@ -74,34 +73,34 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;
   target = THCIndexTensor_(newContiguous)(state, target);
 
-  real *input_data = THCTensor_(data)(state, input);
-  real *weights_data = weights ? THCTensor_(data)(state, weights) : NULL;
+  scalar_t *input_data = THCTensor_(data)(state, input);
+  scalar_t *weights_data = weights ? THCTensor_(data)(state, weights) : NULL;
   THCIndex_t  *target_data = THCIndexTensor_(data)(state, target);
-  real *output_data = THCTensor_(data)(state, output);
-  real *total_weight_data = THCTensor_(data)(state, total_weight);
+  scalar_t *output_data = THCTensor_(data)(state, output);
+  scalar_t *total_weight_data = THCTensor_(data)(state, total_weight);
 
   if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 1) {
-    cunn_ClassNLLCriterion_updateOutput_kernel1<real>
+    cunn_ClassNLLCriterion_updateOutput_kernel1<scalar_t>
       <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
         output_data,
         total_weight_data,
         input_data,
         target_data,
         weights_data,
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         n_classes,
         ignore_index
     );
 
   } else if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 2) {
-    cunn_ClassNLLCriterion_updateOutput_kernel<real, accreal>
+    cunn_ClassNLLCriterion_updateOutput_kernel<scalar_t, accreal>
       <<<1, NTHREADS, 0, THCState_getCurrentStream(state)>>>(
         output_data,
         total_weight_data,
         input_data,
         target_data,
         weights_data,
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         THCTensor_(size)(state, input, 0),
         THCTensor_(size)(state, input, 1),
         n_classes,
@@ -167,12 +166,12 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
       weights = THCTensor_(newContiguous)(state, weights);
     }
 
-    ClassNLLCriterion_updateGradInput_no_reduce_kernel<real>
+    ClassNLLCriterion_updateGradInput_no_reduce_kernel<scalar_t>
       <<<GET_BLOCKS(batch_size), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
         batch_size,
         toDeviceTensor<THCIndex_t, 1>(state, target),
-        toDeviceTensor<real, 1>(state, gradOutput),
-        toDeviceTensor<real, 2>(state, gradInput),
+        toDeviceTensor<scalar_t, 1>(state, gradOutput),
+        toDeviceTensor<scalar_t, 2>(state, gradInput),
         weights ? THCTensor_(data)(state, weights) : NULL,
         n_classes,
         ignore_index);
@@ -185,39 +184,37 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     return;
   }
 
-  ignore_index -= TH_INDEX_BASE;
-
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;
   target = THCIndexTensor_(newContiguous)(state, target);
 
   THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
-  real *gradOutput_data = THCTensor_(data)(state, gradOutput);
-  real *weights_data = weights ? THCTensor_(data)(state, weights) : NULL;
-  real *gradInput_data = THCTensor_(data)(state, gradInput);
+  scalar_t *gradOutput_data = THCTensor_(data)(state, gradOutput);
+  scalar_t *weights_data = weights ? THCTensor_(data)(state, weights) : NULL;
+  scalar_t *gradInput_data = THCTensor_(data)(state, gradInput);
   THCIndex_t  *target_data = THCIndexTensor_(data)(state, target);
-  real *total_weight_data = THCTensor_(data)(state, total_weight);
+  scalar_t *total_weight_data = THCTensor_(data)(state, total_weight);
 
   if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 1) {
-    cunn_ClassNLLCriterion_updateGradInput_kernel1<real>
+    cunn_ClassNLLCriterion_updateGradInput_kernel1<scalar_t>
       <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
         gradInput_data,
         gradOutput_data,
         weights_data,
         target_data,
         total_weight_data,
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         n_classes,
         ignore_index
     );
   } else {
-    cunn_ClassNLLCriterion_updateGradInput_kernel<real>
+    cunn_ClassNLLCriterion_updateGradInput_kernel<scalar_t>
       <<<1, NTHREADS, 0, THCState_getCurrentStream(state)>>>(
         gradInput_data,
         gradOutput_data,
         target_data,
         weights_data,
         total_weight_data,
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         THCTensor_(size)(state, input, 0),
         THCTensor_(size)(state, input, 1),
         n_classes,

@@ -1,6 +1,6 @@
-#include "THTensor.hpp"
-#include "THVector.h"
+#include <TH/THTensor.hpp>
+#include <TH/THVector.h>
 
-#include "generic/THTensorConv.cpp"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THTensorConv.cpp>
+#include <TH/THGenerateAllTypes.h>
 

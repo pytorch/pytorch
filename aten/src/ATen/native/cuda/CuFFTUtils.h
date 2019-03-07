@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ATen/ATen.h"
-#include "ATen/Config.h"
+#include <ATen/ATen.h>
+#include <ATen/Config.h>
 
 #include <string>
 #include <stdexcept>
@@ -49,8 +49,10 @@ static inline std::string _cudaGetErrorEnum(cufftResult error)
       return "CUFFT_NO_WORKSPACE";
     case CUFFT_NOT_IMPLEMENTED:
       return "CUFFT_NOT_IMPLEMENTED";
+#ifndef __HIP_PLATFORM_HCC__
     case CUFFT_LICENSE_ERROR:
       return "CUFFT_LICENSE_ERROR";
+#endif
     case CUFFT_NOT_SUPPORTED:
       return "CUFFT_NOT_SUPPORTED";
     default:

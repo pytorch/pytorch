@@ -4,15 +4,15 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core
-from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
 
-class TestClipTensorByScalingOp(hu.HypothesisTestCase):
+class TestClipTensorByScalingOp(serial.SerializedTestCase):
 
-    @given(n=st.integers(5, 8), d=st.integers(2, 4),
+    @serial.given(n=st.integers(5, 8), d=st.integers(2, 4),
            threshold=st.floats(0.1, 10),
            additional_threshold=st.floats(0.1, 10),
            use_additional_threshold=st.booleans(),

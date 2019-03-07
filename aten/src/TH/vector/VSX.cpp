@@ -245,7 +245,7 @@ static void THDoubleVector_adds_VSX(double *y, const double *x, const double c, 
         y9_fp64vec2  = vec_add(x9_fp64vec2,  c_fp64vec2);
         y10_fp64vec2 = vec_add(x10_fp64vec2, c_fp64vec2);
         y11_fp64vec2 = vec_add(x11_fp64vec2, c_fp64vec2);
-        
+
 
         vec_xst(y0_fp64vec2,  0, y+(i   ));
         vec_xst(y1_fp64vec2,  0, y+(i+2 ));
@@ -432,7 +432,7 @@ static void THDoubleVector_muls_VSX(double *y, const double *x, const double c, 
         y9_fp64vec2  = vec_mul(x9_fp64vec2,  c_fp64vec2);
         y10_fp64vec2 = vec_mul(x10_fp64vec2, c_fp64vec2);
         y11_fp64vec2 = vec_mul(x11_fp64vec2, c_fp64vec2);
-        
+
 
         vec_xst(y0_fp64vec2,  0, y+(i   ));
         vec_xst(y1_fp64vec2,  0, y+(i+2 ));
@@ -619,7 +619,7 @@ static void THDoubleVector_divs_VSX(double *y, const double *x, const double c, 
         y9_fp64vec2  = vec_div(x9_fp64vec2,  c_fp64vec2);
         y10_fp64vec2 = vec_div(x10_fp64vec2, c_fp64vec2);
         y11_fp64vec2 = vec_div(x11_fp64vec2, c_fp64vec2);
-        
+
 
         vec_xst(y0_fp64vec2,  0, y+(i   ));
         vec_xst(y1_fp64vec2,  0, y+(i+2 ));
@@ -1279,7 +1279,7 @@ static void THFloatVector_divs_VSX(float *y, const float*x, const float c, const
         y9_fp64vec2  = vec_div(x9_fp64vec2,  c_fp64vec2);
         y10_fp64vec2 = vec_div(x10_fp64vec2, c_fp64vec2);
         y11_fp64vec2 = vec_div(x11_fp64vec2, c_fp64vec2);
-        
+
 
         vec_xst(y0_fp64vec2,  0, y+(i   ));
         vec_xst(y1_fp64vec2,  0, y+(i+4 ));

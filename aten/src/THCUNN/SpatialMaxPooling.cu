@@ -1,4 +1,4 @@
-#include "THCUNN.h"
+#include <THCUNN/THCUNN.h>
 
-#include "generic/SpatialMaxPooling.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/SpatialMaxPooling.cu>
+#include <THC/THCGenerateFloatTypes.h>

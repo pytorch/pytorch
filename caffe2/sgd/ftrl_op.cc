@@ -60,15 +60,15 @@ template <typename T, typename Context>
 bool FtrlOp<T, Context>::RunOnDevice() {
   // run time learning rate override
   if (ALPHA < InputSize()) {
-    CAFFE_ENFORCE_EQ(Input(ALPHA).size(), 1, "alpha should be real-valued");
+    CAFFE_ENFORCE_EQ(Input(ALPHA).numel(), 1, "alpha should be real-valued");
     params_.alphaInv = 1.0 / *(Input(ALPHA).template data<T>());
   }
-  CAFFE_ENFORCE_EQ(Input(GRAD).size(), Input(VAR).size());
-  CAFFE_ENFORCE_EQ(Input(GRAD).size() * 2, Input(N_Z).size());
+  CAFFE_ENFORCE_EQ(Input(GRAD).numel(), Input(VAR).numel());
+  CAFFE_ENFORCE_EQ(Input(GRAD).numel() * 2, Input(N_Z).numel());
   Output(OUTPUT_VAR)->ResizeLike(Input(VAR));
   Output(OUTPUT_N_Z)->ResizeLike(Input(N_Z));
   ftrl_update<Context>(
-      Input(GRAD).size(),
+      Input(GRAD).numel(),
       Input(VAR).template data<T>(),
       Input(N_Z).template data<T>(),
       Input(GRAD).template data<T>(),
@@ -88,12 +88,12 @@ void SparseFtrlOp<T>::DoRun() {
   auto& grad = Input(GRAD);
   CAFFE_ENFORCE_EQ(&Input(VAR), var, "In place operation is required");
   CAFFE_ENFORCE_EQ(&Input(N_Z), n_z, "In place operation is required");
-  TIndex M = var->size();
-  TIndex N = var->dim(0);
-  TIndex block_size = M / N;
-  TIndex K = indices.size();
-  DCHECK_EQ(M * 2, n_z->size());
-  DCHECK_EQ(grad.size(), K * block_size);
+  int64_t M = var->numel();
+  int64_t N = var->size(0);
+  int64_t block_size = M / N;
+  int64_t K = indices.numel();
+  DCHECK_EQ(M * 2, n_z->numel());
+  DCHECK_EQ(grad.numel(), K * block_size);
   T* w = var->template mutable_data<T>();
   T* nz = n_z->template mutable_data<T>();
   const SIndex* idxs = indices.template data<SIndex>();
@@ -101,7 +101,7 @@ void SparseFtrlOp<T>::DoRun() {
 
   // TODO(cxj): use OMP when it is reliable
   // #pragma omp parallel for
-  for (TIndex i = 0; i < K; ++i) {
+  for (int64_t i = 0; i < K; ++i) {
     SIndex idx = idxs[i];
     DCHECK(0 <= idx && idx < N) << "Index out of bounds: " << idx
                                 << ", range 0 to " << N;
@@ -116,7 +116,7 @@ void SparseFtrlOp<T>::DoRun() {
           nz[idx * 2 + 1],
           params_);
     } else {
-      TIndex x = block_size * idx;
+      int64_t x = block_size * idx;
       ftrl_update(
           block_size,
           w + x,

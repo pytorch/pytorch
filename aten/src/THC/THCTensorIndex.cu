@@ -1,19 +1,19 @@
-#include "THC.h"
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCBlas.h"
-#include "THCTensorCopy.h"
-#include "THCTensorRandom.h"
-#include "THCHalf.h"
-#include "THCApply.cuh"
-#include "THCReduce.cuh"
-#include "THCDeviceUtils.cuh"
-#include "THCNumerics.cuh"
-#include "THCAtomics.cuh"
-#include "THCThrustAllocator.cuh"
-#include "THCTensorSort.cuh"
-#include "THCTensor.hpp"
-#include "THCStorage.hpp"
+#include <THC/THC.h>
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCBlas.h>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCTensorRandom.h>
+#include <TH/THHalf.h>
+#include <THC/THCApply.cuh>
+#include <THC/THCReduce.cuh>
+#include <THC/THCDeviceUtils.cuh>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCAtomics.cuh>
+#include <THC/THCThrustAllocator.cuh>
+#include <THC/THCTensorSort.cuh>
+#include <THC/THCTensor.hpp>
+#include <THC/THCStorage.hpp>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #include <algorithm> // for std::min
@@ -40,7 +40,7 @@ __global__ void indexCopySmallIndex(TensorInfo<T, IndexType> dst,
   for (IndexType srcIndex = 0; srcIndex < indices.sizes[0]; ++srcIndex) {
     // Lua indices begin at 1
     IndexType dstIndex =
-      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)] - TH_INDEX_BASE;
+      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
     assert(dstIndex < dstCopyDimSize);
 
     // We stride over the output ignoring the indexed dimension
@@ -95,7 +95,7 @@ __global__ void indexCopyLargeIndex(TensorInfo<T, IndexType> dst,
 
     // Lua indices begin at 1
     IndexType dstIndex =
-      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)] - TH_INDEX_BASE;
+      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
     assert(dstIndex < dstCopyDimSize);
 
     IndexType dstOffset =
@@ -132,7 +132,7 @@ __global__ void indexAddSmallIndex(TensorInfo<T, IndexType> dst,
   for (IndexType srcIndex = 0; srcIndex < indices.sizes[0]; ++srcIndex) {
     // Lua indices begin at 1
     IndexType dstIndex =
-      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)] - TH_INDEX_BASE;
+      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
     assert(dstIndex < dstAddDimSize);
 
     // We stride over the output ignoring the indexed dimension
@@ -186,7 +186,7 @@ __global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
 
     // Lua indices begin at 1
     IndexType dstIndex =
-      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)] - TH_INDEX_BASE;
+      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
     assert(dstIndex < dstAddDimSize);
 
     IndexType dstOffset =
@@ -222,7 +222,7 @@ __global__ void indexFillSmallIndex(TensorInfo<T, IndexType> dst,
   for (IndexType dstIndex = 0; dstIndex < indices.sizes[0]; ++dstIndex) {
     // Lua indices begin at 1
     IndexType dstIndex_ =
-      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)] - TH_INDEX_BASE;
+      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
     assert(dstIndex_ < dstFillDimSize);
 
     // We stride over the output ignoring the indexed dimension
@@ -271,7 +271,7 @@ __global__ void indexFillLargeIndex(TensorInfo<T, IndexType> dst,
 
     // Lua indices begin at 1
     IndexType dstIndex_ =
-      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)] - TH_INDEX_BASE;
+      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
     assert(dstIndex_ < dstFillDimSize);
 
     IndexType dstOffset =
@@ -304,7 +304,7 @@ __global__ void indexSelectSmallIndex(TensorInfo<T, IndexType> dst,
   for (IndexType dstIndex = 0; dstIndex < indices.sizes[0]; ++dstIndex) {
     // Lua indices begin at 1
     IndexType srcIndex =
-      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)] - TH_INDEX_BASE;
+      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
     assert(srcIndex < srcSelectDimSize);
 
     // We stride over the output ignoring the indexed dimension
@@ -358,7 +358,7 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
 
     // Lua indices begin at 1
     IndexType srcIndex =
-      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)] - TH_INDEX_BASE;
+      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
     assert(srcIndex < srcSelectDimSize);
 
     IndexType dstOffset =
@@ -384,7 +384,7 @@ __device__ __forceinline__ IndexType indexToOffset(
   if (linearIndex < 0) {
     linearIndex += size;
   }
-  return IndexToOffset<T, IndexType, Dims>::get(linearIndex, info) - TH_INDEX_BASE;
+  return IndexToOffset<T, IndexType, Dims>::get(linearIndex, info);
 }
 
 struct WrapIndexOp {
@@ -451,32 +451,32 @@ struct TensorPutAccumulateOp {
 };
 
 
-template<typename IndexType, typename real, template<class, class, int> class Op, typename TensorType>
+template<typename IndexType, typename T, template<class, class, int> class Op, typename TensorType>
 void dispatchTakePutImpl(THCState *state, TensorType *a, TensorType *b, THCudaLongTensor *index) {
   // These are only valid if index is contiguous
   auto start = THCudaLongTensor_data(state, index);
   auto end = start + THCudaLongTensor_numel(state, index);
 
-  auto aInfo = getTensorInfo<real, TensorType, IndexType>(state, a);
+  auto aInfo = getTensorInfo<T, TensorType, IndexType>(state, a);
   aInfo.collapseDims();
   auto numel = THCTensor_nElement(state, a);
   if (aInfo.isContiguous()) {
-    auto op = Op<real, IndexType, -2>(aInfo, numel, start, end);
-    THC_pointwiseApply2<real, int64_t>(state, b, index, op);
+    auto op = Op<T, IndexType, -2>(aInfo, numel, start, end);
+    THC_pointwiseApply2<T, int64_t>(state, b, index, op);
   } else {
-    auto op = Op<real, IndexType, -1>(aInfo, numel, start, end);
-    THC_pointwiseApply2<real, int64_t>(state, b, index, op);
+    auto op = Op<T, IndexType, -1>(aInfo, numel, start, end);
+    THC_pointwiseApply2<T, int64_t>(state, b, index, op);
   }
 }
 
-template<typename real, template<class, class, int> class Op, typename TensorType>
+template<typename T, template<class, class, int> class Op, typename TensorType>
 void dispatchTakePut(THCState *state, TensorType *a, TensorType *b, THCudaLongTensor *index) {
   if (THCTensor_canUse32BitIndexMath(state, a, INT_MAX)) {
-    dispatchTakePutImpl<int32_t, real, Op>(state, a, b, index);
+    dispatchTakePutImpl<int32_t, T, Op>(state, a, b, index);
   } else {
-    dispatchTakePutImpl<int64_t, real, Op>(state, a, b, index);
+    dispatchTakePutImpl<int64_t, T, Op>(state, a, b, index);
   }
 }
 
-#include "generic/THCTensorIndex.cu"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensorIndex.cu>
+#include <THC/THCGenerateAllTypes.h>

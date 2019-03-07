@@ -1,297 +1,369 @@
 // Basic functions on sparse tensors
 
 #include <ATen/ATen.h>
+#include <ATen/Layout.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/sparse/SparseUtils.h>
+#include <ATen/InitialTensorOptions.h>
+#include <ATen/SparseTensorUtils.h>
 
 #include <TH/THBlasUtils.h>
 
 namespace at { namespace native {
 
+using namespace at::sparse;
+
+
 /******************************************************************************
  * access methods
  ******************************************************************************/
 
-int64_t _sparseDims_sparse(const SparseTensor& self) {
-  return _get_sparse_impl(self)->sparseDims();
+int64_t sparse_dim_sparse(const SparseTensor& self) {
+  return get_sparse_impl(self)->sparse_dim();
 }
 
-int64_t _denseDims_sparse(const SparseTensor& self) {
-  return _get_sparse_impl(self)->denseDims();
+int64_t dense_dim_sparse(const SparseTensor& self) {
+  return get_sparse_impl(self)->dense_dim();
 }
 
 bool is_coalesced_sparse(const SparseTensor& self) {
-  return _get_sparse_impl(self)->coalesced();
+  return get_sparse_impl(self)->coalesced();
 }
 
 int64_t _nnz_sparse(const SparseTensor& self) {
-  return _get_sparse_impl(self)->nnz();
+  return get_sparse_impl(self)->nnz();
 }
 
-// TODO: This is wrong: if nnz == 0 but indices/values is not
-// empty then we'll return all the values, even the ones that
-// are "masked out" by nnz
+// Why are there so many methods to get indices and value?
+// See Note [ Sparse: different methods to get indices and values ] in native_functions.yaml
 
 Tensor _indices_sparse(const SparseTensor& self) {
-  auto nnz = self._nnz();
-  if (nnz == 0) {
-    // Narrows don't work on 0-length tensors
-    // TODO: When we handle zero-size dims correctly, this will work and
-    // we can remove the special case.
-    return _get_sparse_impl(self)->indices();
-  }
-  return _get_sparse_impl(self)->indices().narrow(1, 0, nnz);
+  return get_sparse_impl(self)->indices();
 }
 
 Tensor _values_sparse(const SparseTensor& self) {
-  // See indices for some relevant notes
-  auto nnz = self._nnz();
-  if (nnz == 0) {
-    return _get_sparse_impl(self)->values();
-  }
-  return _get_sparse_impl(self)->values().narrow(0, 0, nnz);
+  return get_sparse_impl(self)->values();
+}
+
+Tensor &_coalesced_sparse_(SparseTensor& self, bool coalesced) {
+  get_sparse_impl(self)->set_coalesced(coalesced);
+  return self;
+}
+
+Tensor indices_sparse(const Tensor& self) {
+  AT_CHECK(self.is_coalesced(),
+           "Cannot get indices on an uncoalesced tensor, please call .coalesce() first");
+  return get_sparse_impl(self)->indices().alias();
+}
+
+Tensor values_sparse(const Tensor& self) {
+  AT_CHECK(self.is_coalesced(),
+           "Cannot get values on an uncoalesced tensor, please call .coalesce() first");
+  return get_sparse_impl(self)->values().alias();
 }
 
 /******************************************************************************
  * creation methods
+ * See NOTE [ Sparse: autograd and API ] for details
  ******************************************************************************/
 
-/* Empty init */
-SparseTensor new_sparse(const SparseType& dtype) {
-  AT_ASSERT(!dtype.is_undefined());
-  AT_ASSERT(!dtype.is_variable());
-  AT_ASSERT(dtype.is_sparse());
+/*** Helper methods ***/
+
+SparseTensor new_sparse(const TensorOptions& options) {
+  AT_ASSERT(!options.is_variable());  // TODO: remove this when Variable and Tensor are merged
+  AT_ASSERT(options.layout() == kSparse);
   TensorTypeId type_id;
-  if (dtype.is_cuda()) {
+  if (options.device().is_cuda()) {
     type_id = SparseCUDATensorId();
   } else {
     type_id = SparseCPUTensorId();
   }
-  return SparseTensor(new SparseTensorImpl(type_id, dtype.scalarType()), /* retain */ false);
+  return detail::make_tensor<SparseTensorImpl>(
+      type_id, options.dtype());
 }
 
-/*** Helper methods ***/
+/** Actual dispatched creation methods ***/
 
-/* Pointer-copy init */
-SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& values_) {
-  Tensor values;
-  if (values_.dim() == 0) {
-    // Mimic Numpy behavior here and treat it as a 1D tensor
-    values = values_.expand({1});
-  } else {
-    values = values_;
-  }
-
-  // TODO: This is a temporary test until we support zero-size dims.
-  // I'm NOT adding the "obvious" bypass code, because it wasn't supported
-  // previously
-  AT_CHECK(indices.numel() != 0, "cannot construct sparse tensor with empty indices; use the nullary constructor instead");
-
-  const SparseType& dtype = values.type().toSparse();
-
-  // If sizes are not given, it is inferred as max index of each dim.
-  int64_t sparseDims = indices.size(0);
-  int64_t denseDims = values.dim() - 1;
-
-  std::vector<int64_t> computed_sizes(sparseDims + denseDims);
-  // NB: It used to keepdim. I think that was wrong.
-  LongTensor computed_indices_sizes = std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
-  computed_indices_sizes.add_(1); // len = max_index + 1
-  LongTensor cpu_computed_indices_sizes;
-  if (computed_indices_sizes.is_cuda()) {
-    cpu_computed_indices_sizes = at::CPU(kLong).tensor(computed_indices_sizes.sizes());
-    cpu_computed_indices_sizes.copy_(computed_indices_sizes);
-  } else {
-    cpu_computed_indices_sizes = computed_indices_sizes;
-  }
-  auto cpu_computed_indices_sizes_accessor = cpu_computed_indices_sizes.accessor<int64_t, 1>();
-  for (int64_t d = 0; d < sparseDims; d++) {
-    computed_sizes[static_cast<size_t>(d)] = cpu_computed_indices_sizes_accessor[d];
-  }
-  for (int64_t d = 0; d < denseDims; d++) {
-    computed_sizes[static_cast<size_t>(sparseDims + d)] = values.size(d+1);
-  }
-  return _new_with_dims_and_tensor_sparse(dtype, sparseDims, denseDims, computed_sizes, indices, values);
-}
-
-SparseTensor new_with_size_sparse(const SparseType& dtype, ArrayRef<int64_t> size) {
-  SparseTensor self = new_sparse(dtype);
-  _raw_resize_sparse(self, size.size(), 0, size);
+SparseTensor new_with_dims_sparse(int64_t sparse_dim, int64_t dense_dim, ArrayRef<int64_t> size, const TensorOptions& options) {
+  SparseTensor self = new_sparse(options);
+  get_sparse_impl(self)->resize_and_clear_(sparse_dim, dense_dim, size);
   return self;
 }
 
-// NB: Got rid of the sizes == NULL case
-SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices, const Tensor& values_, ArrayRef<int64_t> sizes) {
-  Tensor values;
-  if (values_.dim() == 0) {
-    // Mimic Numpy behavior here and treat it as a 1D tensor
-    values = values_.expand({1});
+// Does NOT make copies of indices and values
+SparseTensor new_with_dims_and_tensor_sparse(
+    int64_t sparse_dim,
+    int64_t dense_dim,
+    ArrayRef<int64_t> size,
+    const LongTensor& indices,
+    const Tensor& values,
+    const TensorOptions& options) {
+  SparseTensor self = new_sparse(options);
+  get_sparse_impl(self)->resize_(sparse_dim, dense_dim, size);
+  alias_into_sparse(self, indices, values);
+  return self;
+}
+
+/** Public creation API that dispatch to methods above **/
+
+/** Empty init **/
+Tensor empty_sparse(IntArrayRef size, const TensorOptions& options) {
+  return new_with_dims_sparse(size.size(), 0, size, options);
+}
+
+/* Shape init */
+Tensor sparse_coo_tensor(ArrayRef<int64_t> size, const TensorOptions& options) {
+  return at::_sparse_coo_tensor_with_dims(size.size(), 0, size, options.layout(at::kSparse));
+}
+
+/* Pointer-copy init */
+
+// helper
+namespace {
+  static inline Tensor expand_values_if_needed(const Tensor& values) {
+    // expand
+    if (values.dim() == 0) {
+      // Mimic Numpy behavior here and treat it as a 1D tensor
+      return values.expand({1});
+    } else {
+      return values;
+    }
+  }
+}
+
+Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const TensorOptions& options) {
+  Tensor values = expand_values_if_needed(values_);
+
+  // arg checking
+  AT_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
+  // the following checks are redundant because they are also checked in SparseTensorImpl::set_indices_and_values_unsafe
+  // but we need to ensure them in order to infer the shape.
+  AT_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
+  AT_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
+
+  // If sizes are not given, it is inferred as max index of each dim.
+  int64_t sparse_dim = indices.size(0);
+  int64_t dense_dim = values.dim() - 1;
+
+  std::vector<int64_t> computed_sizes(sparse_dim + dense_dim);
+  if (indices.numel() > 0) {
+    // If the indices has elements in it, we infer the minimum sparse dimension sizes
+    // as the max value of each dim in indices.
+    // NB: It used to keepdim. I think that was wrong.
+    LongTensor min_indices = std::get</* values */ 0>(indices.min(/* dim */ 1, /* keepdim */ false));
+    LongTensor computed_indices_sizes = std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
+    computed_indices_sizes.add_(1); // len = max_index + 1
+    LongTensor cpu_min_indices = min_indices.to(at::DeviceType::CPU);
+    LongTensor cpu_computed_indices_sizes = computed_indices_sizes.to(at::DeviceType::CPU);
+    auto cpu_min_indices_accessor = cpu_min_indices.accessor<int64_t, 1>();
+    auto cpu_computed_indices_sizes_accessor = cpu_computed_indices_sizes.accessor<int64_t, 1>();
+    for (int64_t d = 0; d < sparse_dim; d++) {
+      int64_t min_index_in_dim = cpu_min_indices_accessor[d];
+      AT_CHECK(min_index_in_dim >= 0,
+               "found negative index ", min_index_in_dim, " for dim ", d);
+      computed_sizes[static_cast<size_t>(d)] = cpu_computed_indices_sizes_accessor[d];
+    }
   } else {
-    values = values_;
+    // If the indices doesn't have elements in it, there is not enough information
+    // to know what the minimum sparse dimension sizes should be, and in this case
+    // we set them to 0
+    for (int64_t d = 0; d < sparse_dim; d++) {
+      computed_sizes[static_cast<size_t>(d)] = 0;
+    }
+  }
+  for (int64_t d = 0; d < dense_dim; d++) {
+    computed_sizes[static_cast<size_t>(sparse_dim + d)] = values.size(d+1);
   }
 
-  const SparseType& dtype = values.type().toSparse();
-  // NB: used to be a dim() == 0 test, but that's legacy TH semantics
-  if (indices.numel() == 0 && values.numel() == 0) {
-    return new_with_size_sparse(dtype, sizes);
-  }
-
-  int64_t sparseDims = indices.size(0);
-  int64_t denseDims = values.dim() - 1;
-  return _new_with_dims_and_tensor_sparse(dtype, sparseDims, denseDims, sizes, indices, values);
+  return at::_sparse_coo_tensor_with_dims_and_tensors(
+      sparse_dim, dense_dim, computed_sizes, indices, values, values.options().layout(kSparse));
 }
 
 // NB: Got rid of the sizes == NULL case
-SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Tensor& values_, ArrayRef<int64_t> sizes) {
-  Tensor values;
-  if (values_.dim() == 0) {
-    // Mimic Numpy behavior here and treat it as a 1D tensor
-    values = values_.expand({1});
-  } else {
-    values = values_;
+Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size, const TensorOptions& options) {
+  Tensor values = expand_values_if_needed(values_);
+
+  // arg checking
+  AT_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
+  // the following checks are redundant because they are also checked in SparseTensorImpl::set_indices_and_values_unsafe
+  // but we need to ensure them in order to infer the shape.
+  AT_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
+  AT_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
+  int64_t sparse_dim = indices.size(0);
+  int64_t dense_dim = values.dim() - 1;
+  AT_CHECK(size.size() == sparse_dim + dense_dim,
+           "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
+
+  // Check to make sure all indices are within the boundaries of `size`
+  if (indices.numel() > 0) {
+    LongTensor min_indices = std::get</* values */ 0>(indices.min(/* dim */ 1, /* keepdim */ false));
+    LongTensor max_indices = std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
+    LongTensor cpu_min_indices, cpu_max_indices;
+    if (indices.is_cuda()) {
+      cpu_min_indices = min_indices.to(at::DeviceType::CPU);
+      cpu_max_indices = max_indices.to(at::DeviceType::CPU);
+    } else {
+      cpu_min_indices = min_indices;
+      cpu_max_indices = max_indices;
+    }
+    auto cpu_min_indices_accessor = cpu_min_indices.accessor<int64_t, 1>();
+    auto cpu_max_indices_accessor = cpu_max_indices.accessor<int64_t, 1>();
+    for (int64_t d = 0; d < sparse_dim; d++) {
+      // NB: This used to sync ndim times to access each entry; now we copy
+      // everything to CPU first and then access it.
+      int64_t min_index_in_dim = cpu_min_indices_accessor[d];
+      AT_CHECK(min_index_in_dim >= 0,
+               "found negative index ", min_index_in_dim, " for dim ", d);
+      int64_t max_index_in_dim = cpu_max_indices_accessor[d];
+      int64_t dim_size = size[static_cast<size_t>(d)];
+      AT_CHECK(max_index_in_dim < dim_size,
+               "size is inconsistent with indices: for dim ", d, ", size is ", dim_size, " but found index ", max_index_in_dim);
+    }
   }
 
-  const SparseType& dtype = values.type().toSparse();
-  // NB: This used to be dims, but mumble TH handling zero-sized tensors
-  // incorrectly
-  if (indices.numel() == 0 && values.numel() == 0) {
-    return new_with_size_sparse(dtype, sizes);
-  }
+  return at::_sparse_coo_tensor_with_dims_and_tensors(
+      sparse_dim, dense_dim, size, indices, values, values.options().layout(kSparse));
+}
 
-  int64_t sparseDims = indices.size(0);
-  int64_t denseDims = values.dim() - 1;
-  AT_CHECK(sizes.size() == sparseDims + denseDims, "number of dimensions must be sparseDims (", sparseDims, ") + denseDims (", denseDims, "), but got ", sizes);
+// NOTE: _sparse_coo_tensor_unsafe() differs from sparse_coo_tensor()
+// in that we don't check whether any indices are out of boundaries of `size`, thus avoiding a
+// copy from CUDA to CPU. However, this function should ONLY be used where we know that the indices
+// are guaranteed to be within bounds.
+// NB: Got rid of the size == NULL case
+Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size, const TensorOptions& options) {
+  Tensor values = expand_values_if_needed(values_);
 
-  LongTensor max_indices = std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
-  LongTensor cpu_max_indices;
-  if (max_indices.is_cuda()) {
-    cpu_max_indices = at::CPU(kLong).copy(max_indices);
-  } else {
-    cpu_max_indices = max_indices;
-  }
-  auto cpu_max_indices_accessor = cpu_max_indices.accessor<int64_t, 1>();
-  for (int64_t d = 0; d < sparseDims; d++) {
-    // NB: This used to sync ndim times to access each entry; now we copy
-    // everything to CPU first and then access it.
-    int64_t max_index_in_dim = cpu_max_indices_accessor[d];
-    int64_t dim_size = sizes[static_cast<size_t>(d)];
-    AT_CHECK(max_index_in_dim < dim_size,
-             "sizes is inconsistent with indices: for dim ", d, ", size is ", dim_size, " but found index ", max_index_in_dim);
-  }
-  for (int64_t d = 0; d < denseDims; d++) {
-    int64_t values_size = values.size(d+1);
-    int64_t specified_size = sizes[static_cast<size_t>(sparseDims + d)];
-    AT_CHECK(values_size <= specified_size,
-             "values and sizes are inconsistent: sizes[", d + sparseDims, "] is ", specified_size,
-             " but values.size(", d + 1, ") is ", values_size);
-  }
-  return _new_with_dims_and_tensor_sparse(dtype, sparseDims, denseDims, sizes, indices, values);
+  // arg checking
+  AT_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
+
+  int64_t sparse_dim = indices.size(0);
+  int64_t dense_dim = values.dim() - 1;
+
+  return at::_sparse_coo_tensor_with_dims_and_tensors(
+      sparse_dim, dense_dim, size, indices, values, values.options().layout(kSparse));
 }
 
 // NB: Deleted newWithSizeNd variants
 
 SparseTensor clone_sparse(const SparseTensor& self) {
-  SparseTensor other = new_sparse(self.type());
-  _raw_resize_sparse(other, self._sparseDims(), self._denseDims(), self.sizes());
-  // NB: This seems to preserve the size of the UN-narrowed indices and
-  // values.  Veeery interesting.
-  _copy_into_sparse(other, _get_sparse_impl(self)->indices(), _get_sparse_impl(self)->values());
-  _get_sparse_impl(other)->set_coalesced(self.is_coalesced());
-  _get_sparse_impl(other)->set_nnz(self._nnz());
-  return other;
+  SparseTensor other = new_with_dims_sparse(self.sparse_dim(), self.dense_dim(), self.sizes(), self.options());
+  copy_into_sparse(other, self._indices(), self._values(), true);
+  return other._coalesced_(self.is_coalesced());
 }
 
 /******************************************************************************
  * reshaping methods
  ******************************************************************************/
 
-/*
-// We should implement a utility function which: (1) sets nnz and (2) resizes
-// indices/values to hold enough space to fit nnz, if nnz is larger than
-// the previous amount.  This ensures that we maintain the nnz invariant.
-void _resize_nnz_(const SparseTensor& self, int64_t nnz) {
-}
-*/
-
-void resize_sparse(const SparseTensor& self, ArrayRef<int64_t> size) {
-  _raw_resize_sparse(self, size.size(), 0, size);
+SparseTensor& sparse_resize_(SparseTensor& self, ArrayRef<int64_t> size, int64_t sparse_dim, int64_t dense_dim) {
+  get_sparse_impl(self)->resize_(sparse_dim, dense_dim, size);
+  return self;
 }
 
-SparseTensor& raw_resize_sparse_(SparseTensor& self, ArrayRef<int64_t> size, int64_t sparseDims, int64_t denseDims) {
-  if (sparseDims == -1) {
-    sparseDims = self._indices().size(0);
-  }
-  if (denseDims == -1) {
-    denseDims = self._values().dim() - 1;
-  }
-  _raw_resize_sparse(self, sparseDims, denseDims, size);
+SparseTensor& sparse_resize_and_clear_(SparseTensor& self, ArrayRef<int64_t> size, int64_t sparse_dim, int64_t dense_dim) {
+  get_sparse_impl(self)->resize_and_clear_(sparse_dim, dense_dim, size);
   return self;
 }
 
 namespace {
   bool _is_same_size_as_sparse(const SparseTensor& self, const SparseTensor& src) {
-    return self._sparseDims() == src._sparseDims() && self._denseDims() == src._denseDims() && self.sizes().equals(src.sizes());
+    return self.sparse_dim() == src.sparse_dim() && self.dense_dim() == src.dense_dim() && self.sizes().equals(src.sizes());
   }
 }
 
 SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
   if (!_is_same_size_as_sparse(self, src)) {
-    _raw_resize_sparse(self, src._sparseDims(), src._denseDims(), src.sizes());
+    sparse_resize_(self, src.sizes(), src.sparse_dim(), src.dense_dim());
   }
   return self;
+}
+
+SparseTensor dense_to_sparse(const Tensor& self){
+  return dense_to_sparse(self, self.dim());
+}
+
+SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
+  int64_t dims = self.dim();
+  // TODO: it seems like sparse_dim == 0 could be supported even if self.dim() > 0,
+  // but this would take some work and doesn't seem particularly useful.
+  AT_CHECK(sparse_dim > 0 || self.dim() == 0, "sparse_dim must be >0 if dimensionality > 0");
+  AT_CHECK(sparse_dim <= dims, 
+    "sparse_dim must be less than or equal to self.dim()");
+  at::TensorOptions sparse_options = self.options().layout(kSparse);
+  std::vector<int64_t> sizes = self.sizes().vec();
+
+  Tensor nz = self.nonzero().transpose(0, 1);
+  if (nz.size(1) == 0) {
+    return new_with_dims_sparse(sparse_dim, dims - sparse_dim, sizes, sparse_options);
+  }
+  LongTensor indices;
+  if (sparse_dim == dims) {
+    indices = nz.clone();
+  } else {
+    Tensor i = nz.narrow(0, 0, sparse_dim);
+    std::tie(indices, std::ignore) = _unique_dim(i, 1);
+    indices = indices.contiguous();  // many sparse CUDA kernels require contiguity, see issue #12633
+  }
+
+  Tensor values;
+  if (self.dim() > 0) {
+    std::vector<Tensor> ix = indices.chunk(indices.size(0), 0);
+    values = self.index(ix).squeeze(0).clone();
+  } else {
+    AT_ASSERT(nz.sizes().equals({0, 1}));
+    // In this cases, indices is a clone of nz, which is a tensor of shape (0, 1).
+    // Given sparse tensor invariants, values should be shape (1,)
+    values = self.unsqueeze(0).clone();
+  }
+
+  Tensor sparse = at::sparse_coo_tensor(indices, values, sizes, sparse_options);
+  return sparse._coalesced_(true);
 }
 
 // NB: Dropped the resizeNd variants
 
 Tensor sparse_to_dense(const SparseTensor& self) {
-  Tensor dst = at::zeros(self.sizes(), self.type().toDense());
+  Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
   return dst.add_(self);
 }
 
-SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src) {
-  if (isSameTensor(self, src)) return self;
-  _raw_resize_sparse(self, src._sparseDims(), src._denseDims(), src.sizes());
-  // NB: This seems to copy the underlying full indices/values buffer
-  _copy_into_sparse(self, _get_sparse_impl(src)->indices(), _get_sparse_impl(src)->values());
-  _get_sparse_impl(self)->set_coalesced(src.is_coalesced());
-  _get_sparse_impl(self)->set_nnz(src._nnz());
-  return self;
+SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non_blocking) {
+  if (is_same_tensor(self, src)) return self;
+  get_sparse_impl(self)->resize_(src.sparse_dim(), src.dense_dim(), src.sizes());
+  copy_into_sparse(self, src._indices(), src._values(), non_blocking);
+  return self._coalesced_(src.is_coalesced());
 }
 
 SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(self.defined());
-  AT_ASSERT(!self.is_variable());
+  AT_ASSERT(!self.is_variable());  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
   AT_ASSERT(self.is_sparse());
 
-  if (self._nnz() < 2) {
-    _get_sparse_impl(self)->set_coalesced(true);
-  }
   if (self.is_coalesced()) {
     return self;
+  }
+  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
+  // we should keep the original tensor intact and do coalesce on a copy of the tensor
+  if (self._nnz() < 2) {
+    SparseTensor dst = self.clone();
+    dst._coalesced_(true);
+    return dst;
   }
 
   LongTensor indices = self._indices();
   Tensor values = self._values().contiguous();
-  int64_t sparseDims = self._sparseDims();
-  int64_t denseDims = self._denseDims();
+  int64_t sparse_dim = self.sparse_dim();
+  int64_t dense_dim = self.dense_dim();
   int64_t nnz = self._nnz();
 
-  LongTensor indices_scalar = at::zeros({nnz}, kLong);
+  LongTensor indices_scalar = flatten_indices(indices, self.sizes());
 
-  int64_t factor = 1;
-  for (int64_t d = sparseDims - 1; d >= 0; d--) {
-    LongTensor indices_slice = indices.select(0, d);
-    indices_scalar.add_(indices_slice, factor); // cadd is swapped args
-    factor *= self.size(d);
-  }
-
-  SparseTensor dst = new_sparse(self.type());
-  _raw_resize_sparse(dst, sparseDims, denseDims, self.sizes());
+  SparseTensor dst = new_sparse(self.options());
+  get_sparse_impl(dst)->resize_(sparse_dim, dense_dim, self.sizes());
   // TODO: is there a more idiomatic way to do this?
-  LongTensor newIndices = indices.type().tensor(indices.sizes());
-  Tensor newValues = values.type().tensor(values.sizes());
-  _alias_into_sparse(dst, newIndices, newValues);
+  LongTensor newIndices = at::empty(indices.sizes(), indices.options());
+  Tensor newValues = at::empty(values.sizes(), values.options());
+  alias_into_sparse(dst, newIndices, newValues);
 
   LongTensor indicesBuffer;
   LongTensor indicesPermutation;
@@ -313,22 +385,57 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
           int64_t pos = indicesPermutationAccessor[j];
           int64_t curr = indicesBufferAccessor[j];
           if (curr == prev) {
-            THBlas_axpy<scalar_t>(blockSize, 1, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+            if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
+              THBlas_axpy<scalar_t>(blockSize, 1, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+            }
           } else {
             ++i;
-            for (int64_t d = 0; d < sparseDims; d++) {
+            for (int64_t d = 0; d < sparse_dim; d++) {
               newIndicesAccessor[d][i] = indicesAccessor[d][pos];
             }
-            THBlas_copy<scalar_t>(blockSize, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+            if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
+              THBlas_copy<scalar_t>(blockSize, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+            }
           }
           prev = curr;
         }
     });
 
-  _get_sparse_impl(dst)->set_coalesced(true);
-  _get_sparse_impl(dst)->set_nnz(i + 1);
+  dst._coalesced_(true);
+  get_sparse_impl(dst)->set_nnz_and_narrow(i + 1);
 
   return dst;
+}
+
+
+// --------------------------------------------------------------------
+// sparse_mask(D, S) -> S
+//
+// Filter Tensor D by S.indices() and output a SparseTensor.
+// D and S must share the same shape.
+// --------------------------------------------------------------------
+
+template <typename scalar_t>
+void inline sparse_mask_out_cpu_kernel(
+  Tensor& r_values,
+  const Tensor& t,
+  const int64_t r_nnz,
+  const int64_t sparse_dim,
+  const LongTensor& mask_indices
+) {
+  auto r_values_accessor = r_values.accessor<scalar_t, 1>();
+  auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
+  scalar_t* t_ptr = t.data<scalar_t>();
+  int64_t i;
+
+  #pragma omp parallel for private(i) if (r_nnz > 1000)
+  for (i = 0; i < r_nnz; i++) {
+    int64_t idx = 0;
+    for (int64_t d = 0; d < sparse_dim; d++) {
+      idx += mask_indices_accessor[d][i] * t.stride(d);
+    }
+    r_values_accessor[i] = t_ptr[idx];
+  }
 }
 
 SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const SparseTensor& mask) {
@@ -340,54 +447,56 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   AT_CHECK(!mask.is_cuda(), "sparse_mask: expected 'mask' to be CPU, but got CUDA");
   resize_as_sparse_(r, mask);
   if (mask._nnz() == 0) {
-    r.zero_();
-    return r;
+    return r.zero_();
   }
   int64_t dim = t.dim();
-  int64_t sparseDims = mask._sparseDims();
+  int64_t sparse_dim = mask.sparse_dim();
   LongTensor mask_indices = mask._indices();
   Tensor mask_values = mask._values();
-  Tensor r_values = r._values().type().tensor(mask_values.sizes());
-  _alias_into_sparse(r, mask_indices.clone(), r_values);
-  _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());
+  Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
+  alias_into_sparse(r, mask_indices.clone(), r_values);
+  r._coalesced_(mask.is_coalesced());
   int64_t r_nnz = mask._nnz();
-  _get_sparse_impl(r)->set_nnz(r_nnz);
-  // NB: Relies on mask._nnz() == 0 test above
-  auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
+  get_sparse_impl(r)->set_nnz_and_narrow(r_nnz);
 
-  if (dim > sparseDims) {
-    // NB: This used to reuse buffers, but I deoptimized it
-    for (int64_t i = 0; i < r_nnz; i++) {
-      Tensor srcBuffer = t;
-      for (int64_t d = 0; d < sparseDims; d++) {
-        srcBuffer = srcBuffer.select(0, mask_indices_accessor[d][i]);
-      }
-      Tensor dstBuffer = r_values.select(0, i);
-      dstBuffer.copy_(srcBuffer);
+  if (t.numel() == 0) {  // if t is an empty tensor, there is no need to mask its elements
+    return r;
+  }
+
+  if (dim > sparse_dim) {
+
+    // Get a flattened sparse indices, similar to NOTE [ Flatten Sparse Indices ].
+    // Keeping this implementation because it is faster than flatten_indices()
+    LongTensor indices = at::zeros({mask._nnz()}, mask_indices.options());
+    for (int64_t d = 0; d < mask.sparse_dim(); d++) {
+      indices.mul_(mask.size(d));
+      indices.add_(mask_indices.select(0, d));
     }
+
+    std::vector<int64_t> view_size(1 + mask.dense_dim());
+    view_size[0] = -1;
+    for (int64_t d = 0; d < mask.dense_dim(); d++) {
+      view_size[d + 1] = mask.size(mask.sparse_dim() + d);
+    }
+
+    Tensor t_view = t.view(view_size);
+    // TODO: Re-audit this; it used to be an indexSelect directly into r_values
+    at::index_select_out(r_values, t_view, 0, indices);
   } else {
-    AT_DISPATCH_ALL_TYPES(
-        r_values.type(), "sparse_mask", [&] {
-          auto r_values_accessor = r_values.accessor<scalar_t, 1>();
-          // NB: The old code did this pointer access in a weird way (going straight
-          // to storage + storageOffset.)  Was there perhaps a method to the
-          // madness?
-          scalar_t* t_ptr = t.data<scalar_t>();
-          for (int64_t i = 0; i < r_nnz; i++) {
-            int64_t idx = 0;
-            for (int64_t d = 0; d < sparseDims; d++) {
-              idx += mask_indices_accessor[d][i] * t.stride(d);
-            }
-            scalar_t val = t_ptr[idx];
-            r_values_accessor[i] = val;
-          }
+    AT_DISPATCH_ALL_TYPES(r_values.type(), "sparse_mask", [&] {
+      sparse_mask_out_cpu_kernel<scalar_t>(
+        r_values,
+        t,
+        r_nnz,
+        sparse_dim,
+        mask_indices);
     });
   }
   return r;
 }
 
 SparseTensor sparse_mask_cpu(const Tensor& t, SparseTensorRef mask) {
-  SparseTensor r = t.type().toSparse().tensor();
+  SparseTensor r = at::empty({0}, t.options().layout(kSparse));
   sparse_mask_out_cpu(r, t, mask.tref);
   return r;
 }

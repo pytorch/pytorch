@@ -3,17 +3,17 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import numpy as np
-
 from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 from hypothesis import given
 import hypothesis.strategies as st
-import caffe2.python.hypothesis_test_util as hu
+import numpy as np
 
 
-class TestBatchSparseToDense(hu.HypothesisTestCase):
+class TestBatchSparseToDense(serial.SerializedTestCase):
 
-    @given(
+    @serial.given(
         batch_size=st.integers(5, 10),
         dense_last_dim=st.integers(5, 10),
         default_value=st.floats(min_value=2.0, max_value=3.0),

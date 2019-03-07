@@ -11,8 +11,9 @@ namespace caffe2 {
 template <typename T, class Context>
 class IntegralImageOp final : public Operator<Context> {
  public:
-  IntegralImageOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit IntegralImageOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -21,14 +22,15 @@ class IntegralImageOp final : public Operator<Context> {
 template <typename T, class Context>
 class IntegralImageGradientOp final : public Operator<Context> {
  public:
-  IntegralImageGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit IntegralImageGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
 
  protected:
-  Tensor row_pass_buffer_{Context::GetDeviceType()};
+  Tensor row_pass_buffer_;
 };
 
 } // namespace caffe2

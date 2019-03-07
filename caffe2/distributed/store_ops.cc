@@ -1,5 +1,7 @@
 #include "store_ops.h"
 
+#include "caffe2/core/blob_serialization.h"
+
 namespace caffe2 {
 
 constexpr auto kBlobName = "blob_name";
@@ -15,7 +17,7 @@ bool StoreSetOp::RunOnDevice() {
   // Serialize and pass to store
   auto* handler =
       OperatorBase::Input<std::unique_ptr<StoreHandler>>(HANDLER).get();
-  handler->set(blobName_, InputBlob(DATA).Serialize(blobName_));
+  handler->set(blobName_, SerializeBlob(InputBlob(DATA), blobName_));
   return true;
 }
 
@@ -42,7 +44,7 @@ bool StoreGetOp::RunOnDevice() {
   // Get from store and deserialize
   auto* handler =
       OperatorBase::Input<std::unique_ptr<StoreHandler>>(HANDLER).get();
-  OperatorBase::Outputs()[DATA]->Deserialize(handler->get(blobName_));
+  DeserializeBlob(handler->get(blobName_), OperatorBase::Outputs()[DATA]);
   return true;
 }
 

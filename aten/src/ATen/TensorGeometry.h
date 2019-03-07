@@ -5,10 +5,10 @@
 
 namespace at {
 
-struct AT_API TensorGeometry {
+struct CAFFE2_API TensorGeometry {
   TensorGeometry() : storage_offset_(0) {}
 
-  explicit TensorGeometry(IntList sizes)
+  explicit TensorGeometry(IntArrayRef sizes)
     : sizes_(sizes.vec())
     , strides_(sizes.size())
     , storage_offset_(0) {
@@ -30,20 +30,17 @@ struct AT_API TensorGeometry {
   // true if the tensor is contiguous
   bool is_contiguous() const;
 
-  // creates a new tensor with the sizes and strides of the source
-  Tensor zeros_with_stride(const Type& type) const;
-
   int64_t dim() const { return sizes_.size(); }
   int64_t size(int64_t dim) const {
     dim = maybe_wrap_dim(dim, this->dim());
     return sizes_.at(static_cast<size_t>(dim));
   }
-  IntList sizes() const { return IntList{ sizes_ }; }
+  IntArrayRef sizes() const { return IntArrayRef{ sizes_ }; }
   int64_t stride(int64_t dim) const {
     dim = maybe_wrap_dim(dim, this->dim());
     return strides_.at(static_cast<size_t>(dim));
   }
-  IntList strides() const { return IntList{ strides_ }; }
+  IntArrayRef strides() const { return IntArrayRef{ strides_ }; }
   int64_t storage_offset() const { return storage_offset_; }
   int64_t numel() const { return numel_; }
 

@@ -9,8 +9,9 @@ template <class Context>
 class BooleanMaskLengthsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  BooleanMaskLengthsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit BooleanMaskLengthsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));
@@ -20,18 +21,18 @@ class BooleanMaskLengthsOp final : public Operator<Context> {
   bool DoRunWithType() {
     auto& lengths = Input(0);
     auto& mask = Input(1);
-    auto* lengthsOut = Output(0);
-    CAFFE_ENFORCE(lengths.ndim() == 1);
-    CAFFE_ENFORCE(mask.ndim() == 1);
+
+    CAFFE_ENFORCE(lengths.dim() == 1);
+    CAFFE_ENFORCE(mask.dim() == 1);
     const auto* lengthsPtr = lengths.template data<T>();
     const auto* maskPtr = mask.template data<bool>();
     auto totalLength =
-        std::accumulate(lengthsPtr, lengthsPtr + lengths.size(), 0);
-    CAFFE_ENFORCE(mask.size() == totalLength);
-    lengthsOut->ResizeLike(lengths);
+        std::accumulate(lengthsPtr, lengthsPtr + lengths.numel(), 0);
+    CAFFE_ENFORCE(mask.numel() == totalLength);
+    auto* lengthsOut = Output(0, lengths.sizes(), at::dtype<T>());
     auto* lengthsOutPtr = lengthsOut->template mutable_data<T>();
     int p = 0;
-    for (int i = 0; i < lengths.size(); ++i) {
+    for (int i = 0; i < lengths.numel(); ++i) {
       T lengthOut = 0;
       for (int j = 0; j < lengthsPtr[i]; ++j) {
         if (maskPtr[p++]) {
@@ -50,28 +51,27 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
   auto& data = Input(0);
   auto& mask = Input(1);
   auto* dataOut = Output(0);
-  CAFFE_ENFORCE(data.ndim() >= 1);
-  CAFFE_ENFORCE_EQ(mask.ndim(), 1);
-  CAFFE_ENFORCE(data.dims()[0] == mask.dims()[0]);
+  CAFFE_ENFORCE(data.dim() >= 1);
+  CAFFE_ENFORCE_EQ(mask.dim(), 1);
+  CAFFE_ENFORCE(data.size(0) == mask.size(0));
 
   const auto* maskPtr = mask.template data<bool>();
   int numOutputs = 0;
-  int outerSize = mask.size();
+  int outerSize = mask.numel();
   for (int i = 0; i < outerSize; ++i) {
     if (maskPtr[i]) {
       ++numOutputs;
     }
   }
-  std::vector<TIndex> outShape;
+  std::vector<int64_t> outShape;
   outShape.push_back(numOutputs);
-  outShape.insert(outShape.end(), data.dims().begin() + 1, data.dims().end());
+  outShape.insert(outShape.end(), data.sizes().begin() + 1, data.sizes().end());
   dataOut->Resize(outShape);
-  auto* outPtr = (char*)dataOut->raw_mutable_data(data.meta());
+  auto* outPtr = (char*)dataOut->raw_mutable_data(data.dtype());
 
   int64_t* out_vec = nullptr;
   if (OutputSize() == 2) {
-    auto* indicesOut = Output(1);
-    indicesOut->Resize(numOutputs);
+    auto* indicesOut = Output(1, {numOutputs}, at::dtype<int64_t>());
     out_vec = indicesOut->template mutable_data<int64_t>();
   }
 
@@ -79,19 +79,20 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
     return true;
   }
   const auto innerSize = data.size_from_dim(1);
-  const auto innerSizeBytes = innerSize * data.meta().itemsize();
+  const auto innerSizeBytes = innerSize * data.dtype().itemsize();
 
-  TIndex lastStart = -1;
+  int64_t lastStart = -1;
   const auto* inPtr = (char*)data.raw_data();
-  TIndex outStart = 0;
+  int64_t outStart = 0;
 
-  for (TIndex i = 0;; ++i) {
+  for (int64_t i = 0;; ++i) {
     // mask was true and either a) became false, or b) sequence finished
     if (lastStart != -1 && ((i >= outerSize) || !maskPtr[i])) {
       const auto* src = inPtr + lastStart * innerSizeBytes;
       auto* dst = outPtr + outStart * innerSizeBytes;
       int numItems = i - lastStart;
-      context_.CopyItemsSameDevice(data.meta(), numItems * innerSize, src, dst);
+      context_.CopyItemsSameDevice(
+          data.dtype(), numItems * innerSize, src, dst);
       outStart += numItems;
       lastStart = -1;
     }
@@ -365,8 +366,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
     window_centers = &Input(1);
   }
 
-  auto* output = Output(0);
-  output->ResizeLike(*input);
+  auto* output = Output(0, input->sizes(), at::dtype<T>());
 
   const auto canonical_axis = input->canonical_axis_index(axis_);
 
@@ -392,7 +392,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
   // product of dims from 1 to batch
   const int batch_dim =
       (canonical_batch >= 0
-           ? input->size_to_dim(canonical_batch) * input->dim(canonical_batch)
+           ? input->size_to_dim(canonical_batch) * input->size(canonical_batch)
            : -1);
 
   T fill_val = convert::To<float, T>(grad_ ? 0.0f : fill_val_);
@@ -410,7 +410,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
           repeated_dims,
           input->data<T>(),
           SequenceFunctor(
-              sequence_lengths->data<int>(), sequence_lengths->size()),
+              sequence_lengths->data<int>(), sequence_lengths->numel()),
           fill_val,
           output->template mutable_data<T>());
     } else {
@@ -420,7 +420,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
           batch_dim,
           input->data<T>(),
           SequenceFunctor(
-              sequence_lengths->data<int>(), sequence_lengths->size()),
+              sequence_lengths->data<int>(), sequence_lengths->numel()),
           fill_val,
           output->template mutable_data<T>());
     }

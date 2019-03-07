@@ -1,8 +1,9 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/TemporalUpSamplingNearest.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/TemporalUpSamplingNearest.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
+#include "ATen/cuda/CUDAContext.h"
 
 static inline void THNN_(TemporalUpSamplingNearest_shapeCheck)
                         (THCState *state,
@@ -46,13 +47,13 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
                        outputWidth);
   THCTensor_(zero)(state, output);
 
-  THCDeviceTensor<real, 3> idata = toDeviceTensor<real, 3>(state, input);
-  THCDeviceTensor<real, 3> odata = toDeviceTensor<real, 3>(state, output);
+  THCDeviceTensor<scalar_t, 3> idata = toDeviceTensor<scalar_t, 3>(state, input);
+  THCDeviceTensor<scalar_t, 3> odata = toDeviceTensor<scalar_t, 3>(state, output);
 
   const int num_kernels = outputWidth;
-  const int num_threads = THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+  const int num_threads = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
-  nearest_neighbor_3d_kernel<real, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads,
+  nearest_neighbor_3d_kernel<scalar_t, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads,
 	 0, stream>>>(num_kernels, idata, odata);
   THCudaCheck(cudaGetLastError());
 }
@@ -73,14 +74,14 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
   THCTensor_(resize3d)(state, gradInput, nbatch, nchannels, inputWidth);
 
   THCTensor_(zero)(state, gradInput);
-  THCDeviceTensor<real, 3> data1 = toDeviceTensor<real, 3>(state, gradInput);
-  THCDeviceTensor<real, 3> data2 = toDeviceTensor<real, 3>(state, gradOutput);
+  THCDeviceTensor<scalar_t, 3> data1 = toDeviceTensor<scalar_t, 3>(state, gradInput);
+  THCDeviceTensor<scalar_t, 3> data2 = toDeviceTensor<scalar_t, 3>(state, gradOutput);
 
   const int num_kernels = outputWidth;
-  const int num_threads = THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+  const int num_threads = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
 
-  nearest_neighbor_3d_kernel_backward<real, accreal> <<<THCCeilDiv(num_kernels, num_threads),
+  nearest_neighbor_3d_kernel_backward<scalar_t, accreal> <<<THCCeilDiv(num_kernels, num_threads),
 	  num_threads, 0, stream>>>(num_kernels, data1, data2);
 
   THCudaCheck(cudaGetLastError());

@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/LookupTable.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/LookupTable.cu"
 #else
 
 void THNN_(LookupTable_accGradParameters)(
@@ -14,7 +14,7 @@ void THNN_(LookupTable_accGradParameters)(
            int paddingValue,
            accreal scale_)
 {
-  real scale = ScalarConvert<accreal, real>::to(scale_);
+  scalar_t scale = ScalarConvert<accreal, scalar_t>::to(scale_);
   THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, sortedIndices, origIndices);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   if (!(THCIndexTensor_(isContiguous)(state, input) &&
@@ -39,9 +39,9 @@ void THNN_(LookupTable_accGradParameters)(
     dim3 grid(THCCeilDiv(stride, (int64_t)WARP_SIZE));
     dim3 block(WARP_SIZE, BLOCKDIMY);
 
-    cunn_LookupTable_accGradParametersKernelByFeature<real, accreal>
-    <<<grid, 
-       block, 
+    cunn_LookupTable_accGradParametersKernelByFeature<scalar_t, accreal>
+    <<<grid,
+       block,
        sizeof(accreal)*WARP_SIZE*BLOCKDIMY + sizeof(int)*WARP_SIZE*BLOCKDIMY,
        stream>>>
       (THCIndexTensor_(data)(state, input),
@@ -73,17 +73,17 @@ void THNN_(LookupTable_accGradParameters)(
       origIndicesIter(THCIndexTensor_(data)(state, origIndices));
 
     // Fill sortedOrigIndices with sequential indices
-    thrust::counting_iterator<THCIndex_t> countIter(TH_INDEX_BASE);
+    thrust::counting_iterator<THCIndex_t> countIter(0);
 
     thrust::copy(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       countIter, countIter + numel, origIndicesIter);
 
     // Sort; a stable sort is not required
     thrust::sort_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       sortedIndicesIter, sortedIndicesIter + numel,
@@ -106,7 +106,7 @@ void THNN_(LookupTable_accGradParameters)(
     // sorted: 2 5 5 5 7 7 8 9 9
     //  count: 1 1 2 3 1 2 1 1 2
     thrust::inclusive_scan_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       sortedIndices_ptr,
@@ -119,7 +119,7 @@ void THNN_(LookupTable_accGradParameters)(
     // sorted: 2 5 5 5 7 7 8 9 9
     //  count: 1 3 3 3 2 2 1 2 2
     thrust::inclusive_scan_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       thrust::make_reverse_iterator(sortedIndices_ptr + numel),
@@ -133,7 +133,7 @@ void THNN_(LookupTable_accGradParameters)(
 
   dim3 grid(THCCeilDiv(numel, (ptrdiff_t) 4), THCCeilDiv(stride, (int64_t) 128));
   dim3 block(32, 4);
-  cunn_LookupTable_accGradParametersKernel<real, accreal><<<grid, block, 0, stream>>>(
+  cunn_LookupTable_accGradParametersKernel<scalar_t, accreal><<<grid, block, 0, stream>>>(
     sortedIndices_data,
     origIndices_data,
     THCTensor_(data)(state, gradOutput),
@@ -151,7 +151,7 @@ void THNN_(LookupTable_accGradParameters)(
 
 #define THREADS 256
 #define RUN(NORM, IDXTYPE) \
-  calculate_norms_and_renorm<real, accreal, IDXTYPE, NORM> \
+  calculate_norms_and_renorm<scalar_t, accreal, IDXTYPE, NORM> \
     <<<numel, THREADS/2, THREADS * sizeof(accreal), THCState_getCurrentStream(state)>>> \
     (weightsRaw, idxRaw, normType, maxNorm, THCTensor_(stride)(state, weight, 0))
 
@@ -178,7 +178,7 @@ void THNN_(LookupTable_renorm)(
 
   THCIndex_t numel = THCIndexTensor_(nElement)(state, idx);
 
-  real * weightsRaw = THCTensor_(data)(state, weight);
+  scalar_t * weightsRaw = THCTensor_(data)(state, weight);
   THCIndex_t * idxRaw = THCIndexTensor_(data)(state, idx);
 
   // get the unique indices

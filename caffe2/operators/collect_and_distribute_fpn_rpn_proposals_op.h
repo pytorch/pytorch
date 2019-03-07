@@ -46,8 +46,9 @@ template <class Context>
 class CollectAndDistributeFpnRpnProposalsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  CollectAndDistributeFpnRpnProposalsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit CollectAndDistributeFpnRpnProposalsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         roi_canonical_scale_(
             this->template GetSingleArgument<int>("roi_canonical_scale", 224)),
         roi_canonical_level_(
@@ -65,15 +66,15 @@ class CollectAndDistributeFpnRpnProposalsOp final : public Operator<Context> {
     CAFFE_ENFORCE_GE(
         roi_max_level_,
         roi_min_level_,
-        "roi_max_level " + caffe2::to_string(roi_max_level_) +
+        "roi_max_level " + c10::to_string(roi_max_level_) +
             " must be greater than or equal to roi_min_level " +
-            caffe2::to_string(roi_min_level_) + ".");
+            c10::to_string(roi_min_level_) + ".");
     CAFFE_ENFORCE_GE(
         rpn_max_level_,
         rpn_min_level_,
-        "rpn_max_level " + caffe2::to_string(rpn_max_level_) +
+        "rpn_max_level " + c10::to_string(rpn_max_level_) +
             " must be greater than or equal to rpn_min_level " +
-            caffe2::to_string(rpn_min_level_) + ".");
+            c10::to_string(rpn_min_level_) + ".");
   }
 
   ~CollectAndDistributeFpnRpnProposalsOp() {}

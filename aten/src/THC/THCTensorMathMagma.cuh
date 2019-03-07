@@ -4,7 +4,7 @@
 #ifdef USE_MAGMA
 #include <magma.h>
 #else
-#include "THCBlas.h"
+#include <THC/THCBlas.h>
 #endif
 
 #ifdef USE_MAGMA

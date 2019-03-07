@@ -1,11 +1,11 @@
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCBlas.h"
-#include "THCTensorCopy.h"
-#include "THCApply.cuh"
-#include "THCReduce.cuh"
-#include "THCNumerics.cuh"
-#include "THCTensorMathReduce.cuh"
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCBlas.h>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCApply.cuh>
+#include <THC/THCReduce.cuh>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCTensorMathReduce.cuh>
 #include <thrust/scan.h>
 #include <thrust/execution_policy.h>
 
@@ -125,5 +125,5 @@ __global__ void THCTensor_kernel_scanInnermostDim(T *tgt_, T *src_,
   }
 }
 
-#include "generic/THCTensorMathScan.cu"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensorMathScan.cu>
+#include <THC/THCGenerateAllTypes.h>

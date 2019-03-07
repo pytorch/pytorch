@@ -1,22 +1,39 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/WrapDimUtilsMulti.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/WrapDimUtilsMulti.h>
+
+#include <array>
 #include <cctype>
+#include <cstddef>
+#include <sstream>
+#include <string>
+#include <vector>
 
 namespace at { namespace native {
 
+Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
+  if (input.dim() == 2 && bias.defined()) {
+    // Fused op is marginally faster.
+    return at::addmm(bias, input, weight.t());
+  }
+  auto output = at::matmul(input, weight.t());
+  if (bias.defined()) {
+    output.add_(bias);
+  }
+  return output;
+}
 
 // sumproduct_pair computes `(left*right).sum(sumdims)` by means of permutation and
 // batch matrix multiplication
 // its main purpose is to provide a pairwise reduction for einsum
-static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_dims_, bool keepdim) {
+static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArrayRef sum_dims_, bool keepdim) {
   // assumes that tensors have been pre-unsqueezed (so that all dimensions match - after broadcasting)
   // but makes no other assumptions on the order of dimensions
   AT_CHECK(left_.dim()==right_.dim(), "number of dimensions must match");
   if (sum_dims_.size() == 0)
     return at::mul(left_, right_);
   int64_t dim = left_.dim();
-  auto sum_dims = dim_list_to_bitset(sum_dims_, dim);
+  auto sum_dims = at::dim_list_to_bitset(sum_dims_, dim);
   // dimensions that will be part of the output (i.e. not summed over) in three vectors
   // dims in lro appear in left, right and output, similarly lo: left and output, ro: right and output
   // also the sizes are kept track of for reshaping
@@ -299,7 +316,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
       }
     }
     preprocessed_op = preprocessed_op.permute(permutation);
-    // finally, we insert dimensions for idxes not in the operand 
+    // finally, we insert dimensions for idxes not in the operand
     for (size_t dim = 0; dim < idx_to_dim.size(); dim++) {
       if (idx_to_dim[dim] == -1) {
         preprocessed_op = preprocessed_op.unsqueeze(dim);
@@ -343,14 +360,14 @@ Tensor einsum(std::string eqn, TensorList tensors) {
 // the computation is unrolled in the unroll_dim dimension
 // its main purpose is to unify the computations in bilinear and bilinear_backward
 Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
-		  IntList expand1_, IntList expand2_, IntList expand3_,
-		  IntList sumdim_, int64_t unroll_dim) {
+		  IntArrayRef expand1_, IntArrayRef expand2_, IntArrayRef expand3_,
+		  IntArrayRef sumdim_, int64_t unroll_dim) {
   int64_t total_dim = i1_.dim()+expand1_.size();
   AT_CHECK((unroll_dim >= 0) && (unroll_dim < total_dim), "unroll_dim must be in [0,", total_dim-1, "]");
-  auto expand1 = dim_list_to_bitset(expand1_, total_dim);
-  auto expand2 = dim_list_to_bitset(expand2_, total_dim);
-  auto expand3 = dim_list_to_bitset(expand3_, total_dim);
-  auto sumdim  = dim_list_to_bitset(sumdim_,  total_dim);
+  auto expand1 = at::dim_list_to_bitset(expand1_, total_dim);
+  auto expand2 = at::dim_list_to_bitset(expand2_, total_dim);
+  auto expand3 = at::dim_list_to_bitset(expand3_, total_dim);
+  auto sumdim  = at::dim_list_to_bitset(sumdim_,  total_dim);
   Tensor i1 = i1_;
   Tensor i2 = i2_;
   Tensor i3 = i3_;
@@ -387,7 +404,7 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   int64_t slicemul2 = (expand2[unroll_dim] ? 0 : 1);
   int64_t slicemul3 = (expand3[unroll_dim] ? 0 : 1);
 
-  auto output = i1.type().tensor(output_size).zero_();
+  auto output = at::zeros(output_size, i1.options());
   if (! sumdim[unroll_dim]) {
     for (int64_t k = 0; k < unroll_size; k++) {
       Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k * slicemul1, 1),
@@ -438,6 +455,64 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
     output = output + bias;
   }
   return output;
+}
+
+// implements tensordot, a matrix-multiplication-like contraction, but the dimensions given
+// in the two dimension lists
+Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
+  AT_CHECK(dims1.size() == dims2.size(), "both dimension lists should have same length");
+  int64_t csize = 1;  // total size of the contracted dimensions
+  Tensor t1 = input1;
+  Tensor t2 = input2;
+  for (size_t i = 0; i < dims1.size(); i++) {
+    int s1 = input1.size(dims1[i]);
+    int s2 = input2.size(dims2[i]);
+    if (s2 == 1) { // broadcasted dimensions can be summed right away
+      t1 = t1.sum(dims1[i], true);
+    } else if (s1 == 1) {
+      t2 = t2.sum(dims2[i], true);
+    } else {
+      AT_CHECK(s1 == s2, "contracted dimensions need to match, but first has size ", s1, " in dim ", dims1[i],
+	       " and second has size ", s2, " in dim ", dims2[i]);
+      csize *= s1;
+    }
+  }
+
+  auto cdims1 = at::dim_list_to_bitset(dims1, input1.dim());
+  auto cdims2 = at::dim_list_to_bitset(dims2, input2.dim());
+  std::vector<int64_t> p1, p2, rsizes;  // p1, p2: input permutations, rsizes: sizes of the result
+  p1.reserve(input1.dim());
+  p2.reserve(input2.dim());
+  rsizes.reserve(input1.dim() + input2.dim() - (int64_t) dims1.size());
+  int64_t size1 = 1; // number of non-contracted elements in input1
+  int64_t size2 = 1; // number of non-contracted elements in input2
+
+  // fill the permutations and compute sizes
+  for (int64_t i = 0; i < input1.dim(); i++) {
+    if (! cdims1[i]) {
+      p1.emplace_back(i);
+      size1 *= t1.size(i);
+      rsizes.emplace_back(t1.size(i));
+    }
+  }
+  for (size_t i = 0; i < dims1.size(); i++) {
+    p1.emplace_back(dims1[i]);
+  }
+  for (size_t i = 0; i < dims2.size(); i++) {
+    p2.emplace_back(dims2[i]);
+  }
+  for (int64_t i = 0; i < input2.dim(); i++) {
+    if (! cdims2[i]) {
+      p2.emplace_back(i);
+      size2 *= t2.size(i);
+      rsizes.emplace_back(t2.size(i));
+    }
+  }
+  // permut and reshape for matrix multiplication
+  t1 = t1.permute(p1).reshape({size1, csize});
+  t2 = t2.permute(p2).reshape({csize, size2});
+  // multiply and reshape to target size
+  return at::mm(t1, t2).reshape(rsizes);
 }
 
 }}  // namespace at::native

@@ -1,4 +1,4 @@
 #pragma once
 
-#include "base/TensorDescriptor.hpp"
-#include "Collectives.h"
+#include <THD/process_group/Collectives.h>
+#include <THD/base/TensorDescriptor.hpp>

@@ -1,28 +1,12 @@
 #pragma once
 
-#include "ATen/TensorImpl.h"
-#include <sstream>
+#include <c10/core/WrapDimMinimal.h>
+#include <c10/core/TensorImpl.h>
 
 namespace at {
 
 static inline int64_t maybe_wrap_dim(int64_t dim, int64_t dim_post_expr, bool wrap_scalar=true) {
-  if (dim_post_expr <= 0) {
-    if (!wrap_scalar) {
-      std::ostringstream oss;
-      oss << "dimension specified as " << dim << " but tensor has no dimensions";
-      throw std::runtime_error(oss.str());
-    }
-    dim_post_expr = 1; // this will make range [-1, 0]
-  }
-
-  int64_t min = -dim_post_expr;
-  int64_t max = dim_post_expr - 1;
-  AT_CHECK(
-      dim >= min && dim <= max,
-      "Dimension out of range (expected to be in range of [",
-      min, ", ", max, "], but got ", dim, ")");
-  if (dim < 0) dim += dim_post_expr;
-  return dim;
+  return c10::maybe_wrap_dim(dim, dim_post_expr, wrap_scalar);
 }
 
 static inline int64_t maybe_wrap_dim(int64_t dim, TensorImpl *tensor) {
@@ -53,10 +37,11 @@ static inline void maybe_wrap_dims(std::vector<int64_t>& dims, int64_t dim_post_
   int64_t min = -dim_post_expr;
   int64_t max = dim_post_expr - 1;
   for (auto& dim : dims) {
-    AT_CHECK(
-        dim >= min && dim <= max,
+    if (dim < min || dim > max) {
+      AT_INDEX_ERROR(
         "Dimension out of range (expected to be in range of [",
         min, ", ", max, "], but got ", dim, ")");
+    }
     if (dim < 0) dim += dim_post_expr;
   }
 }

@@ -1,4 +1,4 @@
-if (USE_NNPACK)
+if (USE_NNPACK AND BUILD_CAFFE2_OPS)
   add_subdirectory(nnpack)
 endif()
 if (USE_ZSTD)

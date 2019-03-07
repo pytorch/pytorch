@@ -40,7 +40,7 @@ template <class Context>
 class DBExistsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  DBExistsOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit DBExistsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         ws_(ws),
         absolute_path_(
@@ -70,7 +70,7 @@ template <class Context>
 class LoadOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  LoadOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit LoadOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         ws_(ws),
         absolute_path_(
@@ -298,7 +298,7 @@ class LoadOp final : public Operator<Context> {
       // different GPU.
       blob->Reset();
     }
-    blob->Deserialize(proto);
+    DeserializeBlob(proto, blob);
     if (proto.has_content_num_chunks()) {
       if (!blob_states.count(key)) {
         blob_states[key] = BlobState(proto.content_num_chunks());
@@ -408,7 +408,7 @@ template <class Context>
 class SaveOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SaveOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit SaveOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         ws_(ws),
         absolute_path_(
@@ -418,7 +418,10 @@ class SaveOp final : public Operator<Context> {
         db_name_(this->template GetSingleArgument<string>("db", "")),
         db_type_(this->template GetSingleArgument<string>("db_type", "")),
         blob_names_(
-            this->template GetRepeatedArgument<string>("blob_name_overrides")) {
+            this->template GetRepeatedArgument<string>("blob_name_overrides")),
+        chunk_size_(this->template GetSingleArgument<int>(
+            "chunk_size",
+            kDefaultChunkSize)) {
     CAFFE_ENFORCE_GT(db_name_.size(), 0, "Must specify a db name.");
     CAFFE_ENFORCE_GT(db_type_.size(), 0, "Must specify a db type.");
     CAFFE_ENFORCE(
@@ -471,7 +474,7 @@ class SaveOp final : public Operator<Context> {
 
     const vector<const Blob*>& inputs = OperatorBase::Inputs();
     for (int i = 0; i < inputs.size(); ++i) {
-      inputs[i]->Serialize(blob_names_[i], acceptor);
+      SerializeBlob(*inputs[i], blob_names_[i], acceptor, chunk_size_);
     }
     out_db->Close();
     return true;
@@ -484,6 +487,7 @@ class SaveOp final : public Operator<Context> {
   string db_name_;
   string db_type_;
   std::vector<std::string> blob_names_;
+  int chunk_size_;
 };
 
 template <typename... Ts>
@@ -517,7 +521,7 @@ string FormatString(const string& pattern, Ts... values) {
 template <class Context>
 class CheckpointOp final : public Operator<Context> {
  public:
-  CheckpointOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit CheckpointOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         db_pattern_(this->template GetSingleArgument<string>("db", "")),
         every_(this->template GetSingleArgument<int>("every", 1)),

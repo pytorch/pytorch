@@ -6,13 +6,14 @@ from __future__ import unicode_literals
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
 
-class TestLengthsPadOp(hu.HypothesisTestCase):
+class TestLengthsPadOp(serial.SerializedTestCase):
 
-    @given(
+    @serial.given(
         inputs=hu.lengths_tensor(
             dtype=np.float32,
             min_value=1,

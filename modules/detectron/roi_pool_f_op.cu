@@ -131,21 +131,17 @@ template<>
 bool RoIPoolFOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);  // Input data to pool
   auto& R = Input(1);  // RoIs
-  auto* Y = Output(0); // RoI pooled data
-  auto* A = Output(1); // argmaxes
 
   if (R.size() == 0) {
     // Handle empty rois
-    Y->Resize(0, X.dim32(1), pooled_height_, pooled_width_);
-    A->Resize(0, X.dim32(1), pooled_height_, pooled_width_);
-    // The following mutable_data calls are needed to allocate the tensors
-    Y->mutable_data<float>();
-    A->mutable_data<int>();
+    std::vector<int64_t> sizes = {0, X.dim32(1), pooled_height_, pooled_width_};
+    /* auto* Y = */ Output(0, sizes, at::dtype<float>());
+    /* auto* A = */ Output(1, sizes, at::dtype<int>());
     return true;
   }
 
-  Y->Resize(R.dim32(0), X.dim32(1), pooled_height_, pooled_width_);
-  A->Resize(Y->dims());
+  auto* Y = Output(0, {R.dim32(0), X.dim32(1), pooled_height_, pooled_width_}, at::dtype<float>()); // RoI pooled data
+  auto* A = Output(1, Y->sizes(), at::dtype<int>()); // argmaxes
   int output_size = Y->size();
   RoIPoolFForward<float><<<CAFFE_GET_BLOCKS(output_size),
                           CAFFE_CUDA_NUM_THREADS,
@@ -164,10 +160,9 @@ bool RoIPoolFGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& A  = Input(2);  // argmaxes
   auto& dY = Input(3);  // Gradient of net w.r.t. output of "forward" op
                         // (aka "gradOutput")
-  auto* dX = Output(0); // Gradient of net w.r.t. input to "forward" op
-                        // (aka "gradInput")
 
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());    // Gradient of net w.r.t. input to "forward" op
+                        // (aka "gradInput")
   // Must zero-out dX before accumulating gradients
   math::Set<float, CUDAContext>(
       dX->size(), 0.f, dX->mutable_data<float>(), &context_);

@@ -21,8 +21,8 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(INPUT);
   const auto& filter = Input(FILTER);
   auto* Y = Output(0);
-  const int image_ndim = X.ndim() - 2;
-  CAFFE_ENFORCE_EQ(X.ndim() + image_ndim, filter.ndim());
+  const int image_ndim = X.dim() - 2;
+  CAFFE_ENFORCE_EQ(X.dim() + image_ndim, filter.dim());
   lc_op_util::ShapeParams shape;
   shape.N = X.dim32(0);
   shape.C = X.dim32(1);
@@ -55,7 +55,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     kernel_dims_size *= kernel_[i];
   }
 
-  shape.X_dims.assign(X.dims().cbegin() + 1, X.dims().cend());
+  shape.X_dims.assign(X.sizes().cbegin() + 1, X.sizes().cend());
   shape.kernel_size = shape.C / group_ * kernel_dims_size;
   lc_op_util::SetColumnBufferShape(
       shape.N,
@@ -81,7 +81,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const T* bias_data = nullptr;
   if (InputSize() == 3) {
     const auto& bias = Input(BIAS);
-    CAFFE_ENFORCE_EQ(bias.ndim(), image_ndim + 1);
+    CAFFE_ENFORCE_EQ(bias.dim(), image_ndim + 1);
     for (int i = 0; i < image_ndim; ++i) {
       CAFFE_ENFORCE_EQ(bias.dim32(i), output_image_dims[i]);
     }
@@ -114,8 +114,8 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       kernel_.size(),
       2,
       "Only 2d locally connected op is supported for NHWC storage type.");
-  const int image_ndim = X.ndim() - 2;
-  CAFFE_ENFORCE_EQ(X.ndim() + image_ndim, filter.ndim());
+  const int image_ndim = X.dim() - 2;
+  CAFFE_ENFORCE_EQ(X.dim() + image_ndim, filter.dim());
   lc_op_util::ShapeParams shape;
   shape.N = X.dim32(0);
   shape.C = X.dim32(3);
@@ -158,7 +158,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const T* bias_data = nullptr;
   if (InputSize() == 3) {
     const auto& bias = Input(BIAS);
-    CAFFE_ENFORCE_EQ(bias.ndim(), image_ndim + 1);
+    CAFFE_ENFORCE_EQ(bias.dim(), image_ndim + 1);
     for (int i = 0; i < image_ndim; ++i) {
       CAFFE_ENFORCE_EQ(bias.dim32(i), output_image_dims[i]);
     }
@@ -372,9 +372,9 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(INPUT);
   const auto& filter = Input(FILTER);
   const auto& dY = Input(OUTPUT_GRAD);
-  auto* dfilter = Output(FILTER_GRAD);
-  const int image_ndim = X.ndim() - 2;
-  CAFFE_ENFORCE_EQ(X.ndim() + image_ndim, filter.ndim());
+
+  const int image_ndim = X.dim() - 2;
+  CAFFE_ENFORCE_EQ(X.dim() + image_ndim, filter.dim());
 
   lc_op_util::ShapeParams shape;
   shape.N = X.dim32(0);
@@ -398,7 +398,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     kernel_dims_size *= kernel_[i];
   }
 
-  shape.X_dims.assign(X.dims().cbegin() + 1, X.dims().cend());
+  shape.X_dims.assign(X.sizes().cbegin() + 1, X.sizes().cend());
   shape.kernel_size = shape.C / group_ * kernel_dims_size;
   lc_op_util::SetColumnBufferShape(
       shape.N,
@@ -419,7 +419,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       &shape.Y_transposed_dims,
       &shape.Y_axes);
 
-  dfilter->ResizeLike(filter);
+  auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
   const T* X_data = X.template data<T>();
   const T* filter_data = filter.template data<T>();
   const T* dY_data = dY.template data<T>();
@@ -427,15 +427,18 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   T* dX_data = nullptr;
   T* dbias_data = nullptr;
   if (OutputSize() == 3 || (no_bias_ && OutputSize() == 2)) {
-    auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-    dX->ResizeLike(X);
+    auto* dX = Output(
+        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
     dX_data = dX->template mutable_data<T>();
   }
   if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-    std::vector<int> dbias_dims = output_image_dims;
+    std::vector<int64_t> dbias_dims;
+    std::copy(
+        output_image_dims.cbegin(),
+        output_image_dims.cend(),
+        std::back_inserter(dbias_dims));
     dbias_dims.push_back(shape.M);
-    dbias->Resize(dbias_dims);
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD, dbias_dims, at::dtype<T>());
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
         shape.N, &bias_multiplier_);
     dbias_data = dbias->template mutable_data<T>();
@@ -460,13 +463,13 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(INPUT);
   const auto& filter = Input(FILTER);
   const auto& dY = Input(OUTPUT_GRAD);
-  auto* dfilter = Output(FILTER_GRAD);
+
   CAFFE_ENFORCE_EQ(
       kernel_.size(),
       2,
       "Only 2d locally connected op is supported for NHWC storage type.");
-  const int image_ndim = X.ndim() - 2;
-  CAFFE_ENFORCE_EQ(X.ndim() + image_ndim, filter.ndim());
+  const int image_ndim = X.dim() - 2;
+  CAFFE_ENFORCE_EQ(X.dim() + image_ndim, filter.dim());
   lc_op_util::ShapeParams shape;
   shape.N = X.dim32(0);
   shape.C = X.dim32(3);
@@ -505,7 +508,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       &shape.Y_transposed_dims,
       &shape.Y_axes);
 
-  dfilter->ResizeLike(filter);
+  auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
   const T* X_data = X.template data<T>();
   const T* filter_data = filter.template data<T>();
   const T* dY_data = dY.template data<T>();
@@ -513,15 +516,18 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   T* dX_data = nullptr;
   T* dbias_data = nullptr;
   if (OutputSize() == 3 || (no_bias_ && OutputSize() == 2)) {
-    auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-    dX->ResizeLike(X);
+    auto* dX = Output(
+        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
     dX_data = dX->template mutable_data<T>();
   }
   if (!no_bias_) {
-    auto* dbias = Output(BIAS_OR_INPUT_GRAD);
-    std::vector<int> dbias_dims = output_image_dims;
+    std::vector<int64_t> dbias_dims;
+    std::copy(
+        output_image_dims.cbegin(),
+        output_image_dims.cend(),
+        std::back_inserter(dbias_dims));
     dbias_dims.push_back(shape.M);
-    dbias->Resize(dbias_dims);
+    auto* dbias = Output(BIAS_OR_INPUT_GRAD, dbias_dims, at::dtype<T>());
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
         shape.N, &bias_multiplier_);
     dbias_data = dbias->template mutable_data<T>();

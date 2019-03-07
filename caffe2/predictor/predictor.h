@@ -4,25 +4,14 @@
 #include "caffe2/core/net.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/predictor/predictor_config.h"
-#include "caffe2/proto/metanet.pb.h"
-#include "caffe2/proto/predictor_consts.pb.h"
 
 namespace caffe2 {
 
 class CAFFE2_API Predictor {
  public:
-  using TensorVector = std::vector<TensorCPU*>;
-  using TensorMap = std::unordered_map<std::string, TensorCPU*>;
+  using TensorList = std::vector<TensorCPU>;
+  using TensorMap = std::unordered_map<std::string, TensorCPU>;
 
-  // MetaNetDef contains 'init_net', 'run_net', and meta-info
-  // The meta-info is used to verify inputs are correctly passed
-  Predictor(
-      const MetaNetDef& net,
-      Workspace* parent = nullptr,
-      bool run_init = true);
-
-  // Runs the `init_net` once, then saves the `run_net` to be executed
-  // in `::run`
   Predictor(
       const NetDef& init_net,
       const NetDef& run_net,
@@ -30,7 +19,9 @@ class CAFFE2_API Predictor {
       bool run_init = true,
       int optimization = 1);
 
-  ~Predictor() {}
+  Predictor(PredictorConfig config);
+
+  virtual ~Predictor() {}
 
   // Executes `run_net` on the inputs.
   // The first `inputs.size()` inputs from run_net::external_inputs
@@ -42,22 +33,25 @@ class CAFFE2_API Predictor {
   // Postcondition:
   //   outputs->size() == run_net.external_inputs.size()
 
+  // NOTE: output is a part of thread local workspace
+  // and is only valid until the next predictor execution.
+
   // Returns true on success
-  bool run(const TensorVector& inputs, TensorVector* outputs);
+  virtual bool operator()(const TensorList& inputs, TensorList* outputs);
 
   // Similar to run, but consumes a map of name to tensor as input
-  bool run_map(const TensorMap& inputs, TensorVector* outputs);
+  bool operator()(const TensorMap& inputs, TensorList* outputs);
 
   // Similar to the other run fns, except inputs and outputs are both maps of
   // string name to tensor.
-  bool run_map_outputs(const TensorMap& inputs, TensorMap* outputs);
+  bool operator()(const TensorMap& inputs, TensorMap* outputs);
 
   const NetDef& def() const {
     return *config_.predict_net;
   };
 
   Workspace* ws() {
-    return &ws_;
+    return config_.ws.get();
   };
 
   const std::vector<std::string>& input_names() const {
@@ -70,7 +64,8 @@ class CAFFE2_API Predictor {
 
  private:
   bool run_map_workspace(const TensorMap& inputs);
+
+ protected:
   PredictorConfig config_;
-  Workspace ws_;
 };
-}
+} // namespace caffe2

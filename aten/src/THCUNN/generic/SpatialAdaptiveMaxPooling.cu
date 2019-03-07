@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialAdaptiveMaxPooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialAdaptiveMaxPooling.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 // 4d tensor B x D x H x W
 
@@ -17,8 +17,8 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
   THCUNN_assertSameGPU(state, 3, input, output, indices);
 
   THCIndex_t *indices_data;
-  real *output_data;
-  real *input_data;
+  scalar_t *output_data;
+  scalar_t *input_data;
 
   THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
                   "non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
@@ -101,8 +101,8 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
   THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
 
   THCIndex_t *indices_data;
-  real *gradInput_data;
-  real *gradOutput_data;
+  scalar_t *gradInput_data;
+  scalar_t *gradOutput_data;
 
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 

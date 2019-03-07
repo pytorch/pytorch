@@ -1,10 +1,10 @@
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCBlas.h"
-#include "THCTensorCopy.h"
-#include "THCNumerics.cuh"
-#include "THCTensor.hpp"
-#include "THCStorage.hpp"
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCBlas.h>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCTensor.hpp>
+#include <THC/THCStorage.hpp>
 
-#include "generic/THCTensorMathBlas.cu"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensorMathBlas.cu>
+#include <THC/THCGenerateAllTypes.h>

@@ -1,13 +1,26 @@
-#include "ATen/native/cpu/UnaryOpsKernel.h"
+#include <ATen/native/cpu/UnaryOpsKernel.h>
 
 #include <cmath>
-#include "ATen/Dispatch.h"
-#include "ATen/cpu/vml.h"
-#include "ATen/CPUApplyUtils.h"
-#include "ATen/native/DispatchStub.h"
+#include <type_traits>
+#include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/CPUGenerator.h>
+#include <ATen/CheckGenerator.h>
+#include <ATen/Generator.h>
+#include <ATen/cpu/vml.h>
+#include <ATen/CPUApplyUtils.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/Distributions.h>
 #ifdef __AVX2__
-#include "ATen/native/cpu/avx_mathfun.h"
+#include <ATen/native/cpu/avx_mathfun.h>
 #endif
+
+#if AT_MKL_ENABLED()
+#include <mkl.h>
+#endif
+
+#include <TH/THGenerator.hpp>
+#include <TH/THRandom.h>
 
 namespace at { namespace native {
 namespace {
@@ -24,9 +37,9 @@ template <>
 int64_t _sigmoid(float* x, float* y, int64_t size) {
   using Vec = Vec256<float>;
   int64_t i = 0;
-  for (; i < size - (size % (2 * Vec::size)); i += 2 * Vec::size) {
+  for (; i < size - (size % (2 * Vec::size())); i += 2 * Vec::size()) {
     Vec ret = Vec::loadu(y + i);
-    Vec ret2 = Vec::loadu(y + i + Vec::size);
+    Vec ret2 = Vec::loadu(y + i + Vec::size());
     ret = ret.neg();
     ret2 = ret2.neg();
 #if defined(__AVX2__) && !defined(_MSC_VER)
@@ -41,7 +54,7 @@ int64_t _sigmoid(float* x, float* y, int64_t size) {
     ret = ret.reciprocal();
     ret2 = ret2.reciprocal();
     ret.store(x + i);
-    ret2.store(x + i + Vec::size);
+    ret2.store(x + i + Vec::size());
   }
   return i;
 }
@@ -50,9 +63,9 @@ template <>
 int64_t _sigmoid(double* x, double* y, int64_t size) {
   using Vec = Vec256<double>;
   int64_t i = 0;
-  for (; i < size - (size % (2 * Vec::size)); i += 2 * Vec::size) {
+  for (; i < size - (size % (2 * Vec::size())); i += 2 * Vec::size()) {
     Vec ret = Vec::loadu(y + i);
-    Vec ret2 = Vec::loadu(y + i + Vec::size);
+    Vec ret2 = Vec::loadu(y + i + Vec::size());
     ret = ret.neg();
     ret2 = ret2.neg();
     ret = ret.exp();
@@ -62,7 +75,7 @@ int64_t _sigmoid(double* x, double* y, int64_t size) {
     ret = ret.reciprocal();
     ret2 = ret2.reciprocal();
     ret.store(x + i);
-    ret2.store(x + i + Vec::size);
+    ret2.store(x + i + Vec::size());
   }
   return i;
 }
@@ -82,9 +95,9 @@ static void sigmoid_kernel(Tensor& result, const Tensor& self) {
           if (stridex == 1 && stridey == 1) {
             i = _sigmoid(x, y, size);
           }
-          for (; i < size; i += Vec::size) {
-            scalar_t buffer[Vec::size];
-            int64_t width = Vec::size;
+          for (; i < size; i += Vec::size()) {
+            scalar_t buffer[Vec::size()];
+            int64_t width = Vec::size();
             width = std::min(width, size - i);
             for (int64_t j = 0; j < width; j++) {
               buffer[j] = y[stridey * (i + j)];
@@ -101,6 +114,65 @@ static void sigmoid_kernel(Tensor& result, const Tensor& self) {
         });
   });
 }
+
+
+#if !AT_MKL_ENABLED()
+void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
+  // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
+  // users to report this as a bug.
+  AT_ASSERTM(false, "ATen not compiled with MKL");
+}
+#else
+void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
+  THGenerator* generator = get_generator(gen);
+  int64_t seed;
+  {
+    std::lock_guard<std::mutex> lock(generator->mutex);
+    seed = THRandom_random(generator);
+  }
+  int64_t n = self.numel();
+  bool contig = self.is_contiguous();
+
+  AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_scalar_cpu_", [&] {
+    at::Tensor tmp_int_tensor;
+    if (std::is_same<scalar_t, int>::value && contig) {
+      tmp_int_tensor = self;
+    } else {
+      tmp_int_tensor = at::empty(self.sizes(), self.options().dtype(at::kInt));
+    }
+
+    scalar_t *self_ptr = self.data<scalar_t>();
+    int *sample_int_ptr = tmp_int_tensor.data<int>();
+
+    auto sample = [&](int64_t begin, int64_t end) {
+      int64_t len = end - begin;
+      if (len > 0) {
+        VSLStreamStatePtr stream;
+        vslNewStream(&stream, VSL_BRNG_MCG31, seed);
+        vslSkipAheadStream(stream, begin);
+        viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, len,
+          sample_int_ptr + begin, p);
+        vslDeleteStream(&stream);
+
+        // vectorized copy if using buffer and contiguous, i.e., being non-int
+        // type and contiguous
+        if (!std::is_same<scalar_t, int>::value && contig) {
+          scalar_t *self_seg = self_ptr + begin;
+          int* tmp_seg = sample_int_ptr + begin;
+          at::vec256::convert<int, scalar_t>(tmp_seg, self_seg, len);
+        }
+      }
+    };
+
+    parallel_for(0, n, /* grain_size= */ 800, sample);
+
+    // copy_ if using buffer and non contiguous
+    if (!contig) {
+      self.copy_(tmp_int_tensor);
+    }
+  });
+}
+#endif
 
 #define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                          \
   static void op##_kernel(Tensor& result, const Tensor& self) {            \
@@ -143,6 +215,7 @@ static void sigmoid_kernel(Tensor& result, const Tensor& self) {
 } // anonymous namespace
 
 REGISTER_DISPATCH(sigmoidImpl, &sigmoid_kernel)
+REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)

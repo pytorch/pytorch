@@ -82,6 +82,7 @@ class ConstraintRegistry(object):
     """
     def __init__(self):
         self._registry = {}
+        super(ConstraintRegistry, self).__init__()
 
     def register(self, constraint, factory=None):
         """
@@ -152,7 +153,9 @@ transform_to = ConstraintRegistry()
 ################################################################################
 
 @biject_to.register(constraints.real)
+@biject_to.register(constraints.real_vector)
 @transform_to.register(constraints.real)
+@transform_to.register(constraints.real_vector)
 def _transform_to_real(constraint):
     return transforms.identity_transform
 

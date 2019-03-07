@@ -10,17 +10,14 @@
 #include "caffe2/core/context_base.h"
 #include "caffe2/core/event.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/typeid.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include <c10/util/typeid.h>
+#include "caffe2/proto/caffe2_pb.h"
 
-#include "ATen/core/ATenCoreTest.h"
-#include "ATen/core/ArrayRef.h"
+#include <c10/util/ArrayRef.h>
 
-CAFFE2_DECLARE_bool(caffe2_report_cpu_memory_usage);
+C10_DECLARE_bool(caffe2_report_cpu_memory_usage);
 
 namespace caffe2 {
-
-CAFFE2_API BaseStaticContext* GetCPUStaticContext();
 
 /**
  * A function to generate a random number seed that is unique in a best-effort
@@ -48,18 +45,12 @@ class CAFFE2_API CPUContext final : public BaseContext {
       : random_seed_(
             option.has_random_seed() ? option.random_seed()
                                      : RandomNumberSeed()) {
-    CAFFE_ENFORCE_EQ(option.device_type(), CPU);
+    CAFFE_ENFORCE_EQ(option.device_type(), PROTO_CPU);
   }
+  explicit CPUContext(const at::Device& device)
+      : CPUContext(DeviceToOption(device)) {}
 
   ~CPUContext() noexcept override {}
-
-  BaseStaticContext* GetStaticContext() const override {
-    return GetCPUStaticContext();
-  }
-
-  static BaseStaticContext* StaticContext() {
-    return GetCPUStaticContext();
-  }
 
   inline void SwitchToDevice(int /*stream_id*/) override {}
 
@@ -83,18 +74,11 @@ class CAFFE2_API CPUContext final : public BaseContext {
     return *random_generator_.get();
   }
 
-  inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
+  inline static at::DataPtr New(size_t nbytes) {
+    return GetCPUAllocator()->allocate(nbytes);
   }
 
-  void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
-    if (nbytes == 0) {
-      return;
-    }
-    CAFFE_ENFORCE(src);
-    CAFFE_ENFORCE(dst);
-    memcpy(dst, src, nbytes);
-  }
+  void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override;
 
   void CopyBytesFromCPU(size_t nbytes, const void* src, void* dst) override {
     CopyBytesSameDevice(nbytes, src, dst);
@@ -120,7 +104,7 @@ class CAFFE2_API CPUContext final : public BaseContext {
           static_cast<const void*>(src),
           static_cast<void*>(dst));
     } else {
-      for (int i = 0; i < n; ++i) {
+      for (size_t i = 0; i < n; ++i) {
         dst[i] = src[i];
       }
     }
@@ -153,7 +137,12 @@ class CAFFE2_API CPUContext final : public BaseContext {
     return true;
   }
 
-  DeviceType GetDevicetype() const override {
+  at::Device device() const override {
+    // TODO: numa?
+    return at::Device(CPU);
+  }
+
+  DeviceType device_type() const override {
     return CPU;
   }
 
@@ -179,41 +168,6 @@ inline void CPUContext::CopyBytes<CPUContext, CPUContext>(
   CAFFE_ENFORCE(dst);
   memcpy(dst, src, nbytes);
 }
-
-// TODO(jerryzh): merge CPUStaticContext with Allocator
-class CAFFE2_API CPUStaticContext : public BaseStaticContext {
- public:
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) const override {
-    auto data_and_deleter = GetCPUAllocator()->New(nbytes);
-    if (FLAGS_caffe2_report_cpu_memory_usage) {
-      reporter_.New(data_and_deleter.first, nbytes);
-      data_and_deleter.second = ReportAndDelete;
-    }
-    return data_and_deleter;
-  }
-
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<CPUContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<CPUContext>(option);
-  }
-
-  DeviceType GetDeviceType() override {
-    return CPU;
-  }
-
- protected:
-  static MemoryAllocationReporter reporter_;
-
- private:
-  static void ReportAndDelete(void* ptr) {
-    reporter_.Delete(ptr);
-    GetCPUAllocator()->GetDeleter()(ptr);
-  }
-};
 
 }  // namespace caffe2
 

@@ -17,8 +17,9 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   USE_DISPATCH_HELPER;
 
-  CuDNNTransposeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws),
+  template <class... Args>
+  explicit CuDNNTransposeOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_),
         axes_(OperatorBase::GetRepeatedArgument<int>("axes")) {
     // We will check the legality of axes_: it should be from 0 to axes_.size().
@@ -34,7 +35,7 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&yDesc_));
   }
 
-  ~CuDNNTransposeOp() {
+  ~CuDNNTransposeOp() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(xDesc_));
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(yDesc_));
   }
@@ -42,13 +43,13 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
   bool RunOnDevice() override {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    const int ndim = X.ndim();
-    X_dims_.assign(X.dims().cbegin(), X.dims().cend());
+    const int ndim = X.dim();
+    X_dims_.assign(X.sizes().cbegin(), X.sizes().cend());
     if (axes_.empty()) {
       axes_.resize(ndim);
       std::iota(axes_.rbegin(), axes_.rend(), 0);
     } else {
-      CAFFE_ENFORCE_EQ(X.ndim(), axes_.size());
+      CAFFE_ENFORCE_EQ(X.dim(), axes_.size());
     }
     std::vector<int> Y_dims(ndim);
     for (int i = 0; i < ndim; ++i) {
@@ -69,7 +70,7 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
   bool DoRunWithType() {
     const auto& input = Input(0);
     auto* output = Output(0);
-    int ndim = input.ndim();
+    int ndim = input.dim();
 
     if (ndim == 0) {
       return true;

@@ -1,9 +1,10 @@
 #pragma once
 
-#include <ATen/Allocator.h>
-#include <ATen/Generator.h>
-#include <ATen/Registry.h>
-#include <ATen/core/Error.h>
+#include <c10/core/Allocator.h>
+#include <ATen/core/Generator.h>
+#include <c10/util/Exception.h>
+
+#include <c10/util/Registry.h>
 
 #include <cstddef>
 #include <functional>
@@ -47,7 +48,7 @@ constexpr const char* CUDA_HELP =
 // TODO: Consider putting the stub definitions in another class, so that one
 // never forgets to implement each virtual function in the real implementation
 // in CUDAHooks.  This probably doesn't buy us much though.
-struct AT_API CUDAHooksInterface {
+struct CAFFE2_API CUDAHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
   virtual ~CUDAHooksInterface() {}
@@ -62,6 +63,10 @@ struct AT_API CUDAHooksInterface {
   }
 
   virtual bool hasCUDA() const {
+    return false;
+  }
+
+  virtual bool hasMAGMA() const {
     return false;
   }
 
@@ -82,6 +87,10 @@ struct AT_API CUDAHooksInterface {
   }
 
   virtual bool compiledWithCuDNN() const {
+    return false;
+  }
+
+  virtual bool compiledWithMIOpen() const {
     return false;
   }
 
@@ -121,25 +130,13 @@ struct AT_API CUDAHooksInterface {
 
 // NB: dummy argument to suppress "ISO C++11 requires at least one argument
 // for the "..." in a variadic macro"
-struct AT_API CUDAHooksArgs {};
+struct CAFFE2_API CUDAHooksArgs {};
 
-AT_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
+C10_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs);
 #define REGISTER_CUDA_HOOKS(clsname) \
-  AT_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
+  C10_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
 
 namespace detail {
-AT_API const CUDAHooksInterface& getCUDAHooks();
-
-/// This class exists to let us access `cudaSetDevice`, `cudaGetDevice` and CUDA
-/// error handling functions, when CUDA is available. These functions will first
-/// default to no-ops. When the `ATen` GPU library is loaded, they will be set to
-/// the `cudaSetDevice`/`cudaGetDevice` functions. This allows us to access them
-/// with only a single pointer indirection, while virtual dispatch would require
-/// two (one for the virtual call, one for `cudaSetDevice`/`cudaGetDevice`).
-struct AT_API DynamicCUDAInterface {
-  static void (*set_device)(int32_t);
-  static void (*get_device)(int32_t*);
-  static void (*unchecked_set_device)(int32_t);
-};
+CAFFE2_API const CUDAHooksInterface& getCUDAHooks();
 } // namespace detail
 } // namespace at

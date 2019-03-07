@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/TemporalMaxPooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/TemporalMaxPooling.cu"
 #else
 
 static inline void THNN_(TemporalMaxPooling_shapeCheck)(
@@ -61,8 +61,8 @@ void THNN_(TemporalMaxPooling_updateOutput)(
   int output_w;
   int nthreads;
 
-  real *input_data;
-  real *output_data;
+  scalar_t *input_data;
+  scalar_t *output_data;
   THCIndex_t *indices_data;
 
   THCUNN_assertSameGPU(state, 3, input, output, indices);
@@ -133,8 +133,8 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
   int output_w;
   int nthreads;
 
-  real *gradInput_data;
-  real *gradOutput_data;
+  scalar_t *gradInput_data;
+  scalar_t *gradOutput_data;
   THCIndex_t *indices_data;
 
   THCUNN_assertSameGPU(state, 4, input, gradOutput, gradInput, indices);

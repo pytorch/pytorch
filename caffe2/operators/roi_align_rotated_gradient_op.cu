@@ -110,8 +110,8 @@ __global__ void RoIAlignRotatedBackward(
     T theta = offset_bottom_rois[5] * M_PI / 180.0;
 
     // Force malformed ROIs to be 1x1
-    roi_width = max(roi_width, (T)1.);
-    roi_height = max(roi_height, (T)1.);
+    roi_width = c10::cuda::compat::max(roi_width, (T)1.);
+    roi_height = c10::cuda::compat::max(roi_height, (T)1.);
     T bin_size_h = static_cast<T>(roi_height) / static_cast<T>(pooled_height);
     T bin_size_w = static_cast<T>(roi_width) / static_cast<T>(pooled_width);
 
@@ -199,22 +199,22 @@ bool RoIAlignRotatedGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& R = Input(1); // RoIs
   auto& dY = Input(2); // Gradient of net w.r.t. output of "forward" op
                        // (aka "gradOutput")
-  auto* dX = Output(0); // Gradient of net w.r.t. input to "forward" op
-                        // (aka "gradInput")
 
-  dX->ResizeLike(X);
+  auto* dX = Output(
+      0, X.sizes(), at::dtype<float>()); // Gradient of net w.r.t. input to
+                                         // "forward" op (aka "gradInput")
 
   // Must zero-out dX before accumulating gradients
   math::Set<float, CUDAContext>(
-      dX->size(), 0.f, dX->mutable_data<float>(), &context_);
+      dX->numel(), 0.f, dX->mutable_data<float>(), &context_);
 
-  if (dY.size() > 0) { // Handle possibly empty gradient if there were no rois
+  if (dY.numel() > 0) { // Handle possibly empty gradient if there were no rois
     RoIAlignRotatedBackward<float>
-        <<<CAFFE_GET_BLOCKS(dY.size()),
+        <<<CAFFE_GET_BLOCKS(dY.numel()),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context_.cuda_stream()>>>(
-            dY.size(),
+            dY.numel(),
             dY.data<float>(),
             R.dim32(0),
             spatial_scale_,

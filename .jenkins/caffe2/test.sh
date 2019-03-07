@@ -1,31 +1,6 @@
 #!/bin/bash
 
-set -ex
-
-LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-ROOT_DIR=$(cd "$LOCAL_DIR"/../.. && pwd)
-TEST_DIR=$ROOT_DIR/caffe2_tests
-
-# Figure out which Python to use
-PYTHON="python"
-if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
-  PYTHON="python${BASH_REMATCH[1]}"
-fi
-
-# The prefix must mirror the setting from build.sh
-INSTALL_PREFIX="/usr/local/caffe2"
-
-# Anaconda builds have a special install prefix and python
-if [[ "$BUILD_ENVIRONMENT" == conda* ]]; then
-  # This path comes from install_anaconda.sh which installs Anaconda into the
-  # docker image
-  PYTHON="/opt/conda/bin/python"
-  INSTALL_PREFIX="/opt/conda/"
-fi
-
-# Add the site-packages in the caffe2 install prefix to the PYTHONPATH
-SITE_DIR=$($PYTHON -c "from distutils import sysconfig; print(sysconfig.get_python_lib(prefix=''))")
-INSTALL_SITE_DIR="${INSTALL_PREFIX}/${SITE_DIR}"
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Skip tests in environments where they are not built/applicable
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
@@ -33,111 +8,119 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   exit 0
 fi
 
-# Set PYTHONPATH and LD_LIBRARY_PATH so that python can find the installed
-# Caffe2. This shouldn't be done on Anaconda, as Anaconda should handle this.
-if [[ "$BUILD_ENVIRONMENT" != conda* ]]; then
-  export PYTHONPATH="${PYTHONPATH}:$INSTALL_SITE_DIR"
-  export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${INSTALL_PREFIX}/lib"
+# Find where cpp tests and Caffe2 itself are installed
+if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
+  # For cmake only build we install everything into /usr/local
+  cpp_test_dir="$INSTALL_PREFIX/cpp_test"
+  ld_library_path="$INSTALL_PREFIX/lib"
+else
+  # For Python builds we install into python
+  # cd to /usr first so the python import doesn't get confused by any 'caffe2'
+  # directory in cwd
+  python_installation="$(dirname $(dirname $(cd /usr && python -c 'import os; import caffe2; print(os.path.realpath(caffe2.__file__))')))"
+  caffe2_pypath="$python_installation/caffe2"
+  cpp_test_dir="$python_installation/torch/test"
+  ld_library_path="$python_installation/torch/lib"
 fi
 
-cd "$ROOT_DIR"
-
-if [ -d $TEST_DIR ]; then
-  echo "Directory $TEST_DIR already exists; please remove it..."
-  exit 1
-fi
-
-mkdir -p $TEST_DIR/{cpp,python}
-
-cd ${INSTALL_PREFIX}
-
-# C++ tests
+################################################################################
+# C++ tests #
+################################################################################
 echo "Running C++ tests.."
-gtest_reports_dir="${TEST_DIR}/cpp"
-junit_reports_dir="${TEST_DIR}/junit_reports"
-mkdir -p "$gtest_reports_dir" "$junit_reports_dir"
-for test in $(find "${INSTALL_PREFIX}/test" -executable -type f); do
+for test in $(find "$cpp_test_dir" -executable -type f); do
   case "$test" in
     # skip tests we know are hanging or bad
     */mkl_utils_test|*/aten/integer_divider_test)
       continue
       ;;
-    */aten/*)
-      # ATen uses test framework Catch2
-      # NB: We do NOT use the xml test reporter, because
-      # Catch doesn't support multiple reporters
+    */scalar_tensor_test|*/basic|*/native_test)
+      if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+        continue
+      else
+        LD_LIBRARY_PATH="$ld_library_path" "$test"
+      fi
+      ;;
+    *)
+      # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
+      # planning to migrate to gtest as the common PyTorch c++ test suite, we
+      # currently do NOT use the xml test reporter, because Catch doesn't
+      # support multiple reporters
       # c.f. https://github.com/catchorg/Catch2/blob/master/docs/release-notes.md#223
       # which means that enabling XML output means you lose useful stdout
       # output for Jenkins.  It's more important to have useful console
       # output than it is to have XML output for Jenkins.
-      "$test"
-      ;;
-    *)
-      "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
+      # Note: in the future, if we want to use xml test reporter once we switch
+      # to all gtest, one can simply do:
+      LD_LIBRARY_PATH="$ld_library_path" \
+          "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
       ;;
   esac
 done
 
-# Get the relative path to where the caffe2 python module was installed
-CAFFE2_PYPATH="$INSTALL_SITE_DIR/caffe2"
+################################################################################
+# Python tests #
+################################################################################
+if [[ "$BUILD_ENVIRONMENT" == *cmake* ]]; then
+  exit 0
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *ubuntu14.04* ]]; then
+  # Hotfix, use hypothesis 3.44.6 on Ubuntu 14.04
+  # See comments on
+  # https://github.com/HypothesisWorks/hypothesis-python/commit/eadd62e467d6cee6216e71b391951ec25b4f5830
+  sudo pip -q uninstall -y hypothesis
+  # "pip install hypothesis==3.44.6" from official server is unreliable on
+  # CircleCI, so we host a copy on S3 instead
+  sudo pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
+  sudo pip -q install coverage==4.5.1 -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
+  sudo pip -q install hypothesis==3.44.6 -f https://s3.amazonaws.com/ossci-linux/wheels/hypothesis-3.44.6-py3-none-any.whl
+else
+  pip install --user --no-cache-dir hypothesis==3.59.0
+fi
 
 # Collect additional tests to run (outside caffe2/python)
 EXTRA_TESTS=()
 
 # CUDA builds always include NCCL support
 if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]]; then
-  EXTRA_TESTS+=("$CAFFE2_PYPATH/contrib/nccl")
-fi
-
-conda_ignore_test=()
-if [[ $BUILD_ENVIRONMENT == conda* ]]; then
-  # These tests both assume Caffe2 was built with leveldb, which is not the case
-  conda_ignore_test+=("--ignore $CAFFE2_PYPATH/python/dataio_test.py")
-  conda_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/checkpoint_test.py")
+  EXTRA_TESTS+=("$caffe2_pypath/contrib/nccl")
 fi
 
 rocm_ignore_test=()
 if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
-  export LANG=C.UTF-8
-  export LC_ALL=C.UTF-8
-
   # Currently these tests are failing on ROCM platform:
 
   # Unknown reasons, need to debug
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/arg_ops_test.py")
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/piecewise_linear_transform_test.py")
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/softmax_ops_test.py")
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/unique_ops_test.py")
+  rocm_ignore_test+=("--ignore $caffe2_pypath/python/operator_test/piecewise_linear_transform_test.py")
+  rocm_ignore_test+=("--ignore $caffe2_pypath/python/operator_test/softmax_ops_test.py")
 
-  # Need to go through roi ops to replace max(...) with fmaxf(...)
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/roi_align_rotated_op_test.py")
-
-  # Our cuda top_k op has some asm code, the hipified version doesn't
-  # compile yet, so we don't have top_k operator for now
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/top_k_test.py")
-
-  # Our AMD CI boxes have 4 gpus on each
-  # Remove this once we have added multi-gpu support
-  export HIP_VISIBLE_DEVICES=$(($BUILD_NUMBER % 4))
+  # On ROCm, RCCL (distributed) development isn't complete.
+  # https://github.com/ROCmSoftwarePlatform/rccl
+  rocm_ignore_test+=("--ignore $caffe2_pypath/python/data_parallel_model_test.py")
 fi
 
-# Python tests
+# NB: Warnings are disabled because they make it harder to see what
+# the actual erroring test is
 echo "Running Python tests.."
+pip install --user pytest-sugar
 "$PYTHON" \
   -m pytest \
   -x \
   -v \
-  --junit-xml="$TEST_DIR/python/result.xml" \
-  --ignore "$CAFFE2_PYPATH/python/test/executor_test.py" \
-  --ignore "$CAFFE2_PYPATH/python/operator_test/matmul_op_test.py" \
-  --ignore "$CAFFE2_PYPATH/python/operator_test/pack_ops_test.py" \
-  --ignore "$CAFFE2_PYPATH/python/mkl/mkl_sbn_speed_test.py" \
-  ${conda_ignore_test[@]} \
+  --disable-warnings \
+  --junit-xml="$pytest_reports_dir/result.xml" \
+  --ignore "$caffe2_pypath/python/test/executor_test.py" \
+  --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
+  --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
+  --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
   ${rocm_ignore_test[@]} \
-  "$CAFFE2_PYPATH/python" \
+  "$caffe2_pypath/python" \
   "${EXTRA_TESTS[@]}"
 
-if [[ -n "$INTEGRATED" ]]; then
+#####################
+# torchvision tests #
+#####################
+if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   pip install --user torchvision
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

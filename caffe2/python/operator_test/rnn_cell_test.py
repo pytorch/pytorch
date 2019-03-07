@@ -1216,7 +1216,7 @@ class RNNCellTest(hu.HypothesisTestCase):
                     if arg.name == "step_net":
                         for step_op in arg.n.op:
                             self.assertEqual(0, step_op.device_option.device_type)
-                            self.assertEqual(1, step_op.device_option.cuda_gpu_id)
+                            self.assertEqual(1, step_op.device_option.device_id)
                     elif arg.name == 'backward_step_net':
                         self.assertEqual(caffe2_pb2.NetDef(), arg.n)
 
@@ -1565,9 +1565,9 @@ class RNNCellTest(hu.HypothesisTestCase):
             self, seed, n, d, t, dtype, dc, use_sequence_lengths, gc):
         np.random.seed(seed)
         if dtype == np.float16:
-            # only supported with CUDA
-            assume(gc.device_type == caffe2_pb2.CUDA)
-            dc = [do for do in dc if do.device_type == caffe2_pb2.CUDA]
+            # only supported with CUDA/HIP
+            assume(gc.device_type == workspace.GpuDeviceType)
+            dc = [do for do in dc if do.device_type == workspace.GpuDeviceType]
 
         if use_sequence_lengths:
             op_inputs = ['hidden_t_prev', 'cell_t_prev', 'gates_t',

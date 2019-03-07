@@ -8,6 +8,7 @@ from __future__ import unicode_literals
 
 import json
 import os
+import six
 import unittest
 
 from caffe2.python import core
@@ -24,12 +25,12 @@ import caffe2.python.onnx.backend as c2
 import numpy as np
 from caffe2.python.models.download import downloadFromURLToFile, getURLFromName, deleteDirectory
 
-from caffe2.python.onnx.tests.test_utils import TestCase
+from caffe2.python.onnx.tests.test_utils import DownloadingTestCase
 
 import caffe2.python._import_c_extension as C
 
 
-class TestCaffe2Basic(TestCase):
+class TestCaffe2Basic(DownloadingTestCase):
     def test_dummy_name(self):
         g = C.DummyName()
         n1 = g.new_dummy_name()
@@ -43,9 +44,9 @@ class TestCaffe2Basic(TestCase):
         b2.convert_node(node_def.SerializeToString())
 
         bad_node_def = make_node("Add", inputs=["X", "Y"], outputs=["Z"], foo=42, bar=56)
-        with self.assertRaisesRegexp(
-                RuntimeError,
-                ".*?Don't know how to map unexpected argument (foo|bar) \(from operator .*?\).*$"):
+        with six.assertRaisesRegex(self,
+                                   RuntimeError,
+                                   "Don't know how to map unexpected argument (foo|bar)"):
             b2.convert_node(bad_node_def.SerializeToString())
 
     def test_relu_graph(self):
@@ -66,6 +67,38 @@ class TestCaffe2Basic(TestCase):
         c2_rep = c2.prepare(make_model(graph_def, producer_name='caffe2-ref-test'))
         output = c2_rep.run(X)
         np.testing.assert_almost_equal(output.Y, Y_ref)
+
+    def test_elementwiselinear(self):
+        X = np.random.randn(4, 2, 5, 7, 3).astype(np.float32)
+        W = np.random.randn(21).astype(np.float32)
+        B = np.random.randn(21).astype(np.float32)
+
+        predict_net = caffe2_pb2.NetDef()
+        predict_net.name = 'test-elementwiselinear-net'
+        predict_net.external_input[:] = ['X', 'W', 'B']
+        predict_net.external_output[:] = ['Y']
+        predict_net.op.extend([
+            core.CreateOperator(
+                'ElementwiseLinear',
+                inputs=['X', 'W', 'B'],
+                outputs=['Y'],
+                axis=3,
+            ),
+        ])
+        ws, c2_outputs = c2_native_run_net(
+            init_net=None,
+            predict_net=predict_net,
+            inputs=[X, W, B])
+
+        onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+            predict_net=predict_net,
+            value_info={
+                'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X.shape),
+                'W': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[W.dtype], W.shape),
+                'B': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[B.dtype], B.shape),
+            })
+        onnx_outputs = c2.run_model(onnx_model, inputs=[X, W, B])
+        self.assertSameOutputs(c2_outputs, onnx_outputs)
 
     def test_initializer(self):
         X = np.array([[1, 2], [3, 4]]).astype(np.float32)
@@ -101,6 +134,59 @@ class TestCaffe2Basic(TestCase):
         output = c2_rep.run({"X": X, "Y": Y})
         np.testing.assert_almost_equal(output["W3"], W_ref)
 
+    def test_reducemean(self):
+        X = np.random.randn(4, 6, 10, 5, 3).astype(np.float32)
+
+        predict_net = caffe2_pb2.NetDef()
+        predict_net.name = 'test-reducemean-net'
+        predict_net.external_input[:] = ['X']
+        predict_net.external_output[:] = [
+                'reduce_front_mean',
+                'reduce_back_mean',
+                'reduce_mean_0',
+                'reduce_mean_1',
+            ]
+        predict_net.op.extend([
+            core.CreateOperator(
+                'ReduceFrontMean',
+                inputs=['X'],
+                outputs=['reduce_front_mean'],
+                num_reduce_dim=2,
+            ),
+            core.CreateOperator(
+                'ReduceBackMean',
+                inputs=['X'],
+                outputs=['reduce_back_mean'],
+                num_reduce_dim=2,
+            ),
+            core.CreateOperator(
+                'ReduceMean',
+                inputs=['X'],
+                outputs=['reduce_mean_0'],
+                axes=[1, 3],
+                keepdims=0,
+            ),
+            core.CreateOperator(
+                'ReduceMean',
+                inputs=['X'],
+                outputs=['reduce_mean_1'],
+                axes=[1, 3],
+                keepdims=1,
+            ),
+        ])
+        ws, c2_outputs = c2_native_run_net(
+            init_net=None,
+            predict_net=predict_net,
+            inputs=[X])
+
+        onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+            predict_net=predict_net,
+            value_info={
+                'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X.shape)
+            })
+        onnx_outputs = c2.run_model(onnx_model, inputs=[X])
+        self.assertSameOutputs(c2_outputs, onnx_outputs)
+
     def test_upsample(self):
         X = np.random.randn(1, 1, 2, 2).astype(np.float32)
         width_scale = 2.0
@@ -130,6 +216,39 @@ class TestCaffe2Basic(TestCase):
                 'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X.shape)
             })
         onnx_outputs = c2.run_model(onnx_model, inputs=[X])
+        self.assertSameOutputs(c2_outputs, onnx_outputs)
+
+    def test_fc(self):
+        X_fake = np.zeros((3, 1, 3, 1, 7), dtype=np.float32)
+        X = np.random.randn(5, 2, 3, 1, 7).astype(np.float32)
+        W = np.random.randn(11, 21).astype(np.float32)
+        B = np.random.randn(11).astype(np.float32)
+
+        predict_net = caffe2_pb2.NetDef()
+        predict_net.name = 'test-fc-net'
+        predict_net.external_input[:] = ['X', 'W', 'B']
+        predict_net.external_output[:] = ['Y']
+        predict_net.op.extend([
+            core.CreateOperator(
+                'FC',
+                inputs=['X', 'W', 'B'],
+                outputs=['Y'],
+                axis=2,
+            ),
+        ])
+        ws, c2_outputs = c2_native_run_net(
+            init_net=None,
+            predict_net=predict_net,
+            inputs=[X, W, B])
+
+        onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+            predict_net=predict_net,
+            value_info={
+                'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X_fake.shape),
+                'W': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[W.dtype], W.shape),
+                'B': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[B.dtype], B.shape),
+            })
+        onnx_outputs = c2.run_model(onnx_model, inputs=[X, W, B])
         self.assertSameOutputs(c2_outputs, onnx_outputs)
 
     def test_gemm(self):
@@ -420,6 +539,33 @@ class TestCaffe2Basic(TestCase):
             op_names.append(op.type)
         self.assertEqual(op_names, ['Scale', 'Scale', 'MatMul', 'Add'])
 
+    def test_mergedim(self):
+        X = np.random.randn(2, 3, 1, 5).astype(np.float32)
+
+        predict_net = caffe2_pb2.NetDef()
+        predict_net.name = 'test-mergedim-net'
+        predict_net.external_input[:] = ['X']
+        predict_net.external_output[:] = ['Y']
+        predict_net.op.extend([
+            core.CreateOperator(
+                'MergeDim',
+                inputs=['X'],
+                outputs=['Y'],
+            ),
+        ])
+        ws, c2_outputs = c2_native_run_net(
+            init_net=None,
+            predict_net=predict_net,
+            inputs=[X])
+
+        onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+            predict_net=predict_net,
+            value_info={
+                'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X.shape),
+            })
+        onnx_outputs = c2.run_model(onnx_model, inputs=[X])
+        self.assertSameOutputs(c2_outputs, onnx_outputs)
+
     def test_tensor_filling_ops(self):
         for dtype in [
                 onnx.TensorProto.FLOAT,
@@ -488,6 +634,36 @@ class TestCaffe2Basic(TestCase):
             np.testing.assert_almost_equal(output[0], vals)
             np.testing.assert_almost_equal(ws.FetchBlob(op.output[0]), vals)
 
+    def test_concat(self):
+        I0 = np.random.randn(20, 4).astype(np.float32)
+        I1 = np.random.randn(20, 4).astype(np.float32)
+        for i in range(2):
+            predict_net = caffe2_pb2.NetDef()
+            predict_net.name = 'test-concat-net'
+            predict_net.external_input[:] = ['I0', 'I1']
+            predict_net.external_output[:] = ['Y', 'output_dim']
+            predict_net.op.extend([
+                core.CreateOperator(
+                    'Concat',
+                    inputs=['I0', 'I1'],
+                    outputs=['Y', 'output_dim'],
+                    axis=1,
+                    add_axis=(1 if i == 0 else 0),
+                ),
+            ])
+            ws, c2_outputs = c2_native_run_net(
+                init_net=None,
+                predict_net=predict_net,
+                inputs=[I0, I1])
+            onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+                predict_net=predict_net,
+                value_info={
+                    'I0': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[I0.dtype], I0.shape),
+                    'I1': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[I1.dtype], I1.shape),
+                })
+            onnx_outputs = c2.run_model(onnx_model, inputs=[I0, I1])
+            self.assertSameOutputs(c2_outputs, onnx_outputs)
+
     def test_slice(self):
         X = np.random.randn(1, 2, 3).astype(np.float32)
         starts = np.array([0, 1, 0], dtype=np.int32)
@@ -550,7 +726,7 @@ class TestCaffe2Basic(TestCase):
             self.assertSameOutputs(c2_outputs, onnx_outputs)
 
 
-class TestCaffe2End2End(TestCase):
+class TestCaffe2End2End(DownloadingTestCase):
     def _model_dir(self, model):
         caffe2_home = os.path.expanduser(os.getenv('CAFFE2_HOME', '~/.caffe2'))
         models_dir = os.getenv('ONNX_MODELS', os.path.join(caffe2_home, 'models'))
@@ -582,35 +758,14 @@ class TestCaffe2End2End(TestCase):
         _, c2_outputs = c2_native_run_net(c2_init_net, c2_predict_net, inputs)
         del _
 
-        model = c2_onnx.caffe2_net_to_onnx_model(
-            predict_net=c2_predict_net,
-            init_net=c2_init_net,
-            value_info=json.load(open(os.path.join(model_dir, 'value_info.json'))))
+        with open(os.path.join(model_dir, 'value_info.json'), 'r') as value_info_conf:
+            model = c2_onnx.caffe2_net_to_onnx_model(
+                predict_net=c2_predict_net,
+                init_net=c2_init_net,
+                value_info=json.load(value_info_conf))
         c2_ir = c2.prepare(model)
         onnx_outputs = c2_ir.run(inputs)
         self.assertSameOutputs(c2_outputs, onnx_outputs, decimal=decimal)
-
-    def _download(self, model):
-        model_dir = self._model_dir(model)
-        assert not os.path.exists(model_dir)
-        os.makedirs(model_dir)
-        for f in ['predict_net.pb', 'init_net.pb', 'value_info.json']:
-            url = getURLFromName(model, f)
-            dest = os.path.join(model_dir, f)
-            try:
-                try:
-                    downloadFromURLToFile(url, dest,
-                                          show_progress=False)
-                except TypeError:
-                    # show_progress not supported prior to
-                    # Caffe2 78c014e752a374d905ecfb465d44fa16e02a28f1
-                    # (Sep 17, 2017)
-                    downloadFromURLToFile(url, dest)
-            except Exception as e:
-                print("Abort: {reason}".format(reason=e))
-                print("Cleaning up...")
-                deleteDirectory(model_dir)
-                exit(1)
 
     def test_alexnet(self):
         self._test_net('bvlc_alexnet', decimal=4)

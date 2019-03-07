@@ -1,25 +1,32 @@
 #include <climits>
+#include <c10/util/intrusive_ptr.h>
 
-#include "THStorageFunctions.hpp"
+#include <TH/THStorageFunctions.hpp>
 
-#include "generic/THStorage.cpp"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THStorage.cpp>
+#include <TH/THGenerateAllTypes.h>
 
-#include "generic/THStorage.cpp"
-#include "THGenerateHalfType.h"
+#include <TH/generic/THStorage.cpp>
+#include <TH/THGenerateHalfType.h>
 
-#include "generic/THStorageCopy.cpp"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THStorage.cpp>
+#include <TH/THGenerateBoolType.h>
 
-#include "generic/THStorageCopy.cpp"
-#include "THGenerateHalfType.h"
+#include <TH/generic/THStorageCopy.cpp>
+#include <TH/THGenerateAllTypes.h>
 
-THStorage* THStorage_new(at::ScalarType scalar_type) {
-  THStorage* storage = new THStorage(
-      scalar_type,
+#include <TH/generic/THStorageCopy.cpp>
+#include <TH/THGenerateHalfType.h>
+
+#include <TH/generic/THStorageCopy.cpp>
+#include <TH/THGenerateBoolType.h>
+
+THStorage* THStorage_new(caffe2::TypeMeta data_type) {
+  THStorage* storage = c10::make_intrusive<at::StorageImpl>(
+      data_type,
       0,
       getTHDefaultAllocator(),
-      true);
+      true).release();
   return storage;
 }
 
@@ -28,60 +35,41 @@ void THStorage_free(THStorage* storage) {
   if (!storage) {
     return;
   }
-  storage->release();
-}
-
-// Manually retains a weak reference
-void THStorage_weakRetain(THStorage *weak_storage) {
-  weak_storage->weak_retain();
-}
-
-// Releases a weak reference
-void THStorage_weakFree(THStorage *weak_storage) {
-  weak_storage->weak_release();
-}
-
-// Given a weak reference, returns a strong reference to a storage (which must
-// be freed when done) or null if the storage is already dead.
-THStorage* THStorage_weakLock(THStorage *weak_storage) {
-  if (weak_storage->weak_lock())
-    return weak_storage;
-  return nullptr;
+  c10::raw::intrusive_ptr::decref(storage);
 }
 
 ptrdiff_t THStorage_size(const THStorage *self)
 {
-  return self->size();
+  return self->numel();
 }
 
 void THStorage_retain(THStorage *storage)
 {
   if (storage) {
-    storage->retain();
+    c10::raw::intrusive_ptr::incref(storage);
   }
 }
 
 void THStorage_resize(THStorage* storage, ptrdiff_t size) {
   if (storage->resizable()) {
     /* case when the allocator does not have a realloc defined */
-    at::DataPtr old_data;
-    std::swap(old_data, storage->data_ptr());
-    ptrdiff_t old_size = storage->size();
+    at::DataPtr new_data;
     if (size != 0) {
-      storage->set_data_ptr(
-          storage->allocator()->allocate(storage->elementSize() * size));
+      new_data = storage->allocator()->allocate(storage->itemsize() * size);
     }
-    storage->set_size(size);
+    at::DataPtr old_data = storage->set_data_ptr(std::move(new_data));
+    ptrdiff_t old_size = storage->numel();
+    storage->set_numel(size);
     if (old_data != nullptr) {
       ptrdiff_t copy_size = old_size;
-      if (storage->size() < copy_size) {
-        copy_size = storage->size();
+      if (storage->numel() < copy_size) {
+        copy_size = storage->numel();
       }
       if (copy_size > 0) {
         memcpy(
             storage->data(),
             old_data.get(),
-            storage->elementSize() * copy_size);
+            storage->itemsize() * copy_size);
       }
     }
   } else {

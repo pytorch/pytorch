@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialDepthwiseConvolution.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialDepthwiseConvolution.cu"
 #else
 
 void THNN_(SpatialDepthwiseConvolution_updateOutput)(
@@ -53,12 +53,12 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
   // Create THCDeviceTensor
   // Kernel currently relies upon all the Tensors to be contiguous, but we made
   // them contiguous above
-  THCDeviceTensor<real, 4> dInput = toDeviceTensor<real, 4>(state, input);
-  THCDeviceTensor<real, 4> dWeight = toDeviceTensor<real, 4>(state, weight);
-  THCDeviceTensor<real, 4> dOutput = toDeviceTensor<real, 4>(state, output);
-  THCDeviceTensor<real, 1> dBias;
+  THCDeviceTensor<scalar_t, 4> dInput = toDeviceTensor<scalar_t, 4>(state, input);
+  THCDeviceTensor<scalar_t, 4> dWeight = toDeviceTensor<scalar_t, 4>(state, weight);
+  THCDeviceTensor<scalar_t, 4> dOutput = toDeviceTensor<scalar_t, 4>(state, output);
+  THCDeviceTensor<scalar_t, 1> dBias;
   if (bias) {
-    dBias = toDeviceTensor<real, 1>(state, bias);
+    dBias = toDeviceTensor<scalar_t, 1>(state, bias);
   }
 
   int inputChannels = input->size(1);
@@ -70,17 +70,17 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
   dim3 grid(blocks);
   dim3 block(CUDA_NUM_THREADS);
   if (kW == 3 && kH == 3) {
-  spatialDepthwiseConvolutionUpdateOutput<real, accreal, unsigned int, 3><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+  spatialDepthwiseConvolutionUpdateOutput<scalar_t, accreal, unsigned int, 3><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
     dInput, dOutput, dWeight, dBias, bias != NULL, n, outputChannels, depthwiseMultiplier,
     width, height, outputWidth, outputHeight,
     kW, kH, dW, dH, padW, padH, dilationW, dilationH);
   } else if (kW == 1 && kH == 1) {
-  spatialDepthwiseConvolutionUpdateOutput<real, accreal, unsigned int, 1><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+  spatialDepthwiseConvolutionUpdateOutput<scalar_t, accreal, unsigned int, 1><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
     dInput, dOutput, dWeight, dBias, bias != NULL, n, outputChannels, depthwiseMultiplier,
     width, height, outputWidth, outputHeight,
     kW, kH, dW, dH, padW, padH, dilationW, dilationH);
   } else {
-  spatialDepthwiseConvolutionUpdateOutput<real, accreal, unsigned int, 0><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+  spatialDepthwiseConvolutionUpdateOutput<scalar_t, accreal, unsigned int, 0><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
     dInput, dOutput, dWeight, dBias, bias != NULL, n, outputChannels, depthwiseMultiplier,
     width, height, outputWidth, outputHeight,
     kW, kH, dW, dH, padW, padH, dilationW, dilationH);
@@ -117,6 +117,10 @@ void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
   // Same # of filters as outputChannels
   THAssert(weight->size(0) == gradOutput->size(1));
 
+  weight = THCTensor_(newContiguous)(state, weight);
+  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
+
+
   // Resize GradInput
   THCTensor_(resizeAs)(state, gradInput, input);
 
@@ -130,9 +134,9 @@ void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
 
   int depthwiseMultiplier = outputChannels / inputChannels;
 
-  THCDeviceTensor<real, 4> dGradOutput = toDeviceTensor<real, 4>(state, gradOutput);
-  THCDeviceTensor<real, 4> dGradInput = toDeviceTensor<real, 4>(state, gradInput);
-  THCDeviceTensor<real, 4> dWeight = toDeviceTensor<real, 4>(state, weight);
+  THCDeviceTensor<scalar_t, 4> dGradOutput = toDeviceTensor<scalar_t, 4>(state, gradOutput);
+  THCDeviceTensor<scalar_t, 4> dGradInput = toDeviceTensor<scalar_t, 4>(state, gradInput);
+  THCDeviceTensor<scalar_t, 4> dWeight = toDeviceTensor<scalar_t, 4>(state, weight);
 
   // Kernel currently relies upon all the Tensors to be contiguous
   THAssert(dGradOutput.isContiguous());
@@ -146,49 +150,52 @@ void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
   dim3 block(CUDA_NUM_THREADS);
   if (kW == 3 && kH == 3)
     if (dW == 1 && dH == 1){
-      spatialDepthwiseConvolutionUpdateGradInput<real, accreal, unsigned int, 3, 1><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+      spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 3, 1><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
       dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
       height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
     } else if (dW == 2 && dH == 2) {
-      spatialDepthwiseConvolutionUpdateGradInput<real, accreal, unsigned int, 3, 2><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+      spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 3, 2><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
       dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
       height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
     } else {
-      spatialDepthwiseConvolutionUpdateGradInput<real, accreal, unsigned int, 3, 0><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+      spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 3, 0><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
       dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
       height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
     }
   else if (kW == 1 && kH == 1)
     if (dW == 1 && dH == 1){
-      spatialDepthwiseConvolutionUpdateGradInput<real, accreal, unsigned int, 1, 1><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+      spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 1, 1><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
       dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
       height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
     } else if (dW == 2 && dH == 2) {
-      spatialDepthwiseConvolutionUpdateGradInput<real, accreal, unsigned int, 1, 2><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+      spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 1, 2><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
       dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
       height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
     } else {
-      spatialDepthwiseConvolutionUpdateGradInput<real, accreal, unsigned int, 1, 0><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+      spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 1, 0><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
       dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
       height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
     }
   else
     if (dW == 1 && dH == 1){
-      spatialDepthwiseConvolutionUpdateGradInput<real, accreal, unsigned int, 0, 1><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+      spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 0, 1><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
       dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
       height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
     } else if (dW == 2 && dH == 2) {
-      spatialDepthwiseConvolutionUpdateGradInput<real, accreal, unsigned int, 0, 2><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+      spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 0, 2><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
       dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
       height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
     } else {
-      spatialDepthwiseConvolutionUpdateGradInput<real, accreal, unsigned int, 0, 0><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+      spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 0, 0><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
       dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
       height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
     }
 
 
   THCudaCheck(cudaGetLastError());
+
+  THCTensor_(free)(state, weight);
+  THCTensor_(free)(state, gradOutput);
 }
 
 void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
@@ -225,9 +232,11 @@ void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
 
   int depthwiseMultiplier = outputChannels / inputChannels;
 
-  THCDeviceTensor<real, 4> dGradOutput = toDeviceTensor<real, 4>(state, gradOutput);
-  THCDeviceTensor<real, 4> dInput = toDeviceTensor<real, 4>(state, input);
-  THCDeviceTensor<real, 4> dGradWeight = toDeviceTensor<real, 4>(state, gradWeight);
+  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
+
+  THCDeviceTensor<scalar_t, 4> dGradOutput = toDeviceTensor<scalar_t, 4>(state, gradOutput);
+  THCDeviceTensor<scalar_t, 4> dInput = toDeviceTensor<scalar_t, 4>(state, input);
+  THCDeviceTensor<scalar_t, 4> dGradWeight = toDeviceTensor<scalar_t, 4>(state, gradWeight);
 
   // Kernel currently relies upon all the Tensors to be contiguous
   THAssert(dGradOutput.isContiguous());
@@ -244,11 +253,13 @@ void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
   dim3 block(getGradParamsNumThreads(batchSize));
   int smem = block.x * sizeof(accreal);
 
-  spatialDepthwiseConvolutionAccGradParameters<real, accreal, unsigned int><<<grid, block, smem, THCState_getCurrentStream(state)>>>(
+  spatialDepthwiseConvolutionAccGradParameters<scalar_t, accreal, unsigned int><<<grid, block, smem, THCState_getCurrentStream(state)>>>(
       dGradOutput, dInput, dGradWeight, batchSize, inputChannels, outputChannels, depthwiseMultiplier,
       width, height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
 
   THCudaCheck(cudaGetLastError());
+
+  THCTensor_(free)(state, gradOutput);
 }
 
 #endif

@@ -12,9 +12,10 @@ import numpy as np
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 
-class TestAdadelta(hu.HypothesisTestCase):
+class TestAdadelta(serial.SerializedTestCase):
     @staticmethod
     def ref_adadelta(param_in,
                      mom_in,
@@ -44,7 +45,7 @@ class TestAdadelta(hu.HypothesisTestCase):
             return (param_out.astype(np.float32), mom_out.astype(np.float32),
                     mom_delta_out.astype(np.float32))
 
-    @given(inputs=hu.tensors(n=4),
+    @serial.given(inputs=hu.tensors(n=4),
            lr=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
@@ -115,7 +116,7 @@ class TestAdadelta(hu.HypothesisTestCase):
             return (param_out, moment_out, moment_delta_out)
 
         ref_using_fp16_values = [False]
-        if dc == hu.gpu_do:
+        if gc == hu.gpu_do:
             ref_using_fp16_values.append(True)
 
         for ref_using_fp16 in ref_using_fp16_values:
@@ -131,12 +132,12 @@ class TestAdadelta(hu.HypothesisTestCase):
                 moment_delta_i = moment_delta.astype(np.float32)
                 param_i = param.astype(np.float32)
 
-                self.assertReferenceChecks(gc, op, [
-                    param_i, moment_i, moment_delta_i, indices, grad, lr, decay,
-                    ref_using_fp16
-                ], ref_sparse)
+            self.assertReferenceChecks(gc, op, [
+                param_i, moment_i, moment_delta_i, indices, grad, lr, decay,
+                ref_using_fp16
+            ], ref_sparse)
 
-    @given(inputs=hu.tensors(n=3),
+    @serial.given(inputs=hu.tensors(n=3),
            lr=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
@@ -171,7 +172,7 @@ class TestAdadelta(hu.HypothesisTestCase):
             return (param_out, moment_out, moment_delta_out)
 
         ref_using_fp16_values = [False]
-        if dc == hu.gpu_do:
+        if gc == hu.gpu_do:
             ref_using_fp16_values.append(True)
 
         for ref_using_fp16 in ref_using_fp16_values:
@@ -187,9 +188,9 @@ class TestAdadelta(hu.HypothesisTestCase):
                 moment_delta_i = moment_delta.astype(np.float32)
                 param_i = param.astype(np.float32)
 
-        self.assertReferenceChecks(
-            gc,
-            op,
-            [param_i, moment_i, moment_delta_i, indices, grad, lr, decay],
-            ref_sparse_empty
-        )
+            self.assertReferenceChecks(
+                gc,
+                op,
+                [param_i, moment_i, moment_delta_i, indices, grad, lr, decay],
+                ref_sparse_empty
+            )

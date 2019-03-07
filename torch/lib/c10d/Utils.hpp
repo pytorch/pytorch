@@ -19,8 +19,8 @@
 
 namespace c10d {
 
-// Turns at::IntList into "(1, 2, 3, 4)".
-inline std::string toString(at::IntList l) {
+// Turns at::IntArrayRef into "(1, 2, 3, 4)".
+inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;
   ss << "(";
   for (size_t i = 0; i < l.size(); i++) {
@@ -31,6 +31,32 @@ inline std::string toString(at::IntList l) {
   }
   ss << ")";
   return ss.str();
+}
+
+inline void assertSameType(
+    const at::Type& type,
+    const std::vector<at::Tensor>& tensors) {
+  for (size_t i = 0; i < tensors.size(); i++) {
+    if (tensors[i].type() != type) {
+      const std::string expected = type.toString();
+      const std::string actual = tensors[i].type().toString();
+      throw std::invalid_argument(
+          "mixed types (" + expected + " and " + actual + ")");
+    }
+  }
+}
+
+inline void assertSameSizes(
+    const at::IntArrayRef& sizes,
+    const std::vector<at::Tensor>& tensors) {
+  for (size_t i = 0; i < tensors.size(); i++) {
+    if (!tensors[i].sizes().equals(sizes)) {
+      const auto expected = toString(sizes);
+      const auto actual = toString(tensors[i].sizes());
+      throw std::invalid_argument(
+          "mixed sizes (" + expected + " and " + actual + ")");
+    }
+  }
 }
 
 inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
@@ -60,16 +86,158 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   }
 }
 
-inline at::Tensor newLikeFlat(std::vector<std::vector<at::Tensor>>& tensors) {
+inline void assertTypeMatch(
+    std::function<void(const std::string&)> fn,
+    const at::Type& type,
+    const at::ArrayRef<at::Tensor>& tensors,
+    size_t index) {
+  if (tensors[index].type() != type) {
+    fn("invalid tensor type at index " + std::to_string(index) + " (expected " +
+       type.toString() + ", got " + tensors[index].type().toString() + ")");
+  }
+}
+
+inline void assertSizesMatch(
+    std::function<void(const std::string&)> fn,
+    const at::IntArrayRef& sizes,
+    const at::ArrayRef<at::Tensor>& tensors,
+    size_t index) {
+  if (tensors[index].sizes() != sizes) {
+    fn("invalid tensor size at index " + std::to_string(index) + " (expected " +
+       toString(sizes) + ", got " + toString(tensors[index].sizes()) + ")");
+  }
+}
+
+inline void assertNonEmpty(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors) {
+  if (tensors.size() == 0) {
+    fn("requires non-empty tensor list");
+  }
+}
+
+inline void assertSingleElement(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors) {
+  if (tensors.size() != 1) {
+    fn("requires a single-element tensor list");
+  }
+}
+
+inline void assertSingleElementInput(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors) {
+  if (tensors.size() != 1) {
+    fn("requires a single-element input tensor list");
+  }
+}
+
+inline void assertSingleElementOutput(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors) {
+  if (tensors.size() != 1) {
+    fn("requires a single-element output tensor list");
+  }
+}
+
+inline void assertRootRank(
+    std::function<void(const std::string&)> fn,
+    int rank,
+    int size) {
+  if (rank < 0 || rank >= size) {
+    fn("invalid root rank: " + std::to_string(rank));
+  }
+}
+
+inline void assertRootTensor(
+    std::function<void(const std::string&)> fn,
+    int rank,
+    int size) {
+  if (rank < 0 || rank >= size) {
+    fn("invalid root tensor: " + std::to_string(rank));
+  }
+}
+
+inline void assertDense(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors) {
+  const auto& layout = tensors[0].layout();
+  if (layout != at::kStrided) {
+    fn("only supports dense tensors");
+  }
+}
+
+inline void assertCPU(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors) {
+  const auto& device = tensors[0].device();
+  if (device.type() != at::kCPU) {
+    fn("only supports CPU tensors");
+  }
+}
+
+inline void assertTypeAndSizesMatch(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors,
+    const at::Type& type,
+    const at::IntArrayRef& sizes) {
+  for (size_t i = 0; i < tensors.size(); i++) {
+    assertTypeMatch(fn, type, tensors, i);
+    assertSizesMatch(fn, sizes, tensors, i);
+  }
+}
+
+inline void assertTypeAndSizesMatch(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors) {
+  const auto& type = tensors[0].type();
+  const auto sizes = tensors[0].sizes();
+  assertTypeAndSizesMatch(fn, tensors.slice(1), type, sizes);
+}
+
+// Copied from ATen/core/functional.h.
+template <typename F, typename T>
+inline auto fmap(T& inputs, const F& fn)
+    -> std::vector<decltype(fn(*inputs.begin()))> {
+  std::vector<decltype(fn(*inputs.begin()))> r;
+  r.reserve(inputs.size());
+  for (auto& input : inputs) {
+    r.push_back(fn(input));
+  }
+  return r;
+}
+
+// Copied from torch/csrc/utils/tensor_flatten.h.
+inline at::Tensor flattenDenseTensors(at::TensorList tensors) {
+  static const auto flatten = [](const at::Tensor& t) {
+    return t.contiguous().view({-1});
+  };
+  if (tensors.size() == 1) {
+    return flatten(tensors[0]);
+  }
+  return at::cat(::c10d::fmap(tensors, flatten));
+}
+
+inline at::Tensor newLikeFlat(
+    std::vector<std::vector<at::Tensor>>& tensors,
+    size_t deviceIdx) {
   if (tensors.size() == 0 || tensors[0].size() == 0) {
     throw std::runtime_error("Received an empty list");
   }
-  auto& t = tensors[0][0];
-  at::DeviceGuard gpuGuard(t.is_cuda() ? t.get_device() : -1);
-  std::vector<int64_t> sizes{static_cast<int64_t>(tensors[0].size()),
-                             static_cast<int64_t>(tensors.size())};
+  if (deviceIdx >= tensors.size()) {
+    throw std::runtime_error("Invalid device index");
+  }
+  auto& t = tensors[deviceIdx][0];
+  auto device = t.device();
+  for (size_t i = 1; i < tensors[deviceIdx].size(); ++i) {
+    if (tensors[deviceIdx][i].device() != device) {
+      throw std::runtime_error("Expecting all tensors on the same device");
+    }
+  }
+  at::DeviceGuard gpuGuard(device);
+  std::vector<int64_t> sizes{static_cast<int64_t>(tensors[deviceIdx].size())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
-  return t.type().tensor(sizes);
+  return at::empty(sizes, t.options());
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
@@ -77,10 +245,10 @@ inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
     throw std::runtime_error("Received an empty list");
   }
   auto& t = tensors[0];
-  at::DeviceGuard gpuGuard(t.is_cuda() ? t.get_device() : -1);
+  at::DeviceGuard gpuGuard(t.device());
   std::vector<int64_t> sizes{static_cast<int64_t>(tensors.size())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
-  return t.type().tensor(sizes);
+  return at::empty(sizes, t.options());
 }
 
 inline std::vector<std::vector<int64_t>> getSizes(
@@ -96,17 +264,23 @@ inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
   std::vector<int> devices(tensors.size(), -1);
   if (tensors[0].type().is_cuda()) {
     for (size_t i = 0; i < tensors.size(); i++) {
-      devices[i] = tensors[i].storage()->pImpl()->getDevice();
+      devices[i] = tensors[i].storage().device().index();
     }
   }
   return devices;
 }
 
 template <typename T>
+inline T* getDataPointer(const at::Tensor& tensor) {
+  // NB: This does NOT respect storage_offset from the tensor
+  return static_cast<T*>(tensor.storage().data());
+}
+
+template <typename T>
 std::vector<T*> getDataPointers(const std::vector<at::Tensor>& tensors) {
   std::vector<T*> ptrs(tensors.size());
   for (size_t i = 0; i < tensors.size(); i++) {
-    ptrs[i] = static_cast<T*>(tensors[i].storage()->pImpl()->data());
+    ptrs[i] = getDataPointer<T>(tensors[i]);
   }
   return ptrs;
 }
@@ -115,14 +289,32 @@ using RankType = uint32_t;
 using PortType = uint16_t;
 using SizeType = uint64_t;
 
-#define SYSCHECK(expr)                                        \
-  {                                                           \
-    errno = 0;                                                \
-    auto ___output = (expr);                                  \
-    (void)___output;                                          \
-    if (errno != 0)                                           \
+// `errno` is only meaningful when it fails. E.g., a  successful `fork()` sets
+// `errno` to `EINVAL` in child process on some macos
+// (https://stackoverflow.com/a/20295079), and thus `errno` should really only
+// be inspected if an error occured.
+//
+// `success_cond` is an expression used to check if an error has happend. So for
+// `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output
+// is stored in variable `__output` and may be used in `success_cond`.
+#define SYSCHECK(expr, success_cond)                          \
+while (true) {                                                \
+  auto __output = (expr);                                     \
+  (void) __output;                                            \
+  if (!(success_cond)) {                                      \
+    if (errno == EINTR) {                                     \
+      continue;                                               \
+    } else {                                                  \
       throw std::system_error(errno, std::system_category()); \
-  }
+    }                                                         \
+  } else {                                                    \
+    break;                                                    \
+  }                                                           \
+}
+
+// Most functions indicate error by returning `-1`. This is a helper macro for
+// this common case with `SYSCHECK`.
+#define SYSCHECK_ERR_RETURN_NEG1(expr) SYSCHECK(expr, __output != -1)
 
 // Helper resource guard class
 class ResourceGuard {
@@ -174,7 +366,7 @@ void sendBytes(
 
   while (bytesToSend > 0) {
     ssize_t bytesSent;
-    SYSCHECK(bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
+    SYSCHECK_ERR_RETURN_NEG1(bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
       throw std::system_error(ECONNRESET, std::system_category());
     }
@@ -196,7 +388,7 @@ void recvBytes(int socket, T* buffer, size_t length) {
 
   while (bytesToReceive > 0) {
     ssize_t bytesReceived;
-    SYSCHECK(bytesReceived = ::recv(socket, currentBytes, bytesToReceive, 0))
+    SYSCHECK_ERR_RETURN_NEG1(bytesReceived = ::recv(socket, currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
       throw std::system_error(ECONNRESET, std::system_category());
     }

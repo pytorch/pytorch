@@ -139,6 +139,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: new_ones
    .. automethod:: new_zeros
 
+   .. autoattribute:: is_cuda
+   .. autoattribute:: device
+
    .. automethod:: abs
    .. automethod:: abs_
    .. automethod:: acos
@@ -157,6 +160,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: addmv_
    .. automethod:: addr
    .. automethod:: addr_
+   .. automethod:: allclose
    .. automethod:: apply_
    .. automethod:: argmax
    .. automethod:: argmin
@@ -179,6 +183,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ceil
    .. automethod:: ceil_
    .. automethod:: char
+   .. automethod:: cholesky
+   .. automethod:: cholesky_solve
    .. automethod:: chunk
    .. automethod:: clamp
    .. automethod:: clamp_
@@ -196,9 +202,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumsum
    .. automethod:: data_ptr
    .. automethod:: det
-   .. autoattribute:: device
-      :annotation:
    .. automethod:: diag
+   .. automethod:: diag_embed
    .. automethod:: dim
    .. automethod:: dist
    .. automethod:: div
@@ -247,15 +252,18 @@ view of a storage and defines numeric operations on it.
    .. automethod:: half
    .. automethod:: histc
    .. automethod:: index_add_
+   .. automethod:: index_add
    .. automethod:: index_copy_
+   .. automethod:: index_copy
    .. automethod:: index_fill_
+   .. automethod:: index_fill
    .. automethod:: index_put_
+   .. automethod:: index_put
    .. automethod:: index_select
    .. automethod:: int
    .. automethod:: inverse
    .. automethod:: is_contiguous
-   .. autoattribute:: is_cuda
-      :annotation:
+   .. automethod:: is_floating_point
    .. automethod:: is_pinned
    .. automethod:: is_set_to
    .. automethod:: is_signed
@@ -281,9 +289,12 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lt_
    .. automethod:: map_
    .. automethod:: masked_scatter_
+   .. automethod:: masked_scatter
    .. automethod:: masked_fill_
+   .. automethod:: masked_fill
    .. automethod:: masked_select
    .. automethod:: matmul
+   .. automethod:: matrix_power
    .. automethod:: max
    .. automethod:: mean
    .. automethod:: median
@@ -335,12 +346,15 @@ view of a storage and defines numeric operations on it.
    .. automethod:: reshape_as
    .. automethod:: resize_
    .. automethod:: resize_as_
+   .. automethod:: roll
    .. automethod:: round
    .. automethod:: round_
    .. automethod:: rsqrt
    .. automethod:: rsqrt_
    .. automethod:: scatter_
+   .. automethod:: scatter
    .. automethod:: scatter_add_
+   .. automethod:: scatter_add
    .. automethod:: select
    .. automethod:: set_
    .. automethod:: share_memory_
@@ -357,6 +371,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: slogdet
    .. automethod:: sort
    .. automethod:: split
+   .. automethod:: sparse_mask
    .. automethod:: sqrt
    .. automethod:: sqrt_
    .. automethod:: squeeze
@@ -381,6 +396,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tanh_
    .. automethod:: tolist
    .. automethod:: topk
+   .. automethod:: to_sparse
    .. automethod:: trace
    .. automethod:: transpose
    .. automethod:: transpose_

@@ -7,11 +7,12 @@ from caffe2.python import core, workspace
 from hypothesis import given
 
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
 
-class TestExpandOp(hu.HypothesisTestCase):
+class TestExpandOp(serial.SerializedTestCase):
     def _rand_shape(self, X_shape, max_length):
         length = np.random.randint(max_length)
         shape = np.ones(length, dtype=np.int64)
@@ -39,7 +40,7 @@ class TestExpandOp(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X, shape], [0])
         self.assertGradientChecks(gc, op, [X, shape], 0, [0])
 
-    @given(X=hu.tensor(max_dim=5, dtype=np.float32),
+    @serial.given(X=hu.tensor(max_dim=5, dtype=np.float32),
            **hu.gcs)
     def test_expand_rand_shape(self, X, gc, dc):
         shape = self._rand_shape(X.shape, 5)

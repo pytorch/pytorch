@@ -8,7 +8,7 @@ namespace opt {
 
 using namespace nom;
 
-void sinkMaxPool(nom::repr::NNModule* nn) {
+C10_EXPORT void sinkMaxPool(nom::repr::NNModule* nn) {
   for (auto max_pool_node :
        repr::nn::nodeIterator<repr::MaxPool>(nn->dataFlow)) {
     if (repr::nn::getInputs(max_pool_node).size() != 1) {

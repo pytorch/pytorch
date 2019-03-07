@@ -6,8 +6,6 @@ namespace caffe2 {
 
 namespace {
 
-constexpr int kFp16CUDADevicePropMajor = 6;
-
 template <class FullyConnectedOp>
 bool RunFullyConnectedOpOnCUDADevice(
     const bool float16_compute,
@@ -19,32 +17,32 @@ bool RunFullyConnectedOpOnCUDADevice(
         float, // B
         float, // Y
         float>(); // Math
-  } else if (op->Input(0).template IsType<float16>()) {
+  } else if (op->Input(0).template IsType<at::Half>()) {
     if (float16_compute) {
       const cudaDeviceProp& prop = GetDeviceProperty(0);
       if (prop.major >= kFp16CUDADevicePropMajor) {
         return op->template DoRunWithType<
-            float16, // X
-            float16, // W
-            float16, // B
-            float16, // Y
-            float16>(); // Math
+            at::Half, // X
+            at::Half, // W
+            at::Half, // B
+            at::Half, // Y
+            at::Half>(); // Math
       } else {
         LOG(INFO) << "CUDA Device does not support FP16 computation, "
                      "falling back to FP32.";
         return op->template DoRunWithType<
-            float16, // X
-            float16, // W
-            float16, // B
-            float16, // Y
+            at::Half, // X
+            at::Half, // W
+            at::Half, // B
+            at::Half, // Y
             float>(); // Math
       }
     } else {
       return op->template DoRunWithType<
-          float16, // X
-          float16, // W
-          float16, // B
-          float16, // Y
+          at::Half, // X
+          at::Half, // W
+          at::Half, // B
+          at::Half, // Y
           float>(); // Math
     }
   } else {
@@ -67,41 +65,41 @@ bool RunFullyConnectedGradientOpOnCUDADevice(
         float, // dW
         float, // dB
         float>(); // Math
-  } else if (op->Input(0).template IsType<float16>()) {
+  } else if (op->Input(0).template IsType<at::Half>()) {
     if (float16_compute) {
       const cudaDeviceProp& prop = GetDeviceProperty(0);
       if (prop.major >= kFp16CUDADevicePropMajor) {
         return op->template DoRunWithType<
-            float16, //  X
-            float16, //  W
-            float16, // dY
-            float16, //  B
-            float16, // dX
-            float16, // dW
-            float16, // dB
-            float16>(); // Math
+            at::Half, //  X
+            at::Half, //  W
+            at::Half, // dY
+            at::Half, //  B
+            at::Half, // dX
+            at::Half, // dW
+            at::Half, // dB
+            at::Half>(); // Math
       } else {
         LOG(INFO) << "CUDA Device does not support FP16 computation, "
                      "falling back to FP32.";
         return op->template DoRunWithType<
-            float16, //  X
-            float16, //  W
-            float16, // dY
-            float16, //  B
-            float16, // dX
-            float16, // dW
-            float16, // dB
+            at::Half, //  X
+            at::Half, //  W
+            at::Half, // dY
+            at::Half, //  B
+            at::Half, // dX
+            at::Half, // dW
+            at::Half, // dB
             float>(); // Math
       }
     } else {
       return op->template DoRunWithType<
-          float16, //  X
-          float16, //  W
-          float16, // dY
-          float16, //  B
-          float16, // dX
-          float16, // dW
-          float16, // dB
+          at::Half, //  X
+          at::Half, //  W
+          at::Half, // dY
+          at::Half, //  B
+          at::Half, // dX
+          at::Half, // dW
+          at::Half, // dB
           float>(); // Math
     }
   } else {

@@ -1,20 +1,10 @@
 #include "bbox_transform_op.h"
 #include "caffe2/operators/generate_proposals_op_util_boxes.h"
 
-#ifdef CAFFE2_USE_MKL
-#include "caffe2/mkl/operators/operator_fallback_mkl.h"
-#endif // CAFFE2_USE_MKL
-
 namespace caffe2 {
 namespace {
 
 REGISTER_CPU_OPERATOR(BBoxTransform, BBoxTransformOp<float, CPUContext>);
-
-#ifdef CAFFE2_HAS_MKL_DNN
-REGISTER_MKL_OPERATOR(
-    BBoxTransform,
-    mkl::MKLFallbackOp<BBoxTransformOp<float, CPUContext>>);
-#endif // CAFFE2_HAS_MKL_DNN
 
 // Input: box, delta Output: box
 OPERATOR_SCHEMA(BBoxTransform)
@@ -31,12 +21,6 @@ Transform proposal bounding boxes to target bounding box using bounding box
         " after applying the bbox deltas."
         "Set to false to match the detectron code, set to true for keypoint"
         " models and for backward compatibility")
-    .Arg(
-        "correct_transform_coords",
-        "bool (default false), Correct bounding box transform coordates,"
-        " see bbox_transform() in boxes.py "
-        "Set to true to match the detectron code, set to false for backward"
-        " compatibility")
     .Arg(
         "rotated",
         "bool (default false). If true, then boxes (rois and deltas) include "
@@ -101,19 +85,18 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
   const auto& roi_in = Input(0);
   const auto& delta_in = Input(1);
   const auto& iminfo_in = Input(2);
-  auto* box_out = Output(0);
 
   const int box_dim = rotated_ ? 5 : 4;
   const int N = roi_in.dim32(0);
-  CAFFE_ENFORCE_EQ(roi_in.ndim(), 2);
+  CAFFE_ENFORCE_EQ(roi_in.dim(), 2);
   CAFFE_ENFORCE(roi_in.dim32(1) == box_dim || roi_in.dim32(1) == box_dim + 1);
 
-  CAFFE_ENFORCE_EQ(delta_in.ndim(), 2);
+  CAFFE_ENFORCE_EQ(delta_in.dim(), 2);
   CAFFE_ENFORCE_EQ(delta_in.dim32(0), N);
   CAFFE_ENFORCE_EQ(delta_in.dim32(1) % box_dim, 0);
   const int num_classes = delta_in.dim32(1) / box_dim;
 
-  CAFFE_ENFORCE_EQ(iminfo_in.ndim(), 2);
+  CAFFE_ENFORCE_EQ(iminfo_in.dim(), 2);
   CAFFE_ENFORCE_EQ(iminfo_in.dim32(1), 3);
   const int batch_size = iminfo_in.dim32(0);
 
@@ -138,11 +121,11 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
     }
   }
 
-  CAFFE_ENFORCE_EQ(iminfo_in.dims(), (vector<TIndex>{batch_size, 3}));
+  CAFFE_ENFORCE_EQ(iminfo_in.sizes(), (at::IntArrayRef{batch_size, 3}));
   Eigen::Map<const ERArrXXf> iminfo(
-      iminfo_in.data<float>(), iminfo_in.dim(0), iminfo_in.dim(1));
+      iminfo_in.data<float>(), iminfo_in.size(0), iminfo_in.size(1));
 
-  box_out->ResizeLike(delta_in);
+  auto* box_out = Output(0, delta_in.sizes(), at::dtype<float>());
   Eigen::Map<ERArrXXf> new_boxes(
       box_out->template mutable_data<float>(),
       box_out->dim32(0),
@@ -171,7 +154,6 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
           cur_deltas,
           weights_,
           utils::BBOX_XFORM_CLIP_DEFAULT,
-          correct_transform_coords_,
           angle_bound_on_,
           angle_bound_lo_,
           angle_bound_hi_);
@@ -186,8 +168,7 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
   }
 
   if (OutputSize() > 1) {
-    auto* roi_batch_splits = Output(1);
-    roi_batch_splits->Resize(batch_size);
+    auto* roi_batch_splits = Output(1, {batch_size}, at::dtype<float>());
     Eigen::Map<EArrXf> roi_batch_splits_map(
         roi_batch_splits->template mutable_data<float>(), batch_size);
     roi_batch_splits_map =
@@ -199,3 +180,26 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
 }
 
 } // namespace caffe2
+
+using BBoxTransformOpFloatCPU =
+    caffe2::BBoxTransformOp<float, caffe2::CPUContext>;
+
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    BBoxTransform,
+    (std::vector<c10::Argument>{
+        c10::Argument("rois"),
+        c10::Argument("deltas"),
+        c10::Argument("im_info"),
+        c10::Argument("weights", ListType::create(FloatType::get())),
+        c10::Argument("apply_scale", BoolType::get()),
+        c10::Argument("rotated", BoolType::get()),
+        c10::Argument("angle_bound_on", BoolType::get()),
+        c10::Argument("angle_bound_lo", IntType::get()),
+        c10::Argument("angle_bound_hi", IntType::get()),
+        c10::Argument("clip_angle_thresh", FloatType::get()),
+    }),
+    (std::vector<c10::Argument>{
+        c10::Argument("output_0"),
+        c10::Argument("output_1"),
+    }),
+    BBoxTransformOpFloatCPU);

@@ -39,7 +39,9 @@ class _StorageBase(object):
 
     def clone(self):
         """Returns a copy of this storage"""
-        return type(self)(self.size()).copy_(self)
+        device = self.get_device() if self.is_cuda else -1
+        with torch.cuda.device(device):
+            return type(self)(self.size()).copy_(self)
 
     def tolist(self):
         """Returns a list containing the elements of this storage"""
@@ -80,6 +82,10 @@ class _StorageBase(object):
     def byte(self):
         """Casts this storage to byte type"""
         return self.type(type(self).__module__ + '.ByteStorage')
+
+    def bool(self):
+        """Casts this storage to bool type"""
+        return self.type(type(self).__module__ + '.BoolStorage')
 
     def pin_memory(self):
         """Copies the storage to pinned memory, if it's not already pinned."""

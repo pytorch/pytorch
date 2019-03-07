@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/unfold.c"
+#define TH_GENERIC_FILE "THNN/generic/unfold.c"
 #else
 
 /* note: due to write issues, this one cannot be parallelized as well as unfolded_copy */
@@ -24,8 +24,8 @@ void THNN_(unfolded_acc)(
 
   int nip;
 
-  real *input_data = THTensor_(data)(input);
-  real *finput_data = THTensor_(data)(finput);
+  scalar_t *input_data = input->data<scalar_t>();
+  scalar_t *finput_data = finput->data<scalar_t>();
 
 #pragma omp parallel for private(nip)
   for(nip = 0; nip < nInputPlane; nip++)
@@ -36,8 +36,8 @@ void THNN_(unfolded_acc)(
     {
       for(kw = 0; kw < kW; kw++)
       {
-        real *src = finput_data + nip*((size_t)kH*kW*outputHeight*outputWidth) + kh*((size_t)kW*outputHeight*outputWidth) + kw*((size_t)outputHeight*outputWidth);
-        real *dst = input_data + nip*((size_t)inputHeight*inputWidth);
+        scalar_t *src = finput_data + nip*((size_t)kH*kW*outputHeight*outputWidth) + kh*((size_t)kW*outputHeight*outputWidth) + kw*((size_t)outputHeight*outputWidth);
+        scalar_t *dst = input_data + nip*((size_t)inputHeight*inputWidth);
         if (padW > 0 || padH > 0) {
           int lpad,rpad;
           for(y = 0; y < outputHeight; y++) {
@@ -48,7 +48,7 @@ void THNN_(unfolded_acc)(
                  ix = 0 - padW + kw;
                  lpad = fmaxf(0,padW-kw);
                  rpad = fmaxf(0,padW-(kW-kw-1));
-                 real *dst_slice = dst+(size_t)iy*inputWidth+ix+lpad;
+                 scalar_t *dst_slice = dst+(size_t)iy*inputWidth+ix+lpad;
                  THVector_(cadd)(dst_slice, dst_slice, src+(size_t)y*outputWidth+lpad, 1, outputWidth - lpad - rpad); /* note: THVector_add could handle 1 value better */
               }
               else{
@@ -56,7 +56,7 @@ void THNN_(unfolded_acc)(
                    ix = (int64_t)x*dW - padW + kw;
                    if (ix < 0 || ix >= inputWidth){
                    }else{
-                     real *dst_slice = dst+(size_t)iy*inputWidth+ix;
+                     scalar_t *dst_slice = dst+(size_t)iy*inputWidth+ix;
                      THVector_(cadd)(dst_slice, dst_slice, src+(size_t)y*outputWidth+x, 1, 1);
                    }
                 }
@@ -68,11 +68,11 @@ void THNN_(unfolded_acc)(
             iy = (int64_t)y*dH + kh;
             ix = 0 + kw;
             if (dW == 1 ) {
-               real *dst_slice = dst+(size_t)iy*inputWidth+ix;
+               scalar_t *dst_slice = dst+(size_t)iy*inputWidth+ix;
                THVector_(cadd)(dst_slice, dst_slice, src+(size_t)y*outputWidth, 1, outputWidth); /* note: THVector_add could handle 1 value better */
             }else{
               for(x = 0; x < outputWidth; x++) {
-                real *dst_slice = dst+(size_t)iy*inputWidth+ix+x*dW;
+                scalar_t *dst_slice = dst+(size_t)iy*inputWidth+ix+x*dW;
                 THVector_(cadd)(dst_slice, dst_slice, src+(size_t)y*outputWidth+x, 1, 1);
               }
             }
@@ -105,8 +105,8 @@ void THNN_(unfolded_copy)(
   // outputWidth*dW does not overflow a int64_t
 
   int64_t k;
-  real *input_data = THTensor_(data)(input);
-  real *finput_data = THTensor_(data)(finput);
+  scalar_t *input_data = input->data<scalar_t>();
+  scalar_t *finput_data = finput->data<scalar_t>();
 
 #pragma omp parallel for private(k)
   for(k = 0; k < (int64_t)nInputPlane*kH*kW; k++) {
@@ -116,34 +116,34 @@ void THNN_(unfolded_copy)(
     int64_t kw = rest % kW;
     int x, y;
     int64_t ix, iy;
-    real *dst = finput_data + nip*((size_t)kH*kW*outputHeight*outputWidth) + kh*((size_t)kW*outputHeight*outputWidth) + kw*((size_t)outputHeight*outputWidth);
-    real *src = input_data + nip*((size_t)inputHeight*inputWidth);
+    scalar_t *dst = finput_data + nip*((size_t)kH*kW*outputHeight*outputWidth) + kh*((size_t)kW*outputHeight*outputWidth) + kw*((size_t)outputHeight*outputWidth);
+    scalar_t *src = input_data + nip*((size_t)inputHeight*inputWidth);
     if (padW > 0 || padH > 0) {
       int64_t lpad,rpad;
       for(y = 0; y < outputHeight; y++) {
         iy = (int64_t)y*dH - padH + kh;
         if (iy < 0 || iy >= inputHeight) {
-          memset(dst+(size_t)y*outputWidth, 0, sizeof(real)*outputWidth);
+          memset(dst+(size_t)y*outputWidth, 0, sizeof(scalar_t)*outputWidth);
         } else {
           if (dW==1){
              ix = 0 - padW + kw;
              lpad = fmaxf(0,padW-kw);
              rpad = fmaxf(0,padW-(kW-kw-1));
              if (outputWidth-rpad-lpad <= 0) {
-                memset(dst+(size_t)y*outputWidth, 0, sizeof(real)*outputWidth);
+                memset(dst+(size_t)y*outputWidth, 0, sizeof(scalar_t)*outputWidth);
              } else {
-                if (lpad > 0) memset(dst+(size_t)y*outputWidth, 0, sizeof(real)*lpad);
-                memcpy(dst+(size_t)y*outputWidth+lpad, src+(size_t)iy*inputWidth+ix+lpad, sizeof(real)*(outputWidth-rpad-lpad));
-                if (rpad > 0) memset(dst+(size_t)y*outputWidth + outputWidth - rpad, 0, sizeof(real)*rpad);
+                if (lpad > 0) memset(dst+(size_t)y*outputWidth, 0, sizeof(scalar_t)*lpad);
+                memcpy(dst+(size_t)y*outputWidth+lpad, src+(size_t)iy*inputWidth+ix+lpad, sizeof(scalar_t)*(outputWidth-rpad-lpad));
+                if (rpad > 0) memset(dst+(size_t)y*outputWidth + outputWidth - rpad, 0, sizeof(scalar_t)*rpad);
              }
           }
           else{
             for (x=0; x<outputWidth; x++){
                ix = (int64_t)x*dW - padW + kw;
                if (ix < 0 || ix >= inputWidth)
-                 memset(dst+(size_t)y*outputWidth+x, 0, sizeof(real)*1);
+                 memset(dst+(size_t)y*outputWidth+x, 0, sizeof(scalar_t)*1);
                else
-                 memcpy(dst+(size_t)y*outputWidth+x, src+(size_t)iy*inputWidth+ix, sizeof(real)*(1));
+                 memcpy(dst+(size_t)y*outputWidth+x, src+(size_t)iy*inputWidth+ix, sizeof(scalar_t)*(1));
             }
           }
         }
@@ -153,10 +153,10 @@ void THNN_(unfolded_copy)(
         iy = (int64_t)y*dH + kh;
         ix = 0 + kw;
         if (dW == 1)
-           memcpy(dst+(size_t)y*outputWidth, src+(size_t)iy*inputWidth+ix, sizeof(real)*outputWidth);
+           memcpy(dst+(size_t)y*outputWidth, src+(size_t)iy*inputWidth+ix, sizeof(scalar_t)*outputWidth);
         else{
           for (x=0; x<outputWidth; x++)
-             memcpy(dst+(size_t)y*outputWidth+x, src+(size_t)iy*inputWidth+ix+(int64_t)x*dW, sizeof(real)*(1));
+             memcpy(dst+(size_t)y*outputWidth+x, src+(size_t)iy*inputWidth+ix+(int64_t)x*dW, sizeof(scalar_t)*(1));
          }
       }
     }

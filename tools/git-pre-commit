@@ -1,0 +1,43 @@
+#!/bin/bash
+set -e
+
+echo "Running pre-commit flake8"
+python tools/flake8_hook.py
+
+if [ $(which clang-tidy) ]
+then
+  echo "Running pre-commit clang-tidy"
+  python tools/clang_tidy.py \
+    --paths torch/csrc \
+    --diff HEAD \
+    -g"-torch/csrc/distributed/Module.cpp" \
+    -g"-torch/csrc/jit/export.cpp" \
+    -g"-torch/csrc/jit/import.cpp" \
+    -j
+else
+  echo "WARNING: Couldn't find clang-tidy executable."
+  echo "  Please install it if you want local clang-tidy checks."
+fi
+
+echo "Running pre-commit clang-format"
+CLANG_FORMAT_DIFF=$(python tools/clang_format.py)
+
+if [[ ${CLANG_FORMAT_DIFF} ]]
+then
+  echo "${CLANG_FORMAT_DIFF}"
+  # Prompt user to accept clang-format changes
+  # From: https://stackoverflow.com/a/10015707
+  exec < /dev/tty
+
+  while true; do
+    read -p "[clang-format hook] Accept changes? (Y/n) " yn
+    if [ "$yn" = "" ]; then
+      yn='Y'
+    fi
+    case $yn in
+      [Yy] ) python tools/clang_format.py --accept-changes; break;;
+      [Nn] ) exit 1;;
+      * ) echo "Please answer y or n.";;
+    esac
+  done
+fi

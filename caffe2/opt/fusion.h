@@ -37,7 +37,7 @@ CAFFE2_API void fuseConvBN(repr::NNModule* nn, caffe2::Workspace* ws);
 // \param postprocess Functor to postprocess the conv node,
 // attaching additional attributes if necessary
 template <typename OperationT, typename ActivationT>
-CAFFE2_API void fuseActivation(
+C10_EXPORT void fuseActivation(
     repr::NNModule* nn,
     std::function<bool(const OperationT& conv)> should_fuse,
     std::function<void(repr::NNGraph::NodeRef conv_node)> postprocess) {

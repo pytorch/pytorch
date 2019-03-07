@@ -341,7 +341,7 @@ if __name__ == '__main__':
         '--caffe2_gpu_memory_tracking=1'] + extra_args)
 
     device = core.DeviceOption(
-        caffe2_pb2.CUDA if args.gpu else caffe2_pb2.CPU, 4)
+        workspace.GpuDeviceType if args.gpu else caffe2_pb2.CPU, 4)
 
     with core.DeviceScope(device):
         Benchmark(args)

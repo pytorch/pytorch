@@ -264,7 +264,7 @@ def main():
     args = parser.parse_args()
 
     device = core.DeviceOption(
-        caffe2_pb2.CUDA if args.gpu else caffe2_pb2.CPU, 0)
+        workspace.GpuDeviceType if args.gpu else caffe2_pb2.CPU, 0)
     with core.DeviceScope(device):
         model = CharRNN(args)
         model.CreateModel()

@@ -2,15 +2,17 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
 
-class TestLengthsTopKOps(hu.HypothesisTestCase):
-    @given(N=st.integers(min_value=0, max_value=10),
+class TestLengthsTopKOps(serial.SerializedTestCase):
+    @serial.given(N=st.integers(min_value=0, max_value=10),
            K=st.integers(min_value=1, max_value=10),
            **hu.gcs_cpu_only)
     def test_lengths_top_k_op(self, N, K, gc, dc):

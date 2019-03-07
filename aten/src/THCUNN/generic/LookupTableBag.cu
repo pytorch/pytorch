@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/LookupTableBag.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/LookupTableBag.cu"
 #else
 
 
@@ -38,7 +38,7 @@ void THNN_(LookupTableBag_updateOutput)(
 
   dim3 block = dim3(32, 8);
   int grid = 1024;
-  cunn_LookupTableBag_updateOutputKernel<real, accreal><<<grid, block, 0, stream>>>(
+  cunn_LookupTableBag_updateOutputKernel<scalar_t, accreal><<<grid, block, 0, stream>>>(
     THCIndexTensor_(data)(state, input),
     THCIndexTensor_(data)(state, offsets),
     THCTensor_(data)(state, weight),
@@ -69,7 +69,7 @@ void THNN_(LookupTableBag_accGradParameters)(
 	   THCIndexTensor *bag_size,
            accreal scale_)
 {
-  real scale = ScalarConvert<accreal, real>::to(scale_);
+  scalar_t scale = ScalarConvert<accreal, scalar_t>::to(scale_);
   THCUNN_assertSameGPU(state, 6, input, gradOutput, gradWeight, offset2bag, sortedIndices, origIndices);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   if (!(THCIndexTensor_(isContiguous)(state, input) &&
@@ -111,17 +111,17 @@ void THNN_(LookupTableBag_accGradParameters)(
       origIndicesIter(THCIndexTensor_(data)(state, origIndices));
 
     // Fill sortedOrigIndices with sequential indices
-    thrust::counting_iterator<THCIndex_t> countIter(TH_INDEX_BASE);
+    thrust::counting_iterator<THCIndex_t> countIter(0);
 
     thrust::copy(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       countIter, countIter + numel, origIndicesIter);
 
     // Sort; a stable sort is not required
     thrust::sort_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       sortedIndicesIter, sortedIndicesIter + numel,
@@ -145,7 +145,7 @@ void THNN_(LookupTableBag_accGradParameters)(
     // sorted: 2 5 5 5 7 7 8 9 9
     //  count: 1 1 2 3 1 2 1 1 2
     thrust::inclusive_scan_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       sortedIndices_ptr,
@@ -158,7 +158,7 @@ void THNN_(LookupTableBag_accGradParameters)(
     // sorted: 2 5 5 5 7 7 8 9 9
     //  count: 1 3 3 3 2 2 1 2 2
     thrust::inclusive_scan_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       thrust::make_reverse_iterator(sortedIndices_ptr + numel),
@@ -172,7 +172,7 @@ void THNN_(LookupTableBag_accGradParameters)(
 
   dim3 grid(THCCeilDiv(numel, (ptrdiff_t) 4), THCCeilDiv(stride, (int64_t) 128));
   dim3 block(32, 4);
-  cunn_LookupTableBag_accGradParametersKernel<real, accreal><<<grid, block, 0, stream>>>(
+  cunn_LookupTableBag_accGradParametersKernel<scalar_t, accreal><<<grid, block, 0, stream>>>(
     sortedIndices_data,
     origIndices_data,
     THCTensor_(data)(state, gradOutput),

@@ -10,15 +10,33 @@ from collections import OrderedDict
 from itertools import product
 from operator import mul, itemgetter
 from functools import reduce, wraps
-from torch._six import inf, nan
+from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
-from common import TEST_MKL, TestCase, run_tests, skipIfNoLapack, \
-    suppress_warnings, skipIfRocm
+from torch.utils.checkpoint import checkpoint
+from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
+                          suppress_warnings, skipIfRocm,
+                          prod_single_zero, random_square_matrix_of_rank,
+                          random_symmetric_matrix, random_symmetric_psd_matrix,
+                          random_symmetric_pd_matrix, make_nonzero_det,
+                          random_fullrank_matrix_distinct_singular_value, load_tests)
+from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
+from common_methods_invocations import (method_tests,
+                                        create_input, unpack_variables,
+                                        EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
+                                        EXCLUDE_GRADGRADCHECK,
+                                        EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
+                                        exclude_tensor_method,
+                                        mask_not_all_zeros,
+                                        L, S)
+
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
 
 if sys.version_info[0] == 2:
     import cPickle as pickle
@@ -26,25 +44,6 @@ else:
     import pickle
 
 PRECISION = 1e-4
-
-
-class NoArgsClass(object):
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        raise StopIteration()
-    next = __next__  # Python 2 compatibility
-
-    def __len__(self):
-        return 0
-
-NO_ARGS = NoArgsClass()
-
-
-class non_differentiable(object):
-    def __init__(self, tensor):
-        self.tensor = tensor
 
 
 @contextlib.contextmanager
@@ -205,6 +204,36 @@ class TestAutograd(TestCase):
         x_grad, x_grad_clone = compute_grad(create_graph=True)
         self.assertEqual(x_grad, x_grad_clone)
 
+    def test_slogdet_sign(self):
+        a = torch.randn(3, 3, requires_grad=True)
+        s, logdet = a.slogdet()
+
+        # test that sign should not require grad
+        self.assertFalse(s.requires_grad)
+
+        # test that backward through computation involving sign works
+        def sign_mul_logdet(mat):
+            s, logdet = mat.slogdet()
+            return s * logdet
+
+        u, s, v = a.detach().svd()
+        s.abs_().clamp_(0.0001)
+        for sign in (-1, 1):
+            s[-1] = sign
+            mat = torch.chain_matmul(u, s.diag(), v.t()).requires_grad_()
+            gradcheck(sign_mul_logdet, mat)
+            gradgradcheck(sign_mul_logdet, mat)
+
+    def test_sum_to_with_empty_dim_grad(self):
+        a = torch.rand(4, 0, requires_grad=True)
+        b = torch.rand(4, 1, requires_grad=True)
+        c = a + b
+        assert c.shape == (4, 0)
+        c.sum().backward()
+
+        self.assertEqual(b.grad, torch.zeros(4, 1))
+        self.assertEqual(a.grad, torch.zeros(4, 0))
+
     def test_hessian_vector(self):
         x = torch.randn(2, 2, requires_grad=True)
         y = torch.randn(2, 2, requires_grad=True)
@@ -294,6 +323,33 @@ class TestAutograd(TestCase):
         self.assertEqual(grad_b.data, go * 2)
         self.assertFalse(hook_called[0])
         self.assertIsNone(x.grad)
+
+    def test_grad_nonleaf_register_hook(self):
+        # This checks an edge case for register_hook.
+        # We want to capture grad of a nonleaf tensor,
+        # but avoid segfault during backward of other nonleaf tensors
+        x = torch.randn(5, requires_grad=True)
+        x_list = x.unbind()
+
+        x0 = x_list[0]
+        hook_results = [None]
+
+        def hook(grad):
+            hook_results[0] = grad
+        x0.register_hook(hook)
+
+        x_list[0].backward()
+        self.assertEqual(hook_results[0], torch.tensor(1.))
+        expected_grad = torch.tensor([1., 0, 0, 0, 0])
+        self.assertEqual(x.grad, expected_grad)
+        self.assertIsNone(x_list[0].grad)
+
+        for i in range(1, 5, 1):
+            x_list[i].backward()
+            self.assertEqual(hook_results[0], None)
+            expected_grad[i] = 1.0
+            self.assertEqual(x.grad, expected_grad)
+            self.assertIsNone(x_list[i].grad)
 
     def test_sharded_grad(self):
         leaves = [torch.zeros(5, 5, requires_grad=True) for _ in range(10)]
@@ -533,14 +589,14 @@ class TestAutograd(TestCase):
             [0, 2, 2],
         ])
         v1 = torch.DoubleTensor([[1, 2], [4, 5], [7, 8]])
-        sparse_grad1 = Variable(torch.sparse.DoubleTensor(i1, v1, size))
+        sparse_grad1 = torch.sparse.DoubleTensor(i1, v1, size)
         i2 = torch.LongTensor([
             [0, 1, 3, 4],
             [0, 1, 2, 2],
         ])
         v2 = torch.DoubleTensor([[1, 2], [4, 3], [4, 5], [7, 8]])
-        sparse_grad2 = Variable(torch.sparse.DoubleTensor(i2, v2, size))
-        dense_grad = Variable(torch.rand(size).double())
+        sparse_grad2 = torch.sparse.DoubleTensor(i2, v2, size)
+        dense_grad = torch.rand(size).double()
         sparse_fn1 = FixedGradientFunction(sparse_grad1)
         sparse_fn2 = FixedGradientFunction(sparse_grad2)
         dense_fn = FixedGradientFunction(dense_grad)
@@ -557,6 +613,62 @@ class TestAutograd(TestCase):
         x = torch.randn(size, requires_grad=True)
         (sparse_fn1(x) + sparse_fn2(x)).sum().backward()
         self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
+
+    def test_sparse_mm_backward(self):
+        size = (3, 3)
+        sparse = torch.sparse_coo_tensor(size, requires_grad=True)
+        dense = torch.randn(size, requires_grad=True)
+
+        z = sparse.mm(dense)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "calculating the gradient of a sparse Tensor argument to mm is not supported."):
+            z.sum().backward()
+
+        z = dense.addmm(sparse, dense)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "calculating the gradient of a sparse Tensor argument to mm is not supported."):
+            z.sum().backward()
+
+    @skipIfRocm
+    def test_sparse_ctor_getter_backward(self):
+        # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
+        def test(size, sparse_dim, nnz, device):
+            v_size = [nnz] + list(size[sparse_dim:])
+            i = torch.rand(sparse_dim, nnz)
+            i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
+            i = i.to(torch.long)
+
+            inp = torch.randn(v_size, requires_grad=True)
+            other = self.genSparseTensor(size, sparse_dim, nnz, is_uncoalesced=True)[0]
+            other = other.to(device)
+
+            def fn(v):
+                x = torch.sparse_coo_tensor(i, v, size, device=device)
+                y = (x + other).coalesce()
+                yv = y.values()
+                new_v = yv.tanh()
+                z = torch.sparse_coo_tensor(y.indices(), new_v, y.size())
+                return z.coalesce().values()
+
+            gradcheck(fn, (inp,))
+            # FIXME: make gradgradcheck work.
+            # gradgradcheck(fn, (inp,))
+
+            # assert that _values is non-differentiable
+            with self.assertRaisesRegex(RuntimeError, "does not have a grad_fn"):
+                other.detach().requires_grad_()._values().backward(torch.ones_like(other._values()))
+
+        devices = ['cpu']
+
+        if torch.cuda.is_available():
+            devices.append('cuda')
+
+        for empty_i, empty_v, empty_nnz in product([True, False], repeat=3):
+            sparse_size = [] if empty_i else [2, 1]
+            dense_size = [1, 0, 2] if empty_v else [1, 2]
+            nnz = 0 if empty_nnz else 5
+            for device in devices:
+                test(sparse_size + dense_size, len(sparse_size), nnz, device)
 
     def test_multi_backward(self):
         x = torch.randn(5, 5, requires_grad=True)
@@ -705,6 +817,35 @@ class TestAutograd(TestCase):
         # Should not stack overflow
         scope()
 
+    @unittest.skipIf(not TEST_CUDA, "need CUDA memory stats")
+    def test_free_unneeded_tensor(self):
+        x = torch.randn(2, 3, 10, 10, device='cuda', requires_grad=True)
+        m = torch.randn(1, 3, 1, 1, device='cuda')
+
+        z = x.sum()
+        base_mem = torch.cuda.memory_allocated()
+        z = ((x + 2) * m).sum()
+        end_mem = torch.cuda.memory_allocated()
+
+        # In the end the memory usage should remain equal, because neither of
+        # (x + 2) and ((x + 2) * m) should be kept alive for backward, while the
+        # previous allocation of z had the same size as the current one.
+        self.assertEqual(base_mem, end_mem)
+
+    def test_no_unnecessary_save(self):
+        # If we kept x in the derivative Function of x * 2 we would
+        # get an error in the backward that would complain that we've
+        # modified x, which was needed for gradient computation.
+        # Since we should elide unnecessary saves, this test should pass.
+        mu = torch.ones(1, requires_grad=True)
+        x = torch.empty(1)
+        loss = 0
+        for i in range(3):
+            x.detach_()
+            x.copy_(mu + i)
+            loss += (x * torch.tensor([float(i)])).sum()
+        loss.backward()
+
     def test_no_grad(self):
         x = torch.ones(5, 5, requires_grad=True)
         y = Variable(torch.ones(5, 5) * 4)
@@ -723,6 +864,12 @@ class TestAutograd(TestCase):
         self.assertFalse(z.requires_grad)
         self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
         self.assertIsNone(z.grad_fn)
+
+        # test nested decorator and with-statement on no_grad
+        with torch.no_grad():
+            self.assertFalse(torch.is_grad_enabled())
+            w = adder(x, y)
+            self.assertFalse(torch.is_grad_enabled())
 
     def test_no_grad_python_function(self):
         """Python Functions should respect grad mode."""
@@ -975,7 +1122,6 @@ class TestAutograd(TestCase):
         with self.assertRaises(RuntimeError):
             b.add_(5)
 
-    @skipIfRocm
     def test_requires_grad_factory(self):
         x = torch.randn(2, 3)
         fns = [torch.ones_like, torch.testing.randn_like]
@@ -994,10 +1140,23 @@ class TestAutograd(TestCase):
                             self.assertIs(dtype, output.dtype)
                             self.assertEqual(1, output.get_device())
 
+    def test_attribute_deletion(self):
+        x = torch.randn((5, 5), requires_grad=True)
+        del x.grad
+        self.assertIsNone(x.grad)
+        with self.assertRaises(RuntimeError):
+            del x.data
+        with self.assertRaises(TypeError):
+            x.data = None
+        with self.assertRaises(RuntimeError):
+            del x.requires_grad
+        with self.assertRaises(RuntimeError):
+            del x._grad_fn
+        with self.assertRaises(RuntimeError):
+            del x._backward_hooks
+
     def test_grad_assignment(self):
         x = torch.randn(5, 5)
-        a = torch.randn(2, 2)  # size mismatch
-        b = Variable(torch.randn(5, 5).long())  # type mismatch
 
         with self.assertRaises(RuntimeError):
             x.grad = torch.randn(2, 2)
@@ -1010,6 +1169,8 @@ class TestAutograd(TestCase):
             raise unittest.SkipTest("CUDA not available")
         with self.assertRaises(RuntimeError):
             x.grad = Variable(torch.randn(5, 5).cuda())
+        x = x.cuda().half()
+        x.grad = torch.zeros_like(x)  # would raise an error unless sparse type is properly handled
 
         if torch.cuda.device_count() < 2:
             raise unittest.SkipTest("At least 2 CUDA devices needed")
@@ -1369,6 +1530,74 @@ class TestAutograd(TestCase):
         expected_grad[:2] = grad_output
         self.assertEqual(x.grad.data, expected_grad)
 
+    @skipIfRocm
+    def test_ctc_loss(self):
+        batch_size = 64
+        num_labels = 101
+        target_length = 15
+        gradcheck_input_size = 10
+
+        # device, input_length
+        tests = [('cpu', 150, False),
+                 ('cpu', 150, True)]
+        if torch.cuda.is_available():
+            tests += [('cuda', 50, False),
+                      ('cuda', 150, False),
+                      ('cuda', 50, True),
+                      ('cuda', 150, True)]
+
+        for device, input_length, vary_lengths in tests:
+            targets = torch.randint(1, num_labels, (batch_size, target_length),
+                                    device=device, dtype=torch.long)
+            x = torch.randn(gradcheck_input_size, device=device, requires_grad=True)
+            tile_factors = torch.randn(input_length * batch_size * num_labels // gradcheck_input_size + 1,
+                                       device=device)
+            input_lengths = [(torch.randint(input_length // 2, input_length + 1, ()).item()
+                              if vary_lengths or i == 0 else input_length) for i in range(batch_size)]
+            target_lengths = [(torch.randint(target_length // 2, target_length + 1, ()).item()
+                               if vary_lengths or i == 0 else target_length) for i in range(batch_size)]
+
+            def ctc_after_softmax(x):
+                x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
+                          .view(input_length, batch_size, num_labels))
+                log_probs = torch.log_softmax(x_full, 2)
+                return torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+
+            gradcheck(ctc_after_softmax, [x])
+
+    def _test_sparse_gather(self, size_x, size_ind, dim):
+        x = torch.randn(size_x, requires_grad=True)
+        if len(size_ind) > 0 and len(size_x) > 0:
+            ind = torch.randint(x.size(dim), size_ind)
+        else:
+            ind = torch.zeros(size_ind, dtype=torch.int64)
+        out = torch.gather(x, dim, ind, sparse_grad=False)
+        grad = torch.rand_like(out)
+        out.backward(grad)
+        grad_dense = x.grad.clone()
+        x.grad = None
+        out = torch.gather(x, dim, ind, sparse_grad=True)
+        out.backward(grad)
+        self.assertEqual(grad_dense, x.grad.to_dense())
+
+    def test_sparse_gather_dim0(self):
+        self._test_sparse_gather((10, 10), (5, 10), 0)
+
+    def test_sparse_gather_dim1(self):
+        self._test_sparse_gather((10, 10, 5), (10, 5, 5), 1)
+
+    def test_sparse_gather_dim_neg(self):
+        self._test_sparse_gather((10, 10, 5), (10, 10, 2), -1)
+
+    def test_sparse_gather_ind_scalar(self):
+        self._test_sparse_gather((10,), (), 0)
+
+    def test_sparse_gather_x_scalar(self):
+        self._test_sparse_gather((), (2,), 0)
+
+    def test_sparse_gather_both_scalar(self):
+        self._test_sparse_gather((), (), 0)
+
     def test_gc_in_destructor(self):
         """
         Previously, if a Function destructor triggered a garbage collection,
@@ -1463,7 +1692,6 @@ class TestAutograd(TestCase):
         self.assertIsNotNone(view.grad_fn)
         self.assertIs(view._base, x)
 
-    @skipIfRocm
     def _test_type_conversion_backward(self, t, ):
         fvar = Variable(t(torch.randn(5, 5).float()), requires_grad=True)
         fvar.double().sum().backward()
@@ -1587,7 +1815,6 @@ class TestAutograd(TestCase):
                 self._test_pyscalar_conversions(lambda x: x.cuda(), lambda x: long(x))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @skipIfRocm
     def test_pin_memory(self):
         x = torch.randn(2, 2, requires_grad=True)
         self.assertEqual(x, x.pin_memory())
@@ -1923,20 +2150,25 @@ class TestAutograd(TestCase):
                               lambda a, b: torch.cat((a, b)),
                               True, f_args_variable, f_args_tensor)
 
-    @skipIfRocm
-    def test_potrf(self):
-        root = Variable(torch.tril(torch.rand(S, S)), requires_grad=True)
+    @skipIfNoLapack
+    def test_cholesky(self):
+        def func(root):
+            x = torch.matmul(root, root.transpose(-1, -2)) + 1e-05
+            return torch.cholesky(x, upper)
 
-        def run_test(upper):
-            def func(root):
-                x = torch.mm(root, root.t())
-                return torch.potrf(x, upper)
+        def run_test(upper, dims):
+            root = torch.rand(*dims)
+            indices = torch.ones(dims[-1], dims[-1], dtype=torch.uint8).tril()
+            indices = indices.expand_as(root)
+            root[indices] = 0
+            root.requires_grad_()
 
             gradcheck(func, [root])
             gradgradcheck(func, [root])
 
-        run_test(upper=True)
-        run_test(upper=False)
+        for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
+            run_test(upper, dims)
+            run_test(upper, dims)
 
     @skipIfNoLapack
     def test_trtrs(self):
@@ -2083,7 +2315,27 @@ class TestAutograd(TestCase):
         run_test((10, 10), torch.zeros(10, 10))
         run_test((10,), 0)
 
-    @skipIfRocm
+    def test_pow_scalar_base(self):
+        a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
+        gradcheck(lambda a: torch.pow(2, a), (a,))
+
+    # test for backward in https://github.com/pytorch/pytorch/issues/15511
+    def test_pdist_large(self):
+        def func(x):
+            return torch.pdist(x, p=2)
+
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            # shape[0] should be able to be (roughly) arbitrarily large, but the kernel
+            # is currently limited to smaller sizes (see issue above); this is just testing
+            # a floor.
+            shape = (1000, 1)
+            x = torch.randn(shape, device=device).requires_grad_()
+            output = torch.pdist(x, p=2)
+            # just run a single backward, as gradcheck/gradgradcheck is expensive here
+            output.sum().backward()
+
+    @skipIfNoLapack
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
         # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
@@ -2106,6 +2358,20 @@ class TestAutograd(TestCase):
         gradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
         gradgradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
         gradgradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
+
+    def test_chain_matmul(self):
+        def gen_matrices(p):
+            matrices = []
+            for (pi, pi_1) in zip(p[:-1], p[1:]):
+                matrices.append(torch.randn(pi, pi_1).requires_grad_())
+            return matrices
+
+        gradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5]))
+        gradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6]))
+        gradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10]))
+        gradgradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5]))
+        gradgradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6]))
+        gradgradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10]))
 
     def test_profiler(self):
         x = torch.randn(10, 10)
@@ -2196,9 +2462,29 @@ class TestAutograd(TestCase):
         self._test_where_functional(lambda t: t)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @skipIfRocm
     def test_where_functional_cuda(self):
         self._test_where_functional(lambda t: t.cuda())
+
+    def test_reduce_dtype(self):
+        def test_reduction(op, has_no_dim):
+            x = torch.randn(3, 3, dtype=torch.float, requires_grad=True)
+
+            if has_no_dim:
+                grad1, = torch.autograd.grad([op(x)], [x])
+                grad2, = torch.autograd.grad([op(x, dtype=torch.double)], [x])
+                self.assertEqual(grad1, grad2)
+                self.assertEqual(grad2.dtype, torch.float)
+
+            gi = torch.randn(op(x, dim=0).shape, dtype=torch.float)
+            grad1, = torch.autograd.grad([op(x, dim=0)], [x], gi)
+            grad2, = torch.autograd.grad([op(x, dim=0, dtype=torch.double)], [x], gi.double())
+            self.assertEqual(grad1, grad2)
+            self.assertEqual(grad2.dtype, torch.float)
+
+        test_reduction(torch.sum, True)
+        test_reduction(torch.prod, True)
+        test_reduction(torch.cumsum, False)
+        test_reduction(torch.cumprod, False)
 
     def test_inplace_view_backprop_base(self):
         # modify view and back-prop through base
@@ -2406,7 +2692,6 @@ class TestAutograd(TestCase):
                         f(dt)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @skipIfRocm
     def test_set_requires_grad_only_for_floats_cuda(self):
         self._test_set_requires_grad_only_for_floats(self, True)
 
@@ -2414,7 +2699,6 @@ class TestAutograd(TestCase):
         self._test_set_requires_grad_only_for_floats(self, False)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @skipIfRocm
     def test_rnn_backward_to_input_but_not_parameters_cuda(self):
         # this checks whether it is possible to not require
         # weight parameters, but require inputs, see #7722
@@ -2426,6 +2710,18 @@ class TestAutograd(TestCase):
         out, _ = l(s)
         out.sum().backward()
         self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    def test_lstmcell_backward_only_one_output_grad(self):
+        # checks that undefined gradients doen't hamper the backward
+        # see #11872
+        dev = torch.device('cuda')
+        l = torch.nn.LSTMCell(2, 3).to(dev).double()
+        s = torch.randn(1, 2, device=dev, dtype=torch.double, requires_grad=True)
+        for i in range(2):
+            out = l(s)[i]
+            out.sum().backward()
+            self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
     def test_anomaly_detect_nan(self):
         size = 10
@@ -2466,12 +2762,105 @@ class TestAutograd(TestCase):
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
 
-    @skipIfRocm
+    @skipIfNoLapack
     def test_symeig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
         w, v = torch.symeig(A, eigenvectors=False)
-        with self.assertRaisesRegex(RuntimeError, 'backward without computing eigenvectors'):
+        with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
             torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
+
+    @skipIfNoLapack
+    def test_svd_no_singularvectors(self):
+        A = torch.randn(2, 2, dtype=torch.float32, requires_grad=True)
+        u, s, v = torch.svd(A, compute_uv=False)
+        with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
+            torch.autograd.backward([u, s, v], [torch.ones_like(u), torch.ones_like(s), torch.ones_like(v)])
+
+    def test_no_grad_copy(self):
+        # create autograd function that saves grad pointer as class static
+        class MyFunc(Function):
+            static_grad_ptr = None
+
+            @staticmethod
+            def forward(ctx, inp1, inp2):
+                return inp1 + inp2
+
+            @staticmethod
+            def backward(ctx, grad):
+                MyFunc.static_grad_ptr = grad.data_ptr()
+                return grad, grad
+
+        class NonContGradFunc(Function):
+            @staticmethod
+            def forward(ctx, inp1):
+                ctx.size = inp1.size()
+                return torch.tensor([1.])
+
+            @staticmethod
+            def backward(ctx, grad):
+                return torch.ones(1).expand(ctx.size)
+
+        a = torch.randn(5, 6, requires_grad=True)
+        b = torch.randn(5, 6, requires_grad=True)
+        # non-contiguous grad should be copied
+        NonContGradFunc.apply(MyFunc.apply(a, b)).backward()
+        self.assertFalse(a.grad.data_ptr() == MyFunc.static_grad_ptr)
+        self.assertFalse(b.grad.data_ptr() == MyFunc.static_grad_ptr)
+        # test case that should trigger no copy for one of a,b
+        a.grad = b.grad = None
+        MyFunc.apply(a, b)[1][0].backward()
+        p_g = MyFunc.static_grad_ptr
+        p_a = a.grad.data_ptr()
+        p_b = b.grad.data_ptr()
+        # check a,b uses different grad buffer
+        self.assertFalse(p_a == p_b)
+        # check one of them is using the computed buffer
+        self.assertTrue(p_a == p_g or p_b == p_g)
+
+    def test_gradcheck_single_input(self):
+        def f(inp):
+            return inp.mul(5)
+
+        gradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
+        gradgradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
+
+    def test_gradcheck_sparse_input(self):
+        def fn(sparse):
+            return torch.sparse.sum(sparse)
+
+        gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=True)
+        with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
+            gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=False)
+
+    @unittest.skipIf(not TEST_CUDA, "Requires cuda for multi device")
+    def test_multi_device_reentrant_autograd(self):
+        # Output on gpu so that this task will be associated with the gpu thread
+        def fn_on_gpu(inp):
+            # Artificially increase the priority of the next op to make sure it runs
+            # as soon as we reach it before the ops of branch1.
+            dummy = inp * 2 * 2 * 2 * 2
+            return inp.cuda()
+
+        def parent_on_cpu(inp):
+            # Slow branch of ops on gpu so that the work queue for the gpu thread
+            # won't empty too quickly. They also have smaller priorities than the
+            # ones created by fn_on_gpu
+            branch1 = inp.cuda()
+            branch1 = branch1 / branch1
+            branch1 = branch1 / branch1
+            branch1 = branch1 / branch1
+            # Perform checkpoint on cpu tensors. So the last op performed in the reentrant
+            # autograd is an AccumulateGrad that runs on the cpu thread for the gpu thread.
+            # So the cpu thread will notify the gpu thread with an empty FunctionTask.
+            branch2 = checkpoint(fn_on_gpu, inp)
+            out = branch2 + branch1
+            return out
+
+        inp = torch.rand(2, requires_grad=True)
+        out = parent_on_cpu(inp)
+        # This will segfault if the empty FunctionTask is not handled properly in the
+        # gpu thread ReadyQueue
+        out.sum().backward()
 
 
 def index_variable(shape, max_indices):
@@ -2502,861 +2891,8 @@ def gather_variable(shape, index_dim, max_indices, duplicate=False):
     return index
 
 
-def mask_not_all_zeros(shape):
-    assert len(shape) > 0
-    while True:
-        result = torch.randn(shape).gt(0)
-        if result.sum() > 0:
-            return result
-
-
-def prod_zeros(dim_size, dim_select):
-    assert len(dim_select) == 2
-    result = torch.randn(dim_size, dim_size, dim_size)
-    result.narrow(dim_select[0], 0, 1).narrow(dim_select[1], 1, 1).zero_()
-    result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
-    result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
-    return result
-
-
-def prod_single_zero(dim_size):
-    result = torch.randn(dim_size, dim_size)
-    result[0, 1] = 0
-    return result
-
-
-def random_square_matrix_of_rank(l, rank):
-    assert rank <= l
-    A = torch.randn(l, l)
-    u, s, v = A.svd()
-    for i in range(l):
-        if i >= rank:
-            s[i] = 0
-        elif s[i] == 0:
-            s[i] = 1
-    return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
-
-
-def random_symmetric_matrix(l):
-    A = torch.randn(l, l)
-    for i in range(l):
-        for j in range(i):
-            A[i, j] = A[j, i]
-    return A
-
-
-def random_symmetric_psd_matrix(l):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1))
-
-
-def random_symmetric_pd_matrix(l, eps=1e-5):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1)) + torch.eye(l) * eps
-
-
-def make_nonzero_det(A, sign=None, min_singular_value=0.1):
-    u, s, v = A.svd()
-    s[s < min_singular_value] = min_singular_value
-    A = u.mm(torch.diag(s)).mm(v.t())
-    det = A.det().item()
-    if sign is not None:
-        if (det < 0) ^ (sign < 0):
-            A[0, :].neg_()
-    return A
-
-
-def random_fullrank_matrix_distinct_singular_value(l):
-    A = torch.randn(l, l)
-    u, _, v = A.svd()
-    s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
-    return u.mm(torch.diag(s)).mm(v.t())
-
-
-def uniform_scalar(offset=0, requires_grad=False):
-    v = torch.rand(()) + offset
-    v.requires_grad = requires_grad
-    return v
-
-
-def normal_scalar_clamp(amin, amax, requires_grad=False):
-    v = torch.randn(()).clamp(amin, amax)
-    v.requires_grad = requires_grad
-    return v
-
-
 def bernoulli_scalar():
     return torch.tensor(0, dtype=torch.uint8).bernoulli_()
-
-
-class dont_convert(tuple):
-    pass
-
-
-L = 20
-M = 10
-S = 5
-
-# (
-#   method name,
-#   input size/constructing fn,
-#   args (tuple represents shape of a tensor arg),
-#   test variant name (will be used at test name suffix),    // optional
-#   indices for possible dim arg,                            // optional
-#   fn mapping output to part that should be gradcheck'ed,   // optional
-# )
-method_tests = [
-    ('add', (S, S, S), ((S, S, S),)),
-    ('add', (S, S, S), ((S, S),), 'broadcast_rhs'),
-    ('add', (S, S), ((S, S, S),), 'broadcast_lhs'),
-    ('add', (S, 1, S), ((M, S),), 'broadcast_all'),
-    ('add', (), ((),), 'scalar'),
-    ('add', (S, S, S), ((),), 'scalar_broadcast_rhs'),
-    ('add', (), ((S, S, S),), 'scalar_broadcast_lhs'),
-    ('add', (S, S, S), (3.14,), 'constant'),
-    ('add', (), (3.14,), 'scalar_constant'),
-    ('__radd__', (S, S, S), (3.14,), 'constant'),
-    ('__radd__', (), (3.14,), 'scalar_constant'),
-    ('sub', (S, S, S), ((S, S, S),)),
-    ('sub', (S, S, S), ((S, S),), 'broadcast_rhs'),
-    ('sub', (S, S), ((S, S, S),), 'broadcast_lhs'),
-    ('sub', (S, 1, S), ((M, S),), 'broadcast_all'),
-    ('sub', (S, S, S), ((),), 'scalar_broadcast_rhs'),
-    ('sub', (), ((S, S, S),), 'scalar_broadcast_lhs'),
-    ('sub', (S, S, S), (3.14,), 'constant'),
-    ('sub', (), (3.14,), 'scalar_constant'),
-    ('__rsub__', (S, S, S), (3.14,), 'constant'),
-    ('__rsub__', (), (3.14,), 'scalar_constant'),
-    ('mul', (S, S, S), ((S, S, S),)),
-    ('mul', (), ((),), 'scalar'),
-    ('mul', (S, S, S), ((S, S),), 'broadcast_rhs'),
-    ('mul', (S, S), ((S, S, S),), 'broadcast_lhs'),
-    ('mul', (S, 1, S), ((M, S),), 'broadcast_all'),
-    ('mul', (S, S, S), ((),), 'scalar_broadcast_rhs'),
-    ('mul', (), ((S, S, S),), 'scalar_broadcast_lhs'),
-    ('mul', (S, S, S), (3.14,), 'constant'),
-    ('mul', (), (3.14,), 'scalar_constant'),
-    ('__rmul__', (S, S, S), (3.14,), 'constant'),
-    ('__rmul__', (), (3.14,), 'scalar_constant'),
-    ('div', (S, S, S), (torch.rand(S, S, S) + 0.1,)),
-    ('div', (S, S, S), (torch.rand(S, S) + 0.1,), 'broadcast_rhs'),
-    ('div', (S, S), (torch.rand(S, S, S) + 0.1,), 'broadcast_lhs'),
-    ('div', (S, 1, S), (torch.rand(M, S) + 0.1,), 'broadcast_all'),
-    ('div', (), (uniform_scalar(0.1),), 'scalar'),
-    ('div', (S, S, S), (uniform_scalar(0.1),), 'scalar_broadcast_rhs'),
-    ('div', (), (uniform_scalar(0.1),), 'scalar_broadcast_lhs'),
-    ('div', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant'),
-    ('__rdiv__', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant'),
-    ('div', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant'),
-    ('__rdiv__', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant'),
-    ('pow', torch.rand(S, S, S) + 1e-3, (torch.rand(S, S, S) + 0.1,)),
-    ('pow', torch.rand(S, S, S) + 1e-3, (torch.rand(1,) + 0.1,), 'broadcast_rhs'),
-    ('pow', torch.rand(1,) + 1e-3, (torch.rand(S, S, S) + 0.1,), 'broadcast_lhs'),
-    ('pow', torch.rand(S, 1, S) + 1e-3, (torch.rand(1, S, 1) + 0.1,), 'broadcast_all'),
-    ('pow', uniform_scalar(1e-3, requires_grad=True), (uniform_scalar(0.1),), 'scalar'),
-    ('pow', torch.rand(S, S, S) + 1e-3, (uniform_scalar(0.1),), 'scalar_broadcast_rhs'),
-    ('pow', uniform_scalar(1e-3, requires_grad=True), (torch.rand(S, S, S) + 0.1,), 'scalar_broadcast_lhs'),
-    ('pow', torch.rand(S, S, S) + 1e-3, (3.14,), 'constant'),
-    ('__rpow__', torch.rand(S, S, S) + 1e-3, (3.14,), 'constant'),
-    ('pow', uniform_scalar(1e-3, requires_grad=True), (3.14,), 'scalar_constant'),
-    ('__rpow__', uniform_scalar(1e-3, requires_grad=True), (3.14,), 'scalar_constant'),
-    ('transpose', (1, 2, 3), (1, 2), 'dim', [0, 1]),
-    ('transpose', (), (0, 0), 'scalar'),
-    ('transpose', (1,), (0, 0), '1d'),
-    ('transpose', torch.rand(L, L), (0, 1), '2d'),
-    ('transpose', torch.rand(S, S, S), (2, 0), '3d'),
-    ('t', (1, 2), NO_ARGS),
-    ('view', (S, S, S), (S * S, S),),
-    ('view', (S, S, S), (torch.Size([S * S, S]),), 'size'),
-    ('view', (S,), (S,), '1d'),
-    ('view', (), (dont_convert(()),), 'scalar_to_scalar'),
-    ('view', (), (1,), 'scalar_to_1d'),
-    ('reshape', (S, S, S), (S * S, S),),
-    ('reshape', (S, S, S), (torch.Size([S * S, S]),), 'size'),
-    ('reshape', (S,), (S,), '1d'),
-    ('reshape', (), (dont_convert(()),), 'scalar_to_scalar'),
-    ('reshape', (), (1,), 'scalar_to_1d'),
-    ('reshape_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
-    ('reshape_as', (), (non_differentiable(torch.tensor(42.)),), 'scalar'),
-    ('reshape_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
-    ('flip', (S, S, S), ([0],), 'd0'),
-    ('flip', (S, S, S), ([0, 1, 2],), 'd012'),
-    ('flip', (S, S, S), ([0, 2],), 'd02'),
-    ('flip', (S, S, S), ([2, 0],), 'd20'),
-    ('flip', (S, S, S), ([-1],), 'neg_d'),
-    ('rot90', (S, S, S), (1, [0, 1],), 'k1_d01'),
-    ('rot90', (S, S, S), (1, [1, 2],), 'k1_d12'),
-    ('rot90', (S, S, S), (1, [1, -1],), 'k1_neg_d'),
-    ('rot90', (S, S, S), (), 'default'),
-    ('view_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
-    ('view_as', (), (non_differentiable(torch.tensor(5.5)),), 'scalar'),
-    ('view_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
-    ('expand', (S, 1, 1), (S, S, S)),
-    ('expand', (torch.Size([S, 1, S]),), (S, S, S), 'size'),
-    ('expand', (S, 1), (S, S, S), 'new_dim'),
-    ('expand', (1,), (S, S, S), '1_element'),
-    ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1'),
-    ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
-    ('expand', (), (1, 3, 2), 'scalar_to_dims'),
-    ('exp', (S, S, S), NO_ARGS),
-    ('exp', (), NO_ARGS, 'scalar'),
-    ('expm1', (S, S, S), NO_ARGS),
-    ('expm1', (), NO_ARGS, 'scalar'),
-    ('erf', torch.rand(S, S, S), NO_ARGS),
-    ('erf', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar'),
-    ('erfc', torch.rand(S, S, S), NO_ARGS),
-    ('erfc', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar'),
-    ('erfinv', torch.rand(S, S, S).clamp(-0.9, 0.9), NO_ARGS),
-    ('erfinv', normal_scalar_clamp(-0.9, 0.9, requires_grad=True), NO_ARGS, 'scalar'),
-    ('log', torch.rand(S, S, S) + 1e-2, NO_ARGS),
-    ('log', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar'),
-    ('log10', torch.rand(S, S, S) + 1e-2, NO_ARGS),
-    ('log10', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar'),
-    ('log1p', torch.rand(S, S, S), NO_ARGS),
-    ('log1p', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar'),
-    ('log2', torch.rand(S, S, S) + 1e-2, NO_ARGS),
-    ('log2', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar'),
-    ('tanh', (S, S, S), NO_ARGS),
-    ('tanh', (), NO_ARGS, 'scalar'),
-    ('sigmoid', (S, S, S), NO_ARGS),
-    ('sigmoid', (), NO_ARGS, 'scalar'),
-    ('sinh', (S, S, S), NO_ARGS),
-    ('sinh', (), NO_ARGS, 'scalar'),
-    ('cosh', (S, S, S), NO_ARGS),
-    ('cosh', (), NO_ARGS, 'scalar'),
-    ('abs', (S, S, S), NO_ARGS),
-    ('abs', (), NO_ARGS, 'scalar'),
-    ('clamp', (S, S, S), (0, 1)),
-    ('clamp', (S, S, S), (None, 0.5), 'min'),
-    ('clamp', (S, S, S), (0.5, None), 'max'),
-    ('clamp', (), (0, 1), 'scalar'),
-    ('clamp', (), (None, 0.5), 'min_scalar'),
-    ('clamp', (), (0.5, None), 'max_scalar'),
-    ('sqrt', torch.rand(S, S, S) + 5e-4, NO_ARGS),
-    ('sqrt', uniform_scalar(5e-4, requires_grad=True), NO_ARGS, 'scalar'),
-    ('sin', (S, S, S), NO_ARGS),
-    ('sin', (), NO_ARGS, 'scalar'),
-    ('cos', (S, S, S), NO_ARGS),
-    ('cos', (), NO_ARGS, 'scalar'),
-    ('tan', torch.randn(S, S, S).clamp(-1, 1), NO_ARGS),
-    ('asin', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS),
-    ('acos', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS),
-    ('atan', (S, S, S), NO_ARGS),
-    ('atan', (), NO_ARGS, 'scalar'),
-    ('atan2', (S, S, S), ((S, S, S),)),
-    ('atan2', (), ((),), 'scalar'),
-    ('reciprocal', torch.rand(S, S, S) + 0.1, NO_ARGS),
-    ('reciprocal', uniform_scalar(0.1, requires_grad=True), NO_ARGS, 'scalar'),
-    ('round', (S, S, S), NO_ARGS),
-    ('round', (), NO_ARGS, 'scalar'),
-    ('sign', (S, S, S), NO_ARGS),
-    ('sign', (), NO_ARGS, 'scalar'),
-    ('trunc', (S, S, S), NO_ARGS),
-    ('trunc', (), NO_ARGS, 'scalar'),
-    ('floor', (S, S, S), NO_ARGS),
-    ('floor', (), NO_ARGS, 'scalar'),
-    ('ceil', (S, S, S), NO_ARGS),
-    ('ceil', (), NO_ARGS, 'scalar'),
-    ('rsqrt', torch.rand(S, S, S) + 1e-2, NO_ARGS),
-    ('rsqrt', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar'),
-    ('frac', (S, S, S), NO_ARGS),
-    ('frac', (), NO_ARGS, 'scalar'),
-    ('fmod', (S, S, S), (1.5,)),
-    ('fmod', (), (1.5,), 'scalar'),
-    ('fmod', (S, S, S), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor'),
-    ('fmod', (S,), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor_broadcast_lhs'),
-    ('fmod', (S, S, S), (non_differentiable(torch.rand(S) + 1.5),), 'tensor_broadcast_rhs'),
-    ('fmod', (S, 1, S), (non_differentiable(torch.rand(S, S) + 1.5),), 'tensor_broadcast_all'),
-    ('fmod', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
-    ('fmod', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
-    ('fmod', (S, S, S), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor_broadcast_rhs'),
-    ('remainder', (S, S, S), (1.5,)),
-    ('remainder', (), (1.5,), 'scalar'),
-    ('remainder', (S, S, S), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor'),
-    ('remainder', (S,), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor_broadcast_lhs'),
-    ('remainder', (S, 1, S), (non_differentiable(torch.rand(S, S) + 1.5),), 'tensor_broadcast_all'),
-    ('remainder', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
-    ('remainder', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
-    ('lerp', (S, S, S), ((S, S, S), 0.4)),
-    ('lerp', (S, S, S), ((S,), 0.4), 'broadcast_rhs'),
-    ('lerp', (S,), ((S, S, S), 0.4), 'broadcast_lhs'),
-    ('lerp', (S, 1, S), ((S, S), 0.4), 'broadcast_all'),
-    ('lerp', (), ((), 0.4), 'scalar'),
-    ('lerp', (S, S, S), ((), 0.4), 'scalar_broadcast_rhs'),
-    ('lerp', (), ((S, S, S), 0.4), 'scalar_broadcast_lhs'),
-    ('max', (S, S, S), NO_ARGS),
-    ('max', (S, S, S), (1,), 'dim', [0]),
-    ('max', (S, S, S), (1, True,), 'keepdim_dim', [0]),
-    ('max', (), NO_ARGS, 'scalar'),
-    ('max', (), (0,), 'scalar_dim', [0]),
-    ('max', (), (0, True,), 'scalar_keepdim_dim', [0]),
-    ('max', (S, S, S), ((S, S, S),), 'elementwise'),
-    ('max', (S, S, S), ((S,),), 'elementwise_broadcast_rhs'),
-    ('max', (S,), ((S, S, S),), 'elementwise_broadcast_lhs'),
-    ('max', (S, 1, S), ((S, S),), 'elementwise_broadcast_all'),
-    ('max', (), ((),), 'scalar_elementwise'),
-    ('max', (S, S, S), ((),), 'scalar_elementwise_broadcast_rhs'),
-    ('max', (), ((S, S, S),), 'scalar_elementwise_broadcast_lhs'),
-    ('min', (S, S, S), NO_ARGS),
-    ('min', (S, S, S), (1,), 'dim', [0]),
-    ('min', (S, S, S), (1, True,), 'keepdim_dim', [0]),
-    ('min', (), NO_ARGS, 'scalar'),
-    ('min', (), (0,), 'scalar_dim', [0]),
-    ('min', (), (0, True,), 'scalar_keepdim_dim', [0]),
-    ('min', (S, S, S), ((S, S, S),), 'elementwise'),
-    ('min', (S, S, S), ((S,),), 'elementwise_broadcast_rhs'),
-    ('min', (S,), ((S, S, S),), 'elementwise_broadcast_lhs'),
-    ('min', (S, 1, S), ((S, S),), 'elementwise_broadcast_all'),
-    ('min', (), ((),), 'scalar_elementwise'),
-    ('min', (S, S, S), ((),), 'scalar_elementwise_broadcast_rhs'),
-    ('min', (), ((S, S, S),), 'scalar_elementwise_broadcast_lhs'),
-    ('mean', (S, S, S), NO_ARGS),
-    ('mean', (S, S, S), (1,), 'dim', [0]),
-    ('mean', (S, S, S), (1, True,), 'keepdim_dim', [0]),
-    ('mean', (), NO_ARGS, 'scalar'),
-    ('mean', (), (0,), 'scalar_dim', [0]),
-    ('mean', (), (0, True,), 'scalar_keepdim_dim', [0]),
-    ('kthvalue', (S, S, S), (2,)),
-    ('kthvalue', (), (1,), 'scalar'),
-    ('kthvalue', (S, S, S), (2, 1,), 'dim', [1]),
-    ('kthvalue', (), (1, 0,), 'scalar_dim', [1]),
-    ('kthvalue', (S, S, S), (2, 1, True,), 'keepdim_dim', [1]),
-    ('kthvalue', (), (1, 0, True), 'scalar_keepdim_dim', [1]),
-    ('kthvalue', (S,), (2, 0,), 'dim_1d', [1]),
-    ('kthvalue', (S,), (2, 0, True,), 'keepdim_dim_1d', [1]),
-    ('median', (S, S, S), NO_ARGS),
-    ('median', (S, S, S), (1,), 'dim', [0]),
-    ('median', (S, S, S), (1, True,), 'keepdim_dim', [0]),
-    ('median', (), NO_ARGS, 'scalar'),
-    ('median', (), (0,), 'scalar_dim', [0]),
-    ('median', (), (0, True,), 'scalar_keepdim_dim', [0]),
-    ('mode', (S, S, S), NO_ARGS),
-    ('mode', (S, S, S), (1,), 'dim', [0]),
-    ('mode', (S, S, S), (1, True,), 'keepdim_dim', [0]),
-    ('mode', (), NO_ARGS, 'scalar'),
-    ('mode', (), (0,), 'scalar_dim', [0]),
-    ('mode', (), (0, True,), 'scalar_keepdim_dim', [0]),
-    ('sum', (S, S, S), NO_ARGS),
-    ('sum', (S, S, S), (1,), 'dim', [0]),
-    ('sum', (S, S, S), (1, True,), 'keepdim_dim', [0]),
-    ('sum', (), NO_ARGS, 'scalar'),
-    ('sum', (), (0,), 'scalar_dim', [0]),
-    ('sum', (), (0, True,), 'scalar_keepdim_dim', [0]),
-    ('sum', (S, S, S), ([1, 2],), 'multi_dim'),
-    ('sum', (S, S, S), ([1, 2], True,), 'multi_dim_keepdim'),
-    ('prod', (S, S, S), NO_ARGS),
-    ('prod', (S, S, S), (1,), 'dim', [0]),
-    ('prod', (S, S, S), (1, True,), 'keepdim_dim', [0]),
-    ('prod', (), NO_ARGS, 'scalar'),
-    ('prod', (), (0,), 'scalar_dim', [0]),
-    ('prod', (), (0, True,), 'scalar_keepdim_dim', [0]),
-    ('prod', prod_zeros(S, [0, 1]), NO_ARGS, 'zerodims2'),
-    ('prod', prod_zeros(S, [0, 2]), NO_ARGS, 'zerodims1'),
-    ('prod', prod_zeros(S, [1, 2]), NO_ARGS, 'zerodims0'),
-    ('prod', prod_zeros(S, [0, 1]), (1,), 'zeros_dims2', [0]),
-    ('prod', prod_zeros(S, [0, 2]), (1,), 'zeros_dims1', [0]),
-    ('prod', prod_zeros(S, [1, 2]), (1,), 'zeros_dims0', [0]),
-    ('prod', prod_zeros(S, [0, 1]), (1, True), 'keepdim_zeros_dims2', [0]),
-    ('prod', prod_zeros(S, [0, 2]), (1, True), 'keepdim_zeros_dims1', [0]),
-    ('prod', prod_zeros(S, [1, 2]), (1, True), 'keepdim_zeros_dims0', [0]),
-    ('prod', prod_single_zero(S), NO_ARGS, 'single_zero'),
-    ('prod', (torch.tensor(0., requires_grad=True)), NO_ARGS, 'scalar_zero'),
-    ('prod', (torch.tensor(0., requires_grad=True)), (0,), 'scalar_dim_zero', [0]),
-    ('prod', (torch.tensor(0., requires_grad=True)), (0, True,), 'scalar_keepdim_dim_zero', [0]),
-    ('var', (S, S, S), NO_ARGS),
-    ('var', (S, S, S), (1,), 'dim', [0]),
-    ('var', (S, S, S), (1, True, True), 'keepdim_dim', [0]),
-    ('var', (S,), (0,), 'dim_1d', [0]),
-    ('var', (S,), (0, True, True), 'keepdim_dim_1d', [0]),
-    ('std', (S, S, S), NO_ARGS),
-    ('std', (S, S, S), (1,), 'dim', [0]),
-    ('std', (S, S, S), (1, True, True), 'keepdim_dim', [0]),
-    ('std', (S,), (0,), 'dim_1d', [0]),
-    ('std', (S,), (0, True, True), 'keepdim_dim_1d', [0]),
-    ('renorm', (S, S, S), (2, 1, 0.5), 'dim', [1]),
-    ('renorm', (S, S, S), (1, 2, 3), 'norm_1'),
-    ('renorm', (S, S, S), (inf, 2, 0.5), 'norm_inf'),
-    ('repeat', (S,), (2,), 'single_number'),
-    ('repeat', (), (2, 3), 'scalar'),
-    ('repeat', (2, 2), (3, 2)),
-    ('repeat', (2, 2), (1, 3, 1, 2), 'unsqueeze'),
-    ('cumsum', (S, S, S), (0,), 'dim0', [0]),
-    ('cumsum', (S, S, S), (1,), 'dim1', [0]),
-    ('cumsum', (), (0,), 'dim0_scalar', [0]),
-    ('cumprod', (S, S, S), (0,)),
-    ('cumprod', (S, S, S), (1,), 'dim1', [0]),
-    ('cumprod', (), (0,), 'scalar'),
-    ('cumprod', (torch.tensor(0., requires_grad=True)), (0,), 'scalar_zeros'),
-    ('cumprod', prod_zeros(S, [0, 1]), (1,), 'zeros_dim2', [0]),
-    ('cumprod', prod_zeros(S, [0, 2]), (1,), 'zeros_dim1', [0]),
-    ('cumprod', prod_zeros(S, [1, 2]), (1,), 'zeros_dim0', [0]),
-    ('unfold', (), (0, 1, 1), 'scalar', [0]),
-    ('unfold', (S, S, S, S), (1, 3, 1), '', [0]),
-    ('unfold', (S, S, S), (2, 3, 2), 'lastdim', [0]),
-    ('addmm', (S, M), ((S, S), (S, M)),),
-    ('addmm', (1,), ((S, S), (S, M)), 'broadcast_lhs'),
-    ('addmm', (S, M), ((S, S), (S, M)), 'coef', (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
-    ('addmm', (1,), ((S, S), (S, M)), 'broadcast_lhs_coef', (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
-    ('addmm', (), ((S, S), (S, M)), 'scalar_broadcast_lhs'),
-    ('addmm', (), ((S, S), (S, M)), 'scalar_broadcast_lhs_coef', (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
-    ('addbmm', (S, M), ((S, S, S), (S, S, M)),),
-    ('addbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs'),
-    ('addbmm', (S, M), ((S, S, S), (S, S, M)), 'coef', (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
-    ('addbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs_coef', (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
-    ('addbmm', (), ((S, S, S), (S, S, M)), 'scalar_broadcast_lhs'),
-    ('addbmm', (), ((S, S, S), (S, S, M)), 'scalar_broadcast_lhs_coef', (), (), lambda x: x,
-        {'beta': 0.2, 'alpha': 0.6}),
-    ('baddbmm', (S, S, M), ((S, S, S), (S, S, M)),),
-    ('baddbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs'),
-    ('baddbmm', (S, S, M), ((S, S, S), (S, S, M)), 'coef', (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
-    ('baddbmm', (1,), ((S, S, S), (S, S, M)), 'broadcast_lhs_coef', (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
-    ('baddbmm', (), ((S, S, S), (S, S, M)), 'scalar_broadcast_lhs'),
-    ('baddbmm', (), ((S, S, S), (S, S, M)), 'scalar_broadcast_lhs_coef', (), (), lambda x: x,
-        {'beta': 0.2, 'alpha': 0.6}),
-    ('addmv', (S,), ((S, M), (M,)),),
-    ('addmv', (1,), ((S, M), (M,)), 'broadcast_lhs'),
-    ('addmv', (S,), ((S, M), (M,)), 'coef', (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
-    ('addmv', (1,), ((S, M), (M,)), 'broadcast_lhs_coef', (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
-    ('addmv', (), ((S, M), (M,)), 'scalar_broadcast_lhs'),
-    ('addmv', (), ((S, M), (M,)), 'scalar_broadcast_lhs_coef', (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
-    ('addr', (S, M), ((S,), (M,)),),
-    ('addr', (), ((S,), (M,)), 'broadcast_lhs'),
-    ('addr', (S, M), ((S,), (M,)), 'coef', (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
-    ('addr', (), ((S,), (M,)), 'broadcast_lhs_coef', (), (), lambda x: x, {'beta': 0.2, 'alpha': 0.6}),
-    ('dot', (L,), ((L,),),),
-    ('mm', (S, M), ((M, S),)),
-    ('bmm', (M, S, M), ((M, M, S),)),
-    ('mv', (S, M), ((M,),)),
-    ('ger', (S,), ((M,),)),
-    ('matmul', (L,), ((L,),),),
-    ('matmul', (S, M), ((M,),), "2d_1d"),
-    ('matmul', (M, ), ((M, S),), "1d_2d"),
-    ('matmul', (S, M), ((M, S),), "2d_2d"),
-    ('matmul', (S, S, M, M), ((S, S, M, S),), "4d_4d"),
-    ('matmul', (S, S, M, M), ((M,),), "4d_1d"),
-    ('matmul', (M,), ((S, S, M, S),), "1d_4d"),
-    ('addcmul', (S, S), ((S, S), (S, S))),
-    ('addcmul', (S, S), ((S, 1), (1, S)), 'broadcast_rhs'),
-    ('addcmul', (1,), ((S, S, 1), (1, S)), 'broadcast_all'),
-    ('addcmul', (S, S), ((S, S), (S, S)), 'scale', (), (), lambda x: x, {'value': 0.5}),
-    ('addcmul', (S, S), ((S, 1), (1, S)), 'scale_broadcast_rhs', (), (), lambda x: x, {'value': 0.5}),
-    ('addcmul', (1,), ((S, S, 1), (1, S)), 'scale_broadcast_all', (), (), lambda x: x, {'value': 0.5}),
-    ('addcmul', (), ((), ()), 'scalar'),
-    ('addcmul', (S, S), ((), ()), 'scalar_broadcast_rhs'),
-    ('addcmul', (), ((S, S, 1), (1, S)), 'scalar_broadcast_lhs'),
-    ('addcmul', (), ((), ()), 'scalar_scale', (), (), lambda x: x, {'value': 0.5}),
-    ('addcmul', (S, S), ((), ()), 'scalar_scale_broadcast_rhs', (), (), lambda x: x, {'value': 0.5}),
-    ('addcmul', (), ((S, S, 1), (1, S)), 'scalar_scale_broadcast_lhs', (), (), lambda x: x, {'value': 0.5}),
-    ('addcdiv', (S, S), ((S, S), (S, S))),
-    ('addcdiv', (S, S), ((S, 1), (1, S)), 'broadcast_rhs'),
-    ('addcdiv', (1,), ((S, S, 1), (1, S)), 'broadcast_all'),
-    ('addcdiv', (S, S), ((S, S), (S, S)), 'scale', (), (), lambda x: x, {'value': 0.5}),
-    ('addcdiv', (S, S), ((S, 1), (1, S)), 'scale_broadcast_rhs', (), (), lambda x: x, {'value': 0.5}),
-    ('addcdiv', (1,), ((S, S, 1), (1, S)), 'scale_broadcast_all', (), (), lambda x: x, {'value': 0.5}),
-    ('addcdiv', (), ((), ()), 'scalar'),
-    ('addcdiv', (S, S), ((), ()), 'scalar_broadcast_rhs'),
-    ('addcdiv', (), ((S, S, 1), (1, S)), 'scalar_broadcast_lhs'),
-    ('addcdiv', (), ((), ()), 'scalar_scale', (), (), lambda x: x, {'value': 0.5}),
-    ('addcdiv', (S, S), ((), ()), 'scalar_scale_broadcast_rhs', (), (), lambda x: x, {'value': 0.5}),
-    ('addcdiv', (), ((S, S, 1), (1, S)), 'scalar_scale_broadcast_lhs', (), (), lambda x: x, {'value': 0.5}),
-    ('zero_', (S, S, S), NO_ARGS),
-    ('zero_', (), NO_ARGS, 'scalar'),
-    ('logsumexp', (S, S), (1,)),
-    ('logsumexp', (), (0,), 'scalar'),
-    ('norm', (S, S), (2,)),
-    ('norm', (S, S), (0,), '0'),
-    ('norm', (S, S), (0.5,), '0_5'),
-    ('norm', (S, S), (1,), '1'),
-    ('norm', (S, S), (3,), '3'),
-    ('norm', (S, S), (inf,), 'inf'),
-    ('norm', (S, S), (-1,), 'neg_1'),
-    ('norm', (S, S), (-0.5,), 'neg_0_5'),
-    ('norm', (S, S), (-1.5,), 'neg_1_5'),
-    ('norm', torch.rand(S, S, S) + 5e-2, (1.5,), '1_5'),
-    ('norm', (S, S, S), (2, 1), '2_dim', [1]),
-    ('norm', (S, S, S), (3, 1), '3_dim', [1]),
-    ('norm', torch.rand(S, S, S) + 5e-2, (1.5, 1), '1_5_dim', [1]),
-    ('norm', (S, S, S), (2, 1, True), 'keepdim_2_dim', [1]),
-    ('norm', (S, S, S), (3, 1, True), 'keepdim_3_dim', [1]),
-    ('norm', torch.rand(S, S, S) + 5e-2, (1.5, 1, True), 'keepdim_1_5_dim', [1]),
-    ('norm', (), (2, 0), '2_dim_scalar', [1]),
-    ('norm', (), (3, 0), '3_dim_scalar', [1]),
-    ('norm', (), (2, 0, True), 'keepdim_2_dim_scalar', [1]),
-    ('norm', (), (3, 0, True), 'keepdim_3_dim_scalar', [1]),
-    ('clone', (S, M, S), NO_ARGS),
-    ('clone', (), NO_ARGS, 'scalar'),
-    ('dist', (S, S, S), ((S, S, S),)),
-    ('dist', (S, S, S), ((S,),), 'broadcast_rhs'),
-    ('dist', (S,), ((S, S, S),), 'broadcast_lhs'),
-    ('dist', (S, 1, S), ((S, S),), 'broadcast_all'),
-    ('dist', (), ((),), 'scalar'),
-    ('dist', (S, S, S), ((),), 'scalar_broadcast_rhs'),
-    ('dist', (), ((S, S, S),), 'scalar_broadcast_lhs'),
-    ('dist', (S, S, S), ((S, S, S), 4), '4'),
-    ('dist', (S, S, S), ((S,), 4), '4_broadcast_rhs'),
-    ('dist', (S,), ((S, S, S), 4), '4_broadcast_lhs'),
-    ('dist', (S, 1, S), ((S, S), 4), '4_broadcast_all'),
-    ('dist', (), ((), 4), 'scalar_4'),
-    ('dist', (S, S, S), ((), 4), 'scalar_4_broadcast_rhs'),
-    ('dist', (), ((S, S, S), 4), 'scalar_4_broadcast_lhs'),
-    ('diag', (M, M), NO_ARGS, '2d'),
-    ('diag', (3, 5), NO_ARGS, '2d_wide'),
-    ('diag', (3, 5), (2,), '2d_wide_pos'),
-    ('diag', (3, 5), (-2,), '2d_wide_neg'),
-    ('diag', (5, 3), NO_ARGS, '2d_tall'),
-    ('diag', (5, 3), (2,), '2d_tall_pos'),
-    ('diag', (5, 3), (-2,), '2d_tall_neg'),
-    ('diag', (M,), NO_ARGS, '1d'),
-    ('diag', (M, M), (1,), '2d_1'),
-    ('diag', (M, M), (2,), '2d_2'),
-    ('diagonal', (M, M), NO_ARGS, '2d'),
-    ('diagonal', (3, 5), NO_ARGS, '2d_wide'),
-    ('diagonal', (3, 5), (2,), '2d_wide_pos'),
-    ('diagonal', (3, 5), (-2,), '2d_wide_neg'),
-    ('diagonal', (5, 3), NO_ARGS, '2d_tall'),
-    ('diagonal', (5, 3), (2,), '2d_tall_pos'),
-    ('diagonal', (5, 3), (-2,), '2d_tall_neg'),
-    ('diagonal', (M, M), (1,), '2d_1'),
-    ('diagonal', (M, M), (2,), '2d_2'),
-    ('diagonal', (M, M, M), (1, 1, 2), '3d_1'),
-    ('diagonal', (M, M, M), (2, 0, 1), '3d_2'),
-    ('diagonal', (M, M, M), (-2, 0, 1), '3d_3'),
-    ('tril', (M, M), NO_ARGS),
-    ('tril', (M, M), (2,), 'idx'),
-    ('triu', (M, M), NO_ARGS),
-    ('triu', (M, M), (2,), 'idx'),
-    ('trace', (M, M), NO_ARGS),
-    ('cross', (S, 3), ((S, 3),)),
-    ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
-    ('index_select', (S, S, S), (0, index_variable(2, S)), 'dim', [0]),
-    ('index_select', (), (0, torch.tensor([0], dtype=torch.int64)), 'scalar_mixed_dim', [0]),
-    ('index_select', (), (0, torch.tensor(0, dtype=torch.int64)), 'scalar_dim', [0]),
-    ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'dim', [0]),
-    ('index_add', (), (0, torch.tensor([0], dtype=torch.int64), torch.tensor([2.])), 'scalar_input_dim', [0]),
-    ('index_add', (), (0, torch.tensor(0, dtype=torch.int64), torch.tensor(2.)), 'scalar_all_dim', [0]),
-    ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', [0]),
-    ('index_copy', (), (0, torch.tensor([0], dtype=torch.int64), torch.tensor([2.])), 'scalar_input_dim', [0]),
-    ('index_copy', (), (0, torch.tensor(0, dtype=torch.int64), torch.tensor(2.)), 'scalar_all_dim', [0]),
-    ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', [0]),
-    # FIXME: we should compute the derivative w.r.t torch.tensor(2)
-    ('index_fill', (S, S), (0, index_variable(2, S), non_differentiable(torch.tensor(2))),
-     'variable_dim', [0]),
-    ('index_fill', (S, S), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_index_dim', [0]),
-    ('index_fill', (), (0, torch.tensor([0], dtype=torch.int64), 2), 'scalar_input_dim', [0]),
-    ('index_fill', (), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_both_dim', [0]),
-    ('inverse', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
-    ('det', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
-    ('det', (1, 1), NO_ARGS, '1x1', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_symmetric_matrix(S), NO_ARGS, 'symmetric', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_symmetric_psd_matrix(S), NO_ARGS, 'symmetric_psd', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_symmetric_pd_matrix(S), NO_ARGS, 'symmetric_pd', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_square_matrix_of_rank(S, S - 2), NO_ARGS, 'dim2_null', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_square_matrix_of_rank(S, 1), NO_ARGS, 'rank1', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_square_matrix_of_rank(S, 2), NO_ARGS, 'rank2', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS,
-     'distinct_singular_values', NO_ARGS, [skipIfNoLapack]),
-    # For `logdet` and `slogdet`, the function at det=0 is not smooth.
-    # We need to exclude tests with det=0 (e.g. dim2_null, rank1, rank2) and use
-    # `make_nonzero_det` to make the random matrices have nonzero det. For
-    # `logdet`, we also set `make_nonzero_det(matrix, sign=1)` to make the
-    # matrix have positive det.
-    ('logdet', lambda: make_nonzero_det(torch.randn(S, S), 1), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
-    ('logdet', lambda: make_nonzero_det(torch.randn(1, 1), 1), NO_ARGS, '1x1', NO_ARGS, [skipIfNoLapack]),
-    ('logdet', lambda: make_nonzero_det(random_symmetric_matrix(S), 1), NO_ARGS,
-     'symmetric', NO_ARGS, [skipIfNoLapack]),
-    ('logdet', lambda: make_nonzero_det(random_symmetric_pd_matrix(S), 1), NO_ARGS,
-     'symmetric_pd', NO_ARGS, [skipIfNoLapack]),
-    ('logdet', lambda: make_nonzero_det(random_fullrank_matrix_distinct_singular_value(S), 1, 0), NO_ARGS,
-     'distinct_singular_values', NO_ARGS, [skipIfNoLapack]),
-    ('slogdet', lambda: make_nonzero_det(torch.randn(1, 1), 1), NO_ARGS,
-     '1x1_pos_det', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
-    ('slogdet', lambda: make_nonzero_det(torch.randn(1, 1), -1), NO_ARGS,
-     '1x1_neg_det', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
-    ('slogdet', lambda: make_nonzero_det(torch.randn(S, S), 1), NO_ARGS,
-     'pos_det', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
-    ('slogdet', lambda: make_nonzero_det(torch.randn(S, S), -1), NO_ARGS,
-     'neg_det', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
-    ('slogdet', lambda: make_nonzero_det(random_symmetric_matrix(S)), NO_ARGS,
-     'symmetric', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
-    ('slogdet', lambda: random_symmetric_pd_matrix(S), NO_ARGS,
-     'symmetric_pd', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
-    ('slogdet', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS,
-     'distinct_singular_values', NO_ARGS, [skipIfNoLapack], itemgetter(1)),
-    ('symeig', lambda: random_symmetric_matrix(S), (True, False), 'lower', NO_ARGS, [skipIfNoLapack]),
-    ('symeig', lambda: random_symmetric_matrix(S), (True, True), 'upper', NO_ARGS, [skipIfNoLapack]),
-    ('symeig', lambda: random_symmetric_matrix(M), (True, True), 'large', NO_ARGS, [skipIfNoLapack]),
-    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
-    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S)[:(S - 2)], NO_ARGS,
-     'wide', NO_ARGS, [skipIfNoLapack]),
-    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S)[:, :(S - 2)], NO_ARGS,
-     'tall', NO_ARGS, [skipIfNoLapack]),
-    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S)[:(S - 2)], (False,),
-     'wide_all', NO_ARGS, [skipIfNoLapack], lambda usv: (usv[0], usv[1], usv[2][:, :(S - 2)])),
-    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S)[:, :(S - 2)], (False,),
-     'tall_all', NO_ARGS, [skipIfNoLapack], lambda usv: (usv[0][:, :(S - 2)], usv[1], usv[2])),
-    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(M), NO_ARGS,
-     'large', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (S, S, S), ((S, S, S),), 'batched', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
-    ('gesv', (2, 3, S, S), ((2, 3, S, S),), 'batched_dims', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
-    ('gesv', (2, 2, S, S), ((1, S, S),), 'batched_broadcast_A', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
-    ('gesv', (1, S, S), ((2, 2, S, S),), 'batched_broadcast_b', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
-    ('fill_', (S, S, S), (1,), 'number'),
-    ('fill_', (), (1,), 'number_scalar'),
-    # FIXME: we should compute the derivative w.r.t torch.tensor(1)
-    ('fill_', (S, S, S), (non_differentiable(torch.tensor(1)),), 'variable'),
-    ('eq_', (S, S, S), ((S, S, S),)),
-    ('eq_', (S, S, S), ((1,),), 'broadcast_rhs'),
-    ('eq_', (), ((),), 'scalar'),
-    ('eq_', (S, S, S), ((),), 'scalar_broadcast_rhs'),
-    ('ne_', (S, S, S), ((S, S, S),)),
-    ('ne_', (S, S, S), ((1,),), 'broadcast_rhs'),
-    ('ne_', (), ((),), 'scalar'),
-    ('ne_', (S, S, S), ((),), 'scalar_broadcast_rhs'),
-    ('gt_', (S, S, S), ((S, S, S),)),
-    ('gt_', (S, S, S), ((1,),), 'broadcast_rhs'),
-    ('gt_', (), ((),), 'scalar'),
-    ('gt_', (S, S, S), ((),), 'scalar_broadcast_rhs'),
-    ('ge_', (S, S, S), ((S, S, S),)),
-    ('ge_', (S, S, S), ((1,),), 'broadcast_rhs'),
-    ('ge_', (), ((),), 'scalar'),
-    ('ge_', (S, S, S), ((),), 'scalar_broadcast_rhs'),
-    ('lt_', (S, S, S), ((S, S, S),)),
-    ('lt_', (S, S, S), ((1,),), 'broadcast_rhs'),
-    ('lt_', (), ((),), 'scalar'),
-    ('lt_', (S, S, S), ((),), 'scalar_broadcast_rhs'),
-    ('le_', (S, S, S), ((S, S, S),)),
-    ('le_', (S, S, S), ((1,),), 'broadcast_rhs'),
-    ('le_', (), ((),), 'scalar'),
-    ('le_', (S, S, S), ((),), 'scalar_broadcast_rhs'),
-    ('eq_', (S, S, S), (0,), 'pyscalar'),
-    ('ne_', (S, S, S), (0,), 'pyscalar'),
-    ('gt_', (S, S, S), (0,), 'pyscalar'),
-    ('ge_', (S, S, S), (0,), 'pyscalar'),
-    ('le_', (S, S, S), (0,), 'pyscalar'),
-    ('lt_', (), (0,), 'pyscalar'),
-    ('eq_', (), (0,), 'pyscalar_scalar'),
-    ('ne_', (), (0,), 'pyscalar_scalar'),
-    ('gt_', (), (0,), 'pyscalar_scalar'),
-    ('ge_', (), (0,), 'pyscalar_scalar'),
-    ('lt_', (), (0,), 'pyscalar_scalar'),
-    ('le_', (), (0,), 'pyscalar_scalar'),
-    ('permute', (1, 2, 3, 4), (0, 2, 3, 1)),
-    ('permute', (1, 2, 3, 4), (0, -2, -1, 1), 'neg_dim'),
-    ('permute', (), (dont_convert(()),), 'scalar'),
-    ('select', (S, S, S), (1, 2), 'dim', [0]),
-    ('select', (S, S, S), (1, -1), 'wrap_dim', [0]),
-    ('select', (S,), (0, 2), '1d'),
-    ('narrow', (S, S, S), (1, 2, 2), 'dim', [0]),
-    ('narrow', (S, S, S), (1, 0, 0), 'empty_dim', [0]),
-    ('squeeze', (S, 1, S, 1), NO_ARGS),
-    ('squeeze', (1, 1, 1, 1), NO_ARGS, 'input_sizes_are_ones'),
-    ('squeeze', (S, 1, S, 1), (1,), '1_dim', [0]),
-    ('squeeze', (S, 1, S, 1), (2,), 'not_1_dim', [0]),
-    ('squeeze', (), (0,), 'scalar', [0]),
-    ('unsqueeze', (S, S, S), (0,), 'first', [0]),
-    ('unsqueeze', (S, S, S), (1,), 'middle', [0]),
-    ('unsqueeze', (S, S, S), (3,), 'last', [0]),
-    ('unsqueeze', (), (0,), 'scalar', [0]),
-    ('chunk', (S, S, S), (2,)),
-    ('chunk', (S, S, S), (S, 1), 'dim', [1]),
-    ('split', (S, S, S), (2,)),
-    ('split', (S, S, S), (S, 1), 'dim', [1]),
-    ('split', (S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],), 'size_list'),
-    ('split', (S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], 2), 'size_list_dim', [1]),
-    ('gather', (M, S), (0, gather_variable((S, S), 1, M, True)), 'dim0', [0]),
-    ('gather', (M, S), (1, gather_variable((M, S // 2), 0, S, True)), 'dim1', [0]),
-    ('gather', (), (0, torch.tensor([0], dtype=torch.int64)), 'scalar_input', [0]),
-    ('gather', (S,), (0, torch.tensor(0, dtype=torch.int64)), 'scalar_index', [0]),
-    ('gather', (), (0, torch.tensor(0, dtype=torch.int64)), 'scalar_both', [0]),
-    ('scatter', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', [0]),
-    ('scatter', (M, S), (1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', [0]),
-    ('scatter', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim0', [0]),
-    ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', [0]),
-    ('scatter_add', (M, S), (1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', [0]),
-    ('scatter_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim0', [0]),
-    ('masked_select', (M, M), (mask_not_all_zeros((M, M)),)),
-    ('masked_select', (M, M), (mask_not_all_zeros((M,)),), 'broadcast_rhs'),
-    ('masked_select', (M,), (mask_not_all_zeros((M, M)),), 'broadcast_lhs'),
-    ('masked_select', (M, 1, M), (mask_not_all_zeros((M, M)),),
-     'broadcast_all'),
-    ('masked_select', (), (torch.tensor(1, dtype=torch.uint8),), 'scalar'),
-    ('masked_select', (M, M), (torch.tensor(1, dtype=torch.uint8),), 'scalar_broadcast_rhs'),
-    ('masked_select', (), (mask_not_all_zeros((M, M)),), 'scalar_broadcast_lhs'),
-    ('masked_fill', (M, M), (torch.ByteTensor(M, M).bernoulli_(), 10)),
-    ('masked_fill', (M, M), (torch.ByteTensor(M, M).bernoulli_(), torch.tensor(10)), 'tensor'),
-    # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
-    ('masked_fill', (M, M), (torch.ByteTensor(M,).bernoulli_(), 10), 'broadcast_rhs'),
-    ('masked_fill', (), (torch.tensor(0, dtype=torch.uint8, requires_grad=False).bernoulli_(), 10), 'scalar'),
-    ('masked_fill', (), (torch.tensor(0, dtype=torch.uint8, requires_grad=False).bernoulli_(), torch.tensor(10)),
-     'scalar_variable'),
-    ('masked_fill', (M, M), (torch.tensor(0, dtype=torch.uint8, requires_grad=False).bernoulli_(), 10),
-     'scalar_broadcast_rhs'),
-    ('masked_scatter', (M, M), (torch.ByteTensor(M, M).bernoulli_(), (M, M))),
-    ('masked_scatter', (M, M), (torch.ByteTensor(M,).bernoulli_(), (M, M)),
-     'broadcast_rhs'),
-    ('masked_scatter', (M, M), (bernoulli_scalar(), (M, M)), 'scalar'),
-    ('masked_scatter', (M, M), (bernoulli_scalar(), (M, M)),
-     'scalar_broadcast_rhs'),
-    ('resize_', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
-    ('resize_', (), (dont_convert(()),), 'scalar'),
-    ('resize_', (), (torch.Size([1, 1, 1])), 'scalar_to_dims'),
-    ('resize_as_', (), (non_differentiable(torch.tensor(5.)),), 'scalar'),
-    ('resize_as_', (), (non_differentiable(torch.randn((1, 1, 1))),), 'scalar_to_dims'),
-    ('resize_as_', (S, S, S), (non_differentiable(torch.randn(S * S, S)),)),
-    ('sort', (S, M, S), NO_ARGS),
-    ('sort', (S, M, S), (1,), 'dim'),
-    ('sort', (S, M, S), (1, True), 'dim_desc'),
-    ('sort', (), NO_ARGS, 'scalar'),
-    ('sort', (), (0,), 'dim_scalar'),
-    ('sort', (), (0, True), 'dim_desc_scalar'),
-    ('topk', (S, M, S), (3,)),
-    ('topk', (S, M, S), (3, 1), 'dim', [1]),
-    ('topk', (S, M, S), (3, 1, True), 'dim_desc', [1]),
-    ('topk', (S, M, S), (3, 1, True, True), 'dim_desc_sort', [1]),
-    ('topk', (), (1,), 'scalar'),
-    ('topk', (), (1, 0), 'dim_scalar', [1]),
-    ('topk', (), (1, 0, True), 'dim_desc_scalar', [1]),
-    ('topk', (), (1, 0, True, True), 'dim_desc_sort_scalar', [1]),
-    ('take', (S, S, S), (torch.LongTensor([[-3, 2], [20, 2]]),)),
-    ('take', (S, S, S), (torch.tensor(0, dtype=torch.int64),), 'scalar_index'),
-    ('take', (), (torch.LongTensor([0]),), 'scalar_data'),
-    ('take', (), (torch.tensor(0, dtype=torch.int64),), 'scalar_both'),
-    ('where', (M, M), (mask_not_all_zeros((M, M)), (M, M))),
-    ('where', (M, 1, M), (mask_not_all_zeros((M, M)), (M, M, 1)), 'broadcast_all'),
-    ('where', (), (bernoulli_scalar(), ()), 'scalar'),
-    ('where', (M, 1, M), (bernoulli_scalar(), (M, M, 1)), 'scalar_broadcast_mask'),
-    ('where', (), (mask_not_all_zeros((M, M)), ()), 'scalar_broadcast_non_mask'),
-    ('__getitem__', torch.randn(S, S, S), (dont_convert([1, 2]),)),
-    ('__getitem__', torch.randn(S, S, S), (slice(0, 3),), 'slice'),
-    ('__getitem__', torch.randn(S, S, S), (dont_convert([slice(0, 3), 1]),), 'slice_index'),
-    ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3], [0, 0, 2]]),), 'adv_index'),
-    ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 0, 3], [1, 1, 3], [0, 0, 2]]),), 'adv_index_dup'),
-    ('__getitem__', torch.randn(S, S, S), (dont_convert([slice(None), slice(None), [0, 3]]),), 'adv_index_end'),
-    ('__getitem__', torch.randn(S, S, S), (dont_convert([slice(None), [0, 3], slice(None)]),), 'adv_index_mid'),
-    ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], slice(None), slice(None)]),), 'adv_index_beg'),
-    ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], [1, 2], slice(None)]),), 'adv_index_comb'),
-    ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], ]),), 'adv_index_sub'),
-    ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], slice(None)]),), 'adv_index_sub_2'),
-    ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], Ellipsis]),), 'adv_index_sub_3'),
-    ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
-     torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
-]
-# TODO: clamp with min/max
-
-
-def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None):
-    if not isinstance(call_args, tuple):
-        call_args = (call_args,)
-
-    def map_arg(arg):
-        def maybe_non_contig(tensor):
-            return tensor if not non_contiguous else make_non_contiguous(tensor)
-
-        if isinstance(arg, torch.Size) or isinstance(arg, dont_convert):
-            return arg
-        elif isinstance(arg, tuple) and len(arg) == 0:
-            var = torch.randn((), dtype=torch.double)
-            var.requires_grad = requires_grad
-            return var
-        elif isinstance(arg, tuple) and not isinstance(arg[0], torch.Tensor):
-            return Variable(maybe_non_contig(torch.randn(*arg, dtype=torch.double)), requires_grad=requires_grad)
-        elif isinstance(arg, non_differentiable):
-            if isinstance(arg.tensor, torch.Tensor):
-                return maybe_non_contig(arg.tensor)
-            return maybe_non_contig(arg.tensor)
-        elif isinstance(arg, torch.Tensor):
-            if arg.dtype == torch.float:
-                arg = arg.double()
-            v = maybe_non_contig(arg).detach()
-            v.requires_grad = requires_grad and v.is_floating_point()
-            return v
-        elif callable(arg):
-            return map_arg(arg())
-        else:
-            return arg
-    args_out = tuple(map_arg(arg) for arg in call_args)
-    kwargs_out = {k: map_arg(v) for k, v in call_kwargs.items()} if call_kwargs else {}
-    return args_out, kwargs_out
-
-
-def unpack_variables(args):
-    if isinstance(args, tuple):
-        return tuple(unpack_variables(elem) for elem in args)
-    else:
-        return args
-
-
-EXCLUDE_FUNCTIONAL = {
-    'addmm',
-    'addmm_',
-    'addbmm',
-    'baddbmm',
-    'addmv',
-    'addmv_',
-    'addr',
-    'addr_',
-    'reshape',
-    'where'  # argument order
-}
-EXCLUDE_GRADCHECK = {
-}
-EXCLUDE_GRADGRADCHECK = {
-}
-EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
-    # *det methods uses svd in backward when matrix is not invertible. However,
-    # svd backward is unstable unless the matrix has positive distinct singular
-    # values. Generated random matrices satisfy this with high probability, but
-    # we can't rely on it. So only test gradgrad on invertible test cases and
-    # _distinct_singular_values.
-    'test_det',
-    'test_det_1x1',
-    'test_det_symmetric',
-    'test_det_symmetric_psd',
-    'test_det_dim2_null',
-    'test_det_rank1',
-    'test_det_rank2',
-    'test_logdet',
-    'test_logdet_1x1',
-    'test_logdet_symmetric',
-    'test_slogdet_1x1_neg_det',
-    'test_slogdet_neg_det',
-    'test_slogdet_symmetric',
-}
-
-
-def exclude_tensor_method(name, test_name):
-    # there are no tensor equivalents for these (inplace or out)
-    exclude_all_tensor_method_by_test_name = {
-        'test_clamp_min',
-        'test_clamp_max',
-        'test_clamp_min_scalar',
-        'test_clamp_max_scalar',
-        'test_slice',
-        'test_where',
-        'test_where_broadcast_all',
-        'test_where_scalar',
-        'test_where_scalar_broadcast_mask',
-        'test_where_scalar_broadcast_non_mask',
-    }
-    # there are no out-of-place tensor equivalents for these
-    exclude_outplace_tensor_method = {
-        'index_add',
-        'index_copy',
-        'index_fill',
-        'masked_fill',
-        'masked_scatter',
-        'scatter',
-        'scatter_add',
-        'det',
-    }
-    if test_name in exclude_all_tensor_method_by_test_name:
-        return True
-    is_magic_method = name[:2] == '__' and name[-2:] == '__'
-    is_inplace = name[-1] == "_" and not is_magic_method
-    if not is_inplace and name in exclude_outplace_tensor_method:
-        return True
-    return False
 
 
 def gradgradcheck_method_precision_override(test_name):
@@ -3441,14 +2977,14 @@ def add_test(
                 # FixMe: run grad checks on inplace self
                 if is_inplace:
                     self_variable.requires_grad = False
-                # need to record this because methods can change the szie (e.g. unsqueeze)
+                # need to record this because methods can change the size (e.g. unsqueeze)
                 args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
                 output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                 if not exclude_tensor_method(name, test_name):
                     output_tensor = getattr(self_tensor, name)(*args_tensor, **kwargs_variable)
-                    if not isinstance(output_tensor, torch.Tensor) and not isinstance(output_tensor, tuple):
+                    if not isinstance(output_tensor, torch.Tensor) and not istuple(output_tensor):
                         output_tensor = torch.DoubleTensor((output_tensor,))
                     self.assertEqual(unpack_variables(output_variable), output_tensor)
                     # TODO: check that both have changed after adding all inplace ops
@@ -3539,7 +3075,7 @@ def add_test(
 
         setattr(TestAutograd, test_name, do_test)
 
-for test in method_tests:
+for test in method_tests():
     add_test(*test)
 
 if __name__ == '__main__':

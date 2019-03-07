@@ -60,6 +60,13 @@ An empty sparse tensor can be constructed by specifying its size:
     and values:
     [torch.FloatTensor with no dimension]
 
+SparseTensor has the following invariants:
+  1. sparse_dim + dense_dim = len(SparseTensor.shape)
+  2. SparseTensor._indices().shape = (sparse_dim, nnz)
+  3. SparseTensor._values().shape = (nnz, SparseTensor.shape[sparse_dim:])
+Since SparseTensor._indices() is always a 2D tensor, the smallest sparse_dim = 1.
+Therefore, representation of a SparseTensor of sparse_dim = 0 is simply a dense tensor.
+
 .. note::
 
     Our sparse tensor format permits *uncoalesced* sparse tensors, where
@@ -82,7 +89,7 @@ An empty sparse tensor can be constructed by specifying its size:
     whether or not they are coalesced or not (e.g.,
     :func:`torch.sparse.FloatTensor._values` and
     :func:`torch.sparse.FloatTensor._indices`, as well as
-    :func:`torch.Tensor._sparse_mask`).  These operators are
+    :func:`torch.Tensor.sparse_mask`).  These operators are
     prefixed by an underscore to indicate that they reveal internal
     implementation details and should be used with care, since code
     that works with coalesced sparse tensors may not work with
@@ -110,6 +117,7 @@ An empty sparse tensor can be constructed by specifying its size:
     .. method:: mm
     .. method:: mul
     .. method:: mul_
+    .. method:: narrow_copy
     .. method:: resizeAs_
     .. method:: size
     .. method:: spadd
@@ -128,3 +136,10 @@ An empty sparse tensor can be constructed by specifying its size:
     .. method:: _indices
     .. method:: _values
     .. method:: _nnz
+
+Functions
+----------------------------------
+
+.. autofunction:: torch.sparse.addmm
+.. autofunction:: torch.sparse.mm
+.. autofunction:: torch.sparse.sum

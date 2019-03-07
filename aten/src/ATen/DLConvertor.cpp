@@ -1,4 +1,5 @@
-#include "ATen/DLConvertor.h"
+#include <ATen/DLConvertor.h>
+#include <ATen/Functions.h>
 
 #include <iostream>
 #include <sstream>
@@ -36,6 +37,15 @@ static DLDataType getDLDataType(const Type& type) {
     case ScalarType::Half:
       dtype.code = DLDataTypeCode::kDLFloat;
       break;
+    case ScalarType::Bool:
+      dtype.code = DLDataTypeCode::kDLUInt;
+      break;
+    case ScalarType::ComplexHalf:
+      throw std::logic_error("ComplexHalf is not supported by dlpack");
+    case ScalarType::ComplexFloat:
+      throw std::logic_error("ComplexFloat is not supported by dlpack");
+    case ScalarType::ComplexDouble:
+      throw std::logic_error("ComplexDouble is not supported by dlpack");
     case ScalarType::Undefined:
       throw std::logic_error("Undefined is not a valid ScalarType");
     case ScalarType::NumOptions:
@@ -57,19 +67,20 @@ static DLContext getDLContext(const Type& type, const int64_t& device_id) {
 }
 
 
-static Backend getATenBackend(const DLContext& ctx) {
-  Backend backend;
+static DeviceType getATenDeviceType(const DLContext& ctx) {
   switch (ctx.device_type) {
     case DLDeviceType::kDLCPU:
-      backend = Backend::CPU;
-      break;
+      return DeviceType::CPU;
     case DLDeviceType::kDLGPU:
-      backend = Backend::CUDA;
-      break;
+      return DeviceType::CUDA;
+    case DLDeviceType::kDLOpenCL:
+      return DeviceType::OPENCL;
+    case DLDeviceType::kDLROCM:
+      return DeviceType::HIP;
     default:
       throw std::logic_error("Unsupported device_type: " + std::to_string(ctx.device_type));
   }
-  return backend;
+  return DeviceType::CPU; // impossible
 }
 
 
@@ -144,7 +155,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.deleter = &deleter;
   atDLMTensor->tensor.dl_tensor.data = src.data_ptr();
   int64_t device_id = 0;
-  if (src.type().is_cuda()) {
+  if (src.is_cuda()) {
     device_id = src.get_device();
   }
   atDLMTensor->tensor.dl_tensor.ctx = getDLContext(src.type(), device_id);
@@ -158,15 +169,15 @@ DLManagedTensor* toDLPack(const Tensor& src) {
 
 
 Tensor fromDLPack(const DLManagedTensor* src) {
-  Backend backend = getATenBackend(src->dl_tensor.ctx);
+  DeviceType device_type = getATenDeviceType(src->dl_tensor.ctx);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
   auto deleter = [src](void * self) {
     src->deleter(const_cast<DLManagedTensor*>(src));
   };
-  return getType(backend, stype).tensorFromBlob(
-      src->dl_tensor.data,
-      IntList(src->dl_tensor.shape, src->dl_tensor.ndim),
-      IntList(src->dl_tensor.strides, src->dl_tensor.ndim),
-      deleter);
+  return at::from_blob(src->dl_tensor.data,
+      IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
+      IntArrayRef(src->dl_tensor.strides, src->dl_tensor.ndim),
+      deleter,
+      at::device(device_type).dtype(stype));
 }
 } //namespace at

@@ -16,12 +16,12 @@ template <>
 template <typename DstType, typename SrcType>
 bool CastOp<CUDAContext>::DoRunWithType() {
   auto& input = Input(0);
-  auto* output = Output(0);
-  output->ResizeLike(input);
+
+  auto* output = Output(0, input.sizes(), at::dtype<DstType>());
   const auto* data = input.template data<SrcType>();
   auto* out = output->template mutable_data<DstType>();
-  DCHECK(input.size() < INT_MAX);
-  int N = input.size();
+  DCHECK(input.numel() < INT_MAX);
+  int N = input.numel();
   if (N == 0) {
     // skip the rest of the computation if input is empty
     return true;
@@ -58,7 +58,7 @@ bool CastOp<CUDAContext>::DoRunWithDstType<float>() {
   return DispatchHelper<
       TensorTypes<
           float,
-          float16,
+          at::Half,
           int32_t,
           bool,
           uint8_t,
@@ -73,12 +73,12 @@ bool CastOp<CUDAContext>::DoRunWithDstType<float>() {
 // specific version for casting _from_ fp16
 template <>
 template <>
-bool CastOp<CUDAContext>::DoRunWithDstType<float16>() {
+bool CastOp<CUDAContext>::DoRunWithDstType<at::Half>() {
   return DispatchHelper<
       TensorTypes<
           float,
-          float16>,
-      float16 /* DstType */>::call(this, Input(0));
+          at::Half>,
+      at::Half /* DstType */>::call(this, Input(0));
 }
 template <>
 void CastOp<CUDAContext>::SetBody(TensorProto_DataType to) {
@@ -114,7 +114,7 @@ void CastOp<CUDAContext>::SetBody(TensorProto_DataType to) {
       body_ = &CastOp<CUDAContext>::DoRunWithDstType<int64_t>;
       break;
     case TensorProto_DataType_FLOAT16:
-      body_ = &CastOp<CUDAContext>::DoRunWithDstType<float16>;
+      body_ = &CastOp<CUDAContext>::DoRunWithDstType<at::Half>;
       break;
     case TensorProto_DataType_DOUBLE:
       body_ = &CastOp<CUDAContext>::DoRunWithDstType<double>;

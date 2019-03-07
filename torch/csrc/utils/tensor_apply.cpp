@@ -1,11 +1,11 @@
-#include "tensor_apply.h"
+#include <torch/csrc/utils/tensor_apply.h>
 
 #include <ATen/TensorUtils.h>
 #include <ATen/ExpandUtils.h>
 
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/utils/python_numbers.h"
-#include "torch/csrc/utils/python_scalars.h"
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_scalars.h>
 
 using namespace at;
 
@@ -18,7 +18,7 @@ struct StridedData {
     , elementSize(tensor.type().elementSizeInBytes()) {}
 
   void* data;
-  IntList strides;
+  IntArrayRef strides;
   int64_t elementSize;
 
   void step(int dim) {
@@ -27,7 +27,7 @@ struct StridedData {
 };
 
 template<size_t N>
-static void recursive_apply(IntList sizes, ScalarType scalarType, int64_t dim,
+static void recursive_apply(IntArrayRef sizes, ScalarType scalarType, int64_t dim,
                             PyObject* fn, std::array<StridedData, N> strided_data) {
   int64_t ndim = sizes.size();
   if (dim == ndim) {

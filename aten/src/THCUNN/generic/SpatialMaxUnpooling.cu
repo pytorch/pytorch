@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialMaxUnpooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialMaxUnpooling.cu"
 #else
 
 void THNN_(SpatialMaxUnpooling_updateOutput)(

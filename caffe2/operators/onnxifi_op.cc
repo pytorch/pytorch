@@ -4,6 +4,59 @@ namespace caffe2 {
 
 namespace {
 
+void SetInputTensorDescriptorTypeAndBuffer(
+    const Tensor& cpu_tensor,
+    onnxTensorDescriptorV1* desc) {
+  if (cpu_tensor.template IsType<float>()) {
+    desc->dataType = ONNXIFI_DATATYPE_FLOAT32;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<float>());
+  } else if (cpu_tensor.template IsType<int32_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_INT32;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int32_t>());
+  } else if (cpu_tensor.template IsType<int8_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_INT8;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int8_t>());
+  } else if (cpu_tensor.template IsType<uint8_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_UINT8;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<uint8_t>());
+  } else if (cpu_tensor.template IsType<int64_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_INT64;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int64_t>());
+  } else if (cpu_tensor.template IsType<int16_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_INT16;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int16_t>());
+  } else if (cpu_tensor.template IsType<uint16_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_UINT16;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<uint16_t>());
+  } else {
+    CAFFE_THROW(
+        "Unsupported tensor type in ONNXIFI: ", cpu_tensor.dtype().name());
+  }
+}
+
+TypeMeta OnnixfiTypeToDataType(uint64_t onnxifi_type) {
+  static std::map<uint64_t, TypeMeta> data_type_map {
+    {ONNXIFI_DATATYPE_FLOAT32, TypeMeta::Make<float>()},
+    {ONNXIFI_DATATYPE_INT32, TypeMeta::Make<int>()},
+    {ONNXIFI_DATATYPE_INT8, TypeMeta::Make<int8_t>()},
+    {ONNXIFI_DATATYPE_UINT8, TypeMeta::Make<uint8_t>()},
+    {ONNXIFI_DATATYPE_INT64, TypeMeta::Make<int64_t>()},
+    {ONNXIFI_DATATYPE_INT16, TypeMeta::Make<int16_t>()},
+    {ONNXIFI_DATATYPE_UINT16, TypeMeta::Make<uint16_t>()},
+  };
+  const auto it = data_type_map.find(onnxifi_type);
+  CAFFE_ENFORCE(it != data_type_map.end(), "Unsupported ONXNIFI data type: ", onnxifi_type);
+  return it->second;
+}
+
+void SetOutputTensorDescriptorTypeAndBuffer(
+    uint64_t onnxifi_type,
+    Tensor* cpu_tensor,
+    onnxTensorDescriptorV1* desc) {
+  desc->dataType = onnxifi_type;
+  desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor->raw_mutable_data(OnnixfiTypeToDataType(onnxifi_type)));
+}
+
 void BlobToTensorDescriptor(
     const std::string& name,
     Workspace* ws,
@@ -15,7 +68,7 @@ void BlobToTensorDescriptor(
   // Memory type
   // We only allow weights to be CPU tensor for now
   CAFFE_ENFORCE(
-      blob->template IsType<Tensor>(CPU),
+      BlobIsTensorType(*blob, CPU),
       "Initialization blob ",
       name,
       " needs to be TensorCPU");
@@ -24,19 +77,10 @@ void BlobToTensorDescriptor(
 
   // Data type
   const auto& cpu_tensor = blob->template Get<TensorCPU>();
-  if (cpu_tensor.template IsType<float>()) {
-    desc->dataType = ONNXIFI_DATATYPE_FLOAT32;
-    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<float>());
-  } else if (cpu_tensor.template IsType<int64_t>()) {
-    desc->dataType = ONNXIFI_DATATYPE_INT64;
-    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int64_t>());
-  } else if (cpu_tensor.template IsType<int32_t>()) {
-    desc->dataType = ONNXIFI_DATATYPE_INT32;
-    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int32_t>());
-  }
+  SetInputTensorDescriptorTypeAndBuffer(cpu_tensor, desc);
 
   // Set dims
-  const auto& shape = cpu_tensor.dims();
+  const auto shape = cpu_tensor.sizes();
   desc->dimensions = shape.size();
   shapes->emplace_back(shape.cbegin(), shape.cend());
   desc->shape = shapes->back().data();
@@ -45,7 +89,7 @@ void BlobToTensorDescriptor(
 
 template <>
 std::vector<onnxTensorDescriptorV1>
-OnnxifiOp<float, CPUContext>::BuildInitializationList(
+OnnxifiOp<float, CPUContext>::buildInitializationList(
     Workspace* ws,
     std::unordered_set<std::string>* initialization_list,
     std::vector<std::string>* weight_names,
@@ -74,28 +118,25 @@ OnnxifiOp<float, CPUContext>::BuildInitializationList(
 
 template <>
 bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
+  CAFFE_ENFORCE_EQ(input_desc_.size(), InputSize());
   for (unsigned i = 0U; i < InputSize(); ++i) {
     const auto& input_tensor = Input(i);
-    const auto& tensor_dims = input_tensor.dims();
-    auto& tensor_descriptor = input_desc_.at(i);
+    const auto tensor_dims = input_tensor.sizes();
+    auto& tensor_descriptor = input_desc_[i];
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
-    tensor_descriptor.dataType = ONNXIFI_DATATYPE_FLOAT32;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     tensor_descriptor.dimensions = tensor_dims.size();
     input_shapes_.emplace_back(tensor_dims.cbegin(), tensor_dims.cend());
     tensor_descriptor.shape = input_shapes_.back().data();
-    tensor_descriptor.buffer =
-        reinterpret_cast<onnxPointer>(input_tensor.data<float>());
+    SetInputTensorDescriptorTypeAndBuffer(input_tensor, &tensor_descriptor);
   }
 
+  CAFFE_ENFORCE_EQ(output_desc_.size(), OutputSize());
   for (unsigned i = 0U; i < OutputSize(); ++i) {
-    auto* output_tensor = Output(i);
-    std::vector<TIndex> tensor_dims;
-    SetOutputShape(i, &tensor_dims);
-    output_tensor->Resize(tensor_dims);
-    auto& tensor_descriptor = output_desc_.at(i);
+    std::vector<size_t> tensor_dims;
+    uint64_t type = SetOutputShapeAndType(i, &tensor_dims);
+    auto& tensor_descriptor = output_desc_[i];
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
-    tensor_descriptor.dataType = ONNXIFI_DATATYPE_FLOAT32;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     tensor_descriptor.dimensions = tensor_dims.size();
     CAFFE_ENFORCE(
@@ -104,45 +145,75 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
         " has 0 dim");
     output_shapes_.emplace_back(tensor_dims.cbegin(), tensor_dims.cend());
     tensor_descriptor.shape = output_shapes_.back().data();
-    tensor_descriptor.buffer =
-        reinterpret_cast<onnxPointer>(output_tensor->mutable_data<float>());
+    std::vector<int64_t> tensor_dims_int64;
+    std::copy(tensor_dims.cbegin(), tensor_dims.cend(), std::back_inserter(tensor_dims_int64));
+    auto* output_tensor = Output(i, tensor_dims_int64, at::dtype(OnnixfiTypeToDataType(type)).device(CPU));
+    SetOutputTensorDescriptorTypeAndBuffer(
+        type, output_tensor, &tensor_descriptor);
   }
-
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxSetGraphIO(
-          graph_,
-          input_desc_.size(),
-          input_desc_.data(),
-          output_desc_.size(),
-          output_desc_.data()),
-      ONNXIFI_STATUS_SUCCESS);
-
+  bool ext_supported = false;
   onnxMemoryFenceV1 input_fence;
-  input_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
-  input_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxInitEvent(backend_, &input_fence.event),
-      ONNXIFI_STATUS_SUCCESS);
   onnxMemoryFenceV1 output_fence;
-  output_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
-  output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
+#ifdef ONNXIFI_ENABLE_EXT
+  /**
+   * If onnxifi extension mode is enabled,
+   * and onnxSetIOAndRunGraph is supported in backend,
+   * then we run throw this workflow;
+   * Else we fallback to non-onnxifi-extension workflow.
+   **/
+  if (onnxSetIOAndRunGraphPointer_ != nullptr) {
+    ext_supported = true;
+    output_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
+    output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
+    CAFFE_ENFORCE_EQ(
+        (*onnxSetIOAndRunGraphPointer_)(
+            graph_,
+            input_desc_.size(),
+            input_desc_.data(),
+            output_desc_.size(),
+            output_desc_.data(),
+            &output_fence),
+        ONNXIFI_STATUS_SUCCESS);
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
+  }
+#endif
+  if (!ext_supported) {
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxSetGraphIO(
+            graph_,
+            input_desc_.size(),
+            input_desc_.data(),
+            output_desc_.size(),
+            output_desc_.data()),
+        ONNXIFI_STATUS_SUCCESS);
 
-  // Call the asycn run on backend, singal event on input fence and wait for the
-  // event on output fence
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxSignalEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxRunGraph(graph_, &input_fence, &output_fence),
-      ONNXIFI_STATUS_SUCCESS);
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
+    input_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
+    input_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxInitEvent(backend_, &input_fence.event),
+        ONNXIFI_STATUS_SUCCESS);
+    output_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
+    output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
 
-  // Destroy the event objects
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxReleaseEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
+    // Call the async run on backend, signal event on input fence and wait for
+    // the event on output fence
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxRunGraph(graph_, &input_fence, &output_fence),
+        ONNXIFI_STATUS_SUCCESS);
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxSignalEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
 
+    // Destroy the event objects
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxReleaseEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
+  }
   return true;
 }
 

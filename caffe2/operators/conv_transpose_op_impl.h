@@ -11,7 +11,7 @@
 #include "caffe2/operators/conv_transpose_unpool_op_base.h"
 #include "caffe2/utils/math.h"
 
-CAFFE2_DECLARE_bool(caffe2_force_shared_col_buffer);
+C10_DECLARE_bool(caffe2_force_shared_col_buffer);
 
 namespace caffe2 {
 
@@ -19,9 +19,8 @@ template <typename T, class Context>
 bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const Tensor& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  Tensor* Y = Output(0);
   const int N = X.dim32(0), M = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
-  CAFFE_ENFORCE(filter.ndim() == 4, "filter must be 4D tensor");
+  CAFFE_ENFORCE(filter.dim() == 4, "filter must be 4D tensor");
   CAFFE_ENFORCE(
       filter.dim32(0) == M,
       "filter number must be equal to input channel number");
@@ -32,7 +31,8 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE(
       filter.dim32(3) == this->kernel_w(),
       "filter width must be equal to kernel width");
-  ConvTransposeUnpoolBase<Context>::SetOutputSize(X, Y, C);
+  auto sizes = ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
+  Tensor* Y = Output(0, sizes, at::dtype<T>());
 
   const int kernel_dim = C * this->kernel_h() * this->kernel_w();
   const int input_image_size = H * W;
@@ -40,19 +40,20 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
   if (InputSize() == 3) {
     auto& bias = Input(BIAS);
-    CAFFE_ENFORCE(bias.ndim() == 1, "bias must be 1D tensor");
+    CAFFE_ENFORCE(bias.dim() == 1, "bias must be 1D tensor");
     CAFFE_ENFORCE(
         bias.dim32(0) == C,
         "bias dimension must be equal to output channel number");
-    if (bias_multiplier_.size() != output_image_size) {
-      bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
+    ReinitializeTensor(
+        &bias_multiplier_,
+        {1, output_image_size},
+        at::dtype<T>().device(Context::GetDeviceType()));
       T* bm_data = bias_multiplier_.template mutable_data<T>();
       math::Set<T, Context>(
           output_image_size,
           static_cast<T>(1),
           bm_data,
           &context_);
-    }
   }
 
   const T* Xdata = X.template data<T>();
@@ -60,8 +61,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   T* Ydata = Y->template mutable_data<T>();
 
   auto f = [&](Tensor* col_buffer) {
-    col_buffer->Resize(
-        vector<TIndex>{C, this->kernel_h(), this->kernel_w(), H, W});
+    ReinitializeTensor(col_buffer, vector<int64_t>{C, this->kernel_h(), this->kernel_w(), H, W}, at::dtype<T>().device(Context::GetDeviceType()));
     T* col_buffer_data = col_buffer->template mutable_data<T>();
     for (auto image_id = 0; image_id < N; ++image_id) {
       // Weight term
@@ -126,7 +126,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       }
 
       Xdata += M * H * W;
-      Ydata += Y->size() / Y->dim32(0);
+      Ydata += Y->numel() / Y->dim32(0);
     }
   };
   if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
@@ -141,9 +141,8 @@ template <typename T, class Context>
 bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const Tensor& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  Tensor* Y = Output(0);
   const auto N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), M = X.dim32(3);
-  CAFFE_ENFORCE(filter.ndim() == 4, "filter must be 4D tensor");
+  CAFFE_ENFORCE(filter.dim() == 4, "filter must be 4D tensor");
   CAFFE_ENFORCE(
       filter.dim32(0) == M,
       "filter number must be equal to input channel number");
@@ -154,7 +153,8 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       filter.dim32(2) == this->kernel_w(),
       "filter width must be equal to kernel width");
   const int C = filter.dim32(3);
-  ConvTransposeUnpoolBase<Context>::SetOutputSize(X, Y, C);
+  auto sizes = ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
+  Tensor* Y = Output(0, sizes, at::dtype<T>());
 
   const auto kernel_dim = C * this->kernel_h() * this->kernel_w();
   const auto input_image_size = H * W;
@@ -162,27 +162,31 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
 
   if (InputSize() == 3) {
     auto& bias = Input(BIAS);
-    CAFFE_ENFORCE(bias.ndim() == 1, "bias must be 1D tensor");
+    CAFFE_ENFORCE(bias.dim() == 1, "bias must be 1D tensor");
     CAFFE_ENFORCE(
         bias.dim32(0) == C,
         "bias dimension must be equal to output channel number");
-    if (bias_multiplier_.size() != output_image_size) {
-      bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
+    // TODO(jerryzh): is it OK to remove the check of whether numel is output_image_size
+    ReinitializeTensor(
+        &bias_multiplier_,
+        {1, output_image_size},
+        at::dtype<T>().device(Context::GetDeviceType()));
       T* bm_data = bias_multiplier_.template mutable_data<T>();
       math::Set<T, Context>(
           output_image_size,
           static_cast<T>(1),
           bm_data,
           &context_);
-    }
   }
   const T* Xdata = X.template data<T>();
   const T* filter_data = filter.template data<T>();
   T* Ydata = Y->template mutable_data<T>();
 
   auto f = [&](Tensor* /*col_buffer*/) {
-    col_buffer_.Resize(
-        vector<TIndex>{H, W, this->kernel_h(), this->kernel_w(), C});
+    ReinitializeTensor(
+        &col_buffer_,
+        vector<int64_t>{H, W, this->kernel_h(), this->kernel_w(), C},
+        at::dtype<T>().device(Context::GetDeviceType()));
     T* col_buffer_data = col_buffer_.template mutable_data<T>();
     for (auto image_id = 0; image_id < N; ++image_id) {
       // Weight term
@@ -234,7 +238,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
             &context_);
       }
       Xdata += M * H * W;
-      Ydata += Y->size() / Y->dim32(0);
+      Ydata += Y->numel() / Y->dim32(0);
     }
   };
   if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
@@ -250,13 +254,13 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
-  auto* dfilter = Output(FILTER_GRAD);
+
   const int N = X.dim32(0), M = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
   // We only handle LegacyPadding::NOTSET case and ignore cases of
   // LegacyPadding::VALID and LegacyPadding::SAME
   // Thus, we don't need to manually compute padding values
   // We simply use the values from the user
-  CAFFE_ENFORCE(filter.ndim() == 4);
+  CAFFE_ENFORCE(filter.dim() == 4);
   const int C = filter.dim32(1);
   CAFFE_ENFORCE(
       filter.dim32(2) == this->kernel_h(),
@@ -264,25 +268,29 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE(
       filter.dim32(3) == this->kernel_w(),
       "filter width must be equal to kernel width");
-  dfilter->ResizeLike(filter);
+  auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
 
   const int kernel_dim = C * this->kernel_h() * this->kernel_w();
   const int output_image_size = dY.dim32(2) * dY.dim32(3);
   // The col buffer is stored in CHW order as well
-  col_buffer_.Resize(
-      vector<TIndex>{C, this->kernel_h(), this->kernel_w(), H, W});
+  ReinitializeTensor(
+      &col_buffer_,
+      vector<int64_t>{C, this->kernel_h(), this->kernel_w(), H, W},
+      at::dtype<T>().device(Context::GetDeviceType()));
   if (!no_bias_) {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD);
     dbias->Resize(C);
-    if (bias_multiplier_.size() != output_image_size) {
-      bias_multiplier_.Resize(1, output_image_size);
-      T* bm_data = bias_multiplier_.template mutable_data<T>();
-      math::Set<T, Context>(
-          output_image_size,
-          static_cast<T>(1),
-          bm_data,
-          &context_);
-    }
+    // TODO(jerryzh): is it OK to remove the check of whether numel is output_image_size
+    ReinitializeTensor(
+        &bias_multiplier_,
+        {1, output_image_size},
+        at::dtype<T>().device(Context::GetDeviceType()));
+    T* bm_data = bias_multiplier_.template mutable_data<T>();
+    math::Set<T, Context>(
+        output_image_size,
+        static_cast<T>(1),
+        bm_data,
+        &context_);
   }
   T* col_buffer_data = col_buffer_.template mutable_data<T>();
   const T* Xdata = X.template data<T>();
@@ -290,11 +298,11 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const T* dYdata = dY.template data<T>();
   T* dfilter_data = dfilter->template mutable_data<T>();
   // Pre-setting the gradients to zero
-  math::Set<T, Context>(dfilter->size(), 0, dfilter_data, &context_);
+  math::Set<T, Context>(dfilter->numel(), 0, dfilter_data, &context_);
   if (!no_bias_) {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD);
     T* dbias_data = dbias->template mutable_data<T>();
-    math::Set<T, Context>(dbias->size(), 0, dbias_data, &context_);
+    math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
   }
   for (auto image_id = 0; image_id < N; ++image_id) {
     // gradient w.r.t. filters. Im2Col followed by Gemm
@@ -346,15 +354,16 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           input_grad_data,
           &context_);
     }
-    dYdata += dY.size() / dY.dim32(0);
-    Xdata += X.size() / X.dim32(0);
+    dYdata += dY.numel() / dY.dim32(0);
+    Xdata += X.numel() / X.dim32(0);
   }
   if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
     // Compute gradients w.r.t. the input
     // Since we have changed dYdata in the above loop, we will need to reset.
     dYdata = dY.template data<T>();
-    auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-    dX->ResizeLike(X);
+
+    auto* dX = Output(
+        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
     T* dXdata = dX->template mutable_data<T>();
     for (auto image_id = 0; image_id < N; ++image_id) {
       // Im2Col.
@@ -390,8 +399,8 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           0,
           dXdata,
           &context_);
-      dYdata += dY.size() / dY.dim32(0);
-      dXdata += X.size() / X.dim32(0);
+      dYdata += dY.numel() / dY.dim32(0);
+      dXdata += X.numel() / X.dim32(0);
     }
   }
   return true;
@@ -402,13 +411,13 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
-  auto* dfilter = Output(FILTER_GRAD);
+
   const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), M = X.dim32(3);
   // We only handle LegacyPadding::NOTSET case and ignore cases of
   // LegacyPadding::VALID and LegacyPadding::SAME
   // Thus, we don't need to manually compute padding values
   // We simply use the values from the user
-  CAFFE_ENFORCE(filter.ndim() == 4, "filter must be 4D tensor");
+  CAFFE_ENFORCE(filter.dim() == 4, "filter must be 4D tensor");
   CAFFE_ENFORCE(
       filter.dim32(1) == this->kernel_h(),
       "filter height must be equal to kernel height");
@@ -416,25 +425,29 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       filter.dim32(2) == this->kernel_w(),
       "filter width must be equal to kernel width");
   const int C = filter.dim32(3);
-  dfilter->ResizeLike(filter);
+  auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
 
   const int kernel_dim = C * this->kernel_h() * this->kernel_w();
   const int output_image_size = dY.dim32(1) * dY.dim32(2);
   // The col buffer is stored in HWC order as well
-  col_buffer_.Resize(
-      vector<TIndex>{H, W, this->kernel_h(), this->kernel_w(), C});
+  ReinitializeTensor(
+      &col_buffer_,
+      vector<int64_t>{H, W, this->kernel_h(), this->kernel_w(), C},
+      at::dtype<T>().device(Context::GetDeviceType()));
   if (!no_bias_) {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD);
     dbias->Resize(C);
-    if (bias_multiplier_.size() != output_image_size) {
-      bias_multiplier_.Resize(1, output_image_size);
-      T* bm_data = bias_multiplier_.template mutable_data<T>();
-      math::Set<T, Context>(
-          output_image_size,
-          static_cast<T>(1),
-          bm_data,
-          &context_);
-    }
+    // TODO(jerryzh): is it OK to remove the check of whether numel is output_image_size
+    ReinitializeTensor(
+        &bias_multiplier_,
+        {1, output_image_size},
+        at::dtype<T>().device(Context::GetDeviceType()));
+    T* bm_data = bias_multiplier_.template mutable_data<T>();
+    math::Set<T, Context>(
+        output_image_size,
+        static_cast<T>(1),
+        bm_data,
+        &context_);
   }
   T* col_buffer_data = col_buffer_.template mutable_data<T>();
   const T* Xdata = X.template data<T>();
@@ -442,11 +455,11 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const T* dYdata = dY.template data<T>();
   T* dfilter_data = dfilter->template mutable_data<T>();
   // Pre-setting the gradients to zero
-  math::Set<T, Context>(dfilter->size(), 0, dfilter_data, &context_);
+  math::Set<T, Context>(dfilter->numel(), 0, dfilter_data, &context_);
   if (!no_bias_) {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD);
     T* dbias_data = dbias->template mutable_data<T>();
-    math::Set<T, Context>(dbias->size(), 0, dbias_data, &context_);
+    math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
   }
   for (auto image_id = 0; image_id < N; ++image_id) {
     // gradient w.r.t. filters. Im2Col followed by Gemm
@@ -498,15 +511,16 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           input_grad_data,
           &context_);
     }
-    dYdata += dY.size() / dY.dim32(0);
-    Xdata += X.size() / X.dim32(0);
+    dYdata += dY.numel() / dY.dim32(0);
+    Xdata += X.numel() / X.dim32(0);
   }
   if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
     // Compute gradients w.r.t. the input
     // Since we have changed dYdata in the above loop, we will need to reset.
     dYdata = dY.template data<T>();
-    auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-    dX->ResizeLike(X);
+
+    auto* dX = Output(
+        no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD, X.sizes(), at::dtype<T>());
     T* dXdata = dX->template mutable_data<T>();
     for (auto image_id = 0; image_id < N; ++image_id) {
       // Im2Col.
@@ -542,8 +556,8 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           0,
           dXdata,
           &context_);
-      dYdata += dY.size() / dY.dim32(0);
-      dXdata += X.size() / X.dim32(0);
+      dYdata += dY.numel() / dY.dim32(0);
+      dXdata += X.numel() / X.dim32(0);
     }
   }
   return true;

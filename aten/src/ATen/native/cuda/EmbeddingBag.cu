@@ -1,9 +1,9 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/NativeFunctions.h>
 
-#include "ATen/AccumulateType.h"
+#include <ATen/AccumulateType.h>
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
@@ -73,14 +73,22 @@ __global__ void EmbeddingBag_updateOutputKernel(
         }
       }
       if (mode == MODE_MEAN) {
-        weightFeatSum = weightFeatSum / static_cast<accscalar_t>(bag_size_);
-        bag_size[bag] = bag_size_;
+        if (end == begin) {
+          bag_size[bag] = 0;
+        } else {
+          weightFeatSum = weightFeatSum / static_cast<accscalar_t>(bag_size_);
+          bag_size[bag] = bag_size_;
+        }
       }
 
       if (mode == MODE_MEAN || mode == MODE_SUM) {
         output[bag * featureSize + featureDim] = static_cast<scalar_t>(weightFeatSum);
       }
       else if (mode == MODE_MAX) {
+        if (end == begin) {
+          // If bag is empty, set output to 0.
+          weightFeatMax = 0;
+        }
         max_indices[bag * featureSize + featureDim] = maxWord;
         output[bag * featureSize + featureDim] = weightFeatMax;
       }
@@ -98,7 +106,7 @@ template <typename scalar_t>
 __global__ void EmbeddingBag_accGradParametersKernel_sum_avg(
     int64_t *input, int64_t *indices, scalar_t *gradOutput,
     scalar_t *gradWeight, int64_t *offset2bag, int64_t *count, ptrdiff_t numel,
-    int64_t stride, int mode, int64_t *bag_size) {
+    int64_t stride, int mode, const int64_t *bag_size) {
 
   using accscalar_t = acc_type<scalar_t, true>;
   int idx = blockIdx.x * 4 + threadIdx.y;
@@ -169,21 +177,25 @@ Tensor embedding_bag_backward_cuda_sum_avg(
                                    const Tensor &grad,
                                    const Tensor &indices,
                                    const Tensor &offset2bag,
-                                   const Tensor &bag_size_,
+                                   const Tensor &bag_size,
                                    int64_t num_weights,
                                    bool scale_grad_by_freq, int64_t mode) {
 
-  Tensor &bag_size = const_cast<Tensor &>(bag_size_);
-
-  auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.type());
+  auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.options());
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   ptrdiff_t numel = indices.numel();
+
+  if (numel == 0) {
+    // all empty bags
+    return grad_weight;
+  }
+
   int64_t stride = grad_weight.stride(0);
 
-  auto sorted_indices = indices.type().tensor(indices.sizes());
-  auto orig_indices = indices.type().tensor(indices.sizes());
+  auto sorted_indices = at::empty_like(indices);
+  auto orig_indices = at::empty_like(indices);
   using device_ptr = thrust::device_ptr<int64_t>;
 
   // Sort the inputs into sorted with the corresponding indices; we
@@ -208,7 +220,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
 
   Tensor count;
   if (scale_grad_by_freq) {
-    count = indices.type().tensor(indices.sizes());
+    count = at::empty_like(indices);
 
     auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
     auto policy = thrust::cuda::par(allocator).on(stream);
@@ -268,8 +280,10 @@ __global__ void EmbeddingBag_accGradParametersKernel_max(
       int64_t bag = chunk / chunksPerBag;
 
       int64_t word_idx = max_indices[bag * stride + featureDim];
-
-      atomicAdd(&(gradWeight[word_idx * stride + featureDim]), gradOutput[bag * stride + featureDim]);
+      if (word_idx >= 0) {
+        // If bag is empty, we have max_indices[idx] set to -1 in forward.
+        atomicAdd(&(gradWeight[word_idx * stride + featureDim]), gradOutput[bag * stride + featureDim]);
+      }
     }
   }
 }
@@ -278,7 +292,7 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
                                    const Tensor &max_indices,
                                    int64_t num_weights) {
 
-  auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.type());
+  auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.options());
 
   int64_t stride = grad_weight.stride(0);
 
@@ -382,7 +396,7 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
 
     default:
       AT_ERROR(
-          "Unknown mode for embedding_bag_backward_cuda %d", mode);
+          "Unknown mode for embedding_bag_backward_cuda ", mode);
   }
 }
 

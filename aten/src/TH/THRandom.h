@@ -77,7 +77,10 @@ TH_API double THRandom_logNormal(THGenerator *_generator, double mean, double st
 */
 TH_API int THRandom_geometric(THGenerator *_generator, double p);
 
-/* Returns true with probability $p$ and false with probability $1-p$ (p > 0). */
+/* Returns true with double probability $p$ and false with probability $1-p$ (p > 0). */
 TH_API int THRandom_bernoulli(THGenerator *_generator, double p);
+
+/* Returns true with float probability $p$ and false with probability $1-p$ (p > 0). */
+TH_API int THRandom_bernoulliFloat(THGenerator *_generator, float p);
 
 #endif

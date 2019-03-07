@@ -1,0 +1,86 @@
+syntax = "proto2";
+
+import "caffe2/proto/caffe2.proto";
+
+package torch;
+
+message RecordRef {
+  optional string key = 1;
+}
+
+message TensorDef {
+  repeated int64 dims = 1;
+  optional int64 offset = 2;
+  repeated int64 strides = 3;
+  // whether we compute the gradient for the parameter
+  optional bool requires_grad = 4;
+  optional caffe2.TensorProto.DataType data_type = 5;
+
+  optional RecordRef data = 6;
+
+  // device field stores the canonical device string, and it follows the
+  // format below: `(cpu|cuda)[:<device-index>]`, e.g., 'cuda:0'
+  optional string device = 7;
+}
+
+message ParameterDef {
+  // whether this parameter is registered as buffer or not
+  optional bool is_buffer = 1;
+
+  // the offset into the tensor table where this parameter is stored
+  optional int64 tensor_id = 2;
+
+  optional string name = 3;
+}
+
+message ModuleDef {
+  repeated ModuleDef submodules = 1;
+
+  optional RecordRef torchscript_arena = 2;
+
+  repeated caffe2.NetDef caffe2_nets = 3;
+
+  // because the old pickle modules may not be supported by torch_script,
+  // have to stored as pickle_arena at this moment.
+  optional RecordRef pickle_arena = 4;
+  // should be exposed by the Class Archive, so user can save
+  // module specific data which cannot be store in the graph or torch_script
+  optional RecordRef cpp_arena = 5;
+
+  // the parameters of this module
+  repeated ParameterDef parameters = 6;
+
+  // the names of inputs and outputs of the module are inferred
+  // from the main method.
+
+  optional string name = 7;
+
+  // whether apply the optimizations to this module, only applicable to
+  // script modules
+  optional bool optimize = 8;
+}
+
+enum ProtoVersion {
+  PROTO_VERSION_NEWEST = 0x0000000000000001;
+}
+
+message ModelDef {
+  // for the proto version, to keep both backward and forward
+  // compatibility, please bump the proto_version when we add any
+  // change in the proto. runtime decides whether accept the
+  // model based on the ir_version.
+  optional int64 proto_version = 1;
+
+  // main module of the model
+  optional ModuleDef main_module = 2;
+
+  // to distinguish whether exported from c2 or torch
+  optional string producer_name = 3;
+
+  // put build version here
+  optional string producer_version = 4;
+
+  // the table contains all the tensor information
+  // the tensor id is defined as TensorProto.name
+  repeated TensorDef tensors = 5;
+}

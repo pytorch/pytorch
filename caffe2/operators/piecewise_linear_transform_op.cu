@@ -103,14 +103,14 @@ __global__ void PieceWiseLinearTransformBinaryKernel2(
 
 template <>
 void PiecewiseLinearTransformOp<float, CUDAContext>::setUpTensors(
-    TIndex& num_func_per_group,
-    TIndex& num_group,
-    TIndex M) {
+    int64_t& num_func_per_group,
+    int64_t& num_group,
+    int64_t M) {
   if (transform_param_from_arg_) {
     if (!gpu_copied_) {
-      TIndex num_bounds;
-      TIndex num_slopes;
-      TIndex num_intercepts;
+      int64_t num_bounds;
+      int64_t num_slopes;
+      int64_t num_intercepts;
 
       CAFFE_ENFORCE_EQ(InputSize(), 1);
 
@@ -162,16 +162,16 @@ void PiecewiseLinearTransformOp<float, CUDAContext>::setUpTensors(
       gpu_copied_ = true;
     }
   } else {
-    TIndex num_bounds;
-    TIndex num_slopes;
-    TIndex num_intercepts;
+    int64_t num_bounds;
+    int64_t num_slopes;
+    int64_t num_intercepts;
     CAFFE_ENFORCE_EQ(InputSize(), 4);
     auto& bounds_input = Input(BOUNDS);
     auto& slopes_input = Input(SLOPES);
     auto& intercepts_input = Input(INTERCEPTS);
-    num_bounds = bounds_input.size();
-    num_slopes = slopes_input.size();
-    num_intercepts = intercepts_input.size();
+    num_bounds = bounds_input.numel();
+    num_slopes = slopes_input.numel();
+    num_intercepts = intercepts_input.numel();
     InferNumFunctionsPerGroup(
         num_bounds,
         num_slopes,
@@ -194,19 +194,19 @@ void PiecewiseLinearTransformOp<float, CUDAContext>::setUpTensors(
 template <>
 bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformGeneral() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  CAFFE_ENFORCE_EQ(X.ndim(), 2);
-  TIndex N = X.dim32(0);
-  TIndex M = X.dim32(1);
-  Y->ResizeLike(X);
 
-  TIndex num_func_per_group;
-  TIndex num_group;
+  CAFFE_ENFORCE_EQ(X.dim(), 2);
+  int64_t N = X.dim32(0);
+  int64_t M = X.dim32(1);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
+
+  int64_t num_func_per_group;
+  int64_t num_group;
 
   setUpTensors(num_func_per_group, num_group, M);
 
   PieceWiseLinearTransformGeneralKernel<<<
-      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_GET_BLOCKS(X.numel()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
@@ -226,23 +226,23 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformGeneral() {
 template <>
 bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
   auto& X = Input(0);
-  auto* Y = Output(0);
-  CAFFE_ENFORCE(X.ndim() == 1 || X.ndim() == 2);
-  TIndex N = X.dim32(0);
-  TIndex M = X.ndim() == 2 ? X.dim32(1) : 1;
+
+  CAFFE_ENFORCE(X.dim() == 1 || X.dim() == 2);
+  int64_t N = X.dim32(0);
+  int64_t M = X.dim() == 2 ? X.dim32(1) : 1;
   CAFFE_ENFORCE(
       M == 1 || M == 2,
       "If binary is set to true, the input must be Nx2 or Nx1 tensor");
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
 
-  TIndex num_func_per_group;
-  TIndex num_group;
+  int64_t num_func_per_group;
+  int64_t num_group;
 
   setUpTensors(num_func_per_group, num_group, M);
 
   if (M == 1) {
     PieceWiseLinearTransformBinaryKernel1<<<
-        CAFFE_GET_BLOCKS(X.size()),
+        CAFFE_GET_BLOCKS(X.numel()),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(
@@ -258,7 +258,7 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
   } else {
     // don't want N*M threads, only N*M/2
     PieceWiseLinearTransformBinaryKernel2<<<
-        CAFFE_GET_BLOCKS(X.size() / 2),
+        CAFFE_GET_BLOCKS(X.numel() / 2),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(

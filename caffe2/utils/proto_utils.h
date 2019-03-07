@@ -9,7 +9,7 @@
 
 #include "caffe2/core/logging.h"
 #include "caffe2/utils/proto_wrap.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
@@ -29,6 +29,9 @@ CAFFE2_API int DeviceId(const DeviceOption& option);
 
 // Returns if the two DeviceOptions are pointing to the same device.
 CAFFE2_API bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs);
+
+CAFFE2_API bool IsCPUDeviceType(int device_type);
+CAFFE2_API bool IsGPUDeviceType(int device_type);
 
 // Common interfaces that reads file contents into a string.
 CAFFE2_API bool ReadStringFromFile(const char* filename, string* str);
@@ -194,7 +197,7 @@ CAFFE2_API bool HasInput(const OperatorDef& op, const std::string& input);
  * does not copy the operator def, so one would need to make sure that the
  * lifetime of the OperatorDef object outlives that of the ArgumentHelper.
  */
-class CAFFE2_API ArgumentHelper {
+class C10_EXPORT ArgumentHelper {
  public:
   template <typename Def>
   static bool HasArgument(const Def& def, const string& name) {

@@ -7,11 +7,9 @@ namespace caffe2 {
 
 class StringJoinOpTest : public testing::Test {
  public:
-  bool runOp(const TensorCPU& input) {
+  bool runOp(const Tensor& input) {
     auto* blob = ws_.CreateBlob("X");
-    auto* tensor = blob->GetMutableTensor(CPU);
-    tensor->ResizeLike(input);
-    tensor->ShareData(input);
+    BlobSetTensor(blob, input.Alias());
 
     OperatorDef def;
     def.set_name("test");
@@ -26,11 +24,11 @@ class StringJoinOpTest : public testing::Test {
   const std::string* checkAndGetOutput(int outputSize) {
     const auto* output = ws_.GetBlob("Y");
     EXPECT_NE(output, nullptr);
-    EXPECT_TRUE(output->IsType<Tensor>(CPU));
+    EXPECT_TRUE(BlobIsTensorType(*output, CPU));
     const auto& outputTensor = output->Get<TensorCPU>();
-    EXPECT_EQ(outputTensor.ndim(), 1);
-    EXPECT_EQ(outputTensor.dim(0), outputSize);
-    EXPECT_EQ(outputTensor.size(), outputSize);
+    EXPECT_EQ(outputTensor.dim(), 1);
+    EXPECT_EQ(outputTensor.size(0), outputSize);
+    EXPECT_EQ(outputTensor.numel(), outputSize);
     return outputTensor.data<std::string>();
   }
 
@@ -42,7 +40,7 @@ TEST_F(StringJoinOpTest, testString1DJoin) {
   std::vector<std::string> input = {"a", "xx", "c"};
 
   auto blob = caffe2::make_unique<Blob>();
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob.get(), CPU);
   tensor->Resize(input.size());
   auto* data = tensor->template mutable_data<std::string>();
   for (int i = 0; i < input.size(); ++i) {
@@ -62,7 +60,7 @@ TEST_F(StringJoinOpTest, testString2DJoin) {
                                                  {"dd", "ee", "ff"}};
 
   auto blob = caffe2::make_unique<Blob>();
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob.get(), CPU);
   tensor->Resize(input.size(), input[0].size());
   auto* data = tensor->template mutable_data<std::string>();
   for (int i = 0; i < input.size(); ++i) {
@@ -82,7 +80,7 @@ TEST_F(StringJoinOpTest, testFloat1DJoin) {
   std::vector<float> input = {3.90f, 5.234f, 8.12f};
 
   auto blob = caffe2::make_unique<Blob>();
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob.get(), CPU);
   tensor->Resize(input.size());
   auto* data = tensor->template mutable_data<float>();
   for (int i = 0; i < input.size(); ++i) {
@@ -102,7 +100,7 @@ TEST_F(StringJoinOpTest, testFloat2DJoin) {
                                            {4.67f, 5.90f, 6.32f}};
 
   auto blob = caffe2::make_unique<Blob>();
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob.get(), CPU);
   tensor->Resize(input.size(), input[0].size());
   auto* data = tensor->template mutable_data<float>();
   for (int i = 0; i < input.size(); ++i) {
@@ -122,7 +120,7 @@ TEST_F(StringJoinOpTest, testLong2DJoin) {
   std::vector<std::vector<int64_t>> input = {{100, 200}, {1000, 2000}};
 
   auto blob = caffe2::make_unique<Blob>();
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob.get(), CPU);
   tensor->Resize(input.size(), input[0].size());
   auto* data = tensor->template mutable_data<int64_t>();
   for (int i = 0; i < input.size(); ++i) {

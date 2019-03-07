@@ -1,11 +1,12 @@
 #include <torch/nn/modules/batchnorm.h>
 
 #include <torch/cuda.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <cstddef>
+#include <ostream>
 #include <utility>
 #include <vector>
 
@@ -13,8 +14,7 @@ namespace torch {
 namespace nn {
 BatchNormOptions::BatchNormOptions(int64_t features) : features_(features) {}
 
-BatchNormImpl::BatchNormImpl(BatchNormOptions options)
-    : options(std::move(options)) {
+BatchNormImpl::BatchNormImpl(BatchNormOptions options) : options(options) {
   reset();
 }
 
@@ -28,20 +28,32 @@ void BatchNormImpl::reset() {
   if (options.stateful_) {
     running_mean =
         register_buffer("running_mean", torch::zeros({options.features_}));
-    running_variance =
-        register_buffer("running_variance", torch::ones({options.features_}));
+    running_var =
+        register_buffer("running_var", torch::ones({options.features_}));
   }
 }
 
-Tensor BatchNormImpl::forward(Tensor input) {
-  return pure_forward(input, Tensor(), Tensor());
+void BatchNormImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::BatchNorm(features=" << options.features_
+         << ", eps=" << options.eps_ << ", momentum=" << options.momentum_
+         << ", affine=" << options.affine_ << ", stateful=" << options.stateful_
+         << ")";
 }
 
-Tensor BatchNormImpl::pure_forward(Tensor input, Tensor mean, Tensor variance) {
-  auto& running_mean = options.stateful_ ? this->running_mean : mean;
-  auto& running_variance =
-      options.stateful_ ? this->running_variance : variance;
+Tensor BatchNormImpl::forward(const Tensor& input) {
+  AT_CHECK(
+      options.stateful_,
+      "Calling BatchNorm::forward is only permitted when "
+      "the 'stateful' option is true (was false). "
+      "Use BatchNorm::pure_forward instead.");
+  return pure_forward(input, running_mean, running_var);
+}
 
+Tensor BatchNormImpl::pure_forward(
+    const Tensor& input,
+    const Tensor& mean,
+    const Tensor& variance) {
   if (is_training()) {
     const auto num_channels = input.dim() > 1 ? input.size(1) : 1;
     AT_CHECK(
@@ -53,8 +65,8 @@ Tensor BatchNormImpl::pure_forward(Tensor input, Tensor mean, Tensor variance) {
       input,
       weight,
       bias,
-      running_mean,
-      running_variance,
+      mean,
+      variance,
       is_training(),
       options.momentum_,
       options.eps_,

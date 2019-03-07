@@ -14,6 +14,31 @@ bool WeightedSumGradientOp<CPUContext>::RunOnDevice() {
   return DoRunWithType<float>();
 }
 
+std::vector<TensorShape> WeightedSumShapeInference(
+    const OperatorDef& /* unused */,
+    const vector<TensorShape>& in) {
+  vector<TensorShape> out(1);
+  out[0] = in[0];
+  return out;
+}
+
+OpSchema::Cost CostInferenceForWeightedSum(
+    const OperatorDef& /* unused */,
+    const vector<TensorShape>& in) {
+  CAFFE_ENFORCE_EQ(
+      in.size() % 2, 0, "WeightedSum requires an even number of inputs");
+  struct OpSchema::Cost c;
+
+  const auto& X0 = in[0];
+  const auto& nElem = nElemFromDim(X0);
+  const auto& nInputs = in.size();
+  c.flops = (nInputs - 1) * nElem;
+  c.bytes_read = (nInputs / 2) * (nElem + 1) * sizeof(X0.data_type());
+  c.bytes_written = nElem * sizeof(X0.data_type());
+  c.params_bytes = (nInputs / 2) * sizeof(X0.data_type());
+  return c;
+}
+
 REGISTER_CPU_OPERATOR(WallClockTime, WallClockTimeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Print, PrintOp<CPUContext>);
 REGISTER_CPU_OPERATOR(FlattenToVec, FlattenToVecOp<CPUContext>);
@@ -27,17 +52,8 @@ REGISTER_CPU_OPERATOR(
     ScatterWeightedSumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<CPUContext>);
 
-// From CPU, copy it to whatever the current context
-REGISTER_CPU_OPERATOR(
-    CopyFromCPUInput,
-    CopyOp<CPUContext, CPUContext, CPUContext>);
-REGISTER_CPU_OPERATOR(
-    CopyOnDeviceLike,
-    CopyOnDeviceLikeOp<CPUContext, CPUContext, CPUContext>);
-REGISTER_CPU_OPERATOR(Copy, CopyOp<CPUContext, CPUContext, CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToShape, LengthsToShapeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(HasElements, HasElementsOp<CPUContext>);
-REGISTER_CPU_OPERATOR(IsEmpty, IsEmptyOp<CPUContext>);
 REGISTER_CPU_OPERATOR(GatherRanges, GatherRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsGather, LengthsGatherOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToSegmentIds, LengthsToSegmentIdsOp<CPUContext>);
@@ -55,8 +71,6 @@ OPERATOR_SCHEMA(WallClockTime)
     .NumOutputs(1)
     .SetDoc("Time since epoch in nanoseconds.")
     .Output(0, "time", "The time in nanoseconds.");
-
-REGISTER_CPU_OPERATOR(UnsafeCoalesce, UnsafeCoalesceOp<CPUContext>);
 
 OPERATOR_SCHEMA(Print)
     .NumInputs(1)
@@ -104,17 +118,17 @@ op = core.CreateOperator(
     ["Y"]
 )
 
-# Create X: Sample softmax output for 5-class model
+// Create X: Sample softmax output for 5-class model
 X = np.array([2,2,2,2,2,2,2,2,2,2])
 print("X:\n",X)
 
-# Feed X into workspace
+// Feed X into workspace
 workspace.FeedBlob("X", X.astype(np.int32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Y:\n", workspace.FetchBlob("Y"))
 
 ```
@@ -262,6 +276,8 @@ OPERATOR_SCHEMA(SumInt)
 OPERATOR_SCHEMA(WeightedSum)
     .NumInputs([](int n) { return (n > 0 && n % 2 == 0); })
     .NumOutputs(1)
+    .TensorInferenceFunction(WeightedSumShapeInference)
+    .CostInferenceFunction(CostInferenceForWeightedSum)
     .AllowInplace({{0, 0}})
     .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
@@ -353,133 +369,6 @@ Currently only works on CPU because of access to INDICES.
         "Update slices, with shape len(INDICES) + shape(X_0)[1:]")
     .Output(0, "DATA", "Has to be exactly the same tensor as the input 0");
 
-OPERATOR_SCHEMA(Copy)
-    .NumInputs(1)
-    .NumOutputs(1)
-    .IdenticalTypeAndShape()
-    .InputsCanCrossDevices()
-    .SetDoc(R"DOC(
-Copy input tensor into output, potentially across devices.
-
-Github Links:
-
-- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.cc
-- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.h
-
-
-<details>
-
-<summary> <b>Example</b> </summary>
-
-**Code**
-
-```
-
-workspace.ResetWorkspace()
-
-op = core.CreateOperator(
-    "Copy",
-    ["input"],
-    ["output"]
-)
-
-workspace.FeedBlob("input", np.random.rand(3,3))
-print("input:", workspace.FetchBlob("input"))
-workspace.RunOperatorOnce(op)
-print("output:", workspace.FetchBlob("output"))
-
-```
-
-**Result**
-
-```
-
-input:
-[[0.16826761 0.68168217 0.55196001]
- [0.19735483 0.34837823 0.69015595]
- [0.09448514 0.57390828 0.37097193]]
-output:
-[[0.16826761 0.68168217 0.55196001]
- [0.19735483 0.34837823 0.69015595]
- [0.09448514 0.57390828 0.37097193]]
-
-```
-
-</details>
-
-)DOC")
-    .Input(0, "input", "(*Tensor*): input tensor to copy")
-    .Output(0, "output", "(*Tensor*): copy of input tensor");
-
-OPERATOR_SCHEMA(CopyGPUToCPU)
-    .NumInputs(1)
-    .NumOutputs(1)
-    .IdenticalTypeAndShape()
-    .InputsCanCrossDevices()
-    .DeviceInferenceFunction([](const OperatorDef& def) {
-      CAFFE_ENFORCE(
-          def.has_device_option(),
-          "CopyGPUToCPU op should have cuda device option.");
-      auto& cuda_option = def.device_option();
-      auto cpu_option = DeviceOption();
-      vector<DeviceOption> in_dev(def.input_size(), cuda_option);
-      vector<DeviceOption> out_dev(def.output_size(), cpu_option);
-      return std::make_pair(in_dev, out_dev);
-    })
-    .SetDoc(R"DOC(
-Copy tensor for GPU to CPU context. Must be run under GPU device option.
-)DOC")
-    .Input(0, "input", "The input tensor.")
-    .Output(0, "output", "Tensor that will contain a copy of the input.");
-
-OPERATOR_SCHEMA(CopyCPUToGPU)
-    .NumInputs(1)
-    .NumOutputs(1)
-    .IdenticalTypeAndShape()
-    .InputsCanCrossDevices()
-    .DeviceInferenceFunction([](const OperatorDef& def) {
-      CAFFE_ENFORCE(
-          def.has_device_option(),
-          "CopyCPUToGPU op should have cuda device option.");
-      auto& cuda_option = def.device_option();
-      auto cpu_option = DeviceOption();
-      vector<DeviceOption> in_dev(def.input_size(), cpu_option);
-      vector<DeviceOption> out_dev(def.output_size(), cuda_option);
-      return std::make_pair(in_dev, out_dev);
-    })
-    .SetDoc(R"DOC(
-Copy tensor for CPU to GPU context. Must be run under GPU device option.
-)DOC")
-    .Input(0, "input", "The input tensor.")
-    .Output(0, "output", "Tensor that will contain a copy of the input.");
-
-OPERATOR_SCHEMA(CopyFromCPUInput)
-    .NumInputs(1)
-    .NumOutputs(1)
-    .IdenticalTypeAndShape()
-    .InputsCanCrossDevices()
-    .DeviceInferenceFunction([](const OperatorDef& def) {
-      auto op_device =
-          def.has_device_option() ? def.device_option() : DeviceOption();
-      auto cpu_option = DeviceOption();
-      vector<DeviceOption> in_dev(def.input_size(), cpu_option);
-      vector<DeviceOption> out_dev(def.output_size(), op_device);
-      return std::make_pair(in_dev, out_dev);
-    })
-    .SetDoc(R"DOC(
-Take a CPU input tensor and copy it to an output in the current
-Context (GPU or CPU). This may involves cross-device MemCpy.
-)DOC")
-    .Input(0, "input", "The input CPU tensor.")
-    .Output(0, "output", "either a TensorCUDA or a TensorCPU");
-
-OPERATOR_SCHEMA(CopyOnDeviceLike)
-    .NumInputs(2)
-    .NumOutputs(1)
-    .SetDoc("Copy input tensor into output to the specific device.")
-    .Input(0, "input", "The input tensor.")
-    .Input(1, "dst", "Tensor, on which device the copy will be performed.")
-    .Output(0, "output", "Tensor that will contain a copy of the input.");
 
 OPERATOR_SCHEMA(HasElements)
     .NumInputs(1)
@@ -509,14 +398,14 @@ op = core.CreateOperator(
     ["has_elements"],
 )
 
-# Use a not-empty tensor
+// Use a not-empty tensor
 workspace.FeedBlob("tensor", np.random.randn(2, 2).astype(np.float32))
 print("tensor:\n", workspace.FetchBlob("tensor"))
 
 workspace.RunOperatorOnce(op)
 print("has_elements: ", workspace.FetchBlob("has_elements"),"\n")
 
-# Use an empty tensor
+// Use an empty tensor
 workspace.FeedBlob("tensor", np.empty(0))
 print("tensor:\n", workspace.FetchBlob("tensor"))
 
@@ -545,72 +434,6 @@ has_elements:  False
 )DOC")
     .Input(0, "tensor", "Input data tensor to check for elements.")
     .Output(0, "has_elements", "Output scalar boolean tensor. True if input has size > 0.");
-
-OPERATOR_SCHEMA(IsEmpty)
-    .NumInputs(1)
-    .NumOutputs(1)
-    .SetDoc(R"DOC(
-The *IsEmpty* op accepts a single input $tensor$, and produces a single boolean output $is\_empty$. The output is *True* if and only if $tensor$ has size == 0.
-
-Github Links:
-
-- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.cc
-- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.h
-
-
-<details>
-
-<summary> <b>Example</b> </summary>
-
-**Code**
-
-```
-
-workspace.ResetWorkspace()
-
-op = core.CreateOperator(
-    "IsEmpty",
-    ["tensor"],
-    ["is_empty"],
-)
-
-# Use a not-empty tensor
-workspace.FeedBlob("tensor", np.random.randn(2, 2).astype(np.float32))
-print("tensor:\n", workspace.FetchBlob("tensor"))
-
-workspace.RunOperatorOnce(op)
-print("is_empty: ", workspace.FetchBlob("is_empty"),"\n")
-
-# Use an empty tensor
-workspace.FeedBlob("tensor", np.empty(0))
-print("tensor:\n", workspace.FetchBlob("tensor"))
-
-workspace.RunOperatorOnce(op)
-print("is_empty: ", workspace.FetchBlob("is_empty"))
-
-```
-
-**Result**
-
-```
-
-tensor:
- [[ 0.26018378  0.6778789 ]
- [-1.3097627  -0.40083608]]
-is_empty:  False
-
-tensor:
- []
-is_empty:  True
-
-```
-
-</details>
-
-)DOC")
-    .ScalarType(::caffe2::TensorProto_DataType::TensorProto_DataType_BOOL)
-    .Input(0, "tensor", "Input data tensor to check if empty.")
-    .Output(0, "is_empty", "Output scalar boolean tensor. True if input has size == 0.");
 
 OPERATOR_SCHEMA(GatherRanges)
     .NumInputs(2)
@@ -824,31 +647,6 @@ weights derived by lengths. i.e 1/pow(length, power)
 
 SHOULD_NOT_DO_GRADIENT(WallClockTime);
 
-OPERATOR_SCHEMA(UnsafeCoalesce)
-    .NumInputsOutputs([](int inputs, int outputs) {
-      return inputs + 1 == outputs;
-    })
-    .AllowInplace([](int input, int output) { return input == output; })
-    .SetDoc(R"DOC(
-Coalesce the N inputs into N outputs and a single coalesced output blob.
-
-This allows operations that operate over multiple small kernels (e.g.
-biases in a deep CNN) to be coalesced into a single larger operation,
-amortizing the kernel launch overhead, synchronization costs for
-distributed computation, etc.
-
-The operator:
-
-- computes the total size of the coalesced blob by summing the input sizes
-- allocates the coalesced output blob as the total size
-- copies the input vectors into the coalesced blob, at the correct offset.
-- aliases each Output(i) to- point into the coalesced blob, at the corresponding offset for Input(i).
-
-This is 'unsafe' as the output vectors are aliased, so use with
-caution.
-
-)DOC");
-
 OPERATOR_SCHEMA(EnsureDense)
     .NumInputs(1)
     .NumOutputs(1)
@@ -914,7 +712,6 @@ SHOULD_NOT_DO_GRADIENT(Print);
 SHOULD_NOT_DO_GRADIENT(HasElements);
 SHOULD_NOT_DO_GRADIENT(IsEmpty);
 SHOULD_NOT_DO_GRADIENT(LengthsToShape);
-SHOULD_NOT_DO_GRADIENT(UnsafeCoalesce);
 
 class GetAliasGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -977,62 +774,6 @@ struct GetFlattenToVecGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(FlattenToVec, GetFlattenToVecGradient);
 
-struct GetCopyGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    return SingleGradientDef(
-        "CopyOnDeviceLike",
-        "",
-        vector<string>{GO(0), I(0)},
-        vector<string>{GI(0)});
-  }
-};
-REGISTER_GRADIENT(Copy, GetCopyGradient);
-
-struct GetGPUToCPUGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    if (g_output_[0].IsDense()) {
-      return SingleGradientDef(
-          "CopyCPUToGPU", "", vector<string>{GO(0)}, vector<string>{GI(0)});
-    } else {
-      return vector<OperatorDef>{CreateOperatorDef(
-                                     "CopyCPUToGPU",
-                                     "",
-                                     std::vector<string>{GO_I(0)},
-                                     std::vector<string>{GI_I(0)}),
-                                 CreateOperatorDef(
-                                     "CopyCPUToGPU",
-                                     "",
-                                     std::vector<string>{GO_V(0)},
-                                     std::vector<string>{GI_V(0)})};
-    }
-  }
-};
-REGISTER_GRADIENT(CopyGPUToCPU, GetGPUToCPUGradient);
-
-struct GetCPUToGPUGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    if (g_output_[0].IsDense()) {
-      return SingleGradientDef(
-          "CopyGPUToCPU", "", vector<string>{GO(0)}, vector<string>{GI(0)});
-    } else {
-      return vector<OperatorDef>{CreateOperatorDef(
-                                     "CopyGPUToCPU",
-                                     "",
-                                     std::vector<string>{GO_I(0)},
-                                     std::vector<string>{GI_I(0)}),
-                                 CreateOperatorDef(
-                                     "CopyGPUToCPU",
-                                     "",
-                                     std::vector<string>{GO_V(0)},
-                                     std::vector<string>{GI_V(0)})};
-    }
-  }
-};
-REGISTER_GRADIENT(CopyCPUToGPU, GetCPUToGPUGradient);
-
 SHOULD_NOT_DO_GRADIENT(LengthsToSegmentIds);
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengths);
 SHOULD_NOT_DO_GRADIENT(SegmentIdsToRanges);
@@ -1045,7 +786,7 @@ template <>
 bool NanCheckOp<CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  const int D = X.size();
+  const int D = X.numel();
   const float* data = X.data<float>();
   ConstEigenVectorMap<float> input_data(data, D);
 
@@ -1061,7 +802,7 @@ bool NanCheckOp<CPUContext>::RunOnDevice() {
       tensorPrinter_.Print<float>(Input(j));
       std::cerr << "NaN idxs:" << std::endl;
       const float* x = Input(j).data<float>();
-      for (size_t i = 0; i < Input(j).size(); ++i) {
+      for (size_t i = 0; i < Input(j).numel(); ++i) {
         if (std::isnan(x[i]) || std::isinf(x[i])) {
           std::cerr << i << " ";
         }
@@ -1072,7 +813,7 @@ bool NanCheckOp<CPUContext>::RunOnDevice() {
   }
 
   if (&X != Y) {
-    Y->CopyFrom(X, &context_);
+    Y->CopyFrom(X);
   }
   return true;
 }
@@ -1171,7 +912,7 @@ bool RangeOp<CPUContext>::DoRunOnDevice(
     const T& step,
     Tensor* output) {
   auto* output_data = output->template mutable_data<T>();
-  for (int i = 0; i < output->size(); ++i) {
+  for (int i = 0; i < output->numel(); ++i) {
     output_data[i] = i * step + start;
   }
   return true;

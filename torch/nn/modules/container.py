@@ -1,5 +1,6 @@
 import warnings
-from collections import OrderedDict, Iterable, Mapping
+from collections import OrderedDict
+from torch._six import container_abcs
 from itertools import islice
 import operator
 
@@ -40,6 +41,11 @@ class Sequential(Module):
                   ('conv2', nn.Conv2d(20,64,5)),
                   ('relu2', nn.ReLU())
                 ]))
+
+    Shape:
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(*)`, same shape as the input
     """
 
     def __init__(self, *args):
@@ -62,7 +68,7 @@ class Sequential(Module):
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
-            return Sequential(OrderedDict(list(self._modules.items())[idx]))
+            return self.__class__(OrderedDict(list(self._modules.items())[idx]))
         else:
             return self._get_item_by_idx(self._modules.values(), idx)
 
@@ -131,12 +137,12 @@ class ModuleList(Module):
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
-            return ModuleList(list(self._modules.values())[idx])
+            return self.__class__(list(self._modules.values())[idx])
         else:
             return self._modules[self._get_abs_string_index(idx)]
 
     def __setitem__(self, idx, module):
-        idx = operator.index(idx)
+        idx = self._get_abs_string_index(idx)
         return setattr(self, str(idx), module)
 
     def __delitem__(self, idx):
@@ -163,6 +169,17 @@ class ModuleList(Module):
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
+    def insert(self, index, module):
+        r"""Insert a given module before a given index in the list.
+
+        Arguments:
+            index (int): index to insert.
+            module (nn.Module): module to insert
+        """
+        for i in range(len(self._modules), index, -1):
+            self._modules[str(i)] = self._modules[str(i - 1)]
+        self._modules[str(index)] = module
+
     def append(self, module):
         r"""Appends a given module to the end of the list.
 
@@ -178,7 +195,7 @@ class ModuleList(Module):
         Arguments:
             modules (iterable): iterable of modules to append
         """
-        if not isinstance(modules, Iterable):
+        if not isinstance(modules, container_abcs.Iterable):
             raise TypeError("ModuleList.extend should be called with an "
                             "iterable, but got " + type(modules).__name__)
         offset = len(self)
@@ -190,8 +207,21 @@ class ModuleList(Module):
 class ModuleDict(Module):
     r"""Holds submodules in a dictionary.
 
-    ModuleDict can be indexed like a regular Python dictionary, but modules it
-    contains are properly registered, and will be visible by all Module methods.
+    :class:`~torch.nn.ModuleDict` can be indexed like a regular Python dictionary,
+    but modules it contains are properly registered, and will be visible by all
+    :class:`~torch.nn.Module` methods.
+
+    :class:`~torch.nn.ModuleDict` is an **ordered** dictionary that respects
+
+    * the order of insertion, and
+
+    * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged ``OrderedDict``
+      or another :class:`~torch.nn.ModuleDict` (the argument to :meth:`~torch.nn.ModuleDict.update`).
+
+    Note that :meth:`~torch.nn.ModuleDict.update` with other unordered mapping
+    types (e.g., Python's plain ``dict``) doesn't not preserve order of the
+    merged mapping.
+
 
     Arguments:
         modules (iterable, optional): a mapping (dictionary) of (string: module)
@@ -278,13 +308,13 @@ class ModuleDict(Module):
             modules (iterable): a mapping (dictionary) of (string: :class:`~torch.nn.Module``) or
                 an iterable of key/value pairs of type (string, :class:`~torch.nn.Module``)
         """
-        if not isinstance(modules, Iterable):
+        if not isinstance(modules, container_abcs.Iterable):
             raise TypeError("ModuleDict.update should be called with an "
                             "iterable of key/value pairs, but got " +
                             type(modules).__name__)
 
-        if isinstance(modules, Mapping):
-            if isinstance(modules, OrderedDict):
+        if isinstance(modules, container_abcs.Mapping):
+            if isinstance(modules, (OrderedDict, ModuleDict)):
                 for key, module in modules.items():
                     self[key] = module
             else:
@@ -292,7 +322,7 @@ class ModuleDict(Module):
                     self[key] = module
         else:
             for j, m in enumerate(modules):
-                if not isinstance(m, Iterable):
+                if not isinstance(m, container_abcs.Iterable):
                     raise TypeError("ModuleDict update sequence element "
                                     "#" + str(j) + " should be Iterable; is" +
                                     type(m).__name__)
@@ -310,7 +340,7 @@ class ParameterList(Module):
     contains are properly registered, and will be visible by all Module methods.
 
     Arguments:
-        parameters (iterable, optional): an iterable of :class:`~torch.nn.Parameter`` to add
+        parameters (iterable, optional): an iterable of :class:`~torch.nn.Parameter` to add
 
     Example::
 
@@ -331,19 +361,24 @@ class ParameterList(Module):
         if parameters is not None:
             self += parameters
 
+    def _get_abs_string_index(self, idx):
+        """Get the absolute index for the list of modules"""
+        idx = operator.index(idx)
+        if not (-len(self) <= idx < len(self)):
+            raise IndexError('index {} is out of range'.format(idx))
+        if idx < 0:
+            idx += len(self)
+        return str(idx)
+
     def __getitem__(self, idx):
         if isinstance(idx, slice):
-            return ParameterList(list(self._parameters.values())[idx])
+            return self.__class__(list(self._parameters.values())[idx])
         else:
-            idx = operator.index(idx)
-            if not (-len(self) <= idx < len(self)):
-                raise IndexError('index {} is out of range'.format(idx))
-            if idx < 0:
-                idx += len(self)
+            idx = self._get_abs_string_index(idx)
             return self._parameters[str(idx)]
 
     def __setitem__(self, idx, param):
-        idx = operator.index(idx)
+        idx = self._get_abs_string_index(idx)
         return self.register_parameter(str(idx), param)
 
     def __len__(self):
@@ -375,7 +410,7 @@ class ParameterList(Module):
         Arguments:
             parameters (iterable): iterable of parameters to append
         """
-        if not isinstance(parameters, Iterable):
+        if not isinstance(parameters, container_abcs.Iterable):
             raise TypeError("ParameterList.extend should be called with an "
                             "iterable, but got " + type(parameters).__name__)
         offset = len(self)
@@ -403,8 +438,8 @@ class ParameterDict(Module):
 
     Arguments:
         parameters (iterable, optional): a mapping (dictionary) of
-            (string : :class:`~torch.nn.Parameter``) or an iterable of key,value pairs
-            of type (string, :class:`~torch.nn.Parameter``)
+            (string : :class:`~torch.nn.Parameter`) or an iterable of key,value pairs
+            of type (string, :class:`~torch.nn.Parameter`)
 
     Example::
 
@@ -480,15 +515,15 @@ class ParameterDict(Module):
 
         Arguments:
             parameters (iterable): a mapping (dictionary) of
-                (string : :class:`~torch.nn.Parameter``) or an iterable of
-                key/value pairs of type (string, :class:`~torch.nn.Parameter``)
+                (string : :class:`~torch.nn.Parameter`) or an iterable of
+                key/value pairs of type (string, :class:`~torch.nn.Parameter`)
         """
-        if not isinstance(parameters, Iterable):
+        if not isinstance(parameters, container_abcs.Iterable):
             raise TypeError("ParametersDict.update should be called with an "
                             "iterable of key/value pairs, but got " +
                             type(parameters).__name__)
 
-        if isinstance(parameters, Mapping):
+        if isinstance(parameters, container_abcs.Mapping):
             if isinstance(parameters, OrderedDict):
                 for key, parameter in parameters.items():
                     self[key] = parameter
@@ -497,7 +532,7 @@ class ParameterDict(Module):
                     self[key] = parameter
         else:
             for j, p in enumerate(parameters):
-                if not isinstance(p, Iterable):
+                if not isinstance(p, container_abcs.Iterable):
                     raise TypeError("ParameterDict update sequence element "
                                     "#" + str(j) + " should be Iterable; is" +
                                     type(p).__name__)

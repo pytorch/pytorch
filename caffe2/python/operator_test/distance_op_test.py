@@ -3,15 +3,16 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import numpy as np
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 from hypothesis import given
 import hypothesis.strategies as st
+import numpy as np
 
 
-class DistanceTest(hu.HypothesisTestCase):
-    @given(n=st.integers(1, 3),
+class DistanceTest(serial.SerializedTestCase):
+    @serial.given(n=st.integers(1, 3),
            dim=st.integers(4, 16),
            **hu.gcs)
     def test_cosine_similarity(self, n, dim, gc, dc):
@@ -32,7 +33,7 @@ class DistanceTest(hu.HypothesisTestCase):
         self.assertGradientChecks(gc, cos_op, [X, Y], 1, [0],
                                   stepsize=1e-2, threshold=1e-2)
 
-    @given(inputs=hu.tensors(n=2,
+    @serial.given(inputs=hu.tensors(n=2,
                              min_dim=1,
                              max_dim=2,
                              dtype=np.float32),
@@ -57,7 +58,7 @@ class DistanceTest(hu.HypothesisTestCase):
         # Gradient check wrt Y
         self.assertGradientChecks(gc, op, [X, Y], 1, [0])
 
-    @given(n=st.integers(1, 3),
+    @serial.given(n=st.integers(1, 3),
            dim=st.integers(4, 16),
            **hu.gcs)
     def test_L1_distance(self, n, dim, gc, dc):
@@ -88,7 +89,7 @@ class DistanceTest(hu.HypothesisTestCase):
         self.assertGradientChecks(gc, op, [X, Y], 1, [0],
                                   stepsize=1e-2, threshold=1e-2)
 
-    @given(n=st.integers(1, 3),
+    @serial.given(n=st.integers(1, 3),
            dim=st.integers(4, 16),
            **hu.gcs)
     def test_L2_distance(self, n, dim, gc, dc):

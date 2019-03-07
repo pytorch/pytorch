@@ -63,7 +63,7 @@ op = core.CreateOperator(
     value=[0,2,4,6,8],
 )
 
-# Use a not-empty tensor
+// Use a not-empty tensor
 workspace.FeedBlob("X", np.array([0,1,2,3,4,5,6,7,8]).astype(np.int32))
 print("X:\n", workspace.FetchBlob("X"))
 
@@ -75,7 +75,7 @@ print("Y: \n", workspace.FetchBlob("Y"))
 **Result**
 
 ```
-# value=[0,2,4,6,8]
+// value=[0,2,4,6,8]
 
 X:
  [0 1 2 3 4 5 6 7 8]

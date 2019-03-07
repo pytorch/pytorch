@@ -1,11 +1,15 @@
 #ifndef CAFFE2_OPERATORS_GROUP_NORM_OP_H_
 #define CAFFE2_OPERATORS_GROUP_NORM_OP_H_
 
+#include <array>
 #include <string>
 #include <vector>
 
+#include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/eigen_utils.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -14,37 +18,53 @@ class GroupNormOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  GroupNormOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit GroupNormOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "group", group_, 32),
         OP_SINGLE_ARG(float, "epsilon", epsilon_, 1e-5),
         order_(StringToStorageOrder(
-            this->template GetSingleArgument<std::string>("order", "NCHW"))) {
+            this->template GetSingleArgument<std::string>("order", "NCHW"))),
+        OP_SINGLE_ARG(bool, OpSchema::Arg_IsTest, is_test_, true) {
     CAFFE_ENFORCE_NE(
         order_,
         StorageOrder::UNKNOWN,
         "order should be either \"NCHW\" or \"NHWC\".");
+    if (!is_test_) {
+      CAFFE_ENFORCE_EQ(OutputSize(), 3);
+    }
   }
 
   bool RunOnDevice() override {
     const auto& X = Input(INPUT);
     const auto& gamma = Input(GAMMA);
     const auto& beta = Input(BETA);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
-    const int HxW = X.size() / (N * C);
+    const int HxW = X.numel() / (N * C);
     CAFFE_ENFORCE_EQ(C % group_, 0);
-    CAFFE_ENFORCE_EQ(gamma.size(), C);
-    CAFFE_ENFORCE_EQ(beta.size(), C);
+    CAFFE_ENFORCE_EQ(gamma.numel(), C);
+    CAFFE_ENFORCE_EQ(beta.numel(), C);
     const int G = group_;
     const int D = C / G;
-    auto* Y = Output(OUTPUT);
-    auto* mu = Output(MU);
-    auto* rsig = Output(INV_SIGMA);
-    Y->ResizeLike(X);
-    mu->Resize(N, G);
-    rsig->Resize(N, G);
+
+    auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
+    T* mu_data = nullptr;
+    T* rsig_data = nullptr;
+    if (OutputSize() == 3) {
+      auto* mu = Output(MU, {N, G}, at::dtype<T>());
+      auto* rsig = Output(INV_SIGMA, {N, G}, at::dtype<T>());
+      mu_data = mu->template mutable_data<T>();
+      rsig_data = rsig->template mutable_data<T>();
+    } else {
+      ReinitializeTensor(
+          &mu_, {N, G}, at::dtype<T>().device(Context::GetDeviceType()));
+      ReinitializeTensor(
+          &rsig_, {N, G}, at::dtype<T>().device(Context::GetDeviceType()));
+      mu_data = mu_.template mutable_data<T>();
+      rsig_data = rsig_.template mutable_data<T>();
+    }
     return RunOnDeviceImpl(
         N,
         G,
@@ -54,8 +74,8 @@ class GroupNormOp final : public Operator<Context> {
         gamma.template data<T>(),
         beta.template data<T>(),
         Y->template mutable_data<T>(),
-        mu->template mutable_data<T>(),
-        rsig->template mutable_data<T>());
+        mu_data,
+        rsig_data);
   }
 
  protected:
@@ -64,16 +84,106 @@ class GroupNormOp final : public Operator<Context> {
       const int G,
       const int D,
       const int HxW,
-      const T* X_data,
-      const T* gamma_data,
-      const T* beta_data,
-      T* Y_data,
-      T* mu_data,
-      T* rsig_data);
+      const T* X,
+      const T* gamma,
+      const T* beta,
+      T* Y,
+      T* mu,
+      T* rsig) {
+    const int C = G * D;
+    ReinitializeTensor(
+        &scale_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &bias_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
+    T* scale_data = scale_.template mutable_data<T>();
+    T* bias_data = bias_.template mutable_data<T>();
+    if (order_ == StorageOrder::NCHW) {
+      const std::array<int, 2> X_dims = {N * G, D * HxW};
+      const std::array<int, 2> Y_dims = {N * G, 1};
+      math::Moments<T, Context>(
+          2, X_dims.data(), Y_dims.data(), X, mu, rsig, &context_);
+      math::InvStd<T, Context>(
+          N * G, static_cast<T>(epsilon_), rsig, rsig, &context_);
+      ComputeFusedParams(N, G, D, mu, rsig, gamma, beta, scale_data, bias_data);
+      GroupNormForwardNCHW(N, C, HxW, X, scale_data, bias_data, Y);
+    } else {
+      const std::array<int, 4> X_dims = {N, HxW, G, D};
+      const std::array<int, 4> Y_dims = {N, 1, G, 1};
+      math::Moments<T, Context>(
+          4, X_dims.data(), Y_dims.data(), X, mu, rsig, &context_);
+      math::InvStd<T, Context>(
+          N * G, static_cast<T>(epsilon_), rsig, rsig, &context_);
+      ComputeFusedParams(N, G, D, mu, rsig, gamma, beta, scale_data, bias_data);
+      GroupNormForwardNHWC(N, C, HxW, X, scale_data, bias_data, Y);
+    }
+    return true;
+  }
+
+  void ComputeFusedParams(
+      const int N,
+      const int G,
+      const int D,
+      const T* mu,
+      const T* rsig,
+      const T* gamma,
+      const T* beta,
+      T* scale,
+      T* bias) {
+    const int C = G * D;
+    ConstEigenArrayMap<float> gamma_arr(gamma, D, G);
+    ConstEigenArrayMap<float> beta_arr(beta, D, G);
+    for (int i = 0; i < N; ++i) {
+      EigenArrayMap<T> scale_arr(scale + i * C, D, G);
+      scale_arr = gamma_arr.rowwise() *
+          ConstEigenVectorArrayMap<T>(rsig + i * G, G).transpose();
+      EigenArrayMap<T>(bias + i * C, D, G) = beta_arr -
+          scale_arr.rowwise() *
+              ConstEigenVectorArrayMap<T>(mu + i * G, G).transpose();
+    }
+  }
+
+  void GroupNormForwardNCHW(
+      const int N,
+      const int C,
+      const int HxW,
+      const T* X,
+      const T* scale,
+      const T* bias,
+      T* Y) {
+    EigenArrayMap<float>(Y, HxW, N * C) =
+        (ConstEigenArrayMap<float>(X, HxW, N * C).rowwise() *
+         ConstEigenVectorArrayMap<float>(scale, N * C).transpose())
+            .rowwise() +
+        ConstEigenVectorArrayMap<float>(bias, N * C).transpose();
+  }
+
+  void GroupNormForwardNHWC(
+      const int N,
+      const int C,
+      const int HxW,
+      const T* X,
+      const T* scale,
+      const T* bias,
+      T* Y) {
+    const int stride = HxW * C;
+    for (int i = 0; i < N; ++i) {
+      EigenArrayMap<float>(Y + i * stride, C, HxW) =
+          (ConstEigenArrayMap<float>(X + i * stride, C, HxW).colwise() *
+           ConstEigenVectorArrayMap<float>(scale + i * C, C))
+              .colwise() +
+          ConstEigenVectorArrayMap<float>(bias + i * C, C);
+    }
+  }
 
   const int group_;
   const float epsilon_;
   const StorageOrder order_;
+  const bool is_test_;
+
+  Tensor mu_;
+  Tensor rsig_;
+  Tensor scale_;
+  Tensor bias_;
 
   // Input: X, gamma, beta
   // Output: Y, mu, inv_sig
@@ -86,8 +196,9 @@ class GroupNormGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  GroupNormGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit GroupNormGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "group", group_, 32),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<std::string>("order", "NCHW"))) {
@@ -104,21 +215,19 @@ class GroupNormGradientOp final : public Operator<Context> {
     const auto& beta = Input(BETA);
     const auto& mu = Input(MU);
     const auto& rsig = Input(INV_SIGMA);
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
-    const int HxW = X.size() / (N * C);
+    const int HxW = X.numel() / (N * C);
     CAFFE_ENFORCE_EQ(C % group_, 0);
-    CAFFE_ENFORCE_EQ(gamma.size(), C);
-    CAFFE_ENFORCE_EQ(beta.size(), C);
+    CAFFE_ENFORCE_EQ(gamma.numel(), C);
+    CAFFE_ENFORCE_EQ(beta.numel(), C);
     const int G = group_;
     const int D = C / G;
-    auto* dX = Output(INPUT_GRAD);
-    auto* dgamma = Output(GAMMA_GRAD);
-    auto* dbeta = Output(BETA_GRAD);
-    dX->ResizeLike(X);
-    dgamma->ResizeLike(gamma);
-    dbeta->ResizeLike(beta);
+
+    auto* dX = Output(INPUT_GRAD, X.sizes(), at::dtype<T>());
+    auto* dgamma = Output(GAMMA_GRAD, gamma.sizes(), at::dtype<T>());
+    auto* dbeta = Output(BETA_GRAD, beta.sizes(), at::dtype<T>());
     return RunOnDeviceImpl(
         N,
         G,
@@ -152,8 +261,8 @@ class GroupNormGradientOp final : public Operator<Context> {
   const int group_;
   const StorageOrder order_;
 
-  Tensor ds_{Context::GetDeviceType()};
-  Tensor db_{Context::GetDeviceType()};
+  Tensor ds_;
+  Tensor db_;
 
   // Input: dY, X, gamma, beta, mu, inv_sig
   // Output: dX, dgamma, dbeta

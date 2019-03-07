@@ -1,12 +1,12 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/Config.h"
-#include "ATen/Dispatch.h"
-#include "ATen/Utils.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/native/SpectralOpsUtils.h"
-#include "ATen/native/cuda/CuFFTUtils.h"
-#include "ATen/native/cuda/CuFFTPlanCache.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Utils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/native/SpectralOpsUtils.h>
+#include <ATen/native/cuda/CuFFTUtils.h>
+#include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
@@ -36,8 +36,11 @@ struct cnt_to_dst_idx_functor : public thrust::unary_function<int64_t, int64_t>
   cnt_to_dst_idx_functor(int64_t last_dim_size, int64_t last_dim_start_slice) :
     last_dim_size(last_dim_size), last_dim_start_slice(last_dim_start_slice),
     last_dim_to_fill_size(last_dim_size - last_dim_start_slice) {}
-  
+
+  // HIP wants __host__ __device__ tag, CUDA does not
+#ifdef __HIP_PLATFORM_HCC__
   __host__ __device__
+#endif
   cnt_to_dst_idx_functor & operator=(const cnt_to_dst_idx_functor&) = default;
 
   __host__ __device__ __forceinline__
@@ -170,8 +173,8 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
 static inline Tensor _run_cufft(
     const CuFFTConfig &config, Tensor& input, int64_t signal_ndim,
     bool complex_input, bool complex_output, bool inverse,
-    IntList checked_signal_sizes, bool normalized, bool onesided,
-    IntList output_sizes, bool input_was_cloned
+    IntArrayRef checked_signal_sizes, bool normalized, bool onesided,
+    IntArrayRef output_sizes, bool input_was_cloned
 ) {
   if (config.should_clone_input() && !input_was_cloned) {
     input = input.clone();
@@ -181,17 +184,54 @@ static inline Tensor _run_cufft(
   auto& ctx = at::globalContext();
 
   // set output
-  auto output = input.type().tensor(output_sizes);
+  auto output = at::empty(output_sizes, input.options());
 
   // set to current stream
   CUFFT_CHECK(cufftSetStream(plan, at::cuda::getCurrentCUDAStream()));
 
-  auto ws = ctx.getType(at::Backend::CUDA, at::ScalarType::Byte).tensor({ config.workspace_size() });
+  auto ws = at::empty({ config.workspace_size() }, at::device(at::kCUDA).dtype(at::kByte));
   CUFFT_CHECK(cufftSetWorkArea(plan, ws.data_ptr()));
 
   // run
+#ifdef __HIP_PLATFORM_HCC__
+  if (input.type().scalarType() == ScalarType::Float) {
+      if (complex_input && complex_output) {
+        CUFFT_CHECK(hipfftExecC2C(plan, static_cast<hipfftComplex*>(input.data_ptr()),
+          static_cast<hipfftComplex*>(output.data_ptr()),
+          inverse ? HIPFFT_BACKWARD : HIPFFT_FORWARD));
+      } else if (complex_input && !complex_output) {
+        CUFFT_CHECK(hipfftExecC2R(plan, static_cast<hipfftComplex*>(input.data_ptr()),
+          static_cast<hipfftReal*>(output.data_ptr())));
+      } else if (!complex_input && complex_output) {
+        CUFFT_CHECK(hipfftExecR2C(plan, static_cast<hipfftReal*>(input.data_ptr()),
+          static_cast<hipfftComplex*>(output.data_ptr())));
+      } else {
+        AT_ERROR("hipFFT doesn't support r2r (float)");
+      }
+    } else if (input.type().scalarType() == ScalarType::Double) {
+      if (complex_input && complex_output) {
+        CUFFT_CHECK(hipfftExecZ2Z(plan, static_cast<hipfftDoubleComplex*>(input.data_ptr()),
+          static_cast<hipfftDoubleComplex*>(output.data_ptr()),
+          inverse ? HIPFFT_BACKWARD : HIPFFT_FORWARD));
+      } else if (complex_input && !complex_output) {
+        CUFFT_CHECK(hipfftExecZ2D(plan, static_cast<hipfftDoubleComplex*>(input.data_ptr()),
+          static_cast<hipfftDoubleReal*>(output.data_ptr())));
+      } else if (!complex_input && complex_output) {
+        CUFFT_CHECK(hipfftExecD2Z(plan, static_cast<hipfftDoubleReal*>(input.data_ptr()),
+          static_cast<hipfftDoubleComplex*>(output.data_ptr())));
+      } else {
+        AT_ERROR("hipFFT doesn't support r2r (double)");
+      }
+    } else {
+      std::ostringstream ss;
+      ss << "hipFFT doesn't support tensor of type: "
+         << toString(input.type().scalarType());
+      AT_ERROR(ss.str());
+    }
+#else
   CUFFT_CHECK(cufftXtExec(plan, input.data_ptr(), output.data_ptr(),
     inverse ? CUFFT_INVERSE : CUFFT_FORWARD));
+#endif
 
   // rescale if needed by normalized flag or inverse transform
   auto size_last_signal_dim = checked_signal_sizes[signal_ndim - 1];
@@ -251,8 +291,8 @@ void cufft_clear_plan_cache_impl() {
 // Currently not utilizing multi GPUs so this can be potentially sped up.
 Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
                   bool complex_input, bool complex_output, bool inverse,
-                  IntList checked_signal_sizes, bool normalized, bool onesided,
-                  IntList output_sizes) {
+                  IntArrayRef checked_signal_sizes, bool normalized, bool onesided,
+                  IntArrayRef output_sizes) {
   Tensor input = self;
   bool input_was_cloned = false;
 
@@ -268,8 +308,9 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   }
 
   // cuFFT requires input and output data pointers to complex type aligned.
-  // Our allocated output tensor is always 256 bytes aligned so it is fine, but
-  // we need to check input tensor to make sure that it is not unaligned, e.g.,
+  // Our newly allocated output tensor is always 512 bytes aligned so it is fine
+  // (see kRoundSmall and kRoundLarge in THCCachingAllocator.cpp), but we do
+  // need to check input tensor to make sure that it is not unaligned, e.g.,
   // from a slicing.
   auto complex_size_bytes = 2 * input.type().elementSizeInBytes();
   if (reinterpret_cast<std::uintptr_t>(input.data_ptr()) % complex_size_bytes != 0) {

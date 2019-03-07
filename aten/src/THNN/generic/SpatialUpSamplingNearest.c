@@ -1,8 +1,8 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SpatialUpSamplingNearest.c"
+#define TH_GENERIC_FILE "THNN/generic/SpatialUpSamplingNearest.c"
 #else
 
-#include "linear_upsampling.h"
+#include <THNN/generic/upsampling.h>
 
 static inline void THNN_(SpatialUpSamplingNearest_shapeCheck)
      (THTensor *input, THTensor *gradOutput,
@@ -56,8 +56,8 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
 
   input = THTensor_(newContiguous)(input);
   THTensor_(zero)(output);
-  real *idata = THTensor_(data)(input);
-  real *odata = THTensor_(data)(output);
+  scalar_t *idata = input->data<scalar_t>();
+  scalar_t *odata = output->data<scalar_t>();
 
   // special case: just copy
   if (inputHeight == outputHeight && inputWidth == outputWidth) {
@@ -65,8 +65,8 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
       const int h1 = h2;
       for (int w2 = 0; w2 < outputWidth; ++w2) {
         const int w1 = w2;
-        const real* pos1 = &idata[h1 * inputWidth + w1];
-        real* pos2 = &odata[h2 * outputWidth + w2];
+        const scalar_t* pos1 = &idata[h1 * inputWidth + w1];
+        scalar_t* pos2 = &odata[h2 * outputWidth + w2];
         for (int c = 0; c < channels; ++c) {
           pos2[0] = pos1[0];
           pos1 += inputHeight * inputWidth;
@@ -74,7 +74,7 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
         }
       }
     }
-    THTensor_(free)(input);
+    c10::raw::intrusive_ptr::decref(input);
     return;
   }
 
@@ -82,8 +82,8 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
     const int h1 = nearest_neighbor_compute_source_index(height_scale, h2, inputHeight);
     for (int w2 = 0; w2 < outputWidth; ++w2) {
       const int w1 = nearest_neighbor_compute_source_index(width_scale, w2, inputWidth);
-      const real* pos1 = &idata[h1 * inputWidth + w1];
-      real* pos2 = &odata[h2 * outputWidth + w2];
+      const scalar_t* pos1 = &idata[h1 * inputWidth + w1];
+      scalar_t* pos2 = &odata[h2 * outputWidth + w2];
       for (int c = 0; c < channels; ++c) {
         pos2[0] = pos1[0];
         pos1 += inputHeight * inputWidth;
@@ -91,7 +91,7 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
       }
     }
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(SpatialUpSamplingNearest_updateGradInput)(
@@ -110,8 +110,8 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
   THTensor_(resize4d)(gradInput, nbatch, channels, inputHeight, inputWidth);
   THTensor_(zero)(gradInput);
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  real *idata = THTensor_(data)(gradInput);
-  real *odata = THTensor_(data)(gradOutput);
+  scalar_t *idata = gradInput->data<scalar_t>();
+  scalar_t *odata = gradOutput->data<scalar_t>();
   channels = nbatch * channels;
   const float height_scale = (float) inputHeight / (float)outputHeight;
   const float width_scale = (float) inputWidth / (float)outputWidth;
@@ -121,8 +121,8 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
       const int h1 = h2;
       for (int w2 = 0; w2 < outputWidth; ++w2) {
         const int w1 = w2;
-        real* pos1 = &idata[h1 * inputWidth + w1];
-        const real* pos2 = &odata[h2 * outputWidth + w2];
+        scalar_t* pos1 = &idata[h1 * inputWidth + w1];
+        const scalar_t* pos2 = &odata[h2 * outputWidth + w2];
         for (int c = 0; c < channels; ++c) {
           pos1[0] = pos2[0];
           pos1 += inputHeight * inputWidth;
@@ -130,7 +130,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
         }
       }
     }
-    THTensor_(free)(gradOutput);
+    c10::raw::intrusive_ptr::decref(gradOutput);
     return;
   }
 
@@ -138,8 +138,8 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
     const int h1 = nearest_neighbor_compute_source_index(height_scale, h2, inputHeight);
     for (int w2 = 0; w2 < outputWidth; ++w2) {
       const int w1 = nearest_neighbor_compute_source_index(width_scale, w2, inputWidth);
-      real* pos1 = &idata[h1 * inputWidth + w1];
-      const real* pos2 = &odata[h2 * outputWidth + w2];
+      scalar_t* pos1 = &idata[h1 * inputWidth + w1];
+      const scalar_t* pos2 = &odata[h2 * outputWidth + w2];
       for (int c = 0; c < channels; ++c) {
         pos1[0] += pos2[0];
         pos1 += inputHeight * inputWidth;
@@ -148,7 +148,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
     }
   }
 
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

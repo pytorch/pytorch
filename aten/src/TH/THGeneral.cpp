@@ -1,5 +1,9 @@
 #include <TH/THGeneral.h>
 
+#ifdef __cplusplus
+#include <c10/core/CPUAllocator.h>
+#endif
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -21,10 +25,7 @@
 #endif
 
 #ifdef TH_BLAS_MKL
-// this is the C prototype, while mkl_set_num_threads is the fortran prototype
-TH_EXTERNC void MKL_Set_Num_Threads(int);
-// this is the C prototype, while mkl_get_max_threads is the fortran prototype
-TH_EXTERNC int  MKL_Get_Max_Threads(void);
+#include <mkl.h>
 #endif
 
 /* Torch Error Handling */
@@ -158,52 +159,12 @@ void THSetGCHandler( void (*torchGCFunction_)(void *data), void *data )
   torchGCData = data;
 }
 
-static void* THAllocInternal(ptrdiff_t size)
-{
-  void *ptr;
-
-  if (size > 5120)
-  {
-#if (defined(__unix) || defined(__APPLE__)) && (!defined(DISABLE_POSIX_MEMALIGN))
-    if (posix_memalign(&ptr, 64, size) != 0)
-      ptr = NULL;
-/*
-#elif defined(_WIN32)
-    ptr = _aligned_malloc(size, 64);
-*/
-#else
-    ptr = malloc(size);
-#endif
-  }
-  else
-  {
-    ptr = malloc(size);
-  }
-
-  return ptr;
-}
-
 void* THAlloc(ptrdiff_t size)
 {
-  void *ptr;
-
   if(size < 0)
     THError("$ Torch: invalid memory size -- maybe an overflow?");
 
-  if(size == 0)
-    return NULL;
-
-  ptr = THAllocInternal(size);
-
-  if(!ptr && torchGCFunction) {
-    torchGCFunction(torchGCData);
-    ptr = THAllocInternal(size);
-  }
-
-  if(!ptr)
-    THError("$ Torch: not enough memory: you tried to allocate %dGB. Buy new RAM!", size/1073741824);
-
-  return ptr;
+  return c10::alloc_cpu(size);
 }
 
 void* THRealloc(void *ptr, ptrdiff_t size)
@@ -235,7 +196,7 @@ void* THRealloc(void *ptr, ptrdiff_t size)
 
 void THFree(void *ptr)
 {
-  free(ptr);
+  c10::free_cpu(ptr);
 }
 
 double THLog10(const double x)
@@ -269,7 +230,14 @@ void THSetNumThreads(int num_threads)
   omp_set_num_threads(num_threads);
 #endif
 #ifdef TH_BLAS_MKL
-  MKL_Set_Num_Threads(num_threads);
+  mkl_set_num_threads(num_threads);
+
+  // because PyTorch uses OpenMP outside of MKL invocations
+  // as well, we want this flag to be false, so that
+  // threads aren't destroyed and recreated across every
+  // MKL / non-MKL boundary of OpenMP usage
+  // See https://github.com/pytorch/pytorch/issues/13757
+  mkl_set_dynamic(false);
 #endif
 
 }
@@ -299,7 +267,7 @@ TH_API void THInferNumThreads(void)
   // Otherwise, MKL and our OpenMP-enabled functions will keep changing the
   // size of the OpenMP thread pool, resulting in worse performance (and memory
   // leaks in GCC 5.4)
-  omp_set_num_threads(MKL_Get_Max_Threads());
+  omp_set_num_threads(mkl_get_max_threads());
 #endif
 }
 

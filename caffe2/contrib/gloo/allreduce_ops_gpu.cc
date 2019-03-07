@@ -84,7 +84,7 @@ void AllreduceOp<Context>::initializeBcube() {
         init_.context,
         init_.template getOutputs<float>(),
         init_.size);
-  } else if (init_.template IsType<float16>()) {
+  } else if (init_.template IsType<at::Half>()) {
     algorithm_ =
         initializeAlgorithm<::gloo::CudaAllreduceBcube, ::gloo::float16>(
             gpu_direct_,
@@ -105,7 +105,7 @@ void AllreduceOp<Context>::initializeHalvingDoubling() {
         init_.context,
         init_.template getOutputs<float>(),
         init_.size);
-  } else if (init_.template IsType<float16>()) {
+  } else if (init_.template IsType<at::Half>()) {
     algorithm_ =
       initializeAlgorithm<::gloo::CudaAllreduceHalvingDoubling, ::gloo::float16>(
         gpu_direct_,
@@ -126,7 +126,7 @@ void AllreduceOp<Context>::initializeRingFull() {
         init_.context,
         init_.template getOutputs<float>(),
         init_.size);
-  } else if (init_.template IsType<float16>()) {
+  } else if (init_.template IsType<at::Half>()) {
     algorithm_ =
       initializeAlgorithm<::gloo::CudaAllreduceRing, ::gloo::float16>(
         gpu_direct_,
@@ -147,7 +147,7 @@ void AllreduceOp<Context>::initializeRingChunked() {
         init_.context,
         init_.template getOutputs<float>(),
         init_.size);
-  } else if (init_.template IsType<float16>()) {
+  } else if (init_.template IsType<at::Half>()) {
     algorithm_ =
       initializeAlgorithm<::gloo::CudaAllreduceRingChunked, ::gloo::float16>(
         gpu_direct_,

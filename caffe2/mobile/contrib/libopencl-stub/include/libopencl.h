@@ -1,11 +1,12 @@
 #ifndef LIBOPENCL_STUB_H
 #define LIBOPENCL_STUB_H
 
-#include <stdlib.h>
-#include <sys/stat.h>
-#include <dlfcn.h>
 #include <CL/cl.h>
 #include <CL/cl_gl.h>
+#include <dlfcn.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
 
 #ifdef __cplusplus
 extern "C" {

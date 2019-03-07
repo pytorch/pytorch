@@ -1,6 +1,6 @@
 #pragma once
 
-#include "torch/csrc/WindowsTorchApiMacro.h"
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/variadic.h>
@@ -20,7 +20,7 @@ using function_constructor = std::function<std::shared_ptr<Function>(edge_list&&
  * grad_fn if necessary.
  */
 TORCH_API variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
-                                     function_constructor ctr);
+                                     const function_constructor& ctr);
 
 ///  Checks that inputs contains exactly `args` items and that the first `required_args`
 /// items are not nullptr. If not specified, `required_args` defaults to `args`.

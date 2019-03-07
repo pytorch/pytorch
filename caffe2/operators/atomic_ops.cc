@@ -1,6 +1,12 @@
 #include <mutex>
+#include <thread>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+
+#ifdef CAFFE2_USE_MKLDNN
+#include <caffe2/ideep/operators/operator_fallback_ideep.h>
+#include <caffe2/ideep/utils/ideep_operator.h>
+#endif
 
 namespace caffe2 {
 namespace fb {
@@ -8,8 +14,9 @@ namespace {
 
 class CreateMutexOp final : public Operator<CPUContext> {
  public:
-  CreateMutexOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws) {}
+  template <class... Args>
+  explicit CreateMutexOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<std::mutex>>(0) =
@@ -20,22 +27,23 @@ class CreateMutexOp final : public Operator<CPUContext> {
 
 class AtomicFetchAddOp final : public Operator<CPUContext> {
  public:
-  AtomicFetchAddOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws) {}
+  template <class... Args>
+  explicit AtomicFetchAddOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& mutex = OperatorBase::Input<std::unique_ptr<std::mutex>>(0);
+    std::lock_guard<std::mutex> lg(*mutex);
     auto& a = Input(1);
     auto& b = Input(2);
     auto* c = Output(0);
     auto* d = Output(1);
-    c->Resize(std::vector<TIndex>());
-    d->Resize(std::vector<TIndex>());
+    c->Resize();
+    d->Resize();
     auto* aPtr = a.data<int32_t>();
     auto* bPtr = b.data<int32_t>();
     auto* cPtr = c->template mutable_data<int32_t>();
     auto* dPtr = d->template mutable_data<int32_t>();
-    std::lock_guard<std::mutex> lg(*mutex);
     *dPtr = *aPtr;
     *cPtr = *aPtr + *bPtr;
     return true;
@@ -84,6 +92,10 @@ class CheckAtomicBoolOp final : public Operator<CPUContext> {
 
 REGISTER_CPU_OPERATOR(CreateMutex, CreateMutexOp);
 REGISTER_CPU_OPERATOR(AtomicFetchAdd, AtomicFetchAddOp);
+
+#ifdef CAFFE2_USE_MKLDNN
+REGISTER_IDEEP_OPERATOR(CreateMutex, IDEEPFallbackOp<CreateMutexOp, SkipIndices<0>>);
+#endif
 
 REGISTER_CPU_OPERATOR(CreateAtomicBool, CreateAtomicBoolOp);
 REGISTER_CPU_OPERATOR(ConditionalSetAtomicBool, ConditionalSetAtomicBoolOp);

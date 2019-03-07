@@ -7,8 +7,9 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/typeid.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include <c10/util/typeid.h>
+#include "caffe2/proto/caffe2_pb.h"
+#include <c10/util/Half.h>
 
 namespace caffe2 {
 
@@ -41,8 +42,8 @@ CAFFE2_API const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt);
 }  // namespace caffe2
 
 ///////////////////////////////////////////////////////////////////////////////
-// Half float definition. Currently half float operators are mainly on CUDA
-// gpus.
+// at::Half is defined in c10/util/Half.h. Currently half float operators are
+// mainly on CUDA gpus.
 // The reason we do not directly use the cuda __half data type is because that
 // requires compilation with nvcc. The float16 data type should be compatible
 // with the cuda __half data type, but will allow us to refer to the data type
@@ -50,29 +51,20 @@ CAFFE2_API const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt);
 static_assert(sizeof(unsigned short) == 2,
               "Short on this platform is not 16 bit.");
 namespace caffe2 {
-typedef struct CAFFE2_ALIGNED(2) __f16 { uint16_t x; } float16;
-
 // Helpers to avoid using typeinfo with -rtti
 template <typename T>
 inline bool fp16_type();
-// explicit instantation for float16 defined in types.cc.
+
 template <>
-inline bool fp16_type<float16>() {
+inline bool fp16_type<at::Half>() {
   return true;
 }
-// The rest.
+
 template <typename T>
 inline bool fp16_type() {
   return false;
 }
 
 }  // namespace caffe2
-
-// Make __f16 a fundamental type.
-namespace std {
-template<>
-struct is_fundamental<caffe2::__f16> : std::integral_constant<bool, true> {
-};
-}  // namespace std
 
 #endif  // CAFFE2_CORE_TYPES_H_

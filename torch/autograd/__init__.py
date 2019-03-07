@@ -40,10 +40,12 @@ def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False, 
 
     The graph is differentiated using the chain rule. If any of ``tensors``
     are non-scalar (i.e. their data has more than one element) and require
-    gradient, the function additionally requires specifying ``grad_tensors``.
-    It should be a sequence of matching length, that contains gradient of
-    the differentiated function w.r.t. corresponding tensors (``None`` is an
-    acceptable value for all tensors that don't need gradient tensors).
+    gradient, then the Jacobian-vector product would be computed, in this
+    case the function additionally requires specifying ``grad_tensors``.
+    It should be a sequence of matching length, that contains the "vector"
+    in the Jacobian-vector product, usually the gradient of the differentiated
+    function w.r.t. corresponding tensors (``None`` is an acceptable value for
+    all tensors that don't need gradient tensors).
 
     This function accumulates gradients in the leaves - you might need to zero
     them before calling it.
@@ -51,10 +53,11 @@ def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False, 
     Arguments:
         tensors (sequence of Tensor): Tensors of which the derivative will be
             computed.
-        grad_tensors (sequence of (Tensor or None)): Gradients w.r.t.
-            each element of corresponding tensors. None values can be specified for
-            scalar Tensors or ones that don't require grad. If a None value would
-            be acceptable for all grad_tensors, then this argument is optional.
+        grad_tensors (sequence of (Tensor or None)): The "vector" in the Jacobian-vector
+            product, usually gradients w.r.t. each element of corresponding tensors.
+            None values can be specified for scalar Tensors or ones that don't require
+            grad. If a None value would be acceptable for all grad_tensors, then this
+            argument is optional.
         retain_graph (bool, optional): If ``False``, the graph used to compute the grad
             will be freed. Note that in nearly all cases setting this option to ``True``
             is not needed and often can be worked around in a much more efficient
@@ -95,8 +98,9 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
     r"""Computes and returns the sum of gradients of outputs w.r.t. the inputs.
 
     ``grad_outputs`` should be a sequence of length matching ``output``
-    containing the pre-computed gradients w.r.t. each of the outputs. If an
-    output doesn't require_grad, then the gradient can be ``None``).
+    containing the "vector" in Jacobian-vector product, usually the pre-computed
+    gradients w.r.t. each of the outputs. If an output doesn't require_grad,
+    then the gradient can be ``None``).
 
     If ``only_inputs`` is ``True``, the function will only return a list of gradients
     w.r.t the specified inputs. If it's ``False``, then gradient w.r.t. all remaining
@@ -107,10 +111,10 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
         outputs (sequence of Tensor): outputs of the differentiated function.
         inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
             returned (and not accumulated into ``.grad``).
-        grad_outputs (sequence of Tensor): Gradients w.r.t. each output.
-            None values can be specified for scalar Tensors or ones that don't require
-            grad. If a None value would be acceptable for all grad_tensors, then this
-            argument is optional. Default: None.
+        grad_outputs (sequence of Tensor): The "vector" in the Jacobian-vector product.
+            Usually gradients w.r.t. each output. None values can be specified for scalar
+            Tensors or ones that don't require grad. If a None value would be acceptable
+            for all grad_tensors, then this argument is optional. Default: None.
         retain_graph (bool, optional): If ``False``, the graph used to compute the grad
             will be freed. Note that in nearly all cases setting this option to ``True``
             is not needed and often can be worked around in a much more efficient

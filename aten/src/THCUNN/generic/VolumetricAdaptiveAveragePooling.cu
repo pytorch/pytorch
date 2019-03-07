@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/VolumetricAdaptiveAveragePooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/VolumetricAdaptiveAveragePooling.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 // 5d tensor B x D x T x H x W
 
@@ -20,8 +20,8 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
                   "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
 
 
-  real *output_data;
-  real *input_data;
+  scalar_t *output_data;
+  scalar_t *input_data;
 
   int64_t sizeD, isizeT, isizeH, isizeW;
   int64_t istrideD, istrideT, istrideH, istrideW;
@@ -99,8 +99,8 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput)(
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);
 
-  real *gradInput_data;
-  real *gradOutput_data;
+  scalar_t *gradInput_data;
+  scalar_t *gradOutput_data;
 
   int64_t sizeD, isizeT, isizeH, isizeW;
   int64_t osizeT, osizeH, osizeW;

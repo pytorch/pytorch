@@ -1,6 +1,6 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <cstddef>
 #include <memory>
@@ -8,30 +8,6 @@
 
 namespace at {
 namespace detail {
-
-void default_set_device(int32_t) {
-  AT_ERROR(
-      "DynamicCUDAInterface::set_device called "
-      "before CUDA library was loaded");
-}
-
-void default_get_device(int32_t*) {
-  AT_ERROR(
-      "DynamicCUDAInterface::get_device called "
-      "before CUDA library was loaded");
-}
-
-void default_unchecked_set_device(int32_t) {
-  AT_ERROR(
-      "DynamicCUDAInterface::unchecked_set_device called "
-      "before CUDA library was loaded");
-}
-
-// Default the static members of DynamicCUDAInterface.
-void (*DynamicCUDAInterface::set_device)(int32_t) = default_set_device;
-void (*DynamicCUDAInterface::get_device)(int32_t*) = default_get_device;
-void (*DynamicCUDAInterface::unchecked_set_device)(int32_t) =
-    default_unchecked_set_device;
 
 const CUDAHooksInterface& getCUDAHooks() {
   static std::unique_ptr<CUDAHooksInterface> cuda_hooks;
@@ -54,6 +30,6 @@ const CUDAHooksInterface& getCUDAHooks() {
 }
 } // namespace detail
 
-AT_DEFINE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
+C10_DEFINE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
 
 } // namespace at

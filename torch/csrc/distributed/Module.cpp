@@ -1,16 +1,16 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
-#include "torch/csrc/utils/python_strings.h"
-#include "THDP.h"
-#include "torch/csrc/PythonTypes.h"
-#include "torch/csrc/autograd/python_variable.h"
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/distributed/THDP.h>
+#include <torch/csrc/PythonTypes.h>
+#include <torch/csrc/autograd/python_variable.h>
 
 #ifdef USE_CUDA
-#include "torch/csrc/cuda/Stream.h"
+#include <torch/csrc/cuda/Stream.h>
 #endif
 
 
@@ -20,64 +20,6 @@ static std::unordered_map<std::string, THDChannelType> name2channel_type = {
     {"gloo", THDChannelGloo},
     {"nccl", THDChannelNccl},
 };
-
-static bool THDPModule_loadClasses(PyObject *self)
-{
-#ifdef USE_DISTRIBUTED_MW
-#define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
-  PyObject *torch_module = PyImport_ImportModule("torch.distributed");
-  if (!torch_module) {
-    THPUtils_setError("class loader couldn't access torch.distributed module");
-    return false;
-  }
-
-  if (!THDPDoubleTensor_postInit(torch_module)) return false;
-  if (!THDPFloatTensor_postInit(torch_module)) return false;
-  if (!THDPHalfTensor_postInit(torch_module)) return false;
-  if (!THDPLongTensor_postInit(torch_module)) return false;
-  if (!THDPIntTensor_postInit(torch_module)) return false;
-  if (!THDPShortTensor_postInit(torch_module)) return false;
-  if (!THDPCharTensor_postInit(torch_module)) return false;
-  if (!THDPByteTensor_postInit(torch_module)) return false;
-
-  ASSERT_NOT_NULL(THDPDoubleStorageClass = PyObject_GetAttrString(torch_module,(char*)"DoubleStorage"));
-  ASSERT_NOT_NULL(THDPFloatStorageClass  = PyObject_GetAttrString(torch_module,(char*)"FloatStorage"));
-  ASSERT_NOT_NULL(THDPHalfStorageClass   = PyObject_GetAttrString(torch_module,(char*)"HalfStorage"));
-  ASSERT_NOT_NULL(THDPLongStorageClass   = PyObject_GetAttrString(torch_module,(char*)"LongStorage"));
-  ASSERT_NOT_NULL(THDPIntStorageClass    = PyObject_GetAttrString(torch_module,(char*)"IntStorage"));
-  ASSERT_NOT_NULL(THDPShortStorageClass  = PyObject_GetAttrString(torch_module,(char*)"ShortStorage"));
-  ASSERT_NOT_NULL(THDPCharStorageClass   = PyObject_GetAttrString(torch_module,(char*)"CharStorage"));
-  ASSERT_NOT_NULL(THDPByteStorageClass   = PyObject_GetAttrString(torch_module,(char*)"ByteStorage"));
-
-#undef ASSERT_NOT_NULL
-#endif
-  return true;
-}
-
-static bool THDPModule_assignStateless(PyObject *self)
-{
-#ifdef USE_DISTRIBUTED_MW
-#define INIT_STATELESS(type)                                                   \
-  stateless = PyObject_CallFunctionObjArgs((PyObject*)&TH_CONCAT_3(THDP, type, TensorStatelessType), NULL); \
-  if (!stateless) {                                                            \
-    return false;                                                              \
-  }                                                                            \
-  if (PyObject_SetAttrString(TH_CONCAT_3(THDP,type,TensorClass), THP_STATELESS_ATTRIBUTE_NAME, stateless) == -1) { \
-    return false;                                                              \
-  }
-  PyObject *stateless;
-  INIT_STATELESS(Double);
-  INIT_STATELESS(Float);
-  INIT_STATELESS(Half);
-  INIT_STATELESS(Long);
-  INIT_STATELESS(Int);
-  INIT_STATELESS(Short);
-  INIT_STATELESS(Char);
-  INIT_STATELESS(Byte);
-#undef INIT_STATELESS
-#endif
-  return true;
-}
 
 static std::unordered_map<PyObject*, THDReduceOp> obj2reduceop;
 static std::unordered_map<PyObject*, THDGroup> obj2group;
@@ -94,8 +36,8 @@ PyObject* THDPModule_initProcessGroup(PyObject *_unused, PyObject *args)
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 2)) ||
         !THPUtils_checkString(PyTuple_GET_ITEM(args, 3)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 4))) {
-    THPUtils_invalidArguments(args, NULL, "init_process_group", 1, "(string backend, string init_method, int world_size, string group_name, int rank)");
-    return NULL;
+    THPUtils_invalidArguments(args, nullptr, "init_process_group", 1, "(string backend, string init_method, int world_size, string group_name, int rank)");
+    return nullptr;
   }
 
   std::string backend_name = THPUtils_unpackString(PyTuple_GET_ITEM(args, 0));
@@ -125,38 +67,6 @@ PyObject* THDPModule_destroyProcessGroup(PyObject *_unused) {
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
-
-#ifdef USE_DISTRIBUTED_MW
-PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *args)
-{
-  HANDLE_TH_ERRORS
-  if (PyTuple_GET_SIZE(args) != 5 || !THPUtils_checkString(PyTuple_GET_ITEM(args, 0)) ||
-        !THPUtils_checkString(PyTuple_GET_ITEM(args, 1)) ||
-        !THPUtils_checkLong(PyTuple_GET_ITEM(args, 2)) ||
-        !THPUtils_checkString(PyTuple_GET_ITEM(args, 3)) ||
-        !THPUtils_checkLong(PyTuple_GET_ITEM(args, 4))) {
-    THPUtils_invalidArguments(args, NULL, "init_master_worker", 1, "(string backend, string init_method, int world_size, string group_name, int rank)");
-    return NULL;
-  }
-
-  std::string backend_name = THPUtils_unpackString(PyTuple_GET_ITEM(args, 0));
-  std::string init_method = THPUtils_unpackString(PyTuple_GET_ITEM(args, 1));
-  int world_size = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 2));
-  std::string group_name = THPUtils_unpackString(PyTuple_GET_ITEM(args, 3));
-  int rank = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 4));
-
-  THDChannelType channel_type = name2channel_type.at(backend_name);
-  {
-    AutoNoGIL nogil;
-    THDMasterWorkerInit(channel_type, init_method, world_size, group_name, rank);
-  }
-#ifdef USE_CUDA
-  THDSetCudaStatePtr(&state);
-#endif
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-#endif
 
 #ifdef USE_CUDA
 PyObject* THDPModule_registerStream(PyObject *_unused, PyObject *_stream)
@@ -211,7 +121,7 @@ static THDReduceOp _getReduceOp(PyObject *obj)
   auto it = obj2reduceop.find(obj);
   if (it == obj2reduceop.end()) {
     throw std::runtime_error("op should be a constant from "
-        "torch.distributed.reduce_op");
+        "torch.distributed.deprecated.reduce_op");
   }
   return it->second;
 }
@@ -222,7 +132,7 @@ static THDGroup _getGroup(PyObject *obj)
   if (it == obj2group.end()) {
     if (!THPUtils_checkLong(obj))
       throw std::runtime_error("group should be an int or one of the values "
-          "from torch.distributed.group");
+          "from torch.distributed.deprecated.group");
     return THPUtils_unpackLong(obj);
   }
   return it->second;
@@ -231,8 +141,8 @@ static THDGroup _getGroup(PyObject *obj)
 PyObject* THDPModule_clearGroupCache(PyObject *_unused, PyObject *args) {
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 1) {
-    THPUtils_invalidArguments(args, NULL, "clear_group_cache", 1, "(group gr)");
-    return NULL;
+    THPUtils_invalidArguments(args, nullptr, "clear_group_cache", 1, "(group gr)");
+    return nullptr;
   }
 
   THDGroup group = _getGroup(PyTuple_GET_ITEM(args, 0));
@@ -250,8 +160,8 @@ PyObject* THDPModule_isend(PyObject *_unused, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 2 || !THPVariable_Check(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, NULL, "isend", 1, "(tensor input, int dst_rank)");
-    return NULL;
+    THPUtils_invalidArguments(args, nullptr, "isend", 1, "(tensor input, int dst_rank)");
+    return nullptr;
   }
 
   auto desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0));
@@ -270,8 +180,8 @@ PyObject* THDPModule_irecv(PyObject *_unused, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 2 || !THPVariable_Check(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, NULL, "irecv", 1, "(tensor output, int src_rank)");
-    return NULL;
+    THPUtils_invalidArguments(args, nullptr, "irecv", 1, "(tensor output, int src_rank)");
+    return nullptr;
   }
 
   auto desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0));
@@ -290,8 +200,8 @@ PyObject* THDPModule_send(PyObject *_unused, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 2 || !THPVariable_Check(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, NULL, "send", 1, "(tensor input, int dst_rank)");
-    return NULL;
+    THPUtils_invalidArguments(args, nullptr, "send", 1, "(tensor input, int dst_rank)");
+    return nullptr;
   }
 
   auto desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0));
@@ -308,8 +218,8 @@ PyObject* THDPModule_recvAnySource(PyObject *_unused, PyObject *_tensor)
 {
   HANDLE_TH_ERRORS
   if (!THPVariable_Check(_tensor)) {
-    THPUtils_invalidArguments(_tensor, NULL, "recv", 1, "(tensor output)");
-    return NULL;
+    THPUtils_invalidArguments(_tensor, nullptr, "recv", 1, "(tensor output)");
+    return nullptr;
   }
 
   auto desc = THDPModule_makeDescriptor(_tensor);
@@ -327,8 +237,8 @@ PyObject* THDPModule_recv(PyObject *_unused, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 2 || !THPVariable_Check(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, NULL, "recv", 1, "(tensor output, int src_rank)");
-    return NULL;
+    THPUtils_invalidArguments(args, nullptr, "recv", 1, "(tensor output, int src_rank)");
+    return nullptr;
   }
 
   auto desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0));
@@ -391,7 +301,7 @@ PyObject* THDPModule_allReduceMultiGPU(PyObject *_unused, PyObject *args)
   Py_RETURN_NONE;
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, NULL, "all_reduce_multigpu", 1,
+  THPUtils_invalidArguments(args, nullptr, "all_reduce_multigpu", 1,
                             "(list[tensor] in_out, reduce_op op, group gr)");
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -448,7 +358,7 @@ PyObject* THDPModule_reduceMultiGPU(PyObject *_unused, PyObject *args)
   Py_RETURN_NONE;
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, NULL, "reduce_multigpu", 1,
+  THPUtils_invalidArguments(args, nullptr, "reduce_multigpu", 1,
                             "(list[tensor] in_out, int dst_rank, "
                             "reduce_op op, group gr)");
   Py_RETURN_NONE;
@@ -504,7 +414,7 @@ PyObject* THDPModule_broadcastMultiGPU(PyObject *_unused, PyObject *args)
   Py_RETURN_NONE;
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, NULL, "broadcast_multigpu", 1,
+  THPUtils_invalidArguments(args, nullptr, "broadcast_multigpu", 1,
                             "(list[tensor] in_out, int src_rank, group gr)");
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -586,7 +496,7 @@ PyObject* THDPModule_allGatherMultiGPU(PyObject *_unused, PyObject *args)
   Py_RETURN_NONE;
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, NULL, "all_gather_multigpu", 1,
+  THPUtils_invalidArguments(args, nullptr, "all_gather_multigpu", 1,
       "(list[list[tensor]] output, list[tensor] input, group gr)");
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -597,8 +507,8 @@ PyObject* THDPModule_allReduce(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 3 || !THPVariable_Check(PyTuple_GET_ITEM(args, 0))) {
-    THPUtils_invalidArguments(args, NULL, "all_reduce", 1, "(tensor in_out, reduce_op op, group gr)");
-    return NULL;
+    THPUtils_invalidArguments(args, nullptr, "all_reduce", 1, "(tensor in_out, reduce_op op, group gr)");
+    return nullptr;
   }
 
   THDGroup group = _getGroup(PyTuple_GET_ITEM(args, 2));
@@ -617,9 +527,9 @@ PyObject* THDPModule_reduce(PyObject *_unused, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 4 || !THPVariable_Check(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, NULL, "reduce", 1,
+    THPUtils_invalidArguments(args, nullptr, "reduce", 1,
         "(tensor reduced, int dst_rank, reduce_op op, group gr)");
-    return NULL;
+    return nullptr;
   }
 
   THDGroup group = _getGroup(PyTuple_GET_ITEM(args, 3));
@@ -639,9 +549,9 @@ PyObject* THDPModule_broadcast(PyObject *_unused, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 3 || !THPVariable_Check(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, NULL, "broadcast", 1,
+    THPUtils_invalidArguments(args, nullptr, "broadcast", 1,
         "(tensor src_dst, int src_rank, group gr)");
-    return NULL;
+    return nullptr;
   }
 
   THDGroup group = _getGroup(PyTuple_GET_ITEM(args, 2));
@@ -699,7 +609,7 @@ PyObject* THDPModule_allGather(PyObject *_unused, PyObject *args)
   Py_RETURN_NONE;
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, NULL, "allGather", 1,
+  THPUtils_invalidArguments(args, nullptr, "allGather", 1,
       "(list[tensor] output, tensor input, group gr)");
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -709,9 +619,9 @@ PyObject* THDPModule_gatherSend(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 3 || !THPVariable_Check(PyTuple_GET_ITEM(args, 0))) {
-    THPUtils_invalidArguments(args, NULL, "gatherSend", 1,
+    THPUtils_invalidArguments(args, nullptr, "gatherSend", 1,
         "(tensor input, int dst_rank, group gr)");
-    return NULL;
+    return nullptr;
   }
 
   THDGroup group = _getGroup(PyTuple_GET_ITEM(args, 2));
@@ -768,9 +678,9 @@ PyObject* THDPModule_gatherRecv(PyObject *_unused, PyObject *args)
   Py_RETURN_NONE;
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, NULL, "gatherRecv", 1,
+  THPUtils_invalidArguments(args, nullptr, "gatherRecv", 1,
       "(list[tensor] output, tensor input, group gr)");
-  return NULL;
+  return nullptr;
   END_HANDLE_TH_ERRORS
 }
 
@@ -817,9 +727,9 @@ PyObject* THDPModule_scatterSend(PyObject *_unused, PyObject *args)
   Py_RETURN_NONE;
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, NULL, "scatterSend", 1,
+  THPUtils_invalidArguments(args, nullptr, "scatterSend", 1,
       "(list[tensor] input, tensor output, group gr)");
-  return NULL;
+  return nullptr;
   END_HANDLE_TH_ERRORS
 }
 
@@ -828,9 +738,9 @@ PyObject* THDPModule_scatterRecv(PyObject *_unused, PyObject *args)
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 3 || !THPVariable_Check(PyTuple_GET_ITEM(args, 0)) ||
         !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, NULL, "scatterRecv", 1,
+    THPUtils_invalidArguments(args, nullptr, "scatterRecv", 1,
         "(tensor output, int src_rank, group gr)");
-    return NULL;
+    return nullptr;
   }
 
   THDGroup group = _getGroup(PyTuple_GET_ITEM(args, 2));
@@ -896,8 +806,8 @@ PyObject* THDPModule_newGroup(PyObject *_unused, PyObject *args)
   return PyInt_FromLong(group);
 
 invalid_arguments:
-  THPUtils_invalidArguments(args, NULL, "newGroup", 1, "(list[int] ranks)");
-  return NULL;
+  THPUtils_invalidArguments(args, nullptr, "newGroup", 1, "(list[int] ranks)");
+  return nullptr;
   END_HANDLE_TH_ERRORS
 }
 
@@ -905,8 +815,8 @@ PyObject* THDPModule_requestIsCompleted(PyObject *_unused, PyObject *_req)
 {
   HANDLE_TH_ERRORS
   if (!THPWrapper_check(_req)) {
-    THPUtils_invalidArguments(_req, NULL, "requestIsCompleted", 1, "(request req)");
-    return NULL;
+    THPUtils_invalidArguments(_req, nullptr, "requestIsCompleted", 1, "(request req)");
+    return nullptr;
   }
 
   return PyBool_FromLong(THDRequest_isCompleted(_unpackRequest(_req)));
@@ -917,8 +827,8 @@ PyObject* THDPModule_requestWait(PyObject *_unused, PyObject *_req)
 {
   HANDLE_TH_ERRORS
   if (!THPWrapper_check(_req)) {
-    THPUtils_invalidArguments(_req, NULL, "requestWait", 1, "(request req)");
-    return NULL;
+    THPUtils_invalidArguments(_req, nullptr, "requestWait", 1, "(request req)");
+    return nullptr;
   }
 
   {
@@ -931,8 +841,8 @@ PyObject* THDPModule_requestWait(PyObject *_unused, PyObject *_req)
 
 PyObject* THDPModule_initExtension(PyObject *_unused, PyObject *args) {
   if (PyTuple_GET_SIZE(args) != 3) {
-    THPUtils_invalidArguments(args, NULL, "initExtension", 1, "(bool is_master_worker, reduce_op obj, group obj)");
-    return NULL;
+    THPUtils_invalidArguments(args, nullptr, "initExtension", 1, "(bool is_master_worker, reduce_op obj, group obj)");
+    return nullptr;
   }
 
   PyObject* is_master_worker_obj = PyTuple_GET_ITEM(args, 0);
@@ -962,50 +872,43 @@ PyObject* THDPModule_initExtension(PyObject *_unused, PyObject *args) {
 #undef REGISTER_GROUP
 
   if (is_master_worker) {
-    PyObject *module = PyImport_ImportModule("torch.distributed");
-    THPUtils_assert(module, "class loader couldn't access torch.distributed module");
-    PyObject* module_dict = PyModule_GetDict(module);
-    if (!THDPModule_loadClasses(module_dict)) return NULL;
-    if (!THDPModule_assignStateless(module_dict)) return NULL;
+    throw std::runtime_error("THD master_worker no longer supported");
   }
   Py_RETURN_TRUE;
 }
 
 static struct PyMethodDef _THDPModule_methods[] = {
-  {"_dist_init_extension", (PyCFunction)THDPModule_initExtension, METH_VARARGS, NULL},
-  {"_dist_init_process_group", (PyCFunction)THDPModule_initProcessGroup, METH_VARARGS, NULL},
-  {"_dist_destroy_process_group", (PyCFunction)THDPModule_destroyProcessGroup, METH_NOARGS, NULL},
-  {"_dist_clear_group_cache", (PyCFunction)THDPModule_clearGroupCache, METH_VARARGS, NULL},
-#ifdef USE_DISTRIBUTED_MW
-  {"_dist_init_master_worker", (PyCFunction)THDPModule_initMasterWorker, METH_VARARGS, NULL},
-#endif
+  {"_dist_init_extension", (PyCFunction)THDPModule_initExtension, METH_VARARGS, nullptr},
+  {"_dist_init_process_group", (PyCFunction)THDPModule_initProcessGroup, METH_VARARGS, nullptr},
+  {"_dist_destroy_process_group", (PyCFunction)THDPModule_destroyProcessGroup, METH_NOARGS, nullptr},
+  {"_dist_clear_group_cache", (PyCFunction)THDPModule_clearGroupCache, METH_VARARGS, nullptr},
 #ifdef USE_CUDA
-  {"_dist_register_stream", (PyCFunction)THDPModule_registerStream, METH_O, NULL},
+  {"_dist_register_stream", (PyCFunction)THDPModule_registerStream, METH_O, nullptr},
 #endif
-  {"_dist_get_rank", (PyCFunction)THDPModule_getRank, METH_NOARGS, NULL},
-  {"_dist_get_num_processes", (PyCFunction)THDPModule_getNumProcesses, METH_NOARGS, NULL},
-  {"_dist_isend", (PyCFunction)THDPModule_isend, METH_VARARGS, NULL},
-  {"_dist_irecv", (PyCFunction)THDPModule_irecv, METH_VARARGS, NULL},
-  {"_dist_send", (PyCFunction)THDPModule_send, METH_VARARGS, NULL},
-  {"_dist_recv_any_source", (PyCFunction)THDPModule_recvAnySource, METH_O, NULL},
-  {"_dist_recv", (PyCFunction)THDPModule_recv, METH_VARARGS, NULL},
-  {"_dist_all_reduce", (PyCFunction)THDPModule_allReduce, METH_VARARGS, NULL},
-  {"_dist_all_reduce_multigpu", (PyCFunction)THDPModule_allReduceMultiGPU, METH_VARARGS, NULL},
-  {"_dist_reduce", (PyCFunction)THDPModule_reduce, METH_VARARGS, NULL},
-  {"_dist_reduce_multigpu", (PyCFunction)THDPModule_reduceMultiGPU, METH_VARARGS, NULL},
-  {"_dist_broadcast", (PyCFunction)THDPModule_broadcast, METH_VARARGS, NULL},
-  {"_dist_broadcast_multigpu", (PyCFunction)THDPModule_broadcastMultiGPU, METH_VARARGS, NULL},
-  {"_dist_all_gather", (PyCFunction)THDPModule_allGather, METH_VARARGS, NULL},
-  {"_dist_all_gather_multigpu", (PyCFunction)THDPModule_allGatherMultiGPU, METH_VARARGS, NULL},
-  {"_dist_gather_send", (PyCFunction)THDPModule_gatherSend, METH_VARARGS, NULL},
-  {"_dist_gather_recv", (PyCFunction)THDPModule_gatherRecv, METH_VARARGS, NULL},
-  {"_dist_scatter_send", (PyCFunction)THDPModule_scatterSend, METH_VARARGS, NULL},
-  {"_dist_scatter_recv", (PyCFunction)THDPModule_scatterRecv, METH_VARARGS, NULL},
-  {"_dist_barrier", (PyCFunction)THDPModule_barrier, METH_O, NULL},
-  {"_dist_new_group", (PyCFunction)THDPModule_newGroup, METH_VARARGS, NULL},
-  {"_dist_request_is_completed", (PyCFunction)THDPModule_requestIsCompleted, METH_O, NULL},
-  {"_dist_request_wait", (PyCFunction)THDPModule_requestWait, METH_O, NULL},
-  {NULL}
+  {"_dist_get_rank", (PyCFunction)THDPModule_getRank, METH_NOARGS, nullptr},
+  {"_dist_get_num_processes", (PyCFunction)THDPModule_getNumProcesses, METH_NOARGS, nullptr},
+  {"_dist_isend", (PyCFunction)THDPModule_isend, METH_VARARGS, nullptr},
+  {"_dist_irecv", (PyCFunction)THDPModule_irecv, METH_VARARGS, nullptr},
+  {"_dist_send", (PyCFunction)THDPModule_send, METH_VARARGS, nullptr},
+  {"_dist_recv_any_source", (PyCFunction)THDPModule_recvAnySource, METH_O, nullptr},
+  {"_dist_recv", (PyCFunction)THDPModule_recv, METH_VARARGS, nullptr},
+  {"_dist_all_reduce", (PyCFunction)THDPModule_allReduce, METH_VARARGS, nullptr},
+  {"_dist_all_reduce_multigpu", (PyCFunction)THDPModule_allReduceMultiGPU, METH_VARARGS, nullptr},
+  {"_dist_reduce", (PyCFunction)THDPModule_reduce, METH_VARARGS, nullptr},
+  {"_dist_reduce_multigpu", (PyCFunction)THDPModule_reduceMultiGPU, METH_VARARGS, nullptr},
+  {"_dist_broadcast", (PyCFunction)THDPModule_broadcast, METH_VARARGS, nullptr},
+  {"_dist_broadcast_multigpu", (PyCFunction)THDPModule_broadcastMultiGPU, METH_VARARGS, nullptr},
+  {"_dist_all_gather", (PyCFunction)THDPModule_allGather, METH_VARARGS, nullptr},
+  {"_dist_all_gather_multigpu", (PyCFunction)THDPModule_allGatherMultiGPU, METH_VARARGS, nullptr},
+  {"_dist_gather_send", (PyCFunction)THDPModule_gatherSend, METH_VARARGS, nullptr},
+  {"_dist_gather_recv", (PyCFunction)THDPModule_gatherRecv, METH_VARARGS, nullptr},
+  {"_dist_scatter_send", (PyCFunction)THDPModule_scatterSend, METH_VARARGS, nullptr},
+  {"_dist_scatter_recv", (PyCFunction)THDPModule_scatterRecv, METH_VARARGS, nullptr},
+  {"_dist_barrier", (PyCFunction)THDPModule_barrier, METH_O, nullptr},
+  {"_dist_new_group", (PyCFunction)THDPModule_newGroup, METH_VARARGS, nullptr},
+  {"_dist_request_is_completed", (PyCFunction)THDPModule_requestIsCompleted, METH_O, nullptr},
+  {"_dist_request_wait", (PyCFunction)THDPModule_requestWait, METH_O, nullptr},
+  {nullptr}
 };
 
 PyMethodDef* THDPModule_methods() {

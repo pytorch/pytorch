@@ -25,20 +25,17 @@ from caffe2.python import utils, workspace, test_util
 import unittest
 
 def setUpModule():
-    # Do nothing is caffe is not found.
-    if not CAFFE_FOUND:
+    # Do nothing if caffe and test data is not found
+    if not (CAFFE_FOUND and os.path.exists('data/testdata/caffe_translator')):
         return
     # We will do all the computation stuff in the global space.
     caffenet = caffe_pb2.NetParameter()
     caffenet_pretrained = caffe_pb2.NetParameter()
-    text_format.Merge(
-        open('data/testdata/caffe_translator/deploy.prototxt').read(), caffenet
-    )
-    caffenet_pretrained.ParseFromString(
-        open(
-            'data/testdata/caffe_translator/bvlc_reference_caffenet.caffemodel')
-        .read()
-    )
+    with open('data/testdata/caffe_translator/deploy.prototxt') as f:
+        text_format.Merge(f.read(), caffenet)
+    with open('data/testdata/caffe_translator/'
+              'bvlc_reference_caffenet.caffemodel') as f:
+        caffenet_pretrained.ParseFromString(f.read())
     for remove_legacy_pad in [True, False]:
         net, pretrained_params = caffe_translator.TranslateModel(
             caffenet, caffenet_pretrained, is_test=True,

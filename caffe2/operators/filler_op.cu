@@ -15,7 +15,7 @@ __global__ void FillRangeKernel(const int n, float* data) {
 template <typename T>
 __global__ void FillDiagonalKernel(
     const int num_diagonal_elements,
-    const TIndex step_size,
+    const int64_t step_size,
     const T value,
     T* data) {
   CUDA_1D_KERNEL_LOOP(index, num_diagonal_elements) {
@@ -26,7 +26,7 @@ __global__ void FillDiagonalKernel(
 
 template <>
 bool RangeFillOp<float, CUDAContext>::Fill(Tensor* output) {
-  int N = output->size();
+  int N = output->numel();
   FillRangeKernel<<<
       CAFFE_GET_BLOCKS(N),
       CAFFE_CUDA_NUM_THREADS,
@@ -40,12 +40,12 @@ template <typename T>
 bool DiagonalFillOp<CUDAContext>::FillWithType(Tensor* output) {
   VerifyOutputShape(output);
   auto* data = output->template mutable_data<T>();
-  int size = output->size();
+  int size = output->numel();
   // first fill everything with 0
   math::Set<T, CUDAContext>(size, T(0), data, &context_);
 
   T value = OperatorBase::GetSingleArgument<T>("value", 0);
-  TIndex step_size = GetStepSize(output);
+  int64_t step_size = GetStepSize(output);
   int num_diagonal_elements = ceil((float)size / step_size);
 
   FillDiagonalKernel<<<
@@ -64,8 +64,6 @@ REGISTER_CUDA_OPERATOR(GaussianFill, GaussianFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(XavierFill, XavierFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(MSRAFill, MSRAFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(RangeFill, RangeFillOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(
-    LengthsRangeFill,
-    GPUFallbackOp<LengthsRangeFillOp<CPUContext>>);
+REGISTER_CUDA_OPERATOR(LengthsRangeFill, GPUFallbackOp);
 
 } // namespace caffe2

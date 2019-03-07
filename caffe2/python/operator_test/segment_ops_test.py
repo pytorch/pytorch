@@ -12,6 +12,7 @@ import hypothesis.strategies as st
 
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 
 class TesterBase:
@@ -418,7 +419,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
         op = core.CreateOperator("UnsortedSegmentMean", ["X", "segments"], "out")
         self.assertDeviceChecks(dc, op, [X, segments], [0])
 
-    @given(
+    @serial.given(
         inputs=hu.lengths_tensor(
             dtype=np.float32,
             min_value=1,
@@ -447,7 +448,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X, Y], [0])
         self.assertGradientChecks(gc, op, [X, Y], 0, [0])
 
-    @given(
+    @serial.given(
         inputs=hu.sparse_lengths_tensor(
             dtype=np.float32,
             min_value=1,
@@ -476,7 +477,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
         self.assertGradientChecks(gc, op, [X, Y, Z], 0, [0])
 
-    @given(
+    @serial.given(
         inputs=hu.lengths_tensor(
             dtype=np.float32,
             min_value=1,
@@ -511,7 +512,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X, Y], [0])
         self.assertGradientChecks(gc, op, [X, Y], 0, [0])
 
-    @given(
+    @serial.given(
         inputs=hu.sparse_lengths_tensor(
             dtype=np.float32,
             min_value=1,
@@ -547,7 +548,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
         self.assertGradientChecks(gc, op, [X, Y, Z], 0, [0])
 
-    @given(
+    @serial.given(
         grad_on_weights=st.booleans(),
         inputs=hu.sparse_lengths_tensor(
             dtype=np.float32,
@@ -635,7 +636,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
 
-    @given(**hu.gcs_cpu_only)
+    @serial.given(**hu.gcs_cpu_only)
     def test_sparse_lengths_positional_weighted_sum(
             self, gc, dc):
         D = np.random.rand(50, 3, 4, 5).astype(np.float32)

@@ -2,9 +2,11 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
@@ -24,8 +26,8 @@ def jsd_grad(go, o, pq_list):
     return [np.log(p * (1 - m) / (1 - p) / m) / 2. * go, None]
 
 
-class TestJSDOps(hu.HypothesisTestCase):
-    @given(n=st.integers(10, 100), **hu.gcs_cpu_only)
+class TestJSDOps(serial.SerializedTestCase):
+    @serial.given(n=st.integers(10, 100), **hu.gcs_cpu_only)
     def test_bernoulli_jsd(self, n, gc, dc):
         p = np.random.rand(n).astype(np.float32)
         q = np.random.rand(n).astype(np.float32)

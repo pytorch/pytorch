@@ -1,16 +1,16 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricFullDilatedConvolution.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricFullDilatedConvolution.c"
 #else
 
 static void THNN_(vol2col)(
-  const real *data_vol, const int64_t channels,
+  const scalar_t *data_vol, const int64_t channels,
   const int64_t depth, const int64_t height, const int64_t width,
   const int64_t depth_col, const int64_t height_col, const int64_t width_col,
   const int64_t kT, const int64_t kH, const int64_t kW,
   const int64_t pT, const int64_t pH, const int64_t pW,
   const int64_t dT, const int64_t dH, const int64_t dW,
   const int64_t dilationT, const int64_t dilationH, const int64_t dilationW,
-  real *data_col)
+  scalar_t *data_col)
 {
   int64_t c, t, h, w;
   int64_t channels_col = channels * kT * kH * kW;
@@ -43,17 +43,17 @@ static void THNN_(vol2col)(
 }
 
 static void THNN_(col2vol)(
-  const real* data_col, const int64_t channels,
+  const scalar_t* data_col, const int64_t channels,
   const int64_t depth, const int64_t height, const int64_t width,
   const int64_t out_depth, const int64_t out_height, const int64_t out_width,
   const int64_t kT, const int64_t kH, const int64_t kW,
   const int64_t pT, const int64_t pH, const int64_t pW,
   const int64_t dT, const int64_t dH, const int64_t dW,
   const int64_t dilationT, const int64_t dilationH, const int64_t dilationW,
-  real* data_vol)
+  scalar_t* data_vol)
 {
   int64_t c, t, h, w;
-  memset(data_vol, 0, sizeof(real) * depth * height * width * channels);
+  memset(data_vol, 0, sizeof(scalar_t) * depth * height * width * channels);
   int64_t depth_col  = out_depth;
   int64_t height_col = out_height;
   int64_t width_col  = out_width;
@@ -248,22 +248,22 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
       'n', 't',
       n, m, k,
       1,
-      THTensor_(data)(input_n), n,
-      THTensor_(data)(weight), m,
+      input_n->data<scalar_t>(), n,
+      weight->data<scalar_t>(), m,
       0,
-      THTensor_(data)(columns), n
+      columns->data<scalar_t>(), n
     );
 
     // Unpack columns back into input:
     THNN_(col2vol)(
-      THTensor_(data)(columns),
+      columns->data<scalar_t>(),
       nOutputPlane, outputDepth, outputHeight, outputWidth,
       inputDepth, inputHeight, inputWidth,
       kT, kH, kW,
       pT, pH, pW,
       dT, dH, dW,
       dilationT,  dilationH,  dilationW,
-      THTensor_(data)(output_n)
+      output_n->data<scalar_t>()
     );
 
     // Do Bias after:
@@ -279,17 +279,17 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
         't', 'n',
         n_, m_, k_,
         1,
-        THTensor_(data)(ones), k_,
-        THTensor_(data)(bias), k_,
+        ones->data<scalar_t>(), k_,
+        bias->data<scalar_t>(), k_,
         1,
-        THTensor_(data)(output_n), n_
+        output_n->data<scalar_t>(), n_
       );
     }
   }
 
   // Free
-  THTensor_(free)(input_n);
-  THTensor_(free)(output_n);
+  c10::raw::intrusive_ptr::decref(input_n);
+  c10::raw::intrusive_ptr::decref(output_n);
 
   // Resize output
   if (is_batch == 0)
@@ -298,9 +298,9 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
     THTensor_(resize4d)(input, nInputPlane, inputDepth, inputHeight, inputWidth);
   }
 
-  THTensor_(free)(input);
-  THTensor_(free)(weight);
-  if (bias) THTensor_(free)(bias);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(weight);
+  if (bias) c10::raw::intrusive_ptr::decref(bias);
 }
 
 void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
@@ -371,14 +371,14 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
 
     // Extract columns:
     THNN_(vol2col)(
-      THTensor_(data)(gradOutput_n),
+      gradOutput_n->data<scalar_t>(),
       nOutputPlane, outputDepth, outputHeight, outputWidth,
       inputDepth, inputHeight, inputWidth,
       kT, kH, kW,
       pT, pH, pW,
       dT, dH, dW,
       dilationT,  dilationH,  dilationW,
-      THTensor_(data)(gradColumns)
+      gradColumns->data<scalar_t>()
     );
 
     // M,N,K are dims of matrix A and B
@@ -392,16 +392,16 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
       'n', 'n',
       n, m, k,
       1,
-      THTensor_(data)(gradColumns), n,
-      THTensor_(data)(weight), k,
+      gradColumns->data<scalar_t>(), n,
+      weight->data<scalar_t>(), k,
       0,
-      THTensor_(data)(gradInput_n), n
+      gradInput_n->data<scalar_t>(), n
     );
   }
 
   // Free
-  THTensor_(free)(gradInput_n);
-  THTensor_(free)(gradOutput_n);
+  c10::raw::intrusive_ptr::decref(gradInput_n);
+  c10::raw::intrusive_ptr::decref(gradOutput_n);
 
   // Resize output
   if (is_batch == 0)
@@ -411,9 +411,9 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
     THTensor_(resize4d)(gradInput, nInputPlane, inputDepth, inputHeight, inputWidth);
   }
 
-  THTensor_(free)(input);
-  THTensor_(free)(gradOutput);
-  THTensor_(free)(weight);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(gradOutput);
+  c10::raw::intrusive_ptr::decref(weight);
 }
 
 void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
@@ -431,7 +431,7 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
   int aT, int aW, int aH,   // extra output adjustment
   accreal scale_)
 {
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
+  scalar_t scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   // number of input & output planes and kernel size is indirectly defined by the gradWeight tensor
   THNN_(VolumetricFullDilatedConvolution_shapeCheck)(
         input, gradOutput, gradWeight, gradBias, kT, kW, kH,
@@ -507,14 +507,14 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
 
       // Extract columns:
       THNN_(vol2col)(
-        THTensor_(data)(gradOutput_n), nOutputPlane,
+        gradOutput_n->data<scalar_t>(), nOutputPlane,
         outputDepth, outputHeight, outputWidth,
         inputDepth, inputHeight, inputWidth,
         kT, kH, kW,
         pT, pH, pW,
         dT, dH, dW,
         dilationT,  dilationH,  dilationW,
-        THTensor_(data)(columns)
+        columns->data<scalar_t>()
       );
 
       // M,N,K are dims of matrix A and B
@@ -528,10 +528,10 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
         't', 'n',
         n, m, k,
         scale,
-        THTensor_(data)(columns), k,
-        THTensor_(data)(input_n), k,
+        columns->data<scalar_t>(), k,
+        input_n->data<scalar_t>(), k,
         1,
-        THTensor_(data)(gradWeight), n
+        gradWeight->data<scalar_t>(), n
       );
     }
 
@@ -547,17 +547,17 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
         't',
         k_, m_,
         scale,
-        THTensor_(data)(gradOutput_n), k_,
-        THTensor_(data)(ones), 1,
+        gradOutput_n->data<scalar_t>(), k_,
+        ones->data<scalar_t>(), 1,
         1,
-        THTensor_(data)(gradBias), 1
+        gradBias->data<scalar_t>(), 1
       );
     }
   }
 
   // Free
-  THTensor_(free)(input_n);
-  THTensor_(free)(gradOutput_n);
+  c10::raw::intrusive_ptr::decref(input_n);
+  c10::raw::intrusive_ptr::decref(gradOutput_n);
 
   // Resize
   if (is_batch == 0)
@@ -566,8 +566,8 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
     THTensor_(resize4d)(input, input->size(1), inputDepth, inputHeight, inputWidth);
   }
 
-  THTensor_(free)(input);
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

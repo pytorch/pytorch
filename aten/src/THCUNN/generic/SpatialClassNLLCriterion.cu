@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialClassNLLCriterion.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialClassNLLCriterion.cu"
 #else
 
 void THNN_(SpatialClassNLLCriterion_shapeCheck)(
@@ -58,7 +58,6 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   THNN_(SpatialClassNLLCriterion_shapeCheck)(state, input, target, weights);
   THCTensor_(resize1d)(state, output, 1);
   THCTensor_(resize1d)(state, total_weight, 1);
-  ignore_index -= TH_INDEX_BASE;
 
   if (weights)
     THCUNN_assertSameGPU(state, 5, input, target, weights, output, total_weight);
@@ -77,12 +76,12 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
     }
 
     int64_t count = batch_size * H * W;
-    SpatialClassNLLCriterion_updateOutput_no_reduce_kernel<real>
+    SpatialClassNLLCriterion_updateOutput_no_reduce_kernel<scalar_t>
       <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
         count,
-        toDeviceTensor<real, 4>(state, input),
+        toDeviceTensor<scalar_t, 4>(state, input),
         toDeviceTensor<THCIndex_t, 3>(state, target),
-        toDeviceTensor<real, 3>(state, output),
+        toDeviceTensor<scalar_t, 3>(state, output),
         weights ? THCTensor_(data)(state, weights) : NULL,
         ignore_index);
 
@@ -96,11 +95,11 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;
   target = THCIndexTensor_(newContiguous)(state, target);
 
-  real *input_data = THCTensor_(data)(state, input);
-  real *weights_data = weights ? THCTensor_(data)(state, weights) : NULL;
+  scalar_t *input_data = THCTensor_(data)(state, input);
+  scalar_t *weights_data = weights ? THCTensor_(data)(state, weights) : NULL;
   THCIndex_t  *target_data = THCIndexTensor_(data)(state, target);
-  real *output_data = THCTensor_(data)(state, output);
-  real *total_weight_data = THCTensor_(data)(state, total_weight);
+  scalar_t *output_data = THCTensor_(data)(state, output);
+  scalar_t *total_weight_data = THCTensor_(data)(state, total_weight);
 
   THCIndex_t batch_size = THCIndexTensor_(size)(state, target, 0);
   THCIndex_t map_nelem = THCIndexTensor_(nElement)(state, target) / batch_size;
@@ -108,17 +107,17 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
   int total_blocks = blocks_per_sample * batch_size;
 
-  THCTensor_(fill)(state, output, ScalarConvert<int, real>::to(0));
-  THCTensor_(fill)(state, total_weight, ScalarConvert<int, real>::to(0));
+  THCTensor_(fill)(state, output, ScalarConvert<int, scalar_t>::to(0));
+  THCTensor_(fill)(state, total_weight, ScalarConvert<int, scalar_t>::to(0));
 
-  cunn_SpatialClassNLLCriterion_updateOutput_kernel<real, accreal>
+  cunn_SpatialClassNLLCriterion_updateOutput_kernel<scalar_t, accreal>
     <<<total_blocks, CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
       output_data,
       total_weight_data,
       input_data,
       target_data,
       weights_data,
-      reduction == Reduction::ElementwiseMean,
+      reduction == Reduction::Mean,
       THCTensor_(size)(state, input, 0),
       THCTensor_(size)(state, input, 1),
       THCTensor_(size)(state, input, 2) * THCTensor_(size)(state, input, 3),
@@ -126,7 +125,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
       ignore_index
   );
   THCudaCheck(cudaGetLastError());
-  if (reduction == Reduction::ElementwiseMean) {
+  if (reduction == Reduction::Mean) {
     cunn_SpatialClassNLLCriterion_sizeAverage_kernel<<<1, 1, 0, THCState_getCurrentStream(state)>>>(
       output_data, total_weight_data
     );
@@ -155,7 +154,6 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   THCTensor_(zero)(state, gradInput);
   THArgCheck(THCTensor_(isContiguous)(state, gradInput), 4,
              "gradInput must be contiguous");
-  ignore_index -= TH_INDEX_BASE;
 
   if (weights)
     THCUNN_assertSameGPU(state, 5, weights, input, target, gradInput, total_weight);
@@ -177,12 +175,12 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
     }
 
     int64_t count = batch_size * H * W;
-    SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel<real>
+    SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel<scalar_t>
       <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
         count,
         toDeviceTensor<THCIndex_t, 3>(state, target),
-        toDeviceTensor<real, 3>(state, gradOutput),
-        toDeviceTensor<real, 4>(state, gradInput),
+        toDeviceTensor<scalar_t, 3>(state, gradOutput),
+        toDeviceTensor<scalar_t, 4>(state, gradInput),
         weights ? THCTensor_(data)(state, weights) : NULL,
         ignore_index);
 
@@ -196,11 +194,11 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;
   target = THCIndexTensor_(newContiguous)(state, target);
 
-  real *gradOutput_data = THCTensor_(data)(state, gradOutput);
-  real *weights_data = weights ? THCTensor_(data)(state, weights) : NULL;
-  real *gradInput_data = THCTensor_(data)(state, gradInput);
+  scalar_t *gradOutput_data = THCTensor_(data)(state, gradOutput);
+  scalar_t *weights_data = weights ? THCTensor_(data)(state, weights) : NULL;
+  scalar_t *gradInput_data = THCTensor_(data)(state, gradInput);
   THCIndex_t *target_data = THCIndexTensor_(data)(state, target);
-  real *total_weight_data = THCTensor_(data)(state, total_weight);
+  scalar_t *total_weight_data = THCTensor_(data)(state, total_weight);
 
   THCIndex_t batch_size = THCIndexTensor_(size)(state, target, 0);
   THCIndex_t map_nelem = THCIndexTensor_(nElement)(state, target) / batch_size;
@@ -215,7 +213,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
       target_data,
       weights_data,
       total_weight_data,
-      reduction == Reduction::ElementwiseMean,
+      reduction == Reduction::Mean,
       THCTensor_(size)(state, input, 0),
       THCTensor_(size)(state, input, 1),
       THCTensor_(size)(state, input, 2) *THCTensor_(size)(state, input, 3),

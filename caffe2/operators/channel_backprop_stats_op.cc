@@ -7,12 +7,12 @@ template <>
 bool ChannelBackpropStatsOp<CPUContext>::RunOnDevice() {
   const auto& X = Input(INPUT);
   const auto& dY = Input(OUTPUT_GRAD);
-  CAFFE_ENFORCE(X.ndim() >= 3 && X.ndim() <= 5);
+  CAFFE_ENFORCE(X.dim() >= 3 && X.dim() <= 5);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
-  const int W = X.ndim() > 3 ? X.dim32(3) : 1;
-  const int D = X.ndim() > 4 ? X.dim32(4) : 1;
+  const int W = X.dim() > 3 ? X.dim32(3) : 1;
+  const int D = X.dim() > 4 ? X.dim32(4) : 1;
 
   const int sampleSize = H * W * D;
 

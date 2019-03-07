@@ -72,17 +72,17 @@ template <typename T, typename Context>
 bool GFtrlOp<T, Context>::RunOnDevice() {
   // run time learning rate override
   if (ALPHA < InputSize()) {
-    CAFFE_ENFORCE_EQ(Input(ALPHA).size(), 1, "alpha should be real-valued");
+    CAFFE_ENFORCE_EQ(Input(ALPHA).numel(), 1, "alpha should be real-valued");
     params_.alphaInv = 1.0 / *(Input(ALPHA).template data<T>());
   }
 
-  CAFFE_ENFORCE_EQ(Input(GRAD).size(), Input(VAR).size());
-  CAFFE_ENFORCE_EQ(Input(GRAD).size() * 2, Input(N_Z).size());
+  CAFFE_ENFORCE_EQ(Input(GRAD).numel(), Input(VAR).numel());
+  CAFFE_ENFORCE_EQ(Input(GRAD).numel() * 2, Input(N_Z).numel());
   Output(OUTPUT_VAR)->ResizeLike(Input(VAR));
   Output(OUTPUT_N_Z)->ResizeLike(Input(N_Z));
   gftrl_update<Context>(
-      Input(GRAD).dim(0), // # of output nodes
-      Input(GRAD).size() / Input(GRAD).dim(0), // # of input features
+      Input(GRAD).size(0), // # of output nodes
+      Input(GRAD).numel() / Input(GRAD).size(0), // # of input features
       Input(VAR).template data<T>(),
       Input(N_Z).template data<T>(),
       Input(GRAD).template data<T>(),

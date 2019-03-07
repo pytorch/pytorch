@@ -2,7 +2,7 @@
 
 #include "caffe2/core/flags.h"
 
-CAFFE2_DECLARE_string(caffe_test_root);
+C10_DECLARE_string(caffe_test_root);
 
 template <>
 void CopyVector<caffe2::CPUContext, bool>(const int N, const bool* x, bool* y) {

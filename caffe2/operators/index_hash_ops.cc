@@ -21,7 +21,7 @@ specified number. All input and output indices are enforced to be positive.
     .TensorInferenceFunction([](const OperatorDef& /* unused */,
                                 const vector<TensorShape>& in) {
       std::vector<TensorShape> out(1);
-      std::vector<TIndex> output_dims = GetDimsVector(in[0]);
+      std::vector<int64_t> output_dims = GetDimsVector(in[0]);
       out[0] = CreateTensorShape(output_dims, in[0].data_type());
       return out;
     });

@@ -13,7 +13,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input, const Tensor& weight,
     const Tensor& bias, const Tensor& running_mean, const Tensor& running_var,
     bool training, double exponential_average_factor, double epsilon) {
-  throw std::runtime_error("cudnn_batch_norm: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_batch_norm: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
@@ -21,7 +21,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& running_mean, const Tensor& running_var,
     const Tensor& save_mean, const Tensor& save_var,
     double epsilon) {
-  throw std::runtime_error("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
 }
 
 }}  // namespace at::native
@@ -88,13 +88,13 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
   } else {
     mode = CUDNN_BATCHNORM_SPATIAL;
-#if CUDNN_VERSION >= 7003
-    if(training)
-      mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
-#endif
+    // TODO: The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
+    // introduced in CuDNN 7 for performance optimization, but it results in
+    // accuracy losses in convolution models such as ResNeXt-101 and
+    // video R(2+1)D. We will fall back to the normal CUDNN_BATCHNORM_SPATIAL
   }
 
-  auto output_t = input->type().tensor(input->sizes());
+  auto output_t = at::empty(input->sizes(), input->options());
   TensorArg output{ output_t, "output", 0 };
 
   auto handle = getCudnnHandle();
@@ -108,8 +108,8 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
 
   if (training) {
     int64_t num_features = input_t.size(1);
-    save_mean = weight_t.type().tensor({ num_features });
-    save_var = weight_t.type().tensor({ num_features });
+    save_mean = at::empty({ num_features }, weight_t.options());
+    save_var = at::empty({ num_features }, weight_t.options());
     AT_CUDNN_CHECK(cudnnBatchNormalizationForwardTraining(
       handle, mode, &one, &zero,
       idesc.desc(), input->data_ptr(),
@@ -183,16 +183,16 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   if (input->dim() == 2) {
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
   } else {
-#if CUDNN_VERSION >= 7003
-    mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
-#else
+    // TODO: The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
+    // introduced in CuDNN 7 for performance optimization, but it results in
+    // accuracy losses in convolution models such as ResNeXt-101 and
+    // video R(2+1)D. We will fall back to the normal CUDNN_BATCHNORM_SPATIAL
     mode = CUDNN_BATCHNORM_SPATIAL;
-#endif
   }
 
-  auto grad_input_t  = input->type().tensor(input->sizes());
-  auto grad_weight_t = weight->type().tensor(weight->sizes());
-  auto grad_bias_t   = weight->type().tensor(weight->sizes());
+  auto grad_input_t  = at::empty(input->sizes(), input->options());
+  auto grad_weight_t = at::empty(weight->sizes(), weight->options());
+  auto grad_bias_t   = at::empty(weight->sizes(), weight->options());
 
   auto handle = getCudnnHandle();
   auto dataType = getCudnnDataType(*input);

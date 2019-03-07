@@ -10,30 +10,30 @@
 
 namespace caffe2 {
 
-void AddConstInput(const vector<TIndex>& shape,
+void AddConstInput(const vector<int64_t>& shape,
                    const float value,
                    const string& name,
                    Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   math::Set<float, CPUContext>(
-      tensor->size(), value, tensor->template mutable_data<float>(), &context);
+      tensor->numel(), value, tensor->template mutable_data<float>(), &context);
 }
 
-void AddNoiseInput(const vector<TIndex>& shape,
+void AddNoiseInput(const vector<int64_t>& shape,
                    const string& name,
                    Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
 
   math::RandGaussian<float, CPUContext>(
-      tensor->size(),
+      tensor->numel(),
       0.0f,
       10.0f,
       tensor->template mutable_data<float>(),
@@ -81,9 +81,9 @@ void compare(int N, int inputC, int H, int W,
   def1.add_arg()->CopyFrom(MakeArgument("adj_h", adjH));
   def1.add_arg()->CopyFrom(MakeArgument("adj_w", adjW));
 
-  AddNoiseInput(vector<TIndex>{N, inputC, H, W}, "X", &ws);
-  AddNoiseInput(vector<TIndex>{inputC, outputC, kernelH, kernelW}, "W", &ws);
-  AddNoiseInput(vector<TIndex>{outputC}, "B", &ws);
+  AddNoiseInput(vector<int64_t>{N, inputC, H, W}, "X", &ws);
+  AddNoiseInput(vector<int64_t>{inputC, outputC, kernelH, kernelW}, "W", &ws);
+  AddNoiseInput(vector<int64_t>{outputC}, "B", &ws);
 
   unique_ptr<OperatorBase> op1(CreateOperator(def1, &ws));
   EXPECT_NE(nullptr, op1.get());

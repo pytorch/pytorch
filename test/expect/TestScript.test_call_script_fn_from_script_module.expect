@@ -1,6 +1,0 @@
-graph(%x : Dynamic
-      %1 : Dynamic) {
-  %2 : Dynamic = aten::mm(%x, %1)
-  %3 : Dynamic = aten::neg(%2)
-  return (%3);
-}

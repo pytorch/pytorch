@@ -124,7 +124,7 @@ def process_function(func):
     unpack = []
 
     env['compute_index_ranges'] = []
-    for arg in func['args_with_gradients']:
+    for arg in func['args_with_derivatives']:
         if arg['type'] == 'TensorList':
             size = '{}_size_'.format(arg['name'])
             saved_list_sizes.append('size_t {}_size_;'.format(arg['name']))
@@ -137,14 +137,17 @@ def process_function(func):
         if arg['type'] == 'Tensor' or (arg['type'] == 'Scalar' and is_output):
             saved_variables.append('SavedVariable {}_;'.format(name))
             release_variables.append('{}_.reset_data();'.format(name))
+            release_variables.append('{}_.reset_grad_function();'.format(name))
             ptr = 'shared_from_this()' if is_output else ''
             unpack.append('auto {} = {}_.unpack({});'.format(name, name, ptr))
         elif arg['type'] == 'TensorList':
             saved_variables.append('std::vector<SavedVariable> {}_;'.format(name))
             release_variables.append('{}_.clear();'.format(name))
             unpack.append('auto {} = unpack_list({}_);'.format(name, name))
-        elif arg['type'] == 'IntList':
+        elif arg['type'] == 'IntArrayRef':
             saved_variables.append('std::vector<int64_t> {};'.format(name))
+        elif arg['type'] == 'int64_t':
+            saved_variables.append('{} {} = 0;'.format(arg['type'], name))
         else:
             saved_variables.append('{} {};'.format(arg['type'], name))
 

@@ -7,7 +7,7 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
 
@@ -19,17 +19,17 @@ TEST(MathTest, GemmNoTransNoTrans) {
   Tensor X(std::vector<int>{5, 10}, CPU);
   Tensor W(std::vector<int>{10, 6}, CPU);
   Tensor Y(std::vector<int>{5, 6}, CPU);
-  EXPECT_EQ(X.size(), 50);
-  EXPECT_EQ(W.size(), 60);
+  EXPECT_EQ(X.numel(), 50);
+  EXPECT_EQ(W.numel(), 60);
   math::Set<float, CPUContext>(
-      X.size(), 1, X.mutable_data<float>(), &cpu_context);
+      X.numel(), 1, X.mutable_data<float>(), &cpu_context);
   math::Set<float, CPUContext>(
-      W.size(), 1, W.mutable_data<float>(), &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < X.size(); ++i) {
+      W.numel(), 1, W.mutable_data<float>(), &cpu_context);
+  EXPECT_EQ(Y.numel(), 30);
+  for (int i = 0; i < X.numel(); ++i) {
     CHECK_EQ(X.data<float>()[i], 1);
   }
-  for (int i = 0; i < W.size(); ++i) {
+  for (int i = 0; i < W.numel(); ++i) {
     CHECK_EQ(W.data<float>()[i], 1);
   }
 
@@ -48,8 +48,8 @@ TEST(MathTest, GemmNoTransNoTrans) {
       kZero,
       Y.mutable_data<float>(),
       &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
+  EXPECT_EQ(Y.numel(), 30);
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 10) << i;
   }
   // Test Accumulate
@@ -65,8 +65,8 @@ TEST(MathTest, GemmNoTransNoTrans) {
       kPointFive,
       Y.mutable_data<float>(),
       &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
+  EXPECT_EQ(Y.numel(), 30);
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 15) << i;
   }
   // Test Accumulate
@@ -82,8 +82,8 @@ TEST(MathTest, GemmNoTransNoTrans) {
       kOne,
       Y.mutable_data<float>(),
       &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
+  EXPECT_EQ(Y.numel(), 30);
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 20) << i;
   }
 }
@@ -94,17 +94,17 @@ TEST(MathTest, GemmNoTransTrans) {
   Tensor X(std::vector<int>{5, 10}, CPU);
   Tensor W(std::vector<int>{6, 10}, CPU);
   Tensor Y(std::vector<int>{5, 6}, CPU);
-  EXPECT_EQ(X.size(), 50);
-  EXPECT_EQ(W.size(), 60);
+  EXPECT_EQ(X.numel(), 50);
+  EXPECT_EQ(W.numel(), 60);
   math::Set<float, CPUContext>(
-      X.size(), 1, X.mutable_data<float>(), &cpu_context);
+      X.numel(), 1, X.mutable_data<float>(), &cpu_context);
   math::Set<float, CPUContext>(
-      W.size(), 1, W.mutable_data<float>(), &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < X.size(); ++i) {
+      W.numel(), 1, W.mutable_data<float>(), &cpu_context);
+  EXPECT_EQ(Y.numel(), 30);
+  for (int i = 0; i < X.numel(); ++i) {
     CHECK_EQ(X.data<float>()[i], 1);
   }
-  for (int i = 0; i < W.size(); ++i) {
+  for (int i = 0; i < W.numel(); ++i) {
     CHECK_EQ(W.data<float>()[i], 1);
   }
 
@@ -123,8 +123,8 @@ TEST(MathTest, GemmNoTransTrans) {
       kZero,
       Y.mutable_data<float>(),
       &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
+  EXPECT_EQ(Y.numel(), 30);
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 10) << i;
   }
   // Test Accumulate
@@ -140,8 +140,8 @@ TEST(MathTest, GemmNoTransTrans) {
       kPointFive,
       Y.mutable_data<float>(),
       &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
+  EXPECT_EQ(Y.numel(), 30);
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 15) << i;
   }
   math::Gemm<float, CPUContext>(
@@ -156,8 +156,8 @@ TEST(MathTest, GemmNoTransTrans) {
       kOne,
       Y.mutable_data<float>(),
       &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
+  EXPECT_EQ(Y.numel(), 30);
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 20) << i;
   }
 }
@@ -171,13 +171,16 @@ class GemmBatchedTest
  protected:
   void SetUp() override {
     cpu_context_ = make_unique<CPUContext>(option_);
-    X_.Resize(std::vector<TIndex>{3, 5, 10});
-    W_.Resize(std::vector<TIndex>{3, 6, 10});
-    Y_.Resize(std::vector<TIndex>{3, 5, 6});
+    ReinitializeTensor(
+        &X_, std::vector<int64_t>{3, 5, 10}, at::dtype<float>().device(CPU));
+    ReinitializeTensor(
+        &W_, std::vector<int64_t>{3, 6, 10}, at::dtype<float>().device(CPU));
+    ReinitializeTensor(
+        &Y_, std::vector<int64_t>{3, 5, 6}, at::dtype<float>().device(CPU));
     math::Set<float, CPUContext>(
-        X_.size(), 1, X_.mutable_data<float>(), cpu_context_.get());
+        X_.numel(), 1, X_.mutable_data<float>(), cpu_context_.get());
     math::Set<float, CPUContext>(
-        W_.size(), 1, W_.mutable_data<float>(), cpu_context_.get());
+        W_.numel(), 1, W_.mutable_data<float>(), cpu_context_.get());
     trans_X_ = std::get<0>(GetParam());
     trans_W_ = std::get<1>(GetParam());
   }
@@ -236,16 +239,16 @@ class GemmBatchedTest
   }
 
   void VerifyOutput(const float value) const {
-    for (int i = 0; i < Y_.size(); ++i) {
+    for (int i = 0; i < Y_.numel(); ++i) {
       EXPECT_FLOAT_EQ(value, Y_.template data<float>()[i]);
     }
   }
 
   DeviceOption option_;
   std::unique_ptr<CPUContext> cpu_context_;
-  Tensor X_{CPU};
-  Tensor W_{CPU};
-  Tensor Y_{CPU};
+  Tensor X_;
+  Tensor W_;
+  Tensor Y_;
   bool trans_X_;
   bool trans_W_;
 };
@@ -281,17 +284,17 @@ TEST(MathTest, GemvNoTrans) {
   Tensor A(std::vector<int>{5, 10}, CPU);
   Tensor X(std::vector<int>{10}, CPU);
   Tensor Y(std::vector<int>{5}, CPU);
-  EXPECT_EQ(A.size(), 50);
-  EXPECT_EQ(X.size(), 10);
+  EXPECT_EQ(A.numel(), 50);
+  EXPECT_EQ(X.numel(), 10);
   math::Set<float, CPUContext>(
-      A.size(), 1, A.mutable_data<float>(), &cpu_context);
+      A.numel(), 1, A.mutable_data<float>(), &cpu_context);
   math::Set<float, CPUContext>(
-      X.size(), 1, X.mutable_data<float>(), &cpu_context);
-  EXPECT_EQ(Y.size(), 5);
-  for (int i = 0; i < A.size(); ++i) {
+      X.numel(), 1, X.mutable_data<float>(), &cpu_context);
+  EXPECT_EQ(Y.numel(), 5);
+  for (int i = 0; i < A.numel(); ++i) {
     CHECK_EQ(A.data<float>()[i], 1);
   }
-  for (int i = 0; i < X.size(); ++i) {
+  for (int i = 0; i < X.numel(); ++i) {
     CHECK_EQ(X.data<float>()[i], 1);
   }
 
@@ -308,7 +311,7 @@ TEST(MathTest, GemvNoTrans) {
       kZero,
       Y.mutable_data<float>(),
       &cpu_context);
-  for (int i = 0; i < Y.size(); ++i) {
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 10) << i;
   }
   // Test Accumulate
@@ -322,7 +325,7 @@ TEST(MathTest, GemvNoTrans) {
       kPointFive,
       Y.mutable_data<float>(),
       &cpu_context);
-  for (int i = 0; i < Y.size(); ++i) {
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 15) << i;
   }
   // Test Accumulate
@@ -336,7 +339,7 @@ TEST(MathTest, GemvNoTrans) {
       kOne,
       Y.mutable_data<float>(),
       &cpu_context);
-  for (int i = 0; i < Y.size(); ++i) {
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 20) << i;
   }
 }
@@ -347,17 +350,17 @@ TEST(MathTest, GemvTrans) {
   Tensor A(std::vector<int>{6, 10}, CPU);
   Tensor X(std::vector<int>{6}, CPU);
   Tensor Y(std::vector<int>{10}, CPU);
-  EXPECT_EQ(A.size(), 60);
-  EXPECT_EQ(X.size(), 6);
+  EXPECT_EQ(A.numel(), 60);
+  EXPECT_EQ(X.numel(), 6);
   math::Set<float, CPUContext>(
-      A.size(), 1, A.mutable_data<float>(), &cpu_context);
+      A.numel(), 1, A.mutable_data<float>(), &cpu_context);
   math::Set<float, CPUContext>(
-      X.size(), 1, X.mutable_data<float>(), &cpu_context);
-  EXPECT_EQ(Y.size(), 10);
-  for (int i = 0; i < A.size(); ++i) {
+      X.numel(), 1, X.mutable_data<float>(), &cpu_context);
+  EXPECT_EQ(Y.numel(), 10);
+  for (int i = 0; i < A.numel(); ++i) {
     CHECK_EQ(A.data<float>()[i], 1);
   }
-  for (int i = 0; i < X.size(); ++i) {
+  for (int i = 0; i < X.numel(); ++i) {
     CHECK_EQ(X.data<float>()[i], 1);
   }
 
@@ -374,7 +377,7 @@ TEST(MathTest, GemvTrans) {
       kZero,
       Y.mutable_data<float>(),
       &cpu_context);
-  for (int i = 0; i < Y.size(); ++i) {
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 6) << i;
   }
   // Test Accumulate
@@ -388,7 +391,7 @@ TEST(MathTest, GemvTrans) {
       kPointFive,
       Y.mutable_data<float>(),
       &cpu_context);
-  for (int i = 0; i < Y.size(); ++i) {
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 9) << i;
   }
   // Test Accumulate
@@ -402,21 +405,19 @@ TEST(MathTest, GemvTrans) {
       kOne,
       Y.mutable_data<float>(),
       &cpu_context);
-  for (int i = 0; i < Y.size(); ++i) {
+  for (int i = 0; i < Y.numel(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 12) << i;
   }
 }
 
-using convert::cpu_float2half_rn;
-using convert::cpu_half2float;
 TEST(MathTest, FloatToHalfConversion) {
   float a = 1.0f;
   float b = 1.75f;
   float c = 128.125f;
 
-  float converted_a = cpu_half2float(cpu_float2half_rn(a));
-  float converted_b = cpu_half2float(cpu_float2half_rn(b));
-  float converted_c = cpu_half2float(cpu_float2half_rn(c));
+  float converted_a = static_cast<float>(at::Half(a));
+  float converted_b = static_cast<float>(at::Half(b));
+  float converted_c = static_cast<float>(at::Half(c));
 
   CHECK_EQ(a, converted_a);
   CHECK_EQ(b, converted_b);
@@ -424,249 +425,6 @@ TEST(MathTest, FloatToHalfConversion) {
 }
 
 namespace {
-
-class ReduceTensorTest : public testing::Test {
- protected:
-  void SetUp() override {
-    cpu_context_ = make_unique<CPUContext>(option_);
-  }
-
-  template <class ReduceFunc>
-  void RunRedcueTensorTest(
-      const ReduceFunc& reduce_func,
-      const std::vector<int>& X_dims,
-      const std::vector<int>& axes,
-      const std::vector<float>& X_data,
-      const std::vector<float>& Y_data) {
-    std::vector<int> Y_dims = X_dims;
-    for (const int axis : axes) {
-      Y_dims[axis] = 1;
-    }
-    X_.Resize(X_dims);
-    Y_.Resize(Y_dims);
-    ASSERT_EQ(X_data.size(), X_.size());
-    cpu_context_->CopyFromCPU<float>(
-        X_data.size(), X_data.data(), X_.mutable_data<float>());
-    reduce_func(
-        X_dims.size(),
-        X_dims.data(),
-        axes.size(),
-        axes.data(),
-        1.0f,
-        X_.data<float>(),
-        Y_.mutable_data<float>(),
-        cpu_context_.get());
-    ASSERT_EQ(Y_data.size(), Y_.size());
-    for (int i = 0; i < Y_.size(); ++i) {
-      EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
-    }
-  }
-
-  DeviceOption option_;
-  std::unique_ptr<CPUContext> cpu_context_;
-  Tensor X_{CPU};
-  Tensor Y_{CPU};
-};
-
-TEST_F(ReduceTensorTest, ReduceMinTest) {
-  const auto& reduce_min = [](const int num_dims,
-                              const int* dims,
-                              const int num_axes,
-                              const int* axes,
-                              const float alpha,
-                              const float* X,
-                              float* Y,
-                              CPUContext* context) {
-    return math::ReduceMin<float, CPUContext>(
-        num_dims, dims, num_axes, axes, alpha, X, Y, context);
-  };
-  // Test for 1D tensor.
-  RunRedcueTensorTest(reduce_min, {3}, {0}, {1.0f, 2.0f, 3.0f}, {1.0f});
-
-  // Test for 2D Tensor.
-  RunRedcueTensorTest(
-      reduce_min,
-      {2, 3},
-      {1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {1.0f, 4.0f});
-  RunRedcueTensorTest(
-      reduce_min,
-      {2, 3},
-      {0},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {1.0f, 2.0f, 3.0f});
-  RunRedcueTensorTest(
-      reduce_min, {2, 3}, {0, 1}, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}, {1.0f});
-
-  // Test for 3D tensor.
-  RunRedcueTensorTest(
-      reduce_min,
-      {2, 2, 2},
-      {1, 2},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {1.0f, 5.0f});
-  RunRedcueTensorTest(
-      reduce_min,
-      {2, 2, 2},
-      {0, 1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {1.0f, 2.0f});
-  RunRedcueTensorTest(
-      reduce_min,
-      {2, 2, 2},
-      {0, 2},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {1.0f, 3.0f});
-}
-
-TEST_F(ReduceTensorTest, ReduceMaxTest) {
-  const auto& reduce_max = [](const int num_dims,
-                              const int* dims,
-                              const int num_axes,
-                              const int* axes,
-                              const float alpha,
-                              const float* X,
-                              float* Y,
-                              CPUContext* context) {
-    return math::ReduceMax<float, CPUContext>(
-        num_dims, dims, num_axes, axes, alpha, X, Y, context);
-  };
-  // Test for 1D tensor.
-  RunRedcueTensorTest(reduce_max, {3}, {0}, {1.0f, 2.0f, 3.0f}, {3.0f});
-
-  // Test for 2D Tensor.
-  RunRedcueTensorTest(
-      reduce_max,
-      {2, 3},
-      {1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {3.0f, 6.0f});
-  RunRedcueTensorTest(
-      reduce_max,
-      {2, 3},
-      {0},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {4.0f, 5.0f, 6.0f});
-  RunRedcueTensorTest(
-      reduce_max, {2, 3}, {0, 1}, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}, {6.0f});
-
-  // Test for 3D tensor.
-  RunRedcueTensorTest(
-      reduce_max,
-      {2, 2, 2},
-      {1, 2},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {4.0f, 8.0f});
-  RunRedcueTensorTest(
-      reduce_max,
-      {2, 2, 2},
-      {0, 1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {7.0f, 8.0f});
-  RunRedcueTensorTest(
-      reduce_max,
-      {2, 2, 2},
-      {0, 2},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {6.0f, 8.0f});
-}
-
-TEST_F(ReduceTensorTest, ReduceSumTest) {
-  // Test for 1D tensor.
-  RunRedcueTensorTest(
-      math::ReduceSum<float, CPUContext>, {3}, {0}, {1.0f, 2.0f, 3.0f}, {6.0f});
-
-  // Test for 2D Tensor.
-  RunRedcueTensorTest(
-      math::ReduceSum<float, CPUContext>,
-      {2, 3},
-      {1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {6.0f, 15.0f});
-  RunRedcueTensorTest(
-      math::ReduceSum<float, CPUContext>,
-      {2, 3},
-      {0},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {5.0f, 7.0f, 9.0f});
-  RunRedcueTensorTest(
-      math::ReduceSum<float, CPUContext>,
-      {2, 3},
-      {0, 1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {21.0f});
-
-  // Test for 3D tensor.
-  RunRedcueTensorTest(
-      math::ReduceSum<float, CPUContext>,
-      {2, 2, 2},
-      {1, 2},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {10.0f, 26.0f});
-  RunRedcueTensorTest(
-      math::ReduceSum<float, CPUContext>,
-      {2, 2, 2},
-      {0, 1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {16.0f, 20.0f});
-  RunRedcueTensorTest(
-      math::ReduceSum<float, CPUContext>,
-      {2, 2, 2},
-      {0, 2},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {14.0f, 22.0f});
-}
-
-TEST_F(ReduceTensorTest, ReduceMeanTest) {
-  // Test for 1D tensor.
-  RunRedcueTensorTest(
-      math::ReduceMean<float, CPUContext>,
-      {3},
-      {0},
-      {1.0f, 2.0f, 3.0f},
-      {2.0f});
-
-  // Test for 2D Tensor.
-  RunRedcueTensorTest(
-      math::ReduceMean<float, CPUContext>,
-      {2, 3},
-      {1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {2.0f, 5.0f});
-  RunRedcueTensorTest(
-      math::ReduceMean<float, CPUContext>,
-      {2, 3},
-      {0},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {2.5f, 3.5f, 4.5f});
-  RunRedcueTensorTest(
-      math::ReduceMean<float, CPUContext>,
-      {2, 3},
-      {0, 1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {3.5f});
-
-  // Test for 3D tensor.
-  RunRedcueTensorTest(
-      math::ReduceMean<float, CPUContext>,
-      {2, 2, 2},
-      {1, 2},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {2.5f, 6.5f});
-  RunRedcueTensorTest(
-      math::ReduceMean<float, CPUContext>,
-      {2, 2, 2},
-      {0, 1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {4.0f, 5.0f});
-  RunRedcueTensorTest(
-      math::ReduceMean<float, CPUContext>,
-      {2, 2, 2},
-      {0, 2},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {3.5f, 5.5f});
-}
 
 class BroadcastTest : public testing::Test {
  protected:
@@ -679,9 +437,13 @@ class BroadcastTest : public testing::Test {
       const std::vector<int>& Y_dims,
       const std::vector<float>& X_data,
       const std::vector<float>& Y_data) {
-    X_.Resize(X_dims);
-    Y_.Resize(Y_dims);
-    ASSERT_EQ(X_data.size(), X_.size());
+    std::vector<int64_t> X_dims_64;
+    std::vector<int64_t> Y_dims_64;
+    std::copy(X_dims.cbegin(), X_dims.cend(), std::back_inserter(X_dims_64));
+    std::copy(Y_dims.cbegin(), Y_dims.cend(), std::back_inserter(Y_dims_64));
+    ReinitializeTensor(&X_, X_dims_64, at::dtype<float>().device(CPU));
+    ReinitializeTensor(&Y_, Y_dims_64, at::dtype<float>().device(CPU));
+    ASSERT_EQ(X_data.size(), X_.numel());
     cpu_context_->CopyFromCPU<float>(
         X_data.size(), X_data.data(), X_.mutable_data<float>());
     math::Broadcast<float, CPUContext>(
@@ -693,7 +455,7 @@ class BroadcastTest : public testing::Test {
         X_.data<float>(),
         Y_.mutable_data<float>(),
         cpu_context_.get());
-    ASSERT_EQ(Y_data.size(), Y_.size());
+    ASSERT_EQ(Y_data.size(), Y_.numel());
     for (int i = 0; i < Y_data.size(); ++i) {
       EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
     }
@@ -702,8 +464,8 @@ class BroadcastTest : public testing::Test {
   DeviceOption option_;
   std::unique_ptr<CPUContext> cpu_context_;
 
-  Tensor X_{CPU};
-  Tensor Y_{CPU};
+  Tensor X_;
+  Tensor Y_;
 };
 
 TEST_F(BroadcastTest, BroadcastFloatTest) {
@@ -718,99 +480,19 @@ TEST_F(BroadcastTest, BroadcastFloatTest) {
       {1.0f, 1.0f, 2.0f, 2.0f, 1.0f, 1.0f, 2.0f, 2.0f});
 }
 
-class MomentsTest : public testing::Test {
+class RandFixedSumTest : public testing::Test {
  protected:
   void SetUp() override {
     cpu_context_ = make_unique<CPUContext>(option_);
   }
-
-  void RunMomentsTest(
-      const std::vector<int>& X_dims,
-      const std::vector<int>& axes,
-      const std::vector<float>& X_data,
-      const std::vector<float>& mean_data,
-      const std::vector<float>& variance_data) {
-    const int ndim = X_dims.size();
-    std::vector<int> Y_dims = X_dims;
-    for (const int axis : axes) {
-      Y_dims[axis] = 1;
-    }
-    X_.Resize(X_dims);
-    mean_.Resize(Y_dims);
-    variance_.Resize(Y_dims);
-    ASSERT_EQ(X_data.size(), X_.size());
-    cpu_context_->CopyFromCPU<float>(
-        X_data.size(), X_data.data(), X_.mutable_data<float>());
-    math::Moments<float, CPUContext>(
-        X_dims.size(),
-        X_dims.data(),
-        axes.size(),
-        axes.data(),
-        X_.data<float>(),
-        mean_.mutable_data<float>(),
-        variance_.mutable_data<float>(),
-        cpu_context_.get());
-    ASSERT_EQ(mean_data.size(), mean_.size());
-    for (int i = 0; i < mean_data.size(); ++i) {
-      EXPECT_FLOAT_EQ(mean_data[i], mean_.data<float>()[i]);
-    }
-    ASSERT_EQ(variance_data.size(), variance_.size());
-    for (int i = 0; i < variance_data.size(); ++i) {
-      EXPECT_NEAR(variance_data[i], variance_.data<float>()[i], kEps);
-    }
-  }
-
   DeviceOption option_;
   std::unique_ptr<CPUContext> cpu_context_;
-
-  Tensor X_{CPU};
-  Tensor mean_{CPU};
-  Tensor variance_{CPU};
 };
 
-TEST_F(MomentsTest, MomentsFloatTest) {
-  // Test for 1D tensor.
-  RunMomentsTest({3}, {0}, {1.0f, 2.0f, 3.0f}, {2.0f}, {2.0f / 3.0f});
-
-  // Test for 2D Tensor.
-  RunMomentsTest(
-      {2, 3},
-      {1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {2.0f, 5.0f},
-      {2.0f / 3.0f, 2.0f / 3.0f});
-  RunMomentsTest(
-      {2, 3},
-      {0},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {2.5f, 3.5f, 4.5f},
-      {2.25f, 2.25f, 2.25f});
-  RunMomentsTest(
-      {2, 3},
-      {0, 1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {3.5f},
-      {35.0f / 12.0f});
-
-  // Test for 3D tensor.
-  RunMomentsTest(
-      {2, 2, 2},
-      {1, 2},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {2.5f, 6.5f},
-      {1.25, 1.25});
-  RunMomentsTest(
-      {2, 2, 2},
-      {0, 1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {4.0f, 5.0f},
-      {5.0f, 5.0f});
-  RunMomentsTest(
-      {2, 2, 2},
-      {0, 2},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-      {3.5f, 5.5f},
-      {4.25, 4.25});
+TEST_F(RandFixedSumTest, UpperBound) {
+  std::vector<int> l(20);
+  math::RandFixedSum<int, CPUContext>(
+      20, 1, 1000, 1000, l.data(), cpu_context_.get());
 }
 
 class TransposeTest : public testing::Test {
@@ -829,9 +511,13 @@ class TransposeTest : public testing::Test {
     for (int i = 0; i < ndim; ++i) {
       Y_dims[i] = X_dims[axes[i]];
     }
-    X_.Resize(X_dims);
-    Y_.Resize(Y_dims);
-    ASSERT_EQ(X_data.size(), X_.size());
+    std::vector<int64_t> X_dims_64;
+    std::vector<int64_t> Y_dims_64;
+    std::copy(X_dims.cbegin(), X_dims.cend(), std::back_inserter(X_dims_64));
+    std::copy(Y_dims.cbegin(), Y_dims.cend(), std::back_inserter(Y_dims_64));
+    ReinitializeTensor(&X_, X_dims_64, at::dtype<float>().device(CPU));
+    ReinitializeTensor(&Y_, Y_dims_64, at::dtype<float>().device(CPU));
+    ASSERT_EQ(X_data.size(), X_.numel());
     cpu_context_->CopyFromCPU<float>(
         X_data.size(), X_data.data(), X_.mutable_data<float>());
     math::Transpose<float, CPUContext>(
@@ -841,8 +527,8 @@ class TransposeTest : public testing::Test {
         X_.data<float>(),
         Y_.mutable_data<float>(),
         cpu_context_.get());
-    ASSERT_EQ(Y_data.size(), Y_.size());
-    for (int i = 0; i < Y_.size(); ++i) {
+    ASSERT_EQ(Y_data.size(), Y_.numel());
+    for (int i = 0; i < Y_.numel(); ++i) {
       EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
     }
   }
@@ -850,8 +536,8 @@ class TransposeTest : public testing::Test {
   DeviceOption option_;
   std::unique_ptr<CPUContext> cpu_context_;
 
-  Tensor X_{CPU};
-  Tensor Y_{CPU};
+  Tensor X_;
+  Tensor Y_;
 };
 
 TEST_F(TransposeTest, TransposeFloatTest) {

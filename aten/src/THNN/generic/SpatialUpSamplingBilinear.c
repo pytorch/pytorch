@@ -2,10 +2,10 @@
 // Originally developed by George Papandreou
 
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SpatialUpSamplingBilinear.c"
+#define TH_GENERIC_FILE "THNN/generic/SpatialUpSamplingBilinear.c"
 #else
 
-#include "linear_upsampling.h"
+#include <THNN/generic/upsampling.h>
 
 static inline void THNN_(SpatialUpSamplingBilinear_shapeCheck)
      (THTensor *input, THTensor *gradOutput,
@@ -55,8 +55,8 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
 		      THTensor_(size)(input, 1),
 		      outputHeight, outputWidth);
   THTensor_(zero)(output);
-  real *idata = THTensor_(data)(input);
-  real *odata = THTensor_(data)(output);
+  scalar_t *idata = input->data<scalar_t>();
+  scalar_t *odata = output->data<scalar_t>();
   channels = nbatch * channels;
   THAssert(inputHeight > 0 && inputWidth > 0 && outputHeight > 0 && outputWidth > 0);
   // special case: just copy
@@ -65,8 +65,8 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
       const int h1 = h2;
       for (int w2 = 0; w2 < outputWidth; ++w2) {
         const int w1 = w2;
-        const real* pos1 = &idata[h1 * inputWidth + w1];
-        real* pos2 = &odata[h2 * outputWidth + w2];
+        const scalar_t* pos1 = &idata[h1 * inputWidth + w1];
+        scalar_t* pos2 = &odata[h2 * outputWidth + w2];
         for (int c = 0; c < channels; ++c) {
           pos2[0] = pos1[0];
           pos1 += inputWidth * inputHeight;
@@ -74,7 +74,7 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
         }
       }
     }
-    THTensor_(free)(input);
+    c10::raw::intrusive_ptr::decref(input);
     return;
   }
   const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
@@ -83,16 +83,16 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
     const accreal h1r = linear_upsampling_compute_source_index<accreal>(rheight, h2, align_corners);
     const int h1 = h1r;
     const int h1p = (h1 < inputHeight - 1) ? 1 : 0;
-    const real h1lambda = h1r - h1;
-    const real h0lambda = (real)1. - h1lambda;
+    const scalar_t h1lambda = h1r - h1;
+    const scalar_t h0lambda = (scalar_t)1. - h1lambda;
     for (int w2 = 0; w2 < outputWidth; ++w2) {
       const accreal w1r = linear_upsampling_compute_source_index<accreal>(rwidth, w2, align_corners);
       const int w1 = w1r;
       const int w1p = (w1 < inputWidth - 1) ? 1 : 0;
-      const real w1lambda = w1r - w1;
-      const real w0lambda = (real)1. - w1lambda;
-      const real* pos1 = &idata[h1 * inputWidth + w1];
-      real* pos2 = &odata[h2 * outputWidth + w2];
+      const scalar_t w1lambda = w1r - w1;
+      const scalar_t w0lambda = (scalar_t)1. - w1lambda;
+      const scalar_t* pos1 = &idata[h1 * inputWidth + w1];
+      scalar_t* pos2 = &odata[h2 * outputWidth + w2];
       for (int c = 0; c < channels; ++c) {
         pos2[0] = h0lambda * (w0lambda * pos1[0]+ w1lambda * pos1[w1p])
                   + h1lambda * (w0lambda * pos1[h1p * inputWidth]
@@ -102,7 +102,7 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
       }
     }
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
@@ -126,8 +126,8 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
   THTensor_(resize4d)(gradInput, nbatch, channels, inputHeight, inputWidth);
   THTensor_(zero)(gradInput);
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  real *data1 = THTensor_(data)(gradInput);
-  real *data2 = THTensor_(data)(gradOutput);
+  scalar_t *data1 = gradInput->data<scalar_t>();
+  scalar_t *data2 = gradOutput->data<scalar_t>();
   channels = nbatch * channels;
 
   // special case: same-size matching grids
@@ -136,8 +136,8 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
       const int h1 = h2;
       for (int w2 = 0; w2 < outputWidth; ++w2) {
         const int w1 = w2;
-        real* pos1 = &data1[h1 * inputWidth + w1];
-        const real* pos2 = &data2[h2 * outputWidth + w2];
+        scalar_t* pos1 = &data1[h1 * inputWidth + w1];
+        const scalar_t* pos2 = &data2[h2 * outputWidth + w2];
         for (int c = 0; c < channels; ++c) {
           pos1[0] += pos2[0];
           pos1 += inputWidth * inputHeight;
@@ -145,7 +145,7 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
         }
       }
     }
-    THTensor_(free)(gradOutput);
+    c10::raw::intrusive_ptr::decref(gradOutput);
     return;
   }
   const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
@@ -154,16 +154,16 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
     const accreal h1r = linear_upsampling_compute_source_index<accreal>(rheight, h2, align_corners);
     const int h1 = h1r;
     const int h1p = (h1 < inputHeight - 1) ? 1 : 0;
-    const real h1lambda = h1r - h1;
-    const real h0lambda = (real)1. - h1lambda;
+    const scalar_t h1lambda = h1r - h1;
+    const scalar_t h0lambda = (scalar_t)1. - h1lambda;
     for (int w2 = 0; w2 < outputWidth; ++w2) {
       const accreal w1r = linear_upsampling_compute_source_index<accreal>(rwidth, w2, align_corners);
       const int w1 = w1r;
       const int w1p = (w1 < inputWidth - 1) ? 1 : 0;
-      const real w1lambda = w1r - w1;
-      const real w0lambda = (real)1. - w1lambda;
-      real* pos1 = &data1[h1 * inputWidth + w1];
-      const real* pos2 = &data2[h2 * outputWidth + w2];
+      const scalar_t w1lambda = w1r - w1;
+      const scalar_t w0lambda = (scalar_t)1. - w1lambda;
+      scalar_t* pos1 = &data1[h1 * inputWidth + w1];
+      const scalar_t* pos2 = &data2[h2 * outputWidth + w2];
       for (int c = 0; c < channels; ++c) {
         pos1[0] += h0lambda * w0lambda * pos2[0];
         pos1[w1p] += h0lambda * w1lambda * pos2[0];
@@ -174,7 +174,7 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
       }
     }
   }
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

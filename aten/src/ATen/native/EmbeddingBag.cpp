@@ -1,8 +1,8 @@
-#include "ATen/ATen.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/NativeFunctions.h>
 
-#include "TH/THBlasUtils.h"
+#include <TH/THBlasUtils.h>
 
 #include <cstring>
 #include <iostream>
@@ -80,7 +80,7 @@ static Tensor apply_bag_size(const Tensor &offsets, const Tensor &indices,
       // Avoid dividing by 0 for empty bags.
       // Instead we want empty bags to return all 0s
       auto bag_size_ = at::max(bag_size, at::ones_like(bag_size))
-                           .toType(output.type())
+                           .to(output.options())
                            .unsqueeze(1)
                            .expand_as(output);
       output /= bag_size_;
@@ -98,7 +98,7 @@ static Tensor apply_bag_size_backward(const Tensor &offsets,
       auto bag_size_ = indices.size(0);
       output /= bag_size_;
     } else {
-      auto inv_bag_size_ = (1 / bag_size.toType(output.type()))
+      auto inv_bag_size_ = (1 / bag_size.to(output.options()))
                              .unsqueeze(1)
                              .index_select(0, offset2bag);
       output *= inv_bag_size_;
@@ -112,7 +112,7 @@ template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor, Tensor> embedding_bag_cpu_max(
   const Tensor& weight, const Tensor &indices, const Tensor& offset2bag, const Tensor& output, const Tensor& bag_size, const Tensor& offsets) {
 
-    auto max_indices = at::zeros({offsets.size(0), weight.size(1)}, indices.type());
+    auto max_indices = at::zeros({offsets.size(0), weight.size(1)}, indices.options());
 
     int64_t numel = indices.numel();
     int64_t dims = weight.size(1);
@@ -173,7 +173,7 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
   auto weight_arg = TensorArg(weight, "weight", 1);
   checkScalarTypes("embedding_bag", weight_arg, {kFloat, kDouble});
 
-  auto bag_size = at::zeros(offsets.sizes(), indices.type());
+  auto bag_size = at::zeros(offsets.sizes(), indices.options());
   make_bag_size(offsets, indices, mode, bag_size);
 
   // If the last entries are empty, that the last offsets are irrelevant as they
@@ -190,9 +190,9 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
   auto output = at::zeros({offsets.size(0), weight.size(1)}, weight.options());
 
   if (mode == MODE_MEAN || mode == MODE_SUM) {
-    if (weight.type().scalarType() == kFloat) {
+    if (weight.scalar_type() == kFloat) {
       index_select_add<float>(indices, offset2bag, weight, output);
-    } else if (weight.type().scalarType() == kDouble) {
+    } else if (weight.scalar_type() == kDouble) {
       index_select_add<double>(indices, offset2bag, weight, output);
     }
     auto ret = apply_bag_size(offsets, indices, mode, output, bag_size);
@@ -273,7 +273,7 @@ Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indi
   }
 
   auto index_grad_weight =
-      at::zeros({num_weights, grad.size(1)}, grad.type()).contiguous();
+      at::zeros({num_weights, grad.size(1)}, grad.options()).contiguous();
 
   std::vector<int64_t> counts_uniq;
   counts_uniq.reserve(num_weights);
@@ -310,12 +310,12 @@ Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indi
             }
           }
           int64_t ddim = grad.size(1);
-          if (grad.type().scalarType() == kFloat) {
+          if (grad.scalar_type() == kFloat) {
             auto igwd = index_grad_weight.data<float>();
             auto gd = grad.data<float>();
             THBlas_axpy<float>(ddim, (float)scale, gd + ddim * source, 1,
                         igwd + ddim * index, 1);
-          } else if (grad.type().scalarType() == kDouble) {
+          } else if (grad.scalar_type() == kDouble) {
             auto igwd = index_grad_weight.data<double>();
             auto gd = grad.data<double>();
             THBlas_axpy<double>(ddim, (double)scale, gd + ddim * source, 1,

@@ -88,7 +88,7 @@ ARGUMENT_MAP = {
     'int': 'int ${arg} = readAttribute<int64_t>("${arg}");',
     'double': 'double ${arg} = readAttribute<float>("${arg}");',
     'int64_t': 'int64_t ${arg} = readAttribute<int64_t>("${arg}");',
-    'IntList': 'auto ${arg} = readIntList("${arg}");',
+    'IntArrayRef': 'auto ${arg} = readIntArrayRef("${arg}");',
     'std::array<bool, 2>': 'auto ${arg} = readBoolMask<2>("${arg}");',
     'std::array<bool, 3>': 'auto ${arg} = readBoolMask<3>("${arg}");',
 }
@@ -237,12 +237,7 @@ if __name__ == '__main__':
         }
         defined_inferred_type = False
 
-        if 'Tensor' in o['method_of']:
-            # make sure 'self' is the first argument. currently Declarations.yaml
-            # does not always do this. Instead it keeps the argument list the same order
-            # as the Type method.
-            o['arguments'] = self_as_first_argument(o['arguments'])
-        elif 'namespace' not in o['method_of']:
+        if 'namespace' not in o['method_of'] and 'Tensor' not in o['method_of']:
             # methods on type like 'ones' or 'zeros' always take a
             # string attribute that is translated into the at::Type object
             # e.g. "Float" is at::kFloat
@@ -278,7 +273,7 @@ if __name__ == '__main__':
                     # first tensor input is used to define the output type.
                     defined_inferred_type = True
                     env['statements'].append(
-                        'auto inferred_type = &({}.type());'.format(
+                        'auto inferred_type = &at::getType({});'.format(
                             arg['name']))
             else:
                 init = CT(ARGUMENT_MAP[arg['type']]).substitute(env, arg=arg['name'])
@@ -289,11 +284,11 @@ if __name__ == '__main__':
             assignment = CT(t).substitute(env, offset=i, output=get_output(o, i))
             env['assignments'].append(assignment)
 
-        if 'Tensor' in o['method_of']:
+        if 'namespace' in o['method_of']:
+            env['invocation'] = CT("at::${name}(${arguments})").substitute(env)
+        elif 'Tensor' in o['method_of']:
             env['invocation'] = "self.{}({})".format(
                 o['name'], ', '.join(env['arguments'][1:]))
-        elif 'namespace' in o['method_of']:
-            env['invocation'] = CT("at::${name}(${arguments})").substitute(env)
         else:
             assert('Type' in o['method_of'])
             env['invocation'] = CT(

@@ -30,15 +30,15 @@ class RmsPropOp final : public Operator<Context> {
         momentum_(this->template GetSingleArgument<float>("momentum", 0.0f)),
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
   bool RunOnDevice() override {
-    CAFFE_ENFORCE(Input(LR).size() == 1);
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(MEAN_SQUARES).size());
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(OUTPUT_MOMENTUM).size());
+    CAFFE_ENFORCE(Input(LR).numel() == 1);
+    CAFFE_ENFORCE(Input(GRAD).numel() == Input(MEAN_SQUARES).numel());
+    CAFFE_ENFORCE(Input(GRAD).numel() == Input(OUTPUT_MOMENTUM).numel());
     Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
     Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
     Output(OUTPUT_MEAN_SQUARES)->ResizeLike(Input(MEAN_SQUARES));
     Output(OUTPUT_MOMENTUM)->ResizeLike(Input(MOMENTUM));
     rmsprop_update<Context>(
-        Input(GRAD).size(),
+        Input(GRAD).numel(),
         Input(GRAD).template data<T>(),
         Input(MEAN_SQUARES).template data<T>(),
         Input(MOMENTUM).template data<T>(),

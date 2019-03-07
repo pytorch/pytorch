@@ -30,7 +30,7 @@
   (this is the zlib license)
 */
 
-#include "Intrinsics.h"
+#include <ATen/native/cpu/Intrinsics.h>
 
 /* yes I know, the top of this file is quite ugly */
 #if defined(__GNUC__)

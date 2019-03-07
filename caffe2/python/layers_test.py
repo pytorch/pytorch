@@ -185,6 +185,28 @@ class TestLayers(LayersTestCase):
         predict_net = self.get_predict_net()
         self.assertNetContainOps(predict_net, [mat_mul_spec])
 
+    def testFCwithAxis2(self):
+        input_dim = 10
+        output_dim = 30
+        max_length = 20
+        input_record = self.new_record(
+            schema.Struct(
+                ('history_sequence', schema.Scalar((np.float32, (max_length,
+                    input_dim)))),
+            )
+        )
+        fc_out = self.model.FC(
+            input_record.history_sequence, output_dim,
+            axis=2)
+        self.model.output_schema = fc_out
+        self.assertEqual(
+            schema.Scalar((np.float32, (max_length, output_dim))),
+            fc_out
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+
+
     def testSparseLookupSumPooling(self):
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('sparse', schema.Struct(
@@ -359,6 +381,72 @@ class TestLayers(LayersTestCase):
         embedding_dim = 64
         embedding_after_pooling = self.model.SparseLookup(
             record.sparse.id_score_list_0, [embedding_dim], 'PositionWeighted')
+        self.model.output_schema = schema.Struct()
+        self.assertEqual(
+            schema.Scalar((np.float32, (embedding_dim, ))),
+            embedding_after_pooling
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+
+        init_ops = self.assertNetContainOps(
+            train_init_net,
+            [
+                OpSpec("UniformFill", None, None),
+                OpSpec("ConstantFill", None, None),
+            ]
+        )
+        sparse_lookup_op_spec = OpSpec(
+            'SparseLengthsWeightedSum',
+            [
+                init_ops[0].output[0],
+                record.sparse.id_score_list_0.values(),
+                record.sparse.id_score_list_0.keys(),
+                record.sparse.id_score_list_0.lengths(),
+            ],
+            [embedding_after_pooling()]
+        )
+        self.assertNetContainOps(train_net, [sparse_lookup_op_spec])
+
+        predict_net = self.get_predict_net()
+        self.assertNetContainOps(predict_net, [sparse_lookup_op_spec])
+
+    def testSparseLookupIncorrectRecencyWeightedOnIdList(self):
+        '''
+        Currently the implementation of SparseLookup assumed input is id_score_list
+        when use RecencyWeighted.
+        '''
+        record = schema.NewRecord(self.model.net, schema.Struct(
+            ('sparse', schema.Struct(
+                ('sparse_feature_0', schema.List(
+                    schema.Scalar(np.int64,
+                                  metadata=schema.Metadata(categorical_limit=1000)))),
+            )),
+        ))
+
+        embedding_dim = 64
+        with self.assertRaises(AssertionError):
+            self.model.SparseLookup(
+                record.sparse.sparse_feature_0, [embedding_dim], 'RecencyWeighted')
+
+    def testSparseLookupRecencyWeightedOnIdScoreList(self):
+        record = schema.NewRecord(self.model.net, schema.Struct(
+            ('sparse', schema.Struct(
+                ('id_score_list_0', schema.Map(
+                    schema.Scalar(
+                        np.int64,
+                        metadata=schema.Metadata(
+                            categorical_limit=1000
+                        ),
+                    ),
+                    np.float32
+                )),
+            )),
+        ))
+
+        embedding_dim = 64
+        embedding_after_pooling = self.model.SparseLookup(
+            record.sparse.id_score_list_0, [embedding_dim], 'RecencyWeighted')
         self.model.output_schema = schema.Struct()
         self.assertEqual(
             schema.Scalar((np.float32, (embedding_dim, ))),
@@ -826,15 +914,22 @@ class TestLayers(LayersTestCase):
 
     @given(
         X=hu.arrays(dims=[2, 5, 6]),
+        use_layer_norm_op=st.booleans(),
     )
-    def testLayerNormalization(self, X):
-        input_record = self.new_record(schema.Scalar((np.float32, (5, 6,))))
+    def testLayerNormalization(self, X, use_layer_norm_op):
+        expect = (5, 6,)
+        if not use_layer_norm_op:
+            X = X.reshape(10, 6)
+            expect = (6,)
+        input_record = self.new_record(schema.Scalar((np.float32, expect)))
         schema.FeedRecord(input_record, [X])
-        ln_output = self.model.LayerNormalization(input_record)
-        self.assertEqual(schema.Scalar((np.float32, (5, 6,))), ln_output)
+        ln_output = self.model.LayerNormalization(
+            input_record, use_layer_norm_op=use_layer_norm_op
+        )
+        self.assertEqual(schema.Scalar((np.float32, expect)), ln_output)
         self.model.output_schema = schema.Struct()
 
-        train_init_net, train_net = self.get_training_nets()
+        train_init_net, train_net = self.get_training_nets(add_constants=True)
         workspace.RunNetOnce(train_init_net)
         workspace.RunNetOnce(train_net)
 
@@ -1281,11 +1376,15 @@ class TestLayers(LayersTestCase):
 
     @given(
         X=hu.arrays(dims=[5, 5]),  # Shape of X is irrelevant
+        dropout_for_eval=st.booleans(),
     )
-    def testDropout(self, X):
+    def testDropout(self, X, dropout_for_eval):
         input_record = self.new_record(schema.Scalar((np.float32, (1,))))
         schema.FeedRecord(input_record, [X])
-        d_output = self.model.Dropout(input_record)
+        d_output = self.model.Dropout(
+            input_record,
+            dropout_for_eval=dropout_for_eval
+        )
         self.assertEqual(schema.Scalar((np.float32, (1,))), d_output)
         self.model.output_schema = schema.Struct()
 
@@ -1294,14 +1393,14 @@ class TestLayers(LayersTestCase):
         input_blob = input_record.field_blobs()[0]
         output_blob = d_output.field_blobs()[0]
 
-        train_d_spec = OpSpec(
+        with_d_spec = OpSpec(
             "Dropout",
             [input_blob],
             [output_blob, None],
             {'is_test': 0, 'ratio': 0.5}
         )
 
-        test_d_spec = OpSpec(
+        without_d_spec = OpSpec(
             "Dropout",
             [input_blob],
             [output_blob, None],
@@ -1310,22 +1409,30 @@ class TestLayers(LayersTestCase):
 
         self.assertNetContainOps(
             train_net,
-            [train_d_spec]
+            [with_d_spec]
         )
 
         eval_net = self.get_eval_net()
-
-        self.assertNetContainOps(
-            eval_net,
-            [test_d_spec]
-        )
-
         predict_net = self.get_predict_net()
 
-        self.assertNetContainOps(
-            predict_net,
-            [test_d_spec]
-        )
+        if dropout_for_eval:
+            self.assertNetContainOps(
+                eval_net,
+                [with_d_spec]
+            )
+            self.assertNetContainOps(
+                predict_net,
+                [with_d_spec]
+            )
+        else:
+            self.assertNetContainOps(
+                eval_net,
+                [without_d_spec]
+            )
+            self.assertNetContainOps(
+                predict_net,
+                [without_d_spec]
+            )
 
         workspace.RunNetOnce(train_init_net)
         workspace.RunNetOnce(train_net)

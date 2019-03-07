@@ -83,6 +83,7 @@ class Transform(object):
             self._cached_x_y = None, None
         else:
             raise ValueError('cache_size must be 0 or 1')
+        super(Transform, self).__init__()
 
     @property
     def inv(self):
@@ -156,6 +157,9 @@ class Transform(object):
         Computes the log det jacobian `log |dy/dx|` given input and output.
         """
         raise NotImplementedError
+
+    def __repr__(self):
+        return self.__class__.__name__ + '()'
 
 
 class _InverseTransform(Transform):
@@ -273,6 +277,12 @@ class ComposeTransform(Transform):
                                              self.event_dim - part.event_dim)
             x = y
         return result
+
+    def __repr__(self):
+        fmt_string = self.__class__.__name__ + '(\n    '
+        fmt_string += ',\n    '.join([p.__repr__() for p in self.parts])
+        fmt_string += '\n)'
+        return fmt_string
 
 
 identity_transform = ComposeTransform([])
@@ -525,8 +535,8 @@ class LowerCholeskyTransform(Transform):
 
     def _call(self, x):
         flat_x = x.contiguous().view((-1,) + x.shape[-2:])
-        return torch.stack([self._call_on_event(z) for z in flat_x]).view(x.shape)
+        return torch.stack([self._call_on_event(flat_x[i]) for i in range(flat_x.size(0))]).view(x.shape)
 
     def _inverse(self, y):
         flat_y = y.contiguous().view((-1,) + y.shape[-2:])
-        return torch.stack([self._inverse_on_event(z) for z in flat_y]).view(y.shape)
+        return torch.stack([self._inverse_on_event(flat_y[i]) for i in range(flat_y.size(0))]).view(y.shape)

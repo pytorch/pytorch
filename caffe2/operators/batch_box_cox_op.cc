@@ -75,20 +75,19 @@ bool BatchBoxCoxOp<CPUContext>::DoRunWithType() {
   auto& data = Input(DATA);
   auto& lambda1 = Input(LAMBDA1);
   auto& lambda2 = Input(LAMBDA2);
-  CAFFE_ENFORCE_GE(data.ndim(), 1);
-  auto N = data.dim(0);
+  CAFFE_ENFORCE_GE(data.dim(), 1);
+  auto N = data.size(0);
   auto D = data.size_from_dim(1);
 
-  auto* output = Output(0);
-  output->ResizeLike(Input(DATA));
+  auto* output = Output(0, Input(DATA).sizes(), at::dtype<T>());
   auto* output_ptr = output->template mutable_data<T>();
 
-  if (data.size() <= 0) {
+  if (data.numel() <= 0) {
     return true;
   }
 
-  CAFFE_ENFORCE_EQ(lambda1.size(), D);
-  CAFFE_ENFORCE_EQ(lambda2.size(), D);
+  CAFFE_ENFORCE_EQ(lambda1.numel(), D);
+  CAFFE_ENFORCE_EQ(lambda2.numel(), D);
 
   const auto* data_ptr = data.template data<T>();
   const auto* lambda1_ptr = lambda1.template data<T>();
@@ -105,7 +104,7 @@ bool BatchBoxCoxOp<CPUContext>::DoRunWithType() {
     zeros_.clear();
     nonzeros_.reserve(D);
     zeros_.reserve(D);
-    for (TIndex j = 0; j < D; j++) {
+    for (int64_t j = 0; j < D; j++) {
       if (lambda1_ptr[j] == 0) {
         zeros_.push_back(j);
       } else {
@@ -121,7 +120,7 @@ bool BatchBoxCoxOp<CPUContext>::DoRunWithType() {
     // rows by replicating the input parameters K times. Then finish row-by-row.
     TypedCachedBuffers<T>& b = GetBuffers<T>();
     if (nonzeros_.size() == D) {
-      TIndex i = 0;
+      int64_t i = 0;
       if (K > 1) {
         TileArrayIntoVector(lambda1_ptr, D, K, &b.lambda1_);
         TileArrayIntoVector(lambda2_ptr, D, K, &b.lambda2_);
@@ -142,7 +141,7 @@ bool BatchBoxCoxOp<CPUContext>::DoRunWithType() {
             D, data_ptr, lambda1_ptr, lambda2_ptr, k_eps, output_ptr);
       }
     } else if (zeros_.size() == D) {
-      TIndex i = 0;
+      int64_t i = 0;
       if (K > 1) {
         TileArrayIntoVector(lambda2_ptr, D, K, &b.lambda2_z_);
         DCHECK_EQ(K * D, b.lambda2_z_.size());
@@ -169,7 +168,7 @@ bool BatchBoxCoxOp<CPUContext>::DoRunWithType() {
       PackV(nonzeros_.size(), lambda2_ptr, nonzeros_.data(), b.lambda2_.data());
       PackV(zeros_.size(), lambda2_ptr, zeros_.data(), b.lambda2_z_.data());
 
-      TIndex i = 0;
+      int64_t i = 0;
       b.accumulator_.resize(std::max(nonzeros_.size(), zeros_.size()));
       if (K > 1) {
         // Truncate to original size, and re-tile with offsets this time.
@@ -219,15 +218,15 @@ bool BatchBoxCoxOp<CPUContext>::DoRunWithType() {
 template <>
 template <typename T>
 void BatchBoxCoxOp<CPUContext>::BoxCoxNaive(
-    TIndex N,
-    TIndex D,
+    int64_t N,
+    int64_t D,
     const T* data_ptr,
     const T* lambda1_ptr,
     const T* lambda2_ptr,
     T k_eps,
     T* output_ptr) {
-  for (TIndex i = 0; i < N; i++) {
-    for (TIndex j = 0; j < D; j++, data_ptr++, output_ptr++) {
+  for (int64_t i = 0; i < N; i++) {
+    for (int64_t j = 0; j < D; j++, data_ptr++, output_ptr++) {
       T lambda1_v = lambda1_ptr[j];
       T lambda2_v = lambda2_ptr[j];
       T tmp = std::max(*data_ptr + lambda2_v, k_eps);
@@ -245,18 +244,18 @@ void BatchBoxCoxOp<CPUContext>::BoxCoxNaive(
 template <>
 template <typename T>
 void BatchBoxCoxOp<CPUContext>::BoxCoxNonzeroLambda(
-    TIndex D,
+    int64_t D,
     const T* data_ptr,
     const T* lambda1,
     const T* lambda2,
     T k_eps,
     T* out) {
   caffe2::math::Add(D, data_ptr, lambda2, out, &context_);
-  for (TIndex j = 0; j < D; j++) {
+  for (int64_t j = 0; j < D; j++) {
     out[j] = std::max(out[j], k_eps);
   }
   Pow(D, out, lambda1, out);
-  for (TIndex j = 0; j < D; j++) {
+  for (int64_t j = 0; j < D; j++) {
     out[j] -= 1.0;
   }
   caffe2::math::Div(D, out, lambda1, out, &context_);
@@ -265,13 +264,13 @@ void BatchBoxCoxOp<CPUContext>::BoxCoxNonzeroLambda(
 template <>
 template <typename T>
 void BatchBoxCoxOp<CPUContext>::BoxCoxZeroLambda(
-    TIndex D,
+    int64_t D,
     const T* data_ptr,
     const T* lambda2,
     T k_eps,
     T* output_ptr) {
   caffe2::math::Add(D, data_ptr, lambda2, output_ptr, &context_);
-  for (TIndex j = 0; j < D; j++) {
+  for (int64_t j = 0; j < D; j++) {
     output_ptr[j] = std::max(output_ptr[j], k_eps);
   }
   caffe2::math::Log(D, output_ptr, output_ptr, &context_);

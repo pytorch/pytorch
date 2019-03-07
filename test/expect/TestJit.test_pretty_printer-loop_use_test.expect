@@ -1,0 +1,10 @@
+def graph(self,
+    y: Tensor) -> Tuple[Tensor, Tensor]:
+  x = torch.add(y, 1, 1)
+  z = torch.add(x, 5, 1)
+  y0, z0 = y, z
+  _0 = bool(torch.lt(y, 8))
+  while _0:
+    y1 = torch.add_(y0, 1, 1)
+    _0, y0, z0 = bool(torch.lt(y1, 8)), y1, x
+  return (x, z0)

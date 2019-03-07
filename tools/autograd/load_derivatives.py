@@ -9,7 +9,6 @@ import re
 import yaml
 from .utils import YamlLoader
 from .utils import IDENT_REGEX, split_name_params
-from .gen_autograd import HARDCODED_DIFFERENTIABLE_OUTPUTS
 
 
 def load_derivatives(path, declarations):
@@ -30,42 +29,44 @@ def load_derivatives(path, declarations):
 
 
 # How do you feel about pasting declaration inside autograd function...
-def create_autograd_function(name, derivatives, args_with_gradients, signature, declaration):
+def create_autograd_function(name, derivatives, args_with_derivatives, not_differentiable_args_names,
+                             signature, declaration, output_differentiability):
     op = to_camel_case(name) + 'Backward'
     op = op.replace('ForwardBackward', 'Backward')
     return {
         'name': name,
         'op': op,
         'declaration': declaration,
-        'args_with_gradients': args_with_gradients,
+        'args_with_derivatives': args_with_derivatives,
+        'not_differentiable_args_names': not_differentiable_args_names,
         'signature': signature,
         'derivatives': derivatives,
         'saved_inputs': all_saved_variables(derivatives, 'saved_inputs'),
         'saved_outputs': all_saved_variables(derivatives, 'saved_outputs'),
+        'output_differentiability': output_differentiability,
     }
 
 
-def create_derivative(declaration, formula, var_names):
+def create_derivative(arguments, returns, name, formula, var_names):
     def transform_return(r):
         # In-place functions take in and return self. Call the modified version
         # "output" so that it can be referred to in derivative definitions.
         if r['name'] == 'self':
             r = copy.deepcopy(r)
-            r['name'] = 'output'
+            r['name'] = 'result'
         return r
 
-    returns = [transform_return(r) for r in declaration['returns']]
-    arguments = declaration['arguments']
+    returns = [transform_return(r) for r in returns]
     formula, saved_inputs = saved_variables(formula, arguments)
     formula, saved_outputs = saved_variables(formula, returns)
 
-    # Check that the referenced gradients in the formula are in bounds
+    # Check that the referenced derivatives in the formula are in bounds
     for i in used_gradient_indices(formula):
-        if i >= len(declaration['returns']):
+        if i >= len(returns):
             raise RuntimeError(
                 "Out of bounds grads access: derivative formula for {} "
                 "used grads[{}], but the forward only returns {} outputs."
-                .format(declaration['name'], i, len(declaration['returns'])))
+                .format(name, i, len(returns)))
 
     return {
         'formula': formula,
@@ -96,7 +97,7 @@ def process_definition(defn, declarations_by_signature):
 
     def check_grad_usage(defn_name, declaration, derivatives):
         """
-        Check for some subtle mistakes one might make when writing gradients.
+        Check for some subtle mistakes one might make when writing derivatives.
         These mistakes will compile, but will be latent until a function is
         used with double backwards.
         """
@@ -128,67 +129,52 @@ def process_definition(defn, declarations_by_signature):
                                "otherwise, there is a likely error in your derivatives "
                                "declaration.".format(defn_name))
 
-        hardcoded_diff = HARDCODED_DIFFERENTIABLE_OUTPUTS.get(defn_name)
-        if hardcoded_diff:
-            if used_grad:
-                raise RuntimeError("Derivative definition {} has hard-coded differentiable "
-                                   "outputs in gen_autograd.py, but used grad (which implies "
-                                   "only the first output is differentiable) in its "
-                                   "derivative declaration.  You likely meant to write "
-                                   "grads[i] for some i instead.".format(defn_name))
-            if only_used_grads_indices and set(used_grads_indices) != set(hardcoded_diff):
-                raise RuntimeError("Derivative definition {} has hard-coded differentiable "
-                                   "outputs {}, but the used grads in the derivative "
-                                   "definitions are only {}.  Either your derivatives "
-                                   "declaration is wrong, or the value of "
-                                   "HARDCODED_DIFFERENTIABLE_OUTPUTS in gen_autograd.py "
-                                   "is wrong.".format(defn_name, hardcoded_diff,
-                                                      used_grads_indices))
-        else:
-            if fully_implemented and not used_grad and \
-               used_grads and only_used_grads_indices and \
-               set(used_grads_indices) != set(range(len(declaration['returns']))):
-                raise RuntimeError("Derivative definition of {} in derivatives.yaml does "
-                                   "not refer to the gradients of all of its outputs.  Either "
-                                   "the derivatives declaration is wrong, OR you have some "
-                                   "non-differentiable outputs.  If you have a single "
-                                   "differentiable output, make it the first output in ATen "
-                                   "and reference its gradient with 'grad'; otherwise, hard "
-                                   "code the list of differentiable outputs in "
-                                   "HARDCODED_DIFFERENTIABLE_OUTPUTS in gen_autograd.py."
-                                   .format(defn_name))
-
     def set_up_derivatives(defn_name, defn, declaration):
-        # Determine the set of inputs which have gradients
-        args_with_gradients_set = set()
+        # Determine the set of inputs which have derivatives
+        args_with_derivatives_set = set()
         for raw_names in defn:
-            args_with_gradients_set |= set(split_names(raw_names))
+            args_with_derivatives_set |= set(split_names(raw_names))
 
         # Next, let us determine the list of inputs in order.
-        args_with_gradients = []
+        args_with_derivatives = []
         for arg in declaration['arguments']:
-            if arg['name'] not in args_with_gradients_set:
+            if arg['name'] not in args_with_derivatives_set:
                 continue
-            args_with_gradients.append(arg)
+            args_with_derivatives.append(arg)
 
         # Set up the derivative information
         derivatives = []
+        not_differentiable_args_names = []
         for raw_names in sorted(defn.keys()):
             formula = defn[raw_names]
             names = split_names(raw_names)
-            derivatives.append(create_derivative(declaration, formula, names))
+            derivative = create_derivative(declaration['arguments'], declaration['returns'],
+                                           declaration['name'], formula, names)
+            if formula.lower().strip() == 'not_differentiable':
+                assert not sum([type(var_name) == list
+                                for var_name in derivative['var_names']]), \
+                    "Variable names associated to a formula should be a flat list"
+                not_differentiable_args_names += derivative['var_names']
+            else:
+                derivatives.append(derivative)
+        args_with_derivatives = list(filter(lambda x: x['name'] not in not_differentiable_args_names,
+                                            args_with_derivatives))
 
         # Test to see if the use of 'grads' makes sense.
         check_grad_usage(defn_name, declaration, derivatives)
 
-        return derivatives, args_with_gradients
+        return derivatives, args_with_derivatives, not_differentiable_args_names
 
     def unzip(xs):
         return zip(*xs)
 
     # NB: Removes 'name' from defn dictionary
     defn_name, params = split_name_params(defn.pop('name'))
+    # NB: Removes 'output_differentiability' from defn dictionary
+    #     `None` means all differentiable.
+    output_differentiability = defn.pop('output_differentiability', None)
     param_types, param_names = unzip([p.split(' ') for p in params if p != '*'])
+
     if 'grad_input_mask' in param_names:
         raise RuntimeError("Signature for {} has an argument named grad_input_mask, "
                            "but this name would be shadowed by our codegen. "
@@ -220,8 +206,9 @@ def process_definition(defn, declarations_by_signature):
                                'Declarations.yaml ({})'
                                .format(i, defn_name, x, y))
 
-    derivatives, args_with_gradients = set_up_derivatives(defn_name, defn, canonical)
-    return create_autograd_function(defn_name, derivatives, args_with_gradients, signature, canonical)
+    derivatives, args_with_derivatives, not_differentiable_args_names = set_up_derivatives(defn_name, defn, canonical)
+    return create_autograd_function(defn_name, derivatives, args_with_derivatives, not_differentiable_args_names,
+                                    signature, canonical, output_differentiability)
 
 
 def ensure_unique_names(autograd_functions):
@@ -275,7 +262,7 @@ def saved_variables(formula, args):
         # replace self.sizes() with self_sizes
         (r'{}.sizes\(\)', {
             'suffix': '_sizes',
-            'type': 'IntList',
+            'type': 'IntArrayRef',
         }),
         # replace zeros_like(self) with self_info
         (r'zeros_like\({}\)', {

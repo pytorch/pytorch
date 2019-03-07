@@ -6,8 +6,9 @@ import numpy as np
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st
 
-from caffe2.python import core
+from caffe2.python import core, utils
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.hip_test_util as hiputl
 
 
 class TestConvolutionTranspose(hu.HypothesisTestCase):
@@ -37,6 +38,11 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
         outputs = {}
         for order in ["NCHW", "NHWC"]:
+            # MIOPEN doesn't work with NHWC, fallback to use normal hip
+            if hiputl.run_in_hip(gc, dc) and order == "NHWC":
+                tmp_engine = ""
+            else:
+                tmp_engine = engine
             op = core.CreateOperator(
                 "ConvTranspose",
                 ["X", "w", "b"] if use_bias else ["X", "w"],
@@ -46,13 +52,13 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                 pad=pad,
                 adj=adj,
                 order=order,
-                engine=engine,
+                engine=tmp_engine,
                 shared_buffer=int(shared_buffer),
                 device_option=gc,
             )
             if order == "NCHW":
-                X_f = X.transpose((0, 3, 1, 2))
-                w_f = w.transpose((0, 3, 1, 2))
+                X_f = utils.NHWC2NCHW(X)
+                w_f = utils.NHWC2NCHW(w)
             else:
                 X_f = X
                 w_f = w
@@ -72,7 +78,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
             (batch_size, output_channels, output_size, output_size))
         np.testing.assert_allclose(
             outputs["NCHW"],
-            outputs["NHWC"].transpose((0, 3, 1, 2)),
+            utils.NHWC2NCHW(outputs["NHWC"]),
             atol=1e-4,
             rtol=1e-4)
 
@@ -102,6 +108,11 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
         b = np.random.rand(output_channels).astype(np.float32) - 0.5
         outputs = {}
         for order in ["NCHW", "NHWC"]:
+            if hiputl.run_in_hip(gc, dc) and order == "NHWC":
+                # MIOPEN doesn't work with NHWC, fallback to use normal hip
+                tmp_engine = ""
+            else:
+                tmp_engine = engine
             op = core.CreateOperator(
                 "ConvTranspose",
                 ["X", "w", "b"] if use_bias else ["X", "w"],
@@ -111,13 +122,13 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                 pads=[pad] * 4,
                 adjs=[adj] * 2,
                 order=order,
-                engine=engine,
+                engine=tmp_engine,
                 shared_buffer=int(shared_buffer),
                 device_option=gc,
             )
             if order == "NCHW":
-                X_f = X.transpose((0, 3, 1, 2))
-                w_f = w.transpose((0, 3, 1, 2))
+                X_f = utils.NHWC2NCHW(X)
+                w_f = utils.NHWC2NCHW(w)
             else:
                 X_f = X
                 w_f = w
@@ -137,7 +148,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
             (batch_size, output_channels, output_size, output_size))
         np.testing.assert_allclose(
             outputs["NCHW"],
-            outputs["NHWC"].transpose((0, 3, 1, 2)),
+            utils.NHWC2NCHW(outputs["NHWC"]),
             atol=1e-4,
             rtol=1e-4)
 
@@ -190,8 +201,8 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                 device_option=gc,
             )
             if order == "NCHW":
-                X_f = X.transpose((0, 3, 1, 2))
-                w_f = w.transpose((0, 3, 1, 2))
+                X_f = utils.NHWC2NCHW(X)
+                w_f = utils.NHWC2NCHW(w)
             else:
                 X_f = X
                 w_f = w
@@ -212,7 +223,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
             (batch_size, output_channels, output_h, output_w))
         np.testing.assert_allclose(
             outputs["NCHW"],
-            outputs["NHWC"].transpose((0, 3, 1, 2)),
+            utils.NHWC2NCHW(outputs["NHWC"]),
             atol=1e-4,
             rtol=1e-4)
 
@@ -236,6 +247,8 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                                              order, engine, use_bias,
                                              compute_dX, gc, dc):
         assume(adj < stride)
+        if hiputl.run_in_hip(gc, dc) and engine == "CUDNN":
+            assume(order == "NCHW")
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
         w = np.random.rand(
@@ -255,8 +268,8 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
             no_gradient_to_input=not compute_dX,
         )
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
+            w = utils.NHWC2NCHW(w)
 
         inputs = [X, w, b] if use_bias else [X, w]
         self.assertDeviceChecks(dc, op, inputs, [0])
@@ -326,8 +339,8 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
             no_gradient_to_input=not compute_dX,
         )
         if order == "NCHW":
-            X = X.transpose((0, 3, 1, 2))
-            w = w.transpose((0, 3, 1, 2))
+            X = utils.NHWC2NCHW(X)
+            w = utils.NHWC2NCHW(w)
 
         inputs = [X, w, b] if use_bias else [X, w]
         self.assertDeviceChecks(dc, op, inputs, [0])

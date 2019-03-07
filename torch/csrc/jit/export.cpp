@@ -1,25 +1,39 @@
-#include "torch/csrc/jit/export.h"
-#include "torch/csrc/jit/serialization.h"
-#include "torch/csrc/autograd/symbolic.h"
-#include "onnx/onnx.pb.h"
-#include "torch/csrc/onnx/onnx.h"
+#include <google/protobuf/util/json_util.h>
+#include <google/protobuf/util/type_resolver_util.h>
 
-#include "torch/csrc/utils/functional.h"
-#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/autograd/symbolic.h>
+#include <torch/csrc/jit/export.h>
+#include <torch/csrc/onnx/onnx.h>
+
+#include <ATen/core/functional.h>
+#include <c10/util/Exception.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/python_print.h>
+
+#include <caffe2/core/types.h>
+#include <caffe2/proto/caffe2_pb.h>
+#include <caffe2/proto/torch_pb.h>
+#include <caffe2/serialize/inline_container.h>
+#include <onnx/onnx_pb.h>
 
 #include <ATen/ATen.h>
-#include <ATen/core/optional.h>
+#include <c10/util/Optional.h>
 
+#include <fstream>
 #include <memory>
-#include <vector>
+#include <sstream>
+#include <stack>
 #include <string>
+#include <vector>
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 
 namespace {
-
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
+
+class ScriptModuleSerializer;
 
 std::string getNodeStackTraceString(const Node* n) {
   std::stringstream ss;
@@ -31,68 +45,104 @@ std::string getNodeStackTraceString(const Node* n) {
   return ss.str();
 }
 
-void validateGraph(const std::shared_ptr<Graph>& graph, onnx_torch::OperatorExportTypes operator_export_type) {
-  for (auto node : graph->nodes()) {
-      // Macro'ed so we get a marginally better line number on failed export
-#define FAIL_EXPORT(name) \
-      throw std::runtime_error(std::string("ONNX export failed: ") + name + "\n\nGraph we tried to export:\n" + graph->toString());
-    IR_IF(node, PythonOp)
-      auto py_node = static_cast<torch::jit::PythonOp*>(value);
+void validateBlock(
+    Block* b,
+    onnx_torch::OperatorExportTypes operator_export_type) {
+  for (auto node : b->nodes()) {
+    for (Block* sub_block : node->blocks()) {
+      validateBlock(sub_block, operator_export_type);
+    }
+    // Macro'ed so we get a marginally better line number on failed export
+#define FAIL_EXPORT(name)                          \
+  throw std::runtime_error(                        \
+      std::string("ONNX export failed: ") + name + \
+      "\n\nGraph we tried to export:\n" + b->owningGraph()->toString());
+    if (node->kind() == prim::PythonOp) {
+      auto py_node = static_cast<PythonOp*>(node);
       FAIL_EXPORT(
           "Couldn't export Python operator " + py_node->name() +
           "\n\nDefined at:\n" + getNodeStackTraceString(node))
-    IR_ELSE()
+    } else {
       // Special error messages for certain types of operators
       if (node->kind() == aten::expand) {
-        FAIL_EXPORT(
-            "Could not export a broadcasted operation; ONNX likely does not support this form of broadcasting.\n\nBroadcast occurred at:\n" +
-            getNodeStackTraceString(node));
+        if (operator_export_type ==
+            onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
+          WithInsertPoint guard(node);
+          auto* new_node =
+              b->owningGraph()->insertNode(b->owningGraph()->create(
+                  Symbol(::c10::onnx::ATen),
+                  node->inputs(),
+                  node->outputs().size()));
+          for (size_t i = 0; i < node->outputs().size(); ++i) {
+            node->output(i)->replaceAllUsesWith(new_node->output(i));
+          }
+          new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
+        }
       }
       if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
         FAIL_EXPORT(
             "Cannot export individual pack_padded_sequence or pad_packed_sequence; these operations must occur in pairs.\n\nUsage of this operation occurred at:\n" +
             getNodeStackTraceString(node));
       }
-      bool is_aten_fallback = operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK;
-      if (!node->kind().is_onnx() && !is_aten_fallback && node->kind() != prim::Undefined) {
+      bool is_aten_enabled = operator_export_type ==
+              onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
+          operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
+      if (!node->kind().is_onnx() && !is_aten_enabled && !node->mustBeNone()) {
         FAIL_EXPORT(
-            "Couldn't export operator " + node->kind().toDisplayString() + "\n\nDefined at:\n" +
-            getNodeStackTraceString(node));
+            "Couldn't export operator " + node->kind().toDisplayString() +
+            "\n\nDefined at:\n" + getNodeStackTraceString(node));
       }
-    IR_END()
+    }
 #undef FAIL_EXPORT
   }
 }
 
+void validateGraph(
+    const std::shared_ptr<Graph>& graph,
+    onnx_torch::OperatorExportTypes operator_export_type) {
+  validateBlock(graph->block(), operator_export_type);
+  EliminateDeadCode(graph->block());
+}
+
 class EncoderBase {
  public:
-  EncoderBase(onnx_torch::OperatorExportTypes operator_export_type, bool strip_doc);
+  EncoderBase(
+      onnx_torch::OperatorExportTypes operator_export_type,
+      bool strip_doc);
 
   onnx::ModelProto get_model_proto() {
     return model_proto_;
   }
 
  protected:
-  void EncodeGraph(onnx::GraphProto *graph_proto,
-                   const std::shared_ptr<Graph> &graph,
-                   const std::vector<at::Tensor> &initializers = {});
+  void EncodeGraph(
+      onnx::GraphProto* graph_proto,
+      const std::shared_ptr<Graph>& graph,
+      const std::vector<at::Tensor>& initializers = {});
 
-  void EncodeBlock(onnx::GraphProto *graph_proto,
-                   const Block *block,
-                   const std::vector<at::Tensor> &initializers = {});
+  void EncodeBlock(
+      onnx::GraphProto* graph_proto,
+      const Block* block,
+      const std::vector<at::Tensor>& initializers = {});
 
-  virtual void EncodeTensor(onnx::TensorProto *tensor_proto,
-                            const at::Tensor &tensor,
-                            const at::optional<std::string> external_ref = {}) = 0;
+  virtual void EncodeTensor(
+      onnx::TensorProto* tensor_proto,
+      const at::Tensor& tensor,
+      const c10::optional<std::string> external_ref = {}) = 0;
 
-  virtual void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
-                                           const Value* n) {};
+  virtual void EncodeIntermediateValueInfo(
+      onnx::GraphProto* graph_proto,
+      const Value* n){};
 
-  virtual void EncodeValueInfo(onnx::GraphProto *graph_proto,
-                               onnx::ValueInfoProto* v,
-                               const Value* n);
+  virtual void EncodeValueInfo(
+      onnx::GraphProto* graph_proto,
+      onnx::ValueInfoProto* v,
+      const Value* n);
 
-  void AddAttribute(onnx::NodeProto *node_proto, const jit::Node *node, const jit::Symbol name);
+  void AddAttribute(
+      onnx::NodeProto* node_proto,
+      const jit::Node* node,
+      const jit::Symbol name);
 
   onnx::ModelProto model_proto_;
   size_t num_blocks_;
@@ -101,7 +151,7 @@ class EncoderBase {
 };
 
 onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
-  switch(at_type) {
+  switch (at_type) {
     case at::kDouble:
       return onnx::TensorProto_DataType_DOUBLE;
     case at::kFloat:
@@ -123,17 +173,20 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
   }
 }
 
-EncoderBase::EncoderBase(onnx_torch::OperatorExportTypes operator_export_type, bool strip_doc)
+EncoderBase::EncoderBase(
+    onnx_torch::OperatorExportTypes operator_export_type,
+    bool strip_doc)
     : num_blocks_(0),
       operator_export_type_(operator_export_type),
       strip_doc_(strip_doc) {
   model_proto_.set_producer_name("pytorch");
   model_proto_.set_ir_version(onnx::IR_VERSION);
-  model_proto_.set_producer_version("0.4");
+  // TODO: set the producer version using appropriate function call
+  model_proto_.set_producer_version("1.1");
 }
 
 void EncoderBase::EncodeValueInfo(
-    onnx::GraphProto *graph_proto,
+    onnx::GraphProto* graph_proto,
     onnx::ValueInfoProto* v,
     const Value* n) {
   v->set_name(n->uniqueName());
@@ -141,27 +194,30 @@ void EncoderBase::EncodeValueInfo(
   onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
 
   onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
-  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
+  if (CompleteTensorTypePtr node_type = n->type()->cast<CompleteTensorType>()) {
     const std::vector<std::int64_t>& sizes = node_type->sizes();
     for (size_t i = 0; i < sizes.size(); i++) {
       shape->add_dim();
       shape->mutable_dim(i)->set_dim_value(sizes[i]);
     }
     tensor_type->set_elem_type(ATenTypeToOnnxType(node_type->scalarType()));
+  } else {
+    tensor_type->set_elem_type(onnx::TensorProto_DataType_UNDEFINED);
   }
 }
 
 void EncoderBase::EncodeGraph(
-    onnx::GraphProto *graph_proto,
-    const std::shared_ptr<Graph> &graph,
-    const std::vector<at::Tensor> &initializers) {
+    onnx::GraphProto* graph_proto,
+    const std::shared_ptr<Graph>& graph,
+    const std::vector<at::Tensor>& initializers) {
   EncodeBlock(graph_proto, graph->block(), initializers);
 }
 
 void EncoderBase::EncodeBlock(
-    onnx::GraphProto *graph_proto, const Block *block,
-    const std::vector<at::Tensor> &initializers) {
-  JIT_ASSERT(graph_proto != nullptr);
+    onnx::GraphProto* graph_proto,
+    const Block* block,
+    const std::vector<at::Tensor>& initializers) {
+  AT_ASSERT(graph_proto != nullptr);
   std::string block_name = "torch-jit-export";
   if (num_blocks_) {
     block_name += std::to_string(num_blocks_);
@@ -178,9 +234,10 @@ void EncoderBase::EncodeBlock(
     EncodeValueInfo(graph_proto, v, output);
   }
   for (auto node : block->nodes()) {
-    bool is_raw_export = operator_export_type_ == onnx_torch::OperatorExportTypes::RAW;
-    if (node->kind() == prim::Undefined && !is_raw_export) {
-      // Undefined nodes are used to implement optional inputs. One
+    bool is_raw_export =
+        operator_export_type_ == onnx_torch::OperatorExportTypes::RAW;
+    if (node->mustBeNone() && !is_raw_export) {
+      // None nodes are used to implement optional inputs. One
       // way to "not provide" an optional input is to create an
       // Undefined node, and pass its output as that input.
       continue;
@@ -191,26 +248,25 @@ void EncoderBase::EncodeBlock(
       node->getSourceLocation()->highlight(ss);
       p_n->set_doc_string(ss.str());
     }
-    for(auto input : node->inputs()) {
-      if (input->node()->kind() == prim::Undefined && !is_raw_export) {
+    for (auto input : node->inputs()) {
+      if (input->node()->mustBeNone() && !is_raw_export) {
         p_n->add_input("");
       } else {
         p_n->add_input(input->uniqueName());
       }
     }
-    for(auto output : node->outputs()) {
+    for (auto output : node->outputs()) {
       p_n->add_output(output->uniqueName());
       EncodeIntermediateValueInfo(graph_proto, output);
     }
     if (is_raw_export) {
-      JIT_ASSERT(!node->kind().is_onnx());
+      AT_ASSERT(!node->kind().is_onnx());
       p_n->set_domain(node->kind().domainString());
-    }
-    else if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
-      JIT_ASSERT(node->kind().is_onnx());
+    } else if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
+      AT_ASSERT(node->kind().is_onnx());
     }
     p_n->set_op_type(node->kind().toUnqualString());
-    for(auto attr_name : node->attributeNames()) {
+    for (auto attr_name : node->attributeNames()) {
       AddAttribute(p_n, node, attr_name);
     }
     if (is_raw_export && node->blocks().size() > 0) {
@@ -222,8 +278,8 @@ void EncoderBase::EncodeBlock(
         EncodeBlock(graph, block, initializers);
       }
     }
-    if (node->kind() == torch::jit::onnx::Loop) {
-      JIT_ASSERT(node->blocks().size() == 1);
+    if (node->kind() == ::c10::onnx::Loop) {
+      AT_ASSERT(node->blocks().size() == 1);
 
       auto body = p_n->add_attribute();
       body->set_name("body");
@@ -231,8 +287,8 @@ void EncoderBase::EncodeBlock(
       auto g = body->mutable_g();
       EncodeBlock(g, node->blocks()[0]);
     }
-    if (node->kind() == torch::jit::onnx::If) {
-      JIT_ASSERT(node->blocks().size() == 2);
+    if (node->kind() == ::c10::onnx::If) {
+      AT_ASSERT(node->blocks().size() == 2);
 
       auto true_branch = p_n->add_attribute();
       true_branch->set_name("then_branch");
@@ -248,9 +304,9 @@ void EncoderBase::EncodeBlock(
     }
   }
   auto num_initializers = initializers.size();
-  JIT_ASSERT(block->inputs().size() >= num_initializers);
+  AT_ASSERT(block->inputs().size() >= num_initializers);
   size_t inputs_count = block->inputs().size() - num_initializers;
-  for (auto & tensor : initializers) {
+  for (auto& tensor : initializers) {
     // TODO: stop using positions to determine which initializers
     // match to which inputs
     std::string name = graph_proto->input(inputs_count++).name();
@@ -260,18 +316,21 @@ void EncoderBase::EncodeBlock(
   }
 }
 
-void EncoderBase::AddAttribute(onnx::NodeProto *node_proto, const jit::Node *node, const jit::Symbol name) {
+void EncoderBase::AddAttribute(
+    onnx::NodeProto* node_proto,
+    const jit::Node* node,
+    const jit::Symbol name) {
   auto attr = node_proto->add_attribute();
-  JIT_ASSERT(name.is_attr());
+  AT_ASSERT(name.is_attr());
   attr->set_name(name.toUnqualString());
-  switch(node->kindOf(name)) {
+  switch (node->kindOf(name)) {
     case AttributeKind::f:
       attr->set_f(node->f(name));
       attr->set_type(onnx::AttributeProto_AttributeType_FLOAT);
       break;
     case AttributeKind::fs:
       attr->set_type(onnx::AttributeProto_AttributeType_FLOATS);
-      for(auto & v : node->fs(name))
+      for (auto& v : node->fs(name))
         attr->add_floats(v);
       break;
     case AttributeKind::i:
@@ -280,7 +339,7 @@ void EncoderBase::AddAttribute(onnx::NodeProto *node_proto, const jit::Node *nod
       break;
     case AttributeKind::is:
       attr->set_type(onnx::AttributeProto_AttributeType_INTS);
-      for(auto & v : node->is(name))
+      for (auto& v : node->is(name))
         attr->add_ints(v);
       break;
     case AttributeKind::s:
@@ -289,7 +348,7 @@ void EncoderBase::AddAttribute(onnx::NodeProto *node_proto, const jit::Node *nod
       break;
     case AttributeKind::ss:
       attr->set_type(onnx::AttributeProto_AttributeType_STRINGS);
-      for(auto & v : node->ss(name))
+      for (auto& v : node->ss(name))
         attr->add_strings(v);
       break;
     case AttributeKind::t: {
@@ -299,7 +358,7 @@ void EncoderBase::AddAttribute(onnx::NodeProto *node_proto, const jit::Node *nod
     } break;
     case AttributeKind::ts:
       attr->set_type(onnx::AttributeProto_AttributeType_TENSORS);
-      for(auto & v : node->ts(name)) {
+      for (auto& v : node->ts(name)) {
         auto t = attr->add_tensors();
         EncodeTensor(t, v);
       }
@@ -311,7 +370,7 @@ void EncoderBase::AddAttribute(onnx::NodeProto *node_proto, const jit::Node *nod
     } break;
     case AttributeKind::gs:
       attr->set_type(onnx::AttributeProto_AttributeType_GRAPHS);
-      for(auto & v : node->gs(name)) {
+      for (auto& v : node->gs(name)) {
         auto g = attr->add_graphs();
         EncodeGraph(g, v);
       }
@@ -321,33 +380,35 @@ void EncoderBase::AddAttribute(onnx::NodeProto *node_proto, const jit::Node *nod
   }
 }
 
-class GraphEncoder: public EncoderBase {
+class GraphEncoder : public EncoderBase {
  public:
-  GraphEncoder(const std::shared_ptr<Graph> &graph,
-               int64_t onnx_opset_version,
-               onnx_torch::OperatorExportTypes operator_export_type,
-               const std::vector<at::Tensor> &initializers,
-               bool defer_weight_export,
-               bool strip_doc);
+  GraphEncoder(
+      const std::shared_ptr<Graph>& graph,
+      int64_t onnx_opset_version,
+      onnx_torch::OperatorExportTypes operator_export_type,
+      const std::vector<at::Tensor>& initializers,
+      bool defer_weight_export,
+      bool strip_doc);
 
   RawDataExportMap get_raw_data_export_map() {
     return raw_data_export_map_;
   }
 
  private:
-  virtual void EncodeTensor(onnx::TensorProto *tensor_proto,
-                            const at::Tensor &tensor,
-                            const at::optional<std::string> external_ref = {}) override;
+  void EncodeTensor(
+      onnx::TensorProto* tensor_proto,
+      const at::Tensor& tensor,
+      const c10::optional<std::string> external_ref = {}) override;
 
-   RawDataExportMap raw_data_export_map_;
-   bool defer_weight_export_;
+  RawDataExportMap raw_data_export_map_;
+  bool defer_weight_export_;
 };
 
 GraphEncoder::GraphEncoder(
-    const std::shared_ptr<Graph> &graph,
+    const std::shared_ptr<Graph>& graph,
     int64_t onnx_opset_version,
     onnx_torch::OperatorExportTypes operator_export_type,
-    const std::vector<at::Tensor> &initializers,
+    const std::vector<at::Tensor>& initializers,
     bool defer_weight_export,
     bool strip_doc)
     : EncoderBase(operator_export_type, strip_doc),
@@ -364,10 +425,10 @@ GraphEncoder::GraphEncoder(
 }
 
 void GraphEncoder::EncodeTensor(
-    onnx::TensorProto *tensor_proto,
-    const at::Tensor &tensor,
-    const at::optional<std::string> external_ref) {
-  for(auto d : tensor.sizes()) {
+    onnx::TensorProto* tensor_proto,
+    const at::Tensor& tensor,
+    const c10::optional<std::string> external_ref) {
+  for (auto d : tensor.sizes()) {
     tensor_proto->add_dims(d);
   }
   tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.type().scalarType()));
@@ -379,281 +440,246 @@ void GraphEncoder::EncodeTensor(
   if (defer_weight_export_ && external_ref) {
     // For now, we use the name of the tensor as the external lookup name to
     // avoid ONNX protobuf changes.
-    JIT_ASSERT(external_ref.value() == tensor_proto->name());
-    JIT_ASSERT(raw_data_export_map_.count(external_ref.value()) == 0);
+    AT_ASSERT(external_ref.value() == tensor_proto->name());
+    AT_ASSERT(raw_data_export_map_.count(external_ref.value()) == 0);
     raw_data_export_map_[external_ref.value()] = t;
     tensor_proto->set_raw_data("__EXTERNAL");
   } else {
-    JIT_ASSERT(t.is_contiguous());
-    tensor_proto->set_raw_data(std::string(static_cast<char*>(t.data_ptr()),  t.type().elementSizeInBytes() * t.numel()));
+    AT_ASSERT(t.is_contiguous());
+    tensor_proto->set_raw_data(std::string(
+        static_cast<char*>(t.data_ptr()),
+        t.type().elementSizeInBytes() * t.numel()));
   }
 }
 
-class ModuleEncoder: public EncoderBase {
+// this is a serializer class which saves script modules to pt files. the
+// content of the file is written using PyTorchStreamWriter, for details please
+// check caffe2/serialize/inline_container.h. all the records except the last
+// one are tensor data, and the last record is a serialized ModelProto, defined
+// in caffe2/proto/torch.proto. ModelProto contains all the metadata of the
+// model, and it is serialized as json.
+class ScriptModuleSerializer final {
  public:
-  ModuleEncoder(const script::Module &module,
-                const std::string &filename);
+  ScriptModuleSerializer(const std::string& filename);
+
+  ScriptModuleSerializer(std::ostream* ofs);
+
+  void serialize(
+      const script::Module& module,
+      const script::ExtraFilesMap& extra_files = script::ExtraFilesMap());
 
  private:
-  void EncodeModule(onnx::GraphProto *graph_proto, const script::Module &module);
+  void convertModel(
+      const script::Module& module,
+      torch::ModelDef* model_def,
+      const script::ExtraFilesMap& extra_files);
 
-  void EncodeParameters(onnx::GraphProto *graph_proto,
-                        const script::Module &module,
-                        const std::string prefix);
+  // add a tensor to the tensorTable
+  // returns the offset into the tensor table
+  size_t addTensor(const at::Tensor& tensor);
 
-  void EncodeParameter(onnx::TensorProto *tensor_proto,
-                       const script::NamedParameter &parameter,
-                       const std::string prefix);
+  // write the content of the tensor to the file/stream, and save the
+  // offset in the storageMap_
+  void convertAndWriteTensor(
+      size_t tensor_id,
+      const at::Tensor& tensor,
+      torch::TensorDef* tensor_proto,
+      std::unordered_map<const void*, std::string>& storageMap);
 
-  void EncodeMethods(onnx::GraphProto *graph_proto,
-                     const script::Module &module,
-                     const std::string prefix);
+  // dump all the tensors in the tensorTable_ to a ModelDef (metadata) and
+  // the file/stream (the content), assuming all the information of the
+  // tensors has been collected. the method calls convertAndWriteTensor
+  // to dump the content of a tensor
+  void writeTensorTable(torch::ModelDef* model_def);
 
-  void EncodeMethod(onnx::NodeProto *node_proto,
-                    script::Method &method,
-                    const std::string prefix);
+  void convertModule(
+      const script::Module& module,
+      const std::string& prefix,
+      const std::string& name,
+      torch::ModuleDef* module_def);
 
-  virtual void EncodeTensor(onnx::TensorProto *tensor_proto,
-                            const at::Tensor &tensor,
-                            const at::optional<std::string> external_ref) override;
+  void convertParameter(
+      const script::NamedParameter& param,
+      torch::ParameterDef* param_def);
 
-  virtual void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
-                                           const Value* n) override;
+  std::ofstream ofs_;
+  caffe2::serialize::PyTorchStreamWriter writer_;
 
-  virtual void EncodeValueInfo(onnx::GraphProto *graph_proto,
-                               onnx::ValueInfoProto* v,
-                               const Value* n) override;
-
-  void EncodeTypeInfo(onnx::GraphProto *graph_proto,
-                      onnx::ValueInfoProto* v,
-                      const TypePtr& type,
-                      const std::string& name);
-
-  PyTorchFileWriter file_writer_;
-  // Used to deduplicate tensor storages
-  std::unordered_map<const void*, uint64_t> storage_dedup_map_;
-
-  // Used to keep track of Parameter names so Methods can refer to them
-  std::unordered_map<at::Tensor*, std::string> parameter_map_;
-
-  // Used to create sequential dummy names for node types
-  size_t type_counter_ = 0;
+  // all tensors that will be stored
+  std::vector<at::Tensor> tensor_table_;
 };
 
-ModuleEncoder::ModuleEncoder(
-    const script::Module &module,
-    const std::string &filename)
-    : EncoderBase(onnx_torch::OperatorExportTypes::RAW, false),
-      file_writer_(filename) {
-  model_proto_.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
-  EncodeModule(model_proto_.mutable_graph(), module);
+// ScriptModuleSerializer's methods
+ScriptModuleSerializer::ScriptModuleSerializer(const std::string& filename)
+    : writer_(filename.c_str()) {
+  // TODO appropriate support for mmap, right now we still use stream writer
 }
 
-void ModuleEncoder::EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto, const Value *n) {
-  auto v = graph_proto->add_value_info();
-  EncodeTypeInfo(graph_proto, v, n->type(), n->uniqueName());
-}
+ScriptModuleSerializer::ScriptModuleSerializer(std::ostream* ofs)
+    : ofs_(), writer_(ofs) {}
 
-void ModuleEncoder::EncodeTypeInfo(
-    onnx::GraphProto *graph_proto,
-    onnx::ValueInfoProto* v,
-    const TypePtr& type,
-    const std::string& name) {
-  v->set_name(name);
-  onnx::TypeProto* type_proto = v->mutable_type();
-  onnx::TypeProto_Tensor* tensortype_proto = type_proto->mutable_tensor_type();
-  onnx::TensorShapeProto* shape_proto = tensortype_proto->mutable_shape();
-
-  // Use TypeProto fields to encode types.
-  // denotation stores the type as a string
-  auto kind = type->kind();
-  if (kind == TypeKind::DynamicType) {
-    type_proto->set_denotation("DynamicType");
-  } else if (kind == TypeKind::TensorType) {
-    type_proto->set_denotation("TensorType");
-    TensorTypePtr node_type = type->cast<TensorType>();
-    const std::vector<std::int64_t>& sizes = node_type->sizes();
-
-    // store the sizes and strides in the dims field of TensorShapeProto
-    for (size_t i = 0; i < sizes.size(); i++) {
-      shape_proto->add_dim();
-      shape_proto->mutable_dim(i)->set_dim_value(sizes[i]);
-    }
-    const std::vector<std::int64_t>& strides = node_type->strides();
-    for (size_t i = 0; i < strides.size(); i++) {
-      shape_proto->add_dim();
-      shape_proto->mutable_dim(i)->set_dim_value(strides[i]);
-    }
-    tensortype_proto->set_elem_type(ATenTypeToOnnxType(node_type->scalarType()));
-  } else if (kind == TypeKind::TupleType) {
-    type_proto->set_denotation("TupleType");
-    TupleTypePtr node_type = type->cast<TupleType>();
-    auto elements = node_type->elements();
-
-    // Generate a name for and encode each subtype in the value_info field of the GraphProto.
-    for (size_t i = 0; i < elements.size(); i++) {
-      std::string name = "#" + std::to_string(type_counter_++);
-      shape_proto->add_dim();
-      shape_proto->mutable_dim(i)->set_dim_param(name);
-      onnx::ValueInfoProto* subtype_proto = graph_proto->add_value_info();
-      EncodeTypeInfo(graph_proto, subtype_proto, elements[i], name);
-    }
-  } else if (kind == TypeKind::ListType) {
-    type_proto->set_denotation("ListType");
-    ListTypePtr node_type = type->cast<ListType>();
-
-    // Generate a name for and encode the subtype in the value_info field of the GraphProto.
-    std::string name = "#" + std::to_string(type_counter_++);
-    shape_proto->add_dim();
-    shape_proto->mutable_dim(0)->set_dim_param(name);
-    onnx::ValueInfoProto* subtype_proto = graph_proto->add_value_info();
-    EncodeTypeInfo(graph_proto, subtype_proto, node_type->getElementType(), name);
-  } else if (kind == TypeKind::NumberType) {
-    type_proto->set_denotation("NumberType");
-  } else if (kind == TypeKind::FloatType) {
-    type_proto->set_denotation("FloatType");
-  } else if (kind == TypeKind::IntType) {
-    type_proto->set_denotation("IntType");
-  } else if (kind == TypeKind::NoneType) {
-    type_proto->set_denotation("NoneType");
+void ScriptModuleSerializer::serialize(
+    const script::Module& module,
+    const script::ExtraFilesMap& extra_files) {
+  torch::ModelDef model_def;
+  convertModel(module, &model_def, extra_files);
+  std::string output;
+  // NB: cannot use MessageToJsonString, since fbcode's protobuf is too old
+  // be consistent with MessageToJsonString
+  std::string url_prefix = "type.googleapis.com";
+  std::unique_ptr<::google::protobuf::util::TypeResolver> resolver(
+      ::google::protobuf::util::NewTypeResolverForDescriptorPool(
+          url_prefix, model_def.GetDescriptor()->file()->pool()));
+  ::google::protobuf::util::Status convert_result =
+      ::google::protobuf::util::BinaryToJsonString(
+          resolver.get(),
+          url_prefix + "/" + model_def.GetDescriptor()->full_name(),
+          model_def.SerializeAsString(),
+          &output);
+  if (!convert_result.ok()) {
+    std::stringstream ss;
+    ss << convert_result;
+    AT_ERROR(ss.str());
   }
-  else {
-    throw std::runtime_error("unexpected type kind");
+  writer_.writeRecord("model.json", output.data(), output.size());
+  writer_.writeEndOfFile();
+}
+
+void ScriptModuleSerializer::convertModel(
+    const script::Module& module,
+    torch::ModelDef* model_def,
+    const script::ExtraFilesMap& extra_files) {
+  model_def->set_producer_name("pytorch");
+  model_def->set_producer_version("1.0"); // TODO: set the producer version
+                                          // using appropriate function call
+  model_def->set_proto_version(torch::ProtoVersion::PROTO_VERSION_NEWEST);
+  convertModule(
+      module, "", writer_.archiveName(), model_def->mutable_main_module());
+  writeTensorTable(model_def);
+
+  // Write out extra files.
+  for (const auto& kv : extra_files) {
+    const std::string key = "extra/" + kv.first;
+    writer_.writeRecord(key, kv.second.data(), kv.second.size());
   }
 }
 
-void ModuleEncoder::EncodeValueInfo(
-    onnx::GraphProto *graph_proto,
-    onnx::ValueInfoProto* v,
-    const Value* n) {
-  EncodeTypeInfo(graph_proto, v, n->type(), n->uniqueName());
+size_t ScriptModuleSerializer::addTensor(const at::Tensor& tensor) {
+  tensor_table_.push_back(tensor);
+  return tensor_table_.size() - 1;
 }
 
-void ModuleEncoder::EncodeModule(
-    onnx::GraphProto *graph_proto,
-    const script::Module &module) {
-  EncodeParameters(graph_proto, module, "");
-  EncodeMethods(graph_proto, module, "");
-  auto str = model_proto_.SerializeAsString();
-  file_writer_.writeRecord(str.data(), str.size());
-}
-
-void ModuleEncoder::EncodeParameters(
-    onnx::GraphProto *graph_proto,
-    const script::Module &module,
-    const std::string prefix) {
-  // Encode each parameter as a initializer in the proto
-  for (auto &parameter : module.get_parameters()) {
-    auto tensor_proto = graph_proto->add_initializer();
-    EncodeParameter(tensor_proto, parameter.value, prefix);
+void ScriptModuleSerializer::convertAndWriteTensor(
+    size_t tensor_id,
+    const at::Tensor& tensor,
+    torch::TensorDef* tensor_proto,
+    std::unordered_map<const void*, std::string>& storageMap) {
+  for (auto d : tensor.sizes()) {
+    tensor_proto->add_dims(d);
   }
-
-  for (auto &submodule : module.get_modules()) {
-    EncodeParameters(graph_proto, *submodule.value.module, prefix + submodule.key + ".");
+  for (auto s : tensor.strides()) {
+    tensor_proto->add_strides(s);
   }
-}
+  tensor_proto->set_data_type(caffe2::TypeMetaToDataType(
+      at::scalarTypeToTypeMeta(tensor.type().scalarType())));
+  tensor_proto->set_offset(tensor.storage_offset());
 
-void ModuleEncoder::EncodeParameter(
-    onnx::TensorProto *tensor_proto,
-    const script::NamedParameter &parameter,
-    const std::string prefix) {
-  auto tensor = parameter.slot();
-  // Name will be prefixed by submodule. e.g. submodule_foo.parameter_bar
-  auto name = prefix + parameter.name;
+  tensor_proto->set_requires_grad(tensor.requires_grad());
 
-  tensor_proto->set_name(name);
-  parameter_map_[tensor] = name;
+  uint64_t record_size =
+      tensor.type().elementSizeInBytes() * tensor.storage().size();
+  auto* key = tensor.storage().unsafeGetStorageImpl();
 
-  // Parameters have these fields, but tensors do not
-  tensor_proto->add_int64_data(parameter.is_buffer);
-  tensor_proto->add_int64_data(tensor->requires_grad());
-
-  EncodeTensor(tensor_proto, *tensor, name);
-}
-
-void ModuleEncoder::EncodeMethods(
-    onnx::GraphProto *graph_proto,
-    const script::Module &module,
-    const std::string prefix) {
-  // Encode each parameter as a initializer in the proto
-  for (auto &method : module.get_methods()) {
-    auto node_proto = graph_proto->add_node();
-    EncodeMethod(node_proto, *method.value, prefix);
-  }
-
-  for (auto &submodule : module.get_modules()) {
-    EncodeMethods(graph_proto, *submodule.value.module, prefix + submodule.key + ".");
-  }
-}
-
-void ModuleEncoder::EncodeMethod(
-    onnx::NodeProto *node_proto,
-    script::Method &method,
-    const std::string prefix) {
-  node_proto->set_name(prefix + method.name());
-
-  // Store member_inputs of Method in input
-  for (auto &member_input : method.params()) {
-    auto it = parameter_map_.find(member_input);
-    JIT_ASSERT(it != parameter_map_.end());
-    node_proto->add_input(it->second);
-  }
-
-  auto attr_proto = node_proto->add_attribute();
-  attr_proto->set_type(onnx::AttributeProto_AttributeType_GRAPH);
-
-  for (auto node : method.graph()->nodes()) {
-    if (node->kind() == prim::PythonOp) {
-      auto py_node = static_cast<torch::jit::PythonOp*>(node);
-      throw std::runtime_error(
-          "Couldn't export Python operator " + py_node->name() +
-          "\n\nDefined at:\n" + getNodeStackTraceString(node));
-    }
-  }
-  EncodeBlock(attr_proto->mutable_g(), method.graph()->block(), {});
-}
-
-void ModuleEncoder::EncodeTensor(
-    onnx::TensorProto *tensor_proto,
-    const at::Tensor &tensor,
-    const at::optional<std::string> external_ref = {}) {
-  auto storage_ptr = tensor.storage()->pImpl();
-  auto dedup_it = storage_dedup_map_.find(storage_ptr);
-  if (dedup_it != storage_dedup_map_.end()) {
-    tensor_proto->add_int64_data(dedup_it->second);
-  } else {
-    at::Tensor t = tensor;
-    if (at::detail::get_backend(tensor.storage()->pImpl()) == at::Backend::CUDA) {
+  auto storage_it = storageMap.find(key);
+  if (storage_it == storageMap.end()) {
+    at::Tensor storage_tensor = tensor;
+    // TODO HIP support
+    if (tensor.storage().device_type() == at::DeviceType::CUDA) {
       // NB: This new tensor is created to support cuda tensors.
       // Storages can be mutated when converting tensors from cuda to cpu,
       // and we need a cpu tensor to copy data from.
-      t = tensor.type().tensor(
-          *tensor.storage(),
-          /* storageOffset = */ 0,
-          /* size = */ { static_cast<int64_t>(tensor.type().elementSizeInBytes() * tensor.storage()->pImpl()->size()) },
-          /* strides = */ { 1 })
-        .cpu();
+      storage_tensor = at::empty({0}, tensor.options())
+                           .set_(
+                               tensor.storage(),
+                               /* storageOffset = */ 0,
+                               /* size = */
+                               {static_cast<int64_t>(tensor.storage().size())},
+                               /* stride = */ {1})
+                           .cpu();
+      AT_ASSERT(
+          storage_tensor.type().elementSizeInBytes() *
+              storage_tensor.storage().size() ==
+          record_size);
     }
-
-    auto record_number = file_writer_.writeRecord(
-      static_cast<char*>(t.storage()->pImpl()->data()), t.type().elementSizeInBytes() * t.numel());
-    tensor_proto->add_int64_data(record_number);
-    storage_dedup_map_[storage_ptr] = record_number;
+    std::string name = "tensors/" + std::to_string(tensor_id);
+    writer_.writeRecord(name, storage_tensor.storage().data(), record_size);
+    storage_it = storageMap.insert({key, name}).first;
   }
 
-  for (auto &d : tensor.sizes()) {
-    tensor_proto->add_dims(d);
-  }
-  tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.type().scalarType()));
+  auto* data = tensor_proto->mutable_data();
+  data->set_key(storage_it->second);
 
-  tensor_proto->add_int64_data(tensor.storage_offset());
-  for (auto &d : tensor.strides()) {
-    tensor_proto->add_int64_data(d);
+  // handle device case, set the device_detail and load to CUDA device
+  std::stringstream ss;
+  ss << tensor.device();
+  tensor_proto->set_device(ss.str());
+}
+
+void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
+  std::unordered_map<const void*, std::string> storageMap;
+  size_t tensor_id = 0;
+  for (const at::Tensor& t : tensor_table_) {
+    auto* tensor_proto = model_def->add_tensors();
+    convertAndWriteTensor(tensor_id++, t, tensor_proto, storageMap);
   }
 }
 
-// Pretty printing
-namespace {
+void ScriptModuleSerializer::convertModule(
+    const script::Module& module,
+    const std::string& prefix,
+    const std::string& name,
+    torch::ModuleDef* module_def) {
+  module_def->set_name(name);
+  module_def->set_optimize(module.is_optimized());
+  for (const auto& elem : module.get_parameters()) {
+    torch::ParameterDef* param_def = module_def->add_parameters();
+    convertParameter(elem.value(), param_def);
+  }
+
+  std::stringstream module_name;
+  if (prefix != "")
+    module_name << prefix << "_";
+  module_name << name;
+
+  if (module.get_methods().size() > 0) {
+    std::ostringstream methods;
+    methods << "op_version_set = 0\n";
+    PythonPrint(methods, module, tensor_table_, /*enforce_importable=*/true);
+    torch::RecordRef* record = module_def->mutable_torchscript_arena();
+
+    std::stringstream filename;
+    filename << "code/" << module_name.str() << ".py";
+    std::string methods_str = methods.str();
+    writer_.writeRecord(
+        filename.str(), methods_str.c_str(), methods_str.size());
+    record->set_key(filename.str());
+  }
+
+  for (const auto& elem : module.get_modules()) {
+    torch::ModuleDef* sub_def = module_def->add_submodules();
+    convertModule(*elem->module, module_name.str(), elem.key(), sub_def);
+  }
+}
+
+void ScriptModuleSerializer::convertParameter(
+    const script::NamedParameter& param,
+    torch::ParameterDef* param_def) {
+  param_def->set_name(param.name);
+  param_def->set_is_buffer(param.is_buffer);
+  param_def->set_tensor_id(addTensor(*param.slot()));
+}
+
+// Pretty printing for ONNX
 constexpr char indent_char = ' ';
 constexpr size_t indent_multiplier = 2;
 
@@ -675,7 +701,7 @@ void dump(const onnx::TensorProto& tensor, std::ostream& stream) {
 
 void dump(const onnx::TensorShapeProto& shape, std::ostream& stream) {
   for (int i = 0; i < shape.dim_size(); ++i) {
-    auto &dim = shape.dim(i);
+    auto& dim = shape.dim(i);
     if (dim.has_dim_value()) {
       stream << dim.dim_value();
     } else {
@@ -695,15 +721,17 @@ void dump(const onnx::TypeProto& type, std::ostream& stream) {
 }
 
 void dump(const onnx::ValueInfoProto& value_info, std::ostream& stream) {
-  stream << "{name: \"" << value_info.name()
-         << "\", type:";
+  stream << "{name: \"" << value_info.name() << "\", type:";
   dump(value_info.type(), stream);
   stream << "}";
 }
 
 void dump(const onnx::GraphProto& graph, std::ostream& stream, size_t indent);
 
-void dump(const onnx::AttributeProto& attr, std::ostream& stream, size_t indent) {
+void dump(
+    const onnx::AttributeProto& attr,
+    std::ostream& stream,
+    size_t indent) {
   stream << "{ name: '" << attr.name() << "', type: ";
   if (attr.has_f()) {
     stream << "float, value: " << attr.f();
@@ -713,7 +741,7 @@ void dump(const onnx::AttributeProto& attr, std::ostream& stream, size_t indent)
     stream << "string, value: '" << attr.s() << "'";
   } else if (attr.has_g()) {
     stream << "graph, value:\n";
-    dump(attr.g(), stream, indent+1);
+    dump(attr.g(), stream, indent + 1);
     stream << nlidt(indent);
   } else if (attr.has_t()) {
     stream << "tensor, value:";
@@ -731,7 +759,8 @@ void dump(const onnx::AttributeProto& attr, std::ostream& stream, size_t indent)
   } else if (attr.strings_size()) {
     stream << "strings, values: [";
     for (int i = 0; i < attr.strings_size(); ++i)
-      stream << "'" << attr.strings(i) << "'" << (i == attr.strings_size() - 1 ? "" : " ");
+      stream << "'" << attr.strings(i) << "'"
+             << (i == attr.strings_size() - 1 ? "" : " ");
     stream << "]";
   } else if (attr.tensors_size()) {
     stream << "tensors, values: [";
@@ -742,7 +771,7 @@ void dump(const onnx::AttributeProto& attr, std::ostream& stream, size_t indent)
   } else if (attr.graphs_size()) {
     stream << "graphs, values: [";
     for (auto& g : attr.graphs()) {
-      dump(g, stream, indent+1);
+      dump(g, stream, indent + 1);
     }
     stream << "]";
   } else {
@@ -762,82 +791,85 @@ void dump(const onnx::NodeProto& node, std::ostream& stream, size_t indent) {
   }
   stream << "], attributes: [";
   for (int i = 0; i < node.attribute_size(); ++i) {
-    dump(node.attribute(i), stream, indent+1);
+    dump(node.attribute(i), stream, indent + 1);
     stream << (i == node.attribute_size() - 1 ? "" : ",");
   }
   stream << "]}";
 }
 
 void dump(const onnx::GraphProto& graph, std::ostream& stream, size_t indent) {
-  stream << idt(indent) << "GraphProto {" << nlidt(indent+1)
-         << "name: \"" << graph.name() << "\"" << nlidt(indent+1)
-         << "inputs: [";
+  stream << idt(indent) << "GraphProto {" << nlidt(indent + 1) << "name: \""
+         << graph.name() << "\"" << nlidt(indent + 1) << "inputs: [";
   for (int i = 0; i < graph.input_size(); ++i) {
     dump(graph.input(i), stream);
     stream << (i == graph.input_size() - 1 ? "" : ",");
   }
-  stream << "]" << nlidt(indent+1)
-         << "outputs: [";
+  stream << "]" << nlidt(indent + 1) << "outputs: [";
   for (int i = 0; i < graph.output_size(); ++i) {
     dump(graph.output(i), stream);
     stream << (i == graph.output_size() - 1 ? "" : ",");
   }
-  stream << "]" << nlidt(indent+1)
-         << "initializers: [";
+  stream << "]" << nlidt(indent + 1) << "initializers: [";
   for (int i = 0; i < graph.initializer_size(); ++i) {
     dump(graph.initializer(i), stream);
     stream << (i == graph.initializer_size() - 1 ? "" : ",");
   }
-  stream << "]" << nlidt(indent+1)
-         << "nodes: [" << nlidt(indent+2);
+  stream << "]" << nlidt(indent + 1) << "nodes: [" << nlidt(indent + 2);
   for (int i = 0; i < graph.node_size(); ++i) {
-    dump(graph.node(i), stream, indent+2);
-    if (i != graph.node_size() - 1) stream << "," << nlidt(indent+2);
+    dump(graph.node(i), stream, indent + 2);
+    if (i != graph.node_size() - 1)
+      stream << "," << nlidt(indent + 2);
   }
-  stream << nlidt(indent+1) << "]\n" << idt(indent) << "}\n";
+  stream << nlidt(indent + 1) << "]\n" << idt(indent) << "}\n";
 }
 
-void dump(const onnx::OperatorSetIdProto& operator_set_id, std::ostream& stream) {
+void dump(
+    const onnx::OperatorSetIdProto& operator_set_id,
+    std::ostream& stream) {
   stream << "OperatorSetIdProto { domain: " << operator_set_id.domain() << "}";
 }
 
 void dump(const onnx::ModelProto& model, std::ostream& stream, size_t indent) {
-  stream << idt(indent)
-         << "ModelProto {" << nlidt(indent+1)
-         << "producer_name: \"" << model.producer_name() << "\"" << nlidt(indent+1)
-         << "domain: \"" << model.domain() << "\"" << nlidt(indent+1)
-         << "doc_string: \"" << model.doc_string() << "\"";
+  stream << idt(indent) << "ModelProto {" << nlidt(indent + 1)
+         << "producer_name: \"" << model.producer_name() << "\""
+         << nlidt(indent + 1) << "domain: \"" << model.domain() << "\""
+         << nlidt(indent + 1) << "doc_string: \"" << model.doc_string() << "\"";
   if (model.has_graph()) {
-    stream << nlidt(indent+1) << "graph:\n";
-    dump(model.graph(), stream, indent+2);
+    stream << nlidt(indent + 1) << "graph:\n";
+    dump(model.graph(), stream, indent + 2);
   }
   if (model.opset_import_size()) {
-    stream << idt(indent+1) << "opset_import: [";
-    for (auto &opset_imp : model.opset_import()) {
+    stream << idt(indent + 1) << "opset_import: [";
+    for (auto& opset_imp : model.opset_import()) {
       dump(opset_imp, stream);
     }
     stream << "],\n";
   }
   stream << idt(indent) << "}\n";
 }
-} // namespace
 
 std::string prettyPrint(const onnx::ModelProto& model) {
   std::stringstream ss;
   dump(model, ss, 0);
   return ss.str();
 }
-}
 
-std::string PrettyPrintExportedGraph(
-                        const std::shared_ptr<Graph> &graph,
-                        const std::vector<at::Tensor> &initializers,
-                        int64_t onnx_opset_version,
-                        bool defer_weight_export,
-                        ::torch::onnx::OperatorExportTypes operator_export_type,
-                        bool google_printer) {
+} // namespace
+
+std::string pretty_print_onnx(
+    const std::shared_ptr<Graph>& graph,
+    const std::vector<at::Tensor>& initializers,
+    int64_t onnx_opset_version,
+    bool defer_weight_export,
+    ::torch::onnx::OperatorExportTypes operator_export_type,
+    bool google_printer) {
   auto graph_encoder = GraphEncoder(
-    graph, onnx_opset_version, operator_export_type, initializers, defer_weight_export, true);
+      graph,
+      onnx_opset_version,
+      operator_export_type,
+      initializers,
+      defer_weight_export,
+      true);
   if (google_printer) {
     return graph_encoder.get_model_proto().DebugString();
   }
@@ -849,20 +881,39 @@ std::string PrettyPrintExportedGraph(
 // conform to the ONNX op specification. Thus, the output will not
 // be interpretable by a ONNX-compatible framework. However, PyTorch or
 // libtorch will be able to import the IR and play it back.
-std::tuple<std::string, RawDataExportMap> ExportGraph(
-                        const std::shared_ptr<Graph> &graph,
-                        const std::vector<at::Tensor> &initializers,
-                        int64_t onnx_opset_version,
-                        bool defer_weight_export,
-                        ::torch::onnx::OperatorExportTypes operator_export_type) {
+std::tuple<std::string, RawDataExportMap> export_onnx(
+    const std::shared_ptr<Graph>& graph,
+    const std::vector<at::Tensor>& initializers,
+    int64_t onnx_opset_version,
+    bool defer_weight_export,
+    ::torch::onnx::OperatorExportTypes operator_export_type) {
   auto graph_encoder = GraphEncoder(
-    graph, onnx_opset_version, operator_export_type, initializers, defer_weight_export, false);
-  return std::make_tuple(graph_encoder.get_model_proto().SerializeAsString(),
-                         graph_encoder.get_raw_data_export_map());
+      graph,
+      onnx_opset_version,
+      operator_export_type,
+      initializers,
+      defer_weight_export,
+      false);
+  return std::make_tuple(
+      graph_encoder.get_model_proto().SerializeAsString(),
+      graph_encoder.get_raw_data_export_map());
 }
 
-void ExportModule(const script::Module& module, const std::string &filename) {
-  ModuleEncoder(module, filename);
+void ExportModule(
+    const script::Module& module,
+    std::ostream& out,
+    const script::ExtraFilesMap& extra_files) {
+  ScriptModuleSerializer serializer(&out);
+  serializer.serialize(module, extra_files);
 }
 
-}}
+void ExportModule(
+    const script::Module& module,
+    const std::string& filename,
+    const script::ExtraFilesMap& extra_files) {
+  ScriptModuleSerializer serializer(filename);
+  serializer.serialize(module, extra_files);
+}
+
+} // namespace jit
+} // namespace torch

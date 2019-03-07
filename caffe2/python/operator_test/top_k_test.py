@@ -9,9 +9,10 @@ import numpy as np
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 
-class TestTopK(hu.HypothesisTestCase):
+class TestTopK(serial.SerializedTestCase):
 
     def top_k_ref(self, X, k, flatten_indices, axis=-1):
         in_dims = X.shape
@@ -64,7 +65,7 @@ class TestTopK(hu.HypothesisTestCase):
         else:
             return (values_ref, indices_ref)
 
-    @given(
+    @serial.given(
         X=hu.tensor(),
         flatten_indices=st.booleans(),
         seed=st.integers(0, 10),

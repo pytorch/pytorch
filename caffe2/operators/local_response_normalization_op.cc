@@ -6,15 +6,15 @@ template<>
 bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   // Note(Yangqing): this one is copied from my Caffe implementation.
   auto& X = Input(0);
-  auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
+
+  DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
   const int W = X.dim32(3);
   const int image_size = C * H * W;
   const float* Xdata = X.data<float>();
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   float* Ydata = Y->template mutable_data<float>();
 
   if (OutputSize() > 1) {
@@ -26,11 +26,11 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   }
   scale_->ResizeLike(X);
   float* scale_data = scale_->template mutable_data<float>();
-  math::Set<float, CPUContext>(X.size(), bias_, scale_data, &context_);
-  Tensor padded_square(vector<TIndex>{C + size_ - 1, H, W}, CPU);
+  math::Set<float, CPUContext>(X.numel(), bias_, scale_data, &context_);
+  Tensor padded_square(vector<int64_t>{C + size_ - 1, H, W}, CPU);
   float* padded_square_data = padded_square.template mutable_data<float>();
-  math::Set<float, CPUContext>(padded_square.size(), 0., padded_square_data,
-                               &context_);
+  math::Set<float, CPUContext>(
+      padded_square.numel(), 0., padded_square_data, &context_);
   const float alpha_over_size = alpha_ / size_;
   // go through the images
   for (int n = 0; n < N; ++n) {
@@ -60,8 +60,8 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     }
   }
   math::Powx<float, CPUContext>(
-      X.size(), scale_data, -beta_, Ydata, &context_);
-  math::Mul<float, CPUContext>(X.size(), Ydata, Xdata, Ydata, &context_);
+      X.numel(), scale_data, -beta_, Ydata, &context_);
+  math::Mul<float, CPUContext>(X.numel(), Ydata, Xdata, Ydata, &context_);
   return true;
 }
 
@@ -70,15 +70,15 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   // Note(Yangqing): This one is copied from my Decaf implementation. How many
   // variants have I written...?
   auto& X = Input(0);
-  auto* Y = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
+
+  DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);
   const int C = X.dim32(3);
   const int num_rows = N * H * W;
   const float* Xdata = X.data<float>();
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
   float* Ydata = Y->template mutable_data<float>();
 
   if (OutputSize() > 1) {
@@ -91,10 +91,10 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   scale_->ResizeLike(X);
   float* scale_data = scale_->template mutable_data<float>();
 
-  Tensor padded_square(vector<TIndex>(1, C + size_ - 1), CPU);
+  Tensor padded_square(vector<int64_t>(1, C + size_ - 1), CPU);
   float* padded_square_data = padded_square.template mutable_data<float>();
-  math::Set<float, CPUContext>(padded_square.size(), 0., padded_square_data,
-                               &context_);
+  math::Set<float, CPUContext>(
+      padded_square.numel(), 0., padded_square_data, &context_);
   const float alpha_over_size = alpha_ / size_;
 
   for (int n = 0; n < num_rows; ++n) {
@@ -113,8 +113,8 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
     }
   }
   math::Powx<float, CPUContext>(
-      X.size(), scale_data, -beta_, Ydata, &context_);
-  math::Mul<float, CPUContext>(X.size(), Ydata, Xdata, Ydata, &context_);
+      X.numel(), scale_data, -beta_, Ydata, &context_);
+  math::Mul<float, CPUContext>(X.numel(), Ydata, Xdata, Ydata, &context_);
   return true;
 }
 
@@ -123,8 +123,8 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dY = Input(2);
-  auto* dX = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
+
+  DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
@@ -132,9 +132,9 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const int image_size = C * H * W;
   // Loosely checking the size, assuming that the shapes will be the same as
   // long as the sizes check out.
-  DCHECK_EQ(X.size(), Y.size());
-  DCHECK_EQ(X.size(), dY.size());
-  dX->ResizeLike(X);
+  DCHECK_EQ(X.numel(), Y.numel());
+  DCHECK_EQ(X.numel(), dY.numel());
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
 
   const float* Xdata = X.data<float>();
   const float* Ydata = Y.data<float>();
@@ -146,12 +146,12 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->template mutable_data<float>();
 
-  Tensor padded_ratio(vector<TIndex>{C + size_ - 1, H, W}, CPU);
+  Tensor padded_ratio(vector<int64_t>{C + size_ - 1, H, W}, CPU);
   float* padded_ratio_data = padded_ratio.template mutable_data<float>();
   // Compute scale(copied from LRNOp) - reusing padded_ratio
-  math::Set<float, CPUContext>(X.size(), bias_, scale_data, &context_);
-  math::Set<float, CPUContext>(padded_ratio.size(), 0., padded_ratio_data,
-                               &context_);
+  math::Set<float, CPUContext>(X.numel(), bias_, scale_data, &context_);
+  math::Set<float, CPUContext>(
+      padded_ratio.numel(), 0., padded_ratio_data, &context_);
   const float alpha_over_size = alpha_ / size_;
   // go through the images
   for (int n = 0; n < N; ++n) {
@@ -181,9 +181,9 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     }
   }
 
-  math::Set<float, CPUContext>(padded_ratio.size(), 0., padded_ratio_data,
-                               &context_);
-  Tensor accum_ratio(vector<TIndex>{H, W}, CPU);
+  math::Set<float, CPUContext>(
+      padded_ratio.numel(), 0., padded_ratio_data, &context_);
+  Tensor accum_ratio(vector<int64_t>{H, W}, CPU);
   float* accum_ratio_data = accum_ratio.template mutable_data<float>();
 
   const float cache_ratio = 2. * alpha_ * beta_ / size_;
@@ -200,8 +200,8 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
         scale_data + offset,
         padded_ratio_data + inverse_pre_pad * H * W, &context_);
     // Now, compute the accumulated ratios and the bottom diff
-    math::Set<float, CPUContext>(accum_ratio.size(), 0., accum_ratio_data,
-                                 &context_);
+    math::Set<float, CPUContext>(
+        accum_ratio.numel(), 0., accum_ratio_data, &context_);
     for (int c = 0; c < size_ - 1; ++c) {
       math::Axpy<float, CPUContext>(H * W, 1,
                                     padded_ratio_data + c * H * W,
@@ -226,8 +226,8 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
   auto& Y = Input(1);
   auto& dY = Input(2);
-  auto* dX = Output(0);
-  DCHECK_EQ(X.ndim(), 4);
+
+  DCHECK_EQ(X.dim(), 4);
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);
@@ -236,20 +236,20 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const float* Xdata = X.data<float>();
   // Loosely checking the size, assuming that the shapes will be the same as
   // long as the sizes check out.
-  DCHECK_EQ(X.size(), Y.size());
-  DCHECK_EQ(X.size(), dY.size());
-  dX->ResizeLike(X);
+  DCHECK_EQ(X.numel(), Y.numel());
+  DCHECK_EQ(X.numel(), dY.numel());
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   if (!scale_) {
     scale_ = &local_scale_tensor_;
   }
   scale_->ResizeLike(X);
-  Tensor padded_ratio(vector<TIndex>(1, C + size_ - 1), CPU);
+  Tensor padded_ratio(vector<int64_t>(1, C + size_ - 1), CPU);
   float* padded_ratio_data = padded_ratio.template mutable_data<float>();
   float* scale_data = scale_->template mutable_data<float>();
   // Compute scale(copied from LRNOp) - reusing padded_ratio
-  math::Set<float, CPUContext>(X.size(), bias_, scale_data, &context_);
-  math::Set<float, CPUContext>(padded_ratio.size(), 0., padded_ratio_data,
-                               &context_);
+  math::Set<float, CPUContext>(X.numel(), bias_, scale_data, &context_);
+  math::Set<float, CPUContext>(
+      padded_ratio.numel(), 0., padded_ratio_data, &context_);
   const float alpha_over_size = alpha_ / size_;
 
   for (int n = 0; n < num_rows; ++n) {
@@ -268,8 +268,8 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
     }
   }
 
-  math::Set<float, CPUContext>(padded_ratio.size(), 0., padded_ratio_data,
-                               &context_);
+  math::Set<float, CPUContext>(
+      padded_ratio.numel(), 0., padded_ratio_data, &context_);
   // the ratio 2*alpha*beta/size
   const float cache_ratio = 2. * alpha_ * beta_ / size_;
   const float* Ydata = Y.data<float>();
@@ -301,13 +301,13 @@ REGISTER_CPU_OPERATOR(LRN, LRNOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(LRNGradient, LRNGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(LRN)
-  .NumInputs(1)
-  .NumOutputs(1, 2)
-  .SetDoc(R"DOC(
+    .NumInputs(1)
+    .NumOutputs(1, 2)
+    .SetDoc(R"DOC(
 
 `LRN` applies Local Response Normalization to an input blob. This operation performs
-a kind of "lateral inhibition" by normalizing over local input regions, where 
-normalization is applied across channels. This operator is typically used to 
+a kind of "lateral inhibition" by normalizing over local input regions, where
+normalization is applied across channels. This operator is typically used to
 normalize an unbounded activation (such as ReLU). The output shape is the same as
 the input shape. The `brew` module has a wrapper for this operator for use in a
 `ModelHelper` object.
@@ -342,7 +342,7 @@ op = core.CreateOperator("LRN",
      order="NHWC"
 )
 
-workspace.FeedBlob("X", np.random.randn(1, 6, 6, 1).astype(np.float32)) # NCHW
+workspace.FeedBlob("X", np.random.randn(1, 6, 6, 1).astype(np.float32)) // NCHW
 print("X:\n", workspace.FetchBlob("X"), "\n")
 workspace.RunOperatorOnce(op)
 print("Y:\n", workspace.FetchBlob("Y"))
@@ -393,7 +393,7 @@ X:
    [ 0.45961624]
    [-1.0201577 ]
    [ 0.62854475]
-   [-0.6395456 ]]]] 
+   [-0.6395456 ]]]]
 
 Y:
  [[[[ 0.5160766 ]
@@ -484,15 +484,19 @@ Y_scale:
 </details>
 
 )DOC")
-  .Arg("size", "*(type: int; default: 0)* Amount of neighboring channels to sum over for normalization")
-  .Arg("alpha", "*(type: float; default: 0)* Multiplicative (scaling) factor.")
-  .Arg("beta", "*(type: float; default: 0)* Exponent.")
-  .Arg("bias", "*(type: float; default: 1.0)* Additive factor.")
-  .Arg("order", "*(type: float; default: 'NCHW')* Order of blob dimensions.")
-  .Input(0, "X", "*(type: Tensor`<float>`)* Input data tensor (ReLU output).")
-  .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.")
-  .Output(1, "Y_scale", "*(type: Tensor`<float>`)* Output scale.") 
-  .InheritOnnxSchema("LRN");
+    .Arg(
+        "size",
+        "*(type: int; default: 0)* Amount of neighboring channels to sum over for normalization")
+    .Arg(
+        "alpha",
+        "*(type: float; default: 0)* Multiplicative (scaling) factor.")
+    .Arg("beta", "*(type: float; default: 0)* Exponent.")
+    .Arg("bias", "*(type: float; default: 1.0)* Additive factor.")
+    .Arg("order", "*(type: float; default: 'NCHW')* Order of blob dimensions.")
+    .Input(0, "X", "*(type: Tensor`<float>`)* Input data tensor (ReLU output).")
+    .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.")
+    .Output(1, "Y_scale", "*(type: Tensor`<float>`)* Output scale.")
+    .InheritOnnxSchema();
 OPERATOR_SCHEMA(LRNGradient).NumInputs(3).NumOutputs(1);
 
 class GetLRNGradient : public GradientMakerBase {

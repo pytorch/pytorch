@@ -18,8 +18,9 @@ class PackSegmentsOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_DISPATCH_HELPER;
 
-  PackSegmentsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit PackSegmentsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         max_length_(this->template GetSingleArgument<int>("max_length", -1)),
         pad_minf_(this->template GetSingleArgument<bool>("pad_minf", false)),
         return_presence_mask_(this->template GetSingleArgument<bool>(
@@ -45,7 +46,7 @@ class PackSegmentsOp final : public Operator<Context> {
   INPUT_TAGS(LENGTHS, DATA);
 
  private:
-  TIndex max_length_;
+  int64_t max_length_;
   bool pad_minf_;
   float padding_;
   bool return_presence_mask_;
@@ -63,8 +64,9 @@ class UnpackSegmentsOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_DISPATCH_HELPER;
 
-  UnpackSegmentsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit UnpackSegmentsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         max_length_(this->template GetSingleArgument<int>("max_length", -1)) {}
 
   bool RunOnDevice() override {
@@ -80,7 +82,7 @@ class UnpackSegmentsOp final : public Operator<Context> {
   INPUT_TAGS(LENGTHS, DATA);
 
  private:
-  TIndex max_length_;
+  int64_t max_length_;
   Tensor dev_buffer_{Context::GetDeviceType()};
   Tensor dev_lengths_prefix_sum_{Context::GetDeviceType()};
   Tensor dev_max_length_{Context::GetDeviceType()};

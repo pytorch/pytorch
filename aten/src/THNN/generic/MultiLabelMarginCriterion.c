@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/MultiLabelMarginCriterion.c"
+#define TH_GENERIC_FILE "THNN/generic/MultiLabelMarginCriterion.c"
 #else
 
 // TODO: improve error messages
@@ -11,11 +11,11 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
           THTensor *isTarget,
           int64_t reduction)
 {
-  real *input_data, *isTarget_data;
+  scalar_t *input_data, *isTarget_data;
   THIndex_t *target_data;
   int64_t nframe, dim;
   int64_t t, d, dt, ddt;
-  real sum;
+  scalar_t sum;
 
   AT_CHECK(!input->is_empty() && input->dim() <= 2,
            "non-empty vector or matrix expected, got size: ", input->sizes());
@@ -35,19 +35,19 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
              && (target->size(1) == dim), "inconsistent target size");
   }
 
-  THArgCheck(THIndexTensor_(minall)(target) >= -1+TH_INDEX_BASE, 3, "target out of range");
-  THArgCheck(THIndexTensor_(maxall)(target) < dim+TH_INDEX_BASE, 3, "target out of range");
+  THArgCheck(THIndexTensor_(minall)(target) >= -1, 3, "target out of range");
+  THArgCheck(THIndexTensor_(maxall)(target) < dim, 3, "target out of range");
 
   target = THIndexTensor_(newContiguous)(target);
   input = THTensor_(newContiguous)(input);
-  input_data = THTensor_(data)(input);
+  input_data = input->data<scalar_t>();
   target_data = THIndexTensor_(data)(target);
 
   if (!isTarget->sizes().equals(target->sizes())) {
     THTensor_(resizeNd)(isTarget, target->dim(), THTensor_getSizePtr(target), nullptr);
   }
   THTensor_(zero)(isTarget);
-  isTarget_data = THTensor_(data)(isTarget);
+  isTarget_data = isTarget->data<scalar_t>();
 
   if (reduction != Reduction::None)
   {
@@ -58,15 +58,15 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     {
       for (ddt = 0; ddt < dim; ddt++)
       {
-        THIndex_t target_idx = target_data[ddt] - TH_INDEX_BASE;
+        THIndex_t target_idx = target_data[ddt];
         if (target_idx < 0)
           break;
         isTarget_data[target_idx] = 1;
       }
       for (dt = 0; dt < dim; dt++)
       {
-        THIndex_t target_idx = target_data[dt] - TH_INDEX_BASE;
-        real input_target;
+        THIndex_t target_idx = target_data[dt];
+        scalar_t input_target;
         if (target_idx < 0)
           break;
 
@@ -75,7 +75,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
         {
           if (!isTarget_data[d])
           {
-            real z = 1 - input_target + input_data[d];
+            scalar_t z = 1 - input_target + input_data[d];
             if (z > 0)
               sum += z;
           }
@@ -87,11 +87,11 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     }
 
     sum /= dim;
-    if (reduction == Reduction::ElementwiseMean)
+    if (reduction == Reduction::Mean)
       sum /= nframe;
     THTensor_(fastSet1d)(output, 0, sum);
 
-    THTensor_(free)(input);
+    c10::raw::intrusive_ptr::decref(input);
     THIndexTensor_(free)(target);
     return;
   }
@@ -102,7 +102,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   {
     for (ddt = 0; ddt < dim; ddt++)
     {
-      THIndex_t target_idx = target_data[ddt] - TH_INDEX_BASE;
+      THIndex_t target_idx = target_data[ddt];
       if (target_idx < 0)
         break;
       isTarget_data[target_idx] = 1;
@@ -111,8 +111,8 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     sum = 0;
     for (dt = 0; dt < dim; dt++)
     {
-      THIndex_t target_idx = target_data[dt] - TH_INDEX_BASE;
-      real input_target;
+      THIndex_t target_idx = target_data[dt];
+      scalar_t input_target;
       if (target_idx < 0)
         break;
 
@@ -121,7 +121,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
       {
         if (!isTarget_data[d])
         {
-          real z = 1 - input_target + input_data[d];
+          scalar_t z = 1 - input_target + input_data[d];
           if (z > 0)
             sum += z;
         }
@@ -136,7 +136,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     isTarget_data += dim;
   }
 
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
   THIndexTensor_(free)(target);
 }
 
@@ -149,13 +149,13 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
           THTensor *isTarget,
           int64_t reduction)
 {
-  real *input_data;
-  real *gradInput_data;
+  scalar_t *input_data;
+  scalar_t *gradInput_data;
   THIndex_t *target_data;
-  real *isTarget_data;
+  scalar_t *isTarget_data;
   int64_t nframe, dim;
   int64_t t, d, dt;
-  real g;
+  scalar_t g;
 
   AT_CHECK(!input->is_empty() && input->dim() <= 2,
            "vector or matrix expected, got size: ", input->sizes());
@@ -179,8 +179,8 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
              && (isTarget->size(1) == dim), 3, "inconsistent isTarget size");
   }
 
-  THArgCheck(THIndexTensor_(minall)(target) >= -1+TH_INDEX_BASE, 3, "target out of range");
-  THArgCheck(THIndexTensor_(maxall)(target) < dim+TH_INDEX_BASE, 3, "target out of range");
+  THArgCheck(THIndexTensor_(minall)(target) >= -1, 3, "target out of range");
+  THArgCheck(THIndexTensor_(maxall)(target) < dim, 3, "target out of range");
 
   THArgCheck(THTensor_(minall)(isTarget) >= 0, 3, "isTarget out of range");
   THArgCheck(THTensor_(maxall)(isTarget) <= 1, 3, "isTarget out of range");
@@ -188,23 +188,23 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   target = THIndexTensor_(newContiguous)(target);
   input = THTensor_(newContiguous)(input);
   isTarget = THTensor_(newContiguous)(isTarget);
-  input_data = THTensor_(data)(input);
+  input_data = input->data<scalar_t>();
   target_data = THIndexTensor_(data)(target);
-  isTarget_data = THTensor_(data)(isTarget);
+  isTarget_data = isTarget->data<scalar_t>();
 
   THTensor_(resizeAs)(gradInput, input);
   gradInput = THTensor_(newContiguous)(gradInput);
   THTensor_(zero)(gradInput);
-  gradInput_data = THTensor_(data)(gradInput);
+  gradInput_data = gradInput->data<scalar_t>();
 
-  g = reduction == Reduction::ElementwiseMean ? (1./((real)(nframe*dim))) : (1./((real)dim));
+  g = reduction == Reduction::Mean ? (1./((scalar_t)(nframe*dim))) : (1./((scalar_t)dim));
 
   for (t = 0; t < nframe; t++)
   {
     for (dt = 0; dt < dim; dt++)
     {
-      THIndex_t target_idx = target_data[dt] - TH_INDEX_BASE;
-      real input_target;
+      THIndex_t target_idx = target_data[dt];
+      scalar_t input_target;
       if (target_idx < 0)
         break;
 
@@ -213,7 +213,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
       {
         if (!isTarget_data[d])
         {
-          real z = 1 - input_target + input_data[d];
+          scalar_t z = 1 - input_target + input_data[d];
           if (z > 0)
           {
             gradInput_data[target_idx] -= g;
@@ -227,7 +227,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
     isTarget_data += dim;
     gradInput_data += dim;
   }
-  gradInput_data = THTensor_(data)(gradInput);
+  gradInput_data = gradInput->data<scalar_t>();
 
   if (reduction != Reduction::None)
   {
@@ -249,10 +249,10 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
     }
   }
 
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
   THIndexTensor_(free)(target);
-  THTensor_(free)(isTarget);
-  THTensor_(free)(gradInput);
+  c10::raw::intrusive_ptr::decref(isTarget);
+  c10::raw::intrusive_ptr::decref(gradInput);
 }
 
 #endif

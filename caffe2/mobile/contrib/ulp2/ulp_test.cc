@@ -62,7 +62,7 @@ int randInt(int a, int b) {
   return std::uniform_int_distribution<int>(a, b)(gen);
 }
 
-TensorCPU genTensor11(std::vector<TIndex> shape) {
+TensorCPU genTensor11(std::vector<int64_t> shape) {
   Tensor r(CPU);
   r.Resize(shape);
 
@@ -76,7 +76,7 @@ TensorCPU genTensor11(std::vector<TIndex> shape) {
   return r;
 }
 
-TensorCPU genTensorUniform11(std::vector<TIndex> shape) {
+TensorCPU genTensorUniform11(std::vector<int64_t> shape) {
   Tensor r(CPU);
   r.Resize(shape);
 
@@ -90,7 +90,7 @@ TensorCPU genTensorUniform11(std::vector<TIndex> shape) {
   return r;
 }
 
-TensorCPU genTensor0123(std::vector<TIndex> shape) {
+TensorCPU genTensor0123(std::vector<int64_t> shape) {
   Tensor r(CPU);
   r.Resize(shape);
 
@@ -171,7 +171,7 @@ inline void qgemmNT(int M, int N, int K, const uint8_t* A, const uint8_t* B, flo
   }
 }
 
-void gemmTest(TIndex M, TIndex N, TIndex K) {
+void gemmTest(int64_t M, int64_t N, int64_t K) {
   auto X = genTensor11({M, K});
   auto W = genTensor11({N, K});
   Tensor XQ(CPU), WQ(CPU), YQ(CPU), Y(CPU);
@@ -185,7 +185,7 @@ void gemmTest(TIndex M, TIndex N, TIndex K) {
     Y.Resize(M, N);
     gemmNT(M, N, K, X.data<float>(), W.data<float>(), Y.mutable_data<float>());
   }
-  EXPECT_TRUE(Y.dims() == YQ.dims());
+  EXPECT_TRUE(Y.sizes() == YQ.sizes());
   for (auto i = 0; i < Y.size(); ++i) {
     EXPECT_NEAR(Y.data<float>()[i], YQ.data<float>()[i], 1e-3);
   }
@@ -214,7 +214,7 @@ TEST(QConv, ConvTest) {
     qconv(ConvArgs{}, XQ, WQ, nullptr, &YQ);
   }
   { conv(ConvArgs{}, X, W, nullptr, &Y); }
-  EXPECT_TRUE(Y.dims() == YQ.dims());
+  EXPECT_TRUE(Y.sizes() == YQ.sizes());
   for (auto i = 0; i < Y.size(); ++i) {
     EXPECT_NEAR(Y.data<float>()[i], YQ.data<float>()[i], 1e-3);
   }
@@ -289,13 +289,13 @@ void ConvTest2b1b(int IC, int KH, int KW, int H, int W, int OC, int N, ConvArgs 
     def.add_arg()->CopyFrom(MakeArgument("pad_r", args.pad_r));
     def.add_arg()->CopyFrom(MakeArgument("pad_t", args.pad_t));
     def.add_arg()->CopyFrom(MakeArgument("pad_b", args.pad_b));
-    auto* Xws = ws.CreateBlob("X")->GetMutableTensor(CPU);
+    auto* Xws = BlobGetMutableTensor(ws.CreateBlob("X"), CPU);
     Xws->ResizeLike(X);
     Xws->ShareExternalPointer(X.mutable_data<float>(), X.size());
-    auto* Wws = ws.CreateBlob("W")->GetMutableTensor(CPU);
+    auto* Wws = BlobGetMutableTensor(ws.CreateBlob("W"), CPU);
     Wws->ResizeLike(W_);
     Wws->ShareExternalPointer(W_.mutable_data<float>(), W_.size());
-    auto* bws = ws.CreateBlob("b")->GetMutableTensor(CPU);
+    auto* bws = BlobGetMutableTensor(ws.CreateBlob("b"), CPU);
     bws->ResizeLike(bias);
     bws->ShareExternalPointer(bias.mutable_data<float>(), bias.size());
     ws.RunOperatorOnce(def);
@@ -304,9 +304,9 @@ void ConvTest2b1b(int IC, int KH, int KW, int H, int W, int OC, int N, ConvArgs 
 
   { conv(args, X, W_, &bias, &Y); }
 
-  EXPECT_TRUE(Y.dims() == YQ.dims());
-  EXPECT_TRUE(Y.dims() == Y2b1b.dims());
-  EXPECT_TRUE(Y.dims() == YOP.dims());
+  EXPECT_TRUE(Y.sizes() == YQ.sizes());
+  EXPECT_TRUE(Y.sizes() == Y2b1b.sizes());
+  EXPECT_TRUE(Y.sizes() == YOP.sizes());
 
   // for (auto i = 0; i < Y.size(); ++i) {
   //   LOG(INFO) << "i: " << i << ", y[i]: " << Y.data<float>()[i]

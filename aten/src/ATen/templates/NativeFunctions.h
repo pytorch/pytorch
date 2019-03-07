@@ -2,10 +2,10 @@
 
 // ${generated_comment}
 
-#include <ATen/ScalarType.h>
-#include <ATen/TensorOperators.h>
-#include <ATen/TensorMethods.h>
-#include <ATen/TensorOptions.h>
+#include <ATen/Context.h>
+#include <c10/core/ScalarType.h>
+#include <ATen/core/TensorMethods.h>
+#include <c10/core/TensorOptions.h>
 
 #include <array>
 #include <functional>
@@ -13,10 +13,12 @@
 #include <tuple>
 #include <vector>
 
+namespace c10 {
+class Scalar;
+}
 namespace at {
 struct Generator;
-class Scalar;
-struct Tensor;
+class Tensor;
 struct Type;
 } // namespace at
 
@@ -25,37 +27,39 @@ namespace native {
 
 inline Tensor from_blob(
     void* data,
-    IntList sizes,
+    IntArrayRef sizes,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
-  return options.type().tensorFromBlob(data, sizes, deleter);
+  return at::getType(options).tensorFromBlob(data, sizes, deleter);
 }
 
 inline Tensor from_blob(
     void* data,
-    IntList sizes,
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
-  return native::from_blob(data, sizes, /*deleter=*/[](void*) {}, options);
+  return at::getType(options).tensorFromBlob(data, sizes, strides, deleter);
 }
 
 // These functions are defined in native/TensorFactories.cpp.
-#define TENSOR(T, S, _1)                                               \
-  AT_API Tensor tensor(ArrayRef<T> values, const TensorOptions& options);     \
-  inline Tensor tensor(                                                \
-      std::initializer_list<T> values, const TensorOptions& options) { \
-    return native::tensor(ArrayRef<T>(values), options);               \
-  }                                                                    \
-  inline Tensor tensor(T value, const TensorOptions& options) {        \
-    return native::tensor(ArrayRef<T>(value), options);                \
-  }                                                                    \
-  inline Tensor tensor(ArrayRef<T> values) {                           \
-    return native::tensor(std::move(values), at::dtype(k##S));         \
-  }                                                                    \
-  inline Tensor tensor(std::initializer_list<T> values) {              \
-    return native::tensor(ArrayRef<T>(values));                        \
-  }                                                                    \
-  inline Tensor tensor(T value) {                                      \
-    return native::tensor(ArrayRef<T>(value));                         \
+#define TENSOR(T, S, _1)                                                      \
+  CAFFE2_API Tensor tensor(ArrayRef<T> values, const TensorOptions& options); \
+  inline Tensor tensor(                                                       \
+      std::initializer_list<T> values, const TensorOptions& options) {        \
+    return native::tensor(ArrayRef<T>(values), options);                      \
+  }                                                                           \
+  inline Tensor tensor(T value, const TensorOptions& options) {               \
+    return native::tensor(ArrayRef<T>(value), options);                       \
+  }                                                                           \
+  inline Tensor tensor(ArrayRef<T> values) {                                  \
+    return native::tensor(std::move(values), at::dtype(k##S));                \
+  }                                                                           \
+  inline Tensor tensor(std::initializer_list<T> values) {                     \
+    return native::tensor(ArrayRef<T>(values));                               \
+  }                                                                           \
+  inline Tensor tensor(T value) {                                             \
+    return native::tensor(ArrayRef<T>(value));                                \
   }
 AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
 #undef TENSOR

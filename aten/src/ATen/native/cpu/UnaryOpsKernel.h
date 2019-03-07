@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/Generator.h>
 #include <stdexcept>
 
 namespace at { namespace native {
@@ -33,6 +34,8 @@ DECLARE_DISPATCH(unary_fn, sqrtImpl);
 DECLARE_DISPATCH(unary_fn, tanImpl);
 DECLARE_DISPATCH(unary_fn, tanhImpl);
 DECLARE_DISPATCH(unary_fn, truncImpl);
+
+DECLARE_DISPATCH(void(*)(Tensor&, const double, Generator *), bernoulli_mkl_stub);
 
 
 // Missing unary functions

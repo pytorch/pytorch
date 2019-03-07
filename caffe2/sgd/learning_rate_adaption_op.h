@@ -49,11 +49,11 @@ class LearningRateAdaptionOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
-    CAFFE_ENFORCE(Input(LR).size() == 1);
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(EFFGRAD).size());
+    CAFFE_ENFORCE(Input(LR).numel() == 1);
+    CAFFE_ENFORCE(Input(GRAD).numel() == Input(EFFGRAD).numel());
     Output(OUTPUT_LR)->ResizeLike(Input(LR));
     lr_update<Context>(
-        Input(GRAD).size(),
+        Input(GRAD).numel(),
         Input(GRAD).template data<T>(),
         Input(EFFGRAD).template data<T>(),
         Input(LR).template data<T>(),

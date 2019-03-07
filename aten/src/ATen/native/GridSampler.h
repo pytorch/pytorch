@@ -1,5 +1,7 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
+#pragma once
+
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 
 namespace at { namespace native { namespace detail {
 

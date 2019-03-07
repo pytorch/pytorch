@@ -2,7 +2,7 @@
 
 #include <cstddef>
 
-#include "RPCType.hpp"
+#include <THD/base/RPCType.hpp>
 
 namespace thd {
 
@@ -19,7 +19,7 @@ struct Scalar {
   virtual Scalar* clone() const = 0;
 };
 
-template<typename real>
+template <typename real>
 struct ScalarWrapper : Scalar {
   ScalarWrapper() {}
   ScalarWrapper(real value) : _value(value) {}
@@ -49,7 +49,7 @@ struct ScalarWrapper : Scalar {
     return _value;
   }
 
-private:
+ private:
   real _value;
 };
 

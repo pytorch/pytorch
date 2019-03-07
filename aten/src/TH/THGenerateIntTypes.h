@@ -7,11 +7,11 @@
 #define THGenerateManyTypes
 #endif
 
-#include "THGenerateByteType.h"
-#include "THGenerateCharType.h"
-#include "THGenerateShortType.h"
-#include "THGenerateIntType.h"
-#include "THGenerateLongType.h"
+#include <TH/THGenerateByteType.h>
+#include <TH/THGenerateCharType.h>
+#include <TH/THGenerateShortType.h>
+#include <TH/THGenerateIntType.h>
+#include <TH/THGenerateLongType.h>
 
 #ifdef THIntLocalGenerateManyTypes
 #undef THIntLocalGenerateManyTypes

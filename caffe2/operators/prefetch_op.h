@@ -32,7 +32,7 @@ class PrefetchOperator : public OperatorBase {
         prefetch_success_(true),
         finalize_(false),
         no_prefetch_(GetSingleArgument<bool>("no_prefetch", false)) {
-    context_.SwitchToDevice(0);
+    context_.SwitchToDevice();
   }
 
   virtual ~PrefetchOperator() noexcept {
@@ -63,7 +63,7 @@ class PrefetchOperator : public OperatorBase {
 
   bool Run(int /* unused */ /*stream_id*/) override {
     if (no_prefetch_) {
-      context_.SwitchToDevice(0);
+      context_.SwitchToDevice();
       bool result = Prefetch() && CopyPrefetched();
       context_.FinishDeviceComputation();
       return result;
@@ -75,7 +75,7 @@ class PrefetchOperator : public OperatorBase {
       prefetch_thread_.reset(
           new std::thread([this] { this->PrefetchWorker(); }));
     }
-    context_.SwitchToDevice(0);
+    context_.SwitchToDevice();
     std::unique_lock<std::mutex> lock(prefetch_access_mutex_);
     while (!prefetched_)
       consumer_.wait(lock);

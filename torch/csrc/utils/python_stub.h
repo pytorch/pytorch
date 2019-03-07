@@ -1,4 +1,4 @@
 #pragma once
 
 struct _object;
-typedef _object PyObject;
+using PyObject = _object;

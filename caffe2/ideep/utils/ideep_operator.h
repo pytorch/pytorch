@@ -2,25 +2,33 @@
 
 #include <ideep.hpp>
 #include <caffe2/core/operator.h>
-#include <caffe2/proto/caffe2.pb.h>
+#include <caffe2/proto/caffe2_pb.h>
 
 namespace caffe2 {
 
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
     IDEEPOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 
 #define REGISTER_IDEEP_OPERATOR_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(IDEEPOperatorRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(IDEEPOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_IDEEP_OPERATOR(name, ...) \
-  CAFFE_REGISTER_CLASS(IDEEPOperatorRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(IDEEPOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_IDEEP_OPERATOR_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(IDEEPOperatorRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(IDEEPOperatorRegistry, str_name, __VA_ARGS__)
+#define REGISTER_IDEEP_COMPARE_OPERATOR(Op)                    \
+  REGISTER_IDEEP_OPERATOR(                                     \
+      Op,                                                      \
+      IDEEPFallbackOp<BinaryElementwiseOp<                     \
+          TensorTypes<bool, int32_t, int64_t, float, double>,  \
+          CPUContext,                                          \
+          Op##Functor<CPUContext>,                             \
+          FixedType<bool>>>)
 
 #define REGISTER_IDEEP_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  CAFFE_REGISTER_CLASS(IDEEPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+  C10_REGISTER_CLASS(IDEEPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
 // IDEEPOperator is the base scaffolding of the operators that uses IDEEP. It
 // provides a few operators that are useful to IDEEP specific implementations.
@@ -51,7 +59,10 @@ class IDEEPOperator : public OperatorBase {
     // FinishDeviceComputation,
     // it is always just a re-route to RunOnDevice().
     try {
-      return RunOnDevice();
+      StartAllObservers();
+      bool result =  RunOnDevice();
+      StopAllObservers();
+      return result;
     } catch (EnforceNotMet& err) {
       err.AppendMessage(getErrorMsg());
       throw;

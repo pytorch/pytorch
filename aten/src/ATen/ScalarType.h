@@ -1,4 +1,4 @@
 #pragma once
-#include <ATen/ATenGeneral.h> // for BC reasons
-#include <ATen/Backend.h>
-#include <ATen/core/ScalarType.h>
+#include <ATen/core/ATenGeneral.h> // for BC reasons
+#include <c10/core/Backend.h>
+#include <c10/core/ScalarType.h>

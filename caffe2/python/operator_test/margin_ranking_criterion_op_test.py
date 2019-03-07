@@ -3,16 +3,17 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+
 from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
 
-from caffe2.python import core
-import caffe2.python.hypothesis_test_util as hu
 
-
-class TestMarginRankingCriterion(hu.HypothesisTestCase):
-    @given(N=st.integers(min_value=10, max_value=20),
+class TestMarginRankingCriterion(serial.SerializedTestCase):
+    @serial.given(N=st.integers(min_value=10, max_value=20),
            seed=st.integers(min_value=0, max_value=65535),
            margin=st.floats(min_value=-0.5, max_value=0.5),
            **hu.gcs)

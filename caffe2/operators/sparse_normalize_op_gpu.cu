@@ -5,5 +5,5 @@
 namespace caffe2 {
 REGISTER_CUDA_OPERATOR(
     SparseNormalize,
-    GPUFallbackOp<SparseNormalizeOp<float, CPUContext>>);
+    GPUFallbackOp);
 }
