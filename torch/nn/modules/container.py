@@ -102,7 +102,7 @@ class ModuleList(Module):
     r"""Holds submodules in a list.
 
     :class:`~torch.nn.ModuleList` can be indexed like a regular Python list, but
-    modules it contains are properly registered, and will be visible by all 
+    modules it contains are properly registered, and will be visible by all
     :class:`~torch.nn.Module` methods.
 
     Arguments:
@@ -446,7 +446,7 @@ class ParameterDict(Module):
     * the order of insertion, and
 
     * in :meth:`~torch.nn.ParameterDict.update`, the order of the merged ``OrderedDict``
-      or another :class:`~torch.nn.ParameterDict` (the argument to 
+      or another :class:`~torch.nn.ParameterDict` (the argument to
       :meth:`~torch.nn.ParameterDict.update`).
 
     Note that :meth:`~torch.nn.ParameterDict.update` with other unordered mapping
