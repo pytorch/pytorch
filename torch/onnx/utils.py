@@ -225,7 +225,7 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
             graph = method.propagate_and_assign_input_and_output_shapes(
                 args, example_outputs, False, propagate)
             # Erase number types to bring the graph to a pre-NumberType state
-            params = method.params()
+            params = method.initial_ivalues()
         except AttributeError:
             # TODO: just trace it
             raise RuntimeError('\'forward\' method must be a script method')

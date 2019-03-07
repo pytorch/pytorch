@@ -502,8 +502,9 @@ class ScriptModuleSerializer final {
       torch::ModuleDef* module_def);
 
   void convertParameter(
-      const script::NamedParameter& param,
-      torch::ParameterDef* param_def);
+      const script::NamedIValue& param,
+      torch::ParameterDef* param_def,
+      bool is_parameter);
 
   std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
@@ -646,7 +647,13 @@ void ScriptModuleSerializer::convertModule(
   module_def->set_optimize(module.is_optimized());
   for (const auto& elem : module.get_parameters()) {
     torch::ParameterDef* param_def = module_def->add_parameters();
-    convertParameter(elem.value(), param_def);
+    convertParameter(elem.value(), param_def, /*is_buffer=*/false);
+  }
+  for (const auto& elem : module.get_attributes()) {
+    if (elem.value().type->isSubtypeOf(TensorType::get())) {
+      torch::ParameterDef* param_def = module_def->add_parameters();
+      convertParameter(elem.value(), param_def, /*is_buffer=*/true);
+    }
   }
 
   std::stringstream module_name;
@@ -675,11 +682,12 @@ void ScriptModuleSerializer::convertModule(
 }
 
 void ScriptModuleSerializer::convertParameter(
-    const script::NamedParameter& param,
-    torch::ParameterDef* param_def) {
-  param_def->set_name(param.name);
-  param_def->set_is_buffer(param.is_buffer);
-  param_def->set_tensor_id(addTensor(*param.slot()));
+    const script::NamedIValue& param,
+    torch::ParameterDef* param_def,
+    bool is_parameter) {
+  param_def->set_name(param.name_);
+  param_def->set_is_buffer(is_parameter);
+  param_def->set_tensor_id(addTensor(param.slot()->toTensor()));
 }
 
 // Pretty printing for ONNX
