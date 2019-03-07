@@ -9,6 +9,7 @@ namespace ops {
 // TODO Parse schema string instead of creating FunctionSchema manually
 C10_DEFINE_OP_SCHEMA(Concat, FunctionSchema(
     "_c10_experimental::Concat",
+    "",
     (std::vector<c10::Argument>{
       c10::Argument("inputs", ListType::ofTensors()),
       c10::Argument("output"),

@@ -89,7 +89,10 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
 
   return c10::FunctionSchema(
     std::string("_caffe2::") + OperatorName,
-    std::move(actual_inputs), std::move(outputs));
+    "caffe2",
+    std::move(actual_inputs),
+    std::move(outputs)
+  );
 }
 
 }

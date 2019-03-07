@@ -9,6 +9,7 @@ namespace ops {
 // TODO Parse schema string instead of creating FunctionSchema manually
 C10_DEFINE_OP_SCHEMA(SigmoidCrossEntropyWithLogits, FunctionSchema(
     "_c10_experimental::SigmoidCrossEntropyWithLogits",
+    "",
     (std::vector<c10::Argument>{
       c10::Argument("input1"),
       c10::Argument("input2"),

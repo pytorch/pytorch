@@ -9,6 +9,7 @@ namespace ops {
 // TODO Parse schema string instead of creating FunctionSchema manually
 C10_DEFINE_OP_SCHEMA(Flatten, FunctionSchema(
     "_c10_experimental::Flatten",
+    "",
     (std::vector<c10::Argument>{
       c10::Argument("input"),
       c10::Argument("output"),
