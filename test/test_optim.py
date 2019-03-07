@@ -344,6 +344,13 @@ class TestOptim(TestCase):
             optim.Adadelta(None, lr=1e-2, rho=1.1)
 
     def test_adagrad(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.Adagrad([bias], lr=1e-1)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1)
         )
