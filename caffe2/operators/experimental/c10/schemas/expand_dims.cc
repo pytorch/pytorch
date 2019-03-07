@@ -33,9 +33,10 @@ struct DimsParameter final {
 
 namespace caffe2 {
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::ExpandDims,
     C10ExpandDims_DontUseThisOpYet,
+    InputKind::TENSORS,
     1,
     DimsParameter)
 }

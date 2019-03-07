@@ -25,10 +25,12 @@ using extract_type_t = typename ParameterDef::type;
  *
  */
 
+enum class InputKind { TENSORS, TENSOR_LIST };
+
 template <
     const c10::OperatorHandle& (*OperatorHandle)(),
     class Context,
-    bool use_array_input,
+    InputKind input_kind,
     size_t num_output_parameters,
     class ParameterDefTuple>
 class C10OperatorWrapper final : public Operator<Context> {
@@ -99,7 +101,7 @@ class C10OperatorWrapper final : public Operator<Context> {
   }
 
   void pushInputs_() {
-    if (use_array_input) {
+    if (input_kind == InputKind::TENSOR_LIST) {
       stack_.emplace_back(ivalue::TensorList::create(array_inputs_()));
     } else {
       for (size_t i = 0; i < num_inputs(); ++i) {
@@ -183,40 +185,15 @@ C10_DECLARE_REGISTRY(
 #ifndef C10_MOBILE
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OperatorHandle, Name, NumOutputParameters)  \
-  C10_REGISTER_CLASS(                                                                         \
-      C10OperatorRegistry,                                                                    \
-      Name,                                                                                   \
-      C10OperatorWrapper<OperatorHandle, CPUContext, false, NumOutputParameters, std::tuple<>>)
-
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS( \
-    OperatorHandle, Name, NumOutputParameters, ...)                \
-  C10_REGISTER_CLASS(                                              \
-      C10OperatorRegistry,                                         \
-      Name,                                                        \
-      C10OperatorWrapper<                                          \
-          OperatorHandle,                                          \
-          CPUContext,                                              \
-          false,                                                   \
-          NumOutputParameters,                                     \
-          std::tuple<__VA_ARGS__>>)
-
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT( \
-    OperatorHandle, Name, NumOutputParameters)                      \
-  C10_REGISTER_CLASS(                                               \
-      C10OperatorRegistry,                                          \
-      Name,                                                         \
-      C10OperatorWrapper<OperatorHandle, CPUContext, true, NumOutputParameters, std::tuple<>>)
-
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS( \
-    OperatorHandle, Name, NumOutputParameters, ...)                                \
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(                                 \
+    OperatorHandle, Name, InputKind, NumOutputParameters, ...)                     \
   C10_REGISTER_CLASS(                                                              \
       C10OperatorRegistry,                                                         \
       Name,                                                                        \
       C10OperatorWrapper<                                                          \
           OperatorHandle,                                                          \
           CPUContext,                                                              \
-          true,                                                                    \
+          InputKind,                                                               \
           NumOutputParameters,                                                     \
           std::tuple<__VA_ARGS__>>)
 

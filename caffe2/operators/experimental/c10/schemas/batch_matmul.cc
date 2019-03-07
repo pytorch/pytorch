@@ -55,9 +55,10 @@ struct BroadcastParameter final {
 
 namespace caffe2 {
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::BatchMatmul,
     C10BatchMatMul_DontUseThisOpYet,
+    InputKind::TENSORS,
     1,
     ParameterHelper<TransAParameter>,
     ParameterHelper<TransBParameter>,

@@ -23,6 +23,7 @@ namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::Relu,
     C10Relu_DontUseThisOpYet,
+    InputKind::TENSORS,
     1
   )
 }

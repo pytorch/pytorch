@@ -44,9 +44,10 @@ struct AddAxisParameter final {
 } // namespace
 
 namespace caffe2 {
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::Concat,
     C10Concat_DontUseThisOpYet,
+    InputKind::TENSOR_LIST,
     2,
     ParameterHelper<AxisParameter>,
     ParameterHelper<AddAxisParameter>)

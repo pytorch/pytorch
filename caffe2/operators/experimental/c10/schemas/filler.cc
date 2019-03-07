@@ -199,18 +199,20 @@ struct ValuesParameter final {
 } // namespace
 
 namespace caffe2 {
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::ConstantFill,
     C10ConstantFill_DontUseThisOpYet,
+    InputKind::TENSOR_LIST,
     1,
     ShapeParameter,
     ExtraShapeParameter,
     InputAsShapeParameter,
     DTypeParameter,
     ValueParameter)
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::UniformFill,
     C10UniformFill_DontUseThisOpYet,
+    InputKind::TENSOR_LIST,
     1,
     ShapeParameter,
     ExtraShapeParameter,
@@ -218,25 +220,28 @@ REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
     MinParameter,
     MaxParameter)
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::GivenTensorFill,
     C10GivenTensorFill_DontUseThisOpYet,
+    InputKind::TENSOR_LIST,
     1,
     ShapeParameter,
     ExtraShapeParameter,
     InputAsShapeParameter,
     ValuesParameter<float>)
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::GivenTensorIntFill,
     C10GivenTensorIntFill_DontUseThisOpYet,
+    InputKind::TENSOR_LIST,
     1,
     ShapeParameter,
     ExtraShapeParameter,
     InputAsShapeParameter,
     ValuesParameter<int>)
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::GivenTensorInt64Fill,
     C10GivenTensorInt64Fill_DontUseThisOpYet,
+    InputKind::TENSOR_LIST,
     1,
     ShapeParameter,
     ExtraShapeParameter,

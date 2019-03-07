@@ -22,5 +22,6 @@ namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::EnforceFinite,
     C10EnforceFinite_DontUseThisOpYet,
+    InputKind::TENSORS,
     0)
 }

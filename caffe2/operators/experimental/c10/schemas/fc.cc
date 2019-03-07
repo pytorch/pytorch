@@ -46,9 +46,10 @@ struct AxisWParameter final {
 
 namespace caffe2 {
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::FullyConnected,
     C10FC_DontUseThisOpYet,
+    InputKind::TENSORS,
     1,
     ParameterHelper<AxisParameter>,
     ParameterHelper<AxisWParameter>)
