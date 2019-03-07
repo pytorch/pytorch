@@ -77,7 +77,7 @@ typedef at::cuda::Array<float, 2> FLOAT2;
 class philox_engine {
 public:
 
-  explicit C10_HOST_DEVICE_INLINE philox_engine(unsigned long long seed = 67280421310721,
+  C10_HOST_DEVICE_INLINE explicit philox_engine(unsigned long long seed = 67280421310721,
                                  unsigned long long subsequence = 0,
                                  unsigned long long offset = 0) {
     key[0] = static_cast<unsigned int>(seed);
