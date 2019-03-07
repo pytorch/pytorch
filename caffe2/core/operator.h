@@ -232,14 +232,15 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   void SetOutputTensor(int idx, Tensor tensor) {
+    output_tensors_[idx] = tensor.UnsafeSharedInstance();
+
     // also update the tensor in the hack
     if (!isLegacyOperator()) {
-      output_tensors_[idx] = tensor.UnsafeSharedInstance();
-      ivalue_outputs_[idx] = at::Tensor(output_tensors_[idx]);
+      ivalue_outputs_[idx] = at::Tensor(std::move(tensor));
+    } else {
+      // update the tensor in the workspace
+      BlobSetTensor(outputs_.at(idx), std::move(tensor));
     }
-
-    // update the tensor in the workspace
-    BlobSetTensor(outputs_.at(idx), std::move(tensor));
   }
 
   Tensor OutputTensorOrUndefined(int idx) {
