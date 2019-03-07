@@ -207,8 +207,21 @@ class ModuleList(Module):
 class ModuleDict(Module):
     r"""Holds submodules in a dictionary.
 
-    ModuleDict can be indexed like a regular Python dictionary, but modules it
-    contains are properly registered, and will be visible by all Module methods.
+    :class:`~torch.nn.ModuleDict` can be indexed like a regular Python dictionary,
+    but modules it contains are properly registered, and will be visible by all
+    :class:`~torch.nn.Module` methods.
+
+    :class:`~torch.nn.ModuleDict` is an **ordered** dictionary that respects
+
+    * the order of insertion, and
+
+    * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged ``OrderedDict``
+      or another :class:`~torch.nn.ModuleDict` (the argument to :meth:`~torch.nn.ModuleDict.update`).
+
+    Note that :meth:`~torch.nn.ModuleDict.update` with other unordered mapping
+    types (e.g., Python's plain ``dict``) doesn't not preserve order of the
+    merged mapping.
+
 
     Arguments:
         modules (iterable, optional): a mapping (dictionary) of (string: module)
@@ -301,7 +314,7 @@ class ModuleDict(Module):
                             type(modules).__name__)
 
         if isinstance(modules, container_abcs.Mapping):
-            if isinstance(modules, OrderedDict):
+            if isinstance(modules, (OrderedDict, ModuleDict)):
                 for key, module in modules.items():
                     self[key] = module
             else:

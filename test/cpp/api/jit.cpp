@@ -98,3 +98,17 @@ TEST(TorchScriptTest, TestDictArgMatching) {
   auto output = module->run_method("dict_op", dict, std::string("hello"));
   ASSERT_EQ(1, output.toTensor()[0].item<int64_t>());
 }
+
+TEST(TorchScriptTest, TestTupleArgMatching) {
+  auto module = torch::jit::compile(R"JIT(
+      def tuple_op(a: Tuple[List[int]]):
+        return a
+    )JIT");
+
+  std::vector<int64_t> int_list = {1};
+  auto tuple_generic_list = torch::jit::Tuple::create({ int_list });
+
+  // doesn't fail on arg matching
+  module->run_method("tuple_op", tuple_generic_list);
+
+}

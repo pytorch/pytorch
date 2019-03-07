@@ -6,7 +6,7 @@
 
 namespace torch { namespace utils {
 
-std::string type_to_string(const at::Tensor& tensor);
+std::string type_to_string(const at::Backend backend, const at::ScalarType scalar_type);
 std::pair<at::Backend, at::ScalarType> type_from_string(const std::string& str);
 
 // return a vector of all "declared" types, even those that weren't compiled
