@@ -593,7 +593,8 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.isNone(0)) {
-    return THPUtils_packString(torch::utils::type_to_string(self_));
+    return THPUtils_packString(
+      torch::utils::type_to_string(self_.type().backend(), self_.scalar_type()));
   }
   auto obj = r.pyobject(0);
   std::string type_name;
