@@ -89,7 +89,7 @@ int compute_input_size_(const std::vector<c10::IValue>& inputs) {
 OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
     std::vector<c10::IValue> inputs,
-    std::vector<c10::IValue*> outputs)
+    std::vector<c10::IValue> outputs)
     : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
       ivalue_inputs_(std::move(inputs)),
       ivalue_outputs_(std::move(outputs)),

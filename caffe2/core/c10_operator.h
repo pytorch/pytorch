@@ -8,11 +8,13 @@
 namespace caffe2 {
 namespace detail {
 
-using _CallCaffe2OpFunc = void(const c10::FunctionSchema& schema, std::vector<c10::IValue>& inputs, std::vector<c10::IValue*>& outputs);
+using _CallCaffe2OpFunc = std::vector<c10::IValue>(const c10::FunctionSchema& schema, std::vector<c10::IValue>&& inputs, std::vector<c10::IValue>&& outputs);
 
 template<class Caffe2Operator>
-inline void _call_caffe2_op(const c10::FunctionSchema& schema, std::vector<c10::IValue>& inputs, std::vector<c10::IValue*>& outputs) {
-  Caffe2Operator(schema, std::move(inputs), std::move(outputs)).Run();
+inline std::vector<c10::IValue> _call_caffe2_op(const c10::FunctionSchema& schema, std::vector<c10::IValue>&& inputs, std::vector<c10::IValue>&& outputs) {
+  Caffe2Operator op(schema, std::move(inputs), std::move(outputs));
+  op.Run();
+  return std::move(op).ivalue_outputs();
 }
 
 // This function is inline in the hope that compilers optimizing for speed will
@@ -42,19 +44,7 @@ inline void _call_caffe2_op_from_c10(
 
   const auto device = at::Device(deviceType);
 
-  for (auto& output : outputs) {
-    if (output.isNone() || (output.isTensor() && !output.toTensor().defined())) {
-      output = at::Tensor(c10::C10Tensor(caffe2::empty({0}, device)));
-    }
-  }
-
-  std::vector<c10::IValue*> outputPtrs;
-  outputPtrs.reserve(outputs.size());
-  for (auto& output : outputs) {
-    outputPtrs.push_back(&output);
-  }
-
-  (*call_op)(schema, inputs, outputPtrs);
+  outputs = (*call_op)(schema, std::move(inputs), std::move(outputs));
 
   for (auto& output: outputs) {
     torch::jit::push(*stack, std::move(output));
