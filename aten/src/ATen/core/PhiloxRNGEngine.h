@@ -18,22 +18,13 @@
 #include <c10/util/Half.h>
 #include <cmath>
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
-#define PHILOX_INLINE __forceinline__
-#else
-#define PHILOX_INLINE __inline__
-#endif
-#define C10_HOST_DEVICE_INLINE C10_HOST_DEVICE PHILOX_INLINE
-#define C10_HOST_INLINE C10_HOST PHILOX_INLINE
-#define C10_DEVICE_INLINE C10_DEVICE PHILOX_INLINE
-
 namespace at {
 
 // typedefs for holding vector data
 namespace {
 
-typedef at::cuda::Array<unsigned int, 4> UINT4;
-typedef at::cuda::Array<unsigned int, 2> UINT2;
+typedef at::cuda::Array<uint32_t, 4> UINT4;
+typedef at::cuda::Array<uint32_t, 2> UINT2;
 typedef at::cuda::Array<double, 2> DOUBLE2;
 typedef at::cuda::Array<float, 2> FLOAT2;
 
@@ -77,14 +68,14 @@ typedef at::cuda::Array<float, 2> FLOAT2;
 class philox_engine {
 public:
 
-  C10_HOST_DEVICE_INLINE explicit philox_engine(unsigned long long seed = 67280421310721,
-                                 unsigned long long subsequence = 0,
-                                 unsigned long long offset = 0) {
-    key[0] = static_cast<unsigned int>(seed);
-    key[1] = static_cast<unsigned int>(seed >> 32);
+  C10_HOST_DEVICE inline explicit philox_engine(uint64_t seed = 67280421310721,
+                                 uint64_t subsequence = 0,
+                                 uint64_t offset = 0) {
+    key[0] = static_cast<uint32_t>(seed);
+    key[1] = static_cast<uint32_t>(seed >> 32);
     counter = UINT4(0);
-    counter[2] = static_cast<unsigned int>(subsequence);
-    counter[3] = static_cast<unsigned int>(subsequence >> 32);
+    counter[2] = static_cast<uint32_t>(subsequence);
+    counter[3] = static_cast<uint32_t>(subsequence >> 32);
     STATE = 0;
     incr_n(offset);
   }
@@ -92,7 +83,7 @@ public:
   /**
    * Produces a unique 32-bit pseudo random number on every invocation
    */
-  C10_HOST_DEVICE_INLINE unsigned long operator()() {
+  C10_HOST_DEVICE inline uint32_t operator()() {
     if(STATE == 0) {
       UINT4 counter_ = counter;
       UINT2 key_ = key;
@@ -103,7 +94,7 @@ public:
       output = single_round(counter_, key_);
       incr();
     }
-    unsigned long ret;
+    uint32_t ret;
     switch(STATE) {
       case 0: ret = output[0]; break;
       case 1: ret = output[1]; break;
@@ -117,9 +108,9 @@ public:
   /**
    * Function that Skips N 128 bit numbers in a subsequence
    */
-  C10_HOST_DEVICE_INLINE void incr_n(unsigned long long n) {
-    unsigned int nlo = static_cast<unsigned int>(n);
-    unsigned int nhi = static_cast<unsigned int>(n >> 32);
+  C10_HOST_DEVICE inline void incr_n(uint64_t n) {
+    uint32_t nlo = static_cast<uint32_t>(n);
+    uint32_t nhi = static_cast<uint32_t>(n >> 32);
     counter[0] += nlo;
     // if overflow in x has occured, carry over to nhi
     if (counter[0] < nlo) {
@@ -150,7 +141,7 @@ public:
   /**
    * Function that Skips one 128 bit number in a subsequence
    */
-  C10_HOST_DEVICE_INLINE void incr() {
+  C10_HOST_DEVICE inline void incr() {
     if (++counter[0])
       return;
     if (++counter[1])
@@ -165,25 +156,25 @@ private:
   UINT4 counter;
   UINT4 output;
   UINT2 key;
-  unsigned int STATE;
+  uint32_t STATE;
 
-  C10_HOST_DEVICE unsigned int mulhilo32(unsigned int a, unsigned int b,
-                                    unsigned int *result_high) {
+  C10_HOST_DEVICE inline uint32_t mulhilo32(uint32_t a, uint32_t b,
+                                    uint32_t *result_high) {
     #ifdef __CUDA_ARCH__
       *result_high = __umulhi(a, b);
       return a*b;
     #else
-      const unsigned long long product = static_cast<unsigned long long>(a) * b;
-      *result_high = static_cast<unsigned int>(product >> 32);
-      return static_cast<unsigned int>(product);
+      const uint64_t product = static_cast<uint64_t>(a) * b;
+      *result_high = static_cast<uint32_t>(product >> 32);
+      return static_cast<uint32_t>(product);
     #endif
   }
 
-  C10_HOST_DEVICE_INLINE UINT4 single_round(UINT4 ctr, UINT2 key) {
-    unsigned int hi0;
-    unsigned int hi1;
-    unsigned int lo0 = mulhilo32(kPhiloxSA, ctr[0], &hi0);
-    unsigned int lo1 = mulhilo32(kPhiloxSB, ctr[2], &hi1);
+  C10_HOST_DEVICE inline UINT4 single_round(UINT4 ctr, UINT2 key) {
+    uint32_t hi0;
+    uint32_t hi1;
+    uint32_t lo0 = mulhilo32(kPhiloxSA, ctr[0], &hi0);
+    uint32_t lo1 = mulhilo32(kPhiloxSB, ctr[2], &hi1);
     UINT4 ret;
     ret[0] = hi1 ^ ctr[1] ^ key[0];
     ret[1] = lo1;
@@ -191,10 +182,10 @@ private:
     ret[3] = lo0;
     return ret;
   }
-  static const unsigned long kPhilox10A = 0x9E3779B9;
-  static const unsigned long kPhilox10B = 0xBB67AE85;
-  static const unsigned long kPhiloxSA = 0xD2511F53;
-  static const unsigned long kPhiloxSB = 0xCD9E8D57;
+  static const uint32_t kPhilox10A = 0x9E3779B9;
+  static const uint32_t kPhilox10B = 0xBB67AE85;
+  static const uint32_t kPhiloxSA = 0xD2511F53;
+  static const uint32_t kPhiloxSB = 0xCD9E8D57;
 };
 
 typedef philox_engine Philox4_32_10;
