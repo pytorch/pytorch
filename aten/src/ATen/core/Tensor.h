@@ -175,6 +175,21 @@ class CAFFE2_API Tensor {
   bool is_contiguous() const {
     return impl_->is_contiguous();
   }
+
+  // Total bytes consumed by the "view" of elements of the array.  Does not
+  // include size of metadata.  The number reported here does not necessarily
+  // correspond to the true physical memory consumed by a tensor; instead,
+  // it reports the memory the tensor would take *if* it were contiguous.
+  // Defined to be numel() * itemsize()
+  size_t nbytes() const {
+    return impl_->numel() * impl_->itemsize();
+  }
+
+  // Length of one array element in bytes.
+  size_t itemsize() const {
+    return impl_->itemsize();
+  }
+
   Type & type() const {
     return legacyTensorType(*impl_);
   }
