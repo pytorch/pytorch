@@ -99,7 +99,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
 }
 
 Tensor& range_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
-  AT_DISPATCH_ALL_TYPES_AND_HALF(result.type(), "range", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, result.type(), "range", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();
@@ -130,7 +130,7 @@ Tensor& range_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 }
 
 Tensor& arange_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
-  AT_DISPATCH_ALL_TYPES_AND_HALF(result.type(), "arange", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, result.type(), "arange", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();
