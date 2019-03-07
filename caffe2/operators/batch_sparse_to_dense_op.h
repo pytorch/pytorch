@@ -13,8 +13,9 @@ template <typename T, class Context>
 class BatchSparseToDenseOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  BatchSparseToDenseOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit BatchSparseToDenseOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int64_t, "dense_last_dim", dense_last_dim_, -1),
         OP_SINGLE_ARG(T, "default_value", default_value_, static_cast<T>(0)) {}
   bool RunOnDevice() override;
@@ -29,8 +30,9 @@ template <typename T, class Context>
 class BatchDenseToSparseOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  BatchDenseToSparseOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit BatchDenseToSparseOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   bool RunOnDevice() override;
 
  private:
