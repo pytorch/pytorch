@@ -6338,14 +6338,15 @@ Example::
 
 add_docstr(torch.Generator.set_state,
            r"""
-Generator.set_state(new_state)
+Generator.set_state(new_state) -> void
 
-Sets the Generator state..
+Sets the Generator state.
 
 Arguments:
-    new_state (torch.ByteTensor): The desired state
+    new_state (torch.ByteTensor): The desired state.
 
 Example::
+
     >>> g_cpu = torch.Generator()
     >>> g_cpu_default = torch.Generator(default=True)
     >>> g_cpu.set_state(g_cpu_default.get_state())
@@ -6354,9 +6355,16 @@ Example::
 
 add_docstr(torch.Generator.get_state,
            r"""
-Generator.get_state()
-Returns the Generator state as a `torch.ByteTensor`.
+Generator.get_state() -> Tensor
+
+Returns the Generator state as a ``torch.ByteTensor``.
+
+Returns:
+    Tensor: A ``torch.ByteTensor`` which contains all the necessary bits
+    to restore a Generator to a specific point in time.
+
 Example::
+
     >>> g_cpu = torch.Generator()
     >>> g_cpu_default = torch.Generator(default=True)
     >>> g_cpu.set_state(g_cpu_default.get_state())
@@ -6365,38 +6373,48 @@ Example::
 
 add_docstr(torch.Generator.manual_seed,
            r"""
-Generator.manual_seed(seed)
-Sets the seed for generating random numbers. Returns a
-    `torch._C.Generator` object. It is recommended to set a
-    large seed, i.e. a number that has a good balance of 0
-    and 1 bits. Avoid having many 0 bits in the seed.
-Args:
+Generator.manual_seed(seed) -> Generator
+
+Sets the seed for generating random numbers. Returns a `torch._C.Generator` object.
+It is recommended to set a large seed, i.e. a number that has a good balance of 0
+and 1 bits. Avoid having many 0 bits in the seed.
+
+Arguments:
     seed (int): The desired seed.
+
+Returns:
+    Generator: An ATen Generator object.
+
 Example::
+
     >>> g_cpu_default = torch.Generator(default=True)
-    >>> g_cpu_default.manual_seed(123456)
+    >>> g_cpu_default.manual_seed(2147483647)
 """)
 
 
 add_docstr(torch.Generator.initial_seed,
            r"""
-Generator.initial_seed()
-Returns the initial seed for generating random numbers as a
-    Python `long`.
+Generator.initial_seed() -> int
+
+Returns the initial seed for generating random numbers.
+
 Example::
+
     >>> g_cpu = torch.Generator()
     >>> g_cpu.initial_seed()
-    123456
+    2147483647
 """)
 
 
 add_docstr(torch.Generator.seed,
            r"""
-Generator.seed()
-Gets a non-deterministic random number from std::random_device or
-    the current time and uses it to seed a Generator. Returns
-    seed as a Python `long`.
+Generator.seed() -> int
+
+Gets a non-deterministic random number from std::random_device or the current
+time and uses it to seed a Generator.
+
 Example::
+
     >>> g_cpu = torch.Generator()
     >>> g_cpu.seed()
     1516516984916

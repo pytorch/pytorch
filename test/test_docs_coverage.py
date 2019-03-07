@@ -60,7 +60,7 @@ class TestDocCoverage(unittest.TestCase):
                 try:
                     if i.value.id != 'torch':
                         continue
-                except:
+                except AttributeError:
                     if i.value.value.id != 'torch':
                         continue
                 i = i.attr

@@ -20,21 +20,24 @@ using namespace torch;
 PyObject *THPGeneratorClass = nullptr;
 
 const char *doc_string = 
-"Generator(device='cpu', default=False)\n"
-" Creates and returns a generator object which manages the state of the algorithm that\n"
-"produces pseudo random numbers. Used as a keyword argument in many random tensors such\n"
-"as normal_, randn etc.\n"
-" Keyword arguments:\n"
+"Generator(device='cpu', default=False) -> Generator\n"
+"\n"
+"Creates and returns a generator object which manages the state of the algorithm that\n"
+"produces pseudo random numbers. Used as a keyword argument in many random tensors in\n"
+":ref:`inplace-random-sampling`. Currently only creation of CPU Generator is supported through\n"
+"this API.\n"
+"\n"
+"Arguments:\n"
 "    device (:class:`torch.device`, optional): the desired device for the generator.\n"
-"        Default: `torch.device('cpu')`.\n"
-"    default (bool, optional): If using the default CPU/CUDA generator\n"
-"        Default: `False`.\n"
-" Example::\n"
+"    default (bool, optional): If using the default CPU/CUDA generator.\n"
+"\n"
+"Returns:\n"
+"    Generator: An ATen Generator object.\n"
+"\n"
+"Example::\n"
+"\n"
 "    >>> g_cpu = torch.Generator()\n"
-"    >>> g_cpu_default = torch.Generator(default=True)\n"
-"    >>> g_cuda = torch.Generator(device='cuda')\n"
-"    >>> g_cuda_default = torch.Generator(device='cuda', default=True)\n"
-"    >>> g_cuda_default_1 = torch.Generator(device='cuda:1', default=True)\n";
+"    >>> g_cpu_default = torch.Generator(default=True)\n";
 
 static void THPGenerator_dealloc(THPGenerator* self)
 {
