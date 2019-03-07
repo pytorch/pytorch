@@ -39,35 +39,16 @@ std::unordered_map<std::string, TensorShape>
 BackendTransformerBase::ssaRewriteAndMapNames(
     Workspace* ws,
     NetDef* pred_net,
-    const std::unordered_set<std::string>& weights,
     const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
-  // Make sure weights do not contain output of any op.
-  for (const auto& op : pred_net->op()) {
-    for (const auto& output : op.output()) {
-      CAFFE_ENFORCE_EQ(
-          weights.count(output),
-          0,
-          "Weight ",
-          output,
-          " shouldn't appear in the output");
-    }
-  }
-  input_mapping_ = onnx::SsaRewrite(nullptr, pred_net, weights);
+  input_mapping_ = onnx::SsaRewrite(nullptr, pred_net);
   // Annote the ops with net position
   AnnotateOpIndex(pred_net);
-
-  // Need to add mapping for weights. This will be used to create new workspace
-  // with mapped weights.
-  for (const auto& w : weights) {
-    input_mapping_.emplace(w, w);
-  }
 
   // Since we are going to create a mapped workspace, we need to make sure that
   // the parent workspace has the mapped blob names. If the blobs don't exist
   // (usually such blobs are input tensor names), we exclude them from mapping.
   std::vector<std::string> exclude_mapping;
   for (const auto kv : input_mapping_) {
-    reverse_input_mapping_.emplace(kv.second, kv.first);
     if (!ws->HasBlob(kv.second)) {
       exclude_mapping.emplace_back(kv.first);
     }
@@ -75,14 +56,10 @@ BackendTransformerBase::ssaRewriteAndMapNames(
   for (const auto& i : exclude_mapping) {
     input_mapping_.erase(i);
   }
+
   std::unordered_map<std::string, TensorShape> shape_hints_mapped;
   for (const auto& kv : input_shape_hints) {
-    const auto it = reverse_input_mapping_.find(kv.first);
-    if (it != reverse_input_mapping_.end()) {
-      shape_hints_mapped.emplace(it->second, kv.second);
-    } else {
-      shape_hints_mapped.emplace(kv.first, kv.second);
-    }
+    shape_hints_mapped.emplace(kv.first, kv.second);
   }
   return shape_hints_mapped;
 }
