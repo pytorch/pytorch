@@ -30,7 +30,7 @@ namespace at {
 template <typename T>
 struct uniform_real_distribution {
 
-  C10_HOST_DEVICE_INLINE uniform_real_distribution(T a_in, T b_in) {
+  C10_HOST_DEVICE inline uniform_real_distribution(T a_in, T b_in) {
     #ifdef __CUDA_ARCH__
       assert(a_in <= b_in);
       assert(b_in-a_in <= std::numeric_limits<T>::max());
@@ -43,7 +43,7 @@ struct uniform_real_distribution {
   }
 
   template<typename U = T> 
-  C10_DEVICE_INLINE typename std::enable_if<std::is_same<U, double>::value, double>::type
+  C10_DEVICE inline typename std::enable_if<std::is_same<U, double>::value, double>::type
   operator()(Philox4_32_10& engine){
     uint64_t hi = static_cast<uint64_t>(engine()) << 32;
     uint64_t lo = static_cast<uint64_t>(engine());
@@ -54,7 +54,7 @@ struct uniform_real_distribution {
   }
 
   template<typename U = T> 
-  C10_DEVICE_INLINE typename std::enable_if<std::is_same<U, float>::value
+  C10_DEVICE inline typename std::enable_if<std::is_same<U, float>::value
                                           || std::is_same<U, at::Half>::value, float>::type
   operator()(Philox4_32_10& engine){
     float x = static_cast<float>(engine()) / static_cast<float>(std::numeric_limits<uint32_t>::max());
@@ -62,7 +62,7 @@ struct uniform_real_distribution {
   }
 
   template<typename U = T> 
-  C10_HOST_INLINE typename std::enable_if<std::is_same<U, double>::value, double>::type
+  C10_HOST inline typename std::enable_if<std::is_same<U, double>::value, double>::type
   operator()(at::CPUGenerator* generator){
     double x = static_cast<double>(generator->random64()) / static_cast<double>(std::numeric_limits<uint64_t>::max());
     return (x * (b - a) + a);
@@ -70,7 +70,7 @@ struct uniform_real_distribution {
   }
 
   template<typename U = T> 
-  C10_HOST_INLINE typename std::enable_if<std::is_same<U, float>::value
+  C10_HOST inline typename std::enable_if<std::is_same<U, float>::value
                                           || std::is_same<U, at::Half>::value, float>::type
   operator()(at::CPUGenerator* generator){
     float x = static_cast<float>(generator->random()) / static_cast<float>(std::numeric_limits<uint32_t>::max());
@@ -90,7 +90,7 @@ struct uniform_real_distribution {
 template <typename T>
 struct normal_distribution {
 
-  C10_HOST_DEVICE_INLINE normal_distribution(T mean_in, T stdv_in) {
+  C10_HOST_DEVICE inline normal_distribution(T mean_in, T stdv_in) {
     #ifdef __CUDA_ARCH__
       assert(stdv_in > 0);
     #else
@@ -101,7 +101,7 @@ struct normal_distribution {
   }
 
   template<typename U = T> 
-  C10_DEVICE_INLINE typename std::enable_if<std::is_same<U, double>::value, DOUBLE2>::type
+  C10_DEVICE inline typename std::enable_if<std::is_same<U, double>::value, DOUBLE2>::type
   operator()(Philox4_32_10& engine){
     uniform_real_distribution<double> uniform(0.0, 1.0);
     DOUBLE2 result;
@@ -114,7 +114,7 @@ struct normal_distribution {
   }
 
   template<typename U = T> 
-  C10_DEVICE_INLINE typename std::enable_if<std::is_same<U, float>::value
+  C10_DEVICE inline typename std::enable_if<std::is_same<U, float>::value
                                           || std::is_same<U, at::Half>::value, FLOAT2>::type
   operator()(Philox4_32_10& engine){
     uniform_real_distribution<float> uniform(0.0, 1.0);
@@ -128,7 +128,7 @@ struct normal_distribution {
   }
 
   template<typename U = T> 
-  C10_HOST_INLINE typename std::enable_if<std::is_same<U, double>::value, DOUBLE2>::type
+  C10_HOST inline typename std::enable_if<std::is_same<U, double>::value, DOUBLE2>::type
   operator()(at::CPUGenerator* generator){
     uniform_real_distribution<double> uniform(0.0, 1.0);
     DOUBLE2 result;
@@ -141,7 +141,7 @@ struct normal_distribution {
   }
 
   template<typename U = T> 
-  C10_HOST_INLINE typename std::enable_if<std::is_same<U, float>::value
+  C10_HOST inline typename std::enable_if<std::is_same<U, float>::value
                                           || std::is_same<U, at::Half>::value, FLOAT2>::type
   operator()(at::CPUGenerator* generator){
     uniform_real_distribution<float> uniform(0.0, 1.0);
@@ -165,7 +165,7 @@ struct normal_distribution {
 template <typename T>
 struct bernoulli_distribution {
 
-  C10_HOST_DEVICE_INLINE bernoulli_distribution(T p_in) {
+  C10_HOST_DEVICE inline bernoulli_distribution(T p_in) {
     #ifdef __CUDA_ARCH__
       assert(p_in >= 0 && p_in <= 1);
     #else
@@ -174,12 +174,12 @@ struct bernoulli_distribution {
     p = p_in;
   }
 
-  C10_DEVICE_INLINE T operator()(Philox4_32_10& engine) { 
+  C10_DEVICE inline T operator()(Philox4_32_10& engine) { 
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return(uniform(engine) <= p);
   }
 
-  C10_HOST_INLINE T operator()(at::CPUGenerator* generator) { 
+  C10_HOST inline T operator()(at::CPUGenerator* generator) { 
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return(uniform(generator) <= p);
   }
@@ -194,7 +194,7 @@ struct bernoulli_distribution {
 template <typename T>
 struct geometric_distribution {
 
-  C10_HOST_DEVICE_INLINE geometric_distribution(T p_in) {
+  C10_HOST_DEVICE inline geometric_distribution(T p_in) {
     #ifdef __CUDA_ARCH__
       assert(p_in > 0 && p_in < 1);
     #else
@@ -203,12 +203,12 @@ struct geometric_distribution {
     p = p_in;
   }
 
-  C10_DEVICE_INLINE int operator()(Philox4_32_10& engine) {
+  C10_DEVICE inline int operator()(Philox4_32_10& engine) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return((int)(::log(1-uniform(engine)) / ::log(p)) + 1);
   }
 
-  C10_HOST_INLINE int operator()(at::CPUGenerator* generator) {
+  C10_HOST inline int operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return((int)(::log(1-uniform(generator)) / ::log(p)) + 1);
   }
@@ -223,16 +223,16 @@ struct geometric_distribution {
 template <typename T>
 struct exponential_distribution {
 
-  C10_HOST_DEVICE_INLINE exponential_distribution(T lambda_in) {
+  C10_HOST_DEVICE inline exponential_distribution(T lambda_in) {
     lambda = lambda_in;
   }
 
-  C10_DEVICE_INLINE T operator()(Philox4_32_10& engine) {
+  C10_DEVICE inline T operator()(Philox4_32_10& engine) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return(-1. / lambda * ::log(1-uniform(engine)));
   }
 
-  C10_HOST_INLINE T operator()(at::CPUGenerator* generator) {
+  C10_HOST inline T operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return(-1. / lambda * ::log(1-uniform(generator)));
   }
@@ -247,17 +247,17 @@ struct exponential_distribution {
 template <typename T>
 struct cauchy_distribution {
 
-  C10_HOST_DEVICE_INLINE cauchy_distribution(T median_in, T sigma_in) {
+  C10_HOST_DEVICE inline cauchy_distribution(T median_in, T sigma_in) {
     median = median_in;
     sigma = sigma_in;
   }
 
-  C10_DEVICE_INLINE T operator()(Philox4_32_10& engine) {
+  C10_DEVICE inline T operator()(Philox4_32_10& engine) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return(median + sigma * ::tan(M_PI*(uniform(engine)-0.5)));
   }
 
-  C10_HOST_INLINE T operator()(at::CPUGenerator* generator) {
+  C10_HOST inline T operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return(median + sigma * ::tan(M_PI*(uniform(generator)-0.5)));
   }
@@ -275,7 +275,7 @@ struct cauchy_distribution {
 template <typename T>
 struct lognormal_distribution {
 
-  C10_HOST_DEVICE_INLINE lognormal_distribution(T mean_in, T stdv_in) {
+  C10_HOST_DEVICE inline lognormal_distribution(T mean_in, T stdv_in) {
     #ifdef __CUDA_ARCH__
       assert(stdv_in > 0);
     #else
@@ -286,7 +286,7 @@ struct lognormal_distribution {
   }
 
   template<typename U = T> 
-  C10_DEVICE_INLINE typename std::enable_if<std::is_same<U, double>::value, DOUBLE2>::type
+  C10_DEVICE inline typename std::enable_if<std::is_same<U, double>::value, DOUBLE2>::type
   operator()(Philox4_32_10& engine){
     normal_distribution<double> normal(mean, stdv);
     DOUBLE2 result;
@@ -297,7 +297,7 @@ struct lognormal_distribution {
   }
 
   template<typename U = T> 
-  C10_DEVICE_INLINE typename std::enable_if<std::is_same<U, float>::value
+  C10_DEVICE inline typename std::enable_if<std::is_same<U, float>::value
                                           || std::is_same<U, at::Half>::value, FLOAT2>::type
   operator()(Philox4_32_10& engine){
     normal_distribution<float> normal(mean, stdv);
@@ -309,7 +309,7 @@ struct lognormal_distribution {
   }
 
   template<typename U = T> 
-  C10_HOST_INLINE typename std::enable_if<std::is_same<U, double>::value, DOUBLE2>::type
+  C10_HOST inline typename std::enable_if<std::is_same<U, double>::value, DOUBLE2>::type
   operator()(at::CPUGenerator* generator){
     normal_distribution<double> normal(mean, stdv);
     DOUBLE2 result;
@@ -320,7 +320,7 @@ struct lognormal_distribution {
   }
 
   template<typename U = T> 
-  C10_HOST_INLINE typename std::enable_if<std::is_same<U, float>::value
+  C10_HOST inline typename std::enable_if<std::is_same<U, float>::value
                                           || std::is_same<U, at::Half>::value, FLOAT2>::type
   operator()(at::CPUGenerator* generator){
     normal_distribution<float> normal(mean, stdv);
