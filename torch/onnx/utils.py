@@ -92,8 +92,10 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             OperatorExportTypes.RAW: export raw ir.
         opset_version (int, default is 9): by default we export the model to the
             opset version of the onnx submodule. Since ONNX's latest opset may
-            evolve before next stable release, we may want to export to some stable
+            evolve before next stable release, by default we export to one stable
             opset version. Right now, supported stable opset version is 9.
+            The opset_version must be _onnx_master_opset or in _onnx_stable_opsets
+            which are defined in torch/onnx/symbolic.py
     """
     if aten or export_raw_ir:
         assert operator_export_type is None
