@@ -51,7 +51,7 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
 
     if ((operator_def.type().substr(0, 15) == "DepthWiseConv") ||
         (operator_def.type().substr(0, 23) == "DepthWiseConvGradient")) {
-          mode_ = miopenmiopenDepthwise;
+          mode_ = miopenDepthwise;
         }
     else if ((group_ > 1)) {
       mode_ = miopenGroupConv;
