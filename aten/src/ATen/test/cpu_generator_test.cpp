@@ -29,11 +29,9 @@ TEST(CPUGenerator, TestCloning) {
   // Check copy assignment
   // See Note [Thread-safety and Generators]
   auto new_gen = at::detail::createCPUGenerator();
-  std::lock_guard<std::mutex> new_gen_lock(new_gen->mutex_);
   new_gen->random(); // advance new gen_state
   new_gen->random();
   auto& default_gen = at::detail::getDefaultCPUGenerator();
-  std::lock_guard<std::mutex> default_gen_lock(default_gen->mutex_);
   default_gen = new_gen->clone();
   ASSERT_EQ(new_gen->random(), default_gen->random());
 }
