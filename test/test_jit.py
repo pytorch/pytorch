@@ -1336,6 +1336,7 @@ class TestJit(JitTestCase):
             m = self.createScriptModuleFromGraph(trace)
             self.assertEqual(outputs, m(*inputs))
 
+    @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
     def test_dropout_cuda(self):
         # Dropout AD is dispatched to _fused_dropout in CUDA case,
         # which is not included in TestJitGeneratedFunctional
