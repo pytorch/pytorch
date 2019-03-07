@@ -61,6 +61,7 @@ enum class TypeID {
   SparseCPUInt,
   SparseCPULong,
   SparseCPUShort,
+  MkldnnCPUFloat,
   CUDABool,
   CUDAByte,
   CUDAChar,
@@ -116,6 +117,7 @@ struct CAFFE2_API Type {
   virtual bool is_cuda() const = 0;
   virtual bool is_hip() const = 0;
   virtual bool is_sparse() const = 0;
+  virtual bool is_mkldnn() const = 0;
   virtual bool is_distributed() const = 0;
   bool is_variable() const noexcept { return is_variable_; }
   bool is_undefined() const noexcept { return is_undefined_; }
@@ -448,6 +450,8 @@ struct CAFFE2_API Type {
   virtual std::vector<Tensor> unbind(const Tensor & self, int64_t dim) const = 0;
   virtual Tensor to_sparse(const Tensor & self, int64_t sparse_dim) const = 0;
   virtual Tensor to_sparse(const Tensor & self) const = 0;
+  virtual Tensor to_mkldnn(const Tensor & self) const = 0;
+  virtual Tensor to_plainfmt(const Tensor & self) const = 0;
   virtual Tensor to(const Tensor & self, const TensorOptions & options, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;

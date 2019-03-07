@@ -2916,6 +2916,18 @@
     CPU: dense_to_sparse
     CUDA: dense_to_sparse
 
+- func: to_mkldnn(Tensor self) -> Tensor
+  matches_jit_signature: True
+  variants: method
+  dispatch:
+    CPU: plainfmt_to_mkldnn
+
+- func: to_plainfmt(Tensor self) -> Tensor
+  matches_jit_signature: True
+  variants: method
+  dispatch:
+    MkldnnCPU: mkldnn_to_plainfmt
+
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
 # See NOTE [ TensorOptions Constructors ].

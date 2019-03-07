@@ -2075,6 +2075,15 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   return grad.sparse_mask(at::SparseTensorRef(input));
 }
 
+Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
+  AT_ASSERT(input_.layout() == c10::kStrided);
+  return grad.to_plainfmt();
+}
+
+Tensor to_plainfmt_backward(const Tensor& grad, const Tensor& input_) {
+  AT_ASSERT(input_.layout() == c10::kMkldnn);
+  return grad.to_mkldnn();
+}
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p in pads])
 Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad) {

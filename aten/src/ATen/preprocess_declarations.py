@@ -21,7 +21,7 @@ type_map = {
 all_types = type_map['floating_point'] + type_map['integral']
 type_map['all'] = all_types
 
-all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA']
+all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA', 'MkldnnCPU']
 default_backends = ['CPU', 'CUDA']
 
 sparse_map = {
@@ -29,6 +29,9 @@ sparse_map = {
     'CUDA': 'SparseCUDA',
 }
 
+mkldnn_map = {
+    'CPU': 'MkldnnCPU',
+}
 
 def process_types_and_backends(option):
     # if specific pairs were not listed, then enumerate them
@@ -38,6 +41,8 @@ def process_types_and_backends(option):
         backends = option.get('backends', default_backends)
         if option.get('aten_sparse', False):
             backends.extend([sparse_map[p] for p in backends if p in sparse_map])
+        if option.get('is_mkldnn', False):
+            backends.extend([mkldnn_map[p] for p in backends if p in mkldnn_map])
         backends = set(backends)
 
         types = option.get('types', all_types)

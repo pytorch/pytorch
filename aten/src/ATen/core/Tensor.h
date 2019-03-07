@@ -223,6 +223,9 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
 
+  /// Returns if a `Tensor` has mkldnn backend.
+  bool is_mkldnn() const;
+
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
   TensorOptions options() const;
@@ -548,6 +551,8 @@ class CAFFE2_API Tensor {
   std::vector<Tensor> unbind(int64_t dim=0) const;
   Tensor to_sparse(int64_t sparse_dim) const;
   Tensor to_sparse() const;
+  Tensor to_mkldnn() const;
+  Tensor to_plainfmt() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;

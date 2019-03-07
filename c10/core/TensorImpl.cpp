@@ -37,7 +37,8 @@ TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, 
     : TensorImpl({}, type_id, data_type, is_variable) {
   // Variables, UndefinedTensors and SparseTensors don't have storages.
   if (!is_variable && type_id != UndefinedTensorId() && data_type.id() != caffe2::TypeIdentifier::uninitialized()
-      && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
+      && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()
+      && type_id != MkldnnCPUTensorId()) {
     storage_ = Storage(data_type, 0, allocator, true);
   }
 }

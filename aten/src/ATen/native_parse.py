@@ -270,6 +270,11 @@ def has_sparse_dispatches(dispatches):
             return True
     return False
 
+def has_mkldnn_dispatches(dispatches):
+    for dispatch in dispatches:
+        if 'Mkldnn' in dispatch:
+            return True
+    return False
 
 def parse_native_yaml(path):
     with open(path, 'r') as f:
@@ -314,6 +319,8 @@ def run(paths):
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
                 declaration['python_module'] = func.get('python_module', '')
                 declaration['aten_sparse'] = has_sparse_dispatches(
+                    declaration['type_method_definition_dispatch'])
+                declaration['is_mkldnn'] = has_mkldnn_dispatches(
                     declaration['type_method_definition_dispatch'])
                 declarations.append(declaration)
             except Exception as e:

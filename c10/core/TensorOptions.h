@@ -332,6 +332,8 @@ struct C10_API TensorOptions {
         return backend;
       case kSparse:
         return toSparse(backend);
+      case kMkldnn:
+        return toMkldnn(backend);
       default:
         return backend;
     }
@@ -527,6 +529,14 @@ inline TensorTypeId computeTensorTypeId(TensorOptions options) {
         default:
           AT_ERROR("Unsupported device type for sparse layout: ", options.device().type());
       }
+    case Layout::Mkldnn:
+      switch (options.device().type()) {
+        case DeviceType::CPU:
+          return MkldnnCPUTensorId();
+        // more devices supporting Mkldnn layout follow...
+        default:
+          AT_ERROR("Unsupported device type for opaque layout: ", options.device().type());
+      }
     default:
       AT_ERROR("Unsupported layout: ", options.layout());
   }
@@ -559,6 +569,8 @@ inline DeviceType computeDeviceType(TensorTypeId tid) {
     return DeviceType::CUDA;
   } else if (tid == SparseHIPTensorId()) {
     return DeviceType::HIP;
+  } else if (tid == MkldnnCPUTensorId()) {
+    return DeviceType::CPU;
   } else {
     AT_ASSERTM(false, "Unknown TensorTypeId: ", tid);
   }
