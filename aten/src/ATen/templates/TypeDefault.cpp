@@ -19,7 +19,7 @@ namespace at {
 
 Tensor & TypeDefault::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   Tensor b_src;
-  if (is_sparse() || is_mkldnn()) {
+  if (is_sparse()) {
     b_src = src;
   } else {
     std::tie(b_src) = expand_inplace(self, src, "copy");
@@ -31,7 +31,7 @@ Tensor TypeDefault::copy(const Tensor & src, bool non_blocking, optional<Device>
   OptionalDeviceGuard device_guard(to_device);
   AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   Tensor r;
-  if (is_sparse() || is_mkldnn()) {
+  if (is_sparse()) {
     r = at::empty({0}, this->options());
   } else {
     r = at::empty(src.sizes(), this->options());

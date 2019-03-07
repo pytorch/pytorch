@@ -112,14 +112,6 @@ inline bool is_sparse(Tensor self) {
   return self.is_sparse();
 }
 
-inline bool Tensor::is_mkldnn() const {
-  return impl_->is_mkldnn();
-}
-
-inline bool is_mkldnn(Tensor self) {
-  return self.is_mkldnn();
-}
-
 #define DEFINE_CAST(T, name, _)                  \
   template <>                                    \
   inline T* Tensor::data() const {               \

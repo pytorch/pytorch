@@ -223,9 +223,6 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
 
-  /// Returns if a `Tensor` has mkldnn backend.
-  bool is_mkldnn() const;
-
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
   TensorOptions options() const;
