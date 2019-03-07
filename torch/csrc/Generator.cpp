@@ -104,6 +104,8 @@ static PyObject * THPGenerator_manualSeed(THPGenerator *self, PyObject *seed)
   auto generator = self->cdata;
   THPUtils_assert(THPUtils_checkLong(seed), "manual_seed expected a long, "
           "but got %s", THPUtils_typename(seed));
+  // See Note [Thread-safety and Generators]
+  std::lock_guard<std::mutex> lock(generator->mutex_);
   generator->set_current_seed(THPUtils_unpackLong(seed));
   Py_INCREF(self);
   return (PyObject*)self;
@@ -125,6 +127,8 @@ static PyObject * THPGenerator_seed(THPGenerator *self)
     seed_val = std::chrono::high_resolution_clock::now().time_since_epoch().count();
     seed_val = ((((uint64_t)seed_val) << 32) + seed_val) & 0x1FFFFFFFFFFFFF;
   }
+  // See Note [Thread-safety and Generators]
+  std::lock_guard<std::mutex> lock(self->cdata->mutex_);
   self->cdata->set_current_seed(seed_val);
   return THPUtils_packUInt64(seed_val);
   END_HANDLE_TH_ERRORS
@@ -133,6 +137,8 @@ static PyObject * THPGenerator_seed(THPGenerator *self)
 static PyObject * THPGenerator_initialSeed(THPGenerator *self)
 {
   HANDLE_TH_ERRORS
+  // See Note [Thread-safety and Generators]
+  std::lock_guard<std::mutex> lock(self->cdata->mutex_);
   return THPUtils_packUInt64(self->cdata->current_seed());
   END_HANDLE_TH_ERRORS
 }

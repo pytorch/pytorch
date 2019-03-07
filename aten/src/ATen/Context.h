@@ -220,7 +220,10 @@ static inline bool hasMAGMA() {
 }
 
 static inline void manual_seed(uint64_t seed) {
-  detail::getDefaultCPUGenerator()->set_current_seed(seed);
+  auto& gen = detail::getDefaultCPUGenerator();
+  // See Note [Thread-safety and Generators]
+  std::lock_guard<std::mutex> lock(gen->mutex_);
+  gen->set_current_seed(seed);
   // NB: Sometimes we build with CUDA, but we don't have any GPUs
   // available. In that case, we must not seed CUDA; it will fail!
   if (hasCUDA() && detail::getCUDAHooks().getNumGPUs() > 0) {

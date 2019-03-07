@@ -31,6 +31,22 @@
  * Currently torch.Generator() can only create a CPUGenerator.
  */
 
+/**
+ * Note [Thread-safety and Generators]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * Generator and its derived classes are NOT thread-safe. Please use the public mutex_ when 
+ * using any methods from these classes. You can learn about the usage by looking into the 
+ * unittests (aten/src/ATen/cpu_generator_test.cpp). Note that we call
+ * std::lock_guard<std::mutex> AFTER every call of at::check_generator_with_default. This is
+ * because, check_generator_with_default uses the mutex_ in its definition and if you call
+ * std::lock_guard before check_generator_with_default, you'll hang inside 
+ * check_generator_with_default.
+ * 
+ * TODO: Look into changing the threading semantics of Generators in ATen (e.g., making
+ * them non-thread safe and instead making the generator state splittable, to accommodate
+ * forks into other threads).
+ */
+
 namespace at {
 
 /**
@@ -75,9 +91,9 @@ struct CAFFE2_API Generator {
 
   // stubbed. will be removed
   virtual Generator& manualSeedAll(uint64_t seed);
-
-  protected:
-    mutable std::mutex mutex_;
+  
+  // See Note [Thread-safety and Generators]
+  std::mutex mutex_;
 
   private:
     Device device_;

@@ -39,46 +39,44 @@ typedef at::cuda::Array<float, 2> FLOAT2;
 
 } // anonymous namespace
 
-/*
-* Philox Engine implementation
-* Originally implemented in PyTorch's fusion compiler
-* Refer to: http://www.thesalmons.org/john/random123/papers/random123sc11.pdf
-* for details regarding the engine.
-*
-* The Philox engine is currently used in CUDA distributions
-* kernels as its random engine. 
-* 
-* It takes a seed value, a subsequeunce
-* for starting the generation and an offset for the sequence.
-*
-* Think of this engine as an algorithm producing a huge array. We are 
-* parallelizing this array by partitioning the huge array and assigning 
-* a thread index to each partition. In other words, each seed value 
-* (there are 2^64 possible seed values) gives a sub array of size 
-* 2^128 (each element in that array is a 128 bit number). Reasoning
-* behind the array being of size 2^128 is, there are 2^64 possible
-* thread index value and there is an array of size 2^64 for each of
-* those thread index. Hence 2^64 * 2^64 = 2^128 for each seed value.
-*
-* In short, this generator can produce 2^64 (seed values) * 2^128 (number
-* of elements in an array given by a seed value) = 2^192 values.
-*
-* Arguments:
-* seed:        Seed values could be any number from 0 to 2^64-1.
-* subsequence: Subsequence is just the cuda thread indexing with:
-*              - blockIdx.x * blockDim.x + threadIdx.x
-* offset:      The offset variable in PhiloxEngine  decides how many 128-bit 
-*              random numbers to skip (i.e. how many groups of 4, 32-bit numbers to skip)
-*              and hence really decides the total number of randoms that can be achieved 
-*              for the given subsequence.
-*/
+/**
+ * Note [Philox Engine implementation]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * Originally implemented in PyTorch's fusion compiler
+ * Refer to: http://www.thesalmons.org/john/random123/papers/random123sc11.pdf
+ * for details regarding the engine.
+ *
+ * The Philox engine is currently used in CUDA distributions
+ * kernels as its random engine. 
+ * 
+ * It takes a seed value, a subsequeunce
+ * for starting the generation and an offset for the sequence.
+ *
+ * Think of this engine as an algorithm producing a huge array. We are 
+ * parallelizing this array by partitioning the huge array and assigning 
+ * a thread index to each partition. In other words, each seed value 
+ * (there are 2^64 possible seed values) gives a sub array of size 
+ * 2^128 (each element in that array is a 128 bit number). Reasoning
+ * behind the array being of size 2^128 is, there are 2^64 possible
+ * thread index value and there is an array of size 2^64 for each of
+ * those thread index. Hence 2^64 * 2^64 = 2^128 for each seed value.
+ *
+ * In short, this generator can produce 2^64 (seed values) * 2^128 (number
+ * of elements in an array given by a seed value) = 2^192 values.
+ *
+ * Arguments:
+ * seed:        Seed values could be any number from 0 to 2^64-1.
+ * subsequence: Subsequence is just the cuda thread indexing with:
+ *              - blockIdx.x * blockDim.x + threadIdx.x
+ * offset:      The offset variable in PhiloxEngine  decides how many 128-bit 
+ *              random numbers to skip (i.e. how many groups of 4, 32-bit numbers to skip)
+ *              and hence really decides the total number of randoms that can be achieved 
+ *              for the given subsequence.
+ */
 
 class philox_engine {
 public:
 
-  /*
-  * Constructor
-  */
   C10_HOST_DEVICE_INLINE philox_engine(unsigned long long seed = 67280421310721,
                                  unsigned long long subsequence = 0,
                                  unsigned long long offset = 0) {
@@ -91,9 +89,9 @@ public:
     incr_n(offset);
   }
 
-  /*
-  * Produces a unique 32-bit pseudo random number on every invocation
-  */
+  /**
+   * Produces a unique 32-bit pseudo random number on every invocation
+   */
   C10_HOST_DEVICE_INLINE unsigned long operator()() {
     if(STATE == 0) {
       UINT4 counter_ = counter;
@@ -116,9 +114,9 @@ public:
     return ret;
   }
 
-  /*
-  * Function that Skips N 128 bit numbers in a subsequence
-  */
+  /**
+   * Function that Skips N 128 bit numbers in a subsequence
+   */
   C10_HOST_DEVICE_INLINE void incr_n(unsigned long long n) {
     unsigned int nlo = static_cast<unsigned int>(n);
     unsigned int nhi = static_cast<unsigned int>(n >> 32);
@@ -149,9 +147,9 @@ public:
     ++counter[3];
   }
 
-  /*
-  * Function that Skips one 128 bit number in a subsequence
-  */
+  /**
+   * Function that Skips one 128 bit number in a subsequence
+   */
   C10_HOST_DEVICE_INLINE void incr() {
     if (++counter[0])
       return;

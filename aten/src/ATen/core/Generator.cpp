@@ -2,24 +2,27 @@
 
 namespace at {
 
-/*
-* Generator class implementation
-*/
+/**
+ * Generator class implementation
+ */
 Generator::Generator(Device device_in) : device_(device_in) {}
 
-/*
-* Clone this generator. Note that clone() is the only
-* method for copying for Generators in ATen.
-*/
+/**
+ * Clone this generator. Note that clone() is the only
+ * method for copying for Generators in ATen.
+ * 
+ * See Note [Thread-safety and Generators]
+ */
 std::unique_ptr<Generator> Generator::clone() const {
   return std::unique_ptr<Generator>(static_cast<Generator*>(this->clone_impl()));
 }
 
-/*
-* Gets the device of a generator.
-*/
+/**
+ * Gets the device of a generator.
+ * 
+ * See Note [Thread-safety and Generators]
+ */
 Device Generator::device() const {
-  std::lock_guard<std::mutex> lock(mutex_);
   return device_;
 }
 

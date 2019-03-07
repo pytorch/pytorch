@@ -128,29 +128,21 @@ inline int64_t prod_intlist(ArrayRef<int64_t> list) {
   return std::accumulate(list.begin(), list.end(), 1ll, std::multiplies<int64_t>());
 }
 
-/*
-* Utility function used in tensor implementations, which
-* supplies the default generator to tensors, if an input generator
-* is not supplied. The input Generator* is also dynamic casted to
-* the backend generator type (CPU/CUDAGenerator etc.)
-*/
+/**
+ * Utility function used in tensor implementations, which
+ * supplies the default generator to tensors, if an input generator
+ * is not supplied. The input Generator* is also dynamic casted to
+ * the backend generator type (CPU/CUDAGenerator etc.)
+ * 
+ * See Note [Thread-safety and Generators]
+ */
 template <typename T>
 static inline T * check_generator_with_default(Generator * expr, Generator * defaultValue) {
   if (!expr) {
     expr = defaultValue;
   }
-  if (T::device_type() == expr->device().type()) {
-    return static_cast<T*>(expr);
-  }
-  AT_ERROR("Expected a '", typeid(T).name(), "' but found '", typeid(expr).name(), "'");
-}
-
-/*
-* Utility function used for dynamic casting a Generator* to
-* the backend generator type (CPU/CUDAGenerator etc.)
-*/
-template <typename T>
-static inline T * check_generator(Generator * expr) {
+  // See Note [Thread-safety and Generators]
+  std::lock_guard<std::mutex> lock(expr->mutex_);
   if (T::device_type() == expr->device().type()) {
     return static_cast<T*>(expr);
   }

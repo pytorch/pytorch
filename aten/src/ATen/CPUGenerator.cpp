@@ -43,52 +43,58 @@ CPUGenerator::CPUGenerator(uint64_t seed_in, Philox4_32_10 engine_in)
 
 /**
  * Manually seeds the engine with the seed input
+ * See Note [Thread-safety and Generators]
  */
 void CPUGenerator::set_current_seed(uint64_t seed) {
-  std::lock_guard<std::mutex> lock(mutex_);
   current_seed_ = seed;
   engine_ = Philox4_32_10(seed);
 }
 
-/*
+/**
  * Gets the current seed of CPUGenerator.
+ * 
+ * See Note [Thread-safety and Generators]
  */
 uint64_t CPUGenerator::current_seed() const {
-  std::lock_guard<std::mutex> lock(mutex_);
   return current_seed_;
 }
 
-/*
+/**
  * Gets the DeviceType of CPUGenerator.
  * Used for type checking during run time.
+ * 
+ * See Note [Thread-safety and Generators]
  */
 DeviceType CPUGenerator::device_type() {
   return DeviceType::CPU;
 }
 
-/* 
-* Gets a random 32 bit unsigned integer from the engine
-*/
+/**
+ * Gets a random 32 bit unsigned integer from the engine
+ * 
+ * See Note [Thread-safety and Generators]
+ */
 uint32_t CPUGenerator::random() {
-  std::lock_guard<std::mutex> lock(mutex_);
   return engine_();
 }
 
-/* 
-* Gets a random 64 bit unsigned integer from the engine
-*/
+/**
+ * Gets a random 64 bit unsigned integer from the engine
+ * 
+ * See Note [Thread-safety and Generators]
+ */
 uint64_t CPUGenerator::random64() {
-  std::lock_guard<std::mutex> lock(mutex_);
   uint64_t hi = static_cast<uint64_t>(engine_()) << 32;
   uint64_t lo = static_cast<uint64_t>(engine_());
   return hi | lo;
 }
 
-/*
-Private clone method implementation
-*/
+/**
+ * Private clone method implementation
+ * 
+ * See Note [Thread-safety and Generators]
+ */
 CloneableGenerator<CPUGenerator, Generator>* CPUGenerator::clone_impl() const {
-  std::lock_guard<std::mutex> lock(mutex_);
   return new CPUGenerator(current_seed_, engine_);
 }
 

@@ -127,6 +127,8 @@ Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
 Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "bernoulli_tensor_cpu_self_", [&] {
     CPUGenerator* generator = check_generator_with_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator().get());
+    // See Note [Thread-safety and Generators]
+    std::lock_guard<std::mutex> lock(generator->mutex_);
     using self_t = scalar_t;
     if (p_.scalar_type() == kDouble) {
       auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
@@ -162,6 +164,8 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
 #endif
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
     CPUGenerator* generator = check_generator_with_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator().get());
+    // See Note [Thread-safety and Generators]
+    std::lock_guard<std::mutex> lock(generator->mutex_);
     CPU_tensor_apply1<scalar_t>(
         self, [generator, p](scalar_t& ret_val) {
           at::bernoulli_distribution<double> bernoulli(p);
@@ -192,6 +196,8 @@ Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
   Tensor ret = at::zeros(lambda.sizes(), lambda.options());
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "poisson_cpu", [&] {
     CPUGenerator* generator = check_generator_with_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator().get());
+    // See Note [Thread-safety and Generators]
+    std::lock_guard<std::mutex> lock(generator->mutex_);
     CPU_tensor_apply2<scalar_t, scalar_t>(ret, lambda,
       [generator](scalar_t& ret_val, const scalar_t& lambda){
         ret_val = static_cast<scalar_t>(sample_poisson(static_cast<double>(lambda), generator));
@@ -205,6 +211,8 @@ Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
   Tensor ret = at::zeros(alpha.sizes(), alpha.options());
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "gamma_cpu", [&] {
     CPUGenerator* generator = check_generator_with_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator().get());
+    // See Note [Thread-safety and Generators]
+    std::lock_guard<std::mutex> lock(generator->mutex_);
     CPU_tensor_apply2<scalar_t, scalar_t>(ret, alpha,
       [generator](scalar_t& ret_val, const scalar_t& alpha){
 

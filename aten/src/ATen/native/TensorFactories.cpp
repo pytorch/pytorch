@@ -443,6 +443,8 @@ Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
   AT_CHECK(n >= 0, "n must be non-negative, got", n);
   result.resize_({n});
   auto gen = check_generator_with_default<CPUGenerator>(generator, detail::getDefaultCPUGenerator().get());
+  // See Note [Thread-safety and Generators]
+  std::lock_guard<std::mutex> lock(gen->mutex_);
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "randperm", [&]() -> void {
     randperm_cpu<scalar_t>(result, n, gen);
   });
