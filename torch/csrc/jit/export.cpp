@@ -312,8 +312,7 @@ void EncoderBase::EncodeBlock(
     }
   }
   AT_ASSERT(block->inputs().size() >= initializers.size());
-  for (auto& name_tensor_pair : 
-        std::map<std::string, at::Tensor>(initializers.begin(), initializers.end())) {
+  for (auto& name_tensor_pair : initializers) {
     auto p = graph_proto->add_initializer();
     p->set_name(name_tensor_pair.first);
     EncodeTensor(p, name_tensor_pair.second, name_tensor_pair.first);
