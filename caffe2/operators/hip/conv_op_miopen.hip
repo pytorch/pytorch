@@ -49,7 +49,11 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&top_desc_for_bias_));
     MIOPEN_ENFORCE(miopenCreateConvolutionDescriptor(&conv_desc_));
 
-    if (group_ > 1) {
+    if ((operator_def.type().substr(0, 15) == "DepthWiseConv") ||
+        (operator_def.type().substr(0, 23) == "DepthWiseConvGradient")) {
+          mode_ = miopenmiopenDepthwise;
+        }
+    else if ((group_ > 1)) {
       mode_ = miopenGroupConv;
     } else {
       mode_ = miopenConvolution;
@@ -670,4 +674,7 @@ bool MIOPENConvGradientOp::RunOnDevice() {
 
 REGISTER_MIOPEN_OPERATOR(Conv, MIOPENConvOp);
 REGISTER_MIOPEN_OPERATOR(ConvGradient, MIOPENConvGradientOp);
+
+REGISTER_MIOPEN_OPERATOR(DepthWiseConv, MIOPENConvOp);
+REGISTER_MIOPEN_OPERATOR(DepthWiseGradient, MIOPENConvGradientOp);
 } // namespace caffe2
