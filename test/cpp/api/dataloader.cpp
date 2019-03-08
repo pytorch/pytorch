@@ -759,7 +759,7 @@ TEST(DataTest, SharedBatchDatasetReallyIsShared) {
       shared_dataset, torch::data::DataLoaderOptions().workers(3));
 
   for (auto batch : *data_loader) {
-    windows_test_fix exhaust */
+      /* exhaust */
   }
 }
 
