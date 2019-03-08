@@ -302,6 +302,7 @@ void ScriptModuleDeserializer::convertModule(
   for (int i = 0; i < module_def.attributes_size(); ++i) {
     const torch::AttributeDef& attr_def = module_def.attributes(i);
     if (module->find_buffer(attr_def.name())) {
+      // TODO: handle this above to this can be removed
       continue;
     }
     auto attribute = attribute_table_.at(attr_def.name());
