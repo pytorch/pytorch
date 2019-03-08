@@ -345,7 +345,7 @@ void py_set_default_dtype(PyObject* obj) {
 
 void set_default_tensor_type(PyTensorType& type) {
   auto aten_type = type.aten_type();
-  if (!at::isFloatingType(aten_type->scalarType())) {
+  if (!at::isFloatingType(static_cast<at::ScalarType>(type.scalar_type))) {
     throw TypeError("only floating-point types are supported as the default type");
   }
   if (!aten_type->is_variable() && !aten_type->is_undefined()) {

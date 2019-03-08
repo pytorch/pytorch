@@ -53,7 +53,7 @@ void TypeDefault::set_data(Tensor & self, Tensor new_data) const {
 }
 
 Type & TypeDefault::toBackend(Backend b) const {
-  return at::globalContext().getNonVariableType(b,scalarType());
+  return at::globalContext().getNonVariableType(b,typeMetaToScalarType(typeMeta()));
 }
 Type & TypeDefault::toScalarType(ScalarType s) const {
   return at::globalContext().getNonVariableType(backend(),s);
