@@ -17,6 +17,7 @@ namespace torch { namespace autograd {
 
 using at::Tensor;
 using at::Scalar;
+using at::ScalarType;
 using at::TensorList;
 using at::IntArrayRef;
 using at::Generator;
@@ -26,6 +27,10 @@ using at::TensorOptions;
 
 static at::Type& default_type() {
   return *torch::tensors::get_default_tensor_type().aten_type();
+}
+
+static ScalarType default_scalar_type() {
+  return static_cast<ScalarType>(torch::tensors::get_default_tensor_type().scalar_type);
 }
 
 static void maybe_initialize_cuda(const at::TensorOptions& options) {
