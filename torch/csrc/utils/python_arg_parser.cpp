@@ -127,7 +127,7 @@ bool FunctionParameter::check(PyObject* obj) {
       }
       if (THPVariable_Check(obj)) {
         auto& var = ((THPVariable*)obj)->cdata;
-        return at::isIntegralType(var.type().scalarType()) && !var.requires_grad() && var.dim() == 0;
+        return at::isIntegralType(var.scalar_type()) && !var.requires_grad() && var.dim() == 0;
       }
       return false;
     }

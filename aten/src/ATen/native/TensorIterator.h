@@ -186,7 +186,7 @@ struct CAFFE2_API TensorIterator {
   template <typename T>
   T scalar_value(int arg) {
     auto& op = operands_[arg];
-    return at::detail::load<T>(op.data, op.tensor.type().scalarType());
+    return at::detail::load<T>(op.data, op.tensor.scalar_type());
   }
 
   void for_each(const loop_t& loop);

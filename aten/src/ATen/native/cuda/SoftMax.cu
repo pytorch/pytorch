@@ -476,7 +476,7 @@ cunn_SoftMaxBackward(scalar_t *gradInput, outscalar_t *output, outscalar_t *grad
 
 template<template<typename, typename, typename> class Epilogue>
 Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_to_float){
-  if (half_to_float) AT_ASSERTM(input_.type().scalarType() == ScalarType::Half,"conversion is supported for Half type only");
+  if (half_to_float) AT_ASSERTM(input_.scalar_type() == ScalarType::Half,"conversion is supported for Half type only");
   auto input = input_.contiguous();
   Tensor output = half_to_float ? at::empty_like(input, input.options().dtype(ScalarType::Float)) : at::empty_like(input);
   static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
@@ -627,9 +627,9 @@ Tensor log_softmax_cuda(const Tensor &input, const int64_t dim, const bool half_
 }
 
 Tensor log_softmax_backward_cuda(const Tensor &grad, const Tensor &output, int64_t dim, const Tensor &input){
-  bool half_to_float = grad.type().scalarType() != input.type().scalarType();
+  bool half_to_float = grad.scalar_type() != input.scalar_type();
   if (half_to_float) {
-     AT_ASSERTM((grad.type().scalarType() == ScalarType::Float && input.type().scalarType() == ScalarType::Half), "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
+     AT_ASSERTM((grad.scalar_type() == ScalarType::Float && input.scalar_type() == ScalarType::Half), "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
   }
   return host_softmax_backward<LogSoftMaxBackwardEpilogue>(grad, output, dim, half_to_float);
 }
@@ -639,9 +639,9 @@ Tensor softmax_cuda(const Tensor &input, const int64_t dim, const bool half_to_f
 }
 
 Tensor softmax_backward_cuda(const Tensor &grad, const Tensor &output, int64_t dim, const Tensor &input){
-  bool half_to_float = grad.type().scalarType() != input.type().scalarType();
+  bool half_to_float = grad.scalar_type() != input.scalar_type();
   if (half_to_float) {
-     AT_ASSERTM((grad.type().scalarType() == ScalarType::Float && input.type().scalarType() == ScalarType::Half), "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
+     AT_ASSERTM((grad.scalar_type() == ScalarType::Float && input.scalar_type() == ScalarType::Half), "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
   }
   Tensor tmp = grad * output;
   return host_softmax_backward<SoftMaxBackwardEpilogue>(tmp, output, dim, half_to_float);
