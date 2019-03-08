@@ -352,7 +352,7 @@ struct ReduceOp {
 
   C10_DEVICE arg_t thread_reduce(const scalar_t* data) const {
     index_t idx = config.input_idx();
-    // Multiple accumulator to remove dependency between unrolled loops.
+    // Multiple accumulators to remove dependency between unrolled loops.
     arg_t value_list[vt0];
     #pragma unroll
     for (int i = 0; i < vt0; i++) {
