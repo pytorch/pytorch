@@ -463,7 +463,7 @@ Tensor indexing_tensor_from_data(
   // indexing tensor (type Byte or Long)
   ScalarType inferred_scalar_type = infer_scalar_type(data);
   if (inferred_scalar_type == ScalarType::Byte) {
-    auto& idx_type = type.toScalarType(scalar_type);
+    auto& idx_type = type.toScalarType(inferred_scalar_type);
     return internal_new_from_data(idx_type, inferred_scalar_type, std::move(device), data, false, false, false);
   } else {
     return internal_new_from_data(type, scalar_type, std::move(device), data, false, false, false);
@@ -482,19 +482,21 @@ Tensor sparse_coo_tensor_ctor(const Type& default_type, ScalarType scalar_type, 
   if (r.idx == 0) {
     bool type_inference = r.isNone(2);
     const auto& type = typeWithDefault(r, 2, 3, default_type, scalar_type);
+    const auto inferred_scalar_type = r.scalartypeWithDefault(2, scalar_type);
     const auto& values_type = type.toDense();
     at::OptionalDeviceGuard device_guard(r.deviceOptional(3));
     // if no dtype provided, infer type based on value type.
-    Tensor values = internal_new_from_data(values_type, scalar_type, r.deviceOptional(3), r.pyobject(1), false, true, type_inference);
+    Tensor values = internal_new_from_data(values_type, inferred_scalar_type, r.deviceOptional(3), r.pyobject(1), false, true, type_inference);
     const auto& indices_type = values.type().toScalarType(kLong);
     Tensor indices = internal_new_from_data(indices_type, scalar_type, r.deviceOptional(3), r.pyobject(0), false, true, false);
     return at::sparse_coo_tensor(indices, values, values.options().layout(at::kSparse)).set_requires_grad(r.toBool(4));
   } else if (r.idx == 1) {
     bool type_inference = r.isNone(3);
     const auto& type = typeWithDefault(r, 3, 4, default_type, scalar_type);
+    const auto inferred_scalar_type = r.scalartypeWithDefault(3, scalar_type);
     const auto& values_type = type.toDense();
     at::OptionalDeviceGuard device_guard(r.deviceOptional(4));
-    Tensor values = internal_new_from_data(values_type, scalar_type, r.deviceOptional(4), r.pyobject(1), false, true, type_inference);
+    Tensor values = internal_new_from_data(values_type, inferred_scalar_type, r.deviceOptional(4), r.pyobject(1), false, true, type_inference);
     const auto& indices_type = values.type().toScalarType(kLong);
     Tensor indices = internal_new_from_data(indices_type, scalar_type, r.deviceOptional(4), r.pyobject(0), false, true, false);
     return at::sparse_coo_tensor(indices, values, r.intlist(2), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(5));
@@ -525,7 +527,7 @@ Tensor tensor_ctor(const Type& type, ScalarType scalar_type, PyObject* args, PyO
     bool args_requires_grad = r.toBool(3);
     auto new_tensor = internal_new_from_data(
                typeWithDefault(r, 1, 2, type, scalar_type),
-               scalar_type,
+               r.scalartypeWithDefault(1, scalar_type),
                r.deviceOptional(2),
                data,
                true,
@@ -549,7 +551,13 @@ Tensor as_tensor(const Type& type, ScalarType scalar_type, PyObject* args, PyObj
   if (r.idx == 0) {
     bool type_inference = r.isNone(1);
     return internal_new_from_data(
-        typeWithDefault(r, 1, 2, type, scalar_type), scalar_type, r.deviceOptional(2), r.pyobject(0), false, false, type_inference);
+        typeWithDefault(r, 1, 2, type, scalar_type),
+        r.scalartypeWithDefault(1, scalar_type),
+        r.deviceOptional(2),
+        r.pyobject(0),
+        false,
+        false,
+        type_inference);
   }
   throw std::runtime_error("tensor(): invalid arguments");
 }
@@ -572,7 +580,7 @@ Tensor new_tensor(const Type& type, ScalarType scalar_type, PyObject* args, PyOb
     bool args_requires_grad = r.toBool(3);
     auto new_tensor = new_from_data_copy(
                typeWithDefault(r, 1, 2, type, scalar_type),
-               scalar_type,
+               r.scalartypeWithDefault(1, scalar_type),
                r.deviceOptional(2),
                data);
     new_tensor.detach_(); // ensure new_tensor a leaf node
