@@ -297,7 +297,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
 
       AT_DISPATCH_ALL_TYPES_AND(
         at::ScalarType::Half, values.scalar_type(), "add_out_dense_sparse_cuda", [&] {
-r           apply::sparseElementwiseKernelScalar<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
+            apply::sparseElementwiseKernelScalar<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
               <<<grid, block, 0, stream>>>(
                 TensorCAddOp<scalar_t>(value.to<scalar_t>()),
                 V_INFO(r_), I_INFO(indices), V_INFO(values),
