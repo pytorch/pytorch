@@ -10293,6 +10293,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
             torch.tensor(2).to("cuda:1") // torch.tensor(3).to("cuda:0")
 
+    def test_nbytes(self):
+        self.assertEqual(torch.zeros(4, dtype=torch.float64).nbytes, 32)
+
+    def test_itemsize(self):
+        self.assertEqual(torch.zeros(4, dtype=torch.float64).itemsize, 8)
+
     def test_allow_tensor_metadata_change(self):
         def do_test(t):
             with self.assertRaisesRegex(

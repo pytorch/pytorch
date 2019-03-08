@@ -412,6 +412,18 @@ static PyObject * THPVariable_device(THPVariable* self) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_nbytes(THPVariable* self) {
+  HANDLE_TH_ERRORS
+  return PyInt_FromSize_t(self->cdata.nbytes());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_itemsize(THPVariable* self) {
+  HANDLE_TH_ERRORS
+  return PyInt_FromSize_t(self->cdata.itemsize());
+  END_HANDLE_TH_ERRORS
+}
+
 static struct PyGetSetDef THPVariable_properties[] = {
   {"_cdata", (getter)THPVariable_get_cdata, nullptr, nullptr, nullptr},
   {"_version", (getter)THPVariable_get_version, nullptr, nullptr, nullptr},
@@ -433,6 +445,8 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"dtype", (getter)THPVariable_dtype, nullptr, nullptr, nullptr},
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
+  {"nbytes", (getter)THPVariable_nbytes, nullptr, nullptr, nullptr},
+  {"itemsize", (getter)THPVariable_itemsize, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
