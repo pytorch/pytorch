@@ -215,7 +215,7 @@ Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen) {
       const at::Type& p_type = p.type();
       using self_t = scalar_t;
       auto seeds = next_philox_seed(gen, 10);
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.type(), "bernoulli_tensor_cuda_p_", [&] {
+      AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, p.scalar_type(), "bernoulli_tensor_cuda_p_", [&] {
         using p_t = scalar_t;
         return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, p, seeds);
       });
