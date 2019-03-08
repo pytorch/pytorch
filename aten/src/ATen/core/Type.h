@@ -109,7 +109,6 @@ struct CAFFE2_API Type {
       : type_id_(type_id), is_variable_(is_variable), is_undefined_(is_undefined) {}
 
   virtual ~Type() {}
-  virtual ScalarType scalarType() const = 0;
   virtual caffe2::TypeMeta typeMeta() const = 0;
   virtual Backend backend() const = 0;
   Layout layout() const noexcept { return layout_from_backend(backend()); }

@@ -16,9 +16,6 @@ VariableType::VariableType(Context* context, TypeExtendedInterface* baseType)
   str = std::string("Variable[") + baseType->toString() + "]";
 }
 
-ScalarType VariableType::scalarType() const {
-  return baseType->scalarType();
-}
 caffe2::TypeMeta VariableType::typeMeta() const {
   return baseType->typeMeta();
 }

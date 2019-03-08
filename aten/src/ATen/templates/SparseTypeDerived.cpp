@@ -29,9 +29,6 @@ namespace at {
 
 ${Type}::${Type}()
   : ${DenseBackend}TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
-ScalarType ${Type}::scalarType() const {
-  return ScalarType::${ScalarName};
-}
 caffe2::TypeMeta ${Type}::typeMeta() const {
   return caffe2::TypeMeta::Make<${ScalarType}>();
 }
