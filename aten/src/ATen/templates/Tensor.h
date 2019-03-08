@@ -185,8 +185,14 @@ class CAFFE2_API Tensor {
     return impl_->numel() * impl_->itemsize();
   }
 
-  // Length of one array element in bytes.
+  // Length of one array element in bytes.  This is the traditional
+  // Numpy naming.
   size_t itemsize() const {
+    return impl_->itemsize();
+  }
+
+  // Same as itemsize().  This is the PyTorch naming.
+  size_t element_size() const {
     return impl_->itemsize();
   }
 
