@@ -330,7 +330,7 @@ Tensor _bincount_cuda(
     const Tensor& self,
     const Tensor& weights,
     int64_t minlength) {
-  return AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "bincount", [&] {
+  return AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "bincount_cuda", [&] {
     const auto scalar = weights.scalar_type();
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
       return _bincount_cuda_template<scalar_t, float>(self, weights, minlength);
