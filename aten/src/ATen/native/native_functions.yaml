@@ -1818,10 +1818,10 @@
     CPU: _round_out_cpu
     CUDA: _round_out_cuda
 
-- func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=1.0/3.0, bool training=False, Generator? generator=None) -> Tensor
+- func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.333333333333, bool training=False, Generator? generator=None) -> Tensor
   matches_jit_signature: True
 
-- func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=1.0/3.0, bool training=False, Generator? generator=None) -> Tensor(a!)
+- func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   matches_jit_signature: True
 
 - func: relu(Tensor self) -> Tensor
@@ -4294,11 +4294,11 @@
   matches_jit_signature: True
   python_module: nn
 
-- func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=1.0/3.0, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
   python_module: nn
 
-- func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=1.0/3.0, bool training=False, Generator? generator=None) -> Tensor
+- func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.333333333333, bool training=False, Generator? generator=None) -> Tensor
   matches_jit_signature: True
   python_module: nn
 
@@ -4310,7 +4310,7 @@
   matches_jit_signature: True
   python_module: nn
 
-- func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=1.0/3.0, bool training=False, Generator? generator=None) -> Tensor(a!)
+- func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   matches_jit_signature: True
   python_module: nn
 
