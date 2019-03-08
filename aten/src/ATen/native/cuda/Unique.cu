@@ -146,7 +146,7 @@ template <typename scalar_t>
 
 std::tuple<Tensor, Tensor>
 _unique_cuda(const Tensor& self, const bool sorted, const bool return_inverse) {
-  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique", [&] {
+  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique_cuda", [&] {
     // The current CUDA implementation of unique always sort due to the
     // lack of hashtable implementation in thrust
     return _unique_cuda_template<scalar_t>(self, return_inverse);
