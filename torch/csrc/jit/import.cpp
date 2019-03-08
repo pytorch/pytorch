@@ -157,6 +157,7 @@ void ScriptModuleDeserializer::loadAttributeTable(
   std::tie(storage_ptr, record_size) = reader_.getRecord("attributes");
   for (const torch::AttributeDef& attribute_def : module_def->attributes()) {
      auto type = script::parseType(attribute_def.type());
+     // TODO: support having more than 1 attribute (need to encode the offset somewhere)
      attribute_table_[attribute_def.name()] =
         std::make_pair(type, loadIValue(0, type, storage_ptr));
   }
