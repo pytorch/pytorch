@@ -8558,7 +8558,7 @@ a")
                 return self.ssm.bar() + x
 
         orig = TraceMe()
-        traced = torch.jit.trace(orig, (torch.rand(4, 3, dtype=torch.float),))
+        traced = torch.jit.trace(orig, (torch.rand(4, 3),))
         # for each of these checks, check that *BOTH* the underlying
         # _C.ScriptModule object has the expected method/param, as well as the
         # Python object that wraps it.
