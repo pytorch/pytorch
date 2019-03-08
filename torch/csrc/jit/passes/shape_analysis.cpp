@@ -719,6 +719,7 @@ class ShapePropagator {
             "aten::fmod(Tensor self, Tensor other) -> Tensor",
             "aten::remainder(Tensor self, Tensor other) -> Tensor",
             "aten::lerp(Tensor self, Tensor end, Scalar weight) -> Tensor",
+            "aten::lerp(Tensor self, Tensor end, Tensor weight) -> Tensor",
             "aten::max(Tensor self, Tensor other) -> Tensor",
             "aten::min(Tensor self, Tensor other) -> Tensor",
             "aten::__and__(Tensor self, Tensor other) -> Tensor",

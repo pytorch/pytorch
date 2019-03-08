@@ -493,7 +493,7 @@ Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, c
           self_row_stride = self.stride(-2), self_col_stride = self.stride(-1);
   dim3 dim_block = cuda::getApplyBlock();
   dim3 dim_grid((mat_size + dim_block.x - 1) / dim_block.x, n_batches);
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), name, [&]{
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.type(), name, [&]{
     triu_tril_kernel<scalar_t, upper>
       <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
         result.data<scalar_t>(), self.data<scalar_t>(), k, mat_size,
