@@ -295,8 +295,8 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
     if (sparse.dense_dim() == 0) {
       AT_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
-      AT_DISPATCH_ALL_TYPES_AND_HALF(
-          values.type(), "add_out_dense_sparse_cuda", [&] {
+      AT_DISPATCH_ALL_TYPES_AND(
+        at::ScalarType::Half, values.type(), "add_out_dense_sparse_cuda", [&] {
             apply::sparseElementwiseKernelScalar<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
               <<<grid, block, 0, stream>>>(
                 TensorCAddOp<scalar_t>(value.to<scalar_t>()),
@@ -309,8 +309,8 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
       // sparseElementwiseKernel needs values to be contiguous too
       values = values.contiguous();
 
-      AT_DISPATCH_ALL_TYPES_AND_HALF(
-          values.type(), "add_out_dense_sparse_cuda", [&] {
+      AT_DISPATCH_ALL_TYPES_AND(
+        at::ScalarType::Half, values.type(), "add_out_dense_sparse_cuda", [&] {
             apply::sparseElementwiseKernel<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
               <<<grid, block, 0, stream>>>(
                 TensorCAddOp<scalar_t>(value.to<scalar_t>()),
@@ -323,8 +323,8 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
 
     // FIXME: at some point we can wrap the scale into indexAdd
     // NB: Purposely not inplace!
-    AT_DISPATCH_ALL_TYPES_AND_HALF(
-        values.type(), "add_out_dense_sparse_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(
+      at::ScalarType::Half, values.type(), "add_out_dense_sparse_cuda", [&] {
           if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
             values = values.mul(value);
           }
@@ -378,8 +378,8 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
   LongTensor s_indices_ = src._indices();
   Tensor s_values_ = src._values();
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(
-      s_values_.type(), "add_out_sparse_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(
+    at::ScalarType::Half, s_values_.type(), "add_out_sparse_cuda", [&] {
         if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
           s_values_ = s_values_.mul(value);
         }
@@ -448,8 +448,8 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   AT_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
 
   LongTensor resultNnz = at::empty({1}, CUDA(kLong));
-  AT_DISPATCH_ALL_TYPES_AND_HALF(
-      t_values_.type(), "mul_out_sparse_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(
+    at::ScalarType::Half, t_values_.type(), "mul_out_sparse_cuda", [&] {
         apply::valueSparseIntersectionKernel<TensorMulOp<scalar_t>, uint64_t, scalar_t>
           <<<grid, block, 0, stream>>>(
             TensorMulOp<scalar_t>(),

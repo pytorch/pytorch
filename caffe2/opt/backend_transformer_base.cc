@@ -78,16 +78,20 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
       shape_map[s] = shape_info;
     }
   }
+  // We treat hinted shapes as BATCH. If there are shape hints on blobs in the
+  // workspace, since they are already inserted as CONSTANT, it will take effect
+  // here. For SEQ typed tensors, there are only a few of them and they will be
+  // handled by BoundShapeInferencer.
   for (const auto& kv : shape_hints_mapped) {
     shape_map.emplace(
         std::piecewise_construct,
         std::forward_as_tuple(kv.first),
-        std::forward_as_tuple(ShapeInfo::DimType::CONSTANT, kv.second));
+        std::forward_as_tuple(ShapeInfo::DimType::BATCH, kv.second));
   }
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(*pred_net, shape_map);
   const auto& out_map = eng.shape_info();
-
+  shape_map.clear();
   for (const auto& kv : out_map) {
     shape_map.emplace(
         std::piecewise_construct,

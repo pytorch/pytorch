@@ -211,14 +211,14 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
 
   // precision
   DFTI_CONFIG_VALUE prec;
-  if (input.type().scalarType() == ScalarType::Float) {
+  if (input.scalar_type() == ScalarType::Float) {
     prec = DFTI_SINGLE;
-  } else if (input.type().scalarType() == ScalarType::Double) {
+  } else if (input.scalar_type() == ScalarType::Double) {
     prec = DFTI_DOUBLE;
   } else {
     std::ostringstream ss;
     ss << "MKL FFT doesn't support tensor of type: "
-       << toString(input.type().scalarType());
+       << toString(input.scalar_type());
     AT_ERROR(ss.str());
   }
   // signal type
