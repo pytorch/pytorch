@@ -210,21 +210,22 @@ Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
 
 Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen) {
   auto p = std::get<0>(expand_inplace(self, p_.to(kCUDA)));
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "bernoulli_tensor_cuda_self_", [&] {
-    const at::Type& p_type = p.type();
-    using self_t = scalar_t;
-    auto seeds = next_philox_seed(gen, 10);
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.type(), "bernoulli_tensor_cuda_p_", [&] {
-      using p_t = scalar_t;
-      return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, p, seeds);
-    });
+  AT_DISPATCH_ALL_TYPES_AND(
+    at::ScalarType::Half, self.type(), "bernoulli_tensor_cuda_self_", [&] {
+      const at::Type& p_type = p.type();
+      using self_t = scalar_t;
+      auto seeds = next_philox_seed(gen, 10);
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.type(), "bernoulli_tensor_cuda_p_", [&] {
+        using p_t = scalar_t;
+        return bernoulli_tensor_cuda_kernel<self_t, p_t>(self, p, seeds);
+      });
    });
   return self;
 }
 
 Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
   AT_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "bernoulli_scalar_cuda_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.type(), "bernoulli_scalar_cuda_", [&] {
     auto seeds = next_philox_seed(gen, 10);
     bernoulli_scalar_cuda_kernel<scalar_t>(self, p, seeds);
    });

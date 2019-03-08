@@ -433,6 +433,10 @@
   self: grad * (1 - weight.toDouble())
   end: grad * weight
 
+- name: lerp(Tensor self, Tensor end, Tensor weight)
+  self: grad * (1 - weight)
+  end: grad * weight
+
 - name: lgamma(Tensor self)
   self: grad * digamma(self)
 
