@@ -148,6 +148,8 @@ Value* getNestedValueTrace(const IValue& v) {
             v.toTuple()->elements(),
             [](const IValue& val) { return getNestedValueTrace(val); })))
         ->output();
+  } else if (v.isInt() || v.isDouble() || v.isBool()) {
+    return state->graph->insertConstant(v);
   }
   return getValueTrace(v.toTensor());
 }

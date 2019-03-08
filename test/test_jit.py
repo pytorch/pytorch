@@ -2336,6 +2336,19 @@ class TestJit(JitTestCase):
         self.assertEqual(len(warns), 1)
         self.assertEqual(warns[0], "new_zeros is a legacy constructor and is not supported in the JIT.")
 
+    def test_trace_int_call(self):
+        @torch.jit.script
+        def foo(x, y):
+            # type: (Tensor, int) -> Tensor
+            return x + y
+
+        def bar(x):
+            return foo(x, 4)
+
+        x = torch.ones(1)
+        traced_bar = torch.jit.trace(bar, (x,))
+        self.assertEqual(traced_bar(x), x + 4)
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
