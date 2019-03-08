@@ -32,7 +32,6 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
             /*is_variable=*/false,
             /*is_undefined=*/false) {}
 
-  ScalarType scalarType() const override;
   caffe2::TypeMeta typeMeta() const override;
   Backend backend() const override;
   const char* toString() const override;
@@ -52,10 +51,6 @@ struct ComplexHooks : public at::ComplexHooksInterface {
         Backend::CPU, ScalarType::ComplexFloat, new CPUComplexFloatType());
   }
 };
-
-ScalarType CPUComplexFloatType::scalarType() const {
-  return ScalarType::ComplexFloat;
-}
 
 caffe2::TypeMeta CPUComplexFloatType::typeMeta() const {
   return scalarTypeToTypeMeta(ScalarType::ComplexFloat);
