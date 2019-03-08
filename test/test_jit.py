@@ -10601,6 +10601,18 @@ a")
         m._create_method_from_graph("forward", foo.graph)
         self.getExportImportCopy(m)
 
+    def test_optional_tuple(self):
+        def fn(x=None):
+            # type: (Optional[Tuple[int, int]]) -> Tuple[int, int]
+            if x is None:
+                x = (1, 2)
+            else:
+                x = torch.jit._unwrap_optional(x)
+            return x
+
+        self.checkScript(fn, ((3, 4),))
+        self.checkScript(fn, ())
+
 
 class MnistNet(nn.Module):
     def __init__(self):
