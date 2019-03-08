@@ -15,7 +15,7 @@ struct StridedData {
   StridedData(const Tensor & tensor)
     : data(tensor.data_ptr())
     , strides(tensor.strides())
-    , elementSize(tensor.type().elementSizeInBytes()) {}
+    , elementSize(tensor.dtype().itemsize()) {}
 
   void* data;
   IntArrayRef strides;

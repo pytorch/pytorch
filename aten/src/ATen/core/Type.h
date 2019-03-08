@@ -127,7 +127,6 @@ struct CAFFE2_API Type {
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
   virtual Storage unsafeStorageFromTH(void * th_pointer, bool retain) const = 0;
   virtual const char * toString() const = 0;
-  virtual size_t elementSizeInBytes() const = 0;
   virtual Type & toBackend(Backend b) const = 0;
   virtual Type & toScalarType(ScalarType s) const = 0;
   Type & toSparse() const {
@@ -525,6 +524,7 @@ struct CAFFE2_API Type {
   virtual Tensor & pow_(Tensor & self, Scalar exponent) const = 0;
   virtual Tensor & pow_(Tensor & self, const Tensor & exponent) const = 0;
   virtual Tensor & lerp_(Tensor & self, const Tensor & end, Scalar weight) const = 0;
+  virtual Tensor & lerp_(Tensor & self, const Tensor & end, const Tensor & weight) const = 0;
   virtual Tensor & sign_(Tensor & self) const = 0;
   virtual Tensor & fmod_(Tensor & self, Scalar other) const = 0;
   virtual Tensor & fmod_(Tensor & self, const Tensor & other) const = 0;
@@ -594,6 +594,7 @@ struct CAFFE2_API Type {
   virtual Tensor neg(const Tensor & self) const = 0;
   virtual Tensor atan2(const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor lerp(const Tensor & self, const Tensor & end, Scalar weight) const = 0;
+  virtual Tensor lerp(const Tensor & self, const Tensor & end, const Tensor & weight) const = 0;
   virtual Tensor histc(const Tensor & self, int64_t bins, Scalar min, Scalar max) const = 0;
   virtual Tensor sign(const Tensor & self) const = 0;
   virtual Tensor fmod(const Tensor & self, Scalar other) const = 0;

@@ -166,10 +166,6 @@ Tensor & pow_(Tensor& self, const Tensor & exponent) {
   return at::legacy::th::_th_pow_(self, exponent);
 }
 
-Tensor & lerp_(Tensor& self, const Tensor & end, Scalar weight) {
-  return at::legacy::th::_th_lerp_(self, end, weight);
-}
-
 Tensor & sign_(Tensor& self) {
   return at::legacy::th::_th_sign_(self);
 }
@@ -605,14 +601,6 @@ Tensor & atan2_out(Tensor & result, const Tensor & self, const Tensor & other) {
 
 Tensor atan2(const Tensor & self, const Tensor & other) {
   return at::legacy::th::_th_atan2(self, other);
-}
-
-Tensor & lerp_out(Tensor & result, const Tensor & self, const Tensor & end, Scalar weight) {
-  return at::legacy::th::_th_lerp_out(result, self, end, weight);
-}
-
-Tensor lerp(const Tensor & self, const Tensor & end, Scalar weight) {
-  return at::legacy::th::_th_lerp(self, end, weight);
 }
 
 Tensor & _histc_out_cpu(Tensor & result, const Tensor & self, int64_t bins, Scalar min, Scalar max) {

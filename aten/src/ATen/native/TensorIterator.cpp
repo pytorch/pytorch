@@ -548,7 +548,7 @@ static DimVector compute_stride(const Tensor& tensor, IntArrayRef shape) {
   int ndim = shape.size();
   auto original_shape = tensor.sizes();
   auto original_stride = tensor.strides();
-  auto element_size_in_bytes = tensor.type().elementSizeInBytes();
+  auto element_size_in_bytes = tensor.dtype().itemsize();
 
   auto stride = DimVector(ndim, 0);
   auto offset = ndim - original_shape.size();

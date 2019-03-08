@@ -3373,6 +3373,16 @@
 - func: lerp_(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
   matches_jit_signature: True
   variants: method
+  dispatch:
+    CPU: lerp_cpu_scalar_
+    CUDA: lerp_cuda_scalar_
+
+- func: lerp_(Tensor(a!) self, Tensor end, Tensor weight) -> Tensor(a!)
+  matches_jit_signature: True
+  variants: method
+  dispatch:
+    CPU: lerp_cpu_tensor_
+    CUDA: lerp_cuda_tensor_
 
 - func: sign_(Tensor(a!) self) -> Tensor(a!)
   matches_jit_signature: True
@@ -3829,10 +3839,29 @@
 
 - func: lerp(Tensor self, Tensor end, Scalar weight, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
+  dispatch:
+    CPU: lerp_cpu_scalar_out
+    CUDA: lerp_cuda_scalar_out
+
+- func: lerp(Tensor self, Tensor end, Tensor weight, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
+  dispatch:
+    CPU: lerp_cpu_tensor_out
+    CUDA: lerp_cuda_tensor_out
 
 - func: lerp(Tensor self, Tensor end, Scalar weight) -> Tensor
   matches_jit_signature: True
   variants: method, function
+  dispatch:
+    CPU: lerp_cpu_scalar
+    CUDA: lerp_cuda_scalar
+
+- func: lerp(Tensor self, Tensor end, Tensor weight) -> Tensor
+  matches_jit_signature: True
+  variants: method, function
+  dispatch:
+    CPU: lerp_cpu_tensor
+    CUDA: lerp_cuda_tensor
 
 - func: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True

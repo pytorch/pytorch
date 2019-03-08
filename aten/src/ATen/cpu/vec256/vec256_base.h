@@ -221,7 +221,7 @@ public:
     return map([](T x) { return -x; });
   }
   Vec256<T> round() const {
-    return map(std::round);
+    return map(std::nearbyint);
   }
   Vec256<T> sin() const {
     return map(std::sin);

@@ -320,7 +320,7 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
         w_shape.data_type());
   } else {
     ShapeInfo& x_shape_info = x_it->second;
-    if (x_shape_info.dim_type == ShapeInfo::DimType::UNKNOWN) {
+    if (x_shape_info.dim_type != ShapeInfo::DimType::BATCH) {
       CAFFE_ENFORCE_GE(x_shape_info.shape.dims_size(), 1);
       x_shape_info.shape.set_dims(0, spec_.max_batch_size);
       x_shape_info.dim_type = ShapeInfo::DimType::BATCH;
