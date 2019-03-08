@@ -47,10 +47,6 @@ TypeID ${Type}::ID() const {
   return ${TypeID};
 }
 
-size_t ${Type}::elementSizeInBytes() const {
-  return sizeof(${ScalarType});
-}
-
 ${type_derived_method_definitions}
 
 }
