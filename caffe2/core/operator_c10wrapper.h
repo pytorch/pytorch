@@ -116,24 +116,24 @@ class C10OperatorWrapper final : public Operator<Context> {
   IValue get_nontensor_argument_(const c10::Argument& argument) {
     if (argument.type()->isSubtypeOf(IntType::get())) {
       if (argument.default_value().has_value()) {
-        return GetSingleArgument<int>(argument.name(), argument.default_value()->toInt());
+        return OperatorBase::GetSingleArgument<int>(argument.name(), argument.default_value()->toInt());
       } else {
-        AT_CHECK(HasSingleArgumentOfType<int>(argument.name()), "Error in caffe2->c10 wrapper: Expected argument '", argument.name(), "' missing or wrong type (expected int).");
-        return GetSingleArgument<int>(argument.name(), 0);
+        AT_CHECK(OperatorBase::HasSingleArgumentOfType<int>(argument.name()), "Error in caffe2->c10 wrapper: Expected argument '", argument.name(), "' missing or wrong type (expected int).");
+        return OperatorBase::GetSingleArgument<int>(argument.name(), 0);
       }
     } else if (argument.type()->isSubtypeOf(FloatType::get())) {
       if (argument.default_value().has_value()) {
-        return GetSingleArgument<double>(argument.name(), argument.default_value()->toDouble());
+        return OperatorBase::GetSingleArgument<double>(argument.name(), argument.default_value()->toDouble());
       } else {
-        AT_CHECK(HasSingleArgumentOfType<double>(argument.name()), "Error in caffe2->c10 wrapper: Expected argument '", argument.name(), "' missing or wrong type (expected double).");
-        return GetSingleArgument<double>(argument.name(), 0);
+        AT_CHECK(OperatorBase::HasSingleArgumentOfType<double>(argument.name()), "Error in caffe2->c10 wrapper: Expected argument '", argument.name(), "' missing or wrong type (expected double).");
+        return OperatorBase::GetSingleArgument<double>(argument.name(), 0);
       }
     } else if (argument.type()->isSubtypeOf(BoolType::get())) {
       if (argument.default_value().has_value()) {
-        return GetSingleArgument<bool>(argument.name(), argument.default_value()->toBool());
+        return OperatorBase::GetSingleArgument<bool>(argument.name(), argument.default_value()->toBool());
       } else {
-        AT_CHECK(HasSingleArgumentOfType<bool>(argument.name()), "Error in caffe2->c10 wrapper: Expected argument '", argument.name(), "' missing or wrong type (expected bool).");
-        return GetSingleArgument<bool>(argument.name(), 0);
+        AT_CHECK(OperatorBase::HasSingleArgumentOfType<bool>(argument.name()), "Error in caffe2->c10 wrapper: Expected argument '", argument.name(), "' missing or wrong type (expected bool).");
+        return OperatorBase::GetSingleArgument<bool>(argument.name(), 0);
       }
     } else {
       // TODO Support more types
@@ -154,7 +154,7 @@ class C10OperatorWrapper final : public Operator<Context> {
 
 template<class Context, const c10::OperatorHandle& (*OperatorHandle)()>
 inline std::unique_ptr<C10OperatorWrapper<Context>> createC10OperatorWrapper(const OperatorDef& operator_def, Workspace* ws) {
-  return std::make_unique<C10OperatorWrapper<Context>>(OperatorHandle(), operator_def, ws);
+  return c10::guts::make_unique<C10OperatorWrapper<Context>>(OperatorHandle(), operator_def, ws);
 }
 
 }
