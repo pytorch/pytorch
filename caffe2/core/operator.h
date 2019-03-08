@@ -1239,52 +1239,6 @@ C10_DECLARE_REGISTRY(
   REGISTER_HIP_OPERATOR_WITH_ENGINE(name, MIOPEN, __VA_ARGS__) \
   REGISTER_HIP_OPERATOR_WITH_ENGINE(name, CUDNN, __VA_ARGS__) // Make CUDNN an alias of MIOPEN for HIP ops
 
-C10_DECLARE_REGISTRY(
-    FunctionSchemaOperatorRegistry,
-    OperatorBase,
-    const c10::FunctionSchema,
-    std::vector<c10::IValue>,
-    std::vector<c10::IValue*>);
-
-struct FunctionSchemaStorageBase {
-  FunctionSchemaStorageBase() {}
-  virtual c10::FunctionSchema getSchema() = 0;
-  virtual ~FunctionSchemaStorageBase() {}
-};
-
-C10_DECLARE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
-
-// Prefer to use the {DECLARE,DEFINE}_FUNCTION_SCHEMA_OPERATOR macros,
-// as they wrap it all in a Meyer's singleton accessible from Torch.
-
-#define REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl)        \
-  C10_REGISTER_CLASS(FunctionSchemaOperatorRegistry, name, impl)              \
-  struct FunctionSchemaStorageBase##name : public FunctionSchemaStorageBase { \
-    c10::FunctionSchema getSchema() override {                                \
-      return c10::FunctionSchema("_caffe2::" #name, inputs, outputs);         \
-    }                                                                         \
-  };                                                                          \
-  C10_REGISTER_CLASS(                                                         \
-      FunctionSchemaRegistry, name, FunctionSchemaStorageBase##name)
-
-#define DEFINE_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl) \
-  void CAFFE2_MEYERS_OP_REGISTRATION_##name() {                      \
-    REGISTER_FUNCTION_SCHEMA_OPERATOR(name, inputs, outputs, impl);  \
-  }                                                                  \
-  static CAFFE2_STRUCT_OP_REGISTRATION_##name                        \
-      CAFFE2_STRUCT_OP_REGISTRATION_DEFN_##name;
-
-#define DECLARE_FUNCTION_SCHEMA_OPERATOR(name)             \
-  CAFFE2_API void CAFFE2_MEYERS_OP_REGISTRATION_##name();  \
-  struct CAFFE2_API CAFFE2_STRUCT_OP_REGISTRATION_##name { \
-    CAFFE2_STRUCT_OP_REGISTRATION_##name() {               \
-      CAFFE2_MEYERS_OP_REGISTRATION_##name();              \
-    }                                                      \
-  };
-
-#define GET_FUNCTION_SCHEMA(name) \
-  FunctionSchemaRegistry()->Create(name)->getSchema()
-
 // StaticLinkingProtector is a helper class that ensures that the Caffe2
 // library is linked correctly with whole archives (in the case of static
 // linking). What happens is that when CreateOperator is called for the first
@@ -1341,13 +1295,6 @@ CAFFE2_API unique_ptr<OperatorBase> CreateOperator(
     const OperatorDef& operator_def,
     Workspace* ws,
     int net_position = OperatorBase::kNoNetPositionSet);
-
-// Using the new C10 interface and FunctionSchema registry,
-// instantiate and run the operator.
-CAFFE2_API void RunOperator(
-    c10::Symbol name,
-    const std::vector<c10::IValue>& inputs,
-    const std::vector<c10::IValue*>& outputs);
 
 CAFFE2_API const std::string OpRegistryKey(
     const std::string& op_type,
