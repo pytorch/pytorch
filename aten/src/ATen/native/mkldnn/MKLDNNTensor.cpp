@@ -14,7 +14,7 @@ ideep::tensor& IdeepTensorFromMKLDNNTensor(const Tensor& self) {
   return ((MKLDNNTensorImpl*)self.unsafeGetTensorImpl())->get_ideep_tensor();
 }
 
-Tensor mkldnn_to_plainfmt(const Tensor& mkldnn_tensor) {
+Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
   // TODO: share buffer without copy when MKLDNN tensor is in plain format
   AT_ASSERT(mkldnn_tensor.type_id() == MkldnnCPUTensorId());
   ideep::tensor& stensor = IdeepTensorFromMKLDNNTensor(mkldnn_tensor);
@@ -27,7 +27,7 @@ Tensor mkldnn_to_plainfmt(const Tensor& mkldnn_tensor) {
   return cpu_tensor;
 }
 
-Tensor plainfmt_to_mkldnn(const Tensor& cpu_tensor) {
+Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
   // TODO: share CPU storage without explicit buffer copy here
   AT_ASSERT(cpu_tensor.type_id() == CPUTensorId());
   AT_ASSERT(cpu_tensor.scalar_type() == ScalarType::Float);
@@ -44,11 +44,11 @@ Tensor plainfmt_to_mkldnn(const Tensor& cpu_tensor) {
 
 #else
 
-Tensor mkldnn_to_plainfmt(const Tensor& mkldnn_tensor) {
+Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
   AT_ERROR("MKL-DNN build is disabled");
 }
 
-Tensor plainfmt_to_mkldnn(const Tensor& cpu_tensor) {
+Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
   AT_ERROR("MKL-DNN build is disabled");
 }
 

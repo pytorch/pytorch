@@ -781,9 +781,6 @@ inline Tensor Tensor::to_sparse() const {
 inline Tensor Tensor::to_mkldnn() const {
     return type().to_mkldnn(*this);
 }
-inline Tensor Tensor::to_plainfmt() const {
-    return type().to_plainfmt(*this);
-}
 inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy) const {
     return type().to(*this, options, non_blocking, copy);
 }

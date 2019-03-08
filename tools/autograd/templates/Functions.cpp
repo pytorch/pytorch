@@ -2070,19 +2070,18 @@ Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const T
 }
 
 Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
-  AT_ASSERT(input_.is_sparse());
-  auto input = input_.coalesce();
-  return grad.sparse_mask(at::SparseTensorRef(input));
+  AT_ASSERT(input_.is_sparse() || input_.layout() == c10::kMkldnn);
+  if (input_.is_sparse()) {
+    auto input = input_.coalesce();
+    return grad.sparse_mask(at::SparseTensorRef(input));
+  } else {
+    return grad.to_mkldnn();
+  }
 }
 
 Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
   AT_ASSERT(input_.layout() == c10::kStrided);
-  return grad.to_plainfmt();
-}
-
-Tensor to_plainfmt_backward(const Tensor& grad, const Tensor& input_) {
-  AT_ASSERT(input_.layout() == c10::kMkldnn);
-  return grad.to_mkldnn();
+  return grad.to_dense();
 }
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p in pads])
