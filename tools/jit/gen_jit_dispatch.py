@@ -92,7 +92,6 @@ def jit_type_of(arg):
 
 # map from aten 'simple_type' to the function that will turn a tensor into
 # that type
-# TODO: Device? and Layout? need toOptional?
 FROM_IVALUE = {
     'Device': '{}.toDevice()',
     'Device?': '{}.toOptional<c10::Device>()',
@@ -355,8 +354,7 @@ def gen_jit_dispatch(declarations, out, template_path):
             # device is specified as an IntArrayRef of { at::Device::Type, device_id }
             {'name': 'device', 'simple_type': 'Device'},
         ]
-        # if decl['name'] == '_sparse_coo_tensor_unsafe':
-        #     import pdb; pdb.set_trace()
+        # TODO: Don't repack this into TensorOptions. Needs various changes in downstream code.
         if 'default' in arg:
             tensor_options_expansion[0]['simple_type'] += '?'
             tensor_options_expansion[1]['simple_type'] += '?'

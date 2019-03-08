@@ -194,10 +194,6 @@ def parse_arguments(args, func_variants, declaration, func_return):
     # They must appear in this order and in this order only to be compliant with the JIT schema
 
     tensor_options_arguments = [
-        # XXX - until we actually have first-class interpreter types for these
-        # concepts, the default values to be encoded in Tensors
-        # If you change this, you also need to update [TensorOptions in script]
-        # in the tracer code.
         # dtype is specified as an int64_t of at::ScalarType
         {'name': 'dtype', 'type': ['ScalarType', 'ScalarType?'], 'is_nullable': False, 'annotation': None},
         # layout is specified as an int64_t of at::Layout
@@ -210,13 +206,6 @@ def parse_arguments(args, func_variants, declaration, func_return):
     def compare_tensor_option(argument, tensor_option_argument):
         matches = True
         matches = matches and argument['name'] == tensor_option_argument['name']
-        # print("--")
-        # print("declaration['name']")
-        # print(declaration['name'])
-        # print("tensor_option_argument['type']")
-        # print(tensor_option_argument['type'])
-        # print("argument['type']")
-        # print(argument['type'])
         matches = matches and argument['type'] in tensor_option_argument['type']
         return matches
 
