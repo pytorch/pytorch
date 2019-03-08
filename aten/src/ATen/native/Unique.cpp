@@ -127,7 +127,7 @@ std::tuple<Tensor, Tensor> _unique_dim_cpu_template(
 
 std::tuple<Tensor, Tensor>
 _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
-  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique", [&] {
+  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique_cpu", [&] {
     return _unique_cpu_template<scalar_t>(self, sorted, return_inverse);
   });
 }

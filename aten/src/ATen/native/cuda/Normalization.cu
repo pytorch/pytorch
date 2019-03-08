@@ -4,7 +4,7 @@ namespace at { namespace native {
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const Tensor& weight, const Tensor& bias,
                                                    const Tensor& running_mean, const Tensor& running_var, bool train, double momentum, double epsilon) {
-  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm", [&] {
+  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_cuda", [&] {
       if (cuda::detail::canUse32BitIndexMath(self)) {
         return batch_norm_cuda_template<scalar_t, int32_t>(self, weight, bias, running_mean, running_var, train, momentum, epsilon);
       } else {
@@ -15,7 +15,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const Ten
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_out, const Tensor& self, const Tensor& weight, const Tensor& running_mean, const Tensor& running_var,
                                                             const Tensor& save_mean, const Tensor& save_invstd, bool train, double epsilon, std::array<bool,3> grad_input_mask) {
-  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_backward", [&] {
+  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_backward_cuda", [&] {
       if (cuda::detail::canUse32BitIndexMath(self)) {
         return batch_norm_backward_cuda_template<scalar_t, int32_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, epsilon, grad_input_mask);
       } else {
@@ -25,7 +25,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
 }
 
 std::tuple<Tensor, Tensor> batch_norm_stats_cuda(const Tensor& self, double epsilon) {
-  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_stats", [&] {
+  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_stats_cuda", [&] {
       if (cuda::detail::canUse32BitIndexMath(self)) {
         return batch_norm_stats_cuda_template<scalar_t, int32_t>(self, epsilon);
       } else {
@@ -48,7 +48,7 @@ Tensor batch_norm_elemt_cuda(const Tensor& self, const Tensor& weight, const Ten
 // accepting input(self) here to determine template data types, since running_mean/running_var are optional
 std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda(const Tensor& self, const Tensor& mean, const Tensor& invstd, const Tensor& running_mean,
                                                         const Tensor& running_var, double momentum, double epsilon, int64_t count) {
-  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_update_stats", [&] {
+  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_update_stats_cuda", [&] {
       int world_size = mean.size(1);
       using accscalar_t = at::acc_type<scalar_t, true>;
       if (cuda::detail::canUse32BitIndexMath(self)) {

@@ -260,13 +260,13 @@ std::tuple<Tensor, Tensor> _gesv_helper_cuda(const Tensor& self, const Tensor& A
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
   std::vector<int64_t> infos(batchCount(self), 0);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "gesv", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "gesv_cuda", [&]{
     apply_gesv<scalar_t>(self_working_copy, A_working_copy, infos);
   });
   if (self.dim() > 2) {
-    batchCheckErrors(infos, "gesv");
+    batchCheckErrors(infos, "gesv_cuda");
   } else {
-    singleCheckErrors(infos[0], "gesv");
+    singleCheckErrors(infos[0], "gesv_cuda");
   }
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
@@ -327,11 +327,11 @@ Tensor _inverse_helper_cuda(const Tensor& self) {
   std::vector<int64_t> infos(batchCount(self), 0);
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto self_inv_working_copy = cloneBatchedColumnMajor(self);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
     apply_inverse<scalar_t>(
       self_working_copy, self_inv_working_copy, infos);
   });
-  batchCheckErrors(infos, "inverse");
+  batchCheckErrors(infos, "inverse_cuda");
   return self_inv_working_copy;
 }
 
@@ -386,7 +386,7 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
   int64_t info = 0;
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky_solve", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky_solve_cuda", [&]{
     apply_cholesky_solve<scalar_t>(self_working_copy, A_working_copy, upper, info);
   });
   AT_CHECK(info == 0, "MAGMA cholesky_solve : invalid argument: ", -info);
@@ -446,13 +446,13 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
     self_working_copy = cloneBatchedColumnMajor(self);
   }
 
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky_cuda", [&]{
     apply_cholesky<scalar_t>(self_working_copy, false, infos);
   });
   if (self.dim() > 2) {
-    batchCheckErrors(infos, "cholesky");
+    batchCheckErrors(infos, "cholesky_cuda");
   } else {
-    singleCheckErrors(infos[0], "cholesky");
+    singleCheckErrors(infos[0], "cholesky_cuda");
   }
   if (upper) {
     return self_working_copy.transpose(-1, -2);
