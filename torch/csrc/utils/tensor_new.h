@@ -10,6 +10,7 @@ at::Tensor legacy_tensor_ctor(const at::Type& type, at::ScalarType scalar_type, 
 at::Tensor legacy_tensor_new(const at::Type& type, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
 at::Tensor indexing_tensor_from_data(
     const at::Type& type,
+    at::ScalarType scalar_type,
     c10::optional<at::Device> device,
     PyObject* data);
 at::Tensor sparse_coo_tensor_ctor(const at::Type& type, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
