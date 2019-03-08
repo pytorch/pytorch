@@ -188,10 +188,13 @@ def parse_arguments(args, func_variants, declaration, func_return):
 
     # Reverse splat of TensorOptions
     # As we move towards the JIT function schema for native_functions.yaml we need to support
-    # the expanded version of TensorOptions. For this we discover whether there are three
+    # the expanded version of TensorOptions. For now we discover whether there are three
     # types and names of keyword arguments: "ScalarType dtype", "Layout layout" and "Device device"
-    # Each, if set,  must have default arguments set to long or float, strided and "cpu" respectively.
-    # They must appear in this order and in this order only to be compliant with the JIT schema
+    # Each, if set, must have default arguments set to long or float, strided and "cpu" respectively.
+    # They must appear in this order and in this order only in order for us to be able to process them.
+    # In the future we will get rid of this specific processing as downstream consumers start relying
+    # less on the content of Declarations.yaml. If you want to support more than this you'll
+    # potentially have to extend the JIT.
 
     tensor_options_arguments = [
         # dtype is specified as an int64_t of at::ScalarType
@@ -234,8 +237,6 @@ def parse_arguments(args, func_variants, declaration, func_return):
                 for t_idx, t_arg in enumerate(tensor_options_representation):
                     assert compare_tensor_option(t_arg, tensor_options_arguments[t_idx])
                     if 'default' in t_arg:
-                        # print("t_arg['default']")
-                        # print(t_arg['default'])
                         assert t_arg['default'] in tensor_options_defaults[t_idx]
                         if 'default' not in merged_argument:
                             merged_argument['default'] = '{}'
