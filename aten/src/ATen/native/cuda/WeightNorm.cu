@@ -323,10 +323,10 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
   // sends the unpacked g.data() as the argument.  In other words, we expect "g" is a bare Tensor here.
 
   // norms is only needed to stash for backward.
-  // g.type().scalarType() may be at::ScalarType::Double, Float, or Half.  
+  // g.scalar_type() may be at::ScalarType::Double, Float, or Half.  
   // If Half, stash norms as float.
-  at::ScalarType AccType = g.type().scalarType() == at::ScalarType::Half ?
-                           at::ScalarType::Float : g.type().scalarType();
+  at::ScalarType AccType = g.scalar_type() == at::ScalarType::Half ?
+                           at::ScalarType::Float : g.scalar_type();
   // Will this create norms on the same device as g, regardless of what the thread's default 
   // current device is?  I believe so, because Type::* functions are DeviceGuard()ed.
   auto norms = at::empty_strided(g.sizes(), g.strides(), g.options().dtype(AccType));

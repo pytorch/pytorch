@@ -35,7 +35,7 @@ static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor
 }
 
 Tensor det(const Tensor& self) {
-  AT_CHECK(at::isFloatingType(self.type().scalarType()) &&
+  AT_CHECK(at::isFloatingType(self.scalar_type()) &&
            self.dim() == 2 && self.size(0) == self.size(1),
            "det(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
            "of floating types");
@@ -51,7 +51,7 @@ Tensor det(const Tensor& self) {
 }
 
 Tensor logdet(const Tensor& self) {
-  AT_CHECK(at::isFloatingType(self.type().scalarType()) &&
+  AT_CHECK(at::isFloatingType(self.scalar_type()) &&
            self.dim() == 2 && self.size(0) == self.size(1),
            "logdet(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
            "of floating types");
@@ -72,7 +72,7 @@ Tensor logdet(const Tensor& self) {
 }
 
 std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
-  AT_CHECK(at::isFloatingType(self.type().scalarType()) &&
+  AT_CHECK(at::isFloatingType(self.scalar_type()) &&
            self.dim() == 2 && self.size(0) == self.size(1),
            "slogdet(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
            "of floating types");
@@ -89,7 +89,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 }
 
 Tensor pinverse(const Tensor& self, double rcond) {
-  AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
+  AT_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
            "pinverse(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
            "of floating types");
   if (self.numel() == 0) {
@@ -117,7 +117,7 @@ static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
 }
 
 Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
-  AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
+  AT_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
            "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
            "of floating types");
 
@@ -126,12 +126,12 @@ Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
 }
 
 Tensor matrix_rank(const Tensor& self, bool symmetric) {
-  AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
+  AT_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
            "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
            "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
-  double tol = _get_epsilon(self.type().scalarType()) * std::max(self.size(0), self.size(1));
+  double tol = _get_epsilon(self.scalar_type()) * std::max(self.size(0), self.size(1));
   return (S > S.max().mul_(tol)).sum();
 }
 
@@ -484,7 +484,7 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
 }
 
 Tensor matrix_power(const Tensor& a, int64_t n) {
-  AT_CHECK(a.dim() >= 2 && at::isFloatingType(a.type().scalarType()),
+  AT_CHECK(a.dim() >= 2 && at::isFloatingType(a.scalar_type()),
            "matrix_power(", a.type(), "{", a.sizes(), "}): expected a tensor "
            "of floating types with dim at least 2");
   if (n == 0) {
@@ -532,7 +532,7 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
       dim.size(),
       " dimensions instead.");
   if (dim.size() == 1) {
-    return at::norm(self, 2, dim, keepdim, self.type().scalarType());
+    return at::norm(self, 2, dim, keepdim, self.scalar_type());
   }
   return at::sqrt(at::sum(self * self, dim, keepdim));
 }
@@ -548,7 +548,7 @@ Tensor &frobenius_norm_out(
       dim.size(),
       " dimensions instead.");
   if (dim.size() == 1) {
-    return at::norm_out(result, self, 2, dim, keepdim, self.type().scalarType());
+    return at::norm_out(result, self, 2, dim, keepdim, self.scalar_type());
   }
   return at::sqrt_out(result, at::sum(self * self, dim, keepdim));
 }

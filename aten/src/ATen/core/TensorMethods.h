@@ -1342,11 +1342,11 @@ inline bool is_sparse(Tensor self) {
   template <>                                    \
   inline T* Tensor::data() const {               \
     AT_CHECK(                                    \
-        type().scalarType() == ScalarType::name, \
+        scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
         #name,                                   \
         " but found ",                           \
-        c10::toString(type().scalarType()));     \
+        c10::toString(scalar_type()));           \
     return static_cast<T*>(this->data_ptr());    \
   }
 

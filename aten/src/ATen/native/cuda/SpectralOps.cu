@@ -194,7 +194,7 @@ static inline Tensor _run_cufft(
 
   // run
 #ifdef __HIP_PLATFORM_HCC__
-  if (input.type().scalarType() == ScalarType::Float) {
+  if (input.scalar_type() == ScalarType::Float) {
       if (complex_input && complex_output) {
         CUFFT_CHECK(hipfftExecC2C(plan, static_cast<hipfftComplex*>(input.data_ptr()),
           static_cast<hipfftComplex*>(output.data_ptr()),
@@ -208,7 +208,7 @@ static inline Tensor _run_cufft(
       } else {
         AT_ERROR("hipFFT doesn't support r2r (float)");
       }
-    } else if (input.type().scalarType() == ScalarType::Double) {
+    } else if (input.scalar_type() == ScalarType::Double) {
       if (complex_input && complex_output) {
         CUFFT_CHECK(hipfftExecZ2Z(plan, static_cast<hipfftDoubleComplex*>(input.data_ptr()),
           static_cast<hipfftDoubleComplex*>(output.data_ptr()),
@@ -225,7 +225,7 @@ static inline Tensor _run_cufft(
     } else {
       std::ostringstream ss;
       ss << "hipFFT doesn't support tensor of type: "
-         << toString(input.type().scalarType());
+         << toString(input.scalar_type());
       AT_ERROR(ss.str());
     }
 #else
