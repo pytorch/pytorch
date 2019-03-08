@@ -1358,18 +1358,26 @@ class _TestTorchMixin(object):
     def test_min_elementwise(self):
         self._testCSelection(torch.min, min)
 
-    def test_lerp(self):
-        def TH_lerp(a, b, weight):
-            return a + weight * (b - a)
+    @staticmethod
+    def _test_lerp(self, cast):
+        start_end_shapes = [(), (5,), (5, 5), (5, 5, 5)]
+        for shapes in product(start_end_shapes, start_end_shapes):
+            start = cast(torch.randn(shapes[0]))
+            end = cast(torch.randn(shapes[1]))
 
-        size = (100, 100)
-        a = torch.rand(*size)
-        b = torch.rand(*size)
-        w = random.random()
-        result = torch.lerp(a, b, w)
-        expected = a.clone()
-        expected.map2_(a, b, lambda _, a, b: TH_lerp(a, b, w))
-        self.assertEqual(result, expected)
+            # Tensor weights
+            for weight in [cast(torch.randn(shapes[0])), random.random()]:
+                actual = torch.lerp(start, end, weight)
+                actual_method = start.lerp(end, weight)
+                self.assertEqual(actual, actual_method)
+                actual_out = cast(torch.Tensor())
+                torch.lerp(start, end, weight, out=actual_out)
+                self.assertEqual(actual, actual_out)
+                expected = start + weight * (end - start)
+                self.assertEqual(expected, actual)
+
+    def test_lerp(self):
+        self._test_lerp(self, lambda t: t)
 
     def test_all_any(self):
         def test(size):

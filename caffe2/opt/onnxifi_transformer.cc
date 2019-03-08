@@ -960,6 +960,18 @@ void OnnxifiTransformer::transform(
     shape_hints_onnx_ = stripShapeInfoMap(shape_hints);
   }
 
+  if (opts_.debug) {
+    NetDef shape_net(*pred_net);
+    auto* shape_arg = shape_net.add_arg();
+    shape_arg->set_name("shape_info");
+    for (const auto& kv : shape_hints) {
+      auto t = wrapShapeInfoIntoTensorProto(kv.first, kv.second);
+      t.add_int32_data(static_cast<int32_t>(kv.second.dim_type));
+      shape_arg->mutable_tensors()->Add()->CopyFrom(t);
+    }
+    WriteProtoToTextFile(shape_net, "debug_ssa_net.pb_txt");
+  }
+
   // Get backend id
   getBackendId();
 
@@ -978,7 +990,6 @@ void OnnxifiTransformer::transform(
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());
 
   if (opts_.debug) {
-    WriteProtoToTextFile(*pred_net, "debug_full_pred_net.pb_txt");
     WriteProtoToTextFile(net_opt, "debug_full_opt_net.pb_txt");
   }
   pred_net->Swap(&net_opt);

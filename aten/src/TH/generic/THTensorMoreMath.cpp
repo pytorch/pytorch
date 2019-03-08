@@ -1433,7 +1433,7 @@ LAB_IMPLEMENT_BASIC_FUNCTION(erfc,TH_MATH_NAME(erfc))
 LAB_IMPLEMENT_BASIC_FUNCTION(erfinv,TH_erfinv)
 LAB_IMPLEMENT_BASIC_FUNCTION(ceil,TH_MATH_NAME(ceil))
 LAB_IMPLEMENT_BASIC_FUNCTION(floor,TH_MATH_NAME(floor))
-LAB_IMPLEMENT_BASIC_FUNCTION(round,TH_MATH_NAME(round))
+LAB_IMPLEMENT_BASIC_FUNCTION(round,TH_MATH_NAME(nearbyint))
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
 LAB_IMPLEMENT_BASIC_FUNCTION(trunc,TH_MATH_NAME(trunc))
 LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
@@ -1467,13 +1467,6 @@ void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
     case 1: THTensor_(trigamma)(r_, t); return;
     default: THError("polygamma(n,x) is not implemented for n>=2");
   }
-}
-
-void THTensor_(lerp)(THTensor *r_, THTensor *a, THTensor *b, scalar_t weight)
-{
-  THArgCheck(THTensor_(nElement)(a) == THTensor_(nElement)(b), 2, "sizes do not match");
-  THTensor_(resizeAs)(r_, a);
-  TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, a, scalar_t, b, *r__data = TH_MATH_NAME(TH_lerp)(*a_data, *b_data, weight););
 }
 
 void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension, int keepdim)
