@@ -1390,7 +1390,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
-  auto size = tensor.numel() * tensor.type().elementSizeInBytes();
+  auto size = tensor.numel() * tensor.dtype().itemsize();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
@@ -1409,7 +1409,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
-  auto size = tensor.numel() * tensor.type().elementSizeInBytes();
+  auto size = tensor.numel() * tensor.dtype().itemsize();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
@@ -1427,7 +1427,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
-  auto size = tensor.numel() * tensor.type().elementSizeInBytes();
+  auto size = tensor.numel() * tensor.dtype().itemsize();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
