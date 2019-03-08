@@ -159,23 +159,28 @@ inline std::unique_ptr<C10OperatorWrapper<Context>> createC10OperatorWrapper(con
 
 }
 
-C10_DECLARE_REGISTRY(
-    C10OperatorRegistry,
-    OperatorBase,
-    const OperatorDef&,
-    Workspace*);
-
 // TODO Also register c10 operators on mobile
 #ifndef C10_MOBILE
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OperatorHandle, Name)            \
-  C10_REGISTER_CREATOR(                                                            \
-      C10OperatorRegistry,                                                         \
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(OperatorHandle, Name)        \
+  REGISTER_CPU_OPERATOR_CREATOR(                                                   \
       Name,                                                                        \
       detail::createC10OperatorWrapper<CPUContext, OperatorHandle>                 \
   )
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(OperatorHandle, Name)       \
+  REGISTER_CUDA_OPERATOR_CREATOR(                                                  \
+      Name,                                                                        \
+      detail::createC10OperatorWrapper<CUDAContext, OperatorHandle>                \
+  )
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP(OperatorHandle, Name)        \
+  REGISTER_HIP_OPERATOR_CREATOR(                                                   \
+      Name,                                                                        \
+      detail::createC10OperatorWrapper<HIPContext, OperatorHandle>                 \
+  )
 #else
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OperatorHandle, Name)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(OperatorHandle, Name)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(OperatorHandle, Name)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP(OperatorHandle, Name)
 #endif
 } // namespace caffe2
