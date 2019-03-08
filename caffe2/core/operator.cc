@@ -89,7 +89,7 @@ int compute_input_size_(const std::vector<c10::IValue>& inputs) {
 OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
     std::vector<c10::IValue> inputs,
-    std::vector<c10::IValue*> outputs)
+    std::vector<at::Tensor> outputs)
     : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
       ivalue_inputs_(std::move(inputs)),
       ivalue_outputs_(std::move(outputs)),
@@ -354,23 +354,6 @@ unique_ptr<OperatorBase> CreateOperator(
   }
 }
 
-void RunOperator(
-    c10::Symbol name,
-    const std::vector<c10::IValue>& inputs,
-    const std::vector<c10::IValue*>& outputs) {
-  auto fn_wrap =
-      caffe2::FunctionSchemaRegistry()->Create(name.toUnqualString());
-  CAFFE_ENFORCE(
-      fn_wrap,
-      "Operator not registered with FunctionSchema constructor.",
-      name.toUnqualString());
-  auto fn = fn_wrap->getSchema();
-  auto op = caffe2::FunctionSchemaOperatorRegistry()->Create(
-      name.toUnqualString(), fn, inputs, outputs);
-
-  op->Run();
-}
-
 std::map<DeviceType, OperatorRegistry*>* gDeviceTypeRegistry() {
   static std::map<DeviceType, OperatorRegistry*> g_device_type_registry;
   return &g_device_type_registry;
@@ -402,15 +385,6 @@ C10_DEFINE_REGISTRY(
     GradientMakerBase,
     const OperatorDef&,
     const vector<GradientWrapper>&);
-
-C10_DEFINE_REGISTRY(
-    FunctionSchemaOperatorRegistry,
-    OperatorBase,
-    const c10::FunctionSchema,
-    std::vector<c10::IValue>,
-    std::vector<c10::IValue*>);
-
-C10_DEFINE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
 
 GradientOpsMeta GetGradientForOp(
     const OperatorDef& def, const vector<GradientWrapper>& g_output) {
@@ -754,11 +728,6 @@ std::set<std::string> GetRegisteredOperators() {
 
   // C10 operators
   for (const auto& name : C10OperatorRegistry()->Keys()) {
-    all_keys.emplace(name);
-  }
-
-  // FunctionSchema registered operators
-  for (const auto& name : FunctionSchemaOperatorRegistry()->Keys()) {
     all_keys.emplace(name);
   }
 

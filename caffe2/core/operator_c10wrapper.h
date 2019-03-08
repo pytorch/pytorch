@@ -8,15 +8,6 @@
 
 namespace caffe2 {
 
-namespace details {
-template <size_t...>
-struct true_t : std::true_type {};
-template <class T>
-using is_output_arg = std::is_same<Tensor*, T>;
-template <class ParameterDef>
-using extract_type_t = typename ParameterDef::type;
-} // namespace details
-
 /**
  * To make a c10 operator "C10Add" callable from caffe2 as "C2MyAddOpName", just
  * write
@@ -25,44 +16,21 @@ using extract_type_t = typename ParameterDef::type;
  *
  */
 
-enum class InputKind { TENSORS, TENSOR_LIST };
-
-template <
-    const c10::OperatorHandle& (*OperatorHandle)(),
-    class Context,
-    InputKind input_kind,
-    size_t num_output_parameters,
-    class ParameterDefTuple>
+namespace detail {
+template <class Context>
 class C10OperatorWrapper final : public Operator<Context> {
  public:
-  static_assert(
-      c10::guts::is_instantiation_of<std::tuple, ParameterDefTuple>::value,
-      "");
-  using ParameterTuple =
-      c10::guts::typelist::to_tuple_t<c10::guts::typelist::map_t<
-          details::extract_type_t,
-          c10::guts::typelist::from_tuple_t<ParameterDefTuple>>>;
-
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  C10OperatorWrapper(const OperatorDef& operator_def, Workspace* ws)
+  C10OperatorWrapper(const c10::OperatorHandle& op, const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        op_(OperatorHandle()),
+        op_(op),
         kernel_(at::nullopt),
-        parameters_(parse_parameters_(
-            operator_def,
-            c10::guts::make_index_sequence<num_parameters()>())) {
+        has_preallocated_outputs_(op_.schema().arguments().back().name() == detail::PREALLOCATED_OUTPUT_ARGNAME) {
+    AT_ASSERT(!has_preallocated_outputs_ || op_.schema().arguments().back().type()->isSubtypeOf(OptionalType::create(ListType::ofTensors())));
 
     AT_ASSERT(operator_def.output_size() == op_.schema().returns().size());
-    AT_ASSERT(operator_def.input_size() == num_inputs());
-  }
-
-  size_t num_inputs() {
-    return op_.schema().arguments().size() - num_output_parameters - num_parameters();
-  }
-
-  static constexpr size_t num_parameters() {
-    return std::tuple_size<ParameterDefTuple>::value;
+    AT_ASSERT(operator_def.input_size() + (has_preallocated_outputs_ ? 1 : 0) <= op_.schema().arguments().size()); // '<=' because there might be caffe2 arguments
   }
 
   bool RunOnDevice() override {
@@ -70,61 +38,43 @@ class C10OperatorWrapper final : public Operator<Context> {
     // TODO thread_local might fix this
     std::lock_guard<std::mutex> lock(mutex_);
 
-    AT_ASSERT(stack_.size() == 0);
-
     pushInputs_();
-    pushParameters_(guts::make_index_sequence<num_parameters()>());
-    pushOutputParameters_();
-
     callKernel_();
-
     popOutputs_();
 
     return true;
   }
 
  private:
-  template <size_t... ParameterIndex>
-  ParameterTuple parse_parameters_(
-      const OperatorDef& operator_def,
-      c10::guts::index_sequence<ParameterIndex...>) {
-    return ParameterTuple{Parameter<ParameterIndex>(operator_def)...};
-  }
-
-  template <size_t Index>
-  details::extract_type_t<
-      typename std::tuple_element<Index, ParameterDefTuple>::type>
-  Parameter(const OperatorDef& operator_def) {
-    using Parameter =
-        typename std::tuple_element<Index, ParameterDefTuple>::type;
-    return Parameter::parse(ArgumentHelper(operator_def));
-  }
-
   void pushInputs_() {
-    if (input_kind == InputKind::TENSOR_LIST) {
-      stack_.emplace_back(ivalue::TensorList::create(array_inputs_()));
-    } else {
-      for (size_t i = 0; i < num_inputs(); ++i) {
-        stack_.emplace_back(at::Tensor(C10Tensor(Input(i))));
-      }
-    }
-  }
+    AT_ASSERT(stack_.size() == 0);
+    stack_.reserve(op_.schema().arguments().size() + (has_preallocated_outputs_ ? 1 : 0));
 
-  template<size_t... ParameterIndex>
-  void pushParameters_(guts::index_sequence<ParameterIndex...>) {
-    (void)std::initializer_list<int>{(
-      stack_.emplace_back(std::get<ParameterIndex>(parameters_))
-    , 0)...};
-  }
+    size_t input_tensor_index = 0;
 
-  void pushOutputParameters_() {
-    for (size_t i = 0; i < num_output_parameters; ++i) {
-      caffe2::Tensor preallocated_output_tensor = OperatorBase::OutputTensorOrUndefined(i);
-      if (preallocated_output_tensor.defined()) {
-        stack_.emplace_back(at::Tensor(std::move(preallocated_output_tensor)));
+    for (const auto& argument : op_.schema().arguments()) {
+      if (argument.name() == detail::PREALLOCATED_OUTPUT_ARGNAME) {
+        // note: if detail::PREALLOCATED_OUTPUT_ARGNAME was at the end of the argument list,
+        // then has_preallocated_outputs_ would be true.
+        AT_ASSERTM(has_preallocated_outputs_, "Error in caffe2->c10 wrapper: Operator schema has a parameter named ", detail::PREALLOCATED_OUTPUT_ARGNAME, ", but it's not at the end of the argument list");
+
+        AT_ASSERTM(argument.type()->isSubtypeOf(OptionalType::create(ListType::ofTensors())), "Error in caffe2->c10 wrapper: Operator schema has a parameter named ", detail::PREALLOCATED_OUTPUT_ARGNAME, ", but it's not of type TensorList?");
+        stack_.emplace_back(preallocated_outputs_());
+
+      } else if (argument.type()->isSubtypeOf(TensorType::get())) {
+        AT_ASSERTM(input_tensor_index < InputSize(), "Error in caffe2->c10 wrapper: Too few tensor arguments given (", InputSize(), "), operator schema expected more.");
+        stack_.emplace_back(at::Tensor(Input(input_tensor_index++)));
+
+      } else if (argument.type()->isSubtypeOf(ListType::ofTensors())) {
+        AT_ASSERTM(input_tensor_index == 0, "Error in caffe2->c10 wrapper: Schema can only have either one or more Tensor inputs or one TensorList input.");
+        stack_.emplace_back(ivalue::TensorList::create(array_inputs_()));
+        input_tensor_index = InputSize();
+
       } else {
-        stack_.emplace_back(IValue());
+        stack_.emplace_back(get_nontensor_argument_(argument));
       }
+
+      AT_ASSERTM(input_tensor_index == InputSize(), "Error in caffe2->c10 wrapper: Number of caffe2 operator inputs (", InputSize(), ") doesn't match number of tensor arguments (", input_tensor_index, ") in the c10 operator schema.");
     }
   }
 
@@ -149,31 +99,65 @@ class C10OperatorWrapper final : public Operator<Context> {
     std::vector<at::Tensor> result;
     result.reserve(InputSize());
     for (size_t i = 0; i < InputSize(); ++i) {
-      result.push_back(at::Tensor(c10::C10Tensor(Input(i))));
+      result.emplace_back(Input(i));
     }
     return result;
   }
 
+  std::vector<at::Tensor> preallocated_outputs_() {
+    std::vector<at::Tensor> result;
+    result.reserve(OutputSize());
+    for (size_t i = 0; i < OutputSize(); ++i) {
+      result.emplace_back(OperatorBase::OutputTensorOrUndefined(i));
+    }
+    return result;
+  }
+
+  IValue get_nontensor_argument_(const c10::Argument& argument) {
+    if (argument.type()->isSubtypeOf(IntType::get())) {
+      if (argument.default_value().has_value()) {
+        return GetSingleArgument<int>(argument.name(), argument.default_value()->toInt());
+      } else {
+        AT_CHECK(HasSingleArgumentOfType<int>(argument.name()), "Error in caffe2->c10 wrapper: Expected argument '", argument.name(), "' missing or wrong type (expected int).");
+        return GetSingleArgument<int>(argument.name(), 0);
+      }
+    } else if (argument.type()->isSubtypeOf(FloatType::get())) {
+      if (argument.default_value().has_value()) {
+        return GetSingleArgument<double>(argument.name(), argument.default_value()->toDouble());
+      } else {
+        AT_CHECK(HasSingleArgumentOfType<double>(argument.name()), "Error in caffe2->c10 wrapper: Expected argument '", argument.name(), "' missing or wrong type (expected double).");
+        return GetSingleArgument<double>(argument.name(), 0);
+      }
+    } else if (argument.type()->isSubtypeOf(BoolType::get())) {
+      if (argument.default_value().has_value()) {
+        return GetSingleArgument<bool>(argument.name(), argument.default_value()->toBool());
+      } else {
+        AT_CHECK(HasSingleArgumentOfType<bool>(argument.name()), "Error in caffe2->c10 wrapper: Expected argument '", argument.name(), "' missing or wrong type (expected bool).");
+        return GetSingleArgument<bool>(argument.name(), 0);
+      }
+    } else {
+      // TODO Support more types
+      AT_ERROR("Error in caffe2->c10 wrapper: Unsupported argument type ", argument.type()->str(), " in c10 operator schema");
+    }
+  }
+
   c10::OperatorHandle op_;
   c10::optional<OpKernel> kernel_;
+  bool has_preallocated_outputs_;
 
   // this is stored as a member here to avoid having to re-allocate a stack
   // for each call. Between kernel calls, stack_.size() == 0, but capacity
   // should not need to be grown anymore after the first call.
   std::vector<IValue> stack_;
   std::mutex mutex_;
-
-  ParameterTuple parameters_;
 };
 
-template <class ParameterDef>
-struct ParameterHelper final {
-  using type = typename ParameterDef::type;
-  static typename ParameterDef::type parse(const ArgumentHelper& helper) {
-    return helper.GetSingleArgument<typename ParameterDef::type>(
-        ParameterDef::name(), ParameterDef::default_value());
-  }
-};
+template<class Context, const c10::OperatorHandle& (*OperatorHandle)()>
+inline std::unique_ptr<C10OperatorWrapper<Context>> createC10OperatorWrapper(const OperatorDef& operator_def, Workspace* ws) {
+  return std::make_unique<C10OperatorWrapper<Context>>(OperatorHandle(), operator_def, ws);
+}
+
+}
 
 C10_DECLARE_REGISTRY(
     C10OperatorRegistry,
@@ -185,22 +169,13 @@ C10_DECLARE_REGISTRY(
 #ifndef C10_MOBILE
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(                                 \
-    OperatorHandle, Name, InputKind, NumOutputParameters, ...)                     \
-  C10_REGISTER_CLASS(                                                              \
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OperatorHandle, Name)            \
+  C10_REGISTER_CREATOR(                                                            \
       C10OperatorRegistry,                                                         \
       Name,                                                                        \
-      C10OperatorWrapper<                                                          \
-          OperatorHandle,                                                          \
-          CPUContext,                                                              \
-          InputKind,                                                               \
-          NumOutputParameters,                                                     \
-          std::tuple<__VA_ARGS__>>)
-
+      detail::createC10OperatorWrapper<CPUContext, OperatorHandle>                 \
+  )
 #else
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OperatorHandle, Name, NumOutputParameters)
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(OperatorHandle, Name, NumOutputParameters, ...)
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT(OperatorHandle, Name, NumOutputParameters)
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(OperatorHandle, Name, NumOutputParameters, ...)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OperatorHandle, Name)
 #endif
 } // namespace caffe2

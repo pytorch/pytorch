@@ -11,7 +11,6 @@ namespace ops {
 // TODO Parse schema string instead of creating FunctionSchema manually
 C10_DEFINE_OP_SCHEMA(ExpandDims, FunctionSchema(
     "_c10_experimental::ExpandDims",
-    "",
     (std::vector<c10::Argument>{
       c10::Argument("input"),
       c10::Argument("output"),
@@ -22,21 +21,9 @@ C10_DEFINE_OP_SCHEMA(ExpandDims, FunctionSchema(
 }
 }
 
-namespace {
-struct DimsParameter final {
-  using type = intrusive_ptr<IntList>;
-  static intrusive_ptr<IntList> parse(const caffe2::ArgumentHelper& helper) {
-    return IntList::create(helper.GetRepeatedArgument<int64_t>("dims"));
-  }
-};
-} // namespace
-
 namespace caffe2 {
 
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::ExpandDims,
-    C10ExpandDims_DontUseThisOpYet,
-    InputKind::TENSORS,
-    1,
-    DimsParameter)
+    C10ExpandDims_DontUseThisOpYet)
 }

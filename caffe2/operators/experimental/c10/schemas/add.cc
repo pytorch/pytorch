@@ -8,7 +8,6 @@ namespace ops {
 // TODO Parse schema string instead of creating FunctionSchema manually
 C10_DEFINE_OP_SCHEMA(Add, FunctionSchema(
     "_c10_experimental::Add",
-    "",
     (std::vector<c10::Argument>{
       c10::Argument("input1"),
       c10::Argument("input2"),
@@ -21,34 +20,8 @@ C10_DEFINE_OP_SCHEMA(Add, FunctionSchema(
 }
 }
 
-namespace {
-
-struct LegacyBroadcastParameter final {
-  using type = bool;
-  static constexpr const char* name() {
-    return "legacy_broadcast";
-  }
-  static constexpr bool default_value() {
-    return true;
-  }
-};
-struct AxisParameter final {
-  using type = int;
-  static constexpr const char* name() {
-    return "axis";
-  }
-  static constexpr int default_value() {
-    return -1;
-  }
-};
-} // namespace
-
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::Add,
-    C10Add_DontUseThisOpYet,
-    InputKind::TENSORS,
-    1,
-    ParameterHelper<LegacyBroadcastParameter>,
-    ParameterHelper<AxisParameter>)
+    C10Add_DontUseThisOpYet)
 }

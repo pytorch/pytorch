@@ -9,7 +9,6 @@ namespace ops {
 // TODO Parse schema string instead of creating FunctionSchema manually
 C10_DEFINE_OP_SCHEMA(FullyConnected, FunctionSchema(
     "_c10_experimental::FullyConnected",
-    "",
     (std::vector<c10::Argument>{
       c10::Argument("X"),
       c10::Argument("W"),
@@ -23,34 +22,9 @@ C10_DEFINE_OP_SCHEMA(FullyConnected, FunctionSchema(
 }
 }
 
-namespace {
-struct AxisParameter final {
-  using type = int32_t;
-  static constexpr const char* name() {
-    return "axis";
-  }
-  static constexpr int32_t default_value() {
-    return 1;
-  }
-};
-struct AxisWParameter final {
-  using type = int32_t;
-  static constexpr const char* name() {
-    return "axis_w";
-  }
-  static constexpr int32_t default_value() {
-    return 1;
-  }
-};
-} // namespace
-
 namespace caffe2 {
 
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::FullyConnected,
-    C10FC_DontUseThisOpYet,
-    InputKind::TENSORS,
-    1,
-    ParameterHelper<AxisParameter>,
-    ParameterHelper<AxisWParameter>)
+    C10FC_DontUseThisOpYet)
 }

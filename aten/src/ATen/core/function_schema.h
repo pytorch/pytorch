@@ -67,13 +67,11 @@ private:
 struct FunctionSchema {
   FunctionSchema(
       std::string name,
-      std::string overload_name,
       std::vector<Argument> arguments,
       std::vector<Argument> returns,
       bool is_vararg = false,
       bool is_varret = false)
       : name_(std::move(name)),
-        overload_name_(std::move(overload_name)),
         arguments_(std::move(arguments)),
         returns_(std::move(returns)),
         is_vararg_(is_vararg),
@@ -81,7 +79,6 @@ struct FunctionSchema {
 
   FunctionSchema(
       Symbol name,
-      std::string overload_name,
       std::vector<Argument> arguments,
       std::vector<Argument> returns,
       bool is_vararg = false,
@@ -89,7 +86,6 @@ struct FunctionSchema {
       std::vector<std::string> writes = {})
       : FunctionSchema(
             name.toQualString(),
-            std::move(overload_name),
             std::move(std::move(arguments)),
             std::move(std::move(returns)),
             is_vararg,
@@ -97,7 +93,6 @@ struct FunctionSchema {
 
 private:
   const std::string name_;
-  const std::string overload_name_;
   const std::vector<Argument> arguments_;
   const std::vector<Argument> returns_;
   // if true then this schema takes an arbitrary number of additional arguments
@@ -110,9 +105,6 @@ private:
 public:
   const std::string& name() const {
     return name_;
-  }
-  const std::string& overload_name() const {
-    return overload_name_;
   }
   const std::vector<Argument>& arguments() const {
     return arguments_;

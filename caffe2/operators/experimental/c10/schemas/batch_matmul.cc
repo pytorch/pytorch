@@ -9,7 +9,6 @@ namespace ops {
 // TODO Parse schema string instead of creating FunctionSchema manually
 C10_DEFINE_OP_SCHEMA(BatchMatmul, FunctionSchema(
     "_c10_experimental::BatchMatmul",
-    "",
     (std::vector<c10::Argument>{
       c10::Argument("A"),
       c10::Argument("B"),
@@ -23,44 +22,9 @@ C10_DEFINE_OP_SCHEMA(BatchMatmul, FunctionSchema(
 }
 }
 
-namespace {
-struct TransAParameter final {
-  using type = int;
-  static constexpr const char* name() {
-    return "trans_a";
-  }
-  static constexpr int default_value() {
-    return 0;
-  }
-};
-struct TransBParameter final {
-  using type = int;
-  static constexpr const char* name() {
-    return "trans_b";
-  }
-  static constexpr int default_value() {
-    return 0;
-  }
-};
-struct BroadcastParameter final {
-  using type = int;
-  static constexpr const char* name() {
-    return "broadcast";
-  }
-  static constexpr int default_value() {
-    return 0;
-  }
-};
-} // namespace
-
 namespace caffe2 {
 
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::BatchMatmul,
-    C10BatchMatMul_DontUseThisOpYet,
-    InputKind::TENSORS,
-    1,
-    ParameterHelper<TransAParameter>,
-    ParameterHelper<TransBParameter>,
-    ParameterHelper<BroadcastParameter>)
+    C10BatchMatMul_DontUseThisOpYet)
 }

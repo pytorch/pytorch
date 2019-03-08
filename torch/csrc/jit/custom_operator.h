@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/csrc/jit/caffe2_operator.h>
 #include <torch/csrc/jit/operator.h>
 #include <ATen/core/stack.h>
 #include <torch/csrc/jit/tracer.h>
@@ -82,7 +81,7 @@ FunctionSchema createFunctionSchemaFromTraits(const std::string& name) {
       typename MakeIndices<FunctionTraits::number_of_parameters>::indices{});
   auto returns = createReturns(static_cast<ReturnType*>(nullptr));
 
-  return {name, "", arguments, returns};
+  return {name, arguments, returns};
 }
 
 /// Adds the elements of the `tuple` as input nodes to the traced graph.
@@ -278,14 +277,6 @@ struct TORCH_API RegisterOperators {
   template <typename Implementation>
   RegisterOperators(const std::string& name, Implementation&& implementation) {
     op(name, std::forward<Implementation>(implementation));
-  }
-
-  /// Requires declaration of the FunctionSchema with
-  /// REGISTER_FUNCTION_SCHEMA_OPERATOR(name, ...)
-  static RegisterOperators Caffe2Operator(const std::string& name) {
-    auto r = RegisterOperators();
-    registerOperator(createOperatorFromCaffe2(name));
-    return r;
   }
 
   /// Creates a new operator from a name and implementation function (function

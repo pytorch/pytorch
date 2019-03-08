@@ -74,7 +74,6 @@ struct TORCH_API Operator {
       : Operator(
             FunctionSchema(
                 name,
-                "",
                 {},
                 {},
                 /*is_vararg*/ true,

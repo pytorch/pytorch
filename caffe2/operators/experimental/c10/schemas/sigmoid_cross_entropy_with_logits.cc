@@ -9,7 +9,6 @@ namespace ops {
 // TODO Parse schema string instead of creating FunctionSchema manually
 C10_DEFINE_OP_SCHEMA(SigmoidCrossEntropyWithLogits, FunctionSchema(
     "_c10_experimental::SigmoidCrossEntropyWithLogits",
-    "",
     (std::vector<c10::Argument>{
       c10::Argument("input1"),
       c10::Argument("input2"),
@@ -22,33 +21,8 @@ C10_DEFINE_OP_SCHEMA(SigmoidCrossEntropyWithLogits, FunctionSchema(
 }
 }
 
-namespace {
-struct LogDTrickParameter final {
-  using type = bool;
-  static constexpr const char* name() {
-    return "log_D_trick";
-  }
-  static constexpr bool default_value() {
-    return false;
-  }
-};
-struct UnjoinedLRLossParameter final {
-  using type = bool;
-  static constexpr const char* name() {
-    return "unjoined_lr_loss";
-  }
-  static constexpr bool default_value() {
-    return false;
-  }
-};
-} // namespace
-
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::SigmoidCrossEntropyWithLogits,
-    C10SigmoidCrossEntropyWithLogits_DontUseThisOpYet,
-    InputKind::TENSORS,
-    1,
-    ParameterHelper<LogDTrickParameter>,
-    ParameterHelper<UnjoinedLRLossParameter>)
+    C10SigmoidCrossEntropyWithLogits_DontUseThisOpYet)
 }
