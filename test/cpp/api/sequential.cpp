@@ -37,7 +37,7 @@ TEST_F(SequentialTest, ConstructsFromSharedPointer) {
 TEST_F(SequentialTest, ConstructsFromConcreteType) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
-    M(const M&) {
+    M(const M& other) : torch::nn::Module(other) {
       // NOTE: The current implementation expects the module to be copied once
       // when it's passed into `std::make_shared<T>()`.
       // TODO: Find a way to avoid copying, and then delete the copy constructor.
@@ -53,7 +53,15 @@ TEST_F(SequentialTest, ConstructsFromConcreteType) {
 
   Sequential sequential(M(1), M(2), M(3));
   ASSERT_EQ(sequential->size(), 3);
+
+  Sequential sequential_named(torch::OrderedDict<std::string, torch::nn::Module>({
+    {"m1", M(1)},
+    {"m2", M(2)},
+    {"m3", M(3)}
+  }));
+  ASSERT_EQ(sequential->size(), 3);
 }
+
 TEST_F(SequentialTest, ConstructsFromModuleHolder) {
   struct MImpl : torch::nn::Module {
     explicit MImpl(int value_) : value(value_) {}

@@ -7,6 +7,8 @@
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
+#include <torch/ordered_dict.h>
+
 #include <c10/util/Exception.h>
 
 #include <cstdint>
@@ -207,6 +209,11 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   template <typename M>
   void push_back(const ModuleHolder<M>& module_holder) {
     push_back(module_holder.ptr());
+  }
+
+  template <typename M>
+  void push_back(torch::OrderedDict<std::string, M>&& ordered_dict) {
+    std::cout << "we are here0!" << "\n";
   }
 
   /// Iterates over the container and calls `push_back()` on each value.
