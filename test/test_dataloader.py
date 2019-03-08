@@ -73,6 +73,7 @@ class TestDatasetRandomSplit(TestCase):
         all_values.sort()
         self.assertListEqual(data, all_values)
 
+    # Ensure index returned by random_splits is integer
     def test_splits_indexing_type(self):
         class CustomDataset():
             def __init__(self, test_object, custom_list):
@@ -80,7 +81,7 @@ class TestDatasetRandomSplit(TestCase):
                 self.test_object = test_object
 
             def __getitem__(self, key):
-                self.test_object.assertEqual(type(key), type(self.data[0]))
+                self.test_object.assertEqual(type(key), type(0))
                 return self.data[key]
 
             def __len__(self):
