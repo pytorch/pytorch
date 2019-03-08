@@ -1608,14 +1608,17 @@
     CUDA: batch_norm_cuda
 
 - func: batch_norm_stats(Tensor input, float eps) -> (Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CUDA: batch_norm_stats_cuda
 
 - func: batch_norm_elemt(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor invstd, float eps) -> Tensor
+  matches_jit_signature: True
   dispatch:
     CUDA: batch_norm_elemt_cuda
 
 - func: batch_norm_gather_stats(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, int count) -> (Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CUDA: batch_norm_gather_stats_cuda
 
@@ -1626,10 +1629,12 @@
     CUDA: batch_norm_backward_cuda
 
 - func: batch_norm_backward_reduce(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, bool input_g, bool weight_g, bool bias_g) -> (Tensor, Tensor, Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CUDA: batch_norm_backward_reduce_cuda
 
 - func: batch_norm_backward_elemt(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, Tensor mean_dy, Tensor mean_dy_xmu) -> Tensor
+  matches_jit_signature: True
   dispatch:
     CUDA: batch_norm_backward_elemt_cuda
 
