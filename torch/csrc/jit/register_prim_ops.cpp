@@ -14,7 +14,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/ivalue.h>
-#include <ATen/core/thread_pool.h>
+#include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
 #include <algorithm>
