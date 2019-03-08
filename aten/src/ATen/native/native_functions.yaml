@@ -607,11 +607,13 @@
   matches_jit_signature: True
 
 - func: cudnn_affine_grid_generator(Tensor theta, int N, int C, int H, int W) -> Tensor grid
+  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_affine_grid_generator_forward
 
 # TODO: Why do I have to call this grad?!
 - func: cudnn_affine_grid_generator_backward(Tensor grad, int N, int C, int H, int W) -> Tensor grad_theta
+  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_affine_grid_generator_backward
 
@@ -680,6 +682,7 @@
 
 # NB: input is special cased in a way I don't quite understand
 - func: cudnn_grid_sampler(Tensor self, Tensor grid) -> Tensor output
+  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_grid_sampler_forward
 
@@ -3629,6 +3632,7 @@
   variants: method, function
 
 - func: _gather_sparse_backward(Tensor self, int dim, Tensor index, Tensor grad) -> Tensor
+  matches_jit_signature: True
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
