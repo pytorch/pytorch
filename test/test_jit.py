@@ -371,18 +371,22 @@ class JitTestCase(TestCase):
         torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
         self.assertExpectedGraph(trace, *args, **kwargs)
 
-    def assertExpectedGraph(self, trace, *args, **kwargs):
-        if isinstance(trace, torch._C.Graph):
-            graph = trace
-        else:
-            graph = trace.graph()
-
+    def sanitizeGraph(self, graph):
         torch._C._jit_pass_lint(graph)
         torch._C._jit_pass_dce(graph)
         torch._C._jit_pass_lint(graph)
         graph = torch._C._jit_pass_canonicalize(graph)
         torch._C._jit_pass_lint(graph)
+
+    def assertExpectedGraph(self, trace, *args, **kwargs):
+        graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
+        self.sanitizeGraph(graph)
         self.assertExpected(str(graph), *args, **kwargs)
+
+    def updateExampleGraph(self, trace, *args, **kwargs):
+        graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
+        self.sanitizeGraph(graph)
+        self.updateExampleExpect(str(graph), *args, **kwargs)
 
     def run_pass(self, name, trace):
         if isinstance(trace, torch._C.Graph):
@@ -12045,12 +12049,13 @@ class TestFuser(JitTestCase):
         # Everything is differentiable but TupleConstruct return
         FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
             .check_next("return").run(str(forward_graph))
-
+        self.updateExampleGraph(forward_graph, subname='forward')
         hy, cy = module(*inputs)
         (hy + cy).sum().backward()
         backward = backward_graph(module)
         FileCheck().check("FusionGroup_0").check_next("FusionGroup_1") \
             .check_not("FusionGroup_2").run(str(backward))
+        self.updateExampleGraph(backward_graph, subname='backward')
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")

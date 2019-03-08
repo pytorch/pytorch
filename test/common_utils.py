@@ -536,6 +536,67 @@ class TestCase(expecttest.TestCase):
             found = any(re.search(regex, str(w.message)) is not None for w in ws)
             self.assertTrue(found, msg)
 
+    def getFileIdSubname(self, directory, subname=None):
+        def remove_prefix(text, prefix):
+            if text.startswith(prefix):
+                return text[len(prefix):]
+            return text
+        # NB: we take __file__ from the module that defined the test
+        # class, so we place the expect directory where the test script
+        # lives, NOT where test/common_utils.py lives.  This doesn't matter in
+        # PyTorch where all test scripts are in the same directory as
+        # test/common_utils.py, but it matters in onnx-pytorch
+        module_id = self.__class__.__module__
+        munged_id = remove_prefix(self.id(), module_id + ".")
+        test_file = os.path.realpath(sys.modules[module_id].__file__)
+        expected_file = os.path.join(os.path.dirname(test_file),
+                                     "example",
+                                     munged_id)
+
+        subname_output = ""
+        if subname:
+            expected_file += "-" + subname
+            subname_output = " ({})".format(subname)
+        expected_file += ".example"
+        return expected_file, munged_id, subname_output
+
+    def updateExampleExpect(self, s, subname=None):
+        r"""
+        Updates the file derived from the name of this test and subname to
+        the string. This does not test against the existing output and exists for
+        documentation and to signal unintended changes. This file is placed in
+        the 'example' directory in the same directory as the test script.
+
+        If you call this multiple times in a single function, you must
+        give a unique subname each time.
+        """
+        if not (isinstance(s, str) or (sys.version_info[0] == 2 and isinstance(s, unicode))):
+            raise TypeError("updateExampleExpect is strings only")
+
+        expected_file, munged_id, subname_output = self.getFileIdSubname("example", subname)
+        expected = None
+
+        def updateOutput(start_string):
+            print("{} for {}{}:\n\n{}".format(start_string, munged_id, subname_output, s))
+            with open(expected_file, 'w') as f:
+                f.write(s)
+
+        try:
+            with open(expected_file) as f:
+                expected = f.read()
+        except IOError as e:
+            if e.errno != errno.ENOENT:
+                raise
+            return updateOutput("Setting example output")
+
+        # a hack for JIT tests
+        if IS_WINDOWS:
+            expected = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', expected)
+            s = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', s)
+
+        if expected != s:
+            return updateOutput("Updating example output")
+
     def assertExpected(self, s, subname=None):
         r"""
         Test that a string matches the recorded contents of a file
@@ -550,27 +611,7 @@ class TestCase(expecttest.TestCase):
         if not (isinstance(s, str) or (sys.version_info[0] == 2 and isinstance(s, unicode))):
             raise TypeError("assertExpected is strings only")
 
-        def remove_prefix(text, prefix):
-            if text.startswith(prefix):
-                return text[len(prefix):]
-            return text
-        # NB: we take __file__ from the module that defined the test
-        # class, so we place the expect directory where the test script
-        # lives, NOT where test/common_utils.py lives.  This doesn't matter in
-        # PyTorch where all test scripts are in the same directory as
-        # test/common_utils.py, but it matters in onnx-pytorch
-        module_id = self.__class__.__module__
-        munged_id = remove_prefix(self.id(), module_id + ".")
-        test_file = os.path.realpath(sys.modules[module_id].__file__)
-        expected_file = os.path.join(os.path.dirname(test_file),
-                                     "expect",
-                                     munged_id)
-
-        subname_output = ""
-        if subname:
-            expected_file += "-" + subname
-            subname_output = " ({})".format(subname)
-        expected_file += ".expect"
+        expected_file, munged_id, subname_output = self.getFileIdSubname("expect", subname)
         expected = None
 
         def accept_output(update_type):
@@ -607,12 +648,6 @@ class TestCase(expecttest.TestCase):
                 self.assertMultiLineEqual(expected, s)
             else:
                 self.assertEqual(s, expected)
-
-    if sys.version_info < (3, 2):
-        # assertRegexpMatches renamed to assertRegex in 3.2
-        assertRegex = unittest.TestCase.assertRegexpMatches
-        # assertRaisesRegexp renamed to assertRaisesRegex in 3.2
-        assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
 
 
 def download_file(url, binary=True):
