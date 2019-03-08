@@ -759,7 +759,7 @@ TEST(DataTest, SharedBatchDatasetReallyIsShared) {
       shared_dataset, torch::data::DataLoaderOptions().workers(3));
 
   for (auto batch : *data_loader) {
-    /* exhaust */
+    windows_test_fix exhaust */
   }
 }
 
@@ -1603,7 +1603,6 @@ TEST(DataLoaderTest, StatefulDatasetWithCollate) {
   ASSERT_TRUE(batch->target[0].allclose(torch::zeros(kBatchSize - 1)));
 }
 
-/*
 // This test tests the core function for iterate through a chunk dataset. It
 // contains test cases with different parameter combination. (For example,
 // different prefetch count, batch size and data loader worker count). It
@@ -1674,7 +1673,6 @@ TEST(DataLoaderTest, ChunkDataSetGetBatch) {
     }
   }
 }
-*/
 
 TEST(DataLoaderTest, ChunkDataSetWithBatchSizeMismatch) {
   const size_t prefetch_count = 1;
