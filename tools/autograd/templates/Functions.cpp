@@ -101,7 +101,7 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Sc
     self_scaled = self;
     scale_v = grad / norm;
   } else if (std::isinf(p)) {
-    self_scaled = self.sign() * (self.abs() == norm).toType(self.type());
+    self_scaled = self.sign() * (self.abs() == norm).toType(self.type(), self.scalar_type());
     scale_v = grad.clone();
   } else if (p < 2.0) {
     self_scaled = self.sign() * self.abs().pow(p - 1);
@@ -858,7 +858,7 @@ Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & i
 
 Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
   auto d = (input - target).abs();
-  auto grad_input = grad * (d < 1).toType(grad.type());
+  auto grad_input = grad * (d < 1).toType(grad.type(), grad.scalar_type());
   if (reduction == Reduction::Mean) {
     grad_input /= input.numel();
   }
@@ -931,7 +931,7 @@ Tensor soft_margin_loss_double_backward_grad_output(const Tensor & grad, const T
 
 Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scalar beta, Scalar threshold) {
   auto x = (input * beta);
-  return sigmoid_backward(grad, x.sigmoid()) * (x < threshold).toType(grad.type()) * beta;
+  return sigmoid_backward(grad, x.sigmoid()) * (x < threshold).toType(grad.type(), grad.scalar_type()) * beta;
 }
 
 

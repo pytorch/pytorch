@@ -515,8 +515,8 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
     tg_target_stride = targets.stride(1);
     max_target_length = targets.size(1);
   }
-  auto target_lengths_t = at::tensor(target_lengths, targets.options().device(at::Device(at::Device::Type::CPU)).dtype(kLong)).toType(targets.type().toScalarType(kLong), kLong);
-  auto input_lengths_t = at::tensor(input_lengths, targets.options().device(at::Device(at::Device::Type::CPU)).dtype(kLong)).toType(targets.type().toScalarType(kLong), kLong);
+  auto target_lengths_t = at::tensor(target_lengths, targets.options().device(kCPU).dtype(kLong));
+  auto input_lengths_t = at::tensor(input_lengths, targets.options().device(kCPU).dtype(kLong));
   tg_batch_offsets = tg_batch_offsets.toType(targets.type().toScalarType(kLong), kLong);
 
   Tensor log_beta = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());

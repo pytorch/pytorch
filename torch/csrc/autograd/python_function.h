@@ -24,6 +24,7 @@ struct VariableInfo {
   Variable zeros(at::OptionalDeviceGuard& device_guard) const;
 
   at::Type* type;
+  at::ScalarType dtype;
   at::Device device = at::kCPU;
   std::vector<int64_t> size;
   bool requires_grad;

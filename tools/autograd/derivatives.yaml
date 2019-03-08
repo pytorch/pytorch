@@ -1189,7 +1189,7 @@
 
 - name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output)
   grad_output: elu_backward(grad, alpha, scale, input_scale, output)
-  output: grad * grad_output * input_scale * (output < 0).toType(grad.type())
+  output: grad * grad_output * input_scale * (output < 0).toType(grad.type(), grad.scalar_type())
 
 - name: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, IntArrayRef kernel_size, IntArrayRef output_size, Tensor indices)
   grad_output: max_pool_double_backward(grad, indices, 2)

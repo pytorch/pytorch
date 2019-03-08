@@ -216,6 +216,7 @@ const std::shared_ptr<Function>& Variable::grad_fn() const {
       fn->set_next_edges(collect_next_edges(diff_view_meta->base_));
       fn->add_input_metadata(
         diff_view_meta->base_.type()
+      , diff_view_meta->base_.scalar_type()
       , sizes() // Note: sizes(), not base_.sizes(), is intentional
       , diff_view_meta->base_.is_cuda() ? diff_view_meta->base_.get_device() : -1);
       diff_view_meta->grad_fn_ = std::move(fn);

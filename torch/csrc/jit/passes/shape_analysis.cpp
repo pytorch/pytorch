@@ -144,7 +144,7 @@ class ShapePropagator {
       at::DeviceGuard device_guard(type->device());
       auto& attype = at::getNonVariableType(backend, type->scalarType());
       auto t =
-          at::empty_strided(type->sizes(), type->strides(), attype.options())
+          at::empty_strided(type->sizes(), type->strides(), attype.options(type->scalarType()))
               .zero_();
       return autograd::make_variable(t, /*requires_grad=*/false);
     } else if (type_->isSubtypeOf(FloatType::get())) {

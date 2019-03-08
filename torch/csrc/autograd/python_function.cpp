@@ -45,6 +45,7 @@ namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
   : type(&var.type())
+  , dtype(var.scalar_type())
   , device(var.device())
   , size(var.sizes().vec())
   , requires_grad(var.requires_grad()) {
@@ -53,7 +54,7 @@ VariableInfo::VariableInfo(const Variable& var)
 Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
   // NB: This will NOT work if we ever get mixed device gradients
   device_guard.reset_device(device);
-  return at::zeros(size, type->options());
+  return at::zeros(size, type->options(dtype));
 }
 
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {

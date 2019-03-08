@@ -12,11 +12,11 @@ namespace torch { namespace autograd {
 struct InputMetadata {
   InputMetadata() = default;
 
-  InputMetadata(const at::Type& type, at::IntArrayRef shape, const int64_t device)
-  : type_{&type} , shape_{shape}, device_{device} { }
+  InputMetadata(const at::Type& type, at::ScalarType dtype, at::IntArrayRef shape, const int64_t device)
+  : type_{&type} , dtype_{dtype}, shape_{shape}, device_{device} { }
 
   InputMetadata(const at::Tensor& t)
-  : InputMetadata(t.type(), t.sizes(), t.is_cuda() ? t.get_device() : - 1) { }
+  : InputMetadata(t.type(), t.scalar_type(), t.sizes(), t.is_cuda() ? t.get_device() : - 1) { }
 
   bool is_valid() const {
     return type_ != nullptr;
@@ -36,11 +36,12 @@ struct InputMetadata {
   }
 
   at::Tensor zeros_like() const {
-    return at::zeros(shape_, type_->options(static_cast<int32_t>(device_)));
+    return at::zeros(shape_, type_->options(dtype_, static_cast<int32_t>(device_)));
   }
 
 private:
   const at::Type* type_ = nullptr;
+  const at::ScalarType dtype_ = at::ScalarType::Undefined;
   at::DimVector shape_;
   const int64_t device_ = -1;
 };

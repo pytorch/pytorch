@@ -264,7 +264,7 @@ Operator(                                                                       
 
 DEFINE_TORCH_TENSOR_OP(float, double, at::scalar_to_tensor(scalar_val))
 DEFINE_TORCH_TENSOR_OP(int, int64_t, at::scalar_to_tensor(scalar_val))
-DEFINE_TORCH_TENSOR_OP(bool, bool, at::empty({}, at::CPU(at::kByte).options()).fill_(scalar_val))
+DEFINE_TORCH_TENSOR_OP(bool, bool, at::empty({}, at::CPU(at::kByte).options(at::kByte)).fill_(scalar_val))
 
 
     // reference python implementation: internal_new_from_data in tensor_new.cpp
