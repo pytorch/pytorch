@@ -44,7 +44,7 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   auto max_error = atol + rtol * other.abs();
   auto close = actual_error <= max_error;
 
-  if (isFloatingType(self.type().scalarType()) && isFloatingType(other.type().scalarType())) {
+  if (isFloatingType(self.scalar_type()) && isFloatingType(other.scalar_type())) {
     // Handle +/-inf
     close.__ior__(self == other);
     close.__iand__((self == INFINITY) == (other == INFINITY));
@@ -80,9 +80,9 @@ bool is_nonzero(const Tensor& self) {
 }
 
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  if (condition.type().scalarType() != ScalarType::Byte) {
+  if (condition.scalar_type() != ScalarType::Byte) {
     AT_ERROR("Expected condition to have ScalarType Byte, but got ScalarType ",
-                  toString(condition.type().scalarType()));
+                  toString(condition.scalar_type()));
   }
   Tensor b_condition, b_self, b_other;
   std::tie(b_condition, b_self, b_other) = expand_outplace(condition, self, other, "where");
