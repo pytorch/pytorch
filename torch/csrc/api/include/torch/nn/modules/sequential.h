@@ -20,42 +20,28 @@
 namespace torch {
 namespace nn {
 
-template <typename Key, typename Value>
 class SequentialOrderedDictItem {
  public:
   /// Constructs a new item.
-  SequentialOrderedDictItem(Key key, Value value) : pair_(std::move(key), std::move(value)) {}
-
-  /// Returns a reference to the key.
-  const Key& key() const noexcept {
-    return pair_.first;
+  template <typename ModuleType>
+  SequentialOrderedDictItem(std::string, ModuleType module) {
+    if (torch::detail::is_module<ModuleType>::value) {
+      std::cout << "we are here0! this is Module type" << "\n";
+    } else {
+      std::cout << "we are here1! this is not Module type" << "\n";
+    }
+    // yf225 TODO: check shared_ptr type and ModuleHolder type as well!
+    // yf225 TODO: How do we save the module type appropriately? Should we save AnyModule?
   }
-
-  /// Returns a reference to the value.
-  Value& value() noexcept {
-    return pair_.second;
-  }
-
-  /// Returns a reference to the value.
-  const Value& value() const noexcept {
-    return pair_.second;
-  }
-
- private:
-  /// This is stored as an std::pair because it will make Python binding a lot,
-  /// lot easier.
-  std::pair<const Key, Value> pair_;
 };
 
 class SequentialOrderedDict {
  public:
   /// Constructs a new `SequentialOrderedDict` and pre-populates it with the given
   /// `SequentialOrderedDictItem`s.
-  template <typename M>
-  SequentialOrderedDict(std::initializer_list<SequentialOrderedDictItem<std::string, M&&>> initializer_list) {
+  SequentialOrderedDict(std::initializer_list<SequentialOrderedDictItem> initializer_list) {
     for (auto& item : initializer_list) {
-      std::cout << item.key() << "\n";
-      std::cout << item.value().value << "\n";
+      std::cout << "we are here3!" << "\n";
     }
   }
 };

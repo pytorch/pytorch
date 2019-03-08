@@ -32,6 +32,13 @@ TEST_F(SequentialTest, ConstructsFromSharedPointer) {
   Sequential sequential(
       std::make_shared<M>(1), std::make_shared<M>(2), std::make_shared<M>(3));
   ASSERT_EQ(sequential->size(), 3);
+
+  Sequential sequential_named(SequentialOrderedDict({
+    {"m1", std::make_shared<M>(1)},
+    {std::string("m2"), std::make_shared<M>(2)},
+    {"m3", std::make_shared<M>(3)}
+  }));
+  ASSERT_EQ(sequential->size(), 3);
 }
 
 TEST_F(SequentialTest, ConstructsFromConcreteType) {
@@ -56,7 +63,7 @@ TEST_F(SequentialTest, ConstructsFromConcreteType) {
 
   Sequential sequential_named(SequentialOrderedDict({
     {"m1", M(1)},
-    {"m2", M(2)},
+    {std::string("m2"), M(2)},
     {"m3", M(3)}
   }));
   ASSERT_EQ(sequential->size(), 3);
@@ -78,6 +85,13 @@ TEST_F(SequentialTest, ConstructsFromModuleHolder) {
 
   Sequential sequential(M(1), M(2), M(3));
   ASSERT_EQ(sequential->size(), 3);
+
+  Sequential sequential_named(SequentialOrderedDict({
+    {"m1", M(1)},
+    {std::string("m2"), M(2)},
+    {"m3", M(3)}
+  }));
+  ASSERT_EQ(sequential->size(), 3);
 }
 
 TEST_F(SequentialTest, PushBackAddsAnElement) {
@@ -88,6 +102,8 @@ TEST_F(SequentialTest, PushBackAddsAnElement) {
     }
     int value;
   };
+
+  // Test unnamed submodules
   Sequential sequential;
   ASSERT_EQ(sequential->size(), 0);
   ASSERT_TRUE(sequential->is_empty());
@@ -97,6 +113,32 @@ TEST_F(SequentialTest, PushBackAddsAnElement) {
   ASSERT_EQ(sequential->size(), 2);
   sequential->push_back(M(2));
   ASSERT_EQ(sequential->size(), 3);
+
+  // Test named submodules
+  Sequential sequential_named;
+  ASSERT_EQ(sequential_named->size(), 0);
+  ASSERT_TRUE(sequential_named->is_empty());
+
+  sequential_named->push_back(named_module("linear1", Linear(3, 4)));
+  ASSERT_EQ(sequential_named->size(), 1);
+  ASSERT_EQ(sequential_named->named_children()[0].key(), "linear1");
+  sequential_named->push_back(named_module(std::string("linear2"), Linear(3, 4)));
+  ASSERT_EQ(sequential_named->size(), 2);
+  ASSERT_EQ(sequential_named->named_children()[1].key(), "linear2");
+
+  sequential_named->push_back(named_module("shared_m1", std::make_shared<M>(1)));
+  ASSERT_EQ(sequential_named->size(), 3);
+  ASSERT_EQ(sequential_named->named_children()[2].key(), "shared_m1");
+  sequential_named->push_back(named_module(std::string("shared_m2"), std::make_shared<M>(1)));
+  ASSERT_EQ(sequential_named->size(), 4);
+  ASSERT_EQ(sequential_named->named_children()[3].key(), "shared_m2");
+
+  sequential_named->push_back(named_module("m1", M(1)));
+  ASSERT_EQ(sequential_named->size(), 5);
+  ASSERT_EQ(sequential_named->named_children()[4].key(), "m1");
+  sequential_named->push_back(named_module(std::string("m2"), M(1)));
+  ASSERT_EQ(sequential_named->size(), 6);
+  ASSERT_EQ(sequential_named->named_children()[5].key(), "m2");
 }
 
 TEST_F(SequentialTest, AccessWithAt) {
@@ -357,5 +399,24 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
       "  (3): torch::nn::BatchNorm(features=5, eps=1e-05, momentum=0.1, affine=true, stateful=true)\n"
       "  (4): torch::nn::Embedding(count=4, dimension=10)\n"
       "  (5): torch::nn::LSTM(input_size=4, hidden_size=5, layers=1, dropout=0)\n"
+      ")");
+
+  Sequential sequential_named(
+      named_module("linear", Linear(10, 3)),
+      named_module("conv2d", Conv2d(1, 2, 3)),
+      named_module("dropout", Dropout(0.5)),
+      named_module("batchnorm", BatchNorm(5)),
+      named_module("embedding", Embedding(4, 10)),
+      named_module("lstm", LSTM(4, 5))
+  );
+  ASSERT_EQ(
+      c10::str(sequential_named),
+      "torch::nn::Sequential(\n"
+      "  (linear): torch::nn::Linear(in=10, out=3, with_bias=true)\n"
+      "  (conv2d): torch::nn::Conv2d(input_channels=1, output_channels=2, kernel_size=[3, 3], stride=[1, 1])\n"
+      "  (dropout): torch::nn::Dropout(rate=0.5)\n"
+      "  (batchnorm): torch::nn::BatchNorm(features=5, eps=1e-05, momentum=0.1, affine=true, stateful=true)\n"
+      "  (embedding): torch::nn::Embedding(count=4, dimension=10)\n"
+      "  (lstm): torch::nn::LSTM(input_size=4, hidden_size=5, layers=1, dropout=0)\n"
       ")");
 }
