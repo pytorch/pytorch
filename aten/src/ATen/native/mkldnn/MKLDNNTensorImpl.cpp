@@ -1,13 +1,15 @@
 #include "c10/util/Exception.h"
 #include "MKLDNNTensorImpl.h"
 
+#if AT_MKLDNN_ENABLED()
+
 namespace c10 { namespace mkldnn {
 
 MKLDNNTensorImpl::MKLDNNTensorImpl(c10::TensorTypeId type_id, const caffe2::TypeMeta& data_type)
   : c10::TensorImpl(type_id, data_type, nullptr, false) {}
 
 IntArrayRef MKLDNNTensorImpl::sizes() const {
-  return sizes_;
+  AT_ERROR("mkldnn tensors do not have sizes");
 }
 IntArrayRef MKLDNNTensorImpl::strides() const {
   AT_ERROR("mkldnn tensors do not have strides");
@@ -16,7 +18,7 @@ bool MKLDNNTensorImpl::is_contiguous() const {
   AT_ERROR("mkldnn tensors do not have is_contiguous");
 }
 int64_t MKLDNNTensorImpl::size(int64_t d) const {
-  return it_.get_dims()[d];
+  AT_ERROR("mkldnn tensors do not have size");
 }
 int64_t MKLDNNTensorImpl::stride(int64_t d) const {
   AT_ERROR("mkldnn tensors do not have strides");
@@ -34,7 +36,7 @@ void MKLDNNTensorImpl::set_storage_offset(int64_t storage_offset) {
   AT_ERROR("mkldnn tensors do not have set_storage_offset");
 }
 int64_t MKLDNNTensorImpl::dim() const {
-  return it_.get_dims().size();
+  AT_ERROR("mkldnn tensors do not have dim");
 }
 TensorImpl* MKLDNNTensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
   AT_CHECK(condition_when_zero_dim == (dim() == 0),
@@ -54,3 +56,5 @@ int64_t MKLDNNTensorImpl::storage_offset() const {
 }
 
 }} // namespace at::native
+
+#endif // AT_MKLDNN_ENABLED()

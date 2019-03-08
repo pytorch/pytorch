@@ -1,5 +1,9 @@
 #pragma once
 
+#include <ATen/Config.h>
+
+#if AT_MKLDNN_ENABLED()
+
 #include <ideep.hpp>
 
 #include "c10/core/TensorImpl.h"
@@ -55,13 +59,9 @@ public:
     return it_;
   }
 
-  void sync_sizes() {
-    // NOTE: int32_t dims from ideep::tensor but sizes_ needs int64_t
-    auto dims = it_.get_dims();
-    sizes_ = std::vector<int64_t>(dims.begin(), dims.end());
-  }
-
 };
 
 
 } }// namespace c10::mkldnn
+
+#endif // AT_MKLDNN_ENABLED()
