@@ -65,10 +65,11 @@ void dim_apply(TensorList tensors, int64_t dim, Fn f) {
   });
 }
 
-template <typename scalar_t, typename Fn>
+template <typename scalar_t, typename Comp, typename Fn>
 void quick_select_template(
     TensorAccessor<scalar_t, 1> arr,
     int64_t k,
+    Comp gt_or_nan,
     Fn swap_fn) {
   int64_t P, L, R, i, j, swap;
   scalar_t rswap, piv;
@@ -80,7 +81,7 @@ void quick_select_template(
       return;
 
     if (R == L + 1) { // Two elements only
-      if (arr[L] > arr[R]) {
+      if (gt_or_nan(arr[L], arr[R])) {
         swap_fn(L, R);
       }
       return;
@@ -89,13 +90,13 @@ void quick_select_template(
     // Use median of three for pivot choice
     P = (L + R) >> 1;
     swap_fn(P, L + 1);
-    if (arr[L + 1] > arr[R]) {
+    if (gt_or_nan(arr[L + 1], arr[R])) {
       swap_fn(L + 1, R);
     }
-    if (arr[L] > arr[R]) {
+    if (gt_or_nan(arr[L], arr[R])) {
       swap_fn(L, R);
     }
-    if (arr[L + 1] > arr[L]) {
+    if (gt_or_nan(arr[L + 1], arr[L])) {
       swap_fn(L + 1, L);
     }
 
@@ -105,10 +106,10 @@ void quick_select_template(
     do {
       do
         i++;
-      while (arr[i] < piv);
+      while (gt_or_nan(piv, arr[i]));
       do
         j--;
-      while (arr[j] > piv);
+      while (gt_or_nan(arr[j], piv));
       if (j < i)
         break;
       swap_fn(i, j);
@@ -165,10 +166,17 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
           for (int64_t j = 0; j < tmp_indices.size(0); j++) {
             tmp_indices[j] = j;
           }
-          quick_select_template(tmp_values, k - 1, [&](int64_t i, int64_t j) {
-            std::swap(tmp_values[i], tmp_values[j]);
-            std::swap(tmp_indices[i], tmp_indices[j]);
-          });
+          // we want NaN to be sorted as top for numpy compatibility
+          quick_select_template(
+              tmp_values,
+              k - 1,
+              [](scalar_t x, scalar_t y) -> bool {
+                return ((x != x && y == y) || (x > y));
+              },
+              [&](int64_t i, int64_t j) {
+                std::swap(tmp_values[i], tmp_values[j]);
+                std::swap(tmp_indices[i], tmp_indices[j]);
+              });
           *mode_value = tmp_values[k - 1];
           *mode_index = tmp_indices[k - 1];
         });

@@ -18,15 +18,14 @@
 #include <thrust/extrema.h>
 #include <thrust/inner_product.h>
 #include <thrust/sequence.h>
-#include <THC/THCThrustAllocator.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
+#include <THC/THCThrustAllocator.cuh>
 
 namespace at {
 namespace native {
 
 namespace {
-
 
 template <typename scalar_t, typename index_t, int Dim>
 __global__ void gatherKthValue(
@@ -82,7 +81,7 @@ __global__ void gatherKthValue(
     bool inRange = (i < inputSliceSize);
     scalar_t v = inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride])
                          : static_cast<scalar_t>(0);
-    bool isKValue = inRange && (THCNumerics<scalar_t>::eq(v, kValue));
+    bool isKValue = inRange && THCNumerics<scalar_t>::eq_with_nan(v, kValue);
 
     if (isKValue) {
       kValueIndex = i;
@@ -240,9 +239,10 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
 }
 
 Tensor median_cuda(const Tensor& self) {
-  return AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.type(), "median", [&] {
-    return median_cuda_template<scalar_t>(self);
-  });
+  return AT_DISPATCH_ALL_TYPES_AND(
+      at::ScalarType::Half, self.type(), "median", [&] {
+        return median_cuda_template<scalar_t>(self);
+      });
 }
 
 } // namespace native
