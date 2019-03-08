@@ -148,16 +148,15 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
 
 void ScriptModuleDeserializer::loadAttributeTable(
     const torch::ModuleDef* module_def) {
-  std::unordered_map<std::string, at::Storage> storageMap;
+  if (module_def->attributes_size() == 0) {
+    // No attributes, leave table empty
+    return;
+  }
+  at::DataPtr storage_ptr;
+  uint64_t record_size;
+  std::tie(storage_ptr, record_size) = reader_.getRecord("attributes");
   for (const torch::AttributeDef& attribute_def : module_def->attributes()) {
-    std::ostringstream filename;
-    filename << "attributes/" << attribute_def.name();
-    at::DataPtr storage_ptr;
-    uint64_t record_size;
-    std::tie(storage_ptr, record_size) = reader_.getRecord(filename.str());
-
      auto type = script::parseType(attribute_def.type());
-
      attribute_table_[attribute_def.name()] =
         std::make_pair(type, loadIValue(0, type, storage_ptr));
   }
@@ -173,10 +172,10 @@ IValue ScriptModuleDeserializer::loadIValue(
     uint64_t byte_offset,
     const TypePtr type,
     const at::DataPtr& storage_ptr) {
-  const char* bytes = static_cast<const char*>(storage_ptr.get());
+  const char* bytes = static_cast<const char*>(storage_ptr.get()) + byte_offset;
 
   if (auto dict_type = type->cast<DictType>()) {
-    const uint64_t* data = static_cast<const uint64_t*>(storage_ptr.get());
+    const uint64_t* data = reinterpret_cast<const uint64_t*>(bytes);
     // A byte offset into bytes that says where the mappings of key pointers
     // to value pointers start
     uint64_t dict_pairs_byte_offset = data[0];
@@ -198,10 +197,12 @@ IValue ScriptModuleDeserializer::loadIValue(
     }
     return result;
   } else if (auto string_type = type->cast<StringType>()) {
-    return std::string(bytes + byte_offset);
+    const uint64_t* length_ptr = reinterpret_cast<const uint64_t*>(bytes);
+    const char* characters = reinterpret_cast<const char*>(length_ptr + 1);
+    return std::string(characters, /*n=*/length_ptr[0]);
   } else if (auto tensor_type = type->cast<TensorType>()) {
     const uint64_t* tensor_id =
-        reinterpret_cast<const uint64_t*>(bytes + byte_offset);
+        reinterpret_cast<const uint64_t*>(bytes);
     return tensor_table_.at(tensor_id[0]);
   }
   // TODO: types other than dict and string

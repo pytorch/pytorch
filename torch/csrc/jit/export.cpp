@@ -512,6 +512,8 @@ class ScriptModuleSerializer final {
 
   // all tensors that will be stored
   std::vector<at::Tensor> tensor_table_;
+
+  std::unordered_map<void*, uint64_t> written_ivalues_;
 };
 
 // ScriptModuleSerializer's methods
@@ -679,6 +681,16 @@ size_t estimateIValueSize(const IValue& ivalue) {
 uint64_t ScriptModuleSerializer::writeIValue(
     const IValue& ivalue,
     std::vector<char>& data) {
+  if (ivalue.isPtrType()) {
+    if (ivalue.isString()) {
+      auto ptr = ivalue.toString().get();
+      auto entry = written_ivalues_.find(ptr);
+      if (entry != written_ivalues_.end()) {
+        return entry->second;
+      }
+    }
+    // TODO: support other types
+  }
   // Write IValue into array as bytes, return pointer to start of data for the
   // IValue. This may be anywhere in 'data' (i.e. if the IValue contains other)
   // IValues, it will also write those
@@ -687,9 +699,13 @@ uint64_t ScriptModuleSerializer::writeIValue(
 
   if (ivalue.isString()) {
     auto string = ivalue.toStringRef();
+    // String length
+    pushValue(uint64_t(string.size()), data);
+    // String data
     data.insert(data.end(), string.begin(), string.end());
-    // Null-terminate strings
-    data.push_back('\0');
+
+    // Don't store the same ivalue multiple times
+    written_ivalues_[ivalue.toString().get()] = ivalue_offset;
   } else if (ivalue.isGenericDict()) {
     auto dict = ivalue.toGenericDictRef();
     // Add the pointer to the start of the key/value mappings
@@ -746,18 +762,16 @@ void ScriptModuleSerializer::convertModule(
     }
   }
 
-  for (const auto& item : module.get_attributes()) {
-    torch::AttributeDef* attribute_def = module_def->add_attributes();
-    auto& attribute = item.value();
-    attribute_def->set_name(attribute.name_);
-    attribute_def->set_type(attribute.type->python_str());
-
+  if (module.get_attributes().size() > 0) {
     std::vector<char> bytes;
-    writeIValue(*attribute.slot(), bytes);
-    std::stringstream filename;
-    // TODO: this will clash if a submodule has an attribute of the same name
-    filename << "attributes/" << attribute.name_;
-    writer_.writeRecord(filename.str(), bytes.data(), bytes.size());
+    for (const auto& item : module.get_attributes()) {
+      auto& attribute = item.value();
+      torch::AttributeDef* attribute_def = module_def->add_attributes();
+      attribute_def->set_name(attribute.name_);
+      attribute_def->set_type(attribute.type->python_str());
+      writeIValue(*attribute.slot(), bytes);
+    }
+    writer_.writeRecord("attributes", bytes.data(), bytes.size());
   }
 
   std::stringstream module_name;
