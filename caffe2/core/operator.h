@@ -183,6 +183,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   template <typename T>
   inline T* Output(int idx) {
+    CAFFE_ENFORCE(isLegacyOperator(), "Output(idx) not supported for operators exported to c10. Please use XOutput instead.");
+
     static_assert(
         !std::is_same<T, Tensor>::value,
         "You should use Output<Tensor>(int, DeviceType) for "
@@ -285,6 +287,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   Tensor* OutputTensorAlias(int idx, const Tensor& src) {
+    CAFFE_ENFORCE(isLegacyOperator(), "OutputTensorAlias(idx, src) not (yet) supported for operators exported to c10.");
     return BlobSetTensor(OutputBlob(idx),
                   src.Alias());
   }
@@ -292,15 +295,18 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   template <typename T>
   inline T* Output(int idx, T* allocated) {
+    CAFFE_ENFORCE(isLegacyOperator(), "Output(idx, allocated) not supported for operators exported to c10. Please use XOutput.");
     outputs_.at(idx)->Reset(allocated);
     return allocated;
   }
 
   inline const Blob& InputBlob(int idx) {
+    CAFFE_ENFORCE(isLegacyOperator(), "InputBlob(idx) not (yet) supported for operators exported to c10.");
     return *inputs_.at(idx);
   }
 
   inline Blob* OutputBlob(int idx) {
+    CAFFE_ENFORCE(isLegacyOperator(), "OutputBlob(idx) not (yet) supported for operators exported to c10.");
     return outputs_.at(idx);
   }
 
@@ -308,11 +314,13 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   // note this does not check if the two Blobs points to the same Tensor, or if
   // the Tensor pointers point to the same TensorImpl, or if the Storages alias
   inline bool IsInputOutputAlias(int i, int j) {
+    CAFFE_ENFORCE(isLegacyOperator(), "IsInputOutputAlias(i, j) not (yet) supported for operators exported to c10.");
     return inputs_.at(i) == outputs_.at(j);
   }
 
   template <typename T>
   inline bool InputIsType(int idx) {
+    CAFFE_ENFORCE(isLegacyOperator(), "InputIsType(idx) not (yet) supported for operators exported to c10.");
     static_assert(
         !std::is_same<T, Tensor>::value,
         "You should use InputIsTensorType(int, DeviceType) for "
@@ -321,11 +329,13 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline bool InputIsTensorType(int idx, DeviceType device_type) {
+    CAFFE_ENFORCE(isLegacyOperator(), "InputIsTensorType(idx, device_type) not (yet) supported for operators exported to c10.");
     return BlobIsTensorType(*inputs_.at(idx), device_type);
   }
 
   template <typename T>
   inline bool OutputIsType(int idx) {
+    CAFFE_ENFORCE(isLegacyOperator(), "OutputIsType(idx) not (yet) supported for operators exported to c10.");
     static_assert(
         !std::is_same<T, Tensor>::value,
         "You should use OutputIsTensorType(int, DeviceType) for "
@@ -334,6 +344,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline bool OutputIsTensorType(int idx, DeviceType type) {
+    CAFFE_ENFORCE(isLegacyOperator(), "OutputIsTensorType(idx, type) not (yet) supported for operators exported to c10.");
     return BlobIsTensorType(*outputs_.at(idx), type);
   }
 
@@ -347,8 +358,14 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     }
     return ivalue_outputs_.size();
   }
-  inline const vector<const Blob*>& Inputs() const { return inputs_; }
-  inline const vector<Blob*>& Outputs() { return outputs_; }
+  inline const vector<const Blob*>& Inputs() const {
+    CAFFE_ENFORCE(isLegacyOperator(), "Inputs() not supported for operators exported to c10.");
+    return inputs_;
+  }
+  inline const vector<Blob*>& Outputs() {
+    CAFFE_ENFORCE(isLegacyOperator(), "Outputs() not supported for operators exported to c10.");
+    return outputs_;
+  }
   vector<TensorShape> InputTensorShapes() const;
 
   virtual void WaitEvent(const Event& ev, int /*stream_id */ = -1) {
@@ -417,6 +434,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   virtual void AddRelatedBlobInfo(EnforceNotMet* err) {
+    CAFFE_ENFORCE(isLegacyOperator(), "AddRelatedBlobInfo(err) not supported for operators exported to c10.");
+
     if (!has_debug_def()) {
       return;
     }
