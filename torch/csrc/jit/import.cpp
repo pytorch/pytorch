@@ -152,14 +152,31 @@ void ScriptModuleDeserializer::loadAttributeTable(
     // No attributes, leave table empty
     return;
   }
+
+  std::unordered_map<std::string, uint64_t> offsets;
+  at::DataPtr offset_storage_ptr;
+  uint64_t offset_record_size;
+  std::tie(offset_storage_ptr, offset_record_size) =
+      reader_.getRecord("attribute_offsets");
+  uint64_t i = 0;
+  while (i < offset_record_size) {
+    auto name_chars = static_cast<const char*>(offset_storage_ptr.get()) + i;
+    std::string name(name_chars);
+    auto offset =
+        reinterpret_cast<const uint64_t*>(name_chars + name.size() + 1)[0];
+    i += name.size() + 1 + sizeof(uint64_t);
+    offsets[name] = offset;
+  }
+
   at::DataPtr storage_ptr;
   uint64_t record_size;
   std::tie(storage_ptr, record_size) = reader_.getRecord("attributes");
   for (const torch::AttributeDef& attribute_def : module_def->attributes()) {
-     auto type = script::parseType(attribute_def.type());
-     // TODO: support having more than 1 attribute (need to encode the offset somewhere)
-     attribute_table_[attribute_def.name()] =
-        std::make_pair(type, loadIValue(0, type, storage_ptr));
+    auto type = script::parseType(attribute_def.type());
+    auto offset = offsets.find(attribute_def.name());
+    AT_ASSERT(offset != offsets.end());
+    attribute_table_[attribute_def.name()] =
+        std::make_pair(type, loadIValue(offset->second, type, storage_ptr));
   }
 }
 
@@ -202,9 +219,9 @@ IValue ScriptModuleDeserializer::loadIValue(
     const char* characters = reinterpret_cast<const char*>(length_ptr + 1);
     return std::string(characters, /*n=*/length_ptr[0]);
   } else if (auto tensor_type = type->cast<TensorType>()) {
-    const uint64_t* tensor_id =
-        reinterpret_cast<const uint64_t*>(bytes);
-    return tensor_table_.at(tensor_id[0]);
+    return tensor_table_.at(byte_offset);
+  } else if (auto int_type = type->cast<IntType>()) {
+    return reinterpret_cast<const int64_t*>(bytes)[0];
   }
   // TODO: types other than dict and string
   AT_ERROR("Unknown type for de-serialization:", type->python_str());

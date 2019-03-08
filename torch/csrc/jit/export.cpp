@@ -724,7 +724,7 @@ uint64_t ScriptModuleSerializer::writeIValue(
     }
 
     // Add offsets into 'data' for each key/value pair in the dict
-    ivalue_offset = data.size();
+    auto dict_pairs_byte_offset = data.size();
     for (uint64_t offset : item_data_offsets) {
       pushValue(offset, data);
     }
@@ -732,11 +732,13 @@ uint64_t ScriptModuleSerializer::writeIValue(
     // At the start of the block of data for this dictionary, write where the
     // dictionary key/value pairs begin
     uint64_t* size_ptr = reinterpret_cast<uint64_t*>(&data[data_ptr_index]);
-    *size_ptr = uint64_t(ivalue_offset);
+    *size_ptr = uint64_t(dict_pairs_byte_offset);
   } else if (ivalue.isTensor()) {
     auto tensor = ivalue.toTensor();
     // Write it to the tensor table
-    pushValue(addTensor(tensor), data);
+    return uint64_t(addTensor(tensor));
+  } else if (ivalue.isInt()) {
+    return pushValue(ivalue.toInt(), data);
   } else {
     AT_ERROR("Cannot write data for ivalue");
   }
@@ -764,14 +766,27 @@ void ScriptModuleSerializer::convertModule(
 
   if (module.get_attributes().size() > 0) {
     std::vector<char> bytes;
+    std::unordered_map<std::string, uint64_t> attribute_offsets;
     for (const auto& item : module.get_attributes()) {
       auto& attribute = item.value();
       torch::AttributeDef* attribute_def = module_def->add_attributes();
       attribute_def->set_name(attribute.name_);
       attribute_def->set_type(attribute.type->python_str());
-      writeIValue(*attribute.slot(), bytes);
+      auto offset = writeIValue(*attribute.slot(), bytes);
+      attribute_offsets[attribute.name_] = offset;
     }
     writer_.writeRecord("attributes", bytes.data(), bytes.size());
+
+    // TODO: some better way to track this info
+    std::vector<char> offset_bytes;
+    for (const auto& pair : attribute_offsets) {
+      auto name = pair.first;
+      offset_bytes.insert(offset_bytes.end(), name.begin(), name.end());
+      offset_bytes.push_back('\0');
+      pushValue(pair.second, offset_bytes);
+    }
+    writer_.writeRecord(
+        "attribute_offsets", offset_bytes.data(), offset_bytes.size());
   }
 
   std::stringstream module_name;
