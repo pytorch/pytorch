@@ -196,7 +196,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
     # less on the content of Declarations.yaml. If you want to support more than this you'll
     # potentially have to extend the JIT.
 
-    tensor_options_arguments = [
+    currently_supported_tensor_options_arguments = [
         # dtype is specified as an int64_t of at::ScalarType
         {'name': 'dtype', 'type': ['ScalarType', 'ScalarType?'], 'is_nullable': False, 'annotation': None},
         # layout is specified as an int64_t of at::Layout
@@ -212,9 +212,9 @@ def parse_arguments(args, func_variants, declaration, func_return):
         matches = matches and argument['type'] in tensor_option_argument['type']
         return matches
 
-    def is_tensor_option(argument, tensor_options_arguments):
+    def is_tensor_option(argument, currently_supported_tensor_options_arguments):
         is_in_it = False
-        for to_argument in tensor_options_arguments:
+        for to_argument in currently_supported_tensor_options_arguments:
             is_in_it = is_in_it or compare_tensor_option(argument, to_argument)
         return is_in_it
 
@@ -222,12 +222,12 @@ def parse_arguments(args, func_variants, declaration, func_return):
     idx = 0
     while idx < len(arguments):
         argument = arguments[idx]
-        if is_tensor_option(argument, tensor_options_arguments) and \
+        if is_tensor_option(argument, currently_supported_tensor_options_arguments) and \
                 len(arguments) - idx >= 3:
             tensor_options_representation = []
             for i in range(3):
                 argument = arguments[idx]
-                if not is_tensor_option(argument, tensor_options_arguments):
+                if not is_tensor_option(argument, currently_supported_tensor_options_arguments):
                     break
                 tensor_options_representation.append(argument)
                 idx += 1
@@ -235,7 +235,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
                 merged_argument = {'type': 'TensorOptions', 'name': 'options',
                                    'is_nullable': False, 'annotation': None}
                 for t_idx, t_arg in enumerate(tensor_options_representation):
-                    assert compare_tensor_option(t_arg, tensor_options_arguments[t_idx])
+                    assert compare_tensor_option(t_arg, currently_supported_tensor_options_arguments[t_idx])
                     if 'default' in t_arg:
                         assert t_arg['default'] in tensor_options_defaults[t_idx]
                         if 'default' not in merged_argument:
