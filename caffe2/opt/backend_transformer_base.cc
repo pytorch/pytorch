@@ -87,7 +87,7 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(*pred_net, shape_map);
   const auto& out_map = eng.shape_info();
-
+  shape_map.clear();
   for (const auto& kv : out_map) {
     shape_map.emplace(
         std::piecewise_construct,
