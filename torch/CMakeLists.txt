@@ -136,7 +136,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/irparser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/caffe2_operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_c10_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/symbolic_script.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
@@ -194,11 +193,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
   ${TORCH_ROOT}/test/cpp/jit/no-gtest.cpp
   )
-
-if (BUILD_CAFFE2_OPS)
-  list(APPEND TORCH_SRCS
-    ${TORCH_SRC_DIR}/csrc/jit/register_caffe2_ops.cpp)
-endif()
 
 if (WIN32)
   list(APPEND TORCH_SRCS
