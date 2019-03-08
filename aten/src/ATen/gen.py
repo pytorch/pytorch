@@ -263,7 +263,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     env['AccScalarName'] = accreal
     env['isFloatingType'] = is_floating_type
     env['isIntegralType'] = not is_floating_type
-    if density == 'Dense':
+    if density != 'Sparse':
         env['Tensor'] = "{}{}{}Tensor".format(density_tag, backend, scalar_name)
     env['Type'] = "{}{}{}Type".format(density_tag, backend, scalar_name)
     env['DenseTensor'] = "{}{}Tensor".format(backend, scalar_name)
