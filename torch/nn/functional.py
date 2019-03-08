@@ -2949,6 +2949,14 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
         Currently, only 4-D input tensors (batched image-like tensors) are
         supported.
 
+    .. warning::
+
+        More than one element of the unfolded tensor may refer to a single
+        memory location. As a result, in-place operations (especially ones that
+        are vectorized) may result in incorrect behavior. If you need to write
+        to the tensor, please clone it first.
+
+
     See :class:`torch.nn.Unfold` for details
     """
 
