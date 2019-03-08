@@ -481,6 +481,9 @@ def signature(decl, should_match_schema=True):
     arg_list = ', '.join(args)
     if len(decl['returns']) == 1:
         ret_list = jit_type_of(decl['returns'][0])
+        # Adding output name if it exists
+        if decl['returns'][0].get('field_name'):
+            ret_list += ' ' + decl['returns'][0]['field_name']
     else:
         def type_maybe_field(r):
             return '{} {}'.format(jit_type_of(r), r['field_name']) if 'field_name' in r else jit_type_of(r)
