@@ -54,7 +54,7 @@ TEST_F(SequentialTest, ConstructsFromConcreteType) {
   Sequential sequential(M(1), M(2), M(3));
   ASSERT_EQ(sequential->size(), 3);
 
-  Sequential sequential_named(torch::OrderedDict<std::string, torch::nn::Module>({
+  Sequential sequential_named(SequentialOrderedDict({
     {"m1", M(1)},
     {"m2", M(2)},
     {"m3", M(3)}

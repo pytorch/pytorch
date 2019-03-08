@@ -7,8 +7,6 @@
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
-#include <torch/ordered_dict.h>
-
 #include <c10/util/Exception.h>
 
 #include <cstdint>
@@ -21,6 +19,46 @@
 
 namespace torch {
 namespace nn {
+
+template <typename Key, typename Value>
+class SequentialOrderedDictItem {
+ public:
+  /// Constructs a new item.
+  SequentialOrderedDictItem(Key key, Value value) : pair_(std::move(key), std::move(value)) {}
+
+  /// Returns a reference to the key.
+  const Key& key() const noexcept {
+    return pair_.first;
+  }
+
+  /// Returns a reference to the value.
+  Value& value() noexcept {
+    return pair_.second;
+  }
+
+  /// Returns a reference to the value.
+  const Value& value() const noexcept {
+    return pair_.second;
+  }
+
+ private:
+  /// This is stored as an std::pair because it will make Python binding a lot,
+  /// lot easier.
+  std::pair<const Key, Value> pair_;
+};
+
+class SequentialOrderedDict {
+ public:
+  /// Constructs a new `SequentialOrderedDict` and pre-populates it with the given
+  /// `SequentialOrderedDictItem`s.
+  template <typename M>
+  SequentialOrderedDict(std::initializer_list<SequentialOrderedDictItem<std::string, M&&>> initializer_list) {
+    for (auto& item : initializer_list) {
+      std::cout << item.key() << "\n";
+      std::cout << item.value().value << "\n";
+    }
+  }
+};
 
 /// A list of `Module`s that acts as a `Module` itself.
 ///
@@ -211,8 +249,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     push_back(module_holder.ptr());
   }
 
-  template <typename M>
-  void push_back(torch::OrderedDict<std::string, M>&& ordered_dict) {
+  void push_back(SequentialOrderedDict&& ordered_dict) {
     std::cout << "we are here0!" << "\n";
   }
 
