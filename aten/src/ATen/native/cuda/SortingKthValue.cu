@@ -233,7 +233,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
     int64_t k,
     int64_t dim,
     bool keepdim) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "kthvalue", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "kthvalue_cuda", [&] {
     kthvalue_cuda_template<scalar_t>(values, indices, self, k, dim, keepdim);
   });
   return std::forward_as_tuple(values, indices);
