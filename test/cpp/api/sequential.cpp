@@ -37,7 +37,15 @@ TEST_F(SequentialTest, ConstructsFromSharedPointer) {
 TEST_F(SequentialTest, ConstructsFromConcreteType) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
+    M(const M&) {
+      // NOTE: The current implementation expects the module to be copied once
+      // when it's passed into `std::make_shared<T>()`.
+      // TODO: Find a way to avoid copying, and then delete the copy constructor.
+      AT_ASSERT(copy_count == 0);
+      copy_count++;
+    }
     int value;
+    int copy_count = 0;
     int forward() {
       return value;
     }
