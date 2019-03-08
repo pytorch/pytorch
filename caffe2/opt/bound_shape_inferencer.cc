@@ -2,6 +2,7 @@
 #include "caffe2/core/operator_schema.h"
 #include "caffe2/core/tensor_impl.h"
 #include "caffe2/utils/proto_utils.h"
+#include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
 
@@ -60,6 +61,10 @@ void BoundShapeInferencer::InferBoundShapeAndType(
       InferReshape(op);
     } else if (op.type() == "LengthsRangeFill") {
       InferLengthsRangeFill(op);
+    } else if (
+        caffe2::StartsWith(op.type(), "GivenTensor") &&
+        caffe2::EndsWith(op.type(), "Fill")) {
+      InferGivenTensorFill(op);
     } else {
       InferCommonOp(op);
     }
@@ -120,6 +125,15 @@ std::vector<TensorShape> InferOutput(
   const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
   CAFFE_ENFORCE(schema);
   return schema->InferTensor(op, input_shapes);
+}
+
+void BoundShapeInferencer::InferGivenTensorFill(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.output_size(), 1, op.type(), " must have 1 output");
+  InferCommonOp(op);
+  auto it = shape_info_.find(op.output(0));
+  if (it != shape_info_.end()) {
+    it->second.dim_type = ShapeInfo::DimType::CONSTANT;
+  }
 }
 
 void BoundShapeInferencer::InferLengthsRangeFill(const OperatorDef& op) {
@@ -342,6 +356,7 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
 void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
   // First, we need to check that all the input shape/types are already
   // presented
+  try {
   std::vector<TensorShape> input_shapes;
   for (const auto& input : op.input()) {
     const auto it = shape_info_.find(input);
@@ -356,11 +371,7 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
   const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
   CAFFE_ENFORCE(schema);
   std::vector<TensorShape> output_shapes;
-  try {
     output_shapes = schema->InferTensor(op, input_shapes);
-  } catch (const std::exception& e) {
-    LOG(WARNING) << "Caught exception while inferring shapes for " << op.type();
-  }
   int i = 0;
   for (const auto& shape : output_shapes) {
     if (shape.unknown_shape()) {
@@ -372,6 +383,13 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
         current_dim_type_,
         ConvertToVec(shape.dims()),
         shape.data_type());
+  }
+  } catch (const caffe2::EnforceNotMet& e) {
+    LOG(ERROR) << "Enforce not met while inferring shapes for " << op.type()
+               << ": " << e.msg();
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "Caught exception while inferring shapes for " << op.type()
+                 << ": " << e.what();
   }
 }
 
