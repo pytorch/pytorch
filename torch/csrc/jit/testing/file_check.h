@@ -2,6 +2,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/testing/file_check.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {
@@ -17,8 +18,10 @@ struct FileCheck {
   TORCH_API explicit FileCheck();
   TORCH_API ~FileCheck();
 
-  // Run FileCheck against test string/graph
+  // Run FileCheck against test string
   TORCH_API void run(const std::string& test_string);
+
+  // Run FileCheck against dump of graph IR
   TORCH_API void run(const Graph& graph);
 
   // Checks that the string occurs, starting at the end of the most recent match

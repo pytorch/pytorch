@@ -38,6 +38,7 @@
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
+#include <torch/csrc/jit/testing/file_check.h>
 
 #include "onnx/onnx_pb.h"
 
@@ -150,7 +151,7 @@ void testFusion() {
   };
   testSimple();
 
-  auto testOne = [&](int ti, int tj) {
+  auto testOne = [&](int ti, int tj, int toi, int toj) {
     Graph graph;
 
     Var i0 = Var::asNewInput(graph);
@@ -200,10 +201,14 @@ void testFusion() {
     float max_diff = (outputs.front() - out0).abs().max().item<double>();
     ASSERT_TRUE(max_diff < 1e-6);
   };
-  testOne(0, 0);
-  testOne(0, 1);
-  testOne(1, 2);
-  testOne(0, 2);
+  testOne(0, 0, 0, 0);
+  testOne(0, 1, 0, 0);
+  testOne(1, 2, 0, 0);
+  testOne(0, 2, 0, 0);
+
+  testOne(0, 0, 0, 1);
+  testOne(0, 1, 1, 2);
+  testOne(1, 2, 0, 2);
 
   auto createFusedConcat =
       [](Graph& graph, at::ArrayRef<Value*> inputs, int64_t dim) -> Value* {
@@ -942,6 +947,10 @@ void testCreateAutodiffSubgraphs(std::ostream& out = std::cout) {
   CreateAutodiffSubgraphs(graph, /*threshold=*/2);
   out << "testCreateAutodiffSubgraphs\n";
   out << *graph << "\n";
+  // all of the ops are within the DifferentiableGraph
+  testing::FileCheck().check_not("aten::mm")->check_not("aten::sigmoid")->
+    check_not("aten::tanh")->check_not("aten::mul")->check("DifferentiableGraph")
+    ->check_next("return")->run(*graph);
 }
 
 void testSubgraphUtils() {
@@ -1510,7 +1519,9 @@ void testSchemaParser() {
         Symbol::fromQualString("alias::b"),
     };
     const auto expectedAfter = std::unordered_set<Symbol>{
-        Symbol::fromQualString("alias::b"), Symbol::fromQualString("alias::c")};
+        Symbol::fromQualString("alias::b"),
+        Symbol::fromQualString("alias::c")
+    };
     ASSERT_TRUE(containedAliasInfo.beforeSets() == expectedBefore);
     ASSERT_TRUE(containedAliasInfo.afterSets() == expectedAfter);
     ASSERT_FALSE(containedAliasInfo.isWrite());
