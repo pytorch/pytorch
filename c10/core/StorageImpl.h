@@ -2,7 +2,6 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/core/ScalarType.h>
-#include <c10/core/ScalarTypeUtils.h>
 
 #include <c10/util/intrusive_ptr.h>
 
@@ -64,15 +63,13 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
 
   template <typename T>
   inline T* data() const {
-    // TODO: This is bad: it means storage.data<T>() calls only work on
-    // T that are valid ScalarType.  FIXME!
-    auto data_type_T = at::scalarTypeToDataType(c10::CTypeToScalarType<T>::to());
-    if (dtype().id() != data_type_T) {
+    auto data_type = caffe2::TypeMeta::Make<T>();
+    if (dtype() != data_type) {
       AT_ERROR(
           "Attempt to access StorageImpl having data type ",
-          dtype().id(),
+          dtype(),
           " as data type ",
-          data_type_T);
+          data_type);
     }
     return unsafe_data<T>();
   }
