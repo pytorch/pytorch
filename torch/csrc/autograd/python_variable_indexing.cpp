@@ -107,7 +107,7 @@ static Variable applySelect(const Variable& self, int64_t dim, int64_t index, in
 
 static Variable sequenceToVariable(const at::Type& type, PyObject* seq) {
   auto& idx_type = type.toScalarType(kLong);
-  return torch::utils::indexing_tensor_from_data(idx_type, c10::nullopt, seq);
+  return torch::utils::indexing_tensor_from_data(idx_type, kLong, c10::nullopt, seq);
 }
 
 static Variable valueToTensor(const at::Type & type, PyObject* value) {
