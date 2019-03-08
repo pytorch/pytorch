@@ -35,7 +35,7 @@ bool is_sparse(const Tensor& self) {
 }
 
 Tensor type_as(const Tensor& self, const Tensor& other) {
-  return self.toType(other.type());
+  return self.toType(other.type(), other.scalar_type());
 }
 
 }} // namespace at::native

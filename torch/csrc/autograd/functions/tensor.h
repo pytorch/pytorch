@@ -16,6 +16,7 @@ struct CopyBackwards : public Function {
   variable_list apply(variable_list&& grads) override;
 
   at::Type *src_type = nullptr; // initialized for safety.
+  at::ScalarType src_dtype = at::ScalarType::Undefined;
   at::Device src_device = at::kCPU;
 };
 

@@ -30,7 +30,7 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
-  return at::getType(options).tensorFromBlob(data, sizes, deleter);
+  return at::getType(options).tensorFromBlob(data, at::typeMetaToScalarType(options.dtype()), sizes, deleter);
 }
 
 inline Tensor from_blob(
@@ -39,7 +39,7 @@ inline Tensor from_blob(
     IntArrayRef strides,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
-  return at::getType(options).tensorFromBlob(data, sizes, strides, deleter);
+  return at::getType(options).tensorFromBlob(data, at::typeMetaToScalarType(options.dtype()), sizes, strides, deleter);
 }
 
 // These functions are defined in native/TensorFactories.cpp.

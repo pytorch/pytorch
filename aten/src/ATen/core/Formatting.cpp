@@ -239,7 +239,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     stream << "]";
   } else {
     Type& cpudouble = tensor_.type().toBackend(Backend::CPU).toScalarType(kDouble);
-    Tensor tensor = tensor_.toType(cpudouble).contiguous();
+    Tensor tensor = tensor_.toType(cpudouble, kDouble).contiguous();
     if(tensor.ndimension() == 0) {
       stream << defaultfloat << tensor.data<double>()[0] << std::endl;
       stream << "[ " << tensor_.toString() << "{} ]";

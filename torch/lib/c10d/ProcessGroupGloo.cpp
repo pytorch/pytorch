@@ -124,7 +124,7 @@ void setOutput(O& opts, at::Tensor& tensor) {
 at::Tensor pinnedLike(at::Tensor& tensor) {
   auto& type = tensor.type().toBackend(at::Backend::CPU);
   auto* allocator = at::cuda::getPinnedMemoryAllocator();
-  return type.tensorWithAllocator(tensor.sizes(), tensor.strides(), allocator);
+  return type.tensorWithAllocator(tensor.scalar_type(), tensor.sizes(), tensor.strides(), allocator);
 }
 
 // This function initializes a vector of CUDA streams, one for every

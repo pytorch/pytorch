@@ -9,22 +9,22 @@
 
 namespace at {
 
-inline Tensor Tensor::toType(const Type & t, bool non_blocking) const {
-  if(type() == t)
+inline Tensor Tensor::toType(const Type & t, ScalarType dtype, bool non_blocking) const {
+  if (type() == t && scalar_type() == dtype)
     return *this;
-  return t.copy(*this, non_blocking);
+  return t.copy(*this, dtype, non_blocking);
 }
 
 inline Tensor Tensor::cpu() const {
-  return toType(type().cpu());
+  return toType(type().cpu(), scalar_type());
 }
 
 inline Tensor Tensor::cuda() const {
-  return toType(type().cuda());
+  return toType(type().cuda(), scalar_type());
 }
 
 inline Tensor Tensor::hip() const {
-  return toType(type().hip());
+  return toType(type().hip(), scalar_type());
 }
 
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
@@ -32,11 +32,11 @@ inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {
-  return toType(type().toScalarType(t));
+  return toType(type().toScalarType(t), scalar_type());
 }
 
 inline Tensor Tensor::toBackend(Backend b) const {
-  return toType(type().toBackend(b));
+  return toType(type().toBackend(b), scalar_type());
 }
 
 inline TensorOptions Tensor::options() const {

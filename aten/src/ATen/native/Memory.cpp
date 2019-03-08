@@ -11,7 +11,7 @@ Tensor pin_memory(const Tensor& self) {
     AT_ERROR("cannot pin '", self.type().toString(), "' only CPU memory can be pinned");
   }
   auto* allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
-  auto tensor = self.type().tensorWithAllocator(self.sizes(), self.strides(), allocator);
+  auto tensor = self.type().tensorWithAllocator(self.scalar_type(), self.sizes(), self.strides(), allocator);
   tensor.copy_(self);
   return tensor;
 }

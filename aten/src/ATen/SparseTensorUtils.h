@@ -31,7 +31,7 @@ inline void alias_into_sparse(const SparseTensor& self, const LongTensor& indice
 // Take indices and values and makes a (data) copy of them to put into the sparse
 // indices/values.  This used to be called THSTensor_(_set)
 inline void copy_into_sparse(const SparseTensor& self, const LongTensor& indices, const Tensor& values, bool non_blocking) {
-  alias_into_sparse(self, self._indices().type().copy(indices, non_blocking), self._values().type().copy(values, non_blocking));
+  alias_into_sparse(self, self._indices().type().copy(indices, self._indices().scalar_type(), non_blocking), self._values().type().copy(values, self._values().scalar_type(), non_blocking));
 }
 
 // TODO: put this into the public API
@@ -83,7 +83,7 @@ inline LongTensor flatten_indices(const Tensor& indices, IntArrayRef full_size, 
       mult *= full_size[i];
     }
     auto indices_mult_cpu = indices.type().cpu()
-                                   .tensorFromBlob(indices_mult_cpu_vec.data(), /*size=*/{sparse_dim, 1});
+                                   .tensorFromBlob(indices_mult_cpu_vec.data(), indices.scalar_type(), /*size=*/{sparse_dim, 1});
     // NB: must be blocking because this blob may be freed after this closure,
     //     and non_blocking copy will see garbage.
     auto indices_mult = indices_mult_cpu.to(indices.device(), /*non_blocking=*/false);

@@ -133,14 +133,15 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   }
 
   void* data_ptr = PyArray_DATA(array);
-  auto& type = CPU(numpy_dtype_to_aten(PyArray_TYPE(array)));
+  auto aten_dtype = numpy_dtype_to_aten(PyArray_TYPE(array));
+  auto& type = CPU(aten_dtype);
   if (!PyArray_EquivByteorders(PyArray_DESCR(array)->byteorder, NPY_NATIVE)) {
     throw ValueError(
         "given numpy array has byte order different from the native byte order. "
         "Conversion between byte orders is currently not supported.");
   }
   Py_INCREF(obj);
-  return type.tensorFromBlob(data_ptr, sizes, strides, [obj](void* data) {
+  return type.tensorFromBlob(data_ptr, aten_dtype, sizes, strides, [obj](void* data) {
     AutoGIL gil;
     Py_DECREF(obj);
   });

@@ -138,7 +138,7 @@ Tensor& empty_out(Tensor& result, IntArrayRef size) {
     auto& target_type = self.type().toScalarType(ScalarType::n); \
     if (self.type() == target_type)                              \
       return self;                                               \
-    return target_type.copy(self, non_blocking);                 \
+    return target_type.copy(self, ScalarType::n, non_blocking);  \
   }
 
 AT_FORALL_SCALAR_TYPES(DEFINE_CAST_OP)

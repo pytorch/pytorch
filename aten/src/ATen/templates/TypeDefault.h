@@ -28,7 +28,7 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
   Type & toBackend(Backend b) const override;
   Type & toScalarType(ScalarType s) const override;
 
-  Tensor copy(const Tensor & src, bool non_blocking=false, optional<Device> to_device={}) const override;
+  Tensor copy(const Tensor & src, ScalarType dtype, bool non_blocking=false, optional<Device> to_device={}) const override;
   Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const override;
 
   void backward(
@@ -38,10 +38,10 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
       bool create_graph) const override;
   void set_data(Tensor & self, Tensor new_data) const override;
 
-  Tensor tensorFromBlob(void * data, IntArrayRef sizes, const std::function<void(void*)> & deleter=noop_deleter) const override;
-  Tensor tensorFromBlob(void * data, IntArrayRef sizes, IntArrayRef strides, const std::function<void(void*)> & deleter=noop_deleter) const override;
-  Tensor tensorWithAllocator(IntArrayRef sizes, Allocator* allocator) const override;
-  Tensor tensorWithAllocator(IntArrayRef sizes, IntArrayRef strides, Allocator* allocator) const override;
+  Tensor tensorFromBlob(void * data, ScalarType dtype, IntArrayRef sizes, const std::function<void(void*)> & deleter=noop_deleter) const override;
+  Tensor tensorFromBlob(void * data, ScalarType dtype, IntArrayRef sizes, IntArrayRef strides, const std::function<void(void*)> & deleter=noop_deleter) const override;
+  Tensor tensorWithAllocator(ScalarType dtype, IntArrayRef sizes, Allocator* allocator) const override;
+  Tensor tensorWithAllocator(ScalarType dtype, IntArrayRef sizes, IntArrayRef strides, Allocator* allocator) const override;
 
   Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
   Storage storageWithAllocator(int64_t size, Allocator* allocator) const override;

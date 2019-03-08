@@ -27,14 +27,14 @@ Tensor & TypeDefault::copy_(Tensor & self, const Tensor & src, bool non_blocking
   return s_copy_(self, b_src, non_blocking);
 }
 
-Tensor TypeDefault::copy(const Tensor & src, bool non_blocking, optional<Device> to_device) const {
+Tensor TypeDefault::copy(const Tensor & src, ScalarType dtype, bool non_blocking, optional<Device> to_device) const {
   OptionalDeviceGuard device_guard(to_device);
   AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   Tensor r;
   if (is_sparse()) {
-    r = at::empty({0}, this->options());
+    r = at::empty({0}, this->options(dtype));
   } else {
-    r = at::empty(src.sizes(), this->options());
+    r = at::empty(src.sizes(), this->options(dtype));
   }
   r.copy_(src, non_blocking);
   return r;
@@ -79,19 +79,19 @@ static int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides) {
   }
   return size;
 }
-Tensor TypeDefault::tensorFromBlob(void * data, IntArrayRef sizes, const std::function<void(void*)> & deleter) const {
-  return tensorFromBlob(data, sizes, defaultStrides(sizes), deleter);
+Tensor TypeDefault::tensorFromBlob(void * data, ScalarType dtype, IntArrayRef sizes, const std::function<void(void*)> & deleter) const {
+  return tensorFromBlob(data, dtype, sizes, defaultStrides(sizes), deleter);
 }
-Tensor TypeDefault::tensorFromBlob(void * data, IntArrayRef sizes, IntArrayRef strides, const std::function<void(void*)> & deleter) const {
+Tensor TypeDefault::tensorFromBlob(void * data, ScalarType dtype, IntArrayRef sizes, IntArrayRef strides, const std::function<void(void*)> & deleter) const {
   auto storage = storageFromBlob(data, computeStorageSize(sizes, strides), deleter);
-  return at::empty({0}, options()).set_(storage, 0, sizes, strides);
+  return at::empty({0}, options(dtype)).set_(storage, 0, sizes, strides);
 }
-Tensor TypeDefault::tensorWithAllocator(IntArrayRef sizes, Allocator* allocator) const {
-  return tensorWithAllocator(sizes, defaultStrides(sizes), std::move(allocator));
+Tensor TypeDefault::tensorWithAllocator(ScalarType dtype, IntArrayRef sizes, Allocator* allocator) const {
+  return tensorWithAllocator(dtype, sizes, defaultStrides(sizes), std::move(allocator));
 }
-Tensor TypeDefault::tensorWithAllocator(IntArrayRef sizes, IntArrayRef strides, Allocator* allocator) const {
+Tensor TypeDefault::tensorWithAllocator(ScalarType dtype, IntArrayRef sizes, IntArrayRef strides, Allocator* allocator) const {
   auto storage = storageWithAllocator(computeStorageSize(sizes, strides), std::move(allocator));
-  return at::empty({0}, options()).set_(storage, 0, sizes, strides);
+  return at::empty({0}, options(dtype)).set_(storage, 0, sizes, strides);
 }
 
 Storage TypeDefault::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
