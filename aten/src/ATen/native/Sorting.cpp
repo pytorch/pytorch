@@ -153,7 +153,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
   }
   auto tmp_values = self.clone();
   auto tmp_indices = at::empty(self.sizes(), self.options().dtype(kLong));
-  AT_DISPATCH_ALL_TYPES(self.type(), "kthvalue", [&] {
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "kthvalue_cpu", [&] {
     dim_apply(
         {tmp_values, tmp_indices, values, indices},
         dim,

@@ -90,7 +90,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
     } else {
       // Generate random values for the keys array
       AT_DISPATCH_ALL_TYPES(
-        result.type(), "randperm_out_cuda", [&] {
+        result.scalar_type(), "randperm_out_cuda", [&] {
           auto keys = at::empty(result.sizes(), result.options()).random_(generator);
 
           auto result_data = thrust::device_ptr<scalar_t>(result.data<scalar_t>());
@@ -322,7 +322,7 @@ Tensor tril_indices_cuda(
       cuda::getApplyGrid(tril_size, dim_grid, tensor.get_device()),
       "unable to get dim grid");
 
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.type(), "tril_indices_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
       tril_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
         tensor.data<scalar_t>(),
@@ -398,7 +398,7 @@ Tensor triu_indices_cuda(
       cuda::getApplyGrid(triu_size, dim_grid, tensor.get_device()),
       "unable to get dim grid");
 
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.type(), "triu_indices_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "triu_indices_cuda", [&] {
       triu_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
         tensor.data<scalar_t>(),

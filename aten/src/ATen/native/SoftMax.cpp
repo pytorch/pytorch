@@ -132,7 +132,7 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
   if (input.ndimension() > 0 && dim == input.ndimension() - 1) {
     softmax_lastdim_kernel(kCPU, output, input);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "softmax", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "softmax", [&] {
       host_softmax<scalar_t, false>(output, input, dim);
     });
   }
@@ -152,7 +152,7 @@ Tensor log_softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half
   if (input.ndimension() > 0 && dim == input.ndimension() - 1) {
     log_softmax_lastdim_kernel(kCPU, output, input);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "log_softmax", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "log_softmax", [&] {
       host_softmax<scalar_t, true>(output, input, dim);
     });
   }
@@ -181,7 +181,7 @@ Tensor softmax_backward_cpu(
   if (grad.ndimension() > 0 && dim == grad.ndimension() - 1) {
     softmax_backward_lastdim_kernel(kCPU, grad_input, grad, output);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(grad.type(), "softmax_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "softmax_backward", [&] {
       host_softmax_backward<scalar_t, false>(grad_input, grad, output, dim);
     });
   }
@@ -210,7 +210,7 @@ Tensor log_softmax_backward_cpu(
   if (grad.ndimension() > 0 && dim == grad.ndimension() - 1) {
     log_softmax_backward_lastdim_kernel(kCPU, grad_input, grad, output);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(grad.type(), "log_softmax_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "log_softmax_backward", [&] {
       host_softmax_backward<scalar_t, true>(grad_input, grad, output, dim);
     });
   }

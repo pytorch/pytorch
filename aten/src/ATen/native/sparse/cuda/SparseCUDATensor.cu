@@ -95,7 +95,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
     dim3 grid(THCCeilDiv(newNnz, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
     dim3 block(32, 4);
     AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::Half,values.type(), "coalesce_sparse_cuda", [&] {
+      at::ScalarType::Half,values.scalar_type(), "coalesce_sparse_cuda", [&] {
           using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
           apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
             uniqueOffsets.data<int64_t>(),
