@@ -287,7 +287,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
   // TODO: it seems like sparse_dim == 0 could be supported even if self.dim() > 0,
   // but this would take some work and doesn't seem particularly useful.
   AT_CHECK(sparse_dim > 0 || self.dim() == 0, "sparse_dim must be >0 if dimensionality > 0");
-  AT_CHECK(sparse_dim <= dims, 
+  AT_CHECK(sparse_dim <= dims,
     "sparse_dim must be less than or equal to self.dim()");
   at::TensorOptions sparse_options = self.options().layout(kSparse);
   std::vector<int64_t> sizes = self.sizes().vec();
@@ -376,7 +376,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
 
   int64_t i = -1;
   AT_DISPATCH_ALL_TYPES(
-      values.type(), "coalesce", [&] {
+      values.scalar_type(), "coalesce", [&] {
         int64_t prev = -1;
         int64_t blockSize = values.stride(0);
         scalar_t* values_ptr = values.data<scalar_t>();
@@ -483,7 +483,7 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
     // TODO: Re-audit this; it used to be an indexSelect directly into r_values
     at::index_select_out(r_values, t_view, 0, indices);
   } else {
-    AT_DISPATCH_ALL_TYPES(r_values.type(), "sparse_mask", [&] {
+    AT_DISPATCH_ALL_TYPES(r_values.scalar_type(), "sparse_mask", [&] {
       sparse_mask_out_cpu_kernel<scalar_t>(
         r_values,
         t,
