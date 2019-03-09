@@ -101,7 +101,9 @@ OperatorBase::OperatorBase(
 }
 
 vector<TensorShape> OperatorBase::InputTensorShapes() const {
-  CAFFE_ENFORCE(isLegacyOperator(), "InputTensorShapes() not supported for operators exported to c10.");
+  CAFFE_ENFORCE(
+      isLegacyOperator(),
+      "InputTensorShapes() not supported for operators exported to c10.");
   vector<TensorShape> tps;
   for (const auto& blob : inputs_) {
     tps.push_back(GetTensorShapeOfBlob(blob));
