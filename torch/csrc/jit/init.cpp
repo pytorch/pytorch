@@ -87,6 +87,138 @@ std::string runJITCPPTests() {
 std::string runJITCPPTests();
 #endif
 
+
+static void printPickle(const std::string& data) {
+  struct StreamReader {
+    StreamReader(const char * data)
+    : pos(data) {}
+    uint8_t readOpCode() {
+      return *pos++;
+    }
+    int8_t readInt1() {
+      return *pos++;
+    }
+    double readFloat() {
+      char buf[8];
+      // ok, why are floats big endian but ints little endian!?
+      for(size_t i = 0; i < 8; ++i) {
+        buf[i] = pos[7 - i];
+      }
+      auto r = *(double*)buf;
+      pos += sizeof(double);
+      return r;
+    }
+    int32_t readInt4() {
+      auto r = *(int32_t*)pos;
+      pos += sizeof(int32_t);
+      return r;
+    }
+    std::string readString(size_t size) {
+      auto r = std::string(pos, size);
+      pos += size;
+      return r;
+    }
+  private:
+    const char* pos;
+    const char* end;
+  };
+
+  enum OpCode : uint8_t {
+      PROTO = 0x80,
+      EMPTY_LIST = ']',
+      BINPUT = 'q',
+      MARK = '(',
+      BININT1 = 'K',
+      BINFLOAT = 'G',
+      TUPLE = 't',
+      EMPTY_DICT = '}',
+      SHORT_BINSTRING = 'U',
+      BININT = 'J',
+      SETITEMS = 'u',
+      APPENDS = 'e',
+      BINGET = 'h',
+      STOP = '.',
+  };
+  StreamReader reader(data.c_str());
+  std::vector<IValue> stack;
+  std::vector<IValue> memo;
+  std::vector<size_t> marks;
+  while(1) {
+    uint8_t op = reader.readOpCode();
+    std::cout << "op: " << (int32_t) op << " '" << (char) op << "'\n";
+    switch(op) {
+      case PROTO: {
+        int32_t version = reader.readInt1();
+        std::cout << "PROTO VERSION '" << version << "' \n";
+      } break;
+      case EMPTY_LIST:
+        // generic list issue: we do not know what kind of list to create
+        // can possible use some fake classes like IntList to make it still
+        // loadable in python
+        stack.push_back(std::vector<IValue>());
+        break;
+      case BINPUT: {
+        size_t pos = reader.readInt1();
+        if (memo.size() <= pos)
+          memo.resize(1 + 2*pos);
+        memo[pos] = stack.back();
+      } break;
+      case MARK:
+        marks.push_back(stack.size());
+        break;
+      case BININT1:
+        stack.push_back((int64_t)reader.readInt1());
+        break;
+      case BINFLOAT:
+        stack.push_back(reader.readFloat());
+        break;
+      case TUPLE: {
+        size_t start = marks.back();
+        marks.pop_back();
+        IValue tup = Tuple::create(std::vector<IValue>(stack.begin() + start, stack.end()));
+        stack.resize(start);
+        stack.push_back(tup);
+      } break;
+      case EMPTY_DICT:
+        stack.push_back(c10::ivalue::UnorderedMap());
+        break;
+      case SHORT_BINSTRING: {
+        size_t size = reader.readInt1();
+        stack.push_back(reader.readString(size));
+      } break;
+      case BININT:
+        stack.push_back(reader.readInt4());
+        break;
+      case APPENDS: {
+        size_t start = marks.back();
+        marks.pop_back();
+        auto gl = stack[start - 1].toGenericList();
+        gl->elements().insert(gl->elements().end(), stack.begin() + start, stack.end());
+        stack.resize(start);
+      } break;
+      case SETITEMS: {
+        size_t start = marks.back();
+        marks.pop_back();
+        auto gd = stack[start - 1].toGenericDict();
+        for(size_t i = start; i < stack.size(); i += 2) {
+          gd->elements()[stack[i]] = stack[i+1];
+        }
+        stack.resize(start);
+      } break;
+      case BINGET: {
+        stack.push_back(memo[reader.readInt1()]);
+      } break;
+      case STOP:
+        goto the_end;
+      default:
+        std::cout << "UNKNOWN OPCODE" << op << "\n";
+        return;
+    }
+  }
+the_end:
+  std::cout << "result is: " << stack[0] << "\n";
+}
+
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -454,6 +586,8 @@ void initJITBindings(PyObject* module) {
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
     toIValue(obj, type);
   });
+
+  m.def("print_pickle", printPickle);
 
   initPythonIRBindings(module);
   tracer::initPythonTracerBindings(module);
