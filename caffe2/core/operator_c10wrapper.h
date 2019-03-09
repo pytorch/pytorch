@@ -119,7 +119,8 @@ class C10OperatorWrapper final : public Operator<Context> {
     std::vector<at::Tensor> preallocated_outputs;
     preallocated_outputs.reserve(num_output_parameters);
     for (size_t i = 0; i < num_output_parameters; ++i) {
-      preallocated_outputs.push_back(at::Tensor(OperatorBase::OutputTensorOrUndefined(i)));
+      preallocated_outputs.push_back(
+          at::Tensor(OperatorBase::OutputTensorOrUndefined(i)));
     }
     stack_.emplace_back(std::move(preallocated_outputs));
   }

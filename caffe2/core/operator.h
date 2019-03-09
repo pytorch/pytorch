@@ -251,8 +251,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return BlobGetMutableTensor(outputs_.at(idx), dims, options);
     }
     auto& ival = ivalue_outputs_[idx];
-    Tensor tensor = GetSizedTensorWithOptions(
-        caffe2::Tensor(ival), dims, options);
+    Tensor tensor =
+        GetSizedTensorWithOptions(caffe2::Tensor(ival), dims, options);
     // assign it back in case it changed
     ival = at::Tensor(std::move(tensor.getIntrusivePtr()));
 
