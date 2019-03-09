@@ -575,6 +575,102 @@ void testTopologicalIndex() {
   }
 }
 
+void invokeTestRecordFunction(at::Tensor& t) {
+  autograd::profiler::GetPackedInputsCallback inputs_cb =
+    [t]() {
+      Stack st;
+      pack(st, t);
+      return st;
+    };
+  autograd::profiler::RecordFunction guard("test", inputs_cb);
+  t.add_(torch::ones_like(t));
+}
+
+struct TestInputsCallback : public autograd::profiler::RecordFunctionCallback {
+  TestInputsCallback(
+      const autograd::profiler::FunctionCallContext& ctx,
+      std::vector<std::vector<int64_t>>& input_sizes) : input_sizes_(input_sizes) {
+    for (const auto& input : ctx.inputs()) {
+      if (input.isTensor()) {
+        std::vector<int64_t> t = input.toTensor().sizes().vec();
+        input_sizes_.push_back(t);
+      }
+    }
+  }
+
+  virtual ~TestInputsCallback() {}
+
+ private:
+  std::vector<std::vector<int64_t>>& input_sizes_;
+};
+
+struct TestNestedCallback : public autograd::profiler::RecordFunctionCallback {
+  TestNestedCallback(
+      const autograd::profiler::FunctionCallContext& ctx,
+      std::vector<std::string>& nested_names) : nested_names_(nested_names) {
+    nested_names.push_back(getFullName(&ctx));
+  }
+
+  virtual ~TestNestedCallback() {}
+
+ private:
+  static std::string getFullName(const autograd::profiler::FunctionCallContext* ctx_ptr) {
+    std::string full_name = "";
+    while (ctx_ptr != nullptr) {
+      if (!full_name.empty()) {
+        full_name = std::string(ctx_ptr->name()) + "::" + full_name;
+      } else {
+        full_name = ctx_ptr->name();
+      }
+      ctx_ptr = ctx_ptr->parent().get();
+    }
+    return full_name;
+  }
+
+  std::vector<std::string>& nested_names_;
+};
+
+void invokeTestRecordFunctionAsyncNested() {
+  autograd::profiler::RecordFunction guard("inner");
+}
+
+void testRecordFunction() {
+  std::vector<std::vector<int64_t>> input_sizes;
+  autograd::profiler::pushCallback([&](const autograd::profiler::FunctionCallContext& ctx) {
+    return c10::guts::make_unique<TestInputsCallback>(ctx, input_sizes);
+  });
+
+  auto t = torch::randn({1, 2, 3}, at::kCPU);
+  invokeTestRecordFunction(t);
+
+  autograd::profiler::popCallback();
+
+  AT_CHECK(input_sizes.size() == 1);
+  AT_CHECK(input_sizes[0] == at::IntArrayRef({1, 2, 3}));
+
+  // test nested RecordFunctions, cover async execution test case
+  std::vector<std::string> nested_names;
+  autograd::profiler::pushCallback([&](const autograd::profiler::FunctionCallContext& ctx) {
+    return c10::guts::make_unique<TestNestedCallback>(ctx, nested_names);
+  });
+
+  std::thread test_thread;
+  {
+    autograd::profiler::RecordFunction guard("outer");
+    auto ctx = autograd::profiler::currentFunctionCallContext();
+    test_thread = std::thread([ctx](){
+      autograd::profiler::setCurrentFunctionCallContext(ctx);
+      invokeTestRecordFunctionAsyncNested();
+    });
+  }
+  test_thread.join(); // wait outside of "outer" scope
+
+  autograd::profiler::popCallback();
+  AT_CHECK(nested_names.size() == 2);
+  AT_CHECK(nested_names[0] == "outer");
+  AT_CHECK(nested_names[1] == "outer::inner");
+}
+
 void testAutogradProfiler() {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;

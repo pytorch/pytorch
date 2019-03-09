@@ -93,28 +93,20 @@ void popRange() {
   }
 }
 
-RecordFunction::RecordFunction(Function* fn) {
-  // typeid(*fn).name() would avoid an additional string allocation.
-  // However, typeid(*fn).name() would cause nvtx annotations for all user-defined
-  // (Python-side) custom autograd function backward() methods to have the same name,
-  // because they route through the same C++ side class.
-  // fn->name() ensures that nvtx annotations for custom function backward() methods
-  // receive a relevant, demangled name.
-  pushRangeImpl(fn->name(), ", stashed seq=", fn->sequence_nr());
-}
+struct ProfilerCallback : public RecordFunctionCallback {
+  ProfilerCallback(const FunctionCallContext& ctx) {
+    auto* msg = (ctx.seqNr() >= 0) ? ", seq = " : "";
+    if (ctx.hasOwnedName()) {
+      pushRangeImpl<std::string>(ctx.name(), msg, ctx.seqNr()); // copy name
+    } else {
+      pushRangeImpl<const char*>(ctx.name(), msg, ctx.seqNr());
+    }
+  }
 
-RecordFunction::RecordFunction(std::string name) {
-  pushRangeImpl(std::move(name));
-}
-
-RecordFunction::RecordFunction(const char* name) {
-  pushRangeImpl<const char*>(name);
-}
-
-RecordFunction::RecordFunction(const char* name, int64_t current_sequence_nr)
-{
-  pushRangeImpl<const char*>(name, ", seq=", current_sequence_nr);
-}
+  virtual ~ProfilerCallback() {
+    popRange();
+  }
+};
 
 void enableProfiler(ProfilerState new_state) {
   AT_ASSERT(new_state != ProfilerState::Disabled);
@@ -123,6 +115,10 @@ void enableProfiler(ProfilerState new_state) {
   if (state != ProfilerState::Disabled && new_state != state) {
       throw std::runtime_error("can't change kind of profiling (e.g. NVTX to CPU) while profiler is running");
   }
+
+  pushCallback([](const FunctionCallContext& ctx) {
+    return c10::guts::make_unique<ProfilerCallback>(ctx);
+  });
   state = new_state;
 
   if(state == ProfilerState::CUDA) {
@@ -151,7 +147,10 @@ thread_event_lists disableProfiler() {
   }
   ProfilerState old_state = state;
   mark("__stop_profile");
+
+  popCallback();
   state = ProfilerState::Disabled;
+
   if (old_state == ProfilerState::NVTX) {
     return thread_event_lists();
   } else {

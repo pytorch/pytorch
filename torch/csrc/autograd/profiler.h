@@ -17,6 +17,7 @@
 #include <ctime>
 #endif
 
+#include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/code_template.h>
 
 typedef struct CUevent_st* CUDAEventStub;
@@ -202,20 +203,6 @@ TORCH_API RangeEventList& getEventList();
 TORCH_API void mark(std::string name, bool include_cuda = true);
 TORCH_API void pushRange(std::string name);
 TORCH_API void popRange();
-
-struct TORCH_API RecordFunction {
-  explicit RecordFunction(Function* fn);
-
-  explicit RecordFunction(std::string name);
-
-  explicit RecordFunction(const char* name);
-
-  explicit RecordFunction(const char* name, int64_t current_sequence_nr);
-
-  ~RecordFunction() {
-    popRange();
-  }
-};
 
 using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that
