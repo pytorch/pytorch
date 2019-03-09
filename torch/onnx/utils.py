@@ -235,10 +235,6 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
         graph, torch_out = _trace_and_get_graph_from_model(model, args, training)
         params = list(_unique_state_dict(model).values())
 
-    input_and_param_names = [val.uniqueName() for val in graph.inputs()]
-    param_names = input_and_param_names[len(input_and_param_names) - len(params):]
-    params_dict = dict(zip(param_names, params))
-
     graph = _optimize_graph(graph, operator_export_type)
 
     # NB: ONNX requires complete information about output types, which might be
@@ -252,7 +248,7 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
     if verbose:
         print(graph)
 
-    return graph, params_dict, torch_out
+    return graph, params, torch_out
 
 
 def export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
@@ -300,17 +296,17 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     if opset_version is None:
         opset_version = _default_onnx_opset_version
     _set_opset_version(opset_version)
-    graph, params_dict, torch_out = _model_to_graph(model, args, f, verbose,
-                                                    training, input_names,
-                                                    output_names, operator_export_type,
-                                                    example_outputs, propagate)
+    graph, params, torch_out = _model_to_graph(model, args, f, verbose,
+                                               training, input_names,
+                                               output_names, operator_export_type,
+                                               example_outputs, propagate)
 
     # TODO: Don't allocate a in-memory string for the protobuf
     defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
     if export_params:
-        proto, export_map = graph._export_onnx(params_dict, opset_version, defer_weight_export, operator_export_type)
+        proto, export_map = graph._export_onnx(params, opset_version, defer_weight_export, operator_export_type)
     else:
-        proto, export_map = graph._export_onnx({}, opset_version, False, operator_export_type)
+        proto, export_map = graph._export_onnx([], opset_version, False, operator_export_type)
 
     if export_type == ExportTypes.PROTOBUF_FILE:
         assert(len(export_map) == 0)
