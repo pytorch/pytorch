@@ -22,7 +22,7 @@ void add_kernel_impl(TensorIterator& iter, Scalar alpha_scalar) {
 }
 
 static void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.type(), "add", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "add_cuda", [&]() {
     add_kernel_impl<scalar_t>(iter, alpha_scalar);
   });
 }
@@ -46,21 +46,21 @@ void div_constant_impl(TensorIterator& iter, scalar_t inv_b) {
 }
 
 static void div_kernel_cuda(TensorIterator& iter) {
-  if (isIntegralType(iter.type().scalarType())) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.type(), "div", [&]() {
+  if (isIntegralType(iter.dtype())) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "div_cuda", [&]() {
       div_kernel_impl<scalar_t>(iter);
     });
   } else if (iter.is_cpu_scalar(2)) {
     // optimization for floating-point types: if the second operand is a CPU
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
     // precision compared to computing the division.
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.type(), "div", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "div_cuda", [&]() {
       auto inv_b = scalar_t(1.0 / iter.scalar_value<scalar_t>(2));
       iter.remove_operand(2);
       div_constant_impl<scalar_t>(iter, inv_b);
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.type(), "div", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "div_cuda", [&]() {
       div_kernel_impl<scalar_t>(iter);
     });
   }
@@ -74,7 +74,7 @@ void mul_kernel_impl(TensorIterator& iter) {
 }
 
 static void mul_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.type(), "mul", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "mul_cuda", [&]() {
     mul_kernel_impl<scalar_t>(iter);
   });
 }
