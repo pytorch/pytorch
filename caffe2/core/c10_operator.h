@@ -8,12 +8,19 @@
 namespace caffe2 {
 namespace detail {
 
-constexpr const char* PREALLOCATED_OUTPUT_ARGNAME = "_caffe2_preallocated_outputs";
+constexpr const char* PREALLOCATED_OUTPUT_ARGNAME =
+    "_caffe2_preallocated_outputs";
 
-using _CallCaffe2OpFunc = std::vector<at::Tensor>(const c10::FunctionSchema& schema, std::vector<c10::IValue>&& inputs, std::vector<at::Tensor>&& outputs);
+using _CallCaffe2OpFunc = std::vector<at::Tensor>(
+    const c10::FunctionSchema& schema,
+    std::vector<c10::IValue>&& inputs,
+    std::vector<at::Tensor>&& outputs);
 
-template<class Caffe2Operator>
-inline std::vector<at::Tensor> _call_caffe2_op(const c10::FunctionSchema& schema, std::vector<c10::IValue>&& inputs, std::vector<at::Tensor>&& outputs) {
+template <class Caffe2Operator>
+inline std::vector<at::Tensor> _call_caffe2_op(
+    const c10::FunctionSchema& schema,
+    std::vector<c10::IValue>&& inputs,
+    std::vector<at::Tensor>&& outputs) {
   Caffe2Operator op(schema, std::move(inputs), std::move(outputs));
   op.Run();
   return std::move(op).ivalue_outputs();
@@ -36,11 +43,13 @@ inline void _call_caffe2_op_from_c10(
   // (if not ivalue::None) contains a preallocated output tensor for each
   // operator output.
 
-  AT_ASSERT(schema.arguments().back().type()->isSubtypeOf(OptionalType::create(ListType::ofTensors())));
+  AT_ASSERT(schema.arguments().back().type()->isSubtypeOf(
+      OptionalType::create(ListType::ofTensors())));
   IValue preallocated_outputs = torch::jit::pop(*stack);
 
   const size_t num_outputs = schema.returns().size();
-  const size_t num_inputs = schema.arguments().size() - 1; // -1 because the last argument is the list of preallocated tensors
+  const size_t num_inputs = schema.arguments().size() -
+      1; // -1 because the last argument is the list of preallocated tensors
 
   std::vector<at::Tensor> outputs;
   if (preallocated_outputs.isNone()) {
@@ -50,15 +59,17 @@ inline void _call_caffe2_op_from_c10(
     outputs.resize(num_outputs);
   } else {
     AT_ASSERT(preallocated_outputs.isTensorList());
-    outputs = std::move(*std::move(preallocated_outputs).toTensorList()).elements();
+    outputs =
+        std::move(*std::move(preallocated_outputs).toTensorList()).elements();
   }
 
-  // TODO Avoid vector allocation. One idea would be to keep the std::vector instances in the cache.
+  // TODO Avoid vector allocation. One idea would be to keep the std::vector
+  // instances in the cache.
   std::vector<IValue> inputs = torch::jit::pop(*stack, num_inputs);
 
   outputs = (*call_op)(schema, std::move(inputs), std::move(outputs));
 
-  for (auto&& output: std::move(outputs)) {
+  for (auto&& output : std::move(outputs)) {
     torch::jit::push(*stack, std::move(output));
   }
 
@@ -72,16 +83,18 @@ void call_caffe2_op_from_c10(
     c10::Stack* stack,
     c10::KernelCache* cache) { // TODO Pass in correct cache type
   _call_caffe2_op_from_c10(
-      stack,
-      OpHandle().schema(),
-      &_call_caffe2_op<Caffe2Operator>);
+      stack, OpHandle().schema(), &_call_caffe2_op<Caffe2Operator>);
 }
 
 inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName, std::vector<c10::Argument> inputs, std::vector<c10::Argument> outputs) {
   // actual_inputs is the real inputs plus an optional tensor list argument
   // for preallocated outputs
   std::vector<c10::Argument> actual_inputs = std::move(inputs);
-  actual_inputs.emplace_back(PREALLOCATED_OUTPUT_ARGNAME, c10::OptionalType::create(c10::ListType::ofTensors()), nullopt, IValue());
+  actual_inputs.emplace_back(
+      PREALLOCATED_OUTPUT_ARGNAME,
+      c10::OptionalType::create(c10::ListType::ofTensors()),
+      nullopt,
+      IValue());
 
   return c10::FunctionSchema(
     std::string("_caffe2::") + OperatorName,
@@ -145,47 +158,47 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
   }
 
 // TODO This macro should take a JIT schema string instead of a vector of inputs and outputs.
-#define C10_REGISTER_CAFFE2_OPERATOR_CPU(                                      \
-    OperatorName, Inputs, Outputs, OperatorClass)                              \
-  /* Register the op schema with the c10 dispatcher */                         \
-  namespace caffe2 {                                                           \
-  namespace _c10_ops {                                                         \
-  C10_DEFINE_OP_SCHEMA(                                                        \
-      OperatorName,                                                            \
-      caffe2::detail::make_function_schema_for_c10(                            \
-          #OperatorName,                                                       \
-          Inputs,                                                              \
-          Outputs));                                                           \
-  }                                                                            \
-  }                                                                            \
-  /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */   \
-  namespace c10 {                                                              \
-  C10_REGISTER_KERNEL(caffe2::_c10_ops::OperatorName) /*.withCache<Cache>()*/  \
-      .kernel<&caffe2::detail::call_caffe2_op_from_c10<                        \
-          ::caffe2::_c10_ops::OperatorName,                                    \
-          OperatorClass>>()                                                    \
-      .dispatchKey(CPUTensorId());                                             \
+#define C10_REGISTER_CAFFE2_OPERATOR_CPU(                                     \
+    OperatorName, Inputs, Outputs, OperatorClass)                             \
+  /* Register the op schema with the c10 dispatcher */                        \
+  namespace caffe2 {                                                          \
+  namespace _c10_ops {                                                        \
+  C10_DEFINE_OP_SCHEMA(                                                       \
+      OperatorName,                                                           \
+      caffe2::detail::make_function_schema_for_c10(                           \
+          #OperatorName,                                                      \
+          Inputs,                                                             \
+          Outputs));                                                          \
+  }                                                                           \
+  }                                                                           \
+  /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */  \
+  namespace c10 {                                                             \
+  C10_REGISTER_KERNEL(caffe2::_c10_ops::OperatorName) /*.withCache<Cache>()*/ \
+      .kernel<&caffe2::detail::call_caffe2_op_from_c10<                       \
+          ::caffe2::_c10_ops::OperatorName,                                   \
+          OperatorClass>>()                                                   \
+      .dispatchKey(CPUTensorId());                                            \
   }
 
-#define C10_REGISTER_CAFFE2_OPERATOR_CUDA(OperatorName, OperatorClass)         \
-  namespace c10 {                                                              \
-  C10_REGISTER_KERNEL(caffe2::_c10_ops::OperatorName) /*.withCache<Cache>()*/  \
-      .kernel<&caffe2::detail::call_caffe2_op_from_c10<                        \
-          ::caffe2::_c10_ops::OperatorName,                                    \
-          OperatorClass>>()                                                    \
-      .dispatchKey(CUDATensorId());                                            \
+#define C10_REGISTER_CAFFE2_OPERATOR_CUDA(OperatorName, OperatorClass)        \
+  namespace c10 {                                                             \
+  C10_REGISTER_KERNEL(caffe2::_c10_ops::OperatorName) /*.withCache<Cache>()*/ \
+      .kernel<&caffe2::detail::call_caffe2_op_from_c10<                       \
+          ::caffe2::_c10_ops::OperatorName,                                   \
+          OperatorClass>>()                                                   \
+      .dispatchKey(CUDATensorId());                                           \
   }
 
 // You should never manually call the C10_REGISTER_CAFFE2_OPERATOR_HIP macro.
 // The C10_REGISTER_CAFFE2_OPERATOR_CUDA macro from above will be automatically
 // rewritten to C10_REGISTER_CAFFE2_OPERATOR_HIP by hipify.
-#define C10_REGISTER_CAFFE2_OPERATOR_HIP(OperatorName, OperatorClass)          \
-  namespace c10 {                                                              \
-  C10_REGISTER_KERNEL(caffe2::_c10_ops::OperatorName) /*.withCache<Cache>()*/  \
-      .kernel<&caffe2::detail::call_caffe2_op_from_c10<                        \
-          ::caffe2::_c10_ops::OperatorName,                                    \
-          OperatorClass>>()                                                    \
-      .dispatchKey(CUDATensorId());                                            \
+#define C10_REGISTER_CAFFE2_OPERATOR_HIP(OperatorName, OperatorClass)         \
+  namespace c10 {                                                             \
+  C10_REGISTER_KERNEL(caffe2::_c10_ops::OperatorName) /*.withCache<Cache>()*/ \
+      .kernel<&caffe2::detail::call_caffe2_op_from_c10<                       \
+          ::caffe2::_c10_ops::OperatorName,                                   \
+          OperatorClass>>()                                                   \
+      .dispatchKey(CUDATensorId());                                           \
   }
 
 #else
