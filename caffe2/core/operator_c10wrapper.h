@@ -22,15 +22,27 @@ class C10OperatorWrapper final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  C10OperatorWrapper(const c10::OperatorHandle& op, const OperatorDef& operator_def, Workspace* ws)
+  C10OperatorWrapper(
+      const c10::OperatorHandle& op,
+      const OperatorDef& operator_def,
+      Workspace* ws)
       : Operator<Context>(operator_def, ws),
         op_(op),
         kernel_(at::nullopt),
-        has_preallocated_outputs_(op_.schema().arguments().back().name() == detail::PREALLOCATED_OUTPUT_ARGNAME) {
-    AT_ASSERT(!has_preallocated_outputs_ || op_.schema().arguments().back().type()->isSubtypeOf(OptionalType::create(ListType::ofTensors())));
+        has_preallocated_outputs_(
+            op_.schema().arguments().back().name() ==
+            detail::PREALLOCATED_OUTPUT_ARGNAME) {
+    AT_ASSERT(
+        !has_preallocated_outputs_ ||
+        op_.schema().arguments().back().type()->isSubtypeOf(
+            OptionalType::create(ListType::ofTensors())));
 
     AT_ASSERT(operator_def.output_size() == op_.schema().returns().size());
-    AT_ASSERT(operator_def.input_size() + (has_preallocated_outputs_ ? 1 : 0) <= op_.schema().arguments().size()); // '<=' because there might be caffe2 arguments
+    AT_ASSERT(
+        operator_def.input_size() + (has_preallocated_outputs_ ? 1 : 0) <=
+        op_.schema()
+            .arguments()
+            .size()); // '<=' because there might be caffe2 arguments
   }
 
   bool RunOnDevice() override {
@@ -48,25 +60,41 @@ class C10OperatorWrapper final : public Operator<Context> {
  private:
   void pushInputs_() {
     AT_ASSERT(stack_.size() == 0);
-    stack_.reserve(op_.schema().arguments().size() + (has_preallocated_outputs_ ? 1 : 0));
+    stack_.reserve(
+        op_.schema().arguments().size() + (has_preallocated_outputs_ ? 1 : 0));
 
     size_t input_tensor_index = 0;
 
     for (const auto& argument : op_.schema().arguments()) {
       if (argument.name() == detail::PREALLOCATED_OUTPUT_ARGNAME) {
-        // note: if detail::PREALLOCATED_OUTPUT_ARGNAME was at the end of the argument list,
-        // then has_preallocated_outputs_ would be true.
-        AT_ASSERTM(has_preallocated_outputs_, "Error in caffe2->c10 wrapper: Operator schema has a parameter named ", detail::PREALLOCATED_OUTPUT_ARGNAME, ", but it's not at the end of the argument list");
+        // note: if detail::PREALLOCATED_OUTPUT_ARGNAME was at the end of the
+        // argument list, then has_preallocated_outputs_ would be true.
+        AT_ASSERTM(
+            has_preallocated_outputs_,
+            "Error in caffe2->c10 wrapper: Operator schema has a parameter named ",
+            detail::PREALLOCATED_OUTPUT_ARGNAME,
+            ", but it's not at the end of the argument list");
 
-        AT_ASSERTM(argument.type()->isSubtypeOf(OptionalType::create(ListType::ofTensors())), "Error in caffe2->c10 wrapper: Operator schema has a parameter named ", detail::PREALLOCATED_OUTPUT_ARGNAME, ", but it's not of type TensorList?");
+        AT_ASSERTM(
+            argument.type()->isSubtypeOf(
+                OptionalType::create(ListType::ofTensors())),
+            "Error in caffe2->c10 wrapper: Operator schema has a parameter named ",
+            detail::PREALLOCATED_OUTPUT_ARGNAME,
+            ", but it's not of type TensorList?");
         stack_.emplace_back(preallocated_outputs_());
 
       } else if (argument.type()->isSubtypeOf(TensorType::get())) {
-        AT_ASSERTM(input_tensor_index < InputSize(), "Error in caffe2->c10 wrapper: Too few tensor arguments given (", InputSize(), "), operator schema expected more.");
+        AT_ASSERTM(
+            input_tensor_index < InputSize(),
+            "Error in caffe2->c10 wrapper: Too few tensor arguments given (",
+            InputSize(),
+            "), operator schema expected more.");
         stack_.emplace_back(at::Tensor(Input(input_tensor_index++)));
 
       } else if (argument.type()->isSubtypeOf(ListType::ofTensors())) {
-        AT_ASSERTM(input_tensor_index == 0, "Error in caffe2->c10 wrapper: Schema can only have either one or more Tensor inputs or one TensorList input.");
+        AT_ASSERTM(
+            input_tensor_index == 0,
+            "Error in caffe2->c10 wrapper: Schema can only have either one or more Tensor inputs or one TensorList input.");
         stack_.emplace_back(ivalue::TensorList::create(array_inputs_()));
         input_tensor_index = InputSize();
 
@@ -74,7 +102,13 @@ class C10OperatorWrapper final : public Operator<Context> {
         stack_.emplace_back(get_nontensor_argument_(argument));
       }
 
-      AT_ASSERTM(input_tensor_index == InputSize(), "Error in caffe2->c10 wrapper: Number of caffe2 operator inputs (", InputSize(), ") doesn't match number of tensor arguments (", input_tensor_index, ") in the c10 operator schema.");
+      AT_ASSERTM(
+          input_tensor_index == InputSize(),
+          "Error in caffe2->c10 wrapper: Number of caffe2 operator inputs (",
+          InputSize(),
+          ") doesn't match number of tensor arguments (",
+          input_tensor_index,
+          ") in the c10 operator schema.");
     }
   }
 
@@ -116,28 +150,46 @@ class C10OperatorWrapper final : public Operator<Context> {
   IValue get_nontensor_argument_(const c10::Argument& argument) {
     if (argument.type()->isSubtypeOf(IntType::get())) {
       if (argument.default_value().has_value()) {
-        return OperatorBase::GetSingleArgument<int>(argument.name(), argument.default_value()->toInt());
+        return OperatorBase::GetSingleArgument<int>(
+            argument.name(), argument.default_value()->toInt());
       } else {
-        AT_CHECK(OperatorBase::HasSingleArgumentOfType<int>(argument.name()), "Error in caffe2->c10 wrapper: Expected argument '", argument.name(), "' missing or wrong type (expected int).");
+        AT_CHECK(
+            OperatorBase::HasSingleArgumentOfType<int>(argument.name()),
+            "Error in caffe2->c10 wrapper: Expected argument '",
+            argument.name(),
+            "' missing or wrong type (expected int).");
         return OperatorBase::GetSingleArgument<int>(argument.name(), 0);
       }
     } else if (argument.type()->isSubtypeOf(FloatType::get())) {
       if (argument.default_value().has_value()) {
-        return OperatorBase::GetSingleArgument<double>(argument.name(), argument.default_value()->toDouble());
+        return OperatorBase::GetSingleArgument<double>(
+            argument.name(), argument.default_value()->toDouble());
       } else {
-        AT_CHECK(OperatorBase::HasSingleArgumentOfType<double>(argument.name()), "Error in caffe2->c10 wrapper: Expected argument '", argument.name(), "' missing or wrong type (expected double).");
+        AT_CHECK(
+            OperatorBase::HasSingleArgumentOfType<double>(argument.name()),
+            "Error in caffe2->c10 wrapper: Expected argument '",
+            argument.name(),
+            "' missing or wrong type (expected double).");
         return OperatorBase::GetSingleArgument<double>(argument.name(), 0);
       }
     } else if (argument.type()->isSubtypeOf(BoolType::get())) {
       if (argument.default_value().has_value()) {
-        return OperatorBase::GetSingleArgument<bool>(argument.name(), argument.default_value()->toBool());
+        return OperatorBase::GetSingleArgument<bool>(
+            argument.name(), argument.default_value()->toBool());
       } else {
-        AT_CHECK(OperatorBase::HasSingleArgumentOfType<bool>(argument.name()), "Error in caffe2->c10 wrapper: Expected argument '", argument.name(), "' missing or wrong type (expected bool).");
+        AT_CHECK(
+            OperatorBase::HasSingleArgumentOfType<bool>(argument.name()),
+            "Error in caffe2->c10 wrapper: Expected argument '",
+            argument.name(),
+            "' missing or wrong type (expected bool).");
         return OperatorBase::GetSingleArgument<bool>(argument.name(), 0);
       }
     } else {
       // TODO Support more types
-      AT_ERROR("Error in caffe2->c10 wrapper: Unsupported argument type ", argument.type()->str(), " in c10 operator schema");
+      AT_ERROR(
+          "Error in caffe2->c10 wrapper: Unsupported argument type ",
+          argument.type()->str(),
+          " in c10 operator schema");
     }
   }
 
@@ -152,32 +204,29 @@ class C10OperatorWrapper final : public Operator<Context> {
   std::mutex mutex_;
 };
 
-template<class Context, const c10::OperatorHandle& (*OperatorHandle)()>
-inline std::unique_ptr<C10OperatorWrapper<Context>> createC10OperatorWrapper(const OperatorDef& operator_def, Workspace* ws) {
-  return c10::guts::make_unique<C10OperatorWrapper<Context>>(OperatorHandle(), operator_def, ws);
+template <class Context, const c10::OperatorHandle& (*OperatorHandle)()>
+inline std::unique_ptr<C10OperatorWrapper<Context>> createC10OperatorWrapper(
+    const OperatorDef& operator_def,
+    Workspace* ws) {
+  return c10::guts::make_unique<C10OperatorWrapper<Context>>(
+      OperatorHandle(), operator_def, ws);
 }
 
-}
+} // namespace detail
 
 // TODO Also register c10 operators on mobile
 #ifndef C10_MOBILE
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(OperatorHandle, Name)        \
-  REGISTER_CPU_OPERATOR_CREATOR(                                                   \
-      Name,                                                                        \
-      detail::createC10OperatorWrapper<CPUContext, OperatorHandle>                 \
-  )
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(OperatorHandle, Name)       \
-  REGISTER_CUDA_OPERATOR_CREATOR(                                                  \
-      Name,                                                                        \
-      detail::createC10OperatorWrapper<CUDAContext, OperatorHandle>                \
-  )
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP(OperatorHandle, Name)        \
-  REGISTER_HIP_OPERATOR_CREATOR(                                                   \
-      Name,                                                                        \
-      detail::createC10OperatorWrapper<HIPContext, OperatorHandle>                 \
-  )
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(OperatorHandle, Name) \
+  REGISTER_CPU_OPERATOR_CREATOR(                                            \
+      Name, detail::createC10OperatorWrapper<CPUContext, OperatorHandle>)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(OperatorHandle, Name) \
+  REGISTER_CUDA_OPERATOR_CREATOR(                                            \
+      Name, detail::createC10OperatorWrapper<CUDAContext, OperatorHandle>)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP(OperatorHandle, Name) \
+  REGISTER_HIP_OPERATOR_CREATOR(                                            \
+      Name, detail::createC10OperatorWrapper<HIPContext, OperatorHandle>)
 #else
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(OperatorHandle, Name)
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(OperatorHandle, Name)

@@ -199,7 +199,7 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
 )
 
 namespace caffe2 {
-  REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
-      _c10_ops::LayerNorm,
-      C10LayerNorm_DontUseThisOpYet);
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    _c10_ops::LayerNorm,
+    C10LayerNorm_DontUseThisOpYet);
 }
