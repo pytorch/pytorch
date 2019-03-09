@@ -59,8 +59,6 @@ libtorch_sources = [
     "torch/csrc/jit/ir.cpp",
     "torch/csrc/jit/irparser.cpp",
     "torch/csrc/jit/netdef_converter.cpp",
-    "torch/csrc/jit/caffe2_operator.cpp",
-    "torch/csrc/jit/register_caffe2_ops.cpp",
     "torch/csrc/jit/register_c10_ops.cpp",
     "torch/csrc/jit/symbolic_script.cpp",
     "torch/csrc/jit/operator.cpp",

@@ -233,14 +233,14 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
     int64_t k,
     int64_t dim,
     bool keepdim) {
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "kthvalue", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.type(), "kthvalue", [&] {
     kthvalue_cuda_template<scalar_t>(values, indices, self, k, dim, keepdim);
   });
   return std::forward_as_tuple(values, indices);
 }
 
 Tensor median_cuda(const Tensor& self) {
-  return AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "median", [&] {
+  return AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.type(), "median", [&] {
     return median_cuda_template<scalar_t>(self);
   });
 }
