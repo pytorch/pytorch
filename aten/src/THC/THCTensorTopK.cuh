@@ -447,7 +447,7 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
       IndexType indexOffset = writeIndex * indicesWithinSliceStride;
 
       topKSliceStart[topKOffset] = v;
-      indicesSliceStart[indexOffset] = i + TH_INDEX_BASE; // to Lua index
+      indicesSliceStart[indexOffset] = i;
     }
 
     writeIndexStart += carry;
@@ -479,7 +479,7 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
       IndexType indexOffset = writeIndex * indicesWithinSliceStride;
 
       topKSliceStart[topKOffset] = v;
-      indicesSliceStart[indexOffset] = i + TH_INDEX_BASE; // to Lua index
+      indicesSliceStart[indexOffset] = i;
     }
 
     if (carry >= topKRemaining) {

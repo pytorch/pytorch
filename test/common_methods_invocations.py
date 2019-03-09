@@ -292,7 +292,7 @@ def method_tests():
         ('remainder', (S, 1, S), (non_differentiable(torch.rand(S, S) + 1.5),), 'tensor_broadcast_all'),
         ('remainder', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
         ('remainder', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
-        ('lerp', (S, S, S), ((S, S, S), 0.4)),
+        ('lerp', (S, S, S), ((S, S, S), 0.4), 'scalar_no_broadcast'),
         ('lerp', (S, S, S), ((S,), 0.4), 'broadcast_rhs'),
         ('lerp', (S,), ((S, S, S), 0.4), 'broadcast_lhs'),
         ('lerp', (S, 1, S), ((S, S), 0.4), 'broadcast_all'),
