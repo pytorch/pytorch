@@ -39,7 +39,7 @@ struct Argument {
   c10::optional<int32_t> N() const {
     return N_;
   }
-  c10::optional<IValue> default_value() const {
+  const c10::optional<IValue>& default_value() const {
     return default_value_;
   }
   bool kwarg_only() const {
@@ -63,6 +63,25 @@ private:
   bool kwarg_only_;
   c10::optional<AliasInfo> alias_info_;
 };
+
+namespace detail {
+inline bool defaultValueEquals_(const c10::optional<IValue>& lhs, const c10::optional<IValue>& rhs) {
+  if (lhs.has_value()) {
+    return rhs.has_value() && shallowEquals(*lhs, *rhs);
+  } else {
+    return !rhs.has_value();
+  }
+}
+}
+
+inline bool operator==(const Argument& lhs, const Argument& rhs) {
+  return lhs.name() == rhs.name()
+          && lhs.type() == rhs.type()
+          && lhs.N() == rhs.N()
+          && detail::defaultValueEquals_(lhs.default_value(), rhs.default_value())
+          && lhs.kwarg_only() == rhs.kwarg_only()
+          && lhs.alias_info() == rhs.alias_info();
+}
 
 struct FunctionSchema {
   FunctionSchema(
@@ -141,6 +160,15 @@ public:
     return c10::nullopt;
   }
 };
+
+inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {
+  return lhs.name() == rhs.name()
+      && lhs.overload_name() == rhs.overload_name()
+      && lhs.arguments() == rhs.arguments()
+      && lhs.returns() == rhs.returns()
+      && lhs.is_vararg() == rhs.is_vararg()
+      && lhs.is_varret() == rhs.is_varret();
+}
 
 // for debugging, make sure we can describe the call site
 inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
