@@ -187,7 +187,13 @@ class CAFFE2_API DBReader {
     db_type_ = db_type;
     source_ = source;
     db_ = CreateDB(db_type_, source_, READ);
-    CAFFE_ENFORCE(db_, "Cannot open db: ", source_, " of type ", db_type_);
+    CAFFE_ENFORCE(
+        db_,
+        "Cannot find db implementation of type ",
+        db_type,
+        " (while trying to open ",
+        source_,
+        ")");
     InitializeCursor(num_shards, shard_id);
   }
 

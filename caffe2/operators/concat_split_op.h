@@ -335,6 +335,14 @@ bool ConcatOp<Context>::RunOnDevice() {
   return true;
 }
 
+OpSchema::Cost CostInferenceForConcat(
+    const OperatorDef& def,
+    const std::vector<TensorShape>& in);
+
+std::vector<TensorShape> TensorInferenceForConcat(
+    const OperatorDef& def,
+    const std::vector<TensorShape>& in);
+
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_CONCAT_SPLIT_OP_H_

@@ -1667,42 +1667,6 @@
         - THTensor* exponent
 ]]
 [[
-  name: _th_lerp
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  cname: lerp
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THTensor* self
-      broadcast: end fallback
-    - THTensor* end
-    - real weight
-]]
-[[
-  name: _th_lerp_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  return: self
-  cname: lerp
-  variants: function
-  arguments:
-    - THTensor* self
-    - arg: THTensor* self
-      broadcast: end fallback inplace
-    - THTensor* end
-    - real weight
-]]
-[[
   name: _th_histc
   cname: histc
   types:

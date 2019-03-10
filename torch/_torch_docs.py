@@ -2309,18 +2309,19 @@ add_docstr(torch.lerp,
 lerp(start, end, weight, out=None)
 
 Does a linear interpolation of two tensors :attr:`start` and :attr:`end` based
-on a scalar :attr:`weight` and returns the resulting :attr:`out` tensor.
+on a scalar or tensor :attr:`weight` and returns the resulting :attr:`out` tensor.
 
 .. math::
-    \text{out}_i = \text{start}_i + \text{weight} \times (\text{end}_i - \text{start}_i)
+    \text{out}_i = \text{start}_i + \text{weight}_i \times (\text{end}_i - \text{start}_i)
 
 The shapes of :attr:`start` and :attr:`end` must be
-:ref:`broadcastable <broadcasting-semantics>`.
+:ref:`broadcastable <broadcasting-semantics>`. If :attr:`weight` is a tensor, then
+the shapes of :attr:`start`, :attr:`end` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     start (Tensor): the tensor with the starting points
     end (Tensor): the tensor with the ending points
-    weight (float): the weight for the interpolation formula
+    weight (float or tensor): the weight for the interpolation formula
     out (Tensor, optional): the output tensor
 
 Example::
@@ -2332,6 +2333,8 @@ Example::
     >>> end
     tensor([ 10.,  10.,  10.,  10.])
     >>> torch.lerp(start, end, 0.5)
+    tensor([ 5.5000,  6.0000,  6.5000,  7.0000])
+    >>> torch.lerp(start, end, torch.full_like(start, 0.5))
     tensor([ 5.5000,  6.0000,  6.5000,  7.0000])
 """)
 

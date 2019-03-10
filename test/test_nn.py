@@ -4317,12 +4317,18 @@ class TestNN(NNTestCase):
     def test_loss_equal_input_target_shape(self):
         self._test_loss_equal_input_target_shape(lambda x: x)
 
-    def test_NLLLoss_mismatched_batch(self):
+    def test_nll_loss_mismatched_batch(self):
         x = torch.randn((10, 3), requires_grad=True)
         # t should have size (10,)
         t = torch.zeros((3,), dtype=torch.int64)
         with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
             F.nll_loss(x, t)
+
+    def test_nll_loss_out_of_bounds_ignore_index(self):
+        x = torch.randn(6, 3, requires_grad=True)
+        t = torch.tensor([0, 1, 255, 0, 1, 2], dtype=torch.int64)
+        for reduction in ['mean', 'none']:
+            F.nll_loss(x, t, ignore_index=255, reduction=reduction).sum().backward()
 
     def test_poisson_nll_loss_reduction_modes(self):
         input = torch.tensor([0.5, 1.5, 2.5])

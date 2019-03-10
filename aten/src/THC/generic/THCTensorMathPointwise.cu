@@ -210,20 +210,6 @@ void THCTensor_(polygamma)(THCState* state, THCTensor* self_, int64_t n, THCTens
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(lerp)(THCState *state, THCTensor *result, THCTensor *a, THCTensor *b, scalar_t w)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, result, a, b));
-  THArgCheck(THCTensor_(nElement)(state, a) ==
-             THCTensor_(nElement)(state, b), 3, "sizes do not match");
-  THCTensor_(resizeAs)(state, result, a);
-
-  if (!THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, result, a, b, TensorLerpOp<scalar_t>(w))) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
 #endif
 
 namespace {
