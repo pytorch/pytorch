@@ -1062,9 +1062,8 @@ if _enabled:
                     + Tracing will not record any control-flow like if statements or loops. When
                       this control-flow is constant across your module, this is fine and it often
                       just inlines configuration decisions. But sometimes the control-flow is
-                      actually part of the model itself. For instance, a beam search in
-                      sequence-to-sequence translation is a loop over the (varying) sequence
-                      length of inputs.
+                      actually part of the model itself. For instance, a recurrent network is
+                      a loop over the (possibly dynamic) length of an input sequence.
 
                     + In the returned ``ScriptModule``, operations that have different behaviors
                       in ``training`` and ``eval`` modes will always behave as if it is in the
