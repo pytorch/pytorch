@@ -119,7 +119,7 @@ class Graph_py(object):
     def populate_namespace_from_OP_to_IO(self):
         for node in self.nodes_OP:
             for input_node_id in node.inputs:
-                    self.uniqueNameToScopedName[input_node_id] = node.scopeName + '/' + input_node_id
+                self.uniqueNameToScopedName[input_node_id] = node.scopeName + '/' + input_node_id
 
         for key, node in self.nodes_IO.items():
             if type(node) == Node_base:
