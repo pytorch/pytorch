@@ -664,8 +664,18 @@ class TestDataLoader(TestCase):
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
         dataloader = DataLoader(dataset, num_workers=num_workers)
-        retrieved = set(d.item() for d in dataloader)
+        dataloader_iter = iter(dataloader)
+        retrieved = set(d.item() for d in dataloader_iter)
         self.assertEqual(retrieved, expected)
+
+        workers = dataloader_iter.workers
+        del dataloader_iter
+        for w in workers:
+            try:
+                w.join(JOIN_TIMEOUT)
+                self.assertFalse(w.is_alive())
+            finally:
+                w.terminate()
 
     def test_chain_iterable_dataset(self):
         # chaining (concatenation)

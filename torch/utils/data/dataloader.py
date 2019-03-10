@@ -623,7 +623,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         while True:
             # If the worker responsible for `self.rcvd_idx` has already ended
             # and was unable to fulfill this task (due to exhausting an `IterableDataset`),
-            # tries to advance `self.rcvd_idx` to find the next valid index.
+            # we try to advance `self.rcvd_idx` to find the next valid index.
             #
             # This part needs to run in the loop because both the `self.get_data()`
             # call and `IterableDatasetStopIteration` check below can mark
