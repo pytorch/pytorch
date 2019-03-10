@@ -15,7 +15,7 @@ constexpr int64_t COPY_GRAIN_SIZE = 20000;
 
 static void copy_kernel_impl(Tensor& dst, const Tensor& src) {
   AT_DISPATCH_ALL_TYPES_AND(
-    at::ScalarType::Half, dst.type(), "copy_kernel_impl", [&]() {
+    at::ScalarType::Half, dst.scalar_type(), "copy_kernel_impl", [&]() {
       scalar_t* self_ptr = dst.data<scalar_t>();
       scalar_t* src_ptr = src.data<scalar_t>();
 

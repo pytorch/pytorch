@@ -9,6 +9,8 @@
 
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/numa.h>
+#include <c10/util/thread_name.h>
 
 namespace c10 {
 
@@ -17,7 +19,7 @@ struct Future;
 } // namespace ivalue
 
 // TODO: move this to C10 and make it C10_API
-class CAFFE2_API TaskThreadPoolBase {
+class C10_API TaskThreadPoolBase {
  public:
   virtual void run(const std::function<void()>& func) = 0;
 
@@ -36,7 +38,7 @@ class CAFFE2_API TaskThreadPoolBase {
   virtual ~TaskThreadPoolBase() noexcept {}
 };
 
-class CAFFE2_API ThreadPool : public c10::TaskThreadPoolBase {
+class C10_API ThreadPool : public c10::TaskThreadPoolBase {
  protected:
   struct task_element_t {
     bool run_with_id;
@@ -100,8 +102,29 @@ class CAFFE2_API ThreadPool : public c10::TaskThreadPoolBase {
   void main_loop(std::size_t index);
 };
 
-CAFFE2_API void setNumThreads(size_t v);
+C10_API void setNumThreads(size_t v);
 
-CAFFE2_API ThreadPool& global_work_queue();
+C10_API TaskThreadPoolBase& global_work_queue();
+
+class C10_API TaskThreadPool : public c10::ThreadPool {
+ public:
+  explicit TaskThreadPool(
+      std::size_t pool_size,
+      int numa_node_id = -1)
+      : ThreadPool(pool_size, numa_node_id) {}
+
+  // TODO move this to ATen/core/thread_pool.h
+  void init_thread() override {
+    setThreadName("CaffeTaskThread");
+    NUMABind(numa_node_id_);
+  }
+};
+
+C10_DECLARE_SHARED_REGISTRY(
+    ThreadPoolRegistry,
+    TaskThreadPoolBase,
+    int,
+    int,
+    bool);
 
 } // namespace c10

@@ -18,9 +18,9 @@
 #include <thrust/extrema.h>
 #include <thrust/inner_product.h>
 #include <thrust/sequence.h>
+#include <THC/THCThrustAllocator.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
-#include <THC/THCThrustAllocator.cuh>
 
 namespace at {
 namespace native {
@@ -232,17 +232,16 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
     int64_t k,
     int64_t dim,
     bool keepdim) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.type(), "kthvalue", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "kthvalue_cuda", [&] {
     kthvalue_cuda_template<scalar_t>(values, indices, self, k, dim, keepdim);
   });
   return std::forward_as_tuple(values, indices);
 }
 
 Tensor median_cuda(const Tensor& self) {
-  return AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::Half, self.type(), "median", [&] {
-        return median_cuda_template<scalar_t>(self);
-      });
+  return AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "median", [&] {
+    return median_cuda_template<scalar_t>(self);
+  });
 }
 
 } // namespace native
