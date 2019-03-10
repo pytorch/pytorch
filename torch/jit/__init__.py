@@ -591,7 +591,8 @@ def trace(func,
           check_trace=True,
           check_inputs=None,
           check_tolerance=1e-5,
-          _force_outplace=False):
+          _force_outplace=False,
+          _module_class=None):
     """
     Trace a function and return an executable trace that will be optimized
     using just-in-time compilation.
@@ -657,7 +658,10 @@ def trace(func,
     # done primarily so that weird iterables fail here and not pybind11 code
     elif not isinstance(example_inputs, tuple):
         example_inputs = tuple(example_inputs)
-    module = TopLevelTracedModule(func, **executor_options)
+    if _module_class:
+        module = _module_class(func, **executor_options)
+    else:
+        module = TopLevelTracedModule(func, **executor_options)
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
     module._create_method_from_trace('forward', func, example_inputs,
                                      var_lookup_fn, _force_outplace)
