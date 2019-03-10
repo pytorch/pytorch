@@ -1,29 +1,40 @@
 #ifndef CAFFE2_OPERATORS_TILE_OP_H_
 #define CAFFE2_OPERATORS_TILE_OP_H_
 
+#include <array>
+#include <string>
+#include <type_traits>
+#include <vector>
+
 #include "caffe2/core/common_omp.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
 // Copy a Blob n times along a specified axis.
 template <class Context>
-class TileOp : public Operator<Context> {
+class TileOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
+
   template <class... Args>
   explicit TileOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
-        tiles_(this->template GetSingleArgument<int32_t>("tiles", 1)),
-        axis_(this->template GetSingleArgument<int32_t>("axis", 0)) {}
-  ~TileOp() {}
+        OP_SINGLE_ARG(std::int32_t, "tiles", tiles_, 1),
+        OP_SINGLE_ARG(std::int32_t, "axis", axis_, 0) {}
 
   bool RunOnDevice() override {
-    const auto& input = Input(0);
-    std::array<int32_t, 2> temp_params = {{tiles_, axis_}};
+    return DispatchHelper<
+        TensorTypes<std::int32_t, std::int64_t, float, double>>::
+        call(this, Input(0));
+  }
+
+  template <typename T>
+  bool DoRunWithType() {
     if (InputSize() > 1) {
       // We potentially have tiles and/or axis specified as inputs
       // as well. We will check for them in that order. In other words:
@@ -33,25 +44,12 @@ class TileOp : public Operator<Context> {
       CAFFE_ENFORCE(
           Input(1).dim() == 1 && Input(1).numel() == 1,
           "Input `tiles` should be a vector of size 1.");
-
-      const auto& input1 = Input(1);
-      context_.CopyItemsToCPU(
-          input1.dtype(),
-          1,
-          static_cast<const char*>(input1.raw_data()),
-          &(temp_params[0]));
-
+      tiles_ = GetArgFromTensor(Input(1));
       if (InputSize() > 2) {
         CAFFE_ENFORCE(
             Input(2).dim() == 1 && Input(2).numel() == 1,
             "Input `axis` should be a vector of size 1.");
-
-        const auto& input2 = Input(2);
-        context_.CopyItemsToCPU(
-            input2.dtype(),
-            1,
-            static_cast<const char*>(input2.raw_data()),
-            &(temp_params[1]));
+        axis_ = GetArgFromTensor(Input(2));
       } else {
         CAFFE_ENFORCE(
             OperatorBase::HasArgument("axis"),
@@ -66,79 +64,82 @@ class TileOp : public Operator<Context> {
           "Argument `axis` is missing and was not specified as input.");
     }
 
-    tiles_ = temp_params[0];
-    axis_ = temp_params[1];
-
-    auto* output = Output(0);
-    const auto axis = input.canonical_axis_index(axis_);
+    const auto& X = Input(0);
+    auto* Y = Output(0);
+    const int axis = X.canonical_axis_index(axis_);
 
     // reshape output to be input tiled along the axis
-    vector<int64_t> output_dims(input.sizes().vec());
-    output_dims[axis_] = output_dims[axis_] * tiles_;
-    output->Resize(output_dims);
+    std::vector<std::int64_t> Y_dims = X.sizes().vec();
+    Y_dims[axis] *= tiles_;
+    Y->Resize(Y_dims);
 
     // size up to (and not including) axis
-    const auto outer_dim = input.size_to_dim(axis);
+    const int outer_size = X.size_to_dim(axis);
     // size from axis up
-    const auto inner_dim = input.size_from_dim(axis);
+    const int inner_size = X.size_from_dim(axis);
 
-    /**
-     * How this works:
-     * Imagine a 2D tensor (matrix) of size 3x10, tiled 2 times.
-     * - Tiling along axis 0 (row) means copying the entire 3x10 Matrix 2
-     * times. outer_dim = 0, inner_dim = 30.
-     * - Tiling along axis 1 (column) means copying each row 2 times, then
-     * proceed to the next row, until the end. outer_dim = 3, inner_dim = 10.
-     */
-    const char* input_data = static_cast<const char*>(input.raw_data());
-    char* output_data =
-        static_cast<char*>(output->raw_mutable_data(input.dtype()));
-
-    DoTile(
-        input.dtype(),
-        input.itemsize(),
-        outer_dim,
-        inner_dim,
-        input_data,
-        output_data);
-
-    return true;
+    const T* X_data = X.template data<T>();
+    T* Y_data = Y->template mutable_data<T>();
+    return DoTile<T>(outer_size, inner_size, X_data, Y_data);
   }
 
  private:
-  void DoTile(
-      const TypeMeta& meta,
-      int item_size,
-      int outer_dim,
-      int inner_dim,
-      const char* input_data,
-      char* output_data) {
-    for (auto i = 0; i < outer_dim; ++i) {
-      for (auto t = 0; t < tiles_; ++t) {
-        context_.CopyItemsSameDevice(meta, inner_dim, input_data, output_data);
-        output_data += inner_dim * item_size;
-      }
-      input_data += inner_dim * item_size;
+  std::int32_t GetArgFromTensor(const Tensor& tensor) {
+    CAFFE_ENFORCE(
+        tensor.IsType<std::int32_t>() || tensor.IsType<std::int64_t>());
+    std::int32_t val = -1;
+    if (tensor.IsType<std::int32_t>()) {
+      context_.template CopyToCPU<std::int32_t>(
+          1, tensor.data<std::int32_t>(), &val);
+    } else if (tensor.IsType<std::int64_t>()) {
+      std::int64_t val_int64;
+      context_.template CopyToCPU<std::int64_t>(
+          1, tensor.data<std::int64_t>(), &val_int64);
+      val = static_cast<std::int32_t>(val_int64);
     }
+    return val;
   }
 
-  int32_t tiles_;
-  int32_t axis_;
+  template <typename T>
+  bool DoTile(const int outer_size, const int inner_size, const T* X, T* Y) {
+    if (inner_size == 1) {
+      EigenArrayMap<T> Y_arr(Y, tiles_, outer_size);
+      for (int i = 0; i < outer_size; ++i) {
+        Y_arr.col(i) = X[i];
+      }
+    } else {
+      ConstEigenArrayMap<T> X_arr(X, inner_size, outer_size);
+      for (int i = 0; i < outer_size; ++i) {
+        EigenArrayMap<T>(Y + i * tiles_ * inner_size, inner_size, tiles_)
+            .colwise() = X_arr.col(i);
+      }
+    }
+    return true;
+  }
+
+  std::int32_t tiles_;
+  std::int32_t axis_;
 };
 
-template <typename T, class Context>
-class TileGradientOp : public Operator<Context> {
+template <class Context>
+class TileGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
+
   template <class... Args>
   explicit TileGradientOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
-        tiles_(this->template GetSingleArgument<int32_t>("tiles", 1)),
-        axis_(this->template GetSingleArgument<int32_t>("axis", 0)) {}
-  ~TileGradientOp() {}
+        OP_SINGLE_ARG(std::int32_t, "tiles", tiles_, 1),
+        OP_SINGLE_ARG(std::int32_t, "axis", axis_, 0) {}
 
   bool RunOnDevice() override {
-    std::array<int32_t, 2> temp_params = {{tiles_, axis_}};
+    return DispatchHelper<
+        TensorTypes<std::int32_t, std::int64_t, float, double>>::
+        call(this, Input(0));
+  }
+
+  template <typename T>
+  bool DoRunWithType() {
     if (InputSize() > 1) {
       // We potentially have tiles and/or axis specified as inputs
       // as well. We will check for them in that order. In other words:
@@ -148,25 +149,12 @@ class TileGradientOp : public Operator<Context> {
       CAFFE_ENFORCE(
           Input(1).dim() == 1 && Input(1).numel() == 1,
           "Input `tiles` should be a vector of size 1.");
-
-      const auto& input1 = Input(1);
-      context_.CopyItemsToCPU(
-          input1.dtype(),
-          1,
-          static_cast<const char*>(input1.raw_data()),
-          &(temp_params[0]));
-
+      tiles_ = GetArgFromTensor(Input(1));
       if (InputSize() > 2) {
         CAFFE_ENFORCE(
             Input(2).dim() == 1 && Input(2).numel() == 1,
             "Input `axis` should be a vector of size 1.");
-
-        const auto& input2 = Input(2);
-        context_.CopyItemsToCPU(
-            input2.dtype(),
-            1,
-            static_cast<const char*>(input2.raw_data()),
-            &(temp_params[1]));
+        axis_ = GetArgFromTensor(Input(2));
       } else {
         CAFFE_ENFORCE(
             OperatorBase::HasArgument("axis"),
@@ -181,22 +169,20 @@ class TileGradientOp : public Operator<Context> {
           "Argument `axis` is missing and was not specified as input.");
     }
 
-    tiles_ = temp_params[0];
-    axis_ = temp_params[1];
-
-    const auto& input = Input(0);
-    auto* output = Output(0);
-    const auto axis = input.canonical_axis_index(axis_);
+    const auto& dY = Input(0);
+    auto* dX = Output(0);
+    const int axis = dY.canonical_axis_index(axis_);
 
     // reshape output to be input "untiled" along the axis
-    vector<int64_t> output_dims(input.sizes().vec());
-    output_dims[axis_] = output_dims[axis_] / tiles_;
-    output->Resize(output_dims);
+    std::vector<std::int64_t> X_dims = dY.sizes().vec();
+    CAFFE_ENFORCE_EQ(X_dims[axis] % tiles_, 0);
+    X_dims[axis] /= tiles_;
+    dX->Resize(X_dims);
 
     // size up to (and not including) axis
-    const auto outer_dim = output->size_to_dim(axis);
+    const int outer_size = dX->size_to_dim(axis);
     // size from axis up
-    const auto inner_dim = output->size_from_dim(axis);
+    const int inner_size = dX->size_from_dim(axis);
 
     /**
      * How this works:
@@ -208,47 +194,64 @@ class TileGradientOp : public Operator<Context> {
      * So the output gradient should be the matrix multipication result
      * of input gradient (gradient of tiled tensor output) and X.
      */
-    const char* input_data = static_cast<const char*>(input.raw_data());
-    char* output_data =
-        static_cast<char*>(output->raw_mutable_data(input.dtype()));
-
-    DoTileGradient(
-        input.dtype(),
-        input.itemsize(),
-        outer_dim,
-        inner_dim,
-        input_data,
-        output_data);
-
-    return true;
+    const T* dY_data = dY.template data<T>();
+    T* dX_data = dX->template mutable_data<T>();
+    return DoTileGradient<T>(outer_size, inner_size, dY_data, dX_data);
   }
 
  private:
-  void DoTileGradient(
-      const TypeMeta& meta,
-      int item_size,
-      int outer_dim,
-      int inner_dim,
-      const char* input_data,
-      char* output_data) {
-    for (auto i = 0; i < outer_dim; ++i) {
-      context_.CopyItemsSameDevice(meta, inner_dim, input_data, output_data);
-      input_data += inner_dim * item_size;
-      for (auto t = 1; t < tiles_; ++t) {
-        math::Axpy<T, Context>(
-            inner_dim,
-            T(1),
-            reinterpret_cast<const T*>(input_data),
-            reinterpret_cast<T*>(output_data),
-            &context_);
-        input_data += inner_dim * item_size;
-      }
-      output_data += inner_dim * item_size;
+  std::int32_t GetArgFromTensor(const Tensor& tensor) {
+    CAFFE_ENFORCE(
+        tensor.IsType<std::int32_t>() || tensor.IsType<std::int64_t>());
+    std::int32_t val = -1;
+    if (tensor.IsType<std::int32_t>()) {
+      context_.template CopyToCPU<std::int32_t>(
+          1, tensor.data<std::int32_t>(), &val);
+    } else if (tensor.IsType<std::int64_t>()) {
+      std::int64_t val_int64;
+      context_.template CopyToCPU<std::int64_t>(
+          1, tensor.data<std::int64_t>(), &val_int64);
+      val = static_cast<std::int32_t>(val_int64);
     }
+    return val;
   }
 
-  int32_t tiles_;
-  int32_t axis_;
+  template <typename T>
+  bool DoTileGradient(
+      const int outer_size,
+      const int inner_size,
+      const T* dY,
+      T* dX) {
+    if (inner_size == 1) {
+      const std::array<int, 2> dY_dims = {outer_size, tiles_};
+      const std::array<int, 2> dX_dims = {outer_size, 1};
+      math::ReduceSum<T, Context>(
+          2, dY_dims.data(), dX_dims.data(), T(1), dY, dX, &context_);
+    } else {
+      math::CopyMatrix<T, Context>(
+          outer_size,
+          inner_size,
+          dY,
+          inner_size * tiles_,
+          dX,
+          inner_size,
+          &context_);
+      for (int i = 0; i < outer_size; ++i) {
+        const T* dY_ptr = dY + i * tiles_ * inner_size;
+        T* dX_ptr = dX + i * inner_size;
+        for (int j = 1; j < tiles_; ++j) {
+          math::Add<T, Context>(
+              inner_size, dX_ptr, dY_ptr + j * inner_size, dX_ptr, &context_);
+        }
+      }
+    }
+    return true;
+  }
+
+  std::int32_t tiles_;
+  std::int32_t axis_;
+
+  Tensor ones_;
 };
 
 } // namespace caffe2
