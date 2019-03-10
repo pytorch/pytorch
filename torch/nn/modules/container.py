@@ -220,7 +220,7 @@ class ModuleDict(Module):
       or another :class:`~torch.nn.ModuleDict` (the argument to :meth:`~torch.nn.ModuleDict.update`).
 
     Note that :meth:`~torch.nn.ModuleDict.update` with other unordered mapping
-    types (e.g., Python's plain ``dict``) does not preserve order of the
+    types (e.g., Python's plain ``dict``) does not preserve the order of the
     merged mapping.
 
     Arguments:
@@ -450,7 +450,7 @@ class ParameterDict(Module):
       :meth:`~torch.nn.ParameterDict.update`).
 
     Note that :meth:`~torch.nn.ParameterDict.update` with other unordered mapping
-    types (e.g., Python's plain ``dict``) does not preserve order of the
+    types (e.g., Python's plain ``dict``) does not preserve the order of the
     merged mapping.
 
     Arguments:
