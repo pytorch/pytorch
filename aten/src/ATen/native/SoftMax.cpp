@@ -14,9 +14,6 @@ template <typename scalar_t, bool LogSoftMax>
 void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
   int64_t outer_size = 1;
   int64_t dim_size = input.size(dim);
-  if (input.numel() == 0) {
-    return;
-  }
   int64_t inner_size = 1;
   for (int64_t i = 0; i < dim; ++i)
     outer_size *= input.size(i);
@@ -124,7 +121,11 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
   auto input = input_.contiguous();
   Tensor output = at::native::empty_like(input);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
-  if (input.dim() == 0)
+
+  if (input.numel() == 0) {
+    return output;
+  }
+ if (input.dim() == 0)
     input = input.view(1);
   AT_CHECK(
       dim >= 0 && dim < input.dim(),
@@ -144,6 +145,10 @@ Tensor log_softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half
   auto input = input_.contiguous();
   Tensor output = at::native::empty_like(input);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
+
+  if (input.numel() == 0) {
+    return output;
+  }
   if (input.dim() == 0)
     input = input.view(1);
   AT_CHECK(
@@ -171,6 +176,9 @@ Tensor softmax_backward_cpu(
   auto output = output_.contiguous();
   Tensor grad_input = at::native::empty_like(grad);
 
+  if (output.numel() == 0) {
+    return grad_input;
+  }
   if (grad.dim() == 0)
     grad = grad.view(1);
   if (output.dim() == 0)
@@ -200,6 +208,9 @@ Tensor log_softmax_backward_cpu(
   auto output = output_.contiguous();
   Tensor grad_input = at::native::empty_like(grad);
 
+  if (output.numel() == 0) {
+    return grad_input;
+  }
   if (grad.dim() == 0)
     grad = grad.view(1);
   if (output.dim() == 0)
