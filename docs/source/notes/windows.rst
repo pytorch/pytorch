@@ -113,9 +113,7 @@ This type of extension has better support compared with
 the previous one. However, it still needs some manual
 configuration. First, you should open the
 **x86_x64 Cross Tools Command Prompt for VS 2017**.
-And then, you can open the Git-Bash in it. It is
-usually located in ``C:\Program Files\Git\git-bash.exe``.
-Finally, you can start your compiling process.
+And then, you can start your compiling process.
 
 Installation
 ------------

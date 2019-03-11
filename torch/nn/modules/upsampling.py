@@ -126,7 +126,7 @@ class Upsample(Module):
         super(Upsample, self).__init__()
         self.name = type(self).__name__
         self.size = size
-        self.scale_factor = scale_factor
+        self.scale_factor = float(scale_factor) if scale_factor else None
         self.mode = mode
         self.align_corners = align_corners
 
