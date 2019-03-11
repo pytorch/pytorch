@@ -301,7 +301,7 @@ void ProcessGroupNCCL::tensorCheckHelper(
   usedDevices.reserve(input.size());
 
   auto inputNumElement = input[0].numel();
-  auto elementType = input[0].type().scalarType();
+  auto elementType = input[0].scalar_type();
 
   for (size_t i = 0; i < input.size(); ++i) {
     //  Check to make sure it's a GPU dense tensor
@@ -312,8 +312,8 @@ void ProcessGroupNCCL::tensorCheckHelper(
           "collective operations");
     }
     // Check the tensor type is identical
-    if (input[i].type().scalarType() != elementType ||
-        output[i].type().scalarType() != elementType) {
+    if (input[i].scalar_type() != elementType ||
+        output[i].scalar_type() != elementType) {
       throw std::runtime_error(
           "Expecting all GPU tensors to have identical "
           "type");
@@ -382,7 +382,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
         tensors[i].data_ptr(),
         tensors[i].data_ptr(),
         tensors[i].numel(),
-        getNcclDataType(tensors[i].type().scalarType()),
+        getNcclDataType(tensors[i].scalar_type()),
         ncclOp[opts.reduceOp],
         ncclComms[i]->getNcclComm(),
         ncclStream.stream()));
@@ -430,7 +430,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
     C10D_NCCL_CHECK(ncclBcast(
         tensors[i].data_ptr(),
         tensors[i].numel(),
-        getNcclDataType(tensors[i].type().scalarType()),
+        getNcclDataType(tensors[i].scalar_type()),
         root,
         ncclComms[i]->getNcclComm(),
         ncclStream.stream()));
@@ -479,7 +479,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
         tensors[i].data_ptr(),
         tensors[i].data_ptr(),
         tensors[i].numel(),
-        getNcclDataType(tensors[i].type().scalarType()),
+        getNcclDataType(tensors[i].scalar_type()),
         ncclOp[opts.reduceOp],
         root,
         ncclComms[i]->getNcclComm(),
@@ -547,7 +547,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
         inputTensors[i].data_ptr(),
         flattenOutputTensors[i].data_ptr(),
         inputTensors[i].numel(),
-        getNcclDataType(inputTensors[i].type().scalarType()),
+        getNcclDataType(inputTensors[i].scalar_type()),
         ncclComms[i]->getNcclComm(),
         ncclStream.stream()));
   }

@@ -151,7 +151,7 @@ struct CAFFE2_API TensorIterator {
     AT_ASSERT(operands_[arg].type);
     return *operands_[arg].type;
   }
-  ScalarType dtype(int arg) const { return type(arg).scalarType(); }
+  ScalarType dtype(int arg=0) const { return type(arg).scalarType(); }
   DeviceType device_type(int arg=0) const { return type(arg).device_type(); }
   int64_t element_size(int arg) const { return type(arg).elementSizeInBytes(); }
   bool is_scalar(int arg) const;
@@ -186,7 +186,7 @@ struct CAFFE2_API TensorIterator {
   template <typename T>
   T scalar_value(int arg) {
     auto& op = operands_[arg];
-    return at::detail::load<T>(op.data, op.tensor.type().scalarType());
+    return at::detail::load<T>(op.data, op.tensor.scalar_type());
   }
 
   void for_each(const loop_t& loop);

@@ -128,7 +128,7 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
 
 auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
 
-  return ((input.type().scalarType() == at::kFloat) || (input.type().scalarType() == at::kHalf))
+  return ((input.scalar_type() == at::kFloat) || (input.scalar_type() == at::kHalf))
          && detail::getCUDAHooks().compiledWithMIOpen()
          && input.is_cuda()
          && input.dim() <= MIOPEN_DIM_MAX
@@ -140,7 +140,7 @@ auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
 auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 #if AT_MKLDNN_ENABLED()
   return input.type().backend() == at::Backend::CPU &&
-         input.type().scalarType() == kFloat && // only on CPU Float Tensors
+         input.scalar_type() == kFloat && // only on CPU Float Tensors
          !is_dilated() && // doesn't support dilation
          !transposed && // or transposed tensors
          input.ndimension() == 4; // must be in NCHW format
@@ -151,7 +151,7 @@ auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 #if AT_NNPACK_ENABLED()
   return at::_nnpack_available() &&
          input.type().backend() == at::Backend::CPU &&
-         input.type().scalarType() == kFloat && // only on CPU Float Tensors
+         input.scalar_type() == kFloat && // only on CPU Float Tensors
          !is_strided() && // doesn't support strides
          !is_dilated() && // or dilation
          !transposed &&   // or transposed tensors
