@@ -678,66 +678,138 @@ size_t estimateIValueSize(const IValue& ivalue) {
   return 0;
 }
 
+enum class opcode : char {
+    MARK            = '(',
+    STOP            = '.',
+    POP             = '0',
+    POP_MARK        = '1',
+    DUP             = '2',
+    FLOAT           = 'F',
+    INT             = 'I',
+    BININT          = 'J',
+    BININT1         = 'K',
+    LONG            = 'L',
+    BININT2         = 'M',
+    NONE            = 'N',
+    PERSID          = 'P',
+    BINPERSID       = 'Q',
+    REDUCE          = 'R',
+    STRING          = 'S',
+    BINSTRING       = 'T',
+    SHORT_BINSTRING = 'U',
+    UNICODE         = 'V',
+    BINUNICODE      = 'X',
+    APPEND          = 'a',
+    BUILD           = 'b',
+    GLOBAL          = 'c',
+    DICT            = 'd',
+    EMPTY_DICT      = '}',
+    APPENDS         = 'e',
+    GET             = 'g',
+    BINGET          = 'h',
+    INST            = 'i',
+    LONG_BINGET     = 'j',
+    LIST            = 'l',
+    EMPTY_LIST      = ']',
+    OBJ             = 'o',
+    PUT             = 'p',
+    BINPUT          = 'q',
+    LONG_BINPUT     = 'r',
+    SETITEM         = 's',
+    TUPLE           = 't',
+    EMPTY_TUPLE     = ')',
+    SETITEMS        = 'u',
+    BINFLOAT        = 'G',
+
+    /* Protocol 2. */
+    PROTO       = '\x80',
+    NEWOBJ      = '\x81',
+    EXT1        = '\x82',
+    EXT2        = '\x83',
+    EXT4        = '\x84',
+    TUPLE1      = '\x85',
+    TUPLE2      = '\x86',
+    TUPLE3      = '\x87',
+    NEWTRUE     = '\x88',
+    NEWFALSE    = '\x89',
+    LONG1       = '\x8a',
+    LONG4       = '\x8b',
+
+    /* Protocol 3 (Python 3.x) */
+    BINBYTES       = 'B',
+    SHORT_BINBYTES = 'C',
+
+    /* Protocol 4 */
+    SHORT_BINUNICODE = '\x8c',
+    BINUNICODE8      = '\x8d',
+    BINBYTES8        = '\x8e',
+    EMPTY_SET        = '\x8f',
+    ADDITEMS         = '\x90',
+    FROZENSET        = '\x91',
+    NEWOBJ_EX        = '\x92',
+    STACK_GLOBAL     = '\x93',
+    MEMOIZE          = '\x94',
+    FRAME            = '\x95'
+};
+
 uint64_t ScriptModuleSerializer::writeIValue(
     const IValue& ivalue,
     std::vector<char>& data) {
-  if (ivalue.isPtrType()) {
-    if (ivalue.isString()) {
-      auto ptr = ivalue.toString().get();
-      auto entry = written_ivalues_.find(ptr);
-      if (entry != written_ivalues_.end()) {
-        return entry->second;
-      }
-    }
-    // TODO: support other types
-  }
+  // if (ivalue.isPtrType()) {
+  //   if (ivalue.isString()) {
+  //     auto ptr = ivalue.toString().get();
+  //     auto entry = written_ivalues_.find(ptr);
+  //     if (entry != written_ivalues_.end()) {
+  //       return entry->second;
+  //     }
+  //   }
+  //   // TODO: support other types
+  // }
   // Write IValue into array as bytes, return pointer to start of data for the
   // IValue. This may be anywhere in 'data' (i.e. if the IValue contains other)
   // IValues, it will also write those
   uint64_t ivalue_offset = data.size();
   data.reserve(data.size() + estimateIValueSize(ivalue));
+  static uint8_t memo_id = 0;
 
   if (ivalue.isString()) {
     auto string = ivalue.toStringRef();
-    // String length
-    pushValue(uint64_t(string.size()), data);
-    // String data
+
+    pushValue(opcode::BINUNICODE, data);
+    pushValue(uint32_t(string.size()), data);
     data.insert(data.end(), string.begin(), string.end());
 
+    pushValue(opcode::BINPUT, data);
+    pushValue(uint8_t(memo_id++), data);
+
+    // String length
+    // pushValue(uint64_t(string.size()), data);
+    // String data
+
     // Don't store the same ivalue multiple times
-    written_ivalues_[ivalue.toString().get()] = ivalue_offset;
+    // written_ivalues_[ivalue.toString().get()] = ivalue_offset;
   } else if (ivalue.isGenericDict()) {
     auto dict = ivalue.toGenericDictRef();
-    // Add the pointer to the start of the key/value mappings
-    auto data_ptr_index = pushBytes(sizeof(uint64_t), data);
 
-    // Add the size of the dictionary
-    pushValue(uint64_t(dict.size()), data);
+    pushValue(opcode::EMPTY_DICT, data);
+    pushValue(opcode::BINPUT, data);
+    pushValue(uint8_t(memo_id++), data);
 
-    std::vector<size_t> item_data_offsets;
-    item_data_offsets.reserve(dict.size() * 2);
-    // Write all the key/value pairs into the data array and save their
-    // indices in the array
-    for (const auto& item : dict) {
-      item_data_offsets.push_back(writeIValue(item.first, data));
-      item_data_offsets.push_back(writeIValue(item.second, data));
+    pushValue(opcode::MARK, data);
+
+    for (auto pair : dict) {
+      writeIValue(pair.first, data);
+      writeIValue(pair.second, data);
     }
 
-    // Add offsets into 'data' for each key/value pair in the dict
-    auto dict_pairs_byte_offset = data.size();
-    for (uint64_t offset : item_data_offsets) {
-      pushValue(offset, data);
-    }
-
-    // At the start of the block of data for this dictionary, write where the
-    // dictionary key/value pairs begin
-    uint64_t* size_ptr = reinterpret_cast<uint64_t*>(&data[data_ptr_index]);
-    *size_ptr = uint64_t(dict_pairs_byte_offset);
+    pushValue(opcode::SETITEMS, data);
   } else if (ivalue.isTensor()) {
+    AT_ASSERT(false);
     auto tensor = ivalue.toTensor();
     // Write it to the tensor table
     return uint64_t(addTensor(tensor));
   } else if (ivalue.isInt()) {
+    AT_ASSERT(false);
     return pushValue(ivalue.toInt(), data);
   } else {
     AT_ERROR("Cannot write data for ivalue");
@@ -768,12 +840,19 @@ void ScriptModuleSerializer::convertModule(
     std::vector<char> bytes;
     std::unordered_map<std::string, uint64_t> attribute_offsets;
     for (const auto& item : module.get_attributes()) {
+      std::cout << "bytes has " << bytes.size() << " items\n";
+      pushValue(opcode::PROTO, bytes);
+      std::cout << "bytes has " << bytes.size() << " items\n";
+      pushValue(uint8_t(2), bytes);
+      std::cout << "bytes has " << bytes.size() << " items\n";
       auto& attribute = item.value();
       torch::AttributeDef* attribute_def = module_def->add_attributes();
       attribute_def->set_name(attribute.name_);
       attribute_def->set_type(attribute.type->python_str());
       auto offset = writeIValue(*attribute.slot(), bytes);
       attribute_offsets[attribute.name_] = offset;
+      pushValue(opcode::STOP, bytes);
+      break;
     }
     writer_.writeRecord("attributes", bytes.data(), bytes.size());
 
