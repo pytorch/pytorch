@@ -23,7 +23,7 @@ inline std::vector<at::Tensor> _call_caffe2_op(
     std::vector<at::Tensor>&& outputs) {
   Caffe2Operator op(schema, std::move(inputs), std::move(outputs));
   op.Run();
-  return std::move(op).ivalue_outputs();
+  return std::move(op).move_newstyle_outputs();
 }
 
 // This function is inline in the hope that compilers optimizing for speed will
@@ -43,8 +43,10 @@ inline void _call_caffe2_op_from_c10(
   // (if not ivalue::None) contains a preallocated output tensor for each
   // operator output.
 
-  AT_ASSERT(schema.arguments().back().type()->isSubtypeOf(
-      OptionalType::create(ListType::ofTensors())));
+  AT_ASSERT(
+      schema.arguments().size() != 0 &&
+      schema.arguments().back().type()->isSubtypeOf(
+          OptionalType::create(ListType::ofTensors())));
   IValue preallocated_outputs = torch::jit::pop(*stack);
 
   const size_t num_outputs = schema.returns().size();

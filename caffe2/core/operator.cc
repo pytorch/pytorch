@@ -91,11 +91,11 @@ OperatorBase::OperatorBase(
     std::vector<c10::IValue> inputs,
     std::vector<at::Tensor> outputs)
     : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
-      ivalue_inputs_(std::move(inputs)),
-      ivalue_outputs_(std::move(outputs)),
-      input_size_(compute_input_size_(ivalue_inputs_)) {
+      newstyle_inputs_(std::move(inputs)),
+      newstyle_outputs_(std::move(outputs)),
+      input_size_(compute_input_size_(newstyle_inputs_)) {
   input_tensors_.resize(input_size_);
-  output_tensors_.resize(ivalue_outputs_.size());
+  output_tensors_.resize(newstyle_outputs_.size());
 }
 
 vector<TensorShape> OperatorBase::InputTensorShapes() const {
