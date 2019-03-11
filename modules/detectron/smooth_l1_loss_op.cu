@@ -27,7 +27,11 @@ __global__ void SmoothL1Kernel(
   //        |x| - 0.5 * beta      otherwise
   CUDA_1D_KERNEL_LOOP(index, n) {
     T val = in[index];
+    #ifdef __HIP_PLATFORM_HCC__
+    T abs_val = fabsf(val);
+    #else
     T abs_val = abs(val);
+    #endif
     if (abs_val < beta) {
       out[index] = 0.5 * val * val / beta;
     } else {
@@ -49,7 +53,11 @@ __global__ void SmoothL1GradientKernel(
   // We also scale by norm * d_loss in this kernel for convenience
   CUDA_1D_KERNEL_LOOP(index, n) {
     T val = in[index];
+    #ifdef __HIP_PLATFORM_HCC__
+    T abs_val = fabsf(val);
+    #else
     T abs_val = abs(val);
+    #endif
     T d_loss = *d_loss_data;
     if (abs_val < beta) {
       out[index] = norm * d_loss * val / beta;

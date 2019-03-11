@@ -123,8 +123,13 @@ __global__ void PSRoIPoolForward(
       roundf(offset_bottom_rois[4]) + 1.) * spatial_scale;
 
     // Force too small ROIs to be 1x1
+    #ifdef __HIP_PLATFORM_HCC__
+    T roi_width = fmax(roi_end_w - roi_start_w, 0.1);  // avoid 0
+    T roi_height = fmax(roi_end_h - roi_start_h, 0.1);
+    #else
     T roi_width = max(roi_end_w - roi_start_w, 0.1);  // avoid 0
     T roi_height = max(roi_end_h - roi_start_h, 0.1);
+    #endif
 
     // Compute w and h at bottom
     T bin_size_h = roi_height / static_cast<T>(pooled_height);
@@ -200,8 +205,13 @@ __global__ void PSRoIPoolBackward(
       roundf(offset_bottom_rois[4]) + 1.) * spatial_scale;
 
     // Force too small ROIs to be 1x1
+    #ifdef __HIP_PLATFORM_HCC__
+    T roi_width = fmax(roi_end_w - roi_start_w, 0.1); //avoid 0
+    T roi_height = fmax(roi_end_h - roi_start_h, 0.1);
+    #else
     T roi_width = max(roi_end_w - roi_start_w, 0.1); //avoid 0
     T roi_height = max(roi_end_h - roi_start_h, 0.1);
+    #endif
 
     // Compute w and h at bottom
     T bin_size_h = roi_height / static_cast<T>(pooled_height);

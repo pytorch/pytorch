@@ -38,12 +38,21 @@ __global__ void SelectSmoothL1Kernel(
       float y_hat = Y_hat[ind];
       float y = Y[i * 4 + j];
       float val = y_hat - y;
+      #ifdef __HIP_PLATFORM_HCC__
+      float abs_val = fabsf(val);
+      if (abs_val < beta) {
+        out[ind] = (0.5 * val * val / beta) / fmaxf(S[0], 1.0);
+      } else {
+        out[ind] = (abs_val - 0.5 * beta) / fmaxf(S[0], 1.0);
+      }
+      #else
       float abs_val = abs(val);
       if (abs_val < beta) {
         out[ind] = (0.5 * val * val / beta) / max(S[0], 1.0);
       } else {
         out[ind] = (abs_val - 0.5 * beta) / max(S[0], 1.0);
       }
+      #endif
     }
   }
 }
@@ -75,12 +84,21 @@ __global__ void SelectSmoothL1GradientKernel(
       float y_hat = Y_hat[ind];
       float y = Y[i * 4 + j];
       float val = y_hat - y;
+      #ifdef __HIP_PLATFORM_HCC__
+      float abs_val = fabsf(val);
+      if (abs_val < beta) {
+        out[ind] = norm * d_loss * val / beta / fmaxf(S[0], 1.0);
+      } else {
+        out[ind] = norm * d_loss * ((float(0) < val) - (val < float(0))) / fmaxf(S[0], 1.0);
+      }
+      #else
       float abs_val = abs(val);
       if (abs_val < beta) {
         out[ind] = norm * d_loss * val / beta / max(S[0], 1.0);
       } else {
         out[ind] = norm * d_loss * ((float(0) < val) - (val < float(0))) / max(S[0], 1.0);
       }
+      #endif
     }
   }
 }
