@@ -22,10 +22,6 @@ static inline double TH_rsqrt(double x) {
   return 1.0 / sqrt(x);
 }
 
-static inline double TH_lerp(double a, double b, double weight) {
-  return a + weight * (b-a);
-}
-
 static inline float TH_sigmoidf(float value) {
   return 1.0f / (1.0f + expf(-value));
 }
@@ -36,10 +32,6 @@ static inline float TH_fracf(float x) {
 
 static inline float TH_rsqrtf(float x) {
   return 1.0f / sqrtf(x);
-}
-
-static inline float TH_lerpf(float a, float b, float weight) {
-  return a + weight * (b-a);
 }
 
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.

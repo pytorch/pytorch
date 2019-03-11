@@ -13,7 +13,6 @@ list(APPEND Caffe2_CPU_SRCS
   utils/signal_handler.cc
   utils/smart_tensor_printer.cc
   utils/string_utils.cc
-  utils/thread_name.cc
   utils/threadpool/ThreadPool.cc)
 
 # ---[ threadpool/pthreadpool* is a local modification of the NNPACK
