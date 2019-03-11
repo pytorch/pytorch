@@ -591,7 +591,8 @@ def trace(func,
           check_trace=True,
           check_inputs=None,
           check_tolerance=1e-5,
-          _force_outplace=False):
+          _force_outplace=False,
+          _module_class=None):
     """
     Trace a function and return an executable trace that will be optimized
     using just-in-time compilation.
@@ -657,7 +658,10 @@ def trace(func,
     # done primarily so that weird iterables fail here and not pybind11 code
     elif not isinstance(example_inputs, tuple):
         example_inputs = tuple(example_inputs)
-    module = TopLevelTracedModule(func, **executor_options)
+    if _module_class:
+        module = _module_class(func, **executor_options)
+    else:
+        module = TopLevelTracedModule(func, **executor_options)
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
     module._create_method_from_trace('forward', func, example_inputs,
                                      var_lookup_fn, _force_outplace)
@@ -1058,9 +1062,8 @@ if _enabled:
                     + Tracing will not record any control-flow like if statements or loops. When
                       this control-flow is constant across your module, this is fine and it often
                       just inlines configuration decisions. But sometimes the control-flow is
-                      actually part of the model itself. For instance, a beam search in
-                      sequence-to-sequence translation is a loop over the (varying) sequence
-                      length of inputs.
+                      actually part of the model itself. For instance, a recurrent network is
+                      a loop over the (possibly dynamic) length of an input sequence.
 
                     + In the returned ``ScriptModule``, operations that have different behaviors
                       in ``training`` and ``eval`` modes will always behave as if it is in the
