@@ -20,47 +20,6 @@
 namespace torch {
 namespace nn {
 
-// class SequentialOrderedDictItem {
-//  public:
-//   /// Constructs a new item.
-//   template <typename ModuleType>
-//   SequentialOrderedDictItem(std::string name, ModuleType module) {
-//     if (torch::detail::is_module<ModuleType>::value) {
-//       std::cout << "we are here0! this is Module type" << "\n";
-//     } else {
-//       std::cout << "we are here1! this is not Module type" << "\n";
-//     }
-//     // yf225 TODO: check shared_ptr type and ModuleHolder type as well!
-//     // yf225 TODO: How do we save the module type appropriately? Should we save AnyModule?
-//   }
-// };
-
-template <typename Key, typename Value>
-class SequentialOrderedDictItem {
- public:
-  /// Constructs a new item.
-  SequentialOrderedDictItem(Key key, Value value) {
-    if (torch::detail::is_module<Value>::value) {
-      std::cout << "we are here0! this is Module type" << "\n";
-    } else {
-      std::cout << "we are here1! this is not Module type" << "\n";
-    }
-    // yf225 TODO: check shared_ptr type and ModuleHolder type as well!
-    // yf225 TODO: How do we save the module type appropriately? Should we save AnyModule?
-  }
-};
-
-// class SequentialOrderedDict {
-//  public:
-//   /// Constructs a new `SequentialOrderedDict` and pre-populates it with the given
-//   /// `SequentialOrderedDictItem`s.
-//   SequentialOrderedDict(std::initializer_list<SequentialOrderedDictItem> initializer_list) {
-//     for (auto& item : initializer_list) {
-//       std::cout << "we are here3!" << "\n";
-//     }
-//   }
-// };
-
 /// A list of `Module`s that acts as a `Module` itself.
 ///
 /// A `Sequential` is fundamentally a list of `Module`s, each with a `forward()`
@@ -131,6 +90,66 @@ class SequentialOrderedDictItem {
 /// \endrst
 class SequentialImpl : public Cloneable<SequentialImpl> {
  public:
+  class NamedSubmodule {
+   public:
+    // We don't allow constructing an empty `NamedSubmodule`.
+    NamedSubmodule() = delete;
+
+    /// Creates a `NamedSubmodule` from a (boxed) `Module`.
+    template <typename ModuleType>
+    NamedSubmodule(std::string name, std::shared_ptr<ModuleType> module_ptr) {
+      // Nesting Sequential doesn't work because `forward()`'s return type is
+      // templatized, so it'll give a nasty compiler error.
+      static_assert(
+          !std::is_same<SequentialImpl, ModuleType>::value,
+          "Sequential is not nestable");
+      static_assert(
+          torch::detail::is_module<ModuleType>::value,
+          "Can only add objects derived from nn::Module to Sequential");
+      static_assert(
+          torch::detail::has_forward<ModuleType>::value,
+          "Can only add modules with a forward() method to Sequential");
+      new (this) NamedSubmodule(std::move(name), AnyModule(std::move(module_ptr)));
+    }
+
+    /// Creates a `NamedSubmodule` from a `Module`, moving or copying it
+    /// into a `shared_ptr` internally.
+    template <typename M, typename = torch::detail::enable_if_module_t<M>>
+    NamedSubmodule(std::string name, M&& module) {
+      // Need to get rid of any reference components for make_unique.
+      using Type = typename std::remove_reference<M>::type;
+      // Here we move (or copy) the module into a new shared_ptr.
+      new (this) NamedSubmodule(std::move(name), std::make_shared<Type>(std::forward<M>(module)));
+    }
+
+    /// Creates a `NamedSubmodule` from a `Module` that is unwrapped from
+    /// a `ModuleHolder`.
+    template <typename M>
+    NamedSubmodule(std::string name, const ModuleHolder<M>& module_holder) {
+      new (this) NamedSubmodule(std::move(name), module_holder.ptr());
+    }
+
+    /// Returns a reference to the name.
+    std::string name() const noexcept {
+      return name_;
+    }
+
+    /// Returns a reference to the module.
+    AnyModule& module() noexcept {
+      return module_;
+    }
+
+   private:
+    /// Creates a `NamedSubmodule` from a type-erased `AnyModule`.
+    NamedSubmodule(std::string name, AnyModule any_module) {
+      name_ = std::move(name);
+      module_ = std::move(any_module);
+    }
+
+    std::string name_;
+    AnyModule module_;
+  };
+
   using Iterator = std::vector<AnyModule>::iterator;
   using ConstIterator = std::vector<AnyModule>::const_iterator;
 
@@ -161,21 +180,6 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// Pretty prints the `Sequential` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override {
     stream << "torch::nn::Sequential";
-  }
-
-  // static torch::OrderedDict<std::string, int> make_ordered_dict(std::initializer_list<SequentialOrderedDictItem> initializer_list) {
-  //   for (auto& item : initializer_list) {
-  //     std::cout << "we are here3!" << "\n";
-  //   }
-  //   return {{std::string("hi"), 0}};
-  // }
-
-  template <typename StrType, typename M>
-  static torch::OrderedDict<StrType, M> make_ordered_dict(std::initializer_list<SequentialOrderedDictItem<StrType, M>> initializer_list) {
-    for (auto& item : initializer_list) {
-      std::cout << "we are here3!" << "\n";
-    }
-    return {{std::string("hi"), 0}};
   }
 
   /// Feeds `inputs` to the first module and then chains outputs to inputs,
@@ -231,18 +235,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// Adds a new (boxed) `Module` to the `Sequential` container.
   template <typename ModuleType>
   void push_back(std::shared_ptr<ModuleType> module_ptr) {
-    // Nesting Sequential doesn't work because `forward()`'s return type is
-    // templatized, so it'll give a nasty compiler error.
-    static_assert(
-        !std::is_same<SequentialImpl, ModuleType>::value,
-        "Sequential is not nestable");
-    static_assert(
-        torch::detail::is_module<ModuleType>::value,
-        "Can only add objects derived from nn::Module to Sequential");
-    static_assert(
-        torch::detail::has_forward<ModuleType>::value,
-        "Can only add modules with a forward() method to Sequential");
-    push_back(AnyModule(std::move(module_ptr)));
+    push_back(NamedSubmodule(std::to_string(modules_.size()), std::move(module_ptr)));
   }
 
   /// Adds a new `Module` to the `Sequential` container, moving or copying it
@@ -252,25 +245,24 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// `Sequential(std::make_shared<Module>(3, 4))`.
   template <typename M, typename = torch::detail::enable_if_module_t<M>>
   void push_back(M&& module) {
-    // Need to get rid of any reference components for make_unique.
-    using Type = typename std::remove_reference<M>::type;
-    // Here we move (or copy) the module into a new shared_ptr.
-    push_back(std::make_shared<Type>(std::forward<M>(module)));
+    push_back(NamedSubmodule(std::to_string(modules_.size()), std::forward<M>(module)));
   }
 
   /// Unwraps the contained module of a `ModuleHolder` and adds it to the
   /// `Sequential`.
   template <typename M>
   void push_back(const ModuleHolder<M>& module_holder) {
-    push_back(module_holder.ptr());
+    push_back(NamedSubmodule(std::to_string(modules_.size()), module_holder));
   }
 
-  // void push_back(torch::OrderedDict&& ordered_dict) {
-  //   std::cout << "we are here0!" << "\n";
-  // }
+  void push_back(NamedSubmodule named_module) {
+    push_back(std::move(named_module.name()), std::move(named_module.module()));
+  }
 
-  void push_back(torch::OrderedDict<std::string, int>&& ordered_dict) {
-    std::cout << "we are here0!" << "\n";
+  void push_back(torch::OrderedDict<std::string, AnyModule>&& ordered_dict) {
+    for (auto& item : ordered_dict) {
+      push_back(std::move(item.key()), std::move(item.value()));
+    }
   }
 
   /// Iterates over the container and calls `push_back()` on each value.
@@ -376,9 +368,13 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
 
   /// Adds a type-erased `AnyModule` to the `Sequential`.
   void push_back(AnyModule any_module) {
+    push_back(std::to_string(modules_.size()), std::move(any_module));
+  }
+
+  void push_back(std::string name, AnyModule any_module) {
     modules_.push_back(std::move(any_module));
     const auto index = modules_.size() - 1;
-    register_module(std::to_string(index), modules_[index].ptr());
+    register_module(name, modules_[index].ptr());
   }
 
   /// The base case, when the list of modules is empty.
@@ -389,6 +385,14 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   // `vector<AnyModule>`.
   std::vector<AnyModule> modules_;
 };
+
+inline torch::OrderedDict<std::string, AnyModule> named_submodules(std::initializer_list<SequentialImpl::NamedSubmodule> named_modules) {
+  torch::OrderedDict<std::string, AnyModule> dict;
+  for (auto named_module : named_modules) {
+    dict.insert(std::move(named_module.name()), std::move(named_module.module()));
+  }
+  return dict;
+}
 
 /// A `ModuleHolder` subclass for `SequentialImpl`.
 /// See the documentation for `SequentialImpl` class to learn what methods it
