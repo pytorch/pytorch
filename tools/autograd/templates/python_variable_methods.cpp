@@ -219,7 +219,7 @@ static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   jit::tracer::warn("Converting a tensor to a Python integer", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  if (isFloatingType(self_.type().scalarType())) {
+  if (isFloatingType(self_.scalar_type())) {
     // we can't dispatch to item<int64_t> here because we want to avoid ATen overflow checks;
     // the python integral type (long in python2) can't overflow.
     return THPUtils_packDoubleAsInt(dispatch_to_CDouble(self_));
@@ -237,7 +237,7 @@ static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   // TODO: change the condition to `self_.dim() != 0` once we expose scalars
   // in PyTorch.
-  if (!isIntegralType(self_.type().scalarType()) || self_.numel() != 1) {
+  if (!isIntegralType(self_.scalar_type()) || self_.numel() != 1) {
     throw TypeError("only integer tensors of a single element can be converted to an index");
   }
   return wrap(dispatch_to_CLong(self_));
@@ -253,7 +253,7 @@ static Tensor dispatch_invert(const Tensor & self) {
 static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  if (self_.type().scalarType() != at::kByte) {
+  if (self_.scalar_type() != at::kByte) {
     throw TypeError("~ (operator.invert) is only implemented on byte tensors");
   }
   return THPVariable_Wrap(dispatch_invert(self_));

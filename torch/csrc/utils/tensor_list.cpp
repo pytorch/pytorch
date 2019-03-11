@@ -35,10 +35,9 @@ PyObject* tensor_to_list(const Tensor& tensor) {
       data = data.toBackend(Backend::CPU);
     });
   }
-  auto& type = data.type();
   return recursive_to_list(
       (char*)data.data_ptr(), data.sizes(), data.strides(), 0,
-      type.scalarType(), type.elementSizeInBytes());
+      data.scalar_type(), data.dtype().itemsize());
 }
 
 }}  // namespace torch::utils
