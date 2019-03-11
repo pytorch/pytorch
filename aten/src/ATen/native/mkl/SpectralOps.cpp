@@ -145,7 +145,7 @@ static inline void _fft_fill_with_conjugate_symmetry_(Tensor& input,
     {
       int tid = omp_get_thread_num();
       int64_t start = tid * num_slices_per_thread;
-      AT_DISPATCH_FLOATING_TYPES(input.type(), "_fft_fill_with_conjugate_symmetry", [&] {
+      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "_fft_fill_with_conjugate_symmetry", [&] {
         _fft_fill_with_conjugate_symmetry_slice<scalar_t>(input, signal_ndim, size_last_dim,
             last_dim_start_slice, start, std::min(num_slices_per_thread, num - start));
       });
@@ -153,7 +153,7 @@ static inline void _fft_fill_with_conjugate_symmetry_(Tensor& input,
     return;
   }
 #endif
-  AT_DISPATCH_FLOATING_TYPES(input.type(), "_fft_fill_with_conjugate_symmetry", [&] {
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "_fft_fill_with_conjugate_symmetry", [&] {
     _fft_fill_with_conjugate_symmetry_slice<scalar_t>(input, signal_ndim, size_last_dim,
         last_dim_start_slice, 0, num);
   });
@@ -211,14 +211,14 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
 
   // precision
   DFTI_CONFIG_VALUE prec;
-  if (input.type().scalarType() == ScalarType::Float) {
+  if (input.scalar_type() == ScalarType::Float) {
     prec = DFTI_SINGLE;
-  } else if (input.type().scalarType() == ScalarType::Double) {
+  } else if (input.scalar_type() == ScalarType::Double) {
     prec = DFTI_DOUBLE;
   } else {
     std::ostringstream ss;
     ss << "MKL FFT doesn't support tensor of type: "
-       << toString(input.type().scalarType());
+       << toString(input.scalar_type());
     AT_ERROR(ss.str());
   }
   // signal type
@@ -291,4 +291,3 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
 }} // namespace at::native
 
 #endif
-

@@ -664,6 +664,22 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.MaxPool2d(5, padding=2)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
+    def test_maxpool1d_ceil(self):
+        model = nn.MaxPool1d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_maxpool2d_ceil(self):
+        model = nn.MaxPool2d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_maxpool3d_ceil(self):
+        model = nn.MaxPool3d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 44, 31, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    @unittest.skip("C2 and PyTorch have small difference in padding implementation")
     def test_avgpool2d(self):
         model = nn.AvgPool2d(5, padding=(2))
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
@@ -679,6 +695,21 @@ class TestCaffe2Backend(unittest.TestCase):
     def test_avgpool2d_no_padding(self):
         model = nn.AvgPool2d(5)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
+
+    def test_avg_pool1D_ceil(self):
+        model = torch.nn.AvgPool1d(3, 2, ceil_mode=True)
+        x = torch.randn(1, 1, 7, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_avg_pool2D_ceil(self):
+        model = torch.nn.AvgPool2d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_avg_pool3D_ceil(self):
+        model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 44, 31, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_adaptive_avg_pool1D(self):
         model = torch.nn.AdaptiveAvgPool1d((5))
