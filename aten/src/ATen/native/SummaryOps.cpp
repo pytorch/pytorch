@@ -55,8 +55,8 @@ Tensor _bincount_cpu_template(
 
 Tensor
 _bincount_cpu(const Tensor& self, const Tensor& weights, int64_t minlength) {
-  return AT_DISPATCH_INTEGRAL_TYPES(self.type(), "bincount", [&] {
-    const auto scalar = weights.type().scalarType();
+  return AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "bincount_cpu", [&] {
+    const auto scalar = weights.scalar_type();
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
       return _bincount_cpu_template<scalar_t, float>(self.contiguous(), weights.contiguous(), minlength);
     return _bincount_cpu_template<scalar_t, double>(

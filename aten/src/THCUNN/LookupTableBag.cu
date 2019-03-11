@@ -41,17 +41,17 @@ __global__ void cunn_LookupTableBag_updateOutputKernel(
     if (featureDim < stride) {
       int64_t bag = chunk / chunksPerBag;
       Dtype*  weightFeat = weight + featureDim;
-      int64_t begin = offsets[bag] - TH_INDEX_BASE;
-      int64_t end = (bag < numBags - 1) ? (offsets[bag + 1] - TH_INDEX_BASE) : numIndices;
+      int64_t begin = offsets[bag];
+      int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
       assert(end >= begin);
       Acctype weightFeatSum = ScalarConvert<float, Acctype>::to(0);
       int64_t bag_size_ = 0;
       for (int64_t emb = begin; emb < end; emb++) {
-        const int weightRow = ((int) input[emb] - TH_INDEX_BASE) * stride;
+        const int weightRow = ((int) input[emb]) * stride;
         weightFeatSum += ScalarConvert<Dtype, Acctype>::to(weightFeat[weightRow]);
 	bag_size_ ++;
         if (featureDim == 0) {
-          offset2bag[emb] = bag + TH_INDEX_BASE;
+          offset2bag[emb] = bag;
         }
       }
       if (mode == MODE_MEAN) {
@@ -95,11 +95,11 @@ __global__ void cunn_LookupTableBag_accGradParametersKernel(
       && (idx == 0 || input[idx] != input[idx - 1])) {
     do {
       const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
-      const int weightRow = ((int) input[idx] - TH_INDEX_BASE) * stride;
+      const int weightRow = ((int) input[idx]) * stride;
 
       // Note: only this line changes from LookupTable_accgradParametersKernel
-      const int origRow = ((int) indices[idx] - TH_INDEX_BASE);
-      const int seq_number = offset2bag[origRow] - TH_INDEX_BASE;
+      const int origRow = ((int) indices[idx]);
+      const int seq_number = offset2bag[origRow];
       const int gradOutputRow = ((int) seq_number) * stride;
 
       const Acctype scale = count ? ScalarConvert<Dtype, Acctype>::to(defaultScale) / count[idx] : ScalarConvert<Dtype, Acctype>::to(defaultScale);

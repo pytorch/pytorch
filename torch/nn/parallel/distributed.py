@@ -230,6 +230,7 @@ class DistributedDataParallel(Module):
         (2) bucketing the parameters for reductions
         (3) resetting the bucketing states
         (4) registering the grad hooks
+        (5) passing a handle of DDP to SyncBatchNorm Layer
         """
         if len(self.device_ids) > 1:
             # TODO: we don't need to replicate params in here. they're always going to
@@ -306,6 +307,9 @@ class DistributedDataParallel(Module):
         self.reduction_works = [None for _ in range(len(self.bucket_sizes))]
         self.devs_ready = [0 for _ in range(len(self.bucket_sizes))]
         self._register_grad_hooks()
+
+        # passing a handle to torch.nn.SyncBatchNorm layer
+        self._passing_sync_batchnorm_handle(self._module_copies)
 
     def __getstate__(self):
         self._check_default_group()
@@ -406,6 +410,12 @@ class DistributedDataParallel(Module):
                     for tensors, module_buffers_data in zip(result[1:], self.modules_buffers_data[1:]):
                         for tensor, buffer_data in zip(tensors, module_buffers_data):
                             buffer_data.set_(tensor)
+
+    def _passing_sync_batchnorm_handle(self, module_copies):
+        for dev_idx, module in enumerate(module_copies):
+            for layer in module.modules():
+                if isinstance(layer, torch.nn.modules.SyncBatchNorm):
+                    layer._specify_ddp_gpu_num(len(self.device_ids))
 
     def _register_grad_hooks(self):
         self._grad_accs = []  # need to keep them in scope

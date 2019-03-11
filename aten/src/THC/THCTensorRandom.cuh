@@ -211,7 +211,7 @@ sampleMultinomialOnce(int64_t* dest,
     if (THCNumerics<AccT>::eq(sum,  accZero)) {
       // Choose the first element
       if (threadIdx.x == 0) {
-        dest[curDist] = TH_INDEX_BASE;
+        dest[curDist] = 0;
       }
 
       continue;
@@ -265,7 +265,7 @@ sampleMultinomialOnce(int64_t* dest,
       if (inBucket) {
         // We're done; we have the sample
         // Torch indices are 1-based
-        dest[curDist] = cat + TH_INDEX_BASE;
+        dest[curDist] = cat;
         found = true;
       }
 
@@ -284,7 +284,7 @@ sampleMultinomialOnce(int64_t* dest,
       // rarity in which this occurs, this should not be an issue.
       for (int cat = categories - 1; cat >= 0; --cat) {
         if (THCNumerics<T>::gt(dist[curDist * stride_dist + cat * stride_categories], zero)) {
-          dest[curDist] = cat + TH_INDEX_BASE;
+          dest[curDist] = cat;
           break;
         }
       }
@@ -328,7 +328,7 @@ sampleMultinomialWithReplacement(curandStateMtgp32* state,
           r);
 
         // Torch indices are 1-based
-        dest[curDist * totalSamples + sample] = choice + TH_INDEX_BASE;
+        dest[curDist * totalSamples + sample] = choice;
       }
     }
   }
@@ -370,7 +370,7 @@ sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
         r);
 
       // Torch indices are 1-based
-      dest[curDist * totalSamples + sample] = choice + TH_INDEX_BASE;
+      dest[curDist * totalSamples + sample] = choice;
 
       // Without replacement, so update the original probability so it
       // is not considered a second time

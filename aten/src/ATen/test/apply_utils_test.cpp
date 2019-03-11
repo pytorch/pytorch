@@ -27,7 +27,7 @@ void test(Type& type, IntArrayRef shape, int64_t a = 0, int64_t b = 1) {
   auto zero_dim = at::empty({}, type);
   zero_dim.fill_(2);
   zero_dim.exp_();
-  AT_DISPATCH_FLOATING_TYPES(zero_dim.type(), "test0", [&] {
+  AT_DISPATCH_FLOATING_TYPES(zero_dim.scalar_type(), "test0", [&] {
     ASSERT(zero_dim.data<scalar_t>()[0] == std::exp(2));
   });
 
@@ -50,7 +50,7 @@ void test(Type& type, IntArrayRef shape, int64_t a = 0, int64_t b = 1) {
     }
   }
 
-  AT_DISPATCH_FLOATING_TYPES(a0.type(), "test1", [&] {
+  AT_DISPATCH_FLOATING_TYPES(a0.scalar_type(), "test1", [&] {
     CPU_tensor_apply2<scalar_t, scalar_t>(
         a0, a1, [](scalar_t& y, const scalar_t& x) { y = x * x; });
     CPU_tensor_apply2<double, scalar_t>(
@@ -62,7 +62,7 @@ void test(Type& type, IntArrayRef shape, int64_t a = 0, int64_t b = 1) {
     }
   });
 
-  AT_DISPATCH_FLOATING_TYPES(a0.type(), "test2", [&] {
+  AT_DISPATCH_FLOATING_TYPES(a0.scalar_type(), "test2", [&] {
     CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
         a0, a1, a2, [](scalar_t& y, const scalar_t& x, const scalar_t& z) {
           y = x * x + z;
@@ -79,7 +79,7 @@ void test(Type& type, IntArrayRef shape, int64_t a = 0, int64_t b = 1) {
     }
   });
 
-  AT_DISPATCH_FLOATING_TYPES(a0.type(), "test3", [&] {
+  AT_DISPATCH_FLOATING_TYPES(a0.scalar_type(), "test3", [&] {
     CPU_tensor_apply4<scalar_t, scalar_t, scalar_t, scalar_t>(
         a0,
         a1,
