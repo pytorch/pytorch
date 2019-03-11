@@ -5022,6 +5022,17 @@ a")
         check_cast('bool', 'int', True)
         check_cast('bool', 'float', True)
 
+        def scalar_to_int(a):
+            # type: (Tensor) -> int
+            return int(a.item())
+
+        def scalar_to_float(a):
+            # type: (Tensor) -> float
+            return float(a.item())
+
+        self.checkScript(scalar_to_int, (torch.tensor([1])))
+        self.checkScript(scalar_to_float, (torch.tensor([1.])))
+
     def test_multiple_assignment(self):
         def outer_func(x):
             return x * 2, x + 2

@@ -245,6 +245,24 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
+         "prim::Int(Scalar a) -> int",
+         [](Stack& stack) {
+           at::Scalar s;
+           pop(stack, s);
+           AT_ASSERT(s.isIntegral());
+           push(stack, s.to<int64_t>());
+           return 0;
+         }),
+     Operator(
+         "prim::Float(Scalar a) -> float",
+         [](Stack& stack) {
+           at::Scalar s;
+           pop(stack, s);
+           AT_ASSERT(s.isFloatingPoint());
+           push(stack, s.to<double>());
+           return 0;
+         }),
+     Operator(
          "prim::Float(str a) -> float",
          [](Stack& stack) {
            auto s = pop(stack).toString();
