@@ -262,6 +262,14 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     push_back(std::move(named_module.name()), std::move(named_module.module()));
   }
 
+  void push_back(std::initializer_list<SequentialImpl::NamedSubmodule> named_modules) {
+    torch::OrderedDict<std::string, AnyModule> dict;
+    for (auto named_module : named_modules) {
+      dict.insert(std::move(named_module.name()), std::move(named_module.module()));
+    }
+    push_back(std::move(dict));
+  }
+
   /// Adds a list of named `AnyModule`s to the `Sequential` container.
   /// Combining with `named_submodules()`, this method enables the following use case:
   /// `Sequential sequential(named_submodules({{"m1", M(1)}, {"m2", M(2)}}))`
