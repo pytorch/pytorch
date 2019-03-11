@@ -394,7 +394,9 @@ void THBlas_(gemm)(char transa, char transb, int64_t m, int64_t n, int64_t k, sc
     {
       if (beta == 0) {
         for (int64_t j = 0; j < n; j++) {
-          memset(c + j * ldc, 0, m);
+          for (int64_t i = 0; i < m; i++) {
+            c[j * ldc + i] = 0;
+          }
         }
       }
       else {
