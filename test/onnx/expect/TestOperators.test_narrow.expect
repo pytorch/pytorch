@@ -4,9 +4,23 @@ producer_version: "1.1"
 graph {
   node {
     input: "0"
-    input: "1"
-    output: "2"
-    op_type: "Add"
+    output: "1"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 2
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
   }
   name: "torch-jit-export"
   input {
@@ -16,23 +30,7 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_value: 2
-          }
-          dim {
             dim_value: 3
-          }
-        }
-      }
-    }
-  }
-  input {
-    name: "1"
-    type {
-      tensor_type {
-        elem_type: 1
-        shape {
-          dim {
-            dim_value: 2
           }
           dim {
             dim_value: 3
@@ -42,7 +40,7 @@ graph {
     }
   }
   output {
-    name: "2"
+    name: "1"
     type {
       tensor_type {
         elem_type: 1

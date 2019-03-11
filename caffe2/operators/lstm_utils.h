@@ -295,7 +295,7 @@ Tensor mul(const Tensor& X, const Tensor& Y, CPUContext* context) {
 
 Tensor transpose(const Tensor& X, int dim0, int dim1, CPUContext* context) {
   int ndim = X.dim();
-  CAFFE_ENFORCE(ndim > dim0 and ndim > dim1, "Invalid transpose dimensions");
+  CAFFE_ENFORCE(ndim > dim0 && ndim > dim1, "Invalid transpose dimensions");
   std::vector<int> axes(ndim);
   std::iota(axes.begin(), axes.end(), 0);
   std::swap(axes[dim0], axes[dim1]);

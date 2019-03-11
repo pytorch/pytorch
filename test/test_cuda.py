@@ -635,7 +635,10 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
             gpu_result = getattr(gpu_tensor, fn)(*gpu_args)
         except RuntimeError as e:
             reason = e.args[0]
-            if 'only supports floating-point types' in reason or 'unimplemented data type' in reason:
+            data_type_reasons = {'only supports floating-point types',
+                                 'unimplemented data type',
+                                 'not implemented for'}
+            if any(data_type_reason in reason for data_type_reason in data_type_reasons):
                 raise unittest.SkipTest('unimplemented data type')
             raise
         except AttributeError as e:
@@ -2528,6 +2531,9 @@ class TestCuda(TestCase):
         b = torch.logspace(1, 10, 10)
         self.assertEqual(a, b.cuda())
 
+    def test_lerp(self):
+        _TestTorchMixin._test_lerp(self, lambda t: t.cuda())
+
     def test_diagonal(self):
         _TestTorchMixin._test_diagonal(self, dtype=torch.float32, device='cuda')
 
@@ -2695,6 +2701,21 @@ class TestCuda(TestCase):
 
     def test_triu_tril(self):
         _TestTorchMixin._test_triu_tril(self, lambda t: t.cuda())
+
+    def test_cuda_round(self):
+        # test half-to-even
+        a = [-5.8, -3.5, -2.3, -1.5, -0.5, 0.5, 1.5, 2.3, 3.5, 5.8]
+        res = [-6., -4., -2., -2., 0., 0., 2., 2., 4., 6.]
+
+        self.assertEqual(
+            torch.HalfTensor(a).cuda().round().cpu(),
+            torch.HalfTensor(res).cpu())
+        self.assertEqual(
+            torch.FloatTensor(a).cuda().round().cpu(),
+            torch.FloatTensor(res).cpu())
+        self.assertEqual(
+            torch.DoubleTensor(a).cuda().round().cpu(),
+            torch.DoubleTensor(res).cpu())
 
 
 def load_ignore_file():
