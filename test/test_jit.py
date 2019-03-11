@@ -3491,6 +3491,13 @@ a")
         self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1.0),))
         self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1),))
 
+        def test_scalar_cast(x):
+            scalar = x.item()
+            return int(scalar), float(scalar)
+
+        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1.0),))
+        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1),))
+
         expected_str = r"Use int\(tensor\) or float\(tensor\) to retrieve"
         with self.assertRaisesRegex(RuntimeError, expected_str):
             @torch.jit.script
