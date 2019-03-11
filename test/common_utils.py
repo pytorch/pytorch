@@ -162,7 +162,9 @@ def get_gpu_type(type_name):
     return getattr(torch.cuda, name)
 
 
-def to_gpu(obj, type_map={}):
+def to_gpu(obj, type_map=None):
+    if type_map is None:
+        type_map = {}
     if isinstance(obj, torch.Tensor):
         assert obj.is_leaf
         t = type_map.get(obj.type(), get_gpu_type(obj.type()))

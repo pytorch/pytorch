@@ -124,10 +124,10 @@ write::
     class MyModule(nn.Module):
         # ... __init__, other methods, etc.
 
-        # padding_input is of shape [B x T x *] (batch_first mode) and contains
+        # padded_input is of shape [B x T x *] (batch_first mode) and contains
         # the sequences sorted by lengths
-        # B is the batch size
-        # T is max sequence length
+        #   B is the batch size
+        #   T is max sequence length
         def forward(self, padded_input, input_lengths):
             total_length = padded_input.size(1)  # get the max sequence length
             packed_input = pack_padded_sequence(padded_input, input_lengths,

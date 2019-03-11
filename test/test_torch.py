@@ -7157,7 +7157,7 @@ class _TestTorchMixin(object):
             ret = getattr(a, f)(dim=0)
             self.assertEqual(ret.values, ret[0])
             self.assertEqual(ret.indices, ret[1])
-            ret1 = getattr(torch, f)(a, dim=0, out=tuple(ret))
+            ret1 = getattr(torch, f)(a, dim=0, out=ret)
             self.assertEqual(ret1.values, ret1[0])
             self.assertEqual(ret1.indices, ret1[1])
             self.assertEqual(ret1.values, ret[0])
@@ -7167,7 +7167,7 @@ class _TestTorchMixin(object):
         ret = a.kthvalue(1, dim=0)
         self.assertEqual(ret.values, ret[0])
         self.assertEqual(ret.indices, ret[1])
-        ret1 = torch.kthvalue(a, 1, dim=0, out=tuple(ret))
+        ret1 = torch.kthvalue(a, 1, dim=0, out=ret)
         self.assertEqual(ret1.values, ret1[0])
         self.assertEqual(ret1.indices, ret1[1])
         self.assertEqual(ret1.values, ret[0])
@@ -7178,7 +7178,7 @@ class _TestTorchMixin(object):
         self.assertEqual(ret.U, ret[0])
         self.assertEqual(ret.S, ret[1])
         self.assertEqual(ret.V, ret[2])
-        ret1 = torch.svd(a, out=tuple(ret))
+        ret1 = torch.svd(a, out=ret)
         self.assertEqual(ret1.U, ret1[0])
         self.assertEqual(ret1.S, ret1[1])
         self.assertEqual(ret1.V, ret1[2])
@@ -7491,9 +7491,11 @@ class _TestTorchMixin(object):
             # softmax, logsoftmax
             self.assertEqual(x, torch.nn.functional.softmax(x, 0))
             self.assertEqual(x, torch.nn.functional.softmax(x, 2))
+            self.assertEqual(x, torch.nn.functional.softmax(x, 3))
 
             self.assertEqual(x, torch.nn.functional.log_softmax(x, 0))
             self.assertEqual(x, torch.nn.functional.log_softmax(x, 2))
+            self.assertEqual(x, torch.nn.functional.log_softmax(x, 3))
 
             # cumsum, cumprod
             self.assertEqual(shape, torch.cumsum(x, 0).shape)
@@ -8148,6 +8150,17 @@ class _TestTorchMixin(object):
 
         val = torch.tensor(42)
         self.assertEqual(reversed(val), torch.tensor(42))
+
+    def test_contains(self):
+        x = torch.arange(0, 10)
+        self.assertEqual(4 in x, True)
+        self.assertEqual(12 in x, False)
+
+        x = torch.arange(1, 10).view(3, 3)
+        val = torch.arange(1, 4)
+        self.assertEqual(val in x, True)
+        val += 10
+        self.assertEqual(val in x, False)
 
     @staticmethod
     def _test_rot90(self, use_cuda=False):
