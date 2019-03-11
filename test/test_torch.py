@@ -2341,6 +2341,14 @@ class _TestTorchMixin(object):
         torch.zeros(100, 100, out=res2)
         self.assertEqual(res1, res2)
 
+        boolTensor = torch.zeros(2, 2, dtype=torch.bool)
+        expected = torch.tensor([[False, False], [False, False]], dtype=torch.bool)
+        self.assertEqual(boolTensor, expected)
+
+        halfTensor = torch.zeros(1, 1, dtype=torch.half)
+        expected = torch.tensor([[0.]], dtype=torch.float16)
+        self.assertEqual(halfTensor, expected)
+
     def test_zeros_like(self):
         expected = torch.zeros(100, 100)
 
@@ -2468,9 +2476,19 @@ class _TestTorchMixin(object):
         torch.ones(100, 100, out=res2)
         self.assertEqual(res1, res2)
 
+        # test boolean tensor
+        res1 = torch.ones(1, 2, dtype=torch.bool)
+        expected = torch.tensor([[True, True]], dtype=torch.bool)
+        self.assertEqual(res1, expected)
+
     def test_ones_like(self):
         expected = torch.ones(100, 100)
 
+        res1 = torch.ones_like(expected)
+        self.assertEqual(res1, expected)
+
+        # test boolean tensor
+        expected = torch.tensor([True, True], dtype=torch.bool)
         res1 = torch.ones_like(expected)
         self.assertEqual(res1, expected)
 
@@ -2759,6 +2777,11 @@ class _TestTorchMixin(object):
                 a[0] = 7.
                 self.assertEqual(5., res1[0].item())
 
+        # test boolean tensor
+        a = torch.tensor([True, True, False, True, True], dtype=torch.bool)
+        b = torch.tensor([-1, -1.1, 0, 1, 1.1], dtype=torch.bool)
+        self.assertEqual(a, b)
+
     def test_tensor_factory_copy_var(self):
 
         def check_copy(copy, is_leaf, requires_grad, data_ptr=None):
@@ -2838,6 +2861,19 @@ class _TestTorchMixin(object):
         self.assertIs(torch.float64, x.dtype)
         self.assertTrue(x.is_cuda)
         torch.set_default_tensor_type(saved_type)
+
+    # This is a temporary test for a boolean tensors on CPU. Once the CUDA part
+    # will be done, these test cases will be moved down to test_tensor_factories_empty test
+    def test_tensor_factories_empty_bool(self):
+        expectedShape = (1, 2)
+        test = torch.empty(expectedShape, dtype=torch.bool)
+        self.assertEqual(expectedShape, test.shape)
+        self.assertEqual(expectedShape, torch.empty_like(test).shape)
+
+        test = torch.full(expectedShape, True, dtype=torch.bool)
+        self.assertEqual(test, torch.tensor([[True, True]], dtype=torch.bool))
+        self.assertEqual(expectedShape, test.shape)
+        self.assertEqual(expectedShape, torch.full_like(test, True).shape)
 
     def test_tensor_factories_empty(self):
         # ensure we can create empty tensors from each factory function
