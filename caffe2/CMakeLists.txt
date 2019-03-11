@@ -14,7 +14,7 @@ if (NOT BUILD_ATEN_MOBILE)
   # Generate the headers wrapped by our operator
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
   COMMAND
-  ${PYCMD} ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
+  "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
     --aten_root=${CMAKE_CURRENT_SOURCE_DIR}/../aten
     --template_dir=${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten
     --yaml_dir=${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
@@ -70,7 +70,6 @@ if(NOT BUILD_ATEN_ONLY)
   add_subdirectory(utils)
   add_subdirectory(predictor)
   add_subdirectory(core/nomnigraph)
-  add_subdirectory(core/nomscheduler)
   add_subdirectory(serialize)
   if (USE_NVRTC)
     add_subdirectory(cuda_rtc)
@@ -206,6 +205,9 @@ if(NOT BUILD_ATEN_ONLY)
   #     nothing changes. If one has a dependent library that uses protobuf, then one needs to
   #     have the right protobuf version as well as linking to libprotobuf.a.
   target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
+  if (NOT BUILD_SHARED_LIBS)
+    INSTALL(TARGETS caffe2_protos ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+  endif()
 endif()
 
 # Compile exposed libraries.
@@ -224,6 +226,13 @@ if(NOT BUILD_ATEN_ONLY)
   endif()
 endif()
 
+if (USE_OPENMP AND OPENMP_FOUND)
+  message(STATUS "Caffe2 is compiling with OpenMP. \n"
+    "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
+    "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
+  target_link_libraries(caffe2 PRIVATE ${OpenMP_CXX_LIBRARIES})
+endif()
+
 target_link_libraries(caffe2 PUBLIC c10)
 target_link_libraries(caffe2 PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
@@ -240,7 +249,7 @@ endif()
 
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 if (MSVC AND NOT BUILD_SHARED_LIBS)
-  # Note [Supporting both static and dynamic libraries on Window]
+  # Note [Supporting both static and dynamic libraries on Windows]
   # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   # A Windows library may be distributed as either a static or dynamic
   # library.  The chosen distribution mechanism affects how you setup
@@ -530,11 +539,6 @@ if (BUILD_PYTHON)
   # For cmake installs, including c++ only installs, install libcaffe2 into
   # CMAKE_INSTALL_PREFIX/lib . The pybind11 library can have a hardcoded
   # rpath
-  if(APPLE)
-    set(_rpath_portable_origin "@loader_path")
-  else()
-    set(_rpath_portable_origin $ORIGIN)
-  endif(APPLE)
   set(caffe2_pybind11_rpath "${_rpath_portable_origin}")
   if(${BUILDING_WITH_TORCH_LIBS})
     # site-packages/caffe2/python/caffe2_pybind11_state
@@ -542,15 +546,20 @@ if (BUILD_PYTHON)
     set(caffe2_pybind11_rpath "${_rpath_portable_origin}/../../torch/lib")
   endif(${BUILDING_WITH_TORCH_LIBS})
 
+  # Must also include `CMAKE_SHARED_LINKER_FLAGS` in linker flags for
+  # `caffe2_pybind11_state_*` targets because paths to required libraries may
+  # need to be found there (e.g., specifying path to `libiomp5` with `LDFLAGS`).
+  set(_caffe2_pybind11_state_linker_flags "${CMAKE_SHARED_LINKER_FLAGS}")
+  if (APPLE)
+    set(_caffe2_pybind11_state_linker_flags "${_caffe2_pybind11_state_linker_flags} -undefined dynamic_lookup")
+  endif()
 
   # ---[ Python.
   add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
   set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
   set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "" DEBUG_POSTFIX "")
   set_target_properties(caffe2_pybind11_state PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
-  if (APPLE)
-    set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
-  endif()
+  set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
   target_include_directories(caffe2_pybind11_state PRIVATE $<INSTALL_INTERFACE:include>)
   target_include_directories(caffe2_pybind11_state PRIVATE ${Caffe2_CPU_INCLUDE})
 
@@ -577,9 +586,7 @@ if (BUILD_PYTHON)
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "" DEBUG_POSTFIX "")
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
-    if (APPLE)
-      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
-    endif()
+    set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE ${Caffe2_CPU_INCLUDE})
     target_link_libraries(
@@ -605,9 +612,7 @@ if (BUILD_PYTHON)
     target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
-    if (APPLE)
-      set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
-    endif()
+    set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
     target_include_directories(caffe2_pybind11_state_hip PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(caffe2_pybind11_state_hip PRIVATE ${Caffe2_CPU_INCLUDE} ${Caffe2_HIP_INCLUDE})
     target_link_libraries(

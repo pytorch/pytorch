@@ -5,11 +5,7 @@
 
 #include "caffe2/core/common.h"
 
-#ifndef C10_MOBILE
-#error "mobile build state not defined"
-#endif
-
-#if C10_MOBILE
+#ifdef C10_MOBILE
 
 #include "caffe2/core/logging.h"
 #include "caffe2/operators/conv_op_shared.h"
@@ -18,7 +14,7 @@
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/fixed_divisor.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/utils/math_utils.h"
+#include "caffe2/utils/math/utils.h"
 
 C10_DECLARE_bool(caffe2_force_shared_col_buffer);
 

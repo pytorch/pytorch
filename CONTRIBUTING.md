@@ -335,6 +335,9 @@ Hope this helps, and thanks for considering to contribute.
 
 ## Windows development tips
 
+For building from source on Windows, consult
+[our documentation](https://pytorch.org/docs/stable/notes/windows.html) on it.
+
 Occasionally, you will write a patch which works on Linux, but fails CI on Windows.
 There are a few aspects in which MSVC (the Windows compiler toolchain we use) is stricter
 than Linux, which are worth keeping in mind when fixing these problems.
@@ -472,11 +475,12 @@ which is in PyTorch's `requirements.txt`.
 
 ### Pre-commit Tidy/Linting Hook
 
-We use clang-tidy and flake8 to perform additional formatting and semantic checking
-of code. We provide a pre-commit git hook for performing these checks, before
-a commit is created:
+We use clang-tidy and flake8 (installed with flake-mypy) to perform additional
+formatting and semantic checking of code. We provide a pre-commit git hook for
+performing these checks, before a commit is created:
 
   ```bash
+  pip install flake8-mypy
   ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
   ```
 

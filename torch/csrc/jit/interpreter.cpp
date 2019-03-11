@@ -13,7 +13,7 @@
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/jit_exception.h>
-#include <ATen/core/thread_pool.h>
+#include <c10/core/thread_pool.h>
 
 #include <exception>
 #include <iostream>
@@ -324,10 +324,10 @@ struct ContainerTensor : public at::TensorImpl {
             /* is_variable */ false) {}
 
   ~ContainerTensor() override = default;
-  at::IntList sizes() const override {
+  at::IntArrayRef sizes() const override {
     throw std::runtime_error("sizes() on ContainerTensor");
   }
-  at::IntList strides() const override {
+  at::IntArrayRef strides() const override {
     throw std::runtime_error("strides() on ContainerTensor");
   }
   int64_t dim() const override {

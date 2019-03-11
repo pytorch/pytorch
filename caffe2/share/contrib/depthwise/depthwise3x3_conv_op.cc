@@ -488,7 +488,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
 
     Timer t;
 
-#if C10_MOBILE
+#ifdef C10_MOBILE
     ws_->GetThreadPool()->run(
         [&](int, int n_g) {
           const int g = n_g / N;

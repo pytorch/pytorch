@@ -49,6 +49,7 @@ IValue deepCopy(const IValue& self) {
 
 Stack deepCopy(const Stack& stack) {
   Stack ret;
+  ret.reserve(stack.size());
   for (const auto& v : stack) {
     ret.push_back(deepCopy(v));
   }
@@ -104,7 +105,14 @@ void checkAliases(
         const auto inputSet = input.aliasInfo;
         const auto outputSet = output.aliasInfo;
         AT_ASSERT(inputSet && outputSet);
-        AT_ASSERT(inputSet->isSubsetOf(*outputSet));
+        bool found = false;
+        for (const auto& set : inputSet->beforeSets()) {
+          if (outputSet->beforeSets().count(set)) {
+            found = true;
+            break;
+          }
+        }
+        AT_ASSERT(found);
       }
     }
   }
@@ -159,7 +167,7 @@ c10::optional<IValue> toIValueProp(const Value* v) {
       return fmap(genericList, [](const IValue& v) { return v.toInt(); });
     } else if (containedType == FloatType::get()) {
       return fmap(genericList, [](const IValue& v) { return v.toDouble(); });
-    } else if (containedType->isSubtypeOf(DynamicType::get())) {
+    } else if (containedType->isSubtypeOf(TensorType::get())) {
       return fmap(genericList, [](const IValue& v) { return v.toTensor(); });
     } else {
       return c10::nullopt;

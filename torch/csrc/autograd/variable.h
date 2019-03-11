@@ -104,11 +104,22 @@ struct TORCH_API Variable : public at::Tensor {
       bool allow_tensor_metadata_change,
       Edge gradient_edge);
 
-  /// Creates a `Variable` from the given `Tensor`. `requires_grad` should be
+  /// Creates a `Variable` from the given `Tensor`, copying its underlying `TensorImpl`.
+  /// `requires_grad` should be
   /// set only for leaves, and determines whether the `Variable` will accumulate
   /// gradients. NOTE: `data` must *not* be a `Variable` already. Its dynamic
   /// type *must* be `Tensor`.
   friend Variable make_variable(
+      at::Tensor data,
+      bool requires_grad,
+      bool allow_tensor_metadata_change);
+
+  /// Creates a `Variable` from the given `Tensor`, consuming its underlying `TensorImpl`.
+  /// This is intended to be used from functions that immediately create a `Tensor`,
+  /// convert it to a `Variable`, and then free it; it has been found to
+  /// decrease the overhead of those operations, in some situations.
+  /// The comments about `requires_grad` and `data` on the above version also apply to this one.
+  friend Variable make_variable_consuming(
       at::Tensor data,
       bool requires_grad,
       bool allow_tensor_metadata_change);
@@ -396,8 +407,8 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   ~Impl() override;
 
   int64_t numel() const override;
-  at::IntList sizes() const override;
-  at::IntList strides() const override;
+  at::IntArrayRef sizes() const override;
+  at::IntArrayRef strides() const override;
   bool is_contiguous() const override;
   int64_t size(int64_t d) const override;
   int64_t stride(int64_t d) const override;
@@ -407,6 +418,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   void set_storage_offset(int64_t storage_offset) override;
 
   int64_t dim() const override;
+  bool has_storage() const override;
   const at::Storage& storage() const override;
   void* slow_data() const override;
 
@@ -571,6 +583,22 @@ inline Variable make_variable(
     auto data_copy = at::Tensor(data_impl_copy);
     auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
     return Variable(c10::make_intrusive<Variable::Impl>(data_copy, std::move(autograd_meta), requires_grad));
+  }
+  return Variable();
+}
+
+inline Variable make_variable_consuming(
+    at::Tensor data,
+    bool requires_grad = false,
+    bool allow_tensor_metadata_change = true) {
+  AT_CHECK(
+      !data.is_variable(),
+      "Must not create a new variable from a variable, use its .data()");
+  if (data.defined()) {
+    AT_ASSERT(data.getIntrusivePtr().use_count() == 1);
+    data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
+    return Variable(c10::make_intrusive<Variable::Impl>(std::move(data), std::move(autograd_meta), requires_grad));
   }
   return Variable();
 }

@@ -12,7 +12,7 @@ from subprocess import check_call, call, check_output
 from distutils.version import LooseVersion
 from .setup_helpers.cuda import USE_CUDA, CUDA_HOME
 from .setup_helpers.dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
-from .setup_helpers.nccl import USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
+from .setup_helpers.nccl import USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB, USE_NCCL
 from .setup_helpers.rocm import ROCM_HOME, ROCM_VERSION, USE_ROCM
 from .setup_helpers.nnpack import USE_NNPACK
 from .setup_helpers.qnnpack import USE_QNNPACK
@@ -31,7 +31,7 @@ def which(thefile):
         fname = os.path.join(dir, thefile)
         fnames = [fname]
         if IS_WINDOWS:
-            exts = os.environ.get('PATHEXT', '').split(os.sep)
+            exts = os.environ.get('PATHEXT', '').split(os.pathsep)
             fnames += [fname + ext for ext in exts]
         for name in fnames:
             if (os.path.exists(name) and os.access(name, os.F_OK | os.X_OK)
@@ -69,20 +69,27 @@ def cmake_defines(lst, **kwargs):
 
 
 # Ninja
-try:
-    import ninja
-    USE_NINJA = True
-except ImportError:
-    USE_NINJA = False
+# Use ninja if it is on the PATH. Previous version of PyTorch required the
+# ninja python package, but we no longer use it, so we do not have to import it
+USE_NINJA = not check_negative_env_flag('USE_NINJA') and (which('ninja') is not None)
 
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-torch_lib_dir = base_dir + "/torch/lib"
-install_dir = base_dir + "/torch/lib/tmp_install"
+install_dir = base_dir + "/torch"
 build_type = "Release"
 if DEBUG:
     build_type = "Debug"
 elif REL_WITH_DEB_INFO:
     build_type = "RelWithDebInfo"
+
+
+def overlay_windows_vcvars(env):
+    from distutils._msvccompiler import _get_vc_env
+    vc_env = _get_vc_env('x64')
+    for k, v in env.items():
+        lk = k.lower()
+        if lk not in vc_env:
+            vc_env[lk] = v
+    return vc_env
 
 
 def mkdir_p(dir):
@@ -92,11 +99,29 @@ def mkdir_p(dir):
         pass
 
 
+def create_build_env():
+    # XXX - our cmake file sometimes looks at the system environment
+    # and not cmake flags!
+    # you should NEVER add something to this list. It is bad practice to
+    # have cmake read the environment
+    my_env = os.environ.copy()
+    if USE_CUDNN:
+        my_env['CUDNN_LIBRARY'] = escape_path(CUDNN_LIBRARY)
+        my_env['CUDNN_INCLUDE_DIR'] = escape_path(CUDNN_INCLUDE_DIR)
+    if USE_CUDA:
+        my_env['CUDA_BIN_PATH'] = escape_path(CUDA_HOME)
+
+    if IS_WINDOWS:
+        my_env = overlay_windows_vcvars(my_env)
+    return my_env
+
+
 def run_cmake(version,
               cmake_python_library,
               build_python,
               build_test,
-              build_dir):
+              build_dir,
+              my_env):
     cmake_args = [
         get_cmake_command(),
         base_dir
@@ -113,28 +138,10 @@ def run_cmake(version,
         USE_NUMPY = False
         NUMPY_INCLUDE_DIR = None
 
-    cflags = os.getenv('CFLAGS') or ""
-    ldflags = os.getenv('LDFLAGS') or ""
-    if IS_DARWIN:
-        ldflags += " -Wl,-rpath,@loader_path"
-    elif USE_ROCM:
-        ldflags += " -Wl,-rpath,\\\\\\$ORIGIN"
-    elif IS_WINDOWS:
+    cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
+    ldflags = os.getenv('LDFLAGS', "")
+    if IS_WINDOWS:
         cflags += " /EHa"
-    else:
-        ldflags += " -Wl,-rpath,$ORIGIN"
-
-    # XXX - our cmake file sometimes looks at the system environment
-    # and not cmake flags!
-    # you should NEVER add something to this list. It is bad practice to
-    # have cmake read the environment
-    my_env = os.environ.copy()
-    my_env['PYTORCH_PYTHON'] = escape_path(sys.executable)
-    if USE_CUDNN:
-        my_env['CUDNN_LIBRARY'] = escape_path(CUDNN_LIBRARY)
-        my_env['CUDNN_INCLUDE_DIR'] = escape_path(CUDNN_INCLUDE_DIR)
-    if USE_CUDA:
-        my_env['CUDA_BIN_PATH'] = escape_path(CUDA_HOME)
 
     mkdir_p(install_dir)
     mkdir_p(build_dir)
@@ -149,12 +156,13 @@ def run_cmake(version,
         CMAKE_BUILD_TYPE=build_type,
         BUILD_TORCH="ON",
         BUILD_PYTHON=build_python,
-        BUILD_SHARED_LIBS=os.getenv("BUILD_SHARED_LIBS") or "ON",
+        BUILD_SHARED_LIBS=os.getenv("BUILD_SHARED_LIBS", "ON"),
         BUILD_BINARY=check_env_flag('BUILD_BINARY'),
         BUILD_TEST=build_test,
         INSTALL_TEST=build_test,
         BUILD_CAFFE2_OPS=not check_negative_env_flag('BUILD_CAFFE2_OPS'),
-        ONNX_NAMESPACE=os.getenv("ONNX_NAMESPACE") or "onnx_torch",
+        ONNX_NAMESPACE=os.getenv("ONNX_NAMESPACE", "onnx_torch"),
+        ONNX_ML=os.getenv("ONNX_ML", False),
         USE_CUDA=USE_CUDA,
         USE_DISTRIBUTED=USE_DISTRIBUTED,
         USE_FBGEMM=not (check_env_flag('NO_FBGEMM') or check_negative_env_flag('USE_FBGEMM')),
@@ -175,7 +183,8 @@ def run_cmake(version,
         USE_FFMPEG=check_env_flag('USE_FFMPEG'),
         USE_SYSTEM_EIGEN_INSTALL="OFF",
         USE_MKLDNN=USE_MKLDNN,
-        NCCL_EXTERNAL=USE_CUDA,
+        USE_NCCL=USE_NCCL,
+        NCCL_EXTERNAL=USE_NCCL,
         CMAKE_INSTALL_PREFIX=install_dir,
         CMAKE_C_FLAGS=cflags,
         CMAKE_CXX_FLAGS=cflags,
@@ -193,51 +202,21 @@ def run_cmake(version,
     if USE_GLOO_IBVERBS:
         cmake_defines(cmake_args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
 
+    if USE_MKLDNN:
+        cmake_defines(cmake_args, MKLDNN_ENABLE_CONCURRENT_EXEC="ON")
+
     expected_wrapper = '/usr/local/opt/ccache/libexec'
     if IS_DARWIN and os.path.exists(expected_wrapper):
         cmake_defines(cmake_args,
                       CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper),
                       CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
     pprint(cmake_args)
-    printenv()
+    for env_var_name in my_env:
+        if env_var_name.startswith('gh'):
+            # github env vars use utf-8, on windows, non-ascii code may
+            # cause problem, so encode first
+            my_env[env_var_name] = str(my_env[env_var_name].encode("utf-8"))
     check_call(cmake_args, cwd=build_dir, env=my_env)
-
-
-def copy_files(build_test):
-    def copy_all(pattern, dst):
-        for file in glob(pattern):
-            if os.path.isdir(file):
-                copy_tree(file, dst, update=True)
-            else:
-                copy_file(file, dst, update=True)
-
-    shutil.rmtree(install_dir + '/lib/cmake', ignore_errors=True)
-    shutil.rmtree(install_dir + '/lib/python', ignore_errors=True)
-    copy_all(install_dir + '/lib/*', torch_lib_dir)
-    if os.path.exists(install_dir + '/lib64'):
-        copy_all(install_dir + '/lib64/*', torch_lib_dir)
-    copy_file(base_dir + '/aten/src/THNN/generic/THNN.h', torch_lib_dir, update=True)
-    copy_file(base_dir + '/aten/src/THCUNN/generic/THCUNN.h', torch_lib_dir, update=True)
-
-    copy_tree(install_dir + '/include', torch_lib_dir + '/include', update=True)
-    if os.path.exists(install_dir + '/bin/'):
-        copy_all(install_dir + '/bin/*', torch_lib_dir)
-
-    if build_test:
-        # Copy the test files to pytorch/caffe2 manually
-        # They were built in pytorch/torch/lib/tmp_install/test
-        # Why do we do this? So, setup.py has this section called 'package_data' which
-        # you need to specify to include non-default files (usually .py files).
-        # package_data takes a map from 'python package' to 'globs of files to
-        # include'. By 'python package', it means a folder with an __init__.py file
-        # that's not excluded in the find_packages call earlier in setup.py. So to
-        # include our cpp_test into the site-packages folder in
-        # site-packages/caffe2/cpp_test, we have to copy the cpp_test folder into the
-        # root caffe2 folder and then tell setup.py to include them. Having another
-        # folder like site-packages/caffe2_cpp_test would also be possible by adding a
-        # caffe2_cpp_test folder to pytorch with an __init__.py in it.
-        mkdir_p(base_dir + '/caffe2/cpp_test/')
-        copy_tree(install_dir + '/test', base_dir + '/caffe2/cpp_test', update=True)
 
 
 def build_caffe2(version,
@@ -245,7 +224,9 @@ def build_caffe2(version,
                  build_python,
                  rerun_cmake,
                  build_dir):
+    my_env = create_build_env()
     build_test = not check_negative_env_flag('BUILD_TEST')
+    max_jobs = os.getenv('MAX_JOBS', None)
     cmake_cache_file = 'build/CMakeCache.txt'
     if rerun_cmake and os.path.isfile(cmake_cache_file):
         os.remove(cmake_cache_file)
@@ -254,22 +235,28 @@ def build_caffe2(version,
                   cmake_python_library,
                   build_python,
                   build_test,
-                  build_dir)
+                  build_dir,
+                  my_env)
     if IS_WINDOWS:
         if USE_NINJA:
             # sccache will fail if all cores are used for compiling
             j = max(1, multiprocessing.cpu_count() - 1)
+            if max_jobs is not None:
+                j = min(int(max_jobs), j)
             check_call(['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--', '-j', str(j)],
-                       cwd=build_dir)
+                       cwd=build_dir, env=my_env)
         else:
             check_call(['msbuild', 'INSTALL.vcxproj', '/p:Configuration={}'.format(build_type)],
-                       cwd=build_dir)
+                       cwd=build_dir, env=my_env)
     else:
         if USE_NINJA:
-            check_call(['ninja', 'install'], cwd=build_dir)
+            ninja_cmd = ['ninja', 'install']
+            if max_jobs is not None:
+                ninja_cmd += ['-j', max_jobs]
+            check_call(ninja_cmd, cwd=build_dir, env=my_env)
         else:
-            max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
-            check_call(['make', '-j', str(max_jobs), 'install'], cwd=build_dir)
+            max_jobs = max_jobs or str(multiprocessing.cpu_count())
+            check_call(['make', '-j', str(max_jobs), 'install'], cwd=build_dir, env=my_env)
 
     # in cmake, .cu compilation involves generating certain intermediates
     # such as .cu.o and .cu.depend, and these intermediates finally get compiled
@@ -292,13 +279,6 @@ def build_caffe2(version,
                 proto_file = proto_file.replace(os.path.sep, '/')
             if proto_file != 'build/caffe2/proto/__init__.py':
                 shutil.copyfile(proto_file, "caffe2/proto/" + os.path.basename(proto_file))
-
-    copy_files(build_test)
-
-
-def printenv():
-    envs = map(lambda k, v: k + '=' + v + '\n', os.environ.keys(), os.environ.values())
-    print(''.join(envs))
 
 
 def escape_path(path):

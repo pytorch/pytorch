@@ -4,10 +4,22 @@
 
 using caffe2::CPUContext;
 
-C10_DEFINE_OP_SCHEMA(caffe2::ops::EnforceFinite);
+namespace caffe2 {
+namespace ops {
+// TODO Parse schema string instead of creating FunctionSchema manually
+C10_DEFINE_OP_SCHEMA(EnforceFinite, FunctionSchema(
+    "_c10_experimental::EnforceFinite",
+    (std::vector<c10::Argument>{
+      c10::Argument("input")
+    }), (std::vector<c10::Argument>{
+    })
+));
+}
+}
 
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
     ops::EnforceFinite,
-    C10EnforceFinite_DontUseThisOpYet)
+    C10EnforceFinite_DontUseThisOpYet,
+    0)
 }

@@ -9,21 +9,24 @@
 namespace at {
 namespace native {
 
-static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size, IntList dims) {
+static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size, IntArrayRef dims) {
   // check if number of axis in dim is valid
-  AT_CHECK(flip_dims_size > 0 && flip_dims_size <= total_dims,
-    "flip dims size out of range, got flip dims size=", flip_dims_size);
+  if (flip_dims_size <= 0 || flip_dims_size > total_dims) {
+    AT_INDEX_ERROR("flip dims size out of range, got flip dims size=", flip_dims_size);
+  }
 
   auto flip_dims_v = dims.vec();
 
   // check if dims axis within range
   auto min_max_d = std::minmax_element(flip_dims_v.begin(), flip_dims_v.end());
 
-  AT_CHECK(*min_max_d.first < total_dims && *min_max_d.first >= -total_dims,
-    "The min flip dims out of range, got min flip dims=", *min_max_d.first);
+  if (*min_max_d.first >= total_dims || *min_max_d.first < -total_dims) {
+    AT_INDEX_ERROR("The min flip dims out of range, got min flip dims=", *min_max_d.first);
+  }
 
-  AT_CHECK(*min_max_d.second < total_dims && *min_max_d.second >= -total_dims,
-    "The max flip dims out of range, got max flip dims=", *min_max_d.second);
+  if (*min_max_d.second >= total_dims || *min_max_d.second < -total_dims) {
+    AT_INDEX_ERROR("The max flip dims out of range, got max flip dims=", *min_max_d.second);
+  }
 
   // check duplicates in dims
   wrap_all_dims(flip_dims_v, total_dims);
@@ -33,7 +36,7 @@ static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size,
     ", but unique flip dims size=", flip_dims_v.size());
 }
 
-static inline Tensor roll_common(const Tensor& self, IntList shifts, IntList dims) {
+static inline Tensor roll_common(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   AT_CHECK(shifts.size() > 0, "`shifts` required");
   if (dims.size() == 0 && shifts.size() == 1) {
     auto flattened = self.contiguous().view(self.numel());

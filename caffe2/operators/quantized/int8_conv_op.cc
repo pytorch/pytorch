@@ -3,7 +3,6 @@
 namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(Int8Conv, int8::Int8ConvOp<int8::Activation::NONE>);
-REGISTER_CPU_OPERATOR(Int8ConvRelu, int8::Int8ConvOp<int8::Activation::RELU>);
 
 const char kConvDoc_int8[] = R"DOC(
 [Only NHWC order is supported now]Note that other parameters, such as the stride and

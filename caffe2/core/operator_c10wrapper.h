@@ -23,19 +23,15 @@ using extract_type_t = typename ParameterDef::type;
  *
  *     REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(C10Add, C2MyAddOpName)
  *
- * Note: This wrapper currently only supports C10 ops that have exactly one
- * output and take that in the last parameter as "Tensor* output".
- * TODO: Figure out a better way to handle output parameters
  */
 
 template <
-    class OpSchemaDef,
+    const c10::OperatorHandle& (*OperatorHandle)(),
     class Context,
     bool use_array_input,
+    size_t num_output_parameters,
     class ParameterDefTuple>
 class C10OperatorWrapper final : public Operator<Context> {
-  using Schema = c10::OpSchema<OpSchemaDef>;
-
  public:
   static_assert(
       c10::guts::is_instantiation_of<std::tuple, ParameterDefTuple>::value,
@@ -49,28 +45,39 @@ class C10OperatorWrapper final : public Operator<Context> {
 
   C10OperatorWrapper(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
+        op_(OperatorHandle()),
         kernel_(at::nullopt),
         parameters_(parse_parameters_(
             operator_def,
-            c10::guts::make_index_sequence<num_parameters()>())) {}
+            c10::guts::make_index_sequence<num_parameters()>())) {
 
-  static constexpr size_t num_inputs() {
-    return Schema::signature::num_args - num_outputs() - num_parameters();
+    AT_ASSERT(operator_def.output_size() == op_.schema().returns().size());
+    AT_ASSERT(operator_def.input_size() == num_inputs());
+  }
+
+  size_t num_inputs() {
+    return op_.schema().arguments().size() - num_output_parameters - num_parameters();
   }
 
   static constexpr size_t num_parameters() {
     return std::tuple_size<ParameterDefTuple>::value;
   }
 
-  static constexpr size_t num_outputs() {
-    return Schema::signature::num_outputs;
-  }
-
   bool RunOnDevice() override {
-    RunOnDevice_(
-        c10::guts::make_index_sequence<num_inputs()>(),
-        c10::guts::make_index_sequence<num_outputs()>(),
-        c10::guts::make_index_sequence<num_parameters()>());
+    // due to caching the stack_, concurrent calling is not allowed.
+    // TODO thread_local might fix this
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    AT_ASSERT(stack_.size() == 0);
+
+    pushInputs_();
+    pushParameters_(guts::make_index_sequence<num_parameters()>());
+    pushOutputParameters_();
+
+    callKernel_();
+
+    popOutputs_();
+
     return true;
   }
 
@@ -91,51 +98,49 @@ class C10OperatorWrapper final : public Operator<Context> {
     return Parameter::parse(ArgumentHelper(operator_def));
   }
 
-  template <
-      size_t... InputIndex,
-      size_t... OutputIndex,
-      size_t... ParameterIndex>
-  c10::guts::enable_if_t<
-      details::true_t<InputIndex...>::value &&
-          !use_array_input,
-      void>
-  RunOnDevice_(
-      c10::guts::index_sequence<InputIndex...>,
-      c10::guts::index_sequence<OutputIndex...>,
-      c10::guts::index_sequence<ParameterIndex...>) {
-    call_({
-      IValue(at::Tensor(C10Tensor(Input(InputIndex))))...,
-      IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
-      IValue(std::get<ParameterIndex>(parameters_))...,
-    });
+  void pushInputs_() {
+    if (use_array_input) {
+      stack_.emplace_back(ivalue::TensorList::create(array_inputs_()));
+    } else {
+      for (size_t i = 0; i < num_inputs(); ++i) {
+        stack_.emplace_back(at::Tensor(C10Tensor(Input(i))));
+      }
+    }
   }
 
-  template <
-      size_t... InputIndex,
-      size_t... OutputIndex,
-      size_t... ParameterIndex>
-  c10::guts::enable_if_t<
-      details::true_t<InputIndex...>::value &&
-          use_array_input,
-      void>
-  RunOnDevice_(
-      c10::guts::index_sequence<InputIndex...>,
-      c10::guts::index_sequence<OutputIndex...>,
-      c10::guts::index_sequence<ParameterIndex...>) {
-    // TODO Make outputs be returned, not passed in
-    call_(ArrayRef<IValue>{
-      IValue(ivalue::TensorList::create(array_inputs_())),
-      IValue(at::Tensor(C10Tensor(*Output(OutputIndex))))...,
-      IValue(std::get<ParameterIndex>(parameters_))...,
-    });
+  template<size_t... ParameterIndex>
+  void pushParameters_(guts::index_sequence<ParameterIndex...>) {
+    (void)std::initializer_list<int>{(
+      stack_.emplace_back(std::get<ParameterIndex>(parameters_))
+    , 0)...};
   }
 
-  void call_(ArrayRef<IValue> args) {
+  void pushOutputParameters_() {
+    for (size_t i = 0; i < num_output_parameters; ++i) {
+      caffe2::Tensor preallocated_output_tensor = OperatorBase::OutputTensorOrUndefined(i);
+      if (preallocated_output_tensor.defined()) {
+        stack_.emplace_back(at::Tensor(std::move(preallocated_output_tensor)));
+      } else {
+        stack_.emplace_back(IValue());
+      }
+    }
+  }
+
+  void callKernel_() {
+    AT_ASSERT(stack_.size() == op_.schema().arguments().size());
     if (!kernel_.has_value()) {
       // TODO if kernel is already set, try re-dispatch to assert it goes to the same kernel
-      kernel_ = c10::Dispatcher<OpSchemaDef>::lookup(args);
+      kernel_ = c10::Dispatcher::singleton().lookup(op_, &stack_);
     }
-    kernel_->call(args);
+    kernel_->call(&stack_);
+  }
+
+  void popOutputs_() {
+    AT_ASSERT(stack_.size() == op_.schema().returns().size());
+    for (size_t i = 0; i < op_.schema().returns().size(); ++i) {
+      OperatorBase::SetOutputTensor(i, Tensor(C10Tensor(std::move(stack_[i]).toTensor())));
+    }
+    stack_.clear();
   }
 
   std::vector<at::Tensor> array_inputs_() {
@@ -147,7 +152,14 @@ class C10OperatorWrapper final : public Operator<Context> {
     return result;
   }
 
+  c10::OperatorHandle op_;
   c10::optional<OpKernel> kernel_;
+
+  // this is stored as a member here to avoid having to re-allocate a stack
+  // for each call. Between kernel calls, stack_.size() == 0, but capacity
+  // should not need to be grown anymore after the first call.
+  std::vector<IValue> stack_;
+  std::mutex mutex_;
 
   ParameterTuple parameters_;
 };
@@ -167,41 +179,51 @@ C10_DECLARE_REGISTRY(
     const OperatorDef&,
     Workspace*);
 
+// TODO Also register c10 operators on mobile
+#ifndef C10_MOBILE
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OpSchemaDef, Name)        \
-  C10_REGISTER_CLASS(                                                       \
-      C10OperatorRegistry,                                                  \
-      Name,                                                                 \
-      C10OperatorWrapper<OpSchemaDef, CPUContext, false, std::tuple<>>)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OperatorHandle, Name, NumOutputParameters)  \
+  C10_REGISTER_CLASS(                                                                         \
+      C10OperatorRegistry,                                                                    \
+      Name,                                                                                   \
+      C10OperatorWrapper<OperatorHandle, CPUContext, false, NumOutputParameters, std::tuple<>>)
 
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS( \
-    OpSchemaDef, Name, ...)                                        \
+    OperatorHandle, Name, NumOutputParameters, ...)                \
   C10_REGISTER_CLASS(                                              \
       C10OperatorRegistry,                                         \
       Name,                                                        \
       C10OperatorWrapper<                                          \
-          OpSchemaDef,                                             \
+          OperatorHandle,                                          \
           CPUContext,                                              \
           false,                                                   \
+          NumOutputParameters,                                     \
           std::tuple<__VA_ARGS__>>)
 
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT( \
-    OpSchemaDef, Name)                                              \
+    OperatorHandle, Name, NumOutputParameters)                      \
   C10_REGISTER_CLASS(                                               \
       C10OperatorRegistry,                                          \
       Name,                                                         \
-      C10OperatorWrapper<OpSchemaDef, CPUContext, true, std::tuple<>>)
+      C10OperatorWrapper<OperatorHandle, CPUContext, true, NumOutputParameters, std::tuple<>>)
 
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS( \
-    OpSchemaDef, Name, ...)                                                        \
+    OperatorHandle, Name, NumOutputParameters, ...)                                \
   C10_REGISTER_CLASS(                                                              \
       C10OperatorRegistry,                                                         \
       Name,                                                                        \
       C10OperatorWrapper<                                                          \
-          OpSchemaDef,                                                             \
+          OperatorHandle,                                                          \
           CPUContext,                                                              \
           true,                                                                    \
+          NumOutputParameters,                                                     \
           std::tuple<__VA_ARGS__>>)
 
+#else
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OperatorHandle, Name, NumOutputParameters)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(OperatorHandle, Name, NumOutputParameters, ...)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT(OperatorHandle, Name, NumOutputParameters)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS(OperatorHandle, Name, NumOutputParameters, ...)
+#endif
 } // namespace caffe2

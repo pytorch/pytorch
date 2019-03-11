@@ -335,7 +335,7 @@ class BaseReducer {
 
     explicit Meta(bool first = true) : first_dim(first) {}
 
-    void computeMeta(at::IntList dims, int skip_dims) {
+    void computeMeta(at::IntArrayRef dims, int skip_dims) {
       first_dim ? block_shape.assign(dims.begin() + skip_dims, dims.end())
                 : block_shape.assign(dims.begin(), dims.end() - skip_dims);
       block_size = first_dim ? size_from_dim_(skip_dims, dims)

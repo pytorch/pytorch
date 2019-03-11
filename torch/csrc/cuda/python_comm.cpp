@@ -3,7 +3,7 @@
 #include <torch/csrc/cuda/Stream.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/utils/auto_gil.h>
-#include <torch/csrc/utils/functional.h>
+#include <ATen/core/functional.h>
 
 #include <ATen/ATen.h>
 

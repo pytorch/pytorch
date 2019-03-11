@@ -187,7 +187,7 @@ bool TopKCudaOp<T, Context>::RunOnDevice() {
   auto* indices = Output(1);
   auto* flatten_indices = OutputSize() > 2 ? Output(2) : nullptr;
 
-  at::IntList input_dims = input.sizes();
+  at::IntArrayRef input_dims = input.sizes();
   if (axis_ == -1) {
     axis_ = input_dims.size() - 1;
   }
@@ -207,13 +207,13 @@ bool TopKCudaOp<T, Context>::RunOnDevice() {
       input_dims.cend(),
       int64_t(1),
       std::multiplies<int64_t>());
-  const int64_t outer_size = input.size() / input_dims[axis_];
+  const int64_t outer_size = input.numel() / input_dims[axis_];
   const int64_t inner_size = input_dims[axis_];
 
   values->Resize(output_dims);
   indices->Resize(output_dims);
   if (flatten_indices != nullptr) {
-    flatten_indices->Resize(indices->size());
+    flatten_indices->Resize(indices->numel());
   }
   const T* input_data = input.template data<T>();
   T* values_data = values->template mutable_data<T>();
@@ -243,12 +243,12 @@ bool TopKCudaOp<T, Context>::RunOnDevice() {
   }
 
   // init values as the default value
-  math::Set<T, CUDAContext>(values->size(), T(0), values_data, &context_);
+  math::Set<T, CUDAContext>(values->numel(), T(0), values_data, &context_);
   math::Set<int64_t, CUDAContext>(
-      indices->size(), int64_t(-1), indices_data, &context_);
+      indices->numel(), int64_t(-1), indices_data, &context_);
   if (flatten_indices_data != nullptr) {
     math::Set<int64_t, CUDAContext>(
-        flatten_indices->size(), int64_t(-1), flatten_indices_data, &context_);
+        flatten_indices->numel(), int64_t(-1), flatten_indices_data, &context_);
   }
 
   RunTopKOnLastDimCUDAImpl<T>(
@@ -282,12 +282,12 @@ bool TopKCudaOp<T, Context>::RunOnDevice() {
   // Flatten the indices if needed.
   if (flatten_indices != nullptr) {
     FlattenIndicesCUDAKernel<<<
-        CAFFE_GET_BLOCKS(indices->size()),
+        CAFFE_GET_BLOCKS(indices->numel()),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(
         indices->template data<int64_t>(),
-        indices->size(),
+        indices->numel(),
         next_size,
         inner_size,
         k_,
@@ -321,8 +321,8 @@ bool TopKGradientCudaOp<T, Context>::RunOnDevice() {
   const auto& indices = Input(1);
   const auto& original_input = Input(2);
   auto* output = Output(0);
-  at::IntList values_dims = values.sizes();
-  at::IntList origin_dims = original_input.sizes();
+  at::IntArrayRef values_dims = values.sizes();
+  at::IntArrayRef origin_dims = original_input.sizes();
   CAFFE_ENFORCE_EQ(values_dims.size(), origin_dims.size());
   output->Resize(origin_dims);
   T* output_data = output->template mutable_data<T>();

@@ -9,20 +9,24 @@ import inspect
 from torch._six import builtins
 
 # Tracks standalone weak script functions
-compiled_weak_fns = weakref.WeakKeyDictionary()
+compiled_weak_fns = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Tracks which methods should be converted to strong methods
-weak_script_methods = weakref.WeakKeyDictionary()
+weak_script_methods = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Converted modules and their corresponding WeakScriptModuleProxy objects
-weak_modules = weakref.WeakKeyDictionary()
+weak_modules = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Types that have been declared as weak modules
-weak_types = weakref.WeakKeyDictionary()
+weak_types = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
-boolean_dispatched = weakref.WeakKeyDictionary()
+boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
+
+# Python Op functions that should be ignored by the compiler. These will be replaced
+# with an operator that always throws an error
+ignored_fns = weakref.WeakSet()  # noqa: T484
 
 COMPILATION_PENDING = object()
 COMPILED = object()
@@ -107,7 +111,7 @@ def weak_script_method(fn):
     return fn
 
 
-def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
+def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_name, func_name):
     """
     Dispatches to either of 2 weak script functions based on a boolean argument.
     In TorchScript, the boolean argument must be constant so that the correct
@@ -141,6 +145,11 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
         raise RuntimeError("only one function can have a docstring")
     fn.__doc__ = doc
 
+    if module_name is not None:
+        fn.__module__ = module_name
+    if func_name is not None:
+        fn.__name__ = func_name
+
     boolean_dispatched[fn] = {
         "if_true": if_true,
         "if_false": if_false,
@@ -151,9 +160,23 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false):
     return fn
 
 
+def ignore(fn):
+    ignored_fns.add(fn)
+    return fn
+
+
+def _parameter_list(fn):
+    """
+    Decorator to denote that a function returns a list of all the parameters
+    in a module
+    """
+    fn._is_parameter_list = True
+    return fn
+
+
 try:
     import typing
-    from typing import Tuple, List
+    from typing import Tuple, List, Dict
 
     def is_tuple(ann):
         # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
@@ -165,6 +188,11 @@ try:
         return ann.__module__ == 'typing' and \
             (getattr(ann, '__origin__', None) is typing.List or
              getattr(ann, '__origin__', None) is list)
+
+    def is_dict(ann):
+        return ann.__module__ == 'typing' and \
+            (getattr(ann, '__origin__', None) is typing.Dict or
+             getattr(ann, '__origin__', None) is dict)
 except ImportError:
     # A minimal polyfill for versions of Python that don't have typing.
     # Note that this means that they also don't support the fancy annotation syntax, so
@@ -187,14 +215,26 @@ except ImportError:
         def __getitem__(self, types):
             return TupleInstance(types)
 
-    Tuple = TupleCls()
-    List = ListCls()
+    class DictInstance(object):
+        def __init__(self, types):
+            setattr(self, '__args__', types)
+
+    class DictCls(object):
+        def __getitem__(self, types):
+            return DictInstance(types)
+
+    Tuple = TupleCls()  # noqa: T484
+    List = ListCls()  # noqa: T484
+    Dict = DictCls()  # noqa: T484
 
     def is_tuple(ann):
         return isinstance(ann, TupleInstance)
 
     def is_list(ann):
         return isinstance(ann, ListInstance)
+
+    def is_dict(ann):
+        return isinstance(ann, DictInstance)
 
 
 # allows BroadcastingList instance to be subscriptable

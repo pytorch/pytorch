@@ -106,7 +106,7 @@ struct PDist {
     // vector from the input, j is the second, and k is the result index. This
     // parallelizes over the range of k and infers what i and j are from the
     // value of k.
-    parallel_for(0, combs, internal::GRAIN_SIZE / (16 * m), [=](int64_t k, int64_t end) {
+    parallel_for(0, combs, internal::GRAIN_SIZE / (16 * m), [p, self_start, self_end, n, m, res_start, combs](int64_t k, int64_t end) {
       const Vec pvec(p);
       double n2 = n - .5;
       // The -1 accounts for floating point truncation issues
@@ -234,7 +234,7 @@ struct PDist {
     // The only way to parallelize and avoid locking requires parallelizing
     // over the columns of the input, i.e. we compute the gradient for the
     // first section of each vector independentaly of the second section, etc.
-    at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (8 * n * n), [=](int64_t l, int64_t end) {
+    at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (8 * n * n), [p, n, m, gs, grad_start, dist_start, self_start, res_start](int64_t l, int64_t end) {
       const Vec pvec(p);
 
       const scalar_t * self_l = self_start + l * Vec::size();
@@ -270,19 +270,19 @@ struct PDist {
 };
 
 void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, const double p) {
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "pdist", [&] {
     PDist<scalar_t>::apply(result, self, p);
   });
 }
 
 static void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "pdist_backward", [&] {
     PDist<scalar_t>::apply_backward(result, grad, self, p, dist);
   });
 }
 
 static void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, const double p) {
-  AT_DISPATCH_FLOATING_TYPES(result.type(), "cdist", [&] {
+  AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist", [&] {
     PDist<scalar_t>::apply_cdist(result, x1, x2, p);
   });
 }

@@ -216,9 +216,13 @@ void THVector_(normal_fill_DEFAULT)(scalar_t *data,
 VECTOR_IMPLEMENT_FUNCTION(abs,labs)
 #endif /* long only part */
 
-#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT)
+#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_CHAR)
 VECTOR_IMPLEMENT_FUNCTION(abs,abs)
 #endif /* int only part */
+
+#if defined(TH_REAL_IS_BYTE)
+VECTOR_IMPLEMENT_FUNCTION(abs,)
+#endif /* unsigned, so identity */
 
 
 /* floating point only now */
@@ -257,7 +261,7 @@ VECTOR_IMPLEMENT_FUNCTION(sqrt,TH_MATH_NAME(sqrt))
 VECTOR_IMPLEMENT_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt))
 VECTOR_IMPLEMENT_FUNCTION(ceil,TH_MATH_NAME(ceil))
 VECTOR_IMPLEMENT_FUNCTION(floor,TH_MATH_NAME(floor))
-VECTOR_IMPLEMENT_FUNCTION(round,TH_MATH_NAME(round))
+VECTOR_IMPLEMENT_FUNCTION(round,TH_MATH_NAME(nearbyint))
 VECTOR_IMPLEMENT_FUNCTION(abs,TH_MATH_NAME(fabs))
 VECTOR_IMPLEMENT_FUNCTION(trunc,TH_MATH_NAME(trunc))
 VECTOR_IMPLEMENT_FUNCTION(frac,TH_MATH_NAME(TH_frac))

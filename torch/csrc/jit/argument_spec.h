@@ -2,7 +2,7 @@
 
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/stack.h>
+#include <ATen/core/stack.h>
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/variable_tensor_list.h>
 #include <torch/csrc/utils/hash.h>
@@ -44,8 +44,8 @@ struct ArgumentInfo {
   }
   operator TypePtr() const {
     if (!defined())
-      return DynamicType::get();
-    return TensorType::create(type(), ConvertIntToCPUOrCUDA(device()), dim());
+      return TensorType::get();
+    return DimensionedTensorType::create(type(), ConvertIntToCPUOrCUDA(device()), dim());
   }
 
  private:
@@ -93,7 +93,7 @@ struct ArgumentSpec {
         arg.requires_grad_ = with_grad && autograd::Variable(t).requires_grad();
         arg.dim_ = t.dim();
         arg.device_ = t.is_cuda() ? t.get_device() : -1;
-        arg.type_ = static_cast<unsigned>(t.type().scalarType());
+        arg.type_ = static_cast<unsigned>(t.scalar_type());
       }
 
       arg.is_tensor_ = true;
@@ -153,11 +153,11 @@ struct ArgumentSpec {
 
  private:
   TypePtr fillType(TypePtr original, size_t& offset) const {
-    if (original->isSubtypeOf(DynamicType::get())) {
+    if (original->isSubtypeOf(TensorType::get())) {
       auto& arg = args.at(offset++);
       if (!arg.defined())
-        return UndefinedTensorType::get();
-      return TensorType::create(
+        return AutogradZeroTensorType::get();
+      return DimensionedTensorType::create(
           arg.type(),
           ConvertIntToCPUOrCUDA(arg.device()),
           arg.dim(),
@@ -229,7 +229,7 @@ struct CompleteArgumentSpec {
         at::Tensor t = inputs[i].toTensor();
         pod.defined = t.defined();
         if (pod.defined) {
-          pod.type = static_cast<int>(t.type().scalarType());
+          pod.type = static_cast<int>(t.scalar_type());
           pod.device = (!t.is_cuda()) ? -1 : t.get_device();
           pod.requires_grad =
               with_grad && autograd::as_variable_ref(t).requires_grad();
@@ -315,18 +315,18 @@ struct CompleteArgumentInfo {
     // See [valid range], it is always valid to ask for offset for (i + 1)
     return (sizes_strides_offset(i + 1) - sizes_strides_offset(i)) / 2;
   }
-  at::IntList sizes() const {
-    return at::IntList(
+  at::IntArrayRef sizes() const {
+    return at::IntArrayRef(
         spec.sizes_strides() + sizes_strides_offset(i), ndimension());
   }
-  at::IntList strides() const {
+  at::IntArrayRef strides() const {
     int ndim = ndimension();
-    return at::IntList(
+    return at::IntArrayRef(
         spec.sizes_strides() + sizes_strides_offset(i) + ndim, ndim);
   }
   operator TypePtr() const {
     if (!defined())
-      return DynamicType::get();
+      return TensorType::get();
     return CompleteTensorType::create(
         type(), ConvertIntToCPUOrCUDA(device()), sizes(), strides());
   }

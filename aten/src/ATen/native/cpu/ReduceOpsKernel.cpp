@@ -15,7 +15,7 @@ namespace at { namespace native { namespace {
 using namespace vec256;
 
 static void sum_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.type(), "sum", [&] {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "sum_cpu", [&] {
     binary_kernel_reduce_vec(
       iter,
       [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },
@@ -24,7 +24,7 @@ static void sum_kernel_impl(TensorIterator& iter) {
 }
 
 static void mean_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.type(), "mean", [&] {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "mean_cpu", [&] {
     scalar_t factor = scalar_t(iter.num_output_elements()) / iter.numel();
     binary_kernel_reduce(
       iter,
@@ -35,17 +35,17 @@ static void mean_kernel_impl(TensorIterator& iter) {
 }
 
 static void std_var_kernel_impl(TensorIterator &iter, bool unbiased, bool take_sqrt) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.type(), "std", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "std_cpu", [&] {
     binary_kernel_reduce(
       iter,
-      WelfordOps<scalar_t, double> { unbiased, take_sqrt },
-      WelfordData<double>()
+      WelfordOps<scalar_t, double, int64_t, double> { unbiased, take_sqrt },
+      WelfordData<double, int64_t, double>()
     );
   });
 }
 
 static void prod_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.type(), "prod", [&] {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "prod_cpu", [&] {
     binary_kernel_reduce_vec(
       iter,
       [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
@@ -68,7 +68,7 @@ static void norm_kernel_tensor_iterator_impl(
 
 
   if (val == 0) {
-    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
         NormZeroOps<scalar_t>(),
@@ -76,7 +76,7 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else if (val == 1) {
-    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
         NormOneOps<scalar_t>(),
@@ -84,7 +84,7 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else if (val == INFINITY) {
-    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
         AbsMaxOps<scalar_t>(),
@@ -92,7 +92,7 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else if (val == -INFINITY) {
-    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
         AbsMinOps<scalar_t>(),
@@ -100,7 +100,7 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES(iter.type(), "norm", [&] {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
         NormOps<scalar_t> { scalar_t(val) },
@@ -148,6 +148,24 @@ static void or_kernel_impl(TensorIterator& iter) {
     /*ident=*/false);
 }
 
+static void min_values_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "min_values_cpu", [&iter] {
+    binary_kernel_reduce_vec(
+      iter,
+      [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
+      [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return minimum(a, b); });
+  });
+}
+
+static void max_values_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "max_values_cpu", [&iter] {
+    binary_kernel_reduce_vec(
+      iter,
+      [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
+      [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return maximum(a, b); });
+  });
+}
+
 }  // anonymous namespace
 
 REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
@@ -157,5 +175,7 @@ REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
 REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
 REGISTER_DISPATCH(and_stub, &and_kernel_impl);
 REGISTER_DISPATCH(or_stub, &or_kernel_impl);
+REGISTER_DISPATCH(min_values_stub, &min_values_kernel_impl);
+REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl);
 
 }}  // namespace at::native

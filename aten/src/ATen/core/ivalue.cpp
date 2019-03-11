@@ -28,6 +28,23 @@ std::ostream& printList(std::ostream & out, const List &v,
   return out;
 }
 
+template<typename Dict>
+std::ostream& printDict(std::ostream& out, const Dict& v) {
+  out << "{";
+
+  bool first = true;
+  for (const auto& pair : v->elements()) {
+    if (!first) {
+      out << ", ";
+    }
+    out << pair.first << ": " << pair.second;
+    first = false;
+  }
+
+  out << "}";
+  return out;
+}
+
 } // anonymous namespace
 
 std::ostream& operator<<(std::ostream & out, const IValue & v) {
@@ -74,6 +91,12 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "Future";
     case IValue::Tag::Device:
       return out << v.toDevice();
+    case IValue::Tag::GenericDict:
+      return printDict(out, v.toGenericDict());
+    case IValue::Tag::Object:
+      // TODO we should print the object contents
+      return out << "Object<" << v.toObject()->name().toUnqualString()
+                 << ">";
   }
   AT_ERROR("Tag not found\n");
 }

@@ -265,7 +265,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
-  requires_grad &= isFloatingPoint(self.type().scalarType());
+  requires_grad &= isFloatingPoint(self.scalar_type());
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
@@ -290,13 +290,13 @@ Tensor VariableType::_s_copy_from(const Tensor & self, const Tensor & dst, bool 
   AT_ERROR("copy_from does not support automatic differentiation; use copy_ instead");
 }
 
-Tensor & VariableType::resize_(Tensor & self, IntList size) const {
+Tensor & VariableType::resize_(Tensor & self, IntArrayRef size) const {
   auto& self_ = unpack(self, "self", 0);
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
   if (torch::jit::tracer::isTracing()) {
-    jit::tracer::ArgumentStash::popIntList("size");
+    jit::tracer::ArgumentStash::popIntArrayRef("size");
     jit::tracer::warn("resize_", jit::tracer::WARN_RESIZE);
     jit::tracer::delValueTrace(self);
   }
@@ -341,7 +341,7 @@ Tensor VariableType::detach(const Tensor & self) const {
   if (jit::tracer::isTracing()) {
     jit::tracer::addOutput(node, result);
   }
-  return result;
+  return std::move(result);
 }
 
 Tensor & VariableType::detach_(Tensor & self) const {

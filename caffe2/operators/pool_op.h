@@ -16,8 +16,9 @@ class PoolOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(Context);
 
-  PoolOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws), functor_(*this) {
+  template <class... Args>
+  explicit PoolOp(Args&&... args)
+      : ConvPoolOpBase<Context>(std::forward<Args>(args)...), functor_(*this) {
     const int kernel_size = kernel_.size();
     for (int i = 0; i < kernel_size; ++i) {
       CAFFE_ENFORCE_EQ(
@@ -36,12 +37,15 @@ class PoolOp final : public ConvPoolOpBase<Context> {
 
   bool RunOnDeviceWithOrderNCHW() override {
     const auto& X = Input(0);
+    auto* Y = Output(0);
     const int N = X.dim32(0);
     const int C = X.dim32(1);
-    auto sizes = ConvPoolOpBase<Context>::GetOutputSize(X, C);
-    auto* Y = Output(0, sizes, at::dtype<T>());
+    ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
       return functor_.template GlobalPoolingForward<T, StorageOrder::NCHW>(
@@ -65,13 +69,16 @@ class PoolOp final : public ConvPoolOpBase<Context> {
 
   bool RunOnDeviceWithOrderNHWC() override {
     const auto& X = Input(0);
-    const int ndim = X.ndim();
+    auto* Y = Output(0);
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
-    auto sizes = ConvPoolOpBase<Context>::GetOutputSize(X, C);
-    auto* Y = Output(0, sizes, at::dtype<T>());
+    ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
       return functor_.template GlobalPoolingForward<T, StorageOrder::NHWC>(
@@ -101,8 +108,9 @@ template <typename T, class Context, class Functor>
 class PoolGradientOp final : public ConvPoolOpBase<Context> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(Context);
-  PoolGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws), functor_(*this) {}
+  template <class... Args>
+  explicit PoolGradientOp(Args&&... args)
+      : ConvPoolOpBase<Context>(std::forward<Args>(args)...), functor_(*this) {}
 
   ~PoolGradientOp() = default;
 
@@ -120,6 +128,9 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     const T* X_data = X.template data<T>();
     const T* Y_data = Y.template data<T>();
     T* dX_data = dX->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
       return functor_.template GlobalPoolingBackward<T, StorageOrder::NCHW>(
@@ -146,7 +157,7 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     const auto& Y = Input(1);
     const auto& dY = Input(2);
     auto* dX = Output(0, X.sizes(), at::dtype<T>());
-    const int ndim = X.ndim();
+    const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
     const std::vector<int> X_HW_dims = GetDims(X);
@@ -156,6 +167,9 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     const T* X_data = X.template data<T>();
     const T* Y_data = Y.template data<T>();
     T* dX_data = dX->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     if (global_pooling_) {
       const int HxW = X.numel() / (N * C);
       return functor_.template GlobalPoolingBackward<T, StorageOrder::NHWC>(

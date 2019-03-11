@@ -27,30 +27,7 @@ if(NOT TORCH_INSTALL_LIB_DIR)
   set(TORCH_INSTALL_LIB_DIR lib)
 endif()
 
-# RPATH stuff
-# see https://cmake.org/Wiki/CMake_RPATH_handling
-if (APPLE)
-  set(CMAKE_MACOSX_RPATH ON)
-  set(_rpath_portable_origin "@loader_path")
-else()
-  set(_rpath_portable_origin $ORIGIN)
-endif(APPLE)
-# Use separate rpaths during build and install phases
-set(CMAKE_SKIP_BUILD_RPATH  FALSE)
-# Don't use the install-rpath during the build phase
-set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
-# Automatically add all linked folders that are NOT in the build directory to
-# the rpath (per library?)
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-
-# Get the correct Python executable
-if (DEFINED ENV{PYTORCH_PYTHON})
-  message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
-  set(PYCMD "$ENV{PYTORCH_PYTHON}")
-else()
-  SET(PYCMD "python")
-endif()
 
 # Generate files
 set(TOOLS_PATH "${TORCH_ROOT}/tools")
@@ -89,7 +66,7 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp"
   "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
   COMMAND
-  ${PYCMD} tools/setup_helpers/generate_code.py
+  "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
     --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     --nn-path "aten/src/"
   DEPENDS
@@ -156,9 +133,10 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
   ${TORCH_SRC_DIR}/csrc/jit/node_hashing.cpp
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/irparser.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/caffe2_operator.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/register_caffe2_ops.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/register_c10_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/symbolic_script.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
@@ -182,19 +160,23 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_inplace_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/shape_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/requires_grad_analysis.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_undef.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_autogradzero.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/python_print.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/utils/subgraph_utils.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/utils/check_alias_annotation.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/utils/memory_dag.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/script/type_parser.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/schema_type_parser.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/class_type.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
@@ -202,7 +184,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/c10_ops/layer_norm.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/kernel_cache.cpp
@@ -226,6 +207,10 @@ else ()
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
     )
+    add_library(thnvrtc SHARED ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/thnvrtc.cpp)
+    target_link_libraries(thnvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
+    target_include_directories(thnvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
+    install(TARGETS thnvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 endif ()
 
@@ -241,6 +226,7 @@ if (NOT NO_API)
   list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/datasets/mnist.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/distributed.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/random.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/sequential.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/stream.cpp
@@ -336,13 +322,13 @@ endif()
 
 target_link_libraries(torch caffe2_library)
 
-find_package(OpenMP)
+find_package(OpenMP QUIET)
 if(OPENMP_FOUND)
-  if (VERBOSE)
-    message(STATUS "Compiling with OpenMP")
-  endif()
-  target_compile_options(torch INTERFACE -fopenmp)
-  target_link_libraries(torch -fopenmp)
+  message(STATUS "pytorch is compiling with OpenMP. \n"
+    "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
+    "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
+  target_compile_options(torch INTERFACE ${OpenMP_CXX_FLAGS})
+  target_link_libraries(torch ${OpenMP_CXX_LIBRARIES})
 endif()
 
 if (NOT NO_API)
@@ -371,8 +357,9 @@ if(USE_CUDA)
       ${CUDA_LIBRARIES})
     set_target_properties(torch PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
   else()
+    find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64/)
     set(TORCH_CUDA_LIBRARIES
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvToolsExt.so
+      ${LIBNVTOOLSEXT}
       ${CUDA_LIBRARIES})
   endif()
 
@@ -435,10 +422,7 @@ install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
 install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
-install(TARGETS torch
-  RUNTIME DESTINATION "${TORCH_INSTALL_BIN_DIR}"
-  LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
-  ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+install(TARGETS torch DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 if (MSVC AND NOT TORCH_STATIC)
   install(FILES $<TARGET_PDB_FILE:torch> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
@@ -556,6 +540,7 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/utils/invalid_arguments.cpp
     ${TORCH_SRC_DIR}/csrc/utils/object_ptr.cpp
     ${TORCH_SRC_DIR}/csrc/utils/python_arg_parser.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/structseq.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_apply.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_dtypes.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
@@ -643,7 +628,8 @@ if (BUILD_PYTHON)
     elseif(APPLE)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib)
     else()
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvToolsExt.so)
+      find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64/)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${LIBNVTOOLSEXT})
     endif()
   endif()
 
@@ -720,7 +706,7 @@ if (BUILD_PYTHON)
     OUTPUT
     "${TORCH_SRC_DIR}/__init__.pyi"
     COMMAND
-    ${PYCMD} -mtools.pyi.gen_pyi
+    "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     DEPENDS
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
@@ -745,8 +731,5 @@ if (BUILD_PYTHON)
     set_target_properties(torch_python PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
   endif()
 
-  install(TARGETS torch_python
-    RUNTIME DESTINATION "${TORCH_INSTALL_BIN_DIR}"
-    LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
-    ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()

@@ -1,15 +1,10 @@
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+
 #include <torch/csrc/jit/ir.h>
-
-#include <algorithm>
-#include <unordered_map>
-
-#include <c10/util/Exception.h>
-#include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
-#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
-#include <torch/csrc/utils/functional.h>
-#include <torch/csrc/utils/hash.h>
+
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -67,7 +62,7 @@ void EliminateCommonSubexpression(
 } // namespace
 
 void EliminateCommonSubexpression(std::shared_ptr<Graph>& graph) {
-  const auto aliasDb = AliasAnalysis(graph);
+  AliasDb aliasDb(graph);
   EliminateCommonSubexpression(
       graph->block(), aliasDb, [](Node*) { return nullptr; });
 }

@@ -29,8 +29,8 @@
         - THTensor* self
         - THStorage* source
         - long storage_offset
-        - IntListSize size
-        - arg: IntList stride
+        - IntArrayRefSize size
+        - arg: IntArrayRef stride
           default: {}
 ]]
 [[
@@ -38,6 +38,7 @@
   return: self
   cname: fill
   variants: function
+  cpu_half: True
   options:
     - arguments:
       - THTensor* self
@@ -131,7 +132,7 @@
   return: THTensor*
   arguments:
     - THTensor* self
-    - arg: IntListSize size
+    - arg: IntArrayRefSize size
       long_args: True
 ]]
 [[
@@ -800,27 +801,6 @@
           default: "false"
 ]]
 [[
-  name: _th_kthvalue
-  backends:
-    - CPU
-  variants: function
-  cname: kthvalue
-  return: argument 0,1
-  scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
-  arguments:
-    - arg: THTensor* values
-      output: True
-    - arg: THIndexTensor* indices
-      output: True
-    - THTensor* self
-    - long k
-    - arg: long dim
-      wrap_dim: self
-      default: __last_dim
-    - arg: bool keepdim
-      default: "false"
-]]
-[[
   name: _th_mode
   variants: function
   cname: mode
@@ -910,11 +890,6 @@
 [[
   name: _th_abs
   cname: abs
-  types:
-    - floating_point
-    - Long
-    - Int
-    - Short
   backends:
     - CPU
     - CUDA
@@ -959,7 +934,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants: function
   return: argument 0
@@ -988,7 +962,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants: function
   return: argument 0
@@ -1694,42 +1667,6 @@
         - THTensor* exponent
 ]]
 [[
-  name: _th_lerp
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  cname: lerp
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THTensor* self
-      broadcast: end fallback
-    - THTensor* end
-    - real weight
-]]
-[[
-  name: _th_lerp_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  return: self
-  cname: lerp
-  variants: function
-  arguments:
-    - THTensor* self
-    - arg: THTensor* self
-      broadcast: end fallback inplace
-    - THTensor* end
-    - real weight
-]]
-[[
   name: _th_histc
   cname: histc
   types:
@@ -1755,6 +1692,7 @@
   name: _th_zero_
   cname: zero
   return: self
+  cpu_half: True
   variants:
     - function
   arguments:
@@ -2777,7 +2715,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   return: self
   arguments:
@@ -2811,7 +2748,6 @@
 [[
   name: _th_geometric_
   backends:
-    - CPU
     - CUDA
   cname: geometric
   variants: function

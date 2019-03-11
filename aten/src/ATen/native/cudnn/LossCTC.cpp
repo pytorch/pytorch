@@ -13,7 +13,7 @@ namespace at { namespace native {
 
 // See Note [ATen preprocessor philosophy]
 
-std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs, const Tensor& targets, IntList input_lengths, IntList target_lengths, int64_t BLANK, bool deterministic) {
+std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, bool deterministic, bool zero_infinity) {
   AT_ERROR("cudnn_ctc_loss: ATen not compiled with cuDNN >= 7 support");
 }
 
@@ -33,7 +33,8 @@ namespace {
 
 }  // namespace
 
-std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tensor& targets_t, IntList input_lengths_, IntList target_lengths_, int64_t BLANK, bool deterministic) {
+std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tensor& targets_t, IntArrayRef input_lengths_, IntArrayRef target_lengths_, int64_t BLANK, bool deterministic, bool zero_infinity) {
+  (void)zero_infinity; // only used for backward
   CheckedFrom c = "cudnn_ctc_loss";
   TensorArg log_probs { log_probs_t, "log_probs", 1 };
   TensorArg targets { targets_t, "targets", 2 };

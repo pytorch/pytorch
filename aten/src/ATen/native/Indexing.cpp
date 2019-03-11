@@ -72,16 +72,16 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
   ss << "The shape of the mask " << mask.sizes() << " at index " << maskIdx;
   ss << " does not match the shape of the indexed tensor " << self.sizes();
   ss << " at index " << idx;
-  AT_ERROR(ss.str());
+  AT_INDEX_ERROR(ss.str());
 }
 
 static void checkIndexTensorTypes(TensorList indices) {
   for (auto& tensor : indices) {
     if (tensor.defined()) {
-      auto& type = tensor.type();
-      auto scalarType = type.scalarType();
-      AT_CHECK(scalarType == kLong || scalarType == kByte,
-               "tensors used as indices must be long or byte tensors");
+      auto scalarType = tensor.scalar_type();
+      if (scalarType != kLong && scalarType != kByte) {
+          AT_INDEX_ERROR("tensors used as indices must be long or byte tensors");
+      }
     }
   }
 }
@@ -90,7 +90,7 @@ static std::vector<Tensor> expandByteTensors(const Tensor & self, TensorList ind
   // Expands byte tensors (masks) into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
   for (auto & index : indices) {
-    if (index.type().scalarType() == kByte) {
+    if (index.scalar_type() == kByte) {
       // The sizes of the ByteTensor mask must match the sizes of the
       // corresponding dimensions in self
       for (int64_t j = 0; j < index.dim(); j++) {
@@ -178,10 +178,12 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size)
   if (index.numel() != 0) {
     auto max_idx = index.max().item<int64_t>();
     auto min_idx = index.min().item<int64_t>();
-    AT_CHECK(max_idx < dim_size,
-             "index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
-    AT_CHECK(min_idx >= -dim_size,
-             "index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+    if (max_idx >= dim_size) {
+      AT_INDEX_ERROR("index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+    }
+    if (min_idx < -dim_size) {
+      AT_INDEX_ERROR("index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+    }
   }
   return index.remainder(dim_size);
 }
@@ -301,7 +303,7 @@ struct AdvancedIndex {
 // values and the stride of src. The new shape is not meaningful. It's used to make
 // the shape compatible with the result tensor.
 static Tensor restride_src(const Tensor& src, int64_t dims_before, int64_t dims_indexed,
-                           IntList replacement_shape) {
+                           IntArrayRef replacement_shape) {
   auto shape = DimVector(src.sizes());
   auto strides = DimVector(src.strides());
   int64_t end = dims_before + dims_indexed;
@@ -326,8 +328,8 @@ static Tensor reshape_indexer(const Tensor& index, int64_t dims_before, int64_t 
 AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
 {
   int64_t element_size_bytes = src.type().elementSizeInBytes();
-  int dims_before = 0, dims_after = 0, dims_indexed = 0;
-  IntList replacement_shape;
+  int64_t dims_before = 0, dims_after = 0, dims_indexed = 0;
+  IntArrayRef replacement_shape;
   for (size_t dim = 0; dim < indices_list.size(); dim++) {
     if (!indices_list[dim].defined()) {
       if (dims_indexed == 0) {
@@ -350,7 +352,7 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
   // restride_src with an unhelpful error message.
   if (std::find(indexed_sizes.begin(), indexed_sizes.end(), 0) != indexed_sizes.end() &&
       std::find(replacement_shape.begin(), replacement_shape.end(), 0) == replacement_shape.end()) {
-    AT_ERROR("index is out of bounds for dim with size 0");
+    AT_INDEX_ERROR("index is out of bounds for dimension with size 0");
   }
 
   this->dims_before = dims_before;
@@ -382,8 +384,8 @@ static AdvancedIndex make_info(Tensor self, TensorList orig) {
   try {
     indices = expand_outplace(indices);
   } catch (std::exception& e) {
-    AT_ERROR("shape mismatch: indexing tensors could not be broadcast together"
-             " with shapes ", shapes_as_str(indices));
+    AT_INDEX_ERROR("shape mismatch: indexing tensors could not be broadcast together"
+                   " with shapes ", shapes_as_str(indices));
   }
   // add missing null Tensors so that it matches self.dim()
   while (indices.size() < (size_t)self.dim()) {
@@ -431,8 +433,9 @@ static std::unique_ptr<TensorIterator> make_index_put_iterator(const AdvancedInd
 }
 
 Tensor index(const Tensor & self, TensorList indices) {
-  AT_CHECK(indices.size() <= (size_t)self.dim(),
-           "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  if (indices.size() > (size_t)self.dim()) {
+    AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  }
 
   auto info = make_info(self, indices);
   auto iter = make_index_iterator(info);
@@ -445,8 +448,9 @@ Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, 
 }
 
 Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
-  AT_CHECK(indices.size() <= (size_t)self.dim(),
-           "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  if (indices.size() > (size_t)self.dim()) {
+    AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  }
   if (accumulate && self.type().device_type() == kCUDA) {
     Tensor src, linearIndex, expandedValue;
     std::tie(src, linearIndex) = makeLinearIndex(self, indices);
@@ -462,14 +466,17 @@ Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value, boo
 Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   dim = maybe_wrap_dim(dim, self.dim());
 
-  AT_CHECK(index.dim() < 2,
-           "index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
+  if (index.dim() >= 2) {
+    AT_INDEX_ERROR("index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
+  }
 
   int64_t numIndices = index.numel();
-  AT_CHECK(source.dim() != 0 || numIndices == 1,
-           "index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
-  AT_CHECK(index.type().scalarType() == ScalarType::Long,
-           "index_copy_(): Expected LongTensor for index");
+  if (source.dim() == 0 && numIndices != 1) {
+    AT_INDEX_ERROR("index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
+  }
+  if (index.scalar_type() != ScalarType::Long) {
+    AT_INDEX_ERROR("index_copy_(): Expected LongTensor for index");
+  }
 
   // Check that source and destination slices have the same size
   auto selfSlicedSizes = self.sizes().vec();
@@ -490,11 +497,77 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
     AT_ERROR(ss.str());
   }
   if (source.dim() > 0 && numIndices != source.size(dim)) {
-     AT_ERROR(
+     AT_INDEX_ERROR(
           "index_copy_(): Number of indices (", numIndices, ") should be equal to source.size(dim) (", source.size(dim), ")");
   }
 
   return at::legacy::th::_th_index_copy_(self, dim, index, source);
+}
+
+Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return self.clone().index_copy_(dim, index, source);
+}
+
+Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return self.clone().index_add_(dim, index, source);
+}
+
+Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
+  return self.clone().index_fill_(dim, index, source);
+}
+
+Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return self.clone().index_fill_(dim, index, source);
+}
+
+Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return self.clone().scatter_(dim, index, source);
+}
+
+Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
+  return self.clone().scatter_(dim, index, source);
+}
+
+Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return self.clone().scatter_add_(dim, index, source);
+}
+
+Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
+  Tensor _mask, _self;
+  std::tie(_mask, _self) = expand_outplace(mask, self);
+  return _self.clone().masked_scatter_(_mask, source);
+}
+
+Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
+  Tensor _mask, _self;
+  std::tie(_mask, _self) = expand_outplace(mask, self);
+  return _self.clone().masked_fill_(mask, source);
+}
+
+Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & source) {
+  Tensor _mask, _self;
+  std::tie(_mask, _self) = expand_outplace(mask, self);
+  return _self.clone().masked_fill_(mask, source);
+}
+
+Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){
+// special case scalar input and/or index
+    if (self.ndimension() == 0) return at::_sparse_coo_tensor_unsafe(at::empty({0,grad.numel()}, index.options()), grad, self.sizes());
+    if (grad.ndimension() == 0) return at::_sparse_coo_tensor_unsafe(index.view({1,1}), grad, self.sizes());
+    Tensor sparse_ind = at::empty({self.ndimension(), grad.numel()}, self.options().dtype(at::kLong));
+    int64_t n_above = grad.numel();
+    int64_t n_below = 1;
+    if (dim < 0) dim += self.ndimension();
+    for (int i=0; i<self.ndimension(); i++) {
+        n_above /= grad.size(i);
+        if (i == dim) {
+            sparse_ind[i] = index.reshape(-1);
+        } else {
+            sparse_ind[i] = at::arange(grad.size(i),self.options().dtype(at::kLong)).unsqueeze(1).expand({grad.size(i), n_above}).reshape(-1).repeat(n_below);
+        }
+        n_below *= grad.size(i);
+    }
+    return at::_sparse_coo_tensor_unsafe(sparse_ind, grad.reshape(-1), self.sizes());
 }
 
 }} // at::native

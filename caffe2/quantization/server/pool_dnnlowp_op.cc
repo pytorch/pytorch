@@ -3,6 +3,7 @@
 #include "caffe2/quantization/server/caffe2_dnnlowp_utils.h"
 #include "caffe2/quantization/server/conv_pool_dnnlowp_op_base.h"
 #include "caffe2/quantization/server/op_wrapper.h"
+#include "caffe2/quantization/server/pool_dnnlowp_op_avx2.h"
 #include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
@@ -582,32 +583,55 @@ class MaxPoolDnnLowPOp final : public ConvPoolDNNLowPOpBase<T, MaxPoolFp32Op> {
         }
         break;
       case 2:
+        if (is_same<T, uint8_t>::value) {
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-        for (int n = 0; n < X.dim32(0); ++n) {
-          const T* Xdata_temp = Xdata + n * height * width * channels;
-          T* Ydata_temp = Ydata + n * pooled_height * pooled_width * channels;
-          for (int ph = 0; ph < pooled_height; ++ph) {
-            int hstart = ph * stride_h() - pad_t();
-            int hend = min(hstart + kernel_h(), height);
-            hstart = max(hstart, 0);
-            for (int pw = 0; pw < pooled_width; ++pw) {
-              int wstart = pw * stride_w() - pad_l();
-              int wend = min(wstart + kernel_w(), width);
-              wstart = max(wstart, 0);
-              int size = (hend - hstart) * (wend - wstart);
-              for (int c = 0; c < channels; ++c) {
-                T Yh = MaxPool<T>::initialize();
-                const int pool_idx = (ph * pooled_width + pw) * channels + c;
-                for (int h = hstart; h < hend; ++h) {
-                  for (int w = wstart; w < wend; ++w) {
-                    const int input_idx = (h * width + w) * channels + c;
-                    MaxPool<T>::process(Xdata_temp[input_idx], Yh);
+          for (int n = 0; n < X.dim32(0); ++n) {
+            max_pool_avx2(
+                reinterpret_cast<const uint8_t*>(Xdata),
+                n,
+                height,
+                width,
+                channels,
+                pooled_height,
+                pooled_width,
+                kernel_h(),
+                kernel_w(),
+                stride_h(),
+                stride_w(),
+                pad_t(),
+                pad_l(),
+                reinterpret_cast<uint8_t*>(Ydata));
+          }
+        } else {
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+          for (int n = 0; n < X.dim32(0); ++n) {
+            const T* Xdata_temp = Xdata + n * height * width * channels;
+            T* Ydata_temp = Ydata + n * pooled_height * pooled_width * channels;
+            for (int ph = 0; ph < pooled_height; ++ph) {
+              int hstart = ph * stride_h() - pad_t();
+              int hend = min(hstart + kernel_h(), height);
+              hstart = max(hstart, 0);
+              for (int pw = 0; pw < pooled_width; ++pw) {
+                int wstart = pw * stride_w() - pad_l();
+                int wend = min(wstart + kernel_w(), width);
+                wstart = max(wstart, 0);
+                int size = (hend - hstart) * (wend - wstart);
+                for (int c = 0; c < channels; ++c) {
+                  T Yh = MaxPool<T>::initialize();
+                  const int pool_idx = (ph * pooled_width + pw) * channels + c;
+                  for (int h = hstart; h < hend; ++h) {
+                    for (int w = wstart; w < wend; ++w) {
+                      const int input_idx = (h * width + w) * channels + c;
+                      MaxPool<T>::process(Xdata_temp[input_idx], Yh);
+                    }
                   }
+                  MaxPool<T>::finalize(size, Yh);
+                  Ydata_temp[pool_idx] = Yh;
                 }
-                MaxPool<T>::finalize(size, Yh);
-                Ydata_temp[pool_idx] = Yh;
               }
             }
           }
