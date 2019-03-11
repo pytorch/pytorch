@@ -348,9 +348,10 @@ void THBlas_(gemm)(char transa, char transb, int64_t m, int64_t n, int64_t k, sc
   }
 #endif
   {
-    int64_t i, j, l;
+
     if(!transa_ && !transb_)
     {
+      int64_t i, j, l;
       scalar_t *a_ = a;
       for(i = 0; i < m; i++)
       {
@@ -371,6 +372,7 @@ void THBlas_(gemm)(char transa, char transb, int64_t m, int64_t n, int64_t k, sc
     }
     else if(transa_ && !transb_)
     {
+      int64_t i, j, l;
       scalar_t *a_ = a;
       for(i = 0; i < m; i++)
       {
@@ -391,6 +393,7 @@ void THBlas_(gemm)(char transa, char transb, int64_t m, int64_t n, int64_t k, sc
     }
     else if(!transa_ && transb_)
     {
+      int64_t i, j, l;
       scalar_t *a_ = a;
       for(i = 0; i < m; i++)
       {
@@ -411,6 +414,7 @@ void THBlas_(gemm)(char transa, char transb, int64_t m, int64_t n, int64_t k, sc
     }
     else
     {
+      int64_t i, j, l;
       scalar_t *a_ = a;
       for(i = 0; i < m; i++)
       {
