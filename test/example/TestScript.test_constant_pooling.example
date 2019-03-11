@@ -1,0 +1,29 @@
+graph(%cond : Tensor):
+  %44 : int[] = prim::Constant[value=[1]]()
+  %43 : int[] = prim::Constant[value=[0]]()
+  %42 : int = prim::Constant[value=3]()
+  %39 : Float(2) = prim::Constant[value= 4  4 [ Variable[CPUFloatType]{2} ]]()
+  %38 : Float(2) = prim::Constant[value= 1  1 [ Variable[CPUFloatType]{2} ]]()
+  %c.1 : int = prim::Constant[value=0]()
+  %a : int = prim::Constant[value=1]()
+  %d : string = prim::Constant[value="abc"]()
+  %e : string = prim::Constant[value="bcd"]()
+  %9 : int = prim::Constant[value=6]()
+  %11 : Device = prim::Constant[value="cpu"]()
+  %19 : bool = prim::Bool(%cond)
+  %c : int, %y : Tensor = prim::If(%19)
+    block0():
+      -> (%42, %39)
+    block1():
+      %y.2 : Tensor = aten::rand(%43, %9, %c.1, %11)
+      %26 : bool = prim::Bool(%cond)
+      %y.4 : Tensor = prim::If(%26)
+        block0():
+          %y.3 : Tensor = aten::rand(%44, %9, %c.1, %11)
+          -> (%y.3)
+        block1():
+          -> (%y.2)
+       = prim::Print(%d, %e, %d, %38, %y.4, %38)
+      -> (%c.1, %y.4)
+  %36 : (int, int, int, Tensor, Tensor) = prim::TupleConstruct(%a, %42, %c, %38, %y)
+  return (%36)

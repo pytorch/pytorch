@@ -213,6 +213,18 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
+         "prim::Float(Scalar a) -> float",
+         [](Stack& stack) {
+           IValue scalar;
+           pop(stack, scalar);
+           if (scalar.isDouble()) {
+             push(stack, scalar);
+           } else {
+             push(stack, static_cast<double>(scalar.toInt()));
+           }
+           return 0;
+         }),
+     Operator(
          "prim::Float(int a) -> float",
          [](Stack& stack) {
            int64_t i;
@@ -242,6 +254,18 @@ RegisterOperators reg(
            bool b;
            pop(stack, b);
            push(stack, (int)b);
+           return 0;
+         }),
+     Operator(
+         "prim::Int(Scalar a) -> float",
+         [](Stack& stack) {
+           IValue scalar;
+           pop(stack, scalar);
+           if (scalar.isInt()) {
+             push(stack, scalar);
+           } else {
+             push(stack, static_cast<int64_t>(scalar.toDouble()));
+           }
            return 0;
          }),
      Operator(
@@ -525,23 +549,23 @@ RegisterOperators reg(
              return 0;
            };
          }),
-    Operator(
-        prim::AutogradAnyNonZero,
-        [](const Node* node) {
-          size_t num_inputs = node->inputs().size();
-          return [=](Stack& stack) {
-            bool result = false;
-            for (const IValue& t : last(stack, num_inputs)) {
-              if (t.toTensor().defined()) {
-                result = true;
-                break;
-              }
-            }
-            drop(stack, num_inputs);
-            stack.emplace_back(result);
-            return 0;
-          };
-        }),
+     Operator(
+         prim::AutogradAnyNonZero,
+         [](const Node* node) {
+           size_t num_inputs = node->inputs().size();
+           return [=](Stack& stack) {
+             bool result = false;
+             for (const IValue& t : last(stack, num_inputs)) {
+               if (t.toTensor().defined()) {
+                 result = true;
+                 break;
+               }
+             }
+             drop(stack, num_inputs);
+             stack.emplace_back(result);
+             return 0;
+           };
+         }),
      Operator(
          prim::AutogradAdd,
          [](const Node* node) {
@@ -1976,7 +2000,6 @@ static auto reg4 =
             &leaky_relu)
         .op("_test::cat(Tensor[] inputs) -> Tensor", &cat)
         .op("_test::get_first", &get_first);
-
 } // namespace
 } // namespace jit
 } // namespace torch
