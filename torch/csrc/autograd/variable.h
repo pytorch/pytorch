@@ -234,7 +234,7 @@ struct TORCH_API Variable : public at::Tensor {
   /// It is rarely necessary to call this; it's used, for example, when
   /// a non-sparse gradient gets added to a sparse gradient, requiring
   /// the type of the gradient `Variable` to become non-sparse.
-  void set_data(at::Tensor new_data);
+  void set_data(const at::Tensor &new_data);
 
   /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
   /// `Variable`.
@@ -426,7 +426,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   const at::Storage& storage() const override;
   void* slow_data() const override;
 
-  void set_data(at::Tensor new_data);
+  void set_data(const at::Tensor &new_data);
 
   /// Reset all expensive fields to free up resources
   void release_resources() override;
@@ -675,8 +675,8 @@ inline Variable Variable::detach() const {
   return var;
 }
 
-inline void Variable::set_data(at::Tensor new_data) {
-  get()->set_data(std::move(new_data));
+inline void Variable::set_data(const at::Tensor &new_data) {
+  get()->set_data(new_data);
 }
 
 inline void Variable::set_gradient_edge(Edge edge) noexcept {
