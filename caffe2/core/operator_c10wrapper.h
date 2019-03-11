@@ -30,6 +30,7 @@ class C10OperatorWrapper final : public Operator<Context> {
         op_(op),
         kernel_(at::nullopt),
         has_preallocated_outputs_(
+            op_.schema().arguments().size() != 0 &&
             op_.schema().arguments().back().name() ==
             detail::PREALLOCATED_OUTPUT_ARGNAME) {
     AT_ASSERT(
@@ -42,7 +43,7 @@ class C10OperatorWrapper final : public Operator<Context> {
         operator_def.input_size() + (has_preallocated_outputs_ ? 1 : 0) <=
         op_.schema()
             .arguments()
-            .size()); // '<=' because there might be caffe2 arguments
+            .size()); // '<=' because there might be caffe2 nontensor arguments
   }
 
   bool RunOnDevice() override {
@@ -195,6 +196,11 @@ class C10OperatorWrapper final : public Operator<Context> {
 
   c10::OperatorHandle op_;
   c10::optional<OpKernel> kernel_;
+
+  // has_preallocated_outputs_ is true iff the operator schema has a last
+  // argument that is a TensorList and has a name equal to with the name equal to
+  // detail::PREALLOCATED_OUTPUT_ARGNAME. This argument is then used to pass in
+  // preallocated output tensors to the caffe2 operator.
   bool has_preallocated_outputs_;
 
   // this is stored as a member here to avoid having to re-allocate a stack
