@@ -224,7 +224,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
 
   /**
-     TODO: add comments
+   * Construct a tensor with an opaque layout given `opaque_handle` and
+   * metadata `type_id`, `data_type` and `sizes` for dims.
    */
   TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable,
              c10::intrusive_ptr<c10::intrusive_ptr_target> opaque_handle,
@@ -578,7 +579,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   template <typename T>
   inline T * data() const {
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
-    AT_ASSERT(!opaque_handle_);
     AT_ASSERTM(
         storage_initialized(),
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
@@ -610,7 +610,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline void* data() const {
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
-    AT_ASSERT(!opaque_handle_);
     AT_ASSERT(storage_initialized());
     AT_ASSERT(dtype_initialized());
     return static_cast<void*>(
@@ -636,7 +635,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T * unsafe_data() const {
-    AT_ASSERT(!opaque_handle_);
     return storage_.unsafe_data<T>() + storage_offset_;
   }
 
@@ -938,7 +936,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * This op is auto-asynchronous if the underlying device (CUDA) supports it.
    */
   void Extend(int64_t num, float growthPct) {
-    AT_ASSERT(!opaque_handle_);
+    AT_ASSERTM(!opaque_handle_, "Opaque tensor does not support Extend");
     AT_ASSERT(sizes_.size() >= 1u);
     AT_ASSERTM(num >= 0, "`num` must be non-negative for Extend");
     AT_ASSERTM(
@@ -1004,7 +1002,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <class T>
   void ReserveSpace(const T& outer_dim) {
-    AT_ASSERT(!opaque_handle_);
+    AT_ASSERTM(!opaque_handle_, "Opaque tensor does not support ReserveSpace");
     AT_ASSERTM(
         is_contiguous_,
         "Right now ReserveSpace is only supported for contiguous Tensor.");
@@ -1050,7 +1048,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename... Ts>
   void Resize(Ts... dim_source) {
-    AT_ASSERT(!opaque_handle_);
+    AT_ASSERTM(!opaque_handle_, "Opaque tensor does not support Resize");
     bool size_changed = SetDims(dim_source...);
     if (size_changed) {
       // If needed, we will free the data. the next mutable_data() call
@@ -1080,7 +1078,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * This requires the total size of the tensor to remains constant.
    */
   inline void Reshape(const std::vector<int64_t>& dims) {
-    AT_ASSERT(!opaque_handle_);
+    AT_ASSERTM(!opaque_handle_, "Opaque tensor does not support Reshape");
     AT_ASSERTM(
         is_contiguous_,
         "Right now Reshape is only supported for contiguous Tensor.");
@@ -1109,7 +1107,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * allocation.
    */
   inline void FreeMemory() {
-    AT_ASSERT(!opaque_handle_);
+    AT_ASSERTM(!opaque_handle_, "Opaque tensor does not support FreeMemory");
     // We'll detach from the old Storage and create a new one
     storage_ = Storage::create_legacy(storage_.device(), data_type_);
     storage_offset_ = 0;
@@ -1162,7 +1160,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       DataPtr&& data_ptr,
       const caffe2::TypeMeta& data_type,
       size_t capacity) {
-    AT_ASSERT(!opaque_handle_);
+    AT_ASSERTM(!opaque_handle_, "Opaque tensor does not support ShareExternalPointer");
     AT_ASSERTM(
         data_type.id() != caffe2::TypeIdentifier::uninitialized(),
         "To share with a raw external pointer you need to pass in an "
@@ -1201,7 +1199,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * and a new storage will be created.
    */
   inline void* raw_mutable_data(const caffe2::TypeMeta& meta) {
-    AT_ASSERT(!opaque_handle_);
+    AT_ASSERTM(!opaque_handle_, "Opaque tensor does not support raw_mutable_data");
     // For 0-size tensors it's fine to return any pointer (including nullptr)
     if (data_type_ == meta && storage_initialized()) {
       return static_cast<void*>(static_cast<char*>(storage_.data()) + storage_offset_ * meta.itemsize());
@@ -1263,7 +1261,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* mutable_data() {
-    AT_ASSERT(!opaque_handle_);
+    AT_ASSERTM(!opaque_handle_, "Opaque tensor does not support mutable_data");
     if (storage_initialized() && storage_.IsType<T>()) {
       return static_cast<T*>(storage_.data()) + storage_offset_;
     }
@@ -1313,7 +1311,7 @@ private:
       typename T,
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
   bool SetDimsTemplate(ArrayRef<T> src) {
-    AT_ASSERT(!opaque_handle_);
+    AT_ASSERTM(!opaque_handle_, "Opaque tensor does not support SetDims");
     auto old_numel = numel_;
     auto old_dim = sizes_.size();
     sizes_.resize(src.size());
@@ -1360,7 +1358,6 @@ private:
   }
 
   inline void update_to_contiguous_strides(size_t old_dim) {
-    AT_ASSERT(!opaque_handle_);
     strides_.resize(sizes_.size(), 0);
     if (dim() > 0) {
       int last_idx = dim() - 1;
@@ -1451,7 +1448,15 @@ protected:
   // and its subclasses to find which fields are copied by value.
   bool allow_tensor_metadata_change_ = true;
 
-  // TODO: add comments here
+  // An opaque handle `opaque_handle_` allows customized data layout other than the default
+  // strided layout. A valid opaque handle manages the tensor storage by itself so the default
+  // `storage_` is never initialized and getting data pointer from the default `storage_`
+  // would fail. Metadata like device, dtype and dims can be queried like a normal tensor with
+  // strided layout but cannot be changed. Call to `is_contiguous()` always returns false
+  // since "contiguous" is not well-defined for a customized layout.
+  //
+  // Following invariant holds when `opaque_handle_` is valid:
+  //     `!is_contiguous() && !storage_initialized() && !allow_tensor_metadata_change()`
   c10::intrusive_ptr<c10::intrusive_ptr_target> opaque_handle_;
 
   // we decide to keep reserved_ and it will

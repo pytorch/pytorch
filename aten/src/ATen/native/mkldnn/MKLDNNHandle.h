@@ -19,7 +19,6 @@ public:
   static Tensor tensor_from_handle(c10::intrusive_ptr<MKLDNNHandle> handle,
                                    const caffe2::TypeMeta& dtype) {
     auto dims = handle->get_ideep_tensor().get_dims();
-    // TODO: Is it correct? Setting is_variable to false?
     // NOTE: int32_t dims from ideep::tensor but sizes_ needs int64_t
     return detail::make_tensor<TensorImpl>(
       MkldnnCPUTensorId(), dtype, false,

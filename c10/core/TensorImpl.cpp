@@ -141,7 +141,6 @@ bool TensorImpl::has_storage() const {
 }
 
 const Storage& TensorImpl::storage() const {
-  AT_ASSERT(!opaque_handle_);
   return storage_;
 }
 
