@@ -128,21 +128,19 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
 
 auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
 
-  return ((input.type().scalarType() == at::kFloat) || (input.type().scalarType() == at::kHalf))
+  return ((input.scalar_type() == at::kFloat) || (input.scalar_type() == at::kHalf))
          && detail::getCUDAHooks().compiledWithMIOpen()
          && input.is_cuda()
          && input.dim() <= MIOPEN_DIM_MAX
          && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
          && !transposed
-         && (dilation.at(0) == dilation.at(1)) //MIOpen currently does not support assymetric dilation values.
-         && (stride.at(0) == stride.at(1)) //Line 549 & 635 (swapping stride and dilation values) leads to assymetric dilation values.
          ;
 }
 
 auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 #if AT_MKLDNN_ENABLED()
   return input.type().backend() == at::Backend::CPU &&
-         input.type().scalarType() == kFloat && // only on CPU Float Tensors
+         input.scalar_type() == kFloat && // only on CPU Float Tensors
          !is_dilated() && // doesn't support dilation
          !transposed && // or transposed tensors
          input.ndimension() == 4; // must be in NCHW format
@@ -153,12 +151,12 @@ auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 #if AT_NNPACK_ENABLED()
   return at::_nnpack_available() &&
          input.type().backend() == at::Backend::CPU &&
-         input.type().scalarType() == kFloat && // only on CPU Float Tensors
+         input.scalar_type() == kFloat && // only on CPU Float Tensors
          !is_strided() && // doesn't support strides
          !is_dilated() && // or dilation
          !transposed &&   // or transposed tensors
          input.ndimension() == 4 // must be in NCHW format
-#if !C10_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+#if !defined(C10_MOBILE) && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
          && input.size(0) >= 16 // ensure large enough batch size to ensure perf, tuneable
 #endif
      ;
@@ -356,7 +354,14 @@ at::Tensor _convolution(
       auto padding = params.padding;
       auto dilation = params.dilation;
 
-      output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
+      if(params.use_miopen(input)) {
+        output = at::miopen_depthwise_convolution(
+          input, weight, bias,
+          params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+      } else {
+        output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
+      }
+
   } else if (params.use_cudnn(input)) {
     AT_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),

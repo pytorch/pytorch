@@ -10,8 +10,8 @@ namespace at { namespace native {
 
 namespace {
 
-inline cudnnDataType_t getDataType(const at::Type& t) {
-  auto scalar_type = t.scalarType();
+inline cudnnDataType_t getDataType(const at::Tensor& t) {
+  auto scalar_type = t.scalar_type();
   if (scalar_type == at::kFloat) {
     return CUDNN_DATA_FLOAT;
   } else if (scalar_type == at::kHalf) {
@@ -20,10 +20,6 @@ inline cudnnDataType_t getDataType(const at::Type& t) {
     return CUDNN_DATA_DOUBLE;
   }
   throw std::runtime_error("TensorDescriptor only supports double, float and half tensors");
-}
-
-inline cudnnDataType_t getDataType(const at::Tensor& t) {
-  return getDataType(t.type());
 }
 
 } // anonymous namespace

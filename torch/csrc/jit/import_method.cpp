@@ -19,11 +19,14 @@ struct ModuleAccessorValue : public script::SugaredValue {
       const std::string& field) override {
     if (script::NamedModule* v = module->find_module(field)) {
       return std::make_shared<ModuleAccessorValue>(v->module);
-    } else if (script::NamedParameter* v = module->find_parameter(field)) {
+    } else if (script::NamedIValue* v = module->find_parameter(field)) {
+      return std::make_shared<script::SimpleValue>(
+          m.get_or_add_parameter(v->slot()));
+    } else if (script::NamedIValue* v = module->find_buffer(field)) {
       return std::make_shared<script::SimpleValue>(
           m.get_or_add_parameter(v->slot()));
     } else if (script::Method* m = module->find_method(field)) {
-      return std::make_shared<script::MethodValue>(module, *m);
+      return std::make_shared<script::MethodValue>(shared_from_this(), *m);
     } else {
       throw script::ErrorReport(loc) << "unknown attr: " << field;
     }
@@ -81,7 +84,7 @@ struct ConstantTableValue : public script::SugaredValue {
                                      << " is out of bounds (constant table has "
                                      << constants_.size() << " entries).";
     }
-    Value* value = m.graph()->insertConstant(constants_[offset], loc);
+    Value* value = m.graph()->insertConstant(constants_[offset], nullptr, loc);
     return std::make_shared<script::SimpleValue>(value);
   }
 

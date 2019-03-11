@@ -637,7 +637,7 @@ std::shared_ptr<Graph> Graph::copy() {
 }
 
 bool Value::mustBeNone() const {
-  return node_->kind() == prim::None;
+  return node_->mustBeNone();
 }
 
 std::string Value::uniqueNameBase() const {
@@ -653,10 +653,23 @@ std::string Value::uniqueNameBase() const {
   return name_base;
 }
 
+bool Value::isValidName(const std::string& name) {
+  // Empty strings are legal
+  if (!name.size()) {
+    return true;
+  }
+
+  // Numbers are not legal
+  if (name.find_first_not_of("0123456789") == std::string::npos) {
+    return false;
+  }
+
+  return true;
+}
+
 Value* Value::setUniqueName(const std::string& name) {
-  if (name.size() > 0 &&
-      name.find_first_not_of("0123456789") == std::string::npos) {
-    throw std::runtime_error("names may not be integers: " + name);
+  if (!isValidName(name)) {
+    throw std::runtime_error("Invalid name: '" + name + "'");
   }
 
   auto& names = node()->owningGraph()->unique_names_;
@@ -755,6 +768,12 @@ bool Node::matches(
   return true;
 }
 
+bool Node::mustBeNone() const {
+  return kind_ == prim::Constant && !this->hasAttributes() &&
+      (output()->type()->cast<OptionalType>() ||
+       output()->type() == NoneType::get());
+}
+
 void Node::dump() const {
   std::cout << *this << "\n";
 }
@@ -817,6 +836,7 @@ bool Node::hasSideEffects() const {
     case prim::IgnoredPythonOp:
     case prim::Print:
     case prim::RaiseException:
+    case prim::SetAttr:
     case aten::warn:
       return true;
   }
@@ -1174,12 +1194,12 @@ Node* Graph::create(
   return n;
 }
 
-Node* Graph::createUndefined() {
-  return create(prim::Undefined);
+Node* Graph::createAutogradZero() {
+  return create(prim::AutogradZero);
 }
 
 Node* Graph::createNone(TypePtr typ) {
-  Node* n = create(prim::None);
+  Node* n = create(prim::Constant);
   n->output()->setType(OptionalType::create(std::move(typ)));
   return n;
 }
@@ -1289,6 +1309,32 @@ Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
   return result;
 }
 
+Node* Graph::createObject(const ClassTypePtr& type) {
+  auto result = create(prim::CreateObject);
+  result->output()->setType(type);
+  return result;
+}
+
+Node* Graph::createSetAttr(
+    Value* obj,
+    const std::string& field,
+    Value* newValue) {
+  auto n = create(prim::SetAttr, {obj, newValue}, /*num_outputs=*/0);
+  n->s_(attr::name, field);
+  return n;
+}
+
+Node* Graph::createGetAttr(Value* obj, const std::string& field) {
+  const auto classType = obj->type()->expect<ClassType>();
+
+  auto n = create(prim::GetAttr, {obj}, /*num_outputs=*/1);
+  n->s_(attr::name, field);
+
+  const auto outputType = classType->getAttribute(field);
+  n->output()->setType(outputType);
+  return n;
+}
+
 Node* Graph::createClone(
     Node* n,
     const std::function<Value*(Value*)>& value_map,
@@ -1312,10 +1358,11 @@ Node* Graph::createClone(
 
 Value* Graph::insertConstant(
     IValue val,
+    const TypePtr& result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   return jit::insertConstant(
-      *this, std::move(val), std::move(loc), std::move(scope));
+      *this, std::move(val), result_type, std::move(loc), std::move(scope));
 }
 
 std::string Graph::toString() const {
