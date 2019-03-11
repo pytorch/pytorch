@@ -259,7 +259,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// This method allows creating the `NamedSubmodule` from braced-init-list, e.g.
   /// `push_back({"linear", Linear(3, 4)})`
   void push_back(NamedSubmodule named_module) {
-    push_back(std::move(named_module.name()), std::move(named_module.module()));
+    push_back(named_module.name(), std::move(named_module.module()));
   }
 
   /// Adds an `OrderedDict` of named `AnyModule`s to the `Sequential` container.
@@ -403,7 +403,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
 inline torch::OrderedDict<std::string, AnyModule> named_submodules(std::initializer_list<SequentialImpl::NamedSubmodule> named_modules) {
   torch::OrderedDict<std::string, AnyModule> dict;
   for (auto named_module : named_modules) {
-    dict.insert(std::move(named_module.name()), std::move(named_module.module()));
+    dict.insert(named_module.name(), std::move(named_module.module()));
   }
   return dict;
 }
