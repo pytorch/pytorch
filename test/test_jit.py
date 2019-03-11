@@ -2340,7 +2340,7 @@ class TestJit(JitTestCase):
         lstm_cell = torch.jit.script(LSTMCellS)
 
         def lstm(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
-            for i in range(x.size(0)):  
+            for i in range(x.size(0)):
                 hx, cx = lstm_cell(x[i], hx, cx, w_ih, w_hh, b_ih, b_hh)
             return hx
 
@@ -2354,24 +2354,24 @@ class TestJit(JitTestCase):
         tested_blocks = False
         for node in nodes:
             for output in [o for o in node.outputs()]:
-                self.assertTrue(hasattr(output,'type'))
+                self.assertTrue(hasattr(output, 'type'))
                 self.assertTrue(output.type() is not None)
             for input in [i for i in node.inputs()]:
-                self.assertTrue(hasattr(input,'type'))
+                self.assertTrue(hasattr(input, 'type'))
                 self.assertTrue(input.type() is not None)
             for block in [b for b in node.blocks()]:
                 tested_blocks = True
-                self.assertTrue(hasattr(block,'inputs'))
-                self.assertTrue(hasattr(block,'outputs'))
+                self.assertTrue(hasattr(block, 'inputs'))
+                self.assertTrue(hasattr(block, 'outputs'))
                 for output in [o for o in block.outputs()]:
-                    self.assertTrue(hasattr(output,'type'))
+                    self.assertTrue(hasattr(output, 'type'))
                     self.assertTrue(output.type() is not None)
                 for input in [i for i in block.inputs()]:
-                    self.assertTrue(hasattr(input,'type'))
+                    self.assertTrue(hasattr(input, 'type'))
                     self.assertTrue(input.type() is not None)
-                self.assertTrue(hasattr(block,'returnNode'))
+                self.assertTrue(hasattr(block, 'returnNode'))
                 self.assertTrue(type(block.returnNode()) == torch._C.Node)
-                self.assertTrue(hasattr(block,'paramNode'))
+                self.assertTrue(hasattr(block, 'paramNode'))
                 self.assertTrue(type(block.paramNode()) == torch._C.Node)
         self.assertTrue(tested_blocks)
 
