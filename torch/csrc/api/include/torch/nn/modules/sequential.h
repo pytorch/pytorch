@@ -20,12 +20,27 @@
 namespace torch {
 namespace nn {
 
+// class SequentialOrderedDictItem {
+//  public:
+//   /// Constructs a new item.
+//   template <typename ModuleType>
+//   SequentialOrderedDictItem(std::string name, ModuleType module) {
+//     if (torch::detail::is_module<ModuleType>::value) {
+//       std::cout << "we are here0! this is Module type" << "\n";
+//     } else {
+//       std::cout << "we are here1! this is not Module type" << "\n";
+//     }
+//     // yf225 TODO: check shared_ptr type and ModuleHolder type as well!
+//     // yf225 TODO: How do we save the module type appropriately? Should we save AnyModule?
+//   }
+// };
+
+template <typename Key, typename Value>
 class SequentialOrderedDictItem {
  public:
   /// Constructs a new item.
-  template <typename ModuleType>
-  SequentialOrderedDictItem(std::string, ModuleType module) {
-    if (torch::detail::is_module<ModuleType>::value) {
+  SequentialOrderedDictItem(Key key, Value value) {
+    if (torch::detail::is_module<Value>::value) {
       std::cout << "we are here0! this is Module type" << "\n";
     } else {
       std::cout << "we are here1! this is not Module type" << "\n";
@@ -35,16 +50,16 @@ class SequentialOrderedDictItem {
   }
 };
 
-class SequentialOrderedDict {
- public:
-  /// Constructs a new `SequentialOrderedDict` and pre-populates it with the given
-  /// `SequentialOrderedDictItem`s.
-  SequentialOrderedDict(std::initializer_list<SequentialOrderedDictItem> initializer_list) {
-    for (auto& item : initializer_list) {
-      std::cout << "we are here3!" << "\n";
-    }
-  }
-};
+// class SequentialOrderedDict {
+//  public:
+//   /// Constructs a new `SequentialOrderedDict` and pre-populates it with the given
+//   /// `SequentialOrderedDictItem`s.
+//   SequentialOrderedDict(std::initializer_list<SequentialOrderedDictItem> initializer_list) {
+//     for (auto& item : initializer_list) {
+//       std::cout << "we are here3!" << "\n";
+//     }
+//   }
+// };
 
 /// A list of `Module`s that acts as a `Module` itself.
 ///
@@ -148,6 +163,21 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     stream << "torch::nn::Sequential";
   }
 
+  // static torch::OrderedDict<std::string, int> make_ordered_dict(std::initializer_list<SequentialOrderedDictItem> initializer_list) {
+  //   for (auto& item : initializer_list) {
+  //     std::cout << "we are here3!" << "\n";
+  //   }
+  //   return {{std::string("hi"), 0}};
+  // }
+
+  template <typename StrType, typename M>
+  static torch::OrderedDict<StrType, M> make_ordered_dict(std::initializer_list<SequentialOrderedDictItem<StrType, M>> initializer_list) {
+    for (auto& item : initializer_list) {
+      std::cout << "we are here3!" << "\n";
+    }
+    return {{std::string("hi"), 0}};
+  }
+
   /// Feeds `inputs` to the first module and then chains outputs to inputs,
   /// returning the last output.
   ///
@@ -235,7 +265,11 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     push_back(module_holder.ptr());
   }
 
-  void push_back(SequentialOrderedDict&& ordered_dict) {
+  // void push_back(torch::OrderedDict&& ordered_dict) {
+  //   std::cout << "we are here0!" << "\n";
+  // }
+
+  void push_back(torch::OrderedDict<std::string, int>&& ordered_dict) {
     std::cout << "we are here0!" << "\n";
   }
 
