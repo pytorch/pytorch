@@ -10605,10 +10605,10 @@ a")
         def fn(x=None):
             # type: (Optional[Tuple[int, int]]) -> Tuple[int, int]
             if x is None:
-                x = (1, 2)
+                new_x = (1, 2)
             else:
-                x = torch.jit._unwrap_optional(x)
-            return x
+                new_x = torch.jit._unwrap_optional(x)
+            return new_x
 
         self.checkScript(fn, ((3, 4),))
         self.checkScript(fn, ())
