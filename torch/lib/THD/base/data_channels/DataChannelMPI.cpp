@@ -169,10 +169,10 @@ void DataChannelMPI::allGather(
   MPI_Allgather(
       contig_input.data_ptr(),
       contig_input.numel(),
-      mpi_datatype.at(contig_input.type().scalarType()),
+      mpi_datatype.at(contig_input.scalar_type()),
       recv_buffer.data_ptr(),
       contig_input.numel(),
-      mpi_datatype.at(recv_buffer.type().scalarType()),
+      mpi_datatype.at(recv_buffer.scalar_type()),
       comm);
 
   for (size_t i = 0; i < output.size(); ++i)
@@ -213,10 +213,10 @@ void DataChannelMPI::gather(
   MPI_Gather(
       contig_input.data_ptr(),
       input.numel(),
-      mpi_datatype.at(input.type().scalarType()),
+      mpi_datatype.at(input.scalar_type()),
       recvbuf,
       input.numel(),
-      mpi_datatype.at(input.type().scalarType()),
+      mpi_datatype.at(input.scalar_type()),
       group_dst_rank,
       comm);
 
@@ -263,10 +263,10 @@ void DataChannelMPI::scatter(
   MPI_Scatter(
       sendbuf,
       output.numel(),
-      mpi_datatype.at(output.type().scalarType()),
+      mpi_datatype.at(output.scalar_type()),
       output.data_ptr(),
       output.numel(),
-      mpi_datatype.at(output.type().scalarType()),
+      mpi_datatype.at(output.scalar_type()),
       group_src_rank,
       comm);
 }
@@ -286,7 +286,7 @@ void DataChannelMPI::allReduce(
       MPI_IN_PLACE,
       data.data_ptr(),
       data.numel(),
-      mpi_datatype.at(data.type().scalarType()),
+      mpi_datatype.at(data.scalar_type()),
       mpi_op.at(operation),
       comm);
 }
@@ -311,7 +311,7 @@ void DataChannelMPI::reduce(
       sendbuf,
       recvbuf,
       data.numel(),
-      mpi_datatype.at(data.type().scalarType()),
+      mpi_datatype.at(data.scalar_type()),
       mpi_op.at(operation),
       group_dst_rank,
       comm);
@@ -333,7 +333,7 @@ void DataChannelMPI::broadcast(
   MPI_Bcast(
       data.data_ptr(),
       data.numel(),
-      mpi_datatype.at(data.type().scalarType()),
+      mpi_datatype.at(data.scalar_type()),
       group_src_rank,
       comm);
 }
@@ -355,7 +355,7 @@ void DataChannelMPI::send(at::Tensor& data, rank_type dst_rank) {
   MPI_Send(
       data.data_ptr(),
       data.numel(),
-      mpi_datatype.at(data.type().scalarType()),
+      mpi_datatype.at(data.scalar_type()),
       dst_rank,
       0,
       MPI_COMM_WORLD);
@@ -380,7 +380,7 @@ rank_type DataChannelMPI::receive(at::Tensor& data) {
   MPI_Recv(
       data.data_ptr(),
       data.numel(),
-      mpi_datatype.at(data.type().scalarType()),
+      mpi_datatype.at(data.scalar_type()),
       MPI_ANY_SOURCE,
       0,
       MPI_COMM_WORLD,
@@ -395,7 +395,7 @@ void DataChannelMPI::receive(at::Tensor& data, rank_type src_rank) {
   MPI_Recv(
       data.data_ptr(),
       data.numel(),
-      mpi_datatype.at(data.type().scalarType()),
+      mpi_datatype.at(data.scalar_type()),
       src_rank,
       0,
       MPI_COMM_WORLD,
@@ -422,7 +422,7 @@ DataChannelMPI::RequestMPI* DataChannelMPI::isend(
   MPI_Isend(
       data.data_ptr(),
       data.numel(),
-      mpi_datatype.at(data.type().scalarType()),
+      mpi_datatype.at(data.scalar_type()),
       dst_rank,
       0,
       MPI_COMM_WORLD,
@@ -443,7 +443,7 @@ DataChannelMPI::RequestMPI* DataChannelMPI::ireceive(
   MPI_Irecv(
       data.data_ptr(),
       data.numel(),
-      mpi_datatype.at(data.type().scalarType()),
+      mpi_datatype.at(data.scalar_type()),
       src_rank,
       0,
       MPI_COMM_WORLD,

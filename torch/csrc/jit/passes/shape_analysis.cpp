@@ -392,7 +392,7 @@ class ShapePropagator {
   bool mayAliasResizedSet(at::ArrayRef<Value*> vs) {
     bool in_resize = false;
     for (auto v : vs) {
-      if (aliasDb_.mayAlias({v}, resized_alias_set)) {
+      if (aliasDb_.mayAlias(ValueSet{v}, resized_alias_set)) {
         setUnshapedType(v);
         in_resize = true;
       }
@@ -499,7 +499,7 @@ class ShapePropagator {
         }
         return;
       }
-      case prim::Undefined: {
+      case prim::AutogradZero: {
         setUnshapedType(node);
         return;
       }
@@ -719,6 +719,7 @@ class ShapePropagator {
             "aten::fmod(Tensor self, Tensor other) -> Tensor",
             "aten::remainder(Tensor self, Tensor other) -> Tensor",
             "aten::lerp(Tensor self, Tensor end, Scalar weight) -> Tensor",
+            "aten::lerp(Tensor self, Tensor end, Tensor weight) -> Tensor",
             "aten::max(Tensor self, Tensor other) -> Tensor",
             "aten::min(Tensor self, Tensor other) -> Tensor",
             "aten::__and__(Tensor self, Tensor other) -> Tensor",

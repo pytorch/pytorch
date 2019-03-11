@@ -22,7 +22,7 @@ using namespace at;
 #define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)            \
   ASSERT_EQ(tensor.device().type(), Device((device_), (index_)).type());   \
   ASSERT_EQ(tensor.device().index(), Device((device_), (index_)).index()); \
-  ASSERT_EQ(tensor.type().scalarType(), (type_));                          \
+  ASSERT_EQ(tensor.scalar_type(), (type_));                                \
   ASSERT_TRUE(tensor.type().layout() == (layout_))
 
 TEST(TensorOptionsTest, DefaultsToTheRightValues) {

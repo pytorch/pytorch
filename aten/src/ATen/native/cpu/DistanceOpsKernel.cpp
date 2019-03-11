@@ -270,19 +270,19 @@ struct PDist {
 };
 
 void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, const double p) {
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "pdist", [&] {
     PDist<scalar_t>::apply(result, self, p);
   });
 }
 
 static void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "pdist_backward", [&] {
     PDist<scalar_t>::apply_backward(result, grad, self, p, dist);
   });
 }
 
 static void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, const double p) {
-  AT_DISPATCH_FLOATING_TYPES(result.type(), "cdist", [&] {
+  AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cdist", [&] {
     PDist<scalar_t>::apply_cdist(result, x1, x2, p);
   });
 }

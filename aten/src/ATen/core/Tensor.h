@@ -625,6 +625,7 @@ class CAFFE2_API Tensor {
   Tensor & pow_(Scalar exponent);
   Tensor & pow_(const Tensor & exponent);
   Tensor & lerp_(const Tensor & end, Scalar weight);
+  Tensor & lerp_(const Tensor & end, const Tensor & weight);
   Tensor & sign_();
   Tensor & fmod_(Scalar other);
   Tensor & fmod_(const Tensor & other);
@@ -694,6 +695,7 @@ class CAFFE2_API Tensor {
   Tensor neg() const;
   Tensor atan2(const Tensor & other) const;
   Tensor lerp(const Tensor & end, Scalar weight) const;
+  Tensor lerp(const Tensor & end, const Tensor & weight) const;
   Tensor histc(int64_t bins=100, Scalar min=0, Scalar max=0) const;
   Tensor sign() const;
   Tensor fmod(Scalar other) const;
