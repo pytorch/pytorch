@@ -3078,6 +3078,7 @@ class TestKL(TestCase):
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         lognormal = pairwise(LogNormal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
+        independent = (Independent(normal[0], 1), Independent(normal[1], 1))
         onehotcategorical = pairwise(OneHotCategorical, [[0.4, 0.3, 0.3],
                                                          [0.2, 0.7, 0.1],
                                                          [0.33, 0.33, 0.34],
@@ -3127,6 +3128,7 @@ class TestKL(TestCase):
             (gumbel, gumbel),
             (gumbel, normal),
             (halfnormal, halfnormal),
+            (independent, independent),
             (laplace, laplace),
             (lognormal, lognormal),
             (laplace, normal),
