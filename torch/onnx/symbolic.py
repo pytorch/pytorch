@@ -15,6 +15,9 @@ from collections import Iterable
 from functools import partial, wraps
 import itertools
 
+import numpy
+import math
+
 # EDITING THIS FILE? READ THIS FIRST!
 #
 # - This file is ONLY for ATen operators (e.g., operators that show up in the
@@ -114,7 +117,8 @@ def _unpack_list(list_value):
 def parse_args(*arg_descriptors):
     def decorator(fn):
         def wrapper(g, *args):
-            assert len(arg_descriptors) == len(args)
+            # some args may be optional, so the length may be smaller
+            assert len(arg_descriptors) >= len(args)
             args = [_parse_arg(arg, arg_desc) for arg, arg_desc in zip(args, arg_descriptors)]
             return fn(g, *args)
         # In Python 2 functools.wraps chokes on partially applied functions, so we need this as a workaround
@@ -196,16 +200,18 @@ def _try_get_scalar_type(*args):
 # and the symbolic functions should check it to determine the behavior
 # of the exporter.
 
-_default_onnx_opset_version = 10
-_export_onnx_opset_version = _default_onnx_opset_version
+
+_default_onnx_opset_version = 9
+_onnx_master_opset = 10
 _onnx_stable_opsets = [9]
+_export_onnx_opset_version = _default_onnx_opset_version
 
 
 def _set_opset_version(opset_version):
     global _export_onnx_opset_version
     if opset_version == _default_onnx_opset_version:
         return
-    if opset_version in _onnx_stable_opsets:
+    if opset_version in _onnx_stable_opsets + [_onnx_master_opset]:
         _export_onnx_opset_version = opset_version
         return
     raise ValueError("Unsupported ONNX opset version: " + str(opset_version))
@@ -567,8 +573,8 @@ def glu(g, input, dim):
     return g.op('Mul', first, g.op('Sigmoid', second))
 
 
-@parse_args('v', 'i')
-def softmax(g, input, dim):
+@parse_args('v', 'i', 'i')
+def softmax(g, input, dim, dtype=None):
     # Softmax does normalization at vector level.
     # PyTorch and ONNX use different strategies to split the input tensor into vectors.
     # Thus dim and axis have different meanings.
@@ -589,7 +595,10 @@ def softmax(g, input, dim):
         dim = input.type().dim() + dim
     if input.type().dim() != dim + 1:
         return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
-    return g.op('Softmax', input, axis_i=dim)
+    return_op = g.op('Softmax', input, axis_i=dim)
+    if dtype:
+        return_op = g.op("Cast", return_op, to_i=scalar_type_to_onnx[dtype])
+    return return_op
 
 
 @parse_args('v', 't', 'v')
@@ -599,17 +608,46 @@ def softplus(g, self, beta, threshold):
     return g.op('Softplus', self)
 
 
+def get_pool_ceil_padding(input, kernel_size, stride, padding):
+    dim = input.type().sizes()[-len(padding):]
+    ceiled_output_dim = [int(math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i]))) + 1
+                         for i in range(0, len(padding))]
+    # ensure last pooling starts inside
+    ceiled_output_dim = [ceiled_output_dim[i] - 1
+                         if (((ceiled_output_dim[i] - 1) * stride[i]) >= (dim[i] + padding[i]))
+                         else ceiled_output_dim[i]
+                         for i in range(0, len(ceiled_output_dim))]
+    padding_ceil = [0
+                    if (stride[i] == 1)
+                    else
+                    (kernel_size[i] - (dim[i] + 2 * padding[i] - ((ceiled_output_dim[i] - 1) * stride[i] + 1)))
+                    for i in range(0, len(padding))]
+    # ensure padding is not > kernel_size
+    padding_ceil = [(int(padding_ceil[i]) if padding_ceil[i] < kernel_size[i] - 1 else int(kernel_size[i] - 1))
+                    if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
+                    else
+                    int(padding_ceil[i])
+                    for i in range(0, len(padding_ceil))]
+    return padding_ceil
+
+
 @parse_args('v', 'is', 'is', 'is', 'is', 'i')
 def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode:
-        return _unimplemented("max_pool1d_with_indices", "ceil_mode")
+    if ceil_mode and input.type().kind() != "CompleteTensorType":
+        return _unimplemented("max_pool1d_with_indices", "input size not accesible")
     if set(_single(dilation)) != {1}:
         return _unimplemented("max_pool1d_with_indices", "dilation")
     if stride is None:
         stride = kernel_size
+    padding = tuple(_single(padding))
+    if ceil_mode:
+        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+        padding = padding + tuple(numpy.add(padding_ceil, padding))
+    else:
+        padding = padding * 2
     r, indices = g.op("MaxPool", input, outputs=2,
                       kernel_shape_i=_single(kernel_size),
-                      pads_i=_single(padding) * 2,
+                      pads_i=padding,
                       strides_i=_single(stride))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened.
@@ -635,15 +673,21 @@ def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
 
 @parse_args('v', 'is', 'is', 'is', 'is', 'i')
 def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode:
-        return _unimplemented("max_pool2d_with_indices", "ceil_mode")
+    if ceil_mode and input.type().kind() != "CompleteTensorType":
+        return _unimplemented("max_pool2d_with_indices", "input size not accesible")
     if set(_pair(dilation)) != {1}:
         return _unimplemented("max_pool2d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
+    padding = tuple(_pair(padding))
+    if ceil_mode:
+        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+        padding = padding + tuple(numpy.add(padding_ceil, padding))
+    else:
+        padding = padding * 2
     r, indices = g.op("MaxPool", input, outputs=2,
                       kernel_shape_i=_pair(kernel_size),
-                      pads_i=_pair(padding) * 2,
+                      pads_i=padding,
                       strides_i=_pair(stride))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened
@@ -659,15 +703,21 @@ def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
 
 @parse_args('v', 'is', 'is', 'is', 'is', 'i')
 def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode:
-        return _unimplemented("max_pool3d_with_indices", "ceil_mode")
+    if ceil_mode and input.type().kind() != "CompleteTensorType":
+        return _unimplemented("max_pool3d_with_indices", "input size not accesible")
     if set(_triple(dilation)) != {1}:
         return _unimplemented("max_pool3d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
+    padding = tuple(_triple(padding))
+    if ceil_mode:
+        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+        padding = padding + tuple(numpy.add(padding_ceil, padding))
+    else:
+        padding = padding * 2
     r, indices = g.op("MaxPool", input, outputs=2,
                       kernel_shape_i=_triple(kernel_size),
-                      pads_i=_triple(padding) * 2,
+                      pads_i=padding,
                       strides_i=_triple(stride))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened
@@ -684,23 +734,28 @@ def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
 def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
-        if ceil_mode:
-            return _unimplemented("avg_pool2d", "ceil_mode")
+        if ceil_mode and input.type().kind() != "CompleteTensorType":
+            return _unimplemented(name, "input size not accesible")
         if not stride:
             stride = kernel_size
-
         padding = tuple(tuple_fn(padding))
+        if ceil_mode:
+            padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
         if count_include_pad:
             input = g.op("Pad", input,
                          pads_i=((0,) * 2 + padding) * 2,
                          mode_s='constant',
                          value_f=0.)
             padding = (0,) * len(padding)
-
-        return g.op("AveragePool", input,
-                    kernel_shape_i=tuple_fn(kernel_size),
-                    strides_i=tuple_fn(stride),
-                    pads_i=padding * 2)
+        if ceil_mode:
+            padding = padding + tuple(numpy.add(padding_ceil, padding))
+        else:
+            padding = padding * 2
+        output = g.op("AveragePool", input,
+                      kernel_shape_i=tuple_fn(kernel_size),
+                      strides_i=tuple_fn(stride),
+                      pads_i=padding)
+        return output
     return symbolic_fn
 
 
@@ -870,15 +925,18 @@ def where(g, condition, self, other):
     return g.op("ATen", condition, self, other, operator_s="where")
 
 
-@parse_args('v', 'i')
-def log_softmax(g, input, dim=None):
+@parse_args('v', 'i', 'i')
+def log_softmax(g, input, dim=None, dtype=None):
     # PyTorch dim and ONNX axis have different meanings.
     # See Softmax comment for details.
     if dim < 0:
         dim = input.type().dim() + dim
     if input.type().dim() != dim + 1:
         return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
-    return g.op("LogSoftmax", input, axis_i=dim)
+    return_op = g.op("LogSoftmax", input, axis_i=dim)
+    if dtype:
+        return_op = g.op("Cast", return_op, to_i=scalar_type_to_onnx[dtype])
+    return return_op
 
 
 @parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is', 'i', 'i', 'i', 'i')
@@ -1617,3 +1675,18 @@ def flatten(g, input, start_dim, end_dim):
 @parse_args('v')
 def nonzero(g, input):
     return g.op('NonZero', input)
+
+
+@parse_args('v', 'i', 'i', 'i')
+def narrow(g, input, dim, start, length):
+    return g.op("Slice", input, axes_i=[dim], starts_i=[start], ends_i=[start + length])
+
+
+@parse_args('v', 'i', 'i')
+def _argmax(g, input, dim, keepdim):
+    return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim)
+
+
+@parse_args('v', 'i', 'i')
+def _argmin(g, input, dim, keepdim):
+    return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)

@@ -7,6 +7,7 @@ import warnings
 import weakref
 from torch._six import imap
 from torch._C import _add_docstr
+from numbers import Number
 
 
 # NB: If you subclass Tensor, and want to share the subclassed class
@@ -425,6 +426,17 @@ class Tensor(torch._C._TensorBase):
             # Workaround, torch has no built-in bool tensor
             array = array.astype('uint8')
         return torch.from_numpy(array)
+
+    def __contains__(self, element):
+        r"""Check if `element` is present in tensor
+
+        Arguments:
+            element (Tensor or scalar): element to be checked
+                for presence in current tensor"
+        """
+        if isinstance(element, (torch.Tensor, Number)):
+            return (element == self).any().item()
+        return NotImplemented
 
     @property
     def __cuda_array_interface__(self):

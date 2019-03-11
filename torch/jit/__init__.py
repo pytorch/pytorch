@@ -591,7 +591,8 @@ def trace(func,
           check_trace=True,
           check_inputs=None,
           check_tolerance=1e-5,
-          _force_outplace=False):
+          _force_outplace=False,
+          _module_class=None):
     """
     Trace a function and return an executable trace that will be optimized
     using just-in-time compilation.
@@ -657,7 +658,10 @@ def trace(func,
     # done primarily so that weird iterables fail here and not pybind11 code
     elif not isinstance(example_inputs, tuple):
         example_inputs = tuple(example_inputs)
-    module = TopLevelTracedModule(func, **executor_options)
+    if _module_class:
+        module = _module_class(func, **executor_options)
+    else:
+        module = TopLevelTracedModule(func, **executor_options)
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
     module._create_method_from_trace('forward', func, example_inputs,
                                      var_lookup_fn, _force_outplace)
@@ -899,9 +903,7 @@ class OrderedParameterDict(OrderedDictWrapper):
         super(OrderedParameterDict, self).__init__(module)
 
     def items(self):
-        return [(name, param) for name, param, is_buffer
-                in self.module._get_parameters()
-                if not is_buffer]
+        return [(name, param) for name, param in self.module._get_parameters()]
 
     def __setitem__(self, k, v):
         self.module._register_parameter(k, v, False)
@@ -920,12 +922,11 @@ class OrderedBufferDict(OrderedDictWrapper):
         super(OrderedBufferDict, self).__init__(module)
 
     def items(self):
-        return [(name, param) for name, param, is_buffer
-                in self.module._get_parameters()
-                if is_buffer]
+        return [(name, param) for name, _, param in
+                self.module._get_attributes() if isinstance(param, torch.Tensor)]
 
     def __setitem__(self, k, v):
-        self.module._register_parameter(k, v, True)
+        self.module._register_buffer(k, v)
 
     def __contains__(self, k):
         return self.module._has_buffer(k)
@@ -933,7 +934,7 @@ class OrderedBufferDict(OrderedDictWrapper):
     def __getitem__(self, k):
         if k not in self:
             raise KeyError(k)
-        return self.module._get_parameter(k)
+        return self.module._get_buffer(k)
 
 # base types that can be constants
 # in addition, tuples and lists of these base types are also considered constants
@@ -1061,9 +1062,8 @@ if _enabled:
                     + Tracing will not record any control-flow like if statements or loops. When
                       this control-flow is constant across your module, this is fine and it often
                       just inlines configuration decisions. But sometimes the control-flow is
-                      actually part of the model itself. For instance, a beam search in
-                      sequence-to-sequence translation is a loop over the (varying) sequence
-                      length of inputs.
+                      actually part of the model itself. For instance, a recurrent network is
+                      a loop over the (possibly dynamic) length of an input sequence.
 
                     + In the returned ``ScriptModule``, operations that have different behaviors
                       in ``training`` and ``eval`` modes will always behave as if it is in the
@@ -1161,8 +1161,12 @@ if _enabled:
                 if attr == 'training':
                     if self._has_buffer('training'):
                         self.__dict__['training'] = value
-                        self._get_parameter('training').fill_(int(value))
+                        self._get_buffer('training').fill_(int(value))
                         return
+                if isinstance(value, Attribute):
+                    the_type = torch.jit.annotations.ann_to_type(value.type)
+                    self._register_attribute(attr, the_type, value.value)
+                    return
                 return super(ScriptModule, self).__setattr__(attr, value)
 
             if hasattr(self, attr):
@@ -1551,6 +1555,13 @@ class _disable_tracing(object):
 def annotate(the_type, the_value):
     # noop in python
     return the_value
+
+
+class Attribute(object):
+    def __init__(self, value, the_type):
+        self.value = value
+        self.type = the_type
+
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
