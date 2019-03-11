@@ -393,44 +393,61 @@ void THBlas_(gemm)(char transa, char transb, int64_t m, int64_t n, int64_t k, sc
     }
     else if(!transa_ && transb_)
     {
-      int64_t i, j, l;
-      scalar_t *a_ = a;
-      for(i = 0; i < m; i++)
-      {
-        scalar_t *b_ = b;
-        for(j = 0; j < n; j++)
-        {
-          scalar_t sum = 0;
-          for(l = 0; l < k; l++)
-            sum += a_[l*lda]*b_[l*ldb];
-          b_++;
-	  if (beta == 0)
-	    c[j*ldc+i] = alpha*sum;
-	  else
-	    c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
+      if (beta == 0) {
+        for (int64_t j = 0; j < n; j++) {
+          memset(c + j * ldc, 0, m);
         }
-        a_++;
+      }
+      else {
+        for (int64_t j = 0; j < n; j++) {
+          for (int64_t i = 0; i < m; i++) {
+            c[j * ldc + i] *= beta;
+          }
+        }
+      }
+      for (int64_t l = 0; l < k; l++) {
+        for (int64_t j = 0; j < n; j++) {
+          scalar_t val = b[j + l * ldb] * alpha;
+          int64_t i_m = m / 4;
+          for (int64_t i_i = 0; i_i < i_m; i_i++) {
+            c[j * ldc + i_i * 4 + 0] += a[i_i * 4 + 0 + l * lda] * val;
+            c[j * ldc + i_i * 4 + 1] += a[i_i * 4 + 1 + l * lda] * val;
+            c[j * ldc + i_i * 4 + 2] += a[i_i * 4 + 2 + l * lda] * val;
+            c[j * ldc + i_i * 4 + 3] += a[i_i * 4 + 3 + l * lda] * val;
+          }
+          int64_t i = i_m * 4;
+          for (; i < m; i++)
+            c[j * ldc + i] += a[i + l * lda] * val;
+        }
       }
     }
     else
     {
-      int64_t i, j, l;
-      scalar_t *a_ = a;
-      for(i = 0; i < m; i++)
-      {
-        scalar_t *b_ = b;
-        for(j = 0; j < n; j++)
-        {
-          scalar_t sum = 0;
-          for(l = 0; l < k; l++)
-            sum += a_[l]*b_[l*ldb];
-          b_++;
-	  if (beta == 0)
-	    c[j*ldc+i] = alpha*sum;
-	  else
-	    c[j*ldc+i] = beta*c[j*ldc+i]+alpha*sum;
+      for (int64_t i = 0; i < m; i++) {
+        for (int64_t j = 0; j < n; j++) {
+          if (beta == 0)
+            c[j * ldc + i] = 0;
+          else
+            c[j * ldc + i] *= beta;
         }
-        a_ += lda;
+      }
+      for (int64_t i = 0; i < m; i++) {
+        for (int64_t j = 0; j < n; j++) {
+          int64_t l_k = k / 4;
+          for (int64_t l_l = 0; l_l < l_k; l_l++) {
+              c[j * ldc + i] += a[i * lda + l_l * 4 + 0] //
+                          * b[(l_l * 4 + 0) * ldb + j] * alpha;
+              c[j * ldc + i] += a[i * lda + l_l * 4 + 1] //
+                          * b[(l_l * 4 + 1) * ldb + j] * alpha;
+              c[j * ldc + i] += a[i * lda + l_l * 4 + 2] //
+                          * b[(l_l * 4 + 2) * ldb + j] * alpha;
+              c[j * ldc + i] += a[i * lda + l_l * 4 + 3] //
+                          * b[(l_l * 4 + 3) * ldb + j] * alpha;
+          }
+          int64_t l = l_k * 4;
+          for (; l < k; l++)
+              c[j * ldc + i] += a[i * lda + l] * b[l * ldb + j] * alpha;
+        }
       }
     }
   }
