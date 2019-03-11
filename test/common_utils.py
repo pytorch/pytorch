@@ -392,21 +392,23 @@ class TestCase(expecttest.TestCase):
             self.assertEqual(x, y.item(), prec, message, allow_inf)
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
-                if isinstance(x, torch.BoolTensor) and isinstance(y, torch.BoolTensor):
-                    self.assertEqual(x.tolist(), y.tolist())
-                else:
-                    super(TestCase, self).assertEqual(a.size(), b.size(), message)
-                    if a.numel() > 0:
-                        if a.device.type == 'cpu' and a.dtype == torch.float16:
-                            # CPU half tensors don't have the methods we need below
-                            a = a.to(torch.float32)
-                        if TEST_WITH_ROCM:
-                            # Workaround for bug https://github.com/pytorch/pytorch/issues/16448
-                            # TODO: remove after the bug is resolved.
-                            b = b.to(a.dtype).to(a.device)
-                        else:
-                            b = b.to(a)
+                super(TestCase, self).assertEqual(a.size(), b.size(), message)
+                if a.numel() > 0:
+                    if a.device.type == 'cpu' and a.dtype == torch.float16:
+                        # CPU half tensors don't have the methods we need below
+                        a = a.to(torch.float32)
+                    if TEST_WITH_ROCM:
+                        # Workaround for bug https://github.com/pytorch/pytorch/issues/16448
+                        # TODO: remove after the bug is resolved.
+                        b = b.to(a.dtype).to(a.device)
+                    else:
+                        b = b.to(a)
 
+                    if x.dtype == torch.bool and y.dtype == torch.bool:
+                        self.assertEqual(x.tolist(), y.tolist())
+                    elif x.dtype == torch.bool or y.dtype == torch.bool:
+                        raise TypeError("Was expecting both tensors to be bool type.")
+                    else:
                         diff = a - b
                         if a.is_floating_point():
                             # check that NaNs are in the same locations

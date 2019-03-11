@@ -2341,12 +2341,13 @@ class _TestTorchMixin(object):
         torch.zeros(100, 100, out=res2)
         self.assertEqual(res1, res2)
 
-        res1 = torch.zeros(2, 2, dtype=torch.bool)
+        boolTensor = torch.zeros(2, 2, dtype=torch.bool)
         expected = torch.tensor([[False, False], [False, False]], dtype=torch.bool)
-        self.assertEqual(res1, expected)
+        self.assertEqual(boolTensor, expected)
 
         halfTensor = torch.zeros(1, 1, dtype=torch.half)
-        self.assertEqual(halfTensor, torch.tensor([[0.]], dtype=torch.float16))
+        expected = torch.tensor([[0.]], dtype=torch.float16)
+        self.assertEqual(halfTensor, expected)
 
     def test_zeros_like(self):
         expected = torch.zeros(100, 100)
