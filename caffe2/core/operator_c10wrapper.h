@@ -167,15 +167,15 @@ class C10OperatorWrapper final : public Operator<Context> {
   template<class T>
   IValue get_nontensor_argument_(const std::string& name, const c10::optional<IValue>& default_value) {
     if (default_value.has_value()) {
-      return GetSingleArgument<T>(
+      return this->GetSingleArgument<T>(
         name, default_value->to<T>()
       );
     } else {
-      AT_CHECK(HasSingleArgumentOfType<T>(name),
+      AT_CHECK(this->HasSingleArgumentOfType<T>(name),
         "Error in caffe2->c10 wrapper: Expected argument '",
         name,
         "' missing or wrong type.");
-      return GetSingleArgument<T>(name, 0);
+      return this->GetSingleArgument<T>(name, 0);
     }
   }
 
