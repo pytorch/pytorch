@@ -60,6 +60,12 @@ message ModuleDef {
   optional bool optimize = 8;
 }
 
+message LibDef {
+  optional string name = 1;
+  optional RecordRef torchscript_arena = 2;
+  optional bool optimize = 3;
+}
+
 enum ProtoVersion {
   PROTO_VERSION_NEWEST = 0x0000000000000001;
 }
@@ -83,4 +89,6 @@ message ModelDef {
   // the table contains all the tensor information
   // the tensor id is defined as TensorProto.name
   repeated TensorDef tensors = 5;
+
+  repeated LibDef libs = 9;
 }

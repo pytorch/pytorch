@@ -887,7 +887,8 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            PythonPrint(ss, self, tensors, true);
+            std::vector<ClassTypePtr> classes;
+            PythonPrint(ss, self, tensors, classes, true);
             return std::make_pair(ss.str(), tensors);
           })
       .def_property_readonly(
@@ -895,7 +896,8 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            PythonPrint(ss, self, tensors, false);
+            std::vector<ClassTypePtr> classes;
+            PythonPrint(ss, self, tensors, classes, false);
             return ss.str();
           })
       .def("apply", &Module::apply)
@@ -951,7 +953,8 @@ void initJitScriptBindings(PyObject* module) {
       .def("python_print", [](Method& m) {
         std::ostringstream oss;
         std::vector<at::Tensor> constants;
-        PythonPrint(oss, m, constants, true);
+        std::vector<ClassTypePtr> classes;
+        PythonPrint(oss, m, constants, classes, true);
         return std::make_pair(oss.str(), std::move(constants));
       });
 

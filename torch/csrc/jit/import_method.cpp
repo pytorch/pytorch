@@ -132,22 +132,35 @@ void import_methods(
           script::Method& m,
           const SourceRange& loc) -> std::shared_ptr<script::SugaredValue> {
     auto it = env.find(name);
-    if (it == env.end())
+    if (it == env.end()) {
       return nullptr;
+    }
     return it->second;
   };
 
   std::vector<script::Def> definitions;
   std::vector<script::Resolver> resolvers;
 
-  while (p.lexer().cur().kind != script::TK_EOF) {
-    auto def = script::Def(p.parseFunction(/*is_method=*/true));
-    definitions.emplace_back(def);
-    resolvers.emplace_back(resolver);
+  c10::optional<script::Self> self;
+  if (p.lexer().cur().kind == script::TK_CLASS_DEF) {
+    auto class_def = script::ClassDef(p.parseClass());
+    for (const auto& method_def : class_def.defs()) {
+      definitions.emplace_back(method_def);
+      resolvers.emplace_back(resolver);
+    }
+
+    self = script::Self(ClassType::create(class_def.name().name(), mod));
+  } else {
+    while (p.lexer().cur().kind != script::TK_EOF) {
+      auto def = script::Def(p.parseFunction(/*is_method=*/true));
+      definitions.emplace_back(def);
+      resolvers.emplace_back(resolver);
+    }
+
+    self = script::Self(std::make_shared<ModuleAccessorValue>(mod));
   }
-  auto self = std::make_shared<ModuleAccessorValue>(mod);
-  script::defineMethodsInModule(
-      mod, definitions, resolvers, script::Self(self));
+
+  script::defineMethodsInModule(mod, definitions, resolvers, self);
 }
 
 } // namespace jit

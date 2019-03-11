@@ -1124,6 +1124,10 @@ struct CAFFE2_API ClassType : public Type {
     return std::string("ClassType<") + typename_ + ">";
   }
 
+  std::string python_str() const override {
+    return typename_;
+  }
+
   TypePtr getAttribute(const std::string& name) const {
     const auto it = std::find_if(
         attributes_.cbegin(), attributes_.cend(), [&](const Attribute& attr) {
@@ -1137,6 +1141,7 @@ struct CAFFE2_API ClassType : public Type {
   }
 
   Method* getMethod(const std::string& name) const;
+  std::vector<Method*> methods() const;
 
   std::string name() const {
     return typename_;
