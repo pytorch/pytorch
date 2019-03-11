@@ -257,8 +257,8 @@ def parse_arguments(args, func_variants, declaration, func_return):
             if len(topt_representation) == 3:
                 merged_argument = check_topt_representation(topt_representation)
                 assert merged_argument, \
-                    "Unsupported combination of TensorOptions, the only currently supported combinations are {}"\
-                    .format(str(supported_topt_arguments))
+                    "Unsupported combination of TensorOptions {}, the only currently supported combinations are {}"\
+                    .format(str(topt_representation), str(supported_topt_arguments))
                 new_arguments.append(merged_argument)
             else:
                 new_arguments += topt_representation
