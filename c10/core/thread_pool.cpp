@@ -1,5 +1,4 @@
-#include <ATen/core/ivalue.h>
-#include <ATen/core/thread_pool.h>
+#include <c10/core/thread_pool.h>
 
 namespace c10 {
 
@@ -125,9 +124,32 @@ void setNumThreads(size_t v) {
   }
 }
 
-ThreadPool& global_work_queue() {
-   static ThreadPool thread_pool(num_threads.exchange(-1));
-   return thread_pool;
+TaskThreadPoolBase& global_work_queue() {
+  static std::shared_ptr<TaskThreadPoolBase> pool =
+      ThreadPoolRegistry()->Create("C10", 0, num_threads.exchange(-1), false);
+  return *pool;
 }
+
+C10_DEFINE_SHARED_REGISTRY(
+    ThreadPoolRegistry,
+    TaskThreadPoolBase,
+    int,
+    int,
+    bool);
+
+namespace {
+
+std::shared_ptr<TaskThreadPoolBase> createC10ThreadPool(
+    int device_id,
+    int pool_size,
+    bool create_new) {
+  static std::shared_ptr<TaskThreadPoolBase> pool =
+      std::make_shared<ThreadPool>(pool_size);
+  return pool;
+}
+
+} // namespace
+
+C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, createC10ThreadPool);
 
 } // namespace c10

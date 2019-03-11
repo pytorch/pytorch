@@ -254,7 +254,7 @@
   self: cumsum_backward(grad, dim)
 
 - name: cumsum(Tensor self, int64_t dim, *, ScalarType dtype)
-  self: cumsum_backward(grad, dim, self.type().scalarType())
+  self: cumsum_backward(grad, dim, self.scalar_type())
 
 - name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad)
   self, weight, bias: conv_tbc_backward(grad, self, weight, bias, pad)
@@ -505,16 +505,16 @@
   self: grad.expand(self.sizes()) / self.numel()
 
 - name: mean(Tensor self, ScalarType dtype)
-  self: grad.expand(self.sizes()).to(self.type().scalarType()) / self.numel()
+  self: grad.expand(self.sizes()).to(self.scalar_type()) / self.numel()
 
 - name: mean(Tensor self, IntArrayRef dim, bool keepdim)
   self: sum_backward(grad, self.sizes(), dim, keepdim) / _safe_size(self.sizes(), dim)
 
 - name: mean(Tensor self, IntArrayRef dim, ScalarType dtype)
-  self: sum_backward(grad, self.sizes(), dim, false).to(self.type().scalarType()) / _safe_size(self.sizes(), dim)
+  self: sum_backward(grad, self.sizes(), dim, false).to(self.scalar_type()) / _safe_size(self.sizes(), dim)
 
 - name: mean(Tensor self, IntArrayRef dim, bool keepdim, ScalarType dtype)
-  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.type().scalarType()) / _safe_size(self.sizes(), dim)
+  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.scalar_type()) / _safe_size(self.sizes(), dim)
 
 - name: median(Tensor self)
   self: select_equals_backward(grad, self, result)
@@ -592,11 +592,11 @@
   self: norm_backward(grad, self, p, result, dim, keepdim)
 
 - name: norm(Tensor self, Scalar? p, ScalarType dtype)
-  self: norm_backward(grad, self.to(grad.type().scalarType()), p, result).to(self.type().scalarType())
+  self: norm_backward(grad, self.to(grad.scalar_type()), p, result).to(self.scalar_type())
 
 
 - name: norm(Tensor self, Scalar? p, IntArrayRef dim, bool keepdim, ScalarType dtype)
-  self: norm_backward(grad, self.to(grad.type().scalarType()), p, result, dim, keepdim).to(self.type().scalarType())
+  self: norm_backward(grad, self.to(grad.scalar_type()), p, result, dim, keepdim).to(self.scalar_type())
 
 - name: _pdist_forward(Tensor self, double p)
   self: _pdist_backward(grad, self, p, result)
@@ -651,16 +651,16 @@
   self: prod_backward(grad, self, result)
 
 - name: prod(Tensor self, ScalarType dtype)
-  self: prod_backward(grad, self.to(grad.type().scalarType()), result).to(self.type().scalarType())
+  self: prod_backward(grad, self.to(grad.scalar_type()), result).to(self.scalar_type())
 
 - name: prod(Tensor self, int64_t dim, bool keepdim)
   self: prod_backward(grad, self, result, dim, keepdim)
 
 - name: prod(Tensor self, int64_t dim, ScalarType dtype)
-  self: prod_backward(grad, self.to(grad.type().scalarType()), result, dim, false).to(self.type().scalarType())
+  self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, false).to(self.scalar_type())
 
 - name: prod(Tensor self, int64_t dim, bool keepdim, ScalarType dtype)
-  self: prod_backward(grad, self.to(grad.type().scalarType()), result, dim, keepdim).to(self.type().scalarType())
+  self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim).to(self.scalar_type())
 
 - name: pstrf(Tensor self, bool upper, Scalar tol)
   self: not_implemented("pstrf")
@@ -790,16 +790,16 @@
   self: grad.expand(self.sizes())
 
 - name: sum(Tensor self, ScalarType dtype)
-  self: grad.expand(self.sizes()).to(self.type().scalarType())
+  self: grad.expand(self.sizes()).to(self.scalar_type())
 
 - name: sum(Tensor self, IntArrayRef dim, bool keepdim)
   self: sum_backward(grad, self.sizes(), dim, keepdim)
 
 - name: sum(Tensor self, IntArrayRef dim, ScalarType dtype)
-  self: sum_backward(grad, self.sizes(), dim, false).to(self.type().scalarType())
+  self: sum_backward(grad, self.sizes(), dim, false).to(self.scalar_type())
 
 - name: sum(Tensor self, IntArrayRef dim, bool keepdim, ScalarType dtype)
-  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.type().scalarType())
+  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.scalar_type())
 
 - name: svd(Tensor self, bool some, bool compute_uv)
   self: svd_backward(grads, self, some, compute_uv, U, S, V)

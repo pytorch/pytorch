@@ -14,7 +14,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/ivalue.h>
-#include <ATen/core/thread_pool.h>
+#include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
 #include <algorithm>
@@ -55,9 +55,9 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
   }
   if (toInt &&
       !isIntegralType(
-          autograd::as_variable_ref(t).data().type().scalarType())) {
+          autograd::as_variable_ref(t).data().scalar_type())) {
     std::stringstream ss;
-    ss << "Cannot input a tensor of type " << t.type().scalarType()
+    ss << "Cannot input a tensor of type " << t.scalar_type()
        << " as an integral argument";
     throw std::runtime_error(ss.str());
   }
