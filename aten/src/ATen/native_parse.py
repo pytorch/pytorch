@@ -3,6 +3,7 @@ import re
 import yaml
 import pprint
 import sys
+import copy
 
 try:
     # use faster C loader if available
@@ -196,12 +197,6 @@ def parse_arguments(args, func_variants, declaration, func_return):
     # less on the content of Declarations.yaml. If you want to support more than this you'll
     # potentially have to extend the JIT.
 
-    def copy_arguments(arguments):
-        new_arguments = []
-        for entry in arguments:
-            new_arguments.append(entry.copy())
-        return new_arguments
-
     supported_topt_arguments = [
         [
             {'name': 'dtype', 'type': 'ScalarType', 'is_nullable': False, 'annotation': None},
@@ -209,11 +204,11 @@ def parse_arguments(args, func_variants, declaration, func_return):
             {'name': 'device', 'type': 'Device', 'is_nullable': False, 'annotation': None},
         ]
     ]
-    supported_topt_arguments.append(copy_arguments(supported_topt_arguments[0]))
+    supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[0]))
     supported_topt_arguments[1][0]['kwarg_only'] = True
     supported_topt_arguments[1][1]['kwarg_only'] = True
     supported_topt_arguments[1][2]['kwarg_only'] = True
-    supported_topt_arguments.append(copy_arguments(supported_topt_arguments[1]))
+    supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[1]))
     supported_topt_arguments[2][0]['default'] = 'c10::nullopt'
     supported_topt_arguments[2][1]['default'] = 'c10::nullopt'
     supported_topt_arguments[2][2]['default'] = 'c10::nullopt'
