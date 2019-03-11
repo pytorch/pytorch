@@ -552,14 +552,14 @@ class TestCase(expecttest.TestCase):
         munged_id = remove_prefix(self.id(), module_id + ".")
         test_file = os.path.realpath(sys.modules[module_id].__file__)
         expected_file = os.path.join(os.path.dirname(test_file),
-                                     "example",
+                                     directory,
                                      munged_id)
 
         subname_output = ""
         if subname:
             expected_file += "-" + subname
             subname_output = " ({})".format(subname)
-        expected_file += ".example"
+        expected_file += ".expect"
         return expected_file, munged_id, subname_output
 
     def updateExampleExpect(self, s, subname=None):
