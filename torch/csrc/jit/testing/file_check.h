@@ -2,7 +2,6 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/testing/file_check.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {

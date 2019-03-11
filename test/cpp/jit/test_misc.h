@@ -1148,14 +1148,14 @@ void testBlocks(std::ostream& out = std::cout) {
       ->check_not("block")
       ->run(*g);
   g->lint();
-  Canonicalize(g, false);
-  std::stringstream orig;
-  orig << *g;
   // test recursive copy of blocks works
-  std::stringstream copy;
   auto g2 = g->copy();
-  copy << *g2;
-  AT_ASSERT(orig.str() == copy.str());
+  testing::FileCheck()
+      .check("add")
+      ->check("prim::If")
+      ->check("block0")
+      ->check_not("block")
+      ->run(*g2);
 }
 
 const auto cf_examples = R"JIT(
@@ -1888,7 +1888,6 @@ void testNoneSchemaMatch() {
   // checking that constant propagation ran wo/failure
   AT_ASSERT(std::distance(nodes.begin(), nodes.end()) == 1);
 }
-
 } // namespace
 } // namespace jit
 } // namespace torch
