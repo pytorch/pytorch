@@ -1194,8 +1194,8 @@ Node* Graph::create(
   return n;
 }
 
-Node* Graph::createUndefined() {
-  return create(prim::Undefined);
+Node* Graph::createAutogradZero() {
+  return create(prim::AutogradZero);
 }
 
 Node* Graph::createNone(TypePtr typ) {

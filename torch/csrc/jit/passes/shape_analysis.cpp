@@ -499,7 +499,7 @@ class ShapePropagator {
         }
         return;
       }
-      case prim::Undefined: {
+      case prim::AutogradZero: {
         setUnshapedType(node);
         return;
       }

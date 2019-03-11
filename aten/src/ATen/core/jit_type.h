@@ -29,7 +29,7 @@ namespace c10 {
 _(TensorType) \
 _(DimensionedTensorType) \
 _(CompleteTensorType) \
-_(UndefinedTensorType) \
+_(AutogradZeroTensorType) \
 _(TupleType) \
 _(ListType) \
 _(DictType) \
@@ -255,9 +255,9 @@ private:
 struct TensorType;
 using TensorTypePtr = std::shared_ptr<TensorType>;
 // This type represents a single Tensor, with an unknown shape.
-// Subtype hierarchy for Tensor Types (DynamicType as the base type):
-// CompleteTensorType <: TensorType <: DynamicType
-// UndefinedTensorType <: DynamicType
+// Subtype hierarchy for Tensor Types (TensorType as the base type):
+// CompleteTensorType <: DimensionedTensorType <: TensorType
+// AutogradZeroTensorType <: TensorType
 struct CAFFE2_API TensorType : public Type {
   static TensorTypePtr create() {
     return TensorTypePtr(new TensorType()); // NOLINT(modernize-make-shared)
@@ -280,15 +280,15 @@ protected:
   : Type(kind) {}
 };
 
-struct UndefinedTensorType;
-using UndefinedTensorTypePtr = std::shared_ptr<UndefinedTensorType>;
+struct AutogradZeroTensorType;
+using AutogradZeroTensorTypePtr = std::shared_ptr<AutogradZeroTensorType>;
 // This type represents an undefined tensor.
-struct CAFFE2_API UndefinedTensorType : public TensorType {
-  static UndefinedTensorTypePtr create() {
-    return UndefinedTensorTypePtr(new UndefinedTensorType()); // NOLINT(modernize-make-shared)
+struct CAFFE2_API AutogradZeroTensorType : public TensorType {
+  static AutogradZeroTensorTypePtr create() {
+    return AutogradZeroTensorTypePtr(new AutogradZeroTensorType()); // NOLINT(modernize-make-shared)
   }
 
-  DEFINE_IS_SUBCLASS(UndefinedTensorType);
+  DEFINE_IS_SUBCLASS(AutogradZeroTensorType);
 
   bool requires_grad() const override { return false; }
 
@@ -297,18 +297,18 @@ struct CAFFE2_API UndefinedTensorType : public TensorType {
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
     return rhs->kind() == TypeKind::TensorType ||
-           rhs->kind() == TypeKind::UndefinedTensorType ||
+           rhs->kind() == TypeKind::AutogradZeroTensorType ||
            TensorType::isSubtypeOf(rhs);
   }
   std::string str() const override {
     return "UndefinedTensor";
   }
 
-  static const TypeKind Kind = TypeKind::UndefinedTensorType;
+  static const TypeKind Kind = TypeKind::AutogradZeroTensorType;
   // global singleton
-  static UndefinedTensorTypePtr get();
+  static AutogradZeroTensorTypePtr get();
 protected:
-  UndefinedTensorType(): TensorType(TypeKind::UndefinedTensorType) {}
+  AutogradZeroTensorType(): TensorType(TypeKind::AutogradZeroTensorType) {}
 };
 
 struct DimensionedTensorType;

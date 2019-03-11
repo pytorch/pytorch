@@ -120,7 +120,7 @@ namespace {
   }
 
   template <typename scalar_t>
-  C10_LAUNCH_BOUNDS(1024)
+  C10_LAUNCH_BOUNDS_1(1024)
   __global__ void grid_sampler_2d_kernel(
       const int nthreads,
       TensorInfo<scalar_t, int> input,
@@ -228,7 +228,7 @@ namespace {
   }
 
   template <typename scalar_t>
-  C10_LAUNCH_BOUNDS(1024)
+  C10_LAUNCH_BOUNDS_1(1024)
   __global__ void grid_sampler_3d_kernel(
       const int nthreads,
       TensorInfo<scalar_t, int> input,
@@ -392,7 +392,7 @@ namespace {
   }
 
   template <typename scalar_t>
-  C10_LAUNCH_BOUNDS(1024)
+  C10_LAUNCH_BOUNDS_1(1024)
   __global__ void grid_sampler_2d_backward_kernel(
       const int nthreads,
       TensorInfo<scalar_t, int> grad_output,
@@ -547,7 +547,7 @@ namespace {
   }
 
   template <typename scalar_t>
-  C10_LAUNCH_BOUNDS(1024)
+  C10_LAUNCH_BOUNDS_1(1024)
   __global__ void grid_sampler_3d_backward_kernel(
       const int nthreads,
       TensorInfo<scalar_t, int> grad_output,

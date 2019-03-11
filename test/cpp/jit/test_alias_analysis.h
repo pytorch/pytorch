@@ -51,7 +51,7 @@ struct TopoMoveTestFixture {
     for (const auto name : inputNames) {
       inputs.push_back(nodes.at(name)->output());
     }
-    auto node = graph->appendNode(graph->create(prim::Undefined, inputs));
+    auto node = graph->appendNode(graph->create(prim::AutogradZero, inputs));
     node->output()->setUniqueName(name);
     nodes[name] = node;
 
@@ -63,7 +63,7 @@ struct TopoMoveTestFixture {
       }
 
       auto block = node->blocks().at(0);
-      block->appendNode(graph->create(prim::Undefined, blockDeps));
+      block->appendNode(graph->create(prim::AutogradZero, blockDeps));
     }
   }
 
