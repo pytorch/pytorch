@@ -267,6 +267,12 @@ class Tensor(torch._C._TensorBase):
                       ":attr:`upper` argument in torch.cholesky defaults to ``False``.", stacklevel=2)
         return super(Tensor, self).cholesky(upper=upper)
 
+    def pstrf(self, upper=True):
+        r"""See :func:`torch.pstrf`"""
+        warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
+                      "in the next release.", stacklevel=2)
+        return super(Tensor, self).pstrf(upper=upper)
+
     def potrs(self, u, upper=True):
         r"""See :func:`torch.cholesky_solve`"""
         warnings.warn("torch.potrs is deprecated in favour of torch.cholesky_solve and "
