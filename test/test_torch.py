@@ -7491,9 +7491,11 @@ class _TestTorchMixin(object):
             # softmax, logsoftmax
             self.assertEqual(x, torch.nn.functional.softmax(x, 0))
             self.assertEqual(x, torch.nn.functional.softmax(x, 2))
+            self.assertEqual(x, torch.nn.functional.softmax(x, 3))
 
             self.assertEqual(x, torch.nn.functional.log_softmax(x, 0))
             self.assertEqual(x, torch.nn.functional.log_softmax(x, 2))
+            self.assertEqual(x, torch.nn.functional.log_softmax(x, 3))
 
             # cumsum, cumprod
             self.assertEqual(shape, torch.cumsum(x, 0).shape)
@@ -8148,6 +8150,17 @@ class _TestTorchMixin(object):
 
         val = torch.tensor(42)
         self.assertEqual(reversed(val), torch.tensor(42))
+
+    def test_contains(self):
+        x = torch.arange(0, 10)
+        self.assertEqual(4 in x, True)
+        self.assertEqual(12 in x, False)
+
+        x = torch.arange(1, 10).view(3, 3)
+        val = torch.arange(1, 4)
+        self.assertEqual(val in x, True)
+        val += 10
+        self.assertEqual(val in x, False)
 
     @staticmethod
     def _test_rot90(self, use_cuda=False):
