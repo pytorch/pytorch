@@ -14,6 +14,7 @@ import warnings
 import pickle
 import gzip
 import types
+import textwrap
 import re
 from torch._utils_internal import get_file_path, get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
@@ -1357,18 +1358,26 @@ class _TestTorchMixin(object):
     def test_min_elementwise(self):
         self._testCSelection(torch.min, min)
 
-    def test_lerp(self):
-        def TH_lerp(a, b, weight):
-            return a + weight * (b - a)
+    @staticmethod
+    def _test_lerp(self, cast):
+        start_end_shapes = [(), (5,), (5, 5), (5, 5, 5)]
+        for shapes in product(start_end_shapes, start_end_shapes):
+            start = cast(torch.randn(shapes[0]))
+            end = cast(torch.randn(shapes[1]))
 
-        size = (100, 100)
-        a = torch.rand(*size)
-        b = torch.rand(*size)
-        w = random.random()
-        result = torch.lerp(a, b, w)
-        expected = a.clone()
-        expected.map2_(a, b, lambda _, a, b: TH_lerp(a, b, w))
-        self.assertEqual(result, expected)
+            # Tensor weights
+            for weight in [cast(torch.randn(shapes[0])), random.random()]:
+                actual = torch.lerp(start, end, weight)
+                actual_method = start.lerp(end, weight)
+                self.assertEqual(actual, actual_method)
+                actual_out = cast(torch.Tensor())
+                torch.lerp(start, end, weight, out=actual_out)
+                self.assertEqual(actual, actual_out)
+                expected = start + weight * (end - start)
+                self.assertEqual(expected, actual)
+
+    def test_lerp(self):
+        self._test_lerp(self, lambda t: t)
 
     def test_all_any(self):
         def test(size):
@@ -6199,28 +6208,37 @@ class _TestTorchMixin(object):
             else:
                 return tuple(indices)
 
+        def validate_indexing(x):
+            self.assertEqual(x[[0]], consec((1,)))
+            self.assertEqual(x[ri([0]), ], consec((1,)))
+            self.assertEqual(x[ri([3]), ], consec((1,), 4))
+            self.assertEqual(x[[2, 3, 4]], consec((3,), 3))
+            self.assertEqual(x[ri([2, 3, 4]), ], consec((3,), 3))
+            self.assertEqual(x[ri([0, 2, 4]), ], torch.Tensor([1, 3, 5]))
+
+        def validate_setting(x):
+            dtype = x.type()
+            x[[0]] = -2
+            self.assertEqual(x[[0]], torch.Tensor([-2]).type(dtype))
+            x[[0]] = -1
+            self.assertEqual(x[ri([0]), ], torch.Tensor([-1]).type(dtype))
+            x[[2, 3, 4]] = 4
+            self.assertEqual(x[[2, 3, 4]], torch.Tensor([4, 4, 4]).type(dtype))
+            x[ri([2, 3, 4]), ] = 3
+            self.assertEqual(x[ri([2, 3, 4]), ], torch.Tensor([3, 3, 3]).type(dtype))
+            x[ri([0, 2, 4]), ] = conv_fn(torch.Tensor([5, 4, 3])).type(dtype)
+            self.assertEqual(x[ri([0, 2, 4]), ], torch.Tensor([5, 4, 3]).type(dtype))
+
         # First, we will test indexing to generate return values
 
         # Case 1: Purely Integer Array Indexing
         reference = conv_fn(consec((10,)))
-        self.assertEqual(reference[[0]], consec((1,)))
-        self.assertEqual(reference[ri([0]), ], consec((1,)))
-        self.assertEqual(reference[ri([3]), ], consec((1,), 4))
-        self.assertEqual(reference[[2, 3, 4]], consec((3,), 3))
-        self.assertEqual(reference[ri([2, 3, 4]), ], consec((3,), 3))
-        self.assertEqual(reference[ri([0, 2, 4]), ], torch.Tensor([1, 3, 5]))
+        validate_indexing(reference)
+        validate_indexing(reference.type(torch.half))
 
         # setting values
-        reference[[0]] = -2
-        self.assertEqual(reference[[0]], torch.Tensor([-2]))
-        reference[[0]] = -1
-        self.assertEqual(reference[ri([0]), ], torch.Tensor([-1]))
-        reference[[2, 3, 4]] = 4
-        self.assertEqual(reference[[2, 3, 4]], torch.Tensor([4, 4, 4]))
-        reference[ri([2, 3, 4]), ] = 3
-        self.assertEqual(reference[ri([2, 3, 4]), ], torch.Tensor([3, 3, 3]))
-        reference[ri([0, 2, 4]), ] = conv_fn(torch.Tensor([5, 4, 3]))
-        self.assertEqual(reference[ri([0, 2, 4]), ], torch.Tensor([5, 4, 3]))
+        validate_setting(reference)
+        validate_setting(reference.type(torch.half))
 
         # Tensor with stride != 1
 
@@ -6825,6 +6843,33 @@ class _TestTorchMixin(object):
         out.fill_(0.123)
         self.assertEqual(out, dest.view(-1))  # Must point to the same storage.
 
+    def test_t(self):
+        # Test 0D tensors
+        x = torch.randn(())
+        self.assertEqual(x, x.t())
+        x = x.to_sparse()
+        self.assertEqual(x, x.t())
+
+        # Test 1D tensors
+        x = torch.arange(4)
+        self.assertEqual(x, x.t())
+        x = x.to_sparse()
+        self.assertEqual(x, x.t())
+
+        # Test 2D tensors
+        x = torch.rand((2, 2))
+        self.assertEqual(x.t(), x.transpose(0, 1))
+        x = x.to_sparse()
+        self.assertEqual(x.t(), x.transpose(0, 1))
+
+        # Test 3D tensor
+        x = torch.rand((2, 2, 2))
+        with self.assertRaisesRegex(RuntimeError, 'expects a tensor with <= 2 dimensions, but self is 3D'):
+            x.t()
+        x = x.to_sparse()
+        with self.assertRaisesRegex(RuntimeError, 'expects a tensor with <= 2 sparse and 0 dense dimensions'):
+            x.t()
+
     def test_take(self):
         def check(src, idx):
             expected = src.contiguous().view(-1).index_select(
@@ -7112,7 +7157,7 @@ class _TestTorchMixin(object):
             ret = getattr(a, f)(dim=0)
             self.assertEqual(ret.values, ret[0])
             self.assertEqual(ret.indices, ret[1])
-            ret1 = getattr(torch, f)(a, dim=0, out=tuple(ret))
+            ret1 = getattr(torch, f)(a, dim=0, out=ret)
             self.assertEqual(ret1.values, ret1[0])
             self.assertEqual(ret1.indices, ret1[1])
             self.assertEqual(ret1.values, ret[0])
@@ -7122,7 +7167,7 @@ class _TestTorchMixin(object):
         ret = a.kthvalue(1, dim=0)
         self.assertEqual(ret.values, ret[0])
         self.assertEqual(ret.indices, ret[1])
-        ret1 = torch.kthvalue(a, 1, dim=0, out=tuple(ret))
+        ret1 = torch.kthvalue(a, 1, dim=0, out=ret)
         self.assertEqual(ret1.values, ret1[0])
         self.assertEqual(ret1.indices, ret1[1])
         self.assertEqual(ret1.values, ret[0])
@@ -7133,7 +7178,7 @@ class _TestTorchMixin(object):
         self.assertEqual(ret.U, ret[0])
         self.assertEqual(ret.S, ret[1])
         self.assertEqual(ret.V, ret[2])
-        ret1 = torch.svd(a, out=tuple(ret))
+        ret1 = torch.svd(a, out=ret)
         self.assertEqual(ret1.U, ret1[0])
         self.assertEqual(ret1.S, ret1[1])
         self.assertEqual(ret1.V, ret1[2])
@@ -7218,6 +7263,22 @@ class _TestTorchMixin(object):
         self.assertEqual(tensor.std(0), tensor.std(0, unbiased=True))
         self.assertEqual(tensor.std(), tensor.std(unbiased=True))
         self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False))
+
+    def test_structseq_repr(self):
+        a = torch.arange(250).reshape(5, 5, 10)
+        expected = """
+        torch.return_types.max(
+        values=tensor([[ 40,  41,  42,  43,  44,  45,  46,  47,  48,  49],
+                [ 90,  91,  92,  93,  94,  95,  96,  97,  98,  99],
+                [140, 141, 142, 143, 144, 145, 146, 147, 148, 149],
+                [190, 191, 192, 193, 194, 195, 196, 197, 198, 199],
+                [240, 241, 242, 243, 244, 245, 246, 247, 248, 249]]),
+        indices=tensor([[4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+                [4, 4, 4, 4, 4, 4, 4, 4, 4, 4]]))"""
+        self.assertEqual(repr(a.max(1)), textwrap.dedent(expected).strip())
 
     def test_var_stability(self):
         tensor = torch.FloatTensor([2281.5, 2281.25])
@@ -7430,9 +7491,11 @@ class _TestTorchMixin(object):
             # softmax, logsoftmax
             self.assertEqual(x, torch.nn.functional.softmax(x, 0))
             self.assertEqual(x, torch.nn.functional.softmax(x, 2))
+            self.assertEqual(x, torch.nn.functional.softmax(x, 3))
 
             self.assertEqual(x, torch.nn.functional.log_softmax(x, 0))
             self.assertEqual(x, torch.nn.functional.log_softmax(x, 2))
+            self.assertEqual(x, torch.nn.functional.log_softmax(x, 3))
 
             # cumsum, cumprod
             self.assertEqual(shape, torch.cumsum(x, 0).shape)
@@ -8087,6 +8150,17 @@ class _TestTorchMixin(object):
 
         val = torch.tensor(42)
         self.assertEqual(reversed(val), torch.tensor(42))
+
+    def test_contains(self):
+        x = torch.arange(0, 10)
+        self.assertEqual(4 in x, True)
+        self.assertEqual(12 in x, False)
+
+        x = torch.arange(1, 10).view(3, 3)
+        val = torch.arange(1, 4)
+        self.assertEqual(val in x, True)
+        val += 10
+        self.assertEqual(val in x, False)
 
     @staticmethod
     def _test_rot90(self, use_cuda=False):

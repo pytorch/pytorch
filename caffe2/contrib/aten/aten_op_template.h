@@ -40,7 +40,7 @@ private:
   at::Backend backend() const;
 
   TypeMeta typeMetaFor(const at::Tensor & t) {
-    return typeMetaFor(t.type().scalarType());
+    return typeMetaFor(t.scalar_type());
   }
   TypeMeta typeMetaFor(at::ScalarType st) {
     #define DEFINE_CASE(ctype,aten_name,_) \

@@ -150,7 +150,7 @@ void testFusion() {
   };
   testSimple();
 
-  auto testOne = [&](int ti, int tj, int toi, int toj) {
+  auto testOne = [&](int ti, int tj) {
     Graph graph;
 
     Var i0 = Var::asNewInput(graph);
@@ -200,14 +200,10 @@ void testFusion() {
     float max_diff = (outputs.front() - out0).abs().max().item<double>();
     ASSERT_TRUE(max_diff < 1e-6);
   };
-  testOne(0, 0, 0, 0);
-  testOne(0, 1, 0, 0);
-  testOne(1, 2, 0, 0);
-  testOne(0, 2, 0, 0);
-
-  testOne(0, 0, 0, 1);
-  testOne(0, 1, 1, 2);
-  testOne(1, 2, 0, 2);
+  testOne(0, 0);
+  testOne(0, 1);
+  testOne(1, 2);
+  testOne(0, 2);
 
   auto createFusedConcat =
       [](Graph& graph, at::ArrayRef<Value*> inputs, int64_t dim) -> Value* {
@@ -998,7 +994,7 @@ bool isEqual(const CompleteArgumentInfo& ti, const autograd::Variable& v) {
   if (!ti.defined())
     return ti.defined() == v.defined();
   return ti.device() == device(v) && ti.requires_grad() == v.requires_grad() &&
-      ti.type() == v.type().scalarType() && isEqual(ti.sizes(), v.sizes()) &&
+      ti.type() == v.scalar_type() && isEqual(ti.sizes(), v.sizes()) &&
       isEqual(ti.strides(), v.strides());
 }
 
@@ -1474,7 +1470,7 @@ void testSchemaParser() {
     // The list itself is annotated with `a`
     const auto& aliasInfo = *s.arguments().at(0).alias_info();
     ASSERT_TRUE(
-        aliasInfo.sets() ==
+        aliasInfo.beforeSets() ==
         std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
     ASSERT_TRUE(aliasInfo.isWrite());
 
@@ -1485,7 +1481,38 @@ void testSchemaParser() {
         Symbol::fromQualString("alias::b"),
         Symbol::fromQualString("alias::c"),
     };
-    ASSERT_TRUE(containedAliasInfo.sets() == expected);
+    ASSERT_TRUE(containedAliasInfo.beforeSets() == expected);
+    ASSERT_TRUE(containedAliasInfo.afterSets() == expected);
+    ASSERT_FALSE(containedAliasInfo.isWrite());
+  }
+  {
+    const auto s = parseSchema(
+        "at::what(Tensor(b -> b|c)[](a!) list, Tensor(c) element)"
+        " -> (Tensor(b|c)[](a!))");
+
+    // The list itself is annotated with `a`
+    const auto& aliasInfo = *s.arguments().at(0).alias_info();
+    ASSERT_EQ(
+        aliasInfo.beforeSets(),
+        std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
+    ASSERT_EQ(
+        aliasInfo.afterSets(),
+        std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
+    ASSERT_TRUE(aliasInfo.isWrite());
+    ASSERT_EQ(aliasInfo.containedTypes().size(), 1);
+
+    // Check the contained types
+    ASSERT_TRUE(!aliasInfo.containedTypes().empty());
+    const auto& containedAliasInfo = aliasInfo.containedTypes()[0];
+    const auto expectedBefore = std::unordered_set<Symbol>{
+        Symbol::fromQualString("alias::b"),
+    };
+    const auto expectedAfter = std::unordered_set<Symbol>{
+        Symbol::fromQualString("alias::b"),
+        Symbol::fromQualString("alias::c")
+    };
+    ASSERT_TRUE(containedAliasInfo.beforeSets() == expectedBefore);
+    ASSERT_TRUE(containedAliasInfo.afterSets() == expectedAfter);
     ASSERT_FALSE(containedAliasInfo.isWrite());
   }
 }
@@ -1493,10 +1520,10 @@ void testSchemaParser() {
 void testTopologicalIndex() {
   {
     Graph graph;
-    auto node1 = graph.create(prim::Undefined);
-    auto node2 = graph.create(prim::Undefined);
-    auto node3 = graph.create(prim::Undefined);
-    auto node4 = graph.create(prim::Undefined);
+    auto node1 = graph.create(prim::AutogradZero);
+    auto node2 = graph.create(prim::AutogradZero);
+    auto node3 = graph.create(prim::AutogradZero);
+    auto node4 = graph.create(prim::AutogradZero);
 
     graph.appendNode(node4);
     graph.prependNode(node1);
@@ -1521,12 +1548,12 @@ void testTopologicalIndex() {
     //      \      ...
     //      C    block2
     auto block1 = node3->addBlock();
-    auto A = graph.create(prim::Undefined);
+    auto A = graph.create(prim::AutogradZero);
     block1->appendNode(A);
-    auto B = graph.create(prim::Undefined);
+    auto B = graph.create(prim::AutogradZero);
     block1->appendNode(B);
     auto block2 = B->addBlock();
-    auto C = graph.create(prim::Undefined);
+    auto C = graph.create(prim::AutogradZero);
     block2->appendNode(C);
 
     // Check isAfter on different block levels
@@ -1536,7 +1563,7 @@ void testTopologicalIndex() {
 
     // make sure things don't blow up on deletions
     node2->destroy();
-    auto node2p = graph.create(prim::Undefined);
+    auto node2p = graph.create(prim::AutogradZero);
     node2p->insertAfter(node1);
     ASSERT_TRUE(node1->isBefore(node2p));
     ASSERT_TRUE(node2p->isBefore(node3));
@@ -1546,11 +1573,11 @@ void testTopologicalIndex() {
     Graph graph;
     std::map<size_t, Node*> nodes;
 
-    auto anchor = graph.create(prim::Undefined);
+    auto anchor = graph.create(prim::AutogradZero);
     graph.appendNode(anchor);
     // Inserting to the same place a lot will trigger reindexing
     for (auto i = 0; i < 100; ++i) {
-      auto n = graph.create(prim::Undefined);
+      auto n = graph.create(prim::AutogradZero);
       n->insertAfter(anchor);
       nodes[i] = n;
     }

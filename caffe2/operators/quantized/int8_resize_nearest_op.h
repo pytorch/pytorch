@@ -12,8 +12,9 @@ namespace int8 {
 
 class Int8ResizeNearestOp final : public Operator<CPUContext> {
  public:
-  Int8ResizeNearestOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws) {
+  template <class... Args>
+  explicit Int8ResizeNearestOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...) {
     width_scale_ = this->template GetSingleArgument<float>("width_scale", 1);
     height_scale_ = this->template GetSingleArgument<float>("height_scale", 1);
     CAFFE_ENFORCE_GT(width_scale_, 0);

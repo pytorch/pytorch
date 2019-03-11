@@ -1565,6 +1565,39 @@ class TestAutograd(TestCase):
 
             gradcheck(ctc_after_softmax, [x])
 
+    def _test_sparse_gather(self, size_x, size_ind, dim):
+        x = torch.randn(size_x, requires_grad=True)
+        if len(size_ind) > 0 and len(size_x) > 0:
+            ind = torch.randint(x.size(dim), size_ind)
+        else:
+            ind = torch.zeros(size_ind, dtype=torch.int64)
+        out = torch.gather(x, dim, ind, sparse_grad=False)
+        grad = torch.rand_like(out)
+        out.backward(grad)
+        grad_dense = x.grad.clone()
+        x.grad = None
+        out = torch.gather(x, dim, ind, sparse_grad=True)
+        out.backward(grad)
+        self.assertEqual(grad_dense, x.grad.to_dense())
+
+    def test_sparse_gather_dim0(self):
+        self._test_sparse_gather((10, 10), (5, 10), 0)
+
+    def test_sparse_gather_dim1(self):
+        self._test_sparse_gather((10, 10, 5), (10, 5, 5), 1)
+
+    def test_sparse_gather_dim_neg(self):
+        self._test_sparse_gather((10, 10, 5), (10, 10, 2), -1)
+
+    def test_sparse_gather_ind_scalar(self):
+        self._test_sparse_gather((10,), (), 0)
+
+    def test_sparse_gather_x_scalar(self):
+        self._test_sparse_gather((), (2,), 0)
+
+    def test_sparse_gather_both_scalar(self):
+        self._test_sparse_gather((), (), 0)
+
     def test_gc_in_destructor(self):
         """
         Previously, if a Function destructor triggered a garbage collection,
@@ -2431,6 +2464,30 @@ class TestAutograd(TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     def test_where_functional_cuda(self):
         self._test_where_functional(lambda t: t.cuda())
+
+    def _test_lerp_tensor_weights(self, cast):
+        def construct_inputs(*shapes):
+            start = cast(torch.randn(shapes[0])).requires_grad_()
+            end = cast(torch.randn(shapes[1])).requires_grad_()
+            weight = cast(torch.randn(shapes[2]))
+            return [start, end, weight]
+
+        all_test_shapes = [((3, 3, 3), (3, 3, 3), (3, 3, 3)),  # no broadcasting
+                           ((3,), (3, 3, 3), (3, 3, 3)),  # start broadcasting - 1
+                           ((3, 3, 3), (3,), (3, 3, 3)),  # end broadcasting - 1
+                           ((3, 3, 3), (3, 3, 3), (3,)),  # weight broadcasting - 1
+                           ((), (3, 3, 3), (3, 3, 3)),  # start broadcasting - 2
+                           ((3, 3, 3), (), (3, 3, 3)),  # end broadcasting - 2
+                           ((3, 3, 3), (3, 3, 3), ()),  # weight broadcasting - 2
+                           ((3, 3), (3, 3, 3), (3,))]  # all broadcasting
+
+        for shapes in all_test_shapes:
+            cur_inputs = construct_inputs(*shapes)
+            gradcheck(torch.lerp, cur_inputs)
+            gradgradcheck(torch.lerp, cur_inputs)
+
+    def test_lerp_tensor_weights(self):
+        self._test_lerp_tensor_weights(lambda t: t)
 
     def test_reduce_dtype(self):
         def test_reduction(op, has_no_dim):

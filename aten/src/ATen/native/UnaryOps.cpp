@@ -92,7 +92,7 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
 }
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
-  AT_CHECK(at::isFloatingType(self.type().scalarType()),
+  AT_CHECK(at::isFloatingType(self.scalar_type()),
            "mvlgamma is not implemented for ", self.type());
   AT_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
            "Condition for computing multivariate log-gamma not met");
@@ -103,7 +103,7 @@ Tensor mvlgamma(const Tensor& self, int64_t p) {
 }
 
 Tensor& mvlgamma_(Tensor& self, int64_t p) {
-  AT_CHECK(at::isFloatingType(self.type().scalarType()),
+  AT_CHECK(at::isFloatingType(self.scalar_type()),
            "mvlgamma is not implemented for ", self.type());
   AT_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
            "Condition for computing multivariate log-gamma not met");
