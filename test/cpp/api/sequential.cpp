@@ -33,11 +33,11 @@ TEST_F(SequentialTest, ConstructsFromSharedPointer) {
       std::make_shared<M>(1), std::make_shared<M>(2), std::make_shared<M>(3));
   ASSERT_EQ(sequential->size(), 3);
 
-  Sequential sequential_named({
+  Sequential sequential_named(named_submodules({
     {"m1", std::make_shared<M>(1)},
     {std::string("m2"), std::make_shared<M>(2)},
     {"m3", std::make_shared<M>(3)}
-  });
+  }));
   ASSERT_EQ(sequential->size(), 3);
 }
 
@@ -61,11 +61,11 @@ TEST_F(SequentialTest, ConstructsFromConcreteType) {
   Sequential sequential(M(1), M(2), M(3));
   ASSERT_EQ(sequential->size(), 3);
 
-  Sequential sequential_named({
+  Sequential sequential_named(named_submodules({
     {"m1", M(1)},
     {std::string("m2"), M(2)},
     {"m3", M(3)}
-  });
+  }));
   ASSERT_EQ(sequential->size(), 3);
 }
 
@@ -86,11 +86,11 @@ TEST_F(SequentialTest, ConstructsFromModuleHolder) {
   Sequential sequential(M(1), M(2), M(3));
   ASSERT_EQ(sequential->size(), 3);
 
-  Sequential sequential_named({
+  Sequential sequential_named(named_submodules({
     {"m1", M(1)},
     {std::string("m2"), M(2)},
     {"m3", M(3)}
-  });
+  }));
   ASSERT_EQ(sequential->size(), 3);
 }
 
@@ -401,14 +401,14 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
       "  (5): torch::nn::LSTM(input_size=4, hidden_size=5, layers=1, dropout=0)\n"
       ")");
 
-  Sequential sequential_named({
+  Sequential sequential_named(named_submodules({
       {"linear", Linear(10, 3)},
       {"conv2d", Conv2d(1, 2, 3)},
       {"dropout", Dropout(0.5)},
       {"batchnorm", BatchNorm(5)},
       {"embedding", Embedding(4, 10)},
       {"lstm", LSTM(4, 5)}
-  });
+  }));
   ASSERT_EQ(
       c10::str(sequential_named),
       "torch::nn::Sequential(\n"
