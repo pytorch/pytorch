@@ -5372,7 +5372,7 @@ class _TestTorchMixin(object):
 
         # TODO: Remove when MAGMA 2.5.0 is built for CUDA 8 and CUDA 9.2
         is_cuda_8_92 = False
-        if torch.cuda.is_available() and not TEST_WITH_ROCM:
+        if torch.cuda.is_available() and torch.version.cuda is not None:
             is_cuda_8_92 = any(x in torch.version.cuda for x in ['8.0', '9.2'])
 
         def test(M):

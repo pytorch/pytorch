@@ -547,7 +547,7 @@ std::tuple<Tensor, Tensor, Tensor> _btrifact_helper_cuda(const Tensor& self, boo
     self_working_copy = at::empty_like(self);
   } else {
     self_working_copy = cloneBatchedColumnMajor(self);
-    AT_DISPATCH_FLOATING_TYPES(self.type(), "btrifact", [&]{
+    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "btrifact_cuda", [&]{
       apply_btrifact<scalar_t>(self_working_copy, pivots_tensor, infos_tensor);
     });
   }
