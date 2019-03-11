@@ -150,47 +150,32 @@ class C10OperatorWrapper final : public Operator<Context> {
 
   IValue get_nontensor_argument_(const c10::Argument& argument) {
     if (argument.type()->isSubtypeOf(IntType::get())) {
-      if (argument.default_value().has_value()) {
-        return OperatorBase::GetSingleArgument<int>(
-            argument.name(), argument.default_value()->toInt());
-      } else {
-        AT_CHECK(
-            OperatorBase::HasSingleArgumentOfType<int>(argument.name()),
-            "Error in caffe2->c10 wrapper: Expected argument '",
-            argument.name(),
-            "' missing or wrong type (expected int).");
-        return OperatorBase::GetSingleArgument<int>(argument.name(), 0);
-      }
+      return get_nontensor_argument_<int>(argument.name(), argument.default_value());
     } else if (argument.type()->isSubtypeOf(FloatType::get())) {
-      if (argument.default_value().has_value()) {
-        return OperatorBase::GetSingleArgument<double>(
-            argument.name(), argument.default_value()->toDouble());
-      } else {
-        AT_CHECK(
-            OperatorBase::HasSingleArgumentOfType<double>(argument.name()),
-            "Error in caffe2->c10 wrapper: Expected argument '",
-            argument.name(),
-            "' missing or wrong type (expected double).");
-        return OperatorBase::GetSingleArgument<double>(argument.name(), 0);
-      }
+      return get_nontensor_argument_<double>(argument.name(), argument.default_value());
     } else if (argument.type()->isSubtypeOf(BoolType::get())) {
-      if (argument.default_value().has_value()) {
-        return OperatorBase::GetSingleArgument<bool>(
-            argument.name(), argument.default_value()->toBool());
-      } else {
-        AT_CHECK(
-            OperatorBase::HasSingleArgumentOfType<bool>(argument.name()),
-            "Error in caffe2->c10 wrapper: Expected argument '",
-            argument.name(),
-            "' missing or wrong type (expected bool).");
-        return OperatorBase::GetSingleArgument<bool>(argument.name(), 0);
-      }
+      return get_nontensor_argument_<bool>(argument.name(), argument.default_value());
     } else {
       // TODO Support more types
       AT_ERROR(
           "Error in caffe2->c10 wrapper: Unsupported argument type ",
           argument.type()->str(),
           " in c10 operator schema");
+    }
+  }
+
+  template<class T>
+  IValue get_nontensor_argument_(const std::string& name, const c10::optional<IValue>& default_value) {
+    if (default_value.has_value()) {
+      return GetSingleArgument<T>(
+        name, default_value->to<T>()
+      );
+    } else {
+      AT_CHECK(HasSingleArgumentOfType<T>(name),
+        "Error in caffe2->c10 wrapper: Expected argument '",
+        name,
+        "' missing or wrong type.");
+      return GetSingleArgument<T>(name, 0);
     }
   }
 
