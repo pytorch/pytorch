@@ -2,6 +2,7 @@
 
 #include "test/cpp/jit/test_base.h"
 
+#include <torch/csrc/jit/passes/canonicalize.h>
 #include "ATen/core/interned_strings.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
@@ -34,11 +35,11 @@
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
 
+#include <torch/csrc/jit/testing/file_check.h>
 #include "ATen/core/ivalue.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
-#include <torch/csrc/jit/testing/file_check.h>
 
 #include "onnx/onnx_pb.h"
 
@@ -836,7 +837,7 @@ void testADFormulas() {
   }
 }
 
-void testDifferentiate(std::ostream& out = std::cout) {
+void testDifferentiate() {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
   auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
@@ -857,13 +858,19 @@ void testDifferentiate(std::ostream& out = std::cout) {
   ASSERT_EQ(grad_spec.df_input_captured_outputs, expected_captured_outputs);
   ASSERT_EQ(grad_spec.df_input_vjps, expected_input_vjps);
   ASSERT_EQ(grad_spec.df_output_vjps, expected_output_vjps);
-  out << "testDifferentiate\n";
-  out << *grad_spec.f;
-  out << *grad_spec.df;
-  out << "\n";
+  testing::FileCheck()
+      .check_count("aten::mul", 2)
+      ->check("aten::size")
+      ->check("aten::add")
+      ->run(*grad_spec.f);
+  testing::FileCheck()
+      .check("prim::GradOf[name=\"aten::add\"]")
+      ->check_count("prim::GradOf[name=\"aten::mul\"]", 2)
+      ->check_count("AutogradAdd", 2)
+      ->run(*grad_spec.df);
 }
 
-void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
+void testDifferentiateWithRequiresGrad() {
   // Build up a fake graph
   auto graph = std::make_shared<Graph>();
   auto a = SymbolicVariable::asNewInput(*graph);
@@ -889,10 +896,17 @@ void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
   ASSERT_EQ(grad_spec.df_input_captured_outputs, std::vector<size_t>({2, 3}));
   ASSERT_EQ(grad_spec.df_input_vjps, expected_input_vjps);
   ASSERT_EQ(grad_spec.df_output_vjps, expected_output_vjps);
-  out << "testDifferentiateWithRequiresGrad\n";
-  out << *grad_spec.f;
-  out << *grad_spec.df;
-  out << "\n";
+  testing::FileCheck()
+      .check("aten::mul")
+      ->check_count("aten::add", 2)
+      ->check("aten::mul")
+      ->check("aten::size")
+      ->check("aten::add")
+      ->run(*grad_spec.f);
+
+  testing::FileCheck()
+      .check_count("prim::GradOf[name=\"aten::mul\"]", 1, /*exactly*/ true)
+      ->run(*grad_spec.df);
 }
 
 void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
@@ -942,15 +956,18 @@ void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
   ASSERT_EQ(second_key, expected_key);
 }
 
-void testCreateAutodiffSubgraphs(std::ostream& out = std::cout) {
+void testCreateAutodiffSubgraphs() {
   auto graph = build_lstm();
   CreateAutodiffSubgraphs(graph, /*threshold=*/2);
-  out << "testCreateAutodiffSubgraphs\n";
-  out << *graph << "\n";
   // all of the ops are within the DifferentiableGraph
-  testing::FileCheck().check_not("aten::mm")->check_not("aten::sigmoid")->
-    check_not("aten::tanh")->check_not("aten::mul")->check("DifferentiableGraph")
-    ->check_next("return")->run(*graph);
+  testing::FileCheck()
+      .check_not("aten::mm")
+      ->check_not("aten::sigmoid")
+      ->check_not("aten::tanh")
+      ->check_not("aten::mul")
+      ->check("DifferentiableGraph")
+      ->check_next("return")
+      ->run(*graph);
 }
 
 void testSubgraphUtils() {
@@ -1097,11 +1114,13 @@ void testGraphExecutor() {
 }
 
 void testBlocks(std::ostream& out = std::cout) {
-  Graph g;
-  auto a = Var::asNewInput(g, "a");
-  auto b = Var::asNewInput(g, "b");
+  auto g = std::make_shared<Graph>();
+  // auto g = *graph;
+  auto a = Var::asNewInput(*g, "a");
+  auto b = Var::asNewInput(*g, "b");
   auto c = a + b;
-  auto r = g.appendNode(g.create(prim::If, {Var::asNewInput(g, "c").value()}));
+  auto r =
+      g->appendNode(g->create(prim::If, {Var::asNewInput(*g, "c").value()}));
   auto then_block = r->addBlock();
   auto else_block = r->addBlock();
   {
@@ -1115,17 +1134,32 @@ void testBlocks(std::ostream& out = std::cout) {
     auto e = d + c;
     else_block->registerOutput(e.value());
   }
-  g.registerOutput((Var(r->output()) + c).value());
-  g.lint();
-  // FileCheck().check("add").check("prim::If").check("block").check("aten::add").
-  //   check("block").check("aten::add").check()
-  // out << "testBlocks\n" << g << "\n";
+  g->registerOutput((Var(r->output()) + c).value());
+  g->lint();
+  testing::FileCheck()
+      .check("add")
+      ->check("prim::If")
+      ->check("block0")
+      ->check("aten::add")
+      ->check("block1")
+      ->check_count("aten::add", 3)
+      ->run(*g);
   r->eraseBlock(0);
-  out << g << "\n";
-  g.lint();
+  testing::FileCheck()
+      .check("add")
+      ->check("prim::If")
+      ->check("block0")
+      ->check_not("block")
+      ->run(*g);
+  g->lint();
+  Canonicalize(g, false);
+  std::stringstream orig;
+  orig << *g;
   // test recursive copy of blocks works
-  auto g2 = g.copy();
-  out << *g2 << "\n";
+  std::stringstream copy;
+  auto g2 = g->copy();
+  copy << *g2;
+  AT_ASSERT(orig.str() == copy.str());
 }
 
 const auto cf_examples = R"JIT(
@@ -1519,9 +1553,7 @@ void testSchemaParser() {
         Symbol::fromQualString("alias::b"),
     };
     const auto expectedAfter = std::unordered_set<Symbol>{
-        Symbol::fromQualString("alias::b"),
-        Symbol::fromQualString("alias::c")
-    };
+        Symbol::fromQualString("alias::b"), Symbol::fromQualString("alias::c")};
     ASSERT_TRUE(containedAliasInfo.beforeSets() == expectedBefore);
     ASSERT_TRUE(containedAliasInfo.afterSets() == expectedAfter);
     ASSERT_FALSE(containedAliasInfo.isWrite());
