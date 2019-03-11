@@ -143,6 +143,7 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
 void ScriptModuleDeserializer::loadLibs(torch::ModelDef* model_def) {
   for (const auto& lib_def : model_def->libs()) {
     auto module = std::make_shared<script::Module>();
+    module->set_optimized(lib_def.optimize());
     if (lib_def.has_torchscript_arena()) {
       at::DataPtr data;
       size_t size;

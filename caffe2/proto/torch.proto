@@ -90,5 +90,9 @@ message ModelDef {
   // the tensor id is defined as TensorProto.name
   repeated TensorDef tensors = 5;
 
+  // TorchScript code that this module hierarchy depends on
+  // Libs will be loaded in before the main module is compiled.
+  // They should be in dependency order (e.g. you should be able to compile
+  // the libs in forward order)
   repeated LibDef libs = 9;
 }
