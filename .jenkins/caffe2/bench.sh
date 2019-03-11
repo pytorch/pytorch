@@ -21,6 +21,7 @@ if (( $num_gpus == 0 )); then
 fi
 if (( $num_gpus >= 1 )); then
     "$PYTHON" "$caffe2_pypath/python/examples/resnet50_trainer.py" --train_data null --batch_size 128 --epoch_size 12800 --num_epochs 2 --num_gpus 1
+    "$PYTHON" "$caffe2_pypath/python/examples/resnet50_trainer.py" --train_data null --batch_size 256 --epoch_size 25600 --num_epochs 2 --num_gpus 1 --float16_compute --dtype float16
 fi
 # Run multi-gpu training once the HSAQueue::isEmpty core dump issue is fixed
 # if (( $num_gpus >= 2 )); then

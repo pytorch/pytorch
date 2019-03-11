@@ -156,6 +156,8 @@ struct FileCheckImpl {
 
   bool has_run = false;
 
+  friend std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc);
+
  private:
   void doCheckNot(
       const std::vector<Check>& nots,
@@ -281,9 +283,18 @@ struct FileCheckImpl {
 
 FileCheck::FileCheck() : fcImpl(new FileCheckImpl()){};
 
+std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc) {
+  out << "FileCheck checks:\n";
+  for (const Check& c : fc.checks) {
+    out << "\t" << c << "\n";
+  }
+  return out;
+};
+
 FileCheck::~FileCheck() {
   if (!fcImpl->has_run) {
     std::cout << "You have not run this instance of FileCheck!\n";
+    std::cout << *fcImpl;
   }
   fcImpl.reset();
 };
