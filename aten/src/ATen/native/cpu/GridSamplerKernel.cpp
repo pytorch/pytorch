@@ -308,8 +308,8 @@ static inline void
 mask_scatter_add(const scalar_t *src, scalar_t* base_addr,
                  const int_same_size_t<scalar_t> *offsets,
                  const int_same_size_t<scalar_t> *mask, int64_t len) {
-  #ifndef _MSC_VER  
-  # pragma unroll  
+  #ifndef _MSC_VER
+  # pragma unroll
   #endif
   for (int64_t i = 0; i < len; i++) {
     if (mask[i] & 0x01) {
@@ -431,8 +431,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear, padding>
     auto i_sw_offset = i_nw_offset + iVec(inp_sH);
     auto i_se_offset = i_sw_offset + iVec(inp_sW);
 
-    #ifndef _MSC_VER  
-    # pragma unroll  
+    #ifndef _MSC_VER
+    # pragma unroll
     #endif
     for (int64_t c = 0; c < C; ++c) {
       auto inp_slice_C_ptr = inp_slice[c].data();
@@ -505,8 +505,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear, padding>
     scalar_t gInp_corner_arr[Vec::size()];
 
     auto gx = Vec(0), gy = Vec(0);
-    #ifndef _MSC_VER  
-    # pragma unroll  
+    #ifndef _MSC_VER
+    # pragma unroll
     #endif
     for (int64_t c = 0; c < C; ++c) {
       auto inp_slice_C_ptr = inp_slice[c].data();
@@ -598,8 +598,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest, padding> 
     auto out_ptr = out_slice.data() + offset;
     auto out_sC = out_slice.stride(0);
     auto inp_slice_ptr = inp_slice.data();
-    #ifndef _MSC_VER  
-    # pragma unroll  
+    #ifndef _MSC_VER
+    # pragma unroll
     #endif
     for (int c = 0; c < C; ++c, out_ptr += out_sC, inp_slice_ptr += inp_sC) {
       // mask_gather zeros out the mask, so we need to make a copy
@@ -635,8 +635,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest, padding> 
     integer_t gInp_offset_arr[iVec::size()];
     i_gInp_offset.store(gInp_offset_arr);
 
-    #ifndef _MSC_VER  
-    # pragma unroll  
+    #ifndef _MSC_VER
+    # pragma unroll
     #endif
     for (int64_t c = 0; c < C; ++c) {
       mask_scatter_add(gOut_slice[c].data() + offset, gInp_slice[c].data(),
@@ -743,15 +743,15 @@ static inline void grid_sample_2d_grid_slice_iterator(
     auto spatial_offset = 0;
     auto i_offsets_delta = iVec(grid_sW * step);
 
-    #ifndef _MSC_VER  
-    # pragma unroll  
+    #ifndef _MSC_VER
+    # pragma unroll
     #endif
     for (int64_t h = 0; h < out_H; h++) {
       auto grid_ptr_x = grid_ptr + h * grid_sH;
       auto grid_ptr_y = grid_ptr_x + grid_sCoor;
       auto i_offsets = iVec::arange(0, grid_sW);
-      #ifndef _MSC_VER  
-      # pragma unroll  
+      #ifndef _MSC_VER
+      # pragma unroll
       #endif
       for (int64_t w = 0; w < out_W; w += step) {
         auto len = std::min(step, out_W - w);
@@ -815,7 +815,7 @@ Tensor grid_sampler_2d_cpu_kernel_impl(const Tensor& input, const Tensor& grid,
     return;                                                            \
   }
 
-  AT_DISPATCH_FLOATING_TYPES(input.type(), "grid_sampler_2d_cpu_kernel_impl", [&] {
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "grid_sampler_2d_cpu_kernel_impl", [&] {
     auto out_acc = output.accessor<scalar_t, 4>();
     auto inp_acc = input.accessor<scalar_t, 4>();
     auto grid_acc = grid.accessor<scalar_t, 4>();
@@ -878,7 +878,7 @@ grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
     return;                                                            \
   }
 
-  AT_DISPATCH_FLOATING_TYPES(input.type(), "grid_sampler_2d_backward_cpu_kernel_impl", [&] {
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "grid_sampler_2d_backward_cpu_kernel_impl", [&] {
     auto gInp_acc = grad_input.accessor<scalar_t, 4>();
     auto gGrid_acc = grad_grid.accessor<scalar_t, 4>();
     auto inp_acc = input.accessor<scalar_t, 4>();
