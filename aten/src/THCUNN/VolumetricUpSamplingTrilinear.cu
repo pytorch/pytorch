@@ -13,7 +13,7 @@
 #include <c10/macros/Macros.h>
 
 template<typename Dtype, typename Acctype>
-C10_LAUNCH_BOUNDS(1024)
+C10_LAUNCH_BOUNDS_1(1024)
 __global__ void caffe_gpu_interp2_kernel(const int n,
     const Acctype rdepth, const Acctype rheight, const Acctype rwidth, const bool align_corners,
     const THCDeviceTensor<Dtype, 5> data1, THCDeviceTensor<Dtype, 5> data2) {
@@ -81,7 +81,7 @@ __global__ void caffe_gpu_interp2_kernel(const int n,
 
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename Dtype, typename Acctype>
-C10_LAUNCH_BOUNDS(1024)
+C10_LAUNCH_BOUNDS_1(1024)
 __global__ void caffe_gpu_interp2_kernel_backward(const int n,
     const Acctype rdepth, const Acctype rheight, const Acctype rwidth, const bool align_corners,
     THCDeviceTensor<Dtype, 5> data1, const THCDeviceTensor<Dtype, 5> data2){

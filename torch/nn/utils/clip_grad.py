@@ -59,8 +59,9 @@ def clip_grad_value_(parameters, clip_value):
     Arguments:
         parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
             single Tensor that will have gradients normalized
-        clip_value (float or int): maximum allowed value of the gradients
-            The gradients are clipped in the range [-clip_value, clip_value]
+        clip_value (float or int): maximum allowed value of the gradients.
+            The gradients are clipped in the range
+            :math:`\left[\text{-clip\_value}, \text{clip\_value}\right]`
     """
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
