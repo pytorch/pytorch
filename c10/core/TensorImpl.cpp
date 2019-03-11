@@ -46,6 +46,21 @@ TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, 
 TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable)
     : TensorImpl(std::move(storage), type_id, storage.dtype(), is_variable) {}
 
+TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable,
+                       c10::intrusive_ptr<c10::intrusive_ptr_target> opaque_handle, IntArrayRef sizes)
+  : TensorImpl({}, type_id, data_type, is_variable) {
+  AT_ASSERT(opaque_handle.get() != nullptr);
+  opaque_handle_ = opaque_handle;
+  auto dim = sizes.size();
+  sizes_.resize(dim);
+  for (size_t d = 0; d < dim; ++d) {
+    sizes_[d] = sizes[d];
+  }
+  is_contiguous_ = false;
+  allow_tensor_metadata_change_ = false;
+  refresh_numel();
+}
+
 TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable)
     : storage_(std::move(storage)),
       sizes_{0},
@@ -66,6 +81,9 @@ IntArrayRef TensorImpl::strides() const {
 }
 
 bool TensorImpl::compute_contiguous() const {
+  if (opaque_handle_) {
+    return false;
+  }
   bool is_contiguous = true;
   if (is_empty())
     return is_contiguous;
@@ -86,6 +104,9 @@ bool TensorImpl::compute_contiguous() const {
 void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
+  }
+  if (opaque_handle_) {
+    opaque_handle_ = {};
   }
 }
 
@@ -112,10 +133,15 @@ TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
 }
 
 bool TensorImpl::has_storage() const {
-  return storage_;
+  if (!opaque_handle_) {
+    return false;
+  } else {
+    return storage_;
+  }
 }
 
 const Storage& TensorImpl::storage() const {
+  AT_ASSERT(!opaque_handle_);
   return storage_;
 }
 

@@ -2,16 +2,14 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 
-#include "MKLDNNTensorImpl.h"
+#include "MKLDNNHandle.h"
 
 namespace at { namespace native {
 
 #if AT_MKLDNN_ENABLED()
 
-using c10::mkldnn::MKLDNNTensorImpl;
-
 ideep::tensor& IdeepTensorFromMKLDNNTensor(const Tensor& self) {
-  return ((MKLDNNTensorImpl*)self.unsafeGetTensorImpl())->get_ideep_tensor();
+  return ((MKLDNNHandle*)self.unsafeGetTensorImpl()->unsafe_opaque_handle())->get_ideep_tensor();
 }
 
 Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
@@ -31,15 +29,14 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
   // TODO: share CPU storage without explicit buffer copy here
   AT_ASSERT(cpu_tensor.type_id() == CPUTensorId());
   AT_ASSERT(cpu_tensor.scalar_type() == ScalarType::Float);
-  Tensor mkldnn_tensor = detail::make_tensor<MKLDNNTensorImpl>(
-    MkldnnCPUTensorId(), cpu_tensor.options().dtype());
-  ideep::tensor& dtensor = IdeepTensorFromMKLDNNTensor(mkldnn_tensor);
+  c10::intrusive_ptr<MKLDNNHandle> mkldnn_handle = c10::make_intrusive<MKLDNNHandle>();
+  ideep::tensor& dtensor = mkldnn_handle->get_ideep_tensor();
   auto src_dims = cpu_tensor.sizes().vec();
   ideep::tensor::dims dst_dims (src_dims.begin(), src_dims.end());
   dtensor.resize(dst_dims, ideep::tensor::data_type::f32);
   dtensor.reorder_from(dst_dims, ideep::tensor::data_type::f32,
                        (void*)(cpu_tensor.template data<float>()));
-  return mkldnn_tensor;
+  return MKLDNNHandle::tensor_from_handle(mkldnn_handle, cpu_tensor.options().dtype());
 }
 
 #else

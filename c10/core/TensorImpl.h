@@ -223,6 +223,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
 
+  /**
+     TODO: add comments
+   */
+  TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable,
+             c10::intrusive_ptr<c10::intrusive_ptr_target> opaque_handle,
+             IntArrayRef sizes = IntArrayRef());
+
  private:
   // This constructor is private, because the data_type is redundant with
   // storage.  Still, we pass it in separately because it's easier to write
@@ -369,6 +376,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (tid == CUDATensorId() || tid == HIPTensorId() || tid == MSNPUTensorId() || tid == XLATensorId()) {
       // TODO: #12934 investigate caching device on TensorImpl to avoid this vdispatch.
       return storage().device().index();
+    } else if (tid == MkldnnCPUTensorId()) {
+      return -1;
     }
     return get_device_slow();
   }
@@ -569,6 +578,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   template <typename T>
   inline T * data() const {
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
+    AT_ASSERT(!opaque_handle_);
     AT_ASSERTM(
         storage_initialized(),
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
@@ -600,6 +610,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline void* data() const {
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
+    AT_ASSERT(!opaque_handle_);
     AT_ASSERT(storage_initialized());
     AT_ASSERT(dtype_initialized());
     return static_cast<void*>(
@@ -625,6 +636,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T * unsafe_data() const {
+    AT_ASSERT(!opaque_handle_);
     return storage_.unsafe_data<T>() + storage_offset_;
   }
 
@@ -825,7 +837,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    */
   virtual bool allow_tensor_metadata_change() const {
-    return allow_tensor_metadata_change_;
+    return !opaque_handle_ && allow_tensor_metadata_change_;
   }
 
   /**
@@ -856,14 +868,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // `allow_tensor_metadata_change_` to false would prevent those changes from happening and is
   // undesirable.
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
-    auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id(), is_variable());
-    impl->set_sizes_and_strides(sizes(), strides());
-    impl->storage_offset_ = storage_offset_;
-    impl->is_wrapped_number_ = is_wrapped_number_;
-    impl->reserved_ = reserved_;
-    impl->refresh_numel();
-    impl->refresh_contiguous();
-    return impl;
+    if (!opaque_handle_) {
+      auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id(), is_variable());
+      impl->set_sizes_and_strides(sizes(), strides());
+      impl->storage_offset_ = storage_offset_;
+      impl->is_wrapped_number_ = is_wrapped_number_;
+      impl->reserved_ = reserved_;
+      impl->refresh_numel();
+      impl->refresh_contiguous();
+      return impl;
+    } else {
+      auto impl = c10::make_intrusive<TensorImpl>(type_id(), dtype(), is_variable(), opaque_handle_, sizes());
+      impl->reserved_ = reserved_;
+      return impl;
+    }
+  }
+
+  c10::intrusive_ptr_target* unsafe_opaque_handle() const {
+    return opaque_handle_.get();
   }
 
  private:
@@ -885,7 +907,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   DeviceType device_type() const {
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
-    return storage_.device_type();
+    if (!opaque_handle_) {
+      return storage_.device_type();
+    } else {
+      return computeDeviceType(type_id());
+    }
   }
 
   /**
@@ -893,7 +919,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * device).
    */
   Device GetDevice() const {
-    return storage_.device();
+    if (!opaque_handle_) {
+      return storage_.device();
+    } else {
+      return device();
+    }
   }
 
   /**
@@ -908,6 +938,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * This op is auto-asynchronous if the underlying device (CUDA) supports it.
    */
   void Extend(int64_t num, float growthPct) {
+    AT_ASSERT(!opaque_handle_);
     AT_ASSERT(sizes_.size() >= 1u);
     AT_ASSERTM(num >= 0, "`num` must be non-negative for Extend");
     AT_ASSERTM(
@@ -973,6 +1004,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <class T>
   void ReserveSpace(const T& outer_dim) {
+    AT_ASSERT(!opaque_handle_);
     AT_ASSERTM(
         is_contiguous_,
         "Right now ReserveSpace is only supported for contiguous Tensor.");
@@ -1018,6 +1050,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename... Ts>
   void Resize(Ts... dim_source) {
+    AT_ASSERT(!opaque_handle_);
     bool size_changed = SetDims(dim_source...);
     if (size_changed) {
       // If needed, we will free the data. the next mutable_data() call
@@ -1047,6 +1080,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * This requires the total size of the tensor to remains constant.
    */
   inline void Reshape(const std::vector<int64_t>& dims) {
+    AT_ASSERT(!opaque_handle_);
     AT_ASSERTM(
         is_contiguous_,
         "Right now Reshape is only supported for contiguous Tensor.");
@@ -1075,6 +1109,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * allocation.
    */
   inline void FreeMemory() {
+    AT_ASSERT(!opaque_handle_);
     // We'll detach from the old Storage and create a new one
     storage_ = Storage::create_legacy(storage_.device(), data_type_);
     storage_offset_ = 0;
@@ -1094,6 +1129,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   // To be deprecated
   void ShareData(const TensorImpl& src) {
+    AT_ASSERT(!opaque_handle_);
     // Right now, we are assuming the device_type are the same, since it is
     // inherently the same in the non-templatized code. We should probably add
     // an assert here which might affect perf a little bit.
@@ -1126,6 +1162,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       DataPtr&& data_ptr,
       const caffe2::TypeMeta& data_type,
       size_t capacity) {
+    AT_ASSERT(!opaque_handle_);
     AT_ASSERTM(
         data_type.id() != caffe2::TypeIdentifier::uninitialized(),
         "To share with a raw external pointer you need to pass in an "
@@ -1164,6 +1201,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * and a new storage will be created.
    */
   inline void* raw_mutable_data(const caffe2::TypeMeta& meta) {
+    AT_ASSERT(!opaque_handle_);
     // For 0-size tensors it's fine to return any pointer (including nullptr)
     if (data_type_ == meta && storage_initialized()) {
       return static_cast<void*>(static_cast<char*>(storage_.data()) + storage_offset_ * meta.itemsize());
@@ -1225,6 +1263,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* mutable_data() {
+    AT_ASSERT(!opaque_handle_);
     if (storage_initialized() && storage_.IsType<T>()) {
       return static_cast<T*>(storage_.data()) + storage_offset_;
     }
@@ -1241,7 +1280,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * storage UNINITIALIZED after a Resize() or FreeMemory()
    */
   bool storage_initialized() const noexcept {
-    return storage_.data() || numel_ == 0;
+    return opaque_handle_ || storage_.data() || numel_ == 0;
   }
 
   /**
@@ -1274,6 +1313,7 @@ private:
       typename T,
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
   bool SetDimsTemplate(ArrayRef<T> src) {
+    AT_ASSERT(!opaque_handle_);
     auto old_numel = numel_;
     auto old_dim = sizes_.size();
     sizes_.resize(src.size());
@@ -1320,6 +1360,7 @@ private:
   }
 
   inline void update_to_contiguous_strides(size_t old_dim) {
+    AT_ASSERT(!opaque_handle_);
     strides_.resize(sizes_.size(), 0);
     if (dim() > 0) {
       int last_idx = dim() - 1;
@@ -1410,6 +1451,9 @@ protected:
   // and its subclasses to find which fields are copied by value.
   bool allow_tensor_metadata_change_ = true;
 
+  // TODO: add comments here
+  c10::intrusive_ptr<c10::intrusive_ptr_target> opaque_handle_;
+
   // we decide to keep reserved_ and it will
   // live in Tensor after the split
   // The logic is that if Extend() or ReserveSpace() were ever called,
@@ -1470,7 +1514,7 @@ protected:
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 25,
+              sizeof(TensorImpl) == sizeof(int64_t) * 27,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 
