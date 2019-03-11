@@ -538,18 +538,6 @@ void THTensor_(cminValue)(THTensor *r, THTensor *t, scalar_t value) {
                    *r_data = *t_data > value ? value : *t_data;);  // this order propagates NaN
 }
 
-void THTensor_(zerosLike)(THTensor *r_, THTensor *input)
-{
-  THTensor_(resizeAs)(r_, input);
-  THTensor_(zero)(r_);
-}
-
-void THTensor_(onesLike)(THTensor *r_, THTensor *input)
-{
-  THTensor_(resizeAs)(r_, input);
-  THTensor_(fill)(r_, 1);
-}
-
 void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
 {
   THArgCheck(THTensor_(nDimensionLegacyNoScalars)(t) == 1 || THTensor_(nDimensionLegacyNoScalars)(t) == 2, 1, "matrix or a vector expected");
@@ -599,50 +587,6 @@ void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
   }
 }
 
-void THTensor_(eye)(THTensor *r_, int64_t n, int64_t m)
-{
-  scalar_t *r__data;
-  int64_t i, sz;
-
-  THArgCheck(n > 0, 1, "invalid argument");
-
-  if(m <= 0)
-    m = n;
-
-  THTensor_(resize2d)(r_, n, m);
-  THTensor_(zero)(r_);
-
-  i = 0;
-  r__data = r_->data<scalar_t>();
-  sz = THMin(THTensor_(size)(r_, 0), THTensor_(size)(r_, 1));
-  for(i = 0; i < sz; i++)
-    r__data[i*(r_->stride(0)+r_->stride(1))] = 1;
-}
-
-void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
-{
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-  scalar_t *r__data;
-  int64_t r__stride_0;
-  int64_t i;
-
-  THArgCheck(n > 0, 1, "must be strictly positive");
-
-  THTensor_(resize1d)(r_, n);
-  r__data = r_->data<scalar_t>();
-  r__stride_0 = THTensor_(stride)(r_,0);
-
-  for(i = 0; i < n; i++)
-    r__data[i*r__stride_0] = (scalar_t)(i);
-
-  for(i = 0; i < n-1; i++)
-  {
-    int64_t z = THRandom_random(_generator) % (n-i);
-    scalar_t sav = r__data[i*r__stride_0];
-    r__data[i*r__stride_0] = r__data[(z+i)*r__stride_0];
-    r__data[(z+i)*r__stride_0] = sav;
-  }
-}
 
 /* I cut and pasted (slightly adapted) the quicksort code from
    Sedgewick's 1978 "Implementing Quicksort Programs" article
@@ -1433,7 +1377,7 @@ LAB_IMPLEMENT_BASIC_FUNCTION(erfc,TH_MATH_NAME(erfc))
 LAB_IMPLEMENT_BASIC_FUNCTION(erfinv,TH_erfinv)
 LAB_IMPLEMENT_BASIC_FUNCTION(ceil,TH_MATH_NAME(ceil))
 LAB_IMPLEMENT_BASIC_FUNCTION(floor,TH_MATH_NAME(floor))
-LAB_IMPLEMENT_BASIC_FUNCTION(round,TH_MATH_NAME(round))
+LAB_IMPLEMENT_BASIC_FUNCTION(round,TH_MATH_NAME(nearbyint))
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
 LAB_IMPLEMENT_BASIC_FUNCTION(trunc,TH_MATH_NAME(trunc))
 LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
@@ -1467,22 +1411,6 @@ void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
     case 1: THTensor_(trigamma)(r_, t); return;
     default: THError("polygamma(n,x) is not implemented for n>=2");
   }
-}
-
-void THTensor_(lerp)(THTensor *r_, THTensor *a, THTensor *b, scalar_t weight)
-{
-  THArgCheck(THTensor_(nElement)(a) == THTensor_(nElement)(b), 2, "sizes do not match");
-  THTensor_(resizeAs)(r_, a);
-  TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, a, scalar_t, b, *r__data = TH_MATH_NAME(TH_lerp)(*a_data, *b_data, weight););
-}
-
-void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension, int keepdim)
-{
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "invalid dimension %d",
-      dimension);
-
-  THTensor_(sum)(r_, t, dimension, keepdim);
-  THTensor_(div)(r_, r_, THTensor_sizeLegacyNoScalars(t, dimension));
 }
 
 void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)

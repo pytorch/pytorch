@@ -199,7 +199,7 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
     return std::tuple<Tensor, Tensor, Tensor, Tensor>(ret, offset2bag, bag_size, bag_size);
   } else { // MODE_MAX
     return AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      weight.type(), "embedding_bag_cpu_max", [&]() {
+      weight.scalar_type(), "embedding_bag_cpu_max", [&]() {
         return embedding_bag_cpu_max<scalar_t>(weight, indices, offset2bag, output, bag_size, offsets);
       }
     );

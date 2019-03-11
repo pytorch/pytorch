@@ -210,7 +210,7 @@ void DataChannelGloo::allGather(
     assertSameSizeAndType(out_tensor, input, "allGather");
 
   GENERATE_ALL_TYPES(
-      input.type().scalarType(), allGatherT, output, input, group_id)
+      input.scalar_type(), allGatherT, output, input, group_id)
 }
 
 // XXX: `gather` is not supported by Gloo yet.
@@ -259,7 +259,7 @@ void DataChannelGloo::allReduce(
     THDGroup group_id) {
   RETURN_IF_NOT_IN_GROUP
   GENERATE_ALL_TYPES(
-      data.type().scalarType(), allReduceT, data, operation, group_id)
+      data.scalar_type(), allReduceT, data, operation, group_id)
 }
 
 // XXX: `reduce` is not supported by Gloo yet.
@@ -305,7 +305,7 @@ void DataChannelGloo::broadcast(
     THDGroup group_id) {
   RETURN_IF_NOT_IN_GROUP
   GENERATE_ALL_TYPES(
-      data.type().scalarType(), broadcastT, data, src_rank, group_id)
+      data.scalar_type(), broadcastT, data, src_rank, group_id)
 }
 
 void DataChannelGloo::send(Scalar& data, rank_type dst_rank) {

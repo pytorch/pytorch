@@ -24,6 +24,7 @@ __all__ = [
     'meshgrid',
     'potrf',
     'potrs',
+    'pstrf',
     'split',
     'stft',
     'tensordot',
@@ -741,14 +742,59 @@ def potrf(a, upper=True, out=None):
     For more information, regarding :func:`torch.potrf`, please check :func:`torch.cholesky`.
 
     .. warning::
-        torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next
-        release. Please use torch.cholesky instead and note that the :attr:`upper` argument in
-        torch.cholesky defaults to ``False``.
+        :func:`torch.potrf` is deprecated in favour of :func:`torch.cholesky` and will be removed
+        in the next release. Please use :func:`torch.cholesky` instead and note that the :attr:`upper`
+        argument in :func:`torch.cholesky` defaults to ``False``.
     """
     warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next "
                   "release. Please use torch.cholesky instead and note that the :attr:`upper` argument in"
                   " torch.cholesky defaults to ``False``.", stacklevel=2)
     return torch.cholesky(a, upper=upper, out=out)
+
+
+def pstrf(a, upper=True, out=None):
+    r"""Computes the pivoted Cholesky decomposition of a symmetric positive-definite
+    matrix :attr:`a`. returns a namedtuple (u, pivot) of matrice.
+
+    If :attr:`upper` is ``True`` or not provided, `u` is upper triangular
+    such that :math:`a = p^T u^T u p`, with `p` the permutation given by `pivot`.
+
+    If :attr:`upper` is ``False``, `u` is lower triangular such that
+    :math:`a = p^T u u^T p`.
+
+    .. warning::
+        :func:`torch.pstrf` is deprecated in favour of :func:`torch.cholesky` and will
+        be removed in the next release.
+
+    Args:
+        a (Tensor): the input 2-D tensor
+        upper (bool, optional): whether to return a upper (default) or lower triangular matrix
+        out (tuple, optional): namedtuple of `u` and `pivot` tensors
+
+    Example::
+
+        >>> a = torch.randn(3, 3)
+        >>> a = torch.mm(a, a.t()) # make symmetric positive definite
+        >>> a
+        tensor([[ 3.5405, -0.4577,  0.8342],
+                [-0.4577,  1.8244, -0.1996],
+                [ 0.8342, -0.1996,  3.7493]])
+        >>> u,piv = torch.pstrf(a)
+        >>> u
+        tensor([[ 1.9363,  0.4308, -0.1031],
+                [ 0.0000,  1.8316, -0.2256],
+                [ 0.0000,  0.0000,  1.3277]])
+        >>> piv
+        tensor([ 2,  0,  1], dtype=torch.int32)
+        >>> p = torch.eye(3).index_select(0,piv.long()).index_select(0,piv.long()).t() # make pivot permutation
+        >>> torch.mm(torch.mm(p.t(),torch.mm(u.t(),u)),p) # reconstruct
+        tensor([[ 3.5405, -0.4577,  0.8342],
+                [-0.4577,  1.8244, -0.1996],
+                [ 0.8342, -0.1996,  3.7493]])
+    """
+    warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
+                  "in the next release.", stacklevel=2)
+    return torch._C._VariableFunctions.pstrf(a, upper=upper, out=out)
 
 
 def potrs(b, u, upper=True, out=None):
@@ -758,9 +804,9 @@ def potrs(b, u, upper=True, out=None):
     For more information, regarding :func:`torch.potrs`, please check :func:`torch.cholesky_solve`.
 
     .. warning::
-        torch.potrs is deprecated in favour of torch.cholesky_solve and will be removed in the next
-        release. Please use torch.cholesky_solve instead and note that the :attr:`upper` argument in
-        torch.cholesky_solve defaults to ``False``.
+        :func:`torch.potrs` is deprecated in favour of :func:`torch.cholesky_solve` and will be
+        removed in the next release. Please use :func:`torch.cholesky_solve` instead and note that
+        the :attr:`upper` argument in :func:`torch.cholesky_solve` defaults to ``False``.
     """
     warnings.warn("torch.potrs is deprecated in favour of torch.cholesky_solve and will be removed "
                   "in the next release. Please use torch.cholesky instead and note that the "
