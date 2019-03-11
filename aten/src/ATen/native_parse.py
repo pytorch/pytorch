@@ -196,57 +196,72 @@ def parse_arguments(args, func_variants, declaration, func_return):
     # less on the content of Declarations.yaml. If you want to support more than this you'll
     # potentially have to extend the JIT.
 
-    currently_supported_tensor_options_arguments = [
-        # dtype is specified as an int64_t of at::ScalarType
-        {'name': 'dtype', 'type': ['ScalarType', 'ScalarType?'], 'is_nullable': False, 'annotation': None},
-        # layout is specified as an int64_t of at::Layout
-        {'name': 'layout', 'type': ['Layout', 'Layout?'], 'is_nullable': False, 'annotation': None},
-        # device is specified as an IntArrayRef of { at::Device::Type, device_id }
-        {'name': 'device', 'type': ['Device', 'Device?'], 'is_nullable': False, 'annotation': None},
+    def copy_arguments(arguments):
+        new_arguments = []
+        for entry in arguments:
+            new_arguments.append(entry.copy())
+        return new_arguments
+
+    supported_topt_arguments = [
+        [
+            {'name': 'dtype', 'type': 'ScalarType', 'is_nullable': False, 'annotation': None},
+            {'name': 'layout', 'type': 'Layout', 'is_nullable': False, 'annotation': None},
+            {'name': 'device', 'type': 'Device', 'is_nullable': False, 'annotation': None},
+        ]
     ]
-    tensor_options_defaults = [['c10::nullopt'], ['c10::nullopt'], ['c10::nullopt']]
+    supported_topt_arguments.append(copy_arguments(supported_topt_arguments[0]))
+    supported_topt_arguments[1][0]['kwarg_only'] = True
+    supported_topt_arguments[1][1]['kwarg_only'] = True
+    supported_topt_arguments[1][2]['kwarg_only'] = True
+    supported_topt_arguments.append(copy_arguments(supported_topt_arguments[1]))
+    supported_topt_arguments[2][0]['default'] = 'c10::nullopt'
+    supported_topt_arguments[2][1]['default'] = 'c10::nullopt'
+    supported_topt_arguments[2][2]['default'] = 'c10::nullopt'
+    supported_topt_arguments[2][0]['is_nullable'] = True
+    supported_topt_arguments[2][1]['is_nullable'] = True
+    supported_topt_arguments[2][2]['is_nullable'] = True
 
-    def compare_tensor_option(argument, tensor_option_argument):
-        matches = True
-        matches = matches and argument['name'] == tensor_option_argument['name']
-        matches = matches and argument['type'] in tensor_option_argument['type']
-        return matches
+    corresponding_topts = [
+        {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None},
+    ]
+    corresponding_topts.append(corresponding_topts[0].copy())
+    corresponding_topts[1]['kwarg_only'] = True
+    corresponding_topts.append(corresponding_topts[1].copy())
+    corresponding_topts[2]['default'] = '{}'
 
-    def is_tensor_option(argument, currently_supported_tensor_options_arguments):
-        is_in_it = False
-        for to_argument in currently_supported_tensor_options_arguments:
-            is_in_it = is_in_it or compare_tensor_option(argument, to_argument)
-        return is_in_it
+    def check_topt_representation(topt_representation):
+        for idx, supported_topt in enumerate(supported_topt_arguments):
+            matches = True
+            matches = matches and topt_representation[0] == supported_topt[0]
+            matches = matches and topt_representation[1] == supported_topt[1]
+            matches = matches and topt_representation[2] == supported_topt[2]
+            if matches:
+                return corresponding_topts[idx]
+        return None
+
+    def is_tensor_option(argument):
+        return argument['name'] in ['dtype', 'layout', 'device']
 
     new_arguments = []
     idx = 0
     while idx < len(arguments):
         argument = arguments[idx]
-        if is_tensor_option(argument, currently_supported_tensor_options_arguments) and \
-                len(arguments) - idx >= 3:
-            tensor_options_representation = []
+        if is_tensor_option(argument) and len(arguments) - idx >= 3:
+            topt_representation = []
             for i in range(3):
                 argument = arguments[idx]
-                if not is_tensor_option(argument, currently_supported_tensor_options_arguments):
+                if not is_tensor_option(argument):
                     break
-                tensor_options_representation.append(argument)
+                topt_representation.append(argument)
                 idx += 1
-            if len(tensor_options_representation) == 3:
-                merged_argument = {'type': 'TensorOptions', 'name': 'options',
-                                   'is_nullable': False, 'annotation': None}
-                for t_idx, t_arg in enumerate(tensor_options_representation):
-                    assert compare_tensor_option(t_arg, currently_supported_tensor_options_arguments[t_idx])
-                    if 'default' in t_arg:
-                        assert t_arg['default'] in tensor_options_defaults[t_idx]
-                        if 'default' not in merged_argument:
-                            merged_argument['default'] = '{}'
-                        if t_idx == 0 and t_arg['default'] == 'long':
-                            merged_argument['default'] = 'at::kLong'
-                    if 'kwarg_only' in argument and argument['kwarg_only']:
-                        merged_argument['kwarg_only'] = True
+            if len(topt_representation) == 3:
+                merged_argument = check_topt_representation(topt_representation)
+                assert merged_argument, \
+                    "Unsupported combination of TensorOptions, the only currently supported combinations are {}"\
+                    .format(str(supported_topt_arguments))
                 new_arguments.append(merged_argument)
             else:
-                new_arguments += tensor_options_representation
+                new_arguments += topt_representation
         else:
             new_arguments.append(argument)
             idx += 1
