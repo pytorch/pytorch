@@ -18,8 +18,8 @@
 #include <sstream>
 #include <string>
 
+#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/testing/file_check.h>
-#include "torch/csrc/jit/ir.h"
 
 namespace torch {
 namespace jit {
