@@ -84,7 +84,7 @@ elif REL_WITH_DEB_INFO:
 
 def overlay_windows_vcvars(env):
     from distutils._msvccompiler import _get_vc_env
-    vc_env = _get_vc_env('x64')
+    vc_env = _get_vc_env('x86')
     for k, v in env.items():
         lk = k.lower()
         if lk not in vc_env:
@@ -129,7 +129,7 @@ def run_cmake(version,
     if USE_NINJA:
         cmake_args.append('-GNinja')
     elif IS_WINDOWS:
-        cmake_args.append('-GVisual Studio 15 2017 Win64')
+        cmake_args.append('-GVisual Studio 15 2017')
     try:
         import numpy as np
         NUMPY_INCLUDE_DIR = np.get_include()

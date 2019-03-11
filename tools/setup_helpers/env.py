@@ -27,7 +27,7 @@ def gather_paths(env_vars):
 
 
 def lib_paths_from_base(base_path):
-    return [os.path.join(base_path, s) for s in ['lib/x64', 'lib', 'lib64']]
+    return [os.path.join(base_path, s) for s in ['lib/Win32', 'lib/x64', 'lib', 'lib64']]
 
 
 def hotpatch_var(var, prefix='USE_'):

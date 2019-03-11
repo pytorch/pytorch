@@ -545,7 +545,7 @@ def library_paths(cuda=False):
         paths.append(lib_path)
 
     if cuda:
-        lib_dir = 'lib/x64' if IS_WINDOWS else 'lib64'
+        lib_dir = 'lib/Win32' if IS_WINDOWS else 'lib64'
         paths.append(_join_cuda_home(lib_dir))
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, lib_dir))
@@ -901,10 +901,10 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
             print('Detected CUDA files, patching ldflags')
         if IS_WINDOWS:
             extra_ldflags.append('/LIBPATH:{}'.format(
-                _join_cuda_home('lib/x64')))
+                _join_cuda_home('lib/Win32')))
             extra_ldflags.append('cudart.lib')
             if CUDNN_HOME is not None:
-                extra_ldflags.append(os.path.join(CUDNN_HOME, 'lib/x64'))
+                extra_ldflags.append(os.path.join(CUDNN_HOME, 'lib/Win32'))
         else:
             extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
             extra_ldflags.append('-lcudart')
