@@ -4,6 +4,16 @@
 
 namespace caffe2 {
 
+// Wrap around axis_index if it is negative, s.t., -1 is the last dim
+int canonical_axis_index(int axis_index, int ndims) {
+  CAFFE_ENFORCE_GE(axis_index, -ndims);
+  CAFFE_ENFORCE_LT(axis_index, ndims);
+  if (axis_index < 0) {
+    return axis_index + ndims;
+  }
+  return axis_index;
+}
+
 class IDEEPConcatOp final : public IDEEPOperator {
  public:
   USE_IDEEP_DEF_ALIASES();
@@ -24,7 +34,6 @@ class IDEEPConcatOp final : public IDEEPOperator {
       axis_ = 1;
       add_axis_ = 0;
     }
-    CAFFE_ENFORCE_GE(axis_, 0);
   }
   ~IDEEPConcatOp() override {}
 
@@ -51,12 +60,14 @@ class IDEEPConcatOp final : public IDEEPOperator {
     }
 
     if (!fallback_to_cpu) {
+      int adj_size = inputs_itensor[0].ndims() + (add_axis_ ? 1 : 0);
+      int canonical_axis = canonical_axis_index(axis_, adj_size);
       auto* output = Output(OUTPUT);
       Tensor* axis_info = OutputTensor(AXIS_INFO,
         vector<int64_t>(1, InputSize()), at::dtype<int>().device(CPU));
       auto* axis_data = axis_info->template mutable_data<int>();
       auto axis_vdata =
-        ideep::concat::compute(inputs_itensor, axis_, add_axis_, *output);
+        ideep::concat::compute(inputs_itensor, canonical_axis, add_axis_, *output);
       for (int i = 0; i < axis_vdata.size(); i++) {
         axis_data[i] = axis_vdata[i];
       }
@@ -95,14 +106,13 @@ class IDEEPSplitOp final : public IDEEPOperator {
       axis_ = 1;
       add_axis_ = 0;
     }
-    CAFFE_ENFORCE_GE(axis_, 0);
   }
   ~IDEEPSplitOp() override {}
 
   bool RunOnDevice() override {
     const auto& input = Input(INPUT);
-    CAFFE_ENFORCE_LT(axis_, input.ndims(), "Axis not in input ndim range.");
-    const int input_channels = input.get_dim(axis_);
+    int canonical_axis = canonical_axis_index(axis_, input.ndims());
+    const int input_channels = input.get_dim(canonical_axis);
     vector<int> axis_vdata(OutputSize(), 0);
     if (InputSize() == 2) {
       // We obtain split from the input tensor.
@@ -141,7 +151,7 @@ class IDEEPSplitOp final : public IDEEPOperator {
         input_channels);
 
     auto iten_vector = ideep::spliter::compute(
-        input, axis_vdata, axis_, add_axis_);
+        input, axis_vdata, canonical_axis, add_axis_);
     CAFFE_ENFORCE_EQ(
         iten_vector.size(),
         OutputSize(),
