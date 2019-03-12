@@ -1,5 +1,5 @@
 #include <ATen/core/jit_type.h>
-
+#include <torch/csrc/jit/script/compilation_unit.h>
 #include <iostream>
 
 namespace c10 {
@@ -60,8 +60,10 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << *(tup->elements()[i]);
     }
     out << ")";
+  } else if (t.kind() == TypeKind::FunctionType) {
+    out << "Function(" <<t.expect<FunctionType>()->function()->name() << ")";
   } else {
-    out << t.str();
+     out << t.str();
   }
   return out;
 }

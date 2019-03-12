@@ -14,6 +14,91 @@ struct NoneValue : SugaredValue {
   }
 };
 
+std::shared_ptr<SugaredValue> MethodValue::call(
+    const SourceRange& loc,
+    Function& caller,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+
+  //std::cerr << "entering call\n";
+  Graph& graph = *caller.graph();
+  auto& callee = *method_;
+  try {
+    callee.ensure_defined();
+  } catch (std::exception&) {
+    throw ErrorReport(loc)
+        << " method '" << callee.name()
+        << "' is called recursively involving this call site. Recursive calls are not supported";
+  }
+
+  auto callee_graph = callee.graph();
+  auto& schema = callee.getSchema();
+
+  std::vector<NamedValue> inputsWithSelf(inputs.begin(), inputs.end());
+  auto self_val = self_.value(*caller.graph());
+  if (self_val)
+  {
+    inputsWithSelf.insert(inputsWithSelf.begin(), self_val);
+  }
+
+  //std::cerr << "method " << method.name() << std::endl;
+  //std::cerr << "inputs " << callee_graph->inputs().size() << std::endl;
+  //std::cerr << "schema " << schema << std::endl;
+
+  std::stringstream failure_messages;
+  auto matched_schema = tryMatchSchema(
+      schema,
+      loc,
+      graph,
+      c10::nullopt,
+      inputsWithSelf,
+      attributes,
+      failure_messages,
+      /*conv_tensors_to_nums=*/true);
+
+
+  if (!matched_schema)
+  {
+    throw ErrorReport(loc)
+        << " mismatch between arguments and parameters " << failure_messages.str();
+  }
+
+  if (matched_schema.value().return_types.size() > 1)
+  {
+    throw ErrorReport(loc)
+        << "multiple returns aren't yet supported";
+  }
+
+  auto fun_constant = graph.create(prim::Constant);
+  //std::cerr << "accessing fun_constant output\n";
+  fun_constant->output()->setType(FunctionType::create(&(*method_.get())));
+  auto range = std::make_shared<SourceRange>(loc);
+  graph.insertNode(fun_constant);
+  fun_constant->setSourceLocation(range);
+  auto call_node = graph.create(prim::CallFunction, 0);
+  graph.insertNode(call_node);
+  call_node->setSourceLocation(range);
+
+  //add fun_constant
+  //std::cerr << "accessing fun_constant output\n";
+  call_node->addInput(fun_constant->output());
+  auto& matched_inputs = matched_schema.value().inputs;
+  for (auto input : matched_inputs)
+  {
+    call_node->addInput(input);
+  }
+
+  for (const auto& result : schema.returns())
+  {
+    //std::cerr << "adding output to " << call_node << std::endl;
+    call_node->addOutput()->setType(result.type());
+  }
+
+  //std::cerr << "call_node output " << call_node << std::endl;
+  return std::make_shared<SimpleValue>(call_node->output());
+}
+
 std::shared_ptr<SugaredValue> PrintValue::call(
     const SourceRange& loc,
     Function& m,
@@ -28,15 +113,6 @@ std::shared_ptr<SugaredValue> PrintValue::call(
   // print(a, b) is treated as a (a, b) tuple input.
 
   std::vector<Value*> lowered_inputs = toValues(*m.graph(), inputs);
-  if (lowered_inputs.size() == 1 &&
-      lowered_inputs.at(0)->node()->kind() == prim::TupleConstruct) {
-    auto input = lowered_inputs[0];
-    for (size_t j = 0; j < input->node()->inputs().size(); ++j) {
-      lowered_inputs.insert(
-          lowered_inputs.begin() + 1 + j, input->node()->inputs().at(j));
-    }
-    lowered_inputs.erase(lowered_inputs.begin());
-  }
   g.insertNode(g.create(prim::Print, lowered_inputs, 0)
                    ->setSourceRange(loc));
   return std::make_shared<NoneValue>();

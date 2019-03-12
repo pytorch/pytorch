@@ -17,11 +17,14 @@ namespace jit {
 namespace script {
 struct Function;
 }
+struct Graph;
 } // namespace jit
 } // namespace torch
+
 namespace c10 {
 struct IValue;
 struct ClassType;
+
 
 namespace ivalue {
 

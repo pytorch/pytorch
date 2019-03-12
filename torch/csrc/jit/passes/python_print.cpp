@@ -1037,7 +1037,8 @@ struct PythonPrintPass {
     const FunctionSchema& schema = func.getSchema();
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
-
+    // std::cout << "printFunction " << func.name() << std::endl;
+    // func.graph()->dump();
     indent();
     body_ << "def " << func.name() << "(";
     auto param_it = graph.inputs().begin();
@@ -1129,6 +1130,8 @@ void PythonPrint(
     std::vector<at::Tensor>& tensor_table,
     std::vector<ClassTypePtr>& class_table,
     bool enforce_importable) {
+  // std::cout << "serializing function " << func.name() << std::endl;
+  // func.graph()->dump();
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
   pp.printFunction(func);
   pp.print(out);

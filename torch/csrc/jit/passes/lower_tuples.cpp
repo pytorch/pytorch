@@ -11,16 +11,15 @@ namespace {
 // operators where we expect to find tuples as inputs/outputs
 // this is to assert we are only doing modifications when we know
 // we can flatten tuples
-std::unordered_set<Symbol> white_list = {
-    prim::If,
-    prim::Loop,
-    prim::TupleUnpack,
-    prim::TupleConstruct,
-    prim::TupleIndex,
-    prim::TupleSlice,
-    prim::Param,
-    prim::Return,
-};
+std::unordered_set<Symbol> white_list = {prim::If,
+                                         prim::Loop,
+                                         prim::TupleUnpack,
+                                         prim::TupleConstruct,
+                                         prim::TupleIndex,
+                                         prim::TupleSlice,
+                                         prim::Param,
+                                         prim::Return,
+                                         prim::Print};
 
 void removeTupleNodes(Node* n, bool must_remove_tuples) {
   if (n->kind() != prim::TupleUnpack && n->kind() != prim::TupleIndex &&
@@ -86,6 +85,11 @@ static void VisitNode(Node* n, Node* insert_point) {
     return;
   }
 
+  if (n->kind() == prim::Print && n->inputs().size() != 1)
+  {
+    return;
+  }
+
   // flatten the input list  op(a, tup, b) --> op(a, t0, t1, b)
   for (size_t i = 0; i < n->inputs().size();) {
     auto input = n->inputs()[i];
@@ -96,9 +100,12 @@ static void VisitNode(Node* n, Node* insert_point) {
       AT_CHECK(
           input->node()->kind() == prim::TupleConstruct,
           "tuple use not matched to tuple construct");
+
       for (size_t j = 0; j < tt->elements().size(); ++j) {
         n->insertInput(i + 1 + j, input->node()->inputs().at(j));
       }
+
+
       n->removeInput(i);
       // note: no update to i
       // since tuples might be nested we need to recursively scan
@@ -177,9 +184,18 @@ void LowerAllTuples(std::shared_ptr<Graph>& graph) {
   EnsureNoTuples(graph->block());
 }
 
+void flattenPrintInputs(Node* n) {
+  if (n->kind() != prim::Print) {
+    return;
+  }
+
+  VisitNode(n, nullptr);
+}
+
 void LowerSimpleTuples(Block* block) {
   for (auto n : block->nodes()) {
     removeTupleNodes(n, /*must_remove_tuples*/ false);
+    flattenPrintInputs(n);
     for (auto b : n->blocks()) {
       LowerSimpleTuples(b);
     }

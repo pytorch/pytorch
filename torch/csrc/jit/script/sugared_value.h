@@ -249,12 +249,13 @@ struct MethodValue : public SugaredValue {
       Function& f,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
-      size_t n_binders) override {
-    std::vector<NamedValue> inputsWithSelf;
-    inputsWithSelf.emplace_back(loc, self_.value(*f.graph()));
-    inputsWithSelf.insert(inputsWithSelf.end(), inputs.begin(), inputs.end());
-    return FunctionValue(method_).call(
-        loc, f, inputsWithSelf, attributes, n_binders);
+      size_t n_binders) override;
+
+  std::shared_ptr<Function> getMethod() {
+    return method_;
+  }
+  c10::optional<NamedValue> self() {
+    return self_;
   }
 
  private:

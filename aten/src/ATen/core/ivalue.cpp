@@ -1,6 +1,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/Formatting.h>
+#include <c10/util/StringUtil.h>
 #include <cmath>
 
 namespace c10 {
@@ -10,8 +11,7 @@ CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
     std::string str_) {
   return c10::make_intrusive<ConstantString>(std::move(str_));
 }
-
-} // namespace ivalue
+}
 
 namespace {
 

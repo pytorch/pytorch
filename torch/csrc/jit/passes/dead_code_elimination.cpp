@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/utils/memory.h>
+#include <csignal>
 
 #include <unordered_map>
 
@@ -107,6 +108,12 @@ class DeadCodeEliminator {
       if (hasSideEffects(node)) {
         mark(node);
       }
+
+      if (node->hasAttribute(attr::Subgraph))
+      {
+        auto graph = node->g(attr::Subgraph);
+        EliminateDeadCode(graph);
+      }
     }
 
     // Initialize by marking the return node
@@ -184,7 +191,13 @@ class DeadCodeEliminator {
       // Reverse_block is inlined in grad_desc.f before it's separated
       // to grad_desc.df.
       if (!(marked_.count(node) || node->hasUses())) {
-        it.destroyCurrent();
+
+        //if (node->kind() != prim::GetAttr)
+        {
+          //raise(SIGINT);
+          //std::cout << "destroying " << *node;
+          it.destroyCurrent();
+        }
       }
     }
   }

@@ -738,6 +738,7 @@ void ScriptModuleSerializer::convertModule(
     const std::string& prefix,
     const std::string& name,
     torch::ModuleDef* module_def) {
+  //std::cout << "convertModule " << name << std::endl;
   module_def->set_name(name);
   module_def->set_optimize(module.is_optimized());
   for (const auto& elem : module.get_parameters()) {
@@ -761,6 +762,7 @@ void ScriptModuleSerializer::convertModule(
   module_name << name;
 
   if (module.get_methods().size() > 0) {
+    //std::cout << "convertModule " << name << " size " << module.get_methods().size() << std::endl;
     std::ostringstream methods;
     methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
