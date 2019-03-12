@@ -9,6 +9,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/python_print.h>
+#include <torch/csrc/jit/pickler.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -455,6 +456,8 @@ void GraphEncoder::EncodeTensor(
   }
 }
 
+struct Pickler;
+
 // this is a serializer class which saves script modules to pt files. the
 // content of the file is written using PyTorchStreamWriter, for details please
 // check caffe2/serialize/inline_container.h. all the records except the last
@@ -462,6 +465,7 @@ void GraphEncoder::EncodeTensor(
 // in caffe2/proto/torch.proto. ModelProto contains all the metadata of the
 // model, and it is serialized as json.
 class ScriptModuleSerializer final {
+  friend Pickler;
  public:
   ScriptModuleSerializer(const std::string& filename);
 
@@ -641,24 +645,24 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
   }
 }
 
-size_t pushBytes(size_t num_bytes, std::vector<char>& data) {
-  AT_ASSERT(num_bytes > 0);
-  data.push_back(0);
-  auto index = data.size() - 1;
-
-  for (size_t i = 1; i < num_bytes; ++i) {
-    data.push_back(0);
-  }
-  return index;
-}
-
-template <typename T>
-size_t pushValue(T value, std::vector<char>& data) {
-  auto index = pushBytes(sizeof(T), data);
-  T* ptr = reinterpret_cast<T*>(&data[index]);
-  *ptr = value;
-  return index;
-}
+// size_t pushBytes(size_t num_bytes, std::vector<char>& data) {
+//   AT_ASSERT(num_bytes > 0);
+//   data.push_back(0);
+//   auto index = data.size() - 1;
+//
+//   for (size_t i = 1; i < num_bytes; ++i) {
+//     data.push_back(0);
+//   }
+//   return index;
+// }
+//
+// template <typename T>
+// size_t pushValue(T value, std::vector<char>& data) {
+//   auto index = pushBytes(sizeof(T), data);
+//   T* ptr = reinterpret_cast<T*>(&data[index]);
+//   *ptr = value;
+//   return index;
+// }
 
 // Estimate the number of bytes a serialized IValue will take
 size_t estimateIValueSize(const IValue& ivalue) {
@@ -678,145 +682,242 @@ size_t estimateIValueSize(const IValue& ivalue) {
   return 0;
 }
 
-enum class opcode : char {
-    MARK            = '(',
-    STOP            = '.',
-    POP             = '0',
-    POP_MARK        = '1',
-    DUP             = '2',
-    FLOAT           = 'F',
-    INT             = 'I',
-    BININT          = 'J',
-    BININT1         = 'K',
-    LONG            = 'L',
-    BININT2         = 'M',
-    NONE            = 'N',
-    PERSID          = 'P',
-    BINPERSID       = 'Q',
-    REDUCE          = 'R',
-    STRING          = 'S',
-    BINSTRING       = 'T',
-    SHORT_BINSTRING = 'U',
-    UNICODE         = 'V',
-    BINUNICODE      = 'X',
-    APPEND          = 'a',
-    BUILD           = 'b',
-    GLOBAL          = 'c',
-    DICT            = 'd',
-    EMPTY_DICT      = '}',
-    APPENDS         = 'e',
-    GET             = 'g',
-    BINGET          = 'h',
-    INST            = 'i',
-    LONG_BINGET     = 'j',
-    LIST            = 'l',
-    EMPTY_LIST      = ']',
-    OBJ             = 'o',
-    PUT             = 'p',
-    BINPUT          = 'q',
-    LONG_BINPUT     = 'r',
-    SETITEM         = 's',
-    TUPLE           = 't',
-    EMPTY_TUPLE     = ')',
-    SETITEMS        = 'u',
-    BINFLOAT        = 'G',
 
-    /* Protocol 2. */
-    PROTO       = '\x80',
-    NEWOBJ      = '\x81',
-    EXT1        = '\x82',
-    EXT2        = '\x83',
-    EXT4        = '\x84',
-    TUPLE1      = '\x85',
-    TUPLE2      = '\x86',
-    TUPLE3      = '\x87',
-    NEWTRUE     = '\x88',
-    NEWFALSE    = '\x89',
-    LONG1       = '\x8a',
-    LONG4       = '\x8b',
+struct Pickler {
+  Pickler(ScriptModuleSerializer& serializer) : serializer_(serializer) {}
 
-    /* Protocol 3 (Python 3.x) */
-    BINBYTES       = 'B',
-    SHORT_BINBYTES = 'C',
+public:
+  std::vector<char>& stack() {
+    return stack_;
+  }
+  void start() {
+    push(OpCode::PROTO, uint8_t(2));
 
-    /* Protocol 4 */
-    SHORT_BINUNICODE = '\x8c',
-    BINUNICODE8      = '\x8d',
-    BINBYTES8        = '\x8e',
-    EMPTY_SET        = '\x8f',
-    ADDITEMS         = '\x90',
-    FROZENSET        = '\x91',
-    NEWOBJ_EX        = '\x92',
-    STACK_GLOBAL     = '\x93',
-    MEMOIZE          = '\x94',
-    FRAME            = '\x95'
-};
+    // All attributes get pushed into a list and their indices saved in the
+    // module def
+    push(OpCode::EMPTY_LIST);
+    push(OpCode::MARK);
+  }
+  void finish() {
+    push(OpCode::APPENDS);
+    push(OpCode::STOP);
+  }
+  uint64_t addIValue(const IValue& ivalue) {
+    if (ivalue.isTensor()) {
+      AT_ASSERT(false);
+      auto tensor = ivalue.toTensor();
+      // Write it to the tensor table
+      return uint64_t(serializer_.addTensor(tensor));
+    } else if (ivalue.isBlob()) {
+      AT_ERROR("Unsupported IValue type for pickling (Blob)");
+    } else if (ivalue.isTuple()) {
+      pushTuple(ivalue);
+    } else if (ivalue.isDouble()) {
+      // TODO: flip endianness for valid pickle
+      double value = ivalue.toDouble();
+      AT_ASSERT(sizeof(double) == 8);
+      char bytes[8];
+      double* bytes_as_double = reinterpret_cast<double*>(bytes);
+      *bytes_as_double = value;
 
-uint64_t ScriptModuleSerializer::writeIValue(
-    const IValue& ivalue,
-    std::vector<char>& data) {
-  // if (ivalue.isPtrType()) {
-  //   if (ivalue.isString()) {
-  //     auto ptr = ivalue.toString().get();
-  //     auto entry = written_ivalues_.find(ptr);
-  //     if (entry != written_ivalues_.end()) {
-  //       return entry->second;
-  //     }
-  //   }
-  //   // TODO: support other types
-  // }
-  // Write IValue into array as bytes, return pointer to start of data for the
-  // IValue. This may be anywhere in 'data' (i.e. if the IValue contains other)
-  // IValues, it will also write those
-  uint64_t ivalue_offset = data.size();
-  data.reserve(data.size() + estimateIValueSize(ivalue));
-  static uint8_t memo_id = 0;
+      push(OpCode::BINFLOAT);
+      for (size_t i = 0; i < sizeof(bytes); ++i) {
+        push(bytes[sizeof(bytes) - i - 1]);
+      }
+    } else if (ivalue.isFuture()) {
+      AT_ERROR("Unsupported IValue type for pickling (Future)");
+    } else if (ivalue.isInt()) {
+      // TODO: use BININT1/BININT2/LONG if possible/necessary
+      push(OpCode::BININT, uint32_t(ivalue.toInt()));
+    } else if (ivalue.isBool()) {
+      if (ivalue.toBool()) {
+        push(OpCode::NEWTRUE);
+      } else {
+        push(OpCode::NEWFALSE);
+      }
+    } else if (ivalue.isIntList()) {
+      AT_ERROR("Unsupported IValue type for pickling (IntList)");
+    } else if (ivalue.isString()) {
+      auto string = ivalue.toStringRef();
 
-  if (ivalue.isString()) {
-    auto string = ivalue.toStringRef();
+      push(OpCode::BINUNICODE);
+      push(uint32_t(string.size()));
+      stack_.insert(stack_.end(), string.begin(), string.end());
 
-    pushValue(opcode::BINUNICODE, data);
-    pushValue(uint32_t(string.size()), data);
-    data.insert(data.end(), string.begin(), string.end());
-
-    pushValue(opcode::BINPUT, data);
-    pushValue(uint8_t(memo_id++), data);
-
-    // String length
-    // pushValue(uint64_t(string.size()), data);
-    // String data
-
-    // Don't store the same ivalue multiple times
-    // written_ivalues_[ivalue.toString().get()] = ivalue_offset;
-  } else if (ivalue.isGenericDict()) {
-    auto dict = ivalue.toGenericDictRef();
-
-    pushValue(opcode::EMPTY_DICT, data);
-    pushValue(opcode::BINPUT, data);
-    pushValue(uint8_t(memo_id++), data);
-
-    pushValue(opcode::MARK, data);
-
-    for (auto pair : dict) {
-      writeIValue(pair.first, data);
-      writeIValue(pair.second, data);
+      push(OpCode::BINPUT, memo_id++);
+    } else if (ivalue.isDoubleList()) {
+      AT_ERROR("Unsupported IValue type for pickling (DoubleList)");
+    } else if (ivalue.isBoolList()) {
+      AT_ERROR("Unsupported IValue type for pickling (BoolList)");
+    } else if (ivalue.isTensorList()) {
+      AT_ERROR("Unsupported IValue type for pickling (TensorList)");
+    } else if (ivalue.isGenericList()) {
+      pushList(ivalue);
+    } else if (ivalue.isGenericDict()) {
+      pushDict(ivalue);
+    } else if (ivalue.isObject()) {
+      AT_ERROR("Unsupported IValue type for pickling (Object)");
+    } else if (ivalue.isNone()) {
+      push(OpCode::NONE);
+    } else if (ivalue.isDevice()) {
+      AT_ERROR("Unsupported IValue type for pickling (Device)");
+    } else {
+      AT_ERROR("Unknown IValue type for pickling");
     }
 
-    pushValue(opcode::SETITEMS, data);
-  } else if (ivalue.isTensor()) {
-    AT_ASSERT(false);
-    auto tensor = ivalue.toTensor();
-    // Write it to the tensor table
-    return uint64_t(addTensor(tensor));
-  } else if (ivalue.isInt()) {
-    AT_ASSERT(false);
-    return pushValue(ivalue.toInt(), data);
-  } else {
-    AT_ERROR("Cannot write data for ivalue");
+    return 0;
   }
 
-  return ivalue_offset;
-}
+private:
+  void pushDict(const IValue& ivalue) {
+    auto dict = ivalue.toGenericDictRef();
+
+    push(OpCode::EMPTY_DICT);
+    push(OpCode::BINPUT, memo_id++);
+
+    push(OpCode::MARK);
+
+    for (auto pair : dict) {
+      addIValue(pair.first);
+      addIValue(pair.second);
+    }
+
+    push(OpCode::SETITEMS);
+  }
+
+  void pushList(const IValue& ivalue) {
+    auto list = ivalue.toGenericListRef();
+    push(OpCode::EMPTY_LIST);
+    push(OpCode::BINPUT, memo_id++);
+
+    push(OpCode::MARK);
+
+    for (auto item : list) {
+      addIValue(item);
+    }
+
+    push(OpCode::APPENDS);
+  }
+
+  void pushTuple(const IValue& ivalue) {
+    // TODO: Small tuple unrolling (e.g. TUPLE3)
+    push(OpCode::MARK);
+
+    for (const auto& item : ivalue.toTuple()->elements()) {
+      addIValue(item);
+    }
+
+    push(OpCode::TUPLE);
+    push(OpCode::BINPUT, memo_id++);
+  }
+
+  size_t pushBytes(size_t num_bytes) {
+    AT_ASSERT(num_bytes > 0);
+    stack_.push_back(0);
+    auto index = stack_.size() - 1;
+
+    for (size_t i = 1; i < num_bytes; ++i) {
+      stack_.push_back(0);
+    }
+    return index;
+  }
+
+  template <typename T>
+  size_t push(T value) {
+    auto index = pushBytes(sizeof(T));
+    T* ptr = reinterpret_cast<T*>(&stack_[index]);
+    *ptr = value;
+    return index;
+  }
+
+  template <typename T>
+  size_t push(OpCode opcode, T value) {
+    push(opcode);
+    auto index = pushBytes(sizeof(T));
+    T* ptr = reinterpret_cast<T*>(&stack_[index]);
+    *ptr = value;
+    return index;
+  }
+
+  // Stack of opcodes/data
+  std::vector<char> stack_;
+
+  // Memoization of IValues that have been written (index in table is used for
+  // BINPUT opcodes) to enable shared references
+  std::vector<IValue> memo_;
+
+  ScriptModuleSerializer& serializer_;
+
+  // TODO: only use this if necessary (add a pass to find all shared ivalues,
+  // and only memoize those)
+  uint8_t memo_id = 0;
+};
+
+// uint64_t ScriptModuleSerializer::writeIValue(
+//     const IValue& ivalue,
+//     std::vector<char>& data) {
+//   // if (ivalue.isPtrType()) {
+//   //   if (ivalue.isString()) {
+//   //     auto ptr = ivalue.toString().get();
+//   //     auto entry = written_ivalues_.find(ptr);
+//   //     if (entry != written_ivalues_.end()) {
+//   //       return entry->second;
+//   //     }
+//   //   }
+//   //   // TODO: support other types
+//   // }
+//   // Write IValue into array as bytes, return pointer to start of data for the
+//   // IValue. This may be anywhere in 'data' (i.e. if the IValue contains other)
+//   // IValues, it will also write those
+//   uint64_t ivalue_offset = data.size();
+//   data.reserve(data.size() + estimateIValueSize(ivalue));
+//   static memo_id = 0;
+//
+//   if (ivalue.isString()) {
+//     auto string = ivalue.toStringRef();
+//
+//     pushValue(opcode::BINUNICODE, data);
+//     pushValue(uint32_t(string.size()), data);
+//     data.insert(data.end(), string.begin(), string.end());
+//
+//     pushValue(opcode::BINPUT, data);
+//     pushValue(uint8_t(memo_id++), data);
+//
+//     // String length
+//     // pushValue(uint64_t(string.size()), data);
+//     // String data
+//
+//     // Don't store the same ivalue multiple times
+//     // written_ivalues_[ivalue.toString().get()] = ivalue_offset;
+//   } else if (ivalue.isGenericDict()) {
+//     auto dict = ivalue.toGenericDictRef();
+//
+//     pushValue(opcode::EMPTY_DICT, data);
+//     pushValue(opcode::BINPUT, data);
+//     pushValue(uint8_t(memo_id++), data);
+//
+//     pushValue(opcode::MARK, data);
+//
+//     for (auto pair : dict) {
+//       writeIValue(pair.first, data);
+//       writeIValue(pair.second, data);
+//     }
+//
+//     pushValue(opcode::SETITEMS, data);
+//   } else if (ivalue.isTensor()) {
+//     AT_ASSERT(false);
+//     auto tensor = ivalue.toTensor();
+//     // Write it to the tensor table
+//     return uint64_t(addTensor(tensor));
+//   } else if (ivalue.isInt()) {
+//     AT_ASSERT(false);
+//     return pushValue(ivalue.toInt(), data);
+//   } else {
+//     AT_ERROR("Cannot write data for ivalue");
+//   }
+//
+//   return ivalue_offset;
+// }
 
 void ScriptModuleSerializer::convertModule(
     const script::Module& module,
@@ -837,35 +938,21 @@ void ScriptModuleSerializer::convertModule(
   }
 
   if (module.get_attributes().size() > 0) {
-    std::vector<char> bytes;
-    std::unordered_map<std::string, uint64_t> attribute_offsets;
+    Pickler p(*this);
+    p.start();
     for (const auto& item : module.get_attributes()) {
-      std::cout << "bytes has " << bytes.size() << " items\n";
-      pushValue(opcode::PROTO, bytes);
-      std::cout << "bytes has " << bytes.size() << " items\n";
-      pushValue(uint8_t(2), bytes);
-      std::cout << "bytes has " << bytes.size() << " items\n";
       auto& attribute = item.value();
+
+      // Add attribute to ModuleDef
       torch::AttributeDef* attribute_def = module_def->add_attributes();
       attribute_def->set_name(attribute.name_);
       attribute_def->set_type(attribute.type->python_str());
-      auto offset = writeIValue(*attribute.slot(), bytes);
-      attribute_offsets[attribute.name_] = offset;
-      pushValue(opcode::STOP, bytes);
-      break;
-    }
-    writer_.writeRecord("attributes", bytes.data(), bytes.size());
 
-    // TODO: some better way to track this info
-    std::vector<char> offset_bytes;
-    for (const auto& pair : attribute_offsets) {
-      auto name = pair.first;
-      offset_bytes.insert(offset_bytes.end(), name.begin(), name.end());
-      offset_bytes.push_back('\0');
-      pushValue(pair.second, offset_bytes);
+      // Add attribute to pickle blob
+      p.addIValue(*attribute.slot());
     }
-    writer_.writeRecord(
-        "attribute_offsets", offset_bytes.data(), offset_bytes.size());
+    p.finish();
+    writer_.writeRecord("attributes", p.stack().data(), p.stack().size());
   }
 
   std::stringstream module_name;

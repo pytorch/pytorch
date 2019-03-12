@@ -25,9 +25,8 @@ message TensorDef {
 
 message AttributeDef {
   // The mypy type of this attribute
-  optional string type = 1;
-
-  optional string name = 2;
+  required string type = 1;
+  required string name = 2;
 }
 
 message ParameterDef {

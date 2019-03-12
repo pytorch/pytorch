@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/import_method.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
 
 #include "caffe2/core/common.h"
@@ -146,37 +147,179 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
   }
 }
 
+struct Depickler {
+  Depickler(void* data, uint64_t size)
+      : bytes_(static_cast<const uint8_t*>(data)), size_(size) {}
+
+  const std::vector<IValue>& get_ivalue_list() {
+    run();
+    AT_ASSERT(stack_.size() == 1);
+    return stack_[0].toGenericListRef();
+  }
+
+private:
+  uint8_t readByte() {
+    uint8_t val = *bytes_;
+    ++bytes_;
+    return val;
+  }
+
+  template<typename T>
+  void read(T& var) {
+    const T* data = reinterpret_cast<const T*>(bytes_);
+    bytes_ += sizeof(T);
+    var = *data;
+  }
+
+  // template <typename T>
+  // static void* read<T>() {
+  //   // auto index = pushBytes(sizeof(T));
+  //   // T* ptr = reinterpret_cast<T*>(&stack_[index]);
+  //   // *ptr = value;
+  //   // return index;
+  //   void* data = reinterpret_cast<void*>(bytes_);
+  //   bytes_ += sizeof(T);
+  //   return *data;
+  // }
+
+  double readBinfloat() {
+    AT_ASSERT(sizeof(double) == 0)
+    char float_data[8];
+
+    // Pickle floats are big endian
+    for(size_t i = 0; i < 8; ++i) {
+      float_data[i] = bytes_[8 - 1 - i];
+    }
+    bytes_ += 8;
+
+    return *(reinterpret_cast<double*>(float_data));
+  }
+
+  uint32_t readInt32() {
+    return 23;
+  }
+
+  void run() {
+    while (1) {
+      uint8_t b = readByte();
+      OpCode op = static_cast<OpCode>(b);
+      std::cout << "Doing OP: [" << static_cast<char>(op) << "]\n";
+      switch (op) {
+        case OpCode::PROTO: {
+          uint32_t version = readByte();
+          std::cout << "pickle protocol = " << version << "\n";
+          break;
+        }
+        case OpCode::EMPTY_LIST: {
+          // generic list issue: we do not know what kind of list to create
+          // can possible use some fake classes like IntList to make it still
+          // loadable in python
+          stack_.push_back(std::vector<IValue>());
+          break;
+        }
+        case OpCode::BINPUT: {
+          size_t pos = readByte();
+          if (memo_.size() <= pos)
+            memo_.resize(1 + 2 * pos);
+          memo_[pos] = stack_.back();
+          break;
+        }
+        case OpCode::MARK: {
+          // Mark location of the container ivalue in the stack
+          marks_.push_back(stack_.size());
+          break;
+        }
+        // case OpCode::BININT1: {
+        //   stack_.push_back(uint64_t(readByte()));
+        //   break;
+        // }
+        case OpCode::BINUNICODE: {
+          uint32_t length;
+          read(length);
+          const char* characters = reinterpret_cast<const char*>(bytes_);
+          bytes_ += length;
+          stack_.push_back(std::string(characters, /*n=*/length));
+          break;
+        }
+        case OpCode::BINFLOAT:
+          stack_.push_back(readBinfloat());
+          break;
+        case OpCode::TUPLE: {
+          size_t start = marks_.back();
+          marks_.pop_back();
+          IValue tup = Tuple::create(
+              std::vector<IValue>(stack_.begin() + start, stack_.end()));
+          stack_.resize(start);
+          stack_.push_back(tup);
+        } break;
+        case OpCode::EMPTY_DICT:
+          stack_.push_back(c10::ivalue::UnorderedMap());
+          break;
+        // case OpCode::SHORT_BINSTRING: {
+        //   size_t size = readByte();
+        //   stack_.push_back(readString(size));
+        // } break;
+        case OpCode::BININT:
+          // stack_.push_back(readInt32());
+          break;
+        case OpCode::APPENDS: {
+          size_t start = marks_.back();
+          marks_.pop_back();
+          auto gl = stack_[start - 1].toGenericList();
+          gl->elements().insert(
+              gl->elements().end(), stack_.begin() + start, stack_.end());
+          stack_.resize(start);
+        } break;
+        case OpCode::SETITEMS: {
+          size_t start = marks_.back();
+          marks_.pop_back();
+          auto dict = stack_[start - 1].toGenericDict();
+          for (size_t i = start; i < stack_.size(); i += 2) {
+            dict->elements()[stack_[i]] = stack_[i + 1];
+          }
+          stack_.resize(start);
+        } break;
+        case OpCode::BINGET: {
+          // stack_.push_back(memo_[reader.readInt1()]);
+        } break;
+        case OpCode::STOP:
+          return;
+        default:
+          std::cout << "UNKNOWN OPCODE " << "\n";
+          // return;
+      }
+    }
+  }
+
+  std::vector<IValue> stack_;
+  std::vector<IValue> memo_;
+  std::vector<size_t> marks_;
+  const uint8_t* bytes_;
+  uint64_t size_;
+}; // namespace
+
 void ScriptModuleDeserializer::loadAttributeTable(
     const torch::ModuleDef* module_def) {
   if (module_def->attributes_size() == 0) {
-    // No attributes, leave table empty
+    // No attributes, no attribute file to read
     return;
   }
 
-  std::unordered_map<std::string, uint64_t> offsets;
-  at::DataPtr offset_storage_ptr;
-  uint64_t offset_record_size;
-  std::tie(offset_storage_ptr, offset_record_size) =
-      reader_.getRecord("attribute_offsets");
-  uint64_t i = 0;
-  while (i < offset_record_size) {
-    auto name_chars = static_cast<const char*>(offset_storage_ptr.get()) + i;
-    std::string name(name_chars);
-    auto offset =
-        reinterpret_cast<const uint64_t*>(name_chars + name.size() + 1)[0];
-    i += name.size() + 1 + sizeof(uint64_t);
-    offsets[name] = offset;
-  }
+  at::DataPtr attributes_ptr;
+  size_t attributes_size;
+  std::tie(attributes_ptr, attributes_size) = reader_.getRecord("attributes");
+  Depickler depickler(attributes_ptr.get(), attributes_size);
+  auto& attribute_list = depickler.get_ivalue_list();
+  AT_ASSERT(attribute_list.size() == size_t(module_def->attributes_size()));
 
-  at::DataPtr storage_ptr;
-  uint64_t record_size;
-  std::tie(storage_ptr, record_size) = reader_.getRecord("attributes");
+  for (auto ival : attribute_list) {
+    std::cout << "IVALUE: " << ival << "\n";
+  }
+  size_t index = 0;
   for (const torch::AttributeDef& attribute_def : module_def->attributes()) {
     auto type = script::parseType(attribute_def.type());
-    auto offset = offsets.find(attribute_def.name());
-    AT_ASSERT(offset != offsets.end());
     attribute_table_[attribute_def.name()] =
-        std::make_pair(type, loadIValue(offset->second, type, storage_ptr));
+        std::make_pair(type, attribute_list[index++]);
   }
 }
 
