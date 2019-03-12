@@ -51,8 +51,10 @@ TEST_F(SequentialTest, ConstructsFromConcreteType) {
     int forward() {
       return value;
     }
-    static int copy_count = 0;
+    static int copy_count;
   };
+
+  M::copy_count = 0;
 
   Sequential sequential(M(1), M(2), M(3));
   ASSERT_EQ(sequential->size(), 3);
@@ -64,8 +66,8 @@ TEST_F(SequentialTest, ConstructsFromConcreteType) {
   }));
   ASSERT_EQ(sequential->size(), 3);
 
-  // NOTE: The current implementation expects each module to be copied once
-  // when it's passed into `std::make_shared<T>()`.
+  // NOTE: The current implementation expects each module to be copied exactly once,
+  // which happens when the module is passed into `std::make_shared<T>()`.
   // TODO: Find a way to avoid copying, and then delete the copy constructor.
   AT_ASSERT(M::copy_count == 6);
 }
