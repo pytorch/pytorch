@@ -61,7 +61,7 @@ TEST_F(SequentialTest, ConstructsFromConcreteType) {
   // NOTE: The current implementation expects each module to be copied exactly once,
   // which happens when the module is passed into `std::make_shared<T>()`.
   // TODO: Find a way to avoid copying, and then delete the copy constructor of `M`.
-  AT_ASSERT(copy_count == 3);
+  ASSERT_EQ(copy_count, 3);
 
   copy_count = 0;
   Sequential sequential_named(named_submodules({
@@ -70,7 +70,7 @@ TEST_F(SequentialTest, ConstructsFromConcreteType) {
     {"m3", M(3)}
   }));
   ASSERT_EQ(sequential->size(), 3);
-  AT_ASSERT(copy_count == 3);
+  ASSERT_EQ(copy_count, 3);
 }
 
 TEST_F(SequentialTest, ConstructsFromModuleHolder) {
