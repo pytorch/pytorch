@@ -39,7 +39,7 @@ static void checkRoundtrip(const std::string& s) {
   AT_ASSERT(original == parsed);
 }
 
-void testIRParser(std::ostream& out = std::cout) {
+void testIRParser() {
   {
     auto graph = std::make_shared<Graph>();
     script::parseIR(
