@@ -3777,6 +3777,13 @@
   matches_jit_signature: True
   variants: method, function
 
+- func: _btrifact_helper(Tensor self, bool pivot) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: _btrifact_helper_cpu
+    CUDA: _btrifact_helper_cuda
+
 - func: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
