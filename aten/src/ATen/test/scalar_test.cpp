@@ -61,8 +61,9 @@ TEST(TestScalar, TestScalar) {
        << bar.toDouble() << " " << what.isIntegral() << "\n";
   auto& gen = at::detail::getDefaultCPUGenerator();
   // See Note [Thread-safety and Generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
+  gen->mutex_.lock();
   ASSERT_NO_THROW(gen->set_current_seed(std::random_device()()));
+  gen->mutex_.unlock();
   auto&& C = at::globalContext();
   if (at::hasCUDA()) {
     auto t2 = zeros({4, 4}, at::kCUDA);
