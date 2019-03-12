@@ -313,6 +313,7 @@ class TestCase(expecttest.TestCase):
         # empty numel, but nnz > 0 makes the indices containing values.
         assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
 
+        self.setUp()
         v_size = [nnz] + list(size[sparse_dim:])
         v = torch.randn(*v_size, device=device)
         i = torch.rand(sparse_dim, nnz, device=device)
