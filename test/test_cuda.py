@@ -2353,6 +2353,9 @@ class TestCuda(TestCase):
     def test_advancedindex_big(self):
         _TestTorchMixin._test_advancedindex_big(self, lambda t: t.cuda())
 
+    def test_kthvalue(self):
+        _TestTorchMixin._test_kthvalue(self, device='cuda')
+
     @skipIfRocm
     def test_btrifact(self):
         _TestTorchMixin._test_btrifact(self, lambda t: t.cuda())
