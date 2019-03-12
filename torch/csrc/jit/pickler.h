@@ -72,3 +72,7 @@ enum class OpCode : char {
     MEMOIZE          = '\x94',
     FRAME            = '\x95'
 };
+
+enum class ExtensionCode : char {
+  TENSOR = 'T'
+};

@@ -144,8 +144,13 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
 }
 
 struct Unpickler {
-  Unpickler(void* data, uint64_t size)
-      : bytes_(static_cast<const uint8_t*>(data)), end_ptr_(bytes_ + size) {}
+  Unpickler(
+      void* data,
+      uint64_t size,
+      const std::vector<at::Tensor>& tensor_table)
+      : bytes_(static_cast<const uint8_t*>(data)),
+        end_ptr_(bytes_ + size),
+        tensor_table_(tensor_table) {}
 
   const std::vector<IValue>& get_ivalue_list() {
     run();
@@ -153,7 +158,7 @@ struct Unpickler {
     return stack_[0].toGenericListRef();
   }
 
-private:
+ private:
   uint8_t readByte() {
     uint8_t val = *bytes_;
     ++bytes_;
@@ -182,9 +187,7 @@ private:
 
   void run() {
     while (bytes_ < end_ptr_) {
-      uint8_t b = readByte();
-      OpCode op = static_cast<OpCode>(b);
-      switch (op) {
+      switch (readOpCode()) {
         case OpCode::PROTO: {
           // Pickle protocol version, unused
           readByte();
@@ -257,6 +260,9 @@ private:
         } break;
         case OpCode::STOP:
           return;
+        case OpCode::EXT1:
+          loadExtension();
+          break;
         default:
           AT_ERROR("Unknown opcode for unpickling");
       }
@@ -267,11 +273,30 @@ private:
     }
   }
 
+  OpCode readOpCode() {
+    return static_cast<OpCode>(readByte());
+  }
+
+  void loadExtension() {
+    ExtensionCode extension_code = static_cast<ExtensionCode>(readByte());
+    switch (extension_code) {
+      case ExtensionCode::TENSOR:
+        AT_ASSERT(readOpCode() == OpCode::BININT);
+        uint32_t tensor_id;
+        read(tensor_id);
+        stack_.push_back(tensor_table_.at(tensor_id));
+        break;
+      default:
+        AT_ERROR("Unrecognized extension code while unpickling");
+    }
+  }
+
   std::vector<IValue> stack_;
   std::vector<IValue> memo_;
   std::vector<size_t> marks_;
   const uint8_t* bytes_;
   const uint8_t* end_ptr_;
+  const std::vector<at::Tensor>& tensor_table_;
 }; // namespace
 
 void ScriptModuleDeserializer::loadAttributeTable(
@@ -284,13 +309,11 @@ void ScriptModuleDeserializer::loadAttributeTable(
   at::DataPtr attributes_ptr;
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) = reader_.getRecord("attributes");
-  Unpickler unpickler(attributes_ptr.get(), attributes_size);
+  Unpickler unpickler(attributes_ptr.get(), attributes_size, tensor_table_);
   auto& attribute_list = unpickler.get_ivalue_list();
   AT_ASSERT(attribute_list.size() == size_t(module_def->attributes_size()));
+
   size_t index = 0;
-  for (auto a : attribute_list) {
-    std::cout << "IValue: " << a << "\n";
-  }
   for (const torch::AttributeDef& attribute_def : module_def->attributes()) {
     auto type = script::parseType(attribute_def.type());
     attribute_table_[attribute_def.name()] =

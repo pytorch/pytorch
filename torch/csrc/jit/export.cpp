@@ -662,12 +662,14 @@ public:
     push(OpCode::APPENDS);
     push(OpCode::STOP);
   }
+
   uint64_t addIValue(const IValue& ivalue) {
     if (ivalue.isTensor()) {
       // Write it to the tensor table
-      push(OpCode::GLOBAL);
-
-      return uint64_t(serializer_.addTensor(ivalue.toTensor()));
+      push(OpCode::EXT1);
+      push(ExtensionCode::TENSOR);
+      auto tensor_id = serializer_.addTensor(ivalue.toTensor());
+      push(OpCode::BININT, uint32_t(tensor_id));
     } else if (ivalue.isBlob()) {
       AT_ERROR("Unsupported IValue type for pickling (Blob)");
     } else if (ivalue.isTuple()) {
@@ -830,12 +832,6 @@ void ScriptModuleSerializer::convertModule(
   for (const auto& elem : module.get_parameters()) {
     torch::ParameterDef* param_def = module_def->add_parameters();
     convertParameter(elem.value(), param_def, /*is_buffer=*/false);
-  }
-  for (const auto& elem : module.get_attributes()) {
-    if (elem.value().type->isSubtypeOf(TensorType::get())) {
-      torch::ParameterDef* param_def = module_def->add_parameters();
-      convertParameter(elem.value(), param_def, /*is_buffer=*/true);
-    }
   }
 
   if (module.get_attributes().size() > 0) {
