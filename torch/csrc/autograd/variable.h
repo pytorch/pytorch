@@ -230,8 +230,11 @@ struct TORCH_API Variable : public at::Tensor {
       bool keep_graph,
       bool create_graph) const;
 
-  /// Sets the type of the Variable.
-  void set_data(Tensor new_data) const;
+  /// Sets the `Tensor` held by this `Variable` to the one supplied.
+  /// It is rarely necessary to call this; it's used, for example, when
+  /// a non-sparse gradient gets added to a sparse gradient, requiring
+  /// the type of the gradient `Variable` to become non-sparse.
+  void set_data(const at::Tensor &new_data);
 
   /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
   /// `Variable`.
@@ -242,7 +245,8 @@ struct TORCH_API Variable : public at::Tensor {
   void set_gradient_edge(Edge edge) noexcept;
 
   /// Returns the input index of the gradient `Function` to which this
-  /// `Variable` is connected.
+  /// `Variable` is connected.  Note: input indexes of the gradient `Function`
+  /// correspond to output indexes of the corresponding forward `Function`.
   uint32_t output_nr() const noexcept;
 
   /// True if this `Variable` is a leaf and thus does not have a `grad_fn`.
@@ -422,7 +426,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   const at::Storage& storage() const override;
   void* slow_data() const override;
 
-  void set_data(Tensor new_data);
+  void set_data(const at::Tensor &new_data);
 
   /// Reset all expensive fields to free up resources
   void release_resources() override;
@@ -671,8 +675,8 @@ inline Variable Variable::detach() const {
   return var;
 }
 
-inline void Variable::set_data(Tensor new_data) const {
-  get()->set_data(std::move(new_data));
+inline void Variable::set_data(const at::Tensor &new_data) {
+  get()->set_data(new_data);
 }
 
 inline void Variable::set_gradient_edge(Edge edge) noexcept {
