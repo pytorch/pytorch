@@ -73,7 +73,7 @@ compute_result_type(at::ArrayRef<OperandInfo> operands, const F& predicate) {
   for (auto& op : operands) {
     if (!op.tensor.defined()) continue;
     if (!predicate(op.tensor)) continue;
-    auto dtype = op.tensor.type().scalarType();;
+    auto dtype = op.tensor.scalar_type();;
     result_type = (result_type == ScalarType::Undefined
         ? dtype
         : promoteTypes(result_type, dtype));
@@ -95,7 +95,7 @@ void TensorIterator::compute_types() {
   if (missing_dtypes || compute_common_dtype_) {
     auto& type = compute_common_type();
     for (auto& op : operands_) {
-      auto& op_tensor_type = at::globalContext().getNonVariableType(op.tensor.type().backend(), op.tensor.type().scalarType());
+      auto& op_tensor_type = at::globalContext().getNonVariableType(op.tensor.type().backend(), op.tensor.scalar_type());
       if (!op.type) {
         op.type = &type;
       } else if (compute_common_dtype_ && op.type != &type) {
@@ -118,7 +118,7 @@ void TensorIterator::compute_types() {
   }
 
   for (auto& op : operands_) {
-    auto& op_tensor_type = at::globalContext().getNonVariableType(op.tensor.type().backend(), op.tensor.type().scalarType());
+    auto& op_tensor_type = at::globalContext().getNonVariableType(op.tensor.type().backend(), op.tensor.scalar_type());
     if (op.tensor.defined() && op_tensor_type != *op.type) {
       if (op.is_output) {
         AT_ERROR("output with type ", op_tensor_type.toString(),

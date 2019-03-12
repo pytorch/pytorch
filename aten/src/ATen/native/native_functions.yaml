@@ -553,6 +553,7 @@
 - func: s_copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   matches_jit_signature: True
   cpu_half: True
+  cpu_bool: True
   dispatch:
     CPU: _s_copy__cpu
     CUDA: _s_copy__cuda
@@ -566,6 +567,7 @@
 - func: _copy_same_type_(Tensor(a!) self, Tensor src) -> void
   matches_jit_signature: True
   cpu_half: True
+  cpu_bool: True
   dispatch:
     CPU: _copy_same_type__cpu
 
@@ -837,6 +839,7 @@
 
 - func: empty(int[] size, TensorOptions options=[]) -> Tensor
   cpu_half: True
+  cpu_bool: True
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda
@@ -846,6 +849,7 @@
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
   matches_jit_signature: True
   variants: method
+  cpu_bool: True
   cpu_half: True
   device_guard: False
   dispatch:
@@ -1608,14 +1612,17 @@
     CUDA: batch_norm_cuda
 
 - func: batch_norm_stats(Tensor input, float eps) -> (Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CUDA: batch_norm_stats_cuda
 
 - func: batch_norm_elemt(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor invstd, float eps) -> Tensor
+  matches_jit_signature: True
   dispatch:
     CUDA: batch_norm_elemt_cuda
 
 - func: batch_norm_gather_stats(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, int count) -> (Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CUDA: batch_norm_gather_stats_cuda
 
@@ -1626,10 +1633,12 @@
     CUDA: batch_norm_backward_cuda
 
 - func: batch_norm_backward_reduce(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, bool input_g, bool weight_g, bool bias_g) -> (Tensor, Tensor, Tensor, Tensor)
+  matches_jit_signature: True
   dispatch:
     CUDA: batch_norm_backward_reduce_cuda
 
 - func: batch_norm_backward_elemt(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, Tensor mean_dy, Tensor mean_dy_xmu) -> Tensor
+  matches_jit_signature: True
   dispatch:
     CUDA: batch_norm_backward_elemt_cuda
 
@@ -2983,6 +2992,7 @@
 - func: _local_scalar_dense(Tensor self) -> Scalar
   matches_jit_signature: True
   cpu_half: True
+  cpu_bool: True
   dispatch:
     CPU: _local_scalar_dense_cpu
     CUDA: _local_scalar_dense_cuda
@@ -3766,6 +3776,13 @@
 - func: btrifact_with_info(Tensor self, *, bool pivot=True) -> (Tensor, Tensor, Tensor)
   matches_jit_signature: True
   variants: method, function
+
+- func: _btrifact_helper(Tensor self, bool pivot) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: _btrifact_helper_cpu
+    CUDA: _btrifact_helper_cuda
 
 - func: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True

@@ -4,11 +4,12 @@
 #include <array>
 #include <vector>
 
+#include <ATen/core/dispatch/OpSchemaRegistration.h>
+
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
-#include <ATen/core/dispatch/OpSchemaRegistration.h>
 
 C10_DECLARE_CAFFE2_OPERATOR(LayerNorm)
 
@@ -19,13 +20,11 @@ class LayerNormOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  template<class... Args>
+  template <class... Args>
   explicit LayerNormOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "axis", axis_, 1),
         OP_SINGLE_ARG(float, "epsilon", epsilon_, 1e-5f) {}
-
-  ~LayerNormOp() {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
@@ -41,19 +40,19 @@ class LayerNormOp final : public Operator<Context> {
     moments_dims.push_back(1);
     auto* mean = Output(1, moments_dims, at::dtype<T>());
     auto* sig = Output(2, moments_dims, at::dtype<T>());
-    runLayerNorm<T>(
-        X, Y, mean, sig, canonical_axis, epsilon_, &scale_, &bias_, &context_);
+    RunLayerNorm<T>(
+        X, canonical_axis, epsilon_, Y, mean, sig, &scale_, &bias_, &context_);
     return true;
   }
 
   template <typename T>
-  static void runLayerNorm(
+  static void RunLayerNorm(
       const Tensor& X,
+      const int canonical_axis,
+      const float epsilon,
       Tensor* Y,
       Tensor* mean,
       Tensor* sig,
-      int canonical_axis,
-      float epsilon,
       Tensor* scale_buffer,
       Tensor* bias_buffer,
       Context* context) {
@@ -63,14 +62,12 @@ class LayerNormOp final : public Operator<Context> {
     Y->ResizeLike(X);
     scale_buffer->Resize(M);
     bias_buffer->Resize(M);
-
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
     T* mean_data = mean->template mutable_data<T>();
     T* sig_data = sig->template mutable_data<T>();
     T* scale_data = scale_buffer->template mutable_data<T>();
     T* bias_data = bias_buffer->template mutable_data<T>();
-
     const std::array<int, 2> X_dims = {M, N};
     const std::array<int, 2> Y_dims = {M, 1};
     math::Moments<T, Context>(
