@@ -12,7 +12,7 @@ namespace opt {
 using namespace nom;
 
 #ifndef CAFFE2_USE_MKLDNN
-void OptimizeForIdeep(
+void OptimizeForMkldnn(
     repr::NNModule* nn,
     caffe2::Workspace* ws,
     bool training_mode) {
@@ -791,12 +791,144 @@ void fusePreConvertOp(repr::NNModule* nn) {
   }
 }
 
-void OptimizeForIdeep(
+// Pre-convert filters format to expected one here
+// in order to avoid boring conversions during computations
+void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
+  for (auto& node : nn->dataFlow.getMutableNodes()) {
+    if (!repr::nn::is<repr::ConvTranspose>(node) &&
+        !repr::nn::is<repr::Conv>(node) && !repr::nn::is<repr::FC>(node)) {
+      continue;
+    }
+
+    auto* nnOp = repr::nn::get<repr::NeuralNetOperator>(node);
+    if (!isOnIdeepDevice(*nnOp)) {
+      LOG(INFO) << "Not a IDEEP operator";
+      continue;
+    }
+
+    auto inputs = repr::nn::getInputs(node);
+    if (inputs.size() < 2) {
+      LOG(WARNING) << "Invalid input size";
+      continue;
+    }
+
+    auto* filterBlob = getBlob(inputs[1], ws);
+    auto* filter = getMutableTensor<itensor>(filterBlob);
+    if (filter == nullptr) {
+      continue;
+    }
+
+    itensor::descriptor expectedDesc;
+    if (repr::nn::is<repr::ConvTranspose>(node)) {
+      if (filter->get_public_format() == ideep::format::iohw)
+        continue;
+      auto convTranspose = repr::nn::get<repr::ConvTranspose>(node);
+      auto initValue = [](vector<int>& v, vector<int> i) {
+        if (v.empty())
+          v = i;
+      };
+      auto strides = convTranspose->getStrides();
+      initValue(strides, {1, 1});
+      auto pads = convTranspose->getPads();
+      initValue(pads, {0, 0, 0, 0});
+      auto* op = getMutableOpDef(*convTranspose);
+      auto aalgorithm = ialgo::deconvolution_direct;
+      auto dataType = filter->get_data_type();
+      ideep::tensor::dims filter_dims_mkldnn{filter->get_dim(1),
+                                             filter->get_dim(0),
+                                             filter->get_dim(2),
+                                             filter->get_dim(3)};
+      expectedDesc =
+          ideep::convolution_transpose_forward::expected_weights_descriptor(
+              filter_dims_mkldnn,
+              dataType,
+              strides,
+              {pads[0], pads[1]},
+              {pads[2], pads[3]});
+
+      if (filter->get_descriptor() != expectedDesc) {
+        filter->set_public_format(ideep::format::iohw);
+        itensor&& newFilter(expectedDesc);
+        ideep::reorder::compute(*filter, newFilter);
+        newFilter.set_public_format(ideep::format::iohw);
+        filterBlob->Reset<itensor>(new itensor(newFilter));
+      }
+    } else if (repr::nn::is<repr::Conv>(node)) {
+      auto conv = repr::nn::get<repr::Conv>(node);
+      auto initValue = [](vector<int>& v, vector<int> i) {
+        if (v.empty())
+          v = i;
+      };
+      auto strides = conv->getStrides();
+      initValue(strides, {1, 1});
+      auto pads = conv->getPads();
+      initValue(pads, {0, 0, 0, 0});
+      auto dilations = conv->getDilations();
+      initValue(dilations, {1, 1});
+
+      auto* op = getMutableOpDef(*conv);
+      auto aalgorithm = ialgo::convolution_direct;
+      for (auto& arg : *op->mutable_arg()) {
+        if ((arg.name() == "conv_algorithm") &&
+            (arg.i() == CONV_ALGORITHM_WINOGRAD)) {
+          aalgorithm = ialgo::convolution_winograd;
+        }
+      }
+      auto dataType = filter->get_data_type();
+
+      filter->make_group(conv->getGroup());
+      expectedDesc = ideep::convolution_forward::expected_weights_descriptor(
+          filter->get_dims(),
+          dataType,
+          strides,
+          {pads[0], pads[1]},
+          {pads[2], pads[3]},
+          dilations,
+          conv->getGroup(),
+          aalgorithm);
+
+      if (filter->get_descriptor() != expectedDesc) {
+        itensor&& newFilter(expectedDesc);
+        ideep::reorder::compute(*filter, newFilter);
+        filterBlob->Reset<itensor>(new itensor(newFilter));
+      }
+      // convert weights for FC
+    } else if (repr::nn::is<repr::FC>(node)) {
+      auto fc = repr::nn::get<repr::FC>(node);
+      auto axis_w = fc->getAxisW();
+      if (axis_w != 1) {
+        auto f_dims = filter->get_dims();
+        auto f_dim0 = std::accumulate(
+            f_dims.begin(),
+            f_dims.begin() + axis_w,
+            1,
+            std::multiplies<itensor::dim_t>());
+        auto f_dim1 = std::accumulate(
+            f_dims.begin() + axis_w,
+            f_dims.end(),
+            1,
+            std::multiplies<itensor::dim_t>());
+        filter->reshape({f_dim0, f_dim1});
+      }
+
+      expectedDesc = ideep::inner_product_forward::expected_weights_descriptor(
+          filter->get_dims());
+
+      if (filter->get_descriptor() != expectedDesc) {
+        itensor&& newFilter(expectedDesc);
+        ideep::reorder::compute(filter->as_weights(), newFilter);
+        filterBlob->Reset<itensor>(new itensor(newFilter));
+      }
+    }
+  }
+}
+
+void OptimizeForMkldnn(
     repr::NNModule* nn,
     caffe2::Workspace* ws,
     bool training_mode) {
   if (training_mode) {
-    // Only support inference so far
+    preConvertFiltersFormat(nn, ws);
     return;
   }
 
