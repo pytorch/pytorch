@@ -9054,7 +9054,7 @@ a")
         slices = tuple_graph.findAllNodes("prim::TupleSlice")
         num_outputs = set(map(lambda x: len(x.output().type().elements()), slices))
         # one tuple slice should have an output with 2 elements, other 4
-        self.assertTrue(num_outputs == set([2, 4]))
+        self.assertTrue(num_outputs == {2, 4})
         self.run_pass('lower_all_tuples', tuple_graph)
         self.assertTrue('Tuple' not in str(tuple_graph))
         tuple_comp = torch.jit.script(tuple_slice)
