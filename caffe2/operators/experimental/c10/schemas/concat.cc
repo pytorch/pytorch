@@ -23,6 +23,6 @@ C10_DEFINE_OP_SCHEMA(Concat, FunctionSchema(
 
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
-    ops::Concat,
+    ops::Concat(),
     C10Concat_DontUseThisOpYet)
 }

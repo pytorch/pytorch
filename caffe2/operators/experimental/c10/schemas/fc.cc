@@ -25,6 +25,6 @@ C10_DEFINE_OP_SCHEMA(FullyConnected, FunctionSchema(
 namespace caffe2 {
 
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
-    ops::FullyConnected,
+    ops::FullyConnected(),
     C10FC_DontUseThisOpYet)
 }

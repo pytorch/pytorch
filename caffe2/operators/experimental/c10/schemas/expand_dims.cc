@@ -24,6 +24,6 @@ C10_DEFINE_OP_SCHEMA(ExpandDims, FunctionSchema(
 namespace caffe2 {
 
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
-    ops::ExpandDims,
+    ops::ExpandDims(),
     C10ExpandDims_DontUseThisOpYet)
 }
