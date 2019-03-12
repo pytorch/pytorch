@@ -2499,51 +2499,6 @@
       default: N
 ]]
 [[
-  name: _th_btrifact
-  cname: btrifact
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0,1
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THIntegerTensor* pivots
-      output: True
-    - CONSTANT NULL
-    - arg: bool pivot
-      kwarg_only: True
-      default: "true"
-    - THTensor* self
-]]
-[[
-  name: _th_btrifact_with_info
-  cname: btrifact
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0,1,2
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THIntegerTensor* pivots
-      output: True
-    - arg: THIntegerTensor* info
-      output: True
-    - arg: bool pivot
-      kwarg_only: True
-      default: "true"
-    - THTensor* self
-]]
-[[
   name: _th_btrisolve
   cname: btrisolve
   types:
