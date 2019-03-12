@@ -39,7 +39,6 @@ cat original-doxygen-log.txt
 
 # Filter out some warnings.
 ignore_warning "warning: no uniquely matching class member found for"
-ignore_warning "warning: explicit link request to 'Item' could not be resolved"
 
 # Count the number of remaining warnings.
 warnings="$(grep 'warning:' doxygen-log.txt | wc -l)"

@@ -392,14 +392,14 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   std::vector<AnyModule> modules_;
 };
 
-/// NOTE: We might wonder why we need to have the `NamedSubmodule` class and have
-/// the `named_submodules()` function signature be `named_submodules(std::initializer_list<SequentialImpl::NamedSubmodule> named_modules)`,
-/// instead of `named_submodules(std::initializer_list<torch::OrderedDict<std::string, ModuleType>::Item> named_modules)`.
-/// The reason is that when we pass in a braced-init list such as `named_submodules({{"m1", M(1)}, {"m2", M(2)}})`,
-/// if we use the second signature, at the template argument deduction step the compiler is not able to deduce the type of `ModuleType`
-/// to the type of `M(1)` or `M(2)`, since the compiler doesn't actually look into the braced-init list `{"m1", M(1)}` and figure out
-/// what the types of its elements are. Instead, we have to pass the braced-init list as a whole to the `NamedSubmodule` constructors,
-/// and let the constructors do the job of figuring out the types of its elements and do the matching to the correct module type.
+// NOTE: We might wonder why we need to have the `NamedSubmodule` class and have
+// the `named_submodules()` function signature be `named_submodules(std::initializer_list<SequentialImpl::NamedSubmodule> named_modules)`,
+// instead of `named_submodules(std::initializer_list<torch::OrderedDict<std::string, ModuleType>::Item> named_modules)`.
+// The reason is that when we pass in a braced-init list such as `named_submodules({{"m1", M(1)}, {"m2", M(2)}})`,
+// if we use the second signature, at the template argument deduction step the compiler is not able to deduce the type of `ModuleType`
+// to the type of `M(1)` or `M(2)`, since the compiler doesn't actually look into the braced-init list `{"m1", M(1)}` and figure out
+// what the types of its elements are. Instead, we have to pass the braced-init list as a whole to the `NamedSubmodule` constructors,
+// and let the constructors do the job of figuring out the types of its elements and do the matching to the correct module type.
 inline torch::OrderedDict<std::string, AnyModule> named_submodules(std::initializer_list<SequentialImpl::NamedSubmodule> named_modules) {
   torch::OrderedDict<std::string, AnyModule> dict;
   for (auto named_module : named_modules) {
