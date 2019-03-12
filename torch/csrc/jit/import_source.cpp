@@ -1,4 +1,5 @@
-#include <torch/csrc/jit/import_method.h>
+#include "import_source.h"
+
 #include <torch/csrc/jit/script/parser.h>
 
 namespace torch {
