@@ -55,7 +55,7 @@ private:
   }
 
   at::Type& typeFor(const Tensor& ten) {
-    return at::getNonVariableType(backend(), atScalarTypeFor(ten.meta()));
+    return at::getNonVariableType(backend(), typeMetaToScalarType(ten.meta()));
   }
   at::Tensor tensorWrapping(const Tensor& ten_) {
     auto& ten = const_cast<Tensor&>(ten_);
@@ -75,19 +75,6 @@ private:
     return results;
   }
 
-  at::ScalarType atScalarTypeFor(const TypeMeta & meta) {
-    #define DEFINE_IF(ctype,aten_name,_) \
-    if(meta.Match<ctype>()) { \
-      return at::k##aten_name; \
-    }
-    AT_FORALL_SCALAR_TYPES(DEFINE_IF)
-    #undef DEFINE_IF
-    // Special case for bool, since the type in ATen is actually Byte
-    if (meta.Match<bool>()) {
-      return at::kByte;
-    }
-    CAFFE_THROW("Unknown type meta"); // TODO: improve error message...
-  }
   void assignTo(Tensor* dst, const at::Tensor& src_) {
     at::Tensor src = src_.contiguous();
     auto at_sizes = src.sizes();
@@ -129,8 +116,8 @@ private:
     return s.toLong();
   }
 
-  void assignTo(Tensor* dst, at::Type& inferred_type, at::Scalar scalar) {
-    switch(inferred_type.scalarType()) {
+  void assignTo(Tensor* dst, at::ScalarType scalar_type, at::Scalar scalar) {
+    switch(scalar_type) {
       #define DEFINE_CASE(ctype,aten_name,native) \
         case at::k##aten_name: { \
           auto value = extract_##native(scalar); \
@@ -207,27 +194,6 @@ private:
       result[i] = ints.at(i);
     }
     return result;
-  }
-  at::ScalarType stringToScalarType(const std::string & name) {
-    #define DEFINE_IF(type,aten) \
-      if(#type == name) \
-        return at::k##aten;
-    DEFINE_IF(at::Half, Half)
-    DEFINE_IF(float, Float)
-    DEFINE_IF(double, Double)
-    DEFINE_IF(uint8, Byte)
-    DEFINE_IF(int8, Char)
-    DEFINE_IF(int16, Short)
-    DEFINE_IF(int32, Int)
-    DEFINE_IF(int64, Long)
-    CAFFE_THROW("unsupported type annotation: ", name);
-  }
-  at::TypeExtendedInterface & stringToType(const std::string & name) {
-    return at::getNonVariableType(backend(), stringToScalarType(name));
-  }
-  at::TypeExtendedInterface * readTypeAttribute(const std::string & name) {
-    CAFFE_ENFORCE(OperatorBase::HasSingleArgumentOfType<std::string>(name));
-    return &stringToType(OperatorBase::GetSingleArgument<std::string>(name, ""));
   }
 };
 
