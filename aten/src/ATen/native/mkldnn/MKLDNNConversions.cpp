@@ -31,7 +31,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
   AT_ASSERT(cpu_tensor.scalar_type() == ScalarType::Float);
   c10::intrusive_ptr<MKLDNNHandle> mkldnn_handle = c10::make_intrusive<MKLDNNHandle>();
   ideep::tensor& dtensor = mkldnn_handle->get_ideep_tensor();
-  auto src_dims = cpu_tensor.sizes().vec();
+  auto src_dims = cpu_tensor.sizes();
   ideep::tensor::dims dst_dims (src_dims.begin(), src_dims.end());
   dtensor.resize(dst_dims, ideep::tensor::data_type::f32);
   dtensor.reorder_from(dst_dims, ideep::tensor::data_type::f32,
