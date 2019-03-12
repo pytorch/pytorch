@@ -189,15 +189,15 @@ to the end.)
 } // namespace caffe2
 
 C10_REGISTER_CAFFE2_OPERATOR_CPU(
-LayerNorm,
-(std::vector<c10::Argument>{
-    c10::Argument("input"),
-    c10::Argument("axis", c10::IntType::get()),
-    c10::Argument("epsilon", c10::FloatType::get())}),
-(std::vector<c10::Argument>{c10::Argument("output"),
-                            c10::Argument("mean"),
-                            c10::Argument("stdev")}),
-caffe2::LayerNormOp<caffe2::CPUContext>)
+    LayerNorm,
+    (std::vector<c10::Argument>{
+        c10::Argument("input"),
+        c10::Argument("axis", c10::IntType::get()),
+        c10::Argument("epsilon", c10::FloatType::get())}),
+    (std::vector<c10::Argument>{c10::Argument("output"),
+                                c10::Argument("mean"),
+                                c10::Argument("stdev")}),
+    caffe2::LayerNormOp<caffe2::CPUContext>)
 
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(

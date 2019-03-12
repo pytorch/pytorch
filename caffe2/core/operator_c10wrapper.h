@@ -32,7 +32,7 @@ class C10OperatorWrapper final : public Operator<Context> {
         has_preallocated_outputs_(
             op_.schema().arguments().size() != 0 &&
             op_.schema().arguments().back().name() ==
-            detail::PREALLOCATED_OUTPUT_ARGNAME) {
+                detail::PREALLOCATED_OUTPUT_ARGNAME) {
     AT_ASSERT(
         !has_preallocated_outputs_ ||
         op_.schema().arguments().back().type()->isSubtypeOf(
@@ -150,11 +150,14 @@ class C10OperatorWrapper final : public Operator<Context> {
 
   IValue get_nontensor_argument_(const c10::Argument& argument) {
     if (argument.type()->isSubtypeOf(IntType::get())) {
-      return get_nontensor_argument_<int>(argument.name(), argument.default_value());
+      return get_nontensor_argument_<int>(
+          argument.name(), argument.default_value());
     } else if (argument.type()->isSubtypeOf(FloatType::get())) {
-      return get_nontensor_argument_<double>(argument.name(), argument.default_value());
+      return get_nontensor_argument_<double>(
+          argument.name(), argument.default_value());
     } else if (argument.type()->isSubtypeOf(BoolType::get())) {
-      return get_nontensor_argument_<bool>(argument.name(), argument.default_value());
+      return get_nontensor_argument_<bool>(
+          argument.name(), argument.default_value());
     } else {
       // TODO Support more types
       AT_ERROR(
@@ -164,17 +167,18 @@ class C10OperatorWrapper final : public Operator<Context> {
     }
   }
 
-  template<class T>
-  IValue get_nontensor_argument_(const std::string& name, const c10::optional<IValue>& default_value) {
+  template <class T>
+  IValue get_nontensor_argument_(
+      const std::string& name,
+      const c10::optional<IValue>& default_value) {
     if (default_value.has_value()) {
-      return this->template GetSingleArgument<T>(
-        name, default_value->to<T>()
-      );
+      return this->template GetSingleArgument<T>(name, default_value->to<T>());
     } else {
-      AT_CHECK(this->template HasSingleArgumentOfType<T>(name),
-        "Error in caffe2->c10 wrapper: Expected argument '",
-        name,
-        "' missing or wrong type.");
+      AT_CHECK(
+          this->template HasSingleArgumentOfType<T>(name),
+          "Error in caffe2->c10 wrapper: Expected argument '",
+          name,
+          "' missing or wrong type.");
       return this->template GetSingleArgument<T>(name, 0);
     }
   }
@@ -183,9 +187,9 @@ class C10OperatorWrapper final : public Operator<Context> {
   c10::optional<OpKernel> kernel_;
 
   // has_preallocated_outputs_ is true iff the operator schema has a last
-  // argument that is a TensorList and has a name equal to with the name equal to
-  // detail::PREALLOCATED_OUTPUT_ARGNAME. This argument is then used to pass in
-  // preallocated output tensors to the caffe2 operator.
+  // argument that is a TensorList and has a name equal to with the name equal
+  // to detail::PREALLOCATED_OUTPUT_ARGNAME. This argument is then used to pass
+  // in preallocated output tensors to the caffe2 operator.
   bool has_preallocated_outputs_;
 
   // this is stored as a member here to avoid having to re-allocate a stack
@@ -195,12 +199,14 @@ class C10OperatorWrapper final : public Operator<Context> {
   std::mutex mutex_;
 };
 
-template <class Context, const c10::OperatorHandle& (*OperatorHandle)()>
-inline std::unique_ptr<C10OperatorWrapper<Context>> createC10OperatorWrapper(
-    const OperatorDef& operator_def,
-    Workspace* ws) {
-  return c10::guts::make_unique<C10OperatorWrapper<Context>>(
-      OperatorHandle(), operator_def, ws);
+template <class Context>
+inline std::function<
+    std::unique_ptr<OperatorBase>(const OperatorDef&, Workspace*)>
+createC10OperatorWrapper(const c10::OperatorHandle& op_handle) {
+  return [op_handle](const OperatorDef& op_def, Workspace* ws) {
+    return c10::guts::make_unique<C10OperatorWrapper<Context>>(
+        op_handle, op_def, ws);
+  };
 }
 
 } // namespace detail
@@ -211,13 +217,13 @@ inline std::unique_ptr<C10OperatorWrapper<Context>> createC10OperatorWrapper(
 //      once the tensor detemplatization lands.
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(OperatorHandle, Name) \
   REGISTER_CPU_OPERATOR_CREATOR(                                            \
-      Name, detail::createC10OperatorWrapper<CPUContext, OperatorHandle>)
+      Name, detail::createC10OperatorWrapper<CPUContext>(OperatorHandle))
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(OperatorHandle, Name) \
   REGISTER_CUDA_OPERATOR_CREATOR(                                            \
-      Name, detail::createC10OperatorWrapper<CUDAContext, OperatorHandle>)
+      Name, detail::createC10OperatorWrapper<CUDAContext>(OperatorHandle))
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP(OperatorHandle, Name) \
   REGISTER_HIP_OPERATOR_CREATOR(                                            \
-      Name, detail::createC10OperatorWrapper<HIPContext, OperatorHandle>)
+      Name, detail::createC10OperatorWrapper<HIPContext>(OperatorHandle))
 #else
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(OperatorHandle, Name)
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(OperatorHandle, Name)
