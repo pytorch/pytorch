@@ -12,7 +12,7 @@ from subprocess import check_call, call, check_output
 from distutils.version import LooseVersion
 from .setup_helpers.cuda import USE_CUDA, CUDA_HOME
 from .setup_helpers.dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
-from .setup_helpers.nccl import USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
+from .setup_helpers.nccl import USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB, USE_NCCL
 from .setup_helpers.rocm import ROCM_HOME, ROCM_VERSION, USE_ROCM
 from .setup_helpers.nnpack import USE_NNPACK
 from .setup_helpers.qnnpack import USE_QNNPACK
@@ -183,7 +183,8 @@ def run_cmake(version,
         USE_FFMPEG=check_env_flag('USE_FFMPEG'),
         USE_SYSTEM_EIGEN_INSTALL="OFF",
         USE_MKLDNN=USE_MKLDNN,
-        NCCL_EXTERNAL=USE_CUDA,
+        USE_NCCL=USE_NCCL,
+        NCCL_EXTERNAL=USE_NCCL,
         CMAKE_INSTALL_PREFIX=install_dir,
         CMAKE_C_FLAGS=cflags,
         CMAKE_CXX_FLAGS=cflags,
@@ -210,7 +211,11 @@ def run_cmake(version,
                       CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper),
                       CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
     pprint(cmake_args)
-    pprint(my_env)
+    for env_var_name in my_env:
+        if env_var_name.startswith('gh'):
+            # github env vars use utf-8, on windows, non-ascii code may
+            # cause problem, so encode first
+            my_env[env_var_name] = str(my_env[env_var_name].encode("utf-8"))
     check_call(cmake_args, cwd=build_dir, env=my_env)
 
 
@@ -221,6 +226,7 @@ def build_caffe2(version,
                  build_dir):
     my_env = create_build_env()
     build_test = not check_negative_env_flag('BUILD_TEST')
+    max_jobs = os.getenv('MAX_JOBS', None)
     cmake_cache_file = 'build/CMakeCache.txt'
     if rerun_cmake and os.path.isfile(cmake_cache_file):
         os.remove(cmake_cache_file)
@@ -235,13 +241,14 @@ def build_caffe2(version,
         if USE_NINJA:
             # sccache will fail if all cores are used for compiling
             j = max(1, multiprocessing.cpu_count() - 1)
+            if max_jobs is not None:
+                j = min(int(max_jobs), j)
             check_call(['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--', '-j', str(j)],
                        cwd=build_dir, env=my_env)
         else:
             check_call(['msbuild', 'INSTALL.vcxproj', '/p:Configuration={}'.format(build_type)],
                        cwd=build_dir, env=my_env)
     else:
-        max_jobs = os.getenv('MAX_JOBS', None)
         if USE_NINJA:
             ninja_cmd = ['ninja', 'install']
             if max_jobs is not None:

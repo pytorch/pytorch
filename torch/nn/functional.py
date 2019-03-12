@@ -1753,7 +1753,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
             The logarithmized probabilities of the outputs
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
         targets: :math:`(N, S)` or `(sum(target_lengths))`.
-            Targets (cannot be blank). In the second form, the targets are assumed to be concatenated.
+            Targets cannot be blank. In the second form, the targets are assumed to be concatenated.
         input_lengths: :math:`(N)`.
             Lengths of the inputs (must each be :math:`\leq T`)
         target_lengths: :math:`(N)`.
@@ -1761,9 +1761,10 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
         blank (int, optional):
             Blank label. Default :math:`0`.
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the output losses will be divided by the target lengths and
-            then the mean over the batch is taken. Default: 'mean'
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the output losses will be divided by the target lengths and
+            then the mean over the batch is taken, ``'sum'``: the output will be
+            summed. Default: ``'mean'``
         zero_infinity (bool, optional):
             Whether to zero infinite losses and the associated gradients.
             Default: ``False``
@@ -1793,7 +1794,7 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
 
     Args:
         input: :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
-            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 1`
+            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K \geq 1`
             in the case of K-dimensional loss.
         target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
             or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
@@ -1813,11 +1814,11 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Example::
 
@@ -1891,11 +1892,11 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     """
     if size_average is not None or reduce is not None:
@@ -1909,10 +1910,13 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
         loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
     if reduction == 'none':
         ret = loss
-    if reduction == 'mean':
+    elif reduction == 'mean':
         ret = torch.mean(loss)
-    else:
+    elif reduction == 'sum':
         ret = torch.sum(loss)
+    else:
+        ret = input
+        raise ValueError(reduction + " is not valid")
     return ret
 
 
@@ -1936,19 +1940,21 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'batchmean' | 'sum' | 'mean'.
-            'none': no reduction will be applied
-            'batchmean': the sum of the output will be divided by the batchsize
-            'sum': the output will be summed
-            'mean': the output will be divided by the number of elements in the output
-            Default: 'mean'
+            ``'none'`` | ``'batchmean'`` | ``'sum'`` | ``'mean'``.
+            ``'none'``: no reduction will be applied
+            ``'batchmean'``: the sum of the output will be divided by the batchsize
+            ``'sum'``: the output will be summed
+            ``'mean'``: the output will be divided by the number of elements in the output
+            Default: ``'mean'``
 
-        .. note:: :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
-            and in the meantime, specifying either of those two args will override :attr:`reduction`.
+    .. note::
+        :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
+        and in the meantime, specifying either of those two args will override :attr:`reduction`.
 
-        .. note:: `reduction='mean'` doesn't return the true kl divergence value, please use
-            `reduction='batchmean'` which aligns with KL math definition.
-            In the next major release, 'mean' will be changed to be the same as 'batchmean'.
+    .. note::
+        :attr:``reduction`` = ``'mean'`` doesn't return the true kl divergence value, please use
+        :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
+        In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
     """
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
@@ -1983,7 +1989,7 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
 
     Args:
         input (Tensor) : :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
-            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 1`
+            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K \geq 1`
             in the case of K-dimensional loss.
         target (Tensor) : :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
             or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
@@ -2003,11 +2009,11 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Examples::
 
@@ -2045,11 +2051,11 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Examples::
 
@@ -2101,11 +2107,11 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
         pos_weight (Tensor, optional): a weight of positive examples.
                 Must be a vector with length equal to the number of classes.
 
@@ -2337,7 +2343,7 @@ def multi_margin_loss(input, target, p=1, margin=1., weight=None, size_average=N
 
 pixel_shuffle = _add_docstr(torch.pixel_shuffle, r"""
 Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)` to a
-tensor of shape :math:`(C, H \times r, W \times r)`.
+tensor of shape :math:`(*, C, H \times r, W \times r)`.
 
 See :class:`~torch.nn.PixelShuffle` for details.
 
@@ -2381,15 +2387,17 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to be an integer.
         mode (string): algorithm used for upsampling:
-            'nearest' | 'linear' | 'bilinear' | 'bicubic' | 'trilinear'. Default: 'nearest'
+            ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
+            ``'trilinear'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
-            If set to True, the input and output tensors are aligned by the
-            center points of their corner pixels. If set to False, the input and
+            If set to ``True``, the input and output tensors are aligned by the
+            center points of their corner pixels. If set to ``False``, the input and
             output tensors are aligned by the corner points of their corner
             pixels, and the interpolation uses edge value padding for out-of-boundary values.
-            This only has effect when :attr:`mode` is `linear`,
-            `bilinear`, `bicubic` or `trilinear`. Default: False
+            This only has effect when :attr:`mode` is ``'linear'``,
+            ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
+            Default: ``False``
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -2425,16 +2433,18 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
-        mode (string): algorithm used for upsampling:
-            'nearest' | 'linear' | 'bilinear' | 'bicubic' | 'trilinear' | 'area'. Default: 'nearest'
+        mode (str): algorithm used for upsampling:
+            ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
+            ``'trilinear'`` | ``'area'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
-            If set to True, the input and output tensors are aligned by the
-            center points of their corner pixels. If set to False, the input and
+            If set to ``True``, the input and output tensors are aligned by the
+            center points of their corner pixels. If set to ``False``, the input and
             output tensors are aligned by the corner points of their corner
             pixels, and the interpolation uses edge value padding for out-of-boundary values.
-            This only has effect when :attr:`mode` is `linear`,
-            `bilinear`, `bicubic`, or `trilinear`. Default: False
+            This only has effect when :attr:`mode` is ``'linear'``,
+            ``'bilinear'``, ``'bicubic'``, or ``'trilinear'``.
+            Default: ``False``
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -2613,7 +2623,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
           the border for out-of-bound values. For location far away from the
           border, it will keep being reflected until becoming in bound, e.g.,
           (normalized) pixel location ``x = -3.5`` reflects by ``-1`` and
-          becomes ``x' = 2.5``, then reflects by border ``1`` and becomes
+          becomes ``x' = 1.5``, then reflects by border ``1`` and becomes
           ``x'' = -0.5``.
 
     .. Note:: This function is often used in building Spatial Transformer Networks.
@@ -2625,9 +2635,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
         grid (Tensor): flow-field of shape :math:`(N, H_\text{out}, W_\text{out}, 2)` (4-D case)
                        or :math:`(N, D_\text{out}, H_\text{out}, W_\text{out}, 3)` (5-D case)
         mode (str): interpolation mode to calculate output values
-            'bilinear' | 'nearest'. Default: 'bilinear'
+            ``'bilinear'`` | ``'nearest'``. Default: ``'bilinear'``
         padding_mode (str): padding mode for outside grid values
-            'zeros' | 'border' | 'reflection'. Default: 'zeros'
+            ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
 
     Returns:
         output (Tensor): output Tensor
@@ -2659,14 +2669,14 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
 @weak_script
 def affine_grid(theta, size):
     # type: (Tensor, List[int]) -> Tensor
-    r"""Generates a 2d flow field, given a batch of affine matrices :attr:`theta`
+    r"""Generates a 2d flow field, given a batch of affine matrices :attr:`theta`.
     Generally used in conjunction with :func:`grid_sample` to
     implement Spatial Transformer Networks.
 
     Args:
         theta (Tensor): input batch of affine matrices (:math:`N \times 2 \times 3`)
-        size (torch.Size): the target output image size (:math:`N \times C \times H \times W`)
-                           Example: torch.Size((32, 3, 24, 24))
+        size (torch.Size): the target output image size (:math:`N \times C \times H \times W`).
+            Example: torch.Size((32, 3, 24, 24))
 
     Returns:
         output (Tensor): output Tensor of size (:math:`N \times H \times W \times 2`)
@@ -2707,10 +2717,12 @@ def pad(input, pad, mode='constant', value=0):
     .. include:: cuda_deterministic_backward.rst
 
     Args:
-        input (Tensor): `Nd` tensor
-        pad (tuple): m-elem tuple, where :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
-        mode: 'constant', 'reflect' or 'replicate'. Default: 'constant'
-        value: fill value for 'constant' padding. Default: 0
+        input (Tensor): N-dimensional tensor
+        pad (tuple): m-elements tuple, where
+            :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
+        mode: ``'constant'``, ``'reflect'`` or ``'replicate'``.
+            Default: ``'constant'``
+        value: fill value for ``'constant'`` padding. Default: ``0``
 
     Examples::
 
@@ -2939,6 +2951,14 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
     .. warning::
         Currently, only 4-D input tensors (batched image-like tensors) are
         supported.
+
+    .. warning::
+
+        More than one element of the unfolded tensor may refer to a single
+        memory location. As a result, in-place operations (especially ones that
+        are vectorized) may result in incorrect behavior. If you need to write
+        to the tensor, please clone it first.
+
 
     See :class:`torch.nn.Unfold` for details
     """

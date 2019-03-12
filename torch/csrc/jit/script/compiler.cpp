@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/script/compiler.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -9,7 +10,7 @@
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
-#include <torch/csrc/jit/script/type_parser.h>
+#include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <torch/csrc/jit/constants.h>
@@ -400,6 +401,7 @@ struct Environment {
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
+          {"rangelist", std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
       };
       auto it = globals.find(ident);
       if (it != globals.end())
@@ -488,16 +490,6 @@ static Value* ensureInt(const SourceRange& range, Value* v) {
   return v;
 }
 
-std::shared_ptr<SugaredValue> BuiltinFunction::call(
-    const SourceRange& loc,
-    Method& m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
-    size_t n_binders) {
-  return std::make_shared<SimpleValue>(
-      emitBuiltinCall(loc, *m.graph(), symbol, self, inputs, attributes, true));
-}
-
 inline bool isSupportedListElementType(const TypePtr& type) {
   return type->isSubtypeOf(TensorType::get()) ||
       type->isSubtypeOf(NumberType::get());
@@ -533,6 +525,7 @@ struct to_ir {
     }
 
     method.setSchema(emitDef(def, self, graph->block()));
+
     runCleanupPasses(graph);
   }
 
@@ -575,6 +568,7 @@ struct to_ir {
       const SugaredValuePtr& self,
       Block* block) {
     auto schema = extractSchemaFromDef(def, self);
+    // TODO need guards on init returning none
     if (schema.returns().size() == 1) {
       def_stack_.back().declared_return_type_ = schema.returns().at(0).type();
     }
@@ -629,8 +623,9 @@ struct to_ir {
       const SugaredValuePtr& self) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
-    if (self)
+    if (self) {
       ++params_begin;
+    }
     std::vector<Argument> retval;
 
     std::vector<Expr> default_types;
@@ -671,7 +666,7 @@ struct to_ir {
           type,
           N,
           default_value,
-          /*kwarg_only =*/false);
+          decl_arg.kwarg_only());
       retval.push_back(arg);
     }
     return retval;
@@ -699,7 +694,7 @@ struct to_ir {
   FunctionSchema extractSchemaFromDef(
       const Def& def,
       const SugaredValuePtr& self) {
-    auto name = def.name().name();
+    const auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
     std::vector<Argument> returns = parseReturnFromDecl(def.decl());
     return FunctionSchema(
@@ -715,8 +710,10 @@ struct to_ir {
     // inputs
     auto it = def.decl().params().begin();
     auto end = def.decl().params().end();
-    auto expected_annotation_size =
-        self ? def.decl().params().size() - 1 : def.decl().params().size();
+    auto expected_annotation_size = def.decl().params().size();
+    if (self) {
+      expected_annotation_size--;
+    }
     if (schema.arguments().size() != expected_annotation_size) {
       throw ErrorReport(def.decl().params().range())
           << "Number of type annotations for"
@@ -724,9 +721,19 @@ struct to_ir {
           << " does not match the number of parameters on the function ("
           << expected_annotation_size << ")!";
     }
+
     if (self) {
       AT_ASSERT(it != end);
-      environment_stack->setSugaredVar(def.range(), (*it).ident().name(), self);
+      const auto& name = (*it).ident().name();
+      if (auto classType = dynamic_cast<ClassValue*>(self.get())) {
+        const auto type = classType->type_;
+        Value* new_input =
+            block->addInput()->setUniqueName(name)->setType(type);
+        environment_stack->setVar((*it).ident().range(), name, new_input);
+        arguments.emplace_back(name, type);
+      } else {
+        environment_stack->setSugaredVar(def.range(), name, self);
+      }
       ++it;
     }
     size_t arg_annotation_idx = 0;
@@ -1805,6 +1812,9 @@ struct to_ir {
       case TK_TUPLE_LITERAL:
         emitTupleAssign(TupleLiteral(stmt.lhs()), stmt.rhs());
         break;
+      case '.':
+        emitSelectAssign(stmt);
+        break;
       case TK_SUBSCRIPT:
         emitSubscriptAssign(stmt.range(), Subscript(stmt.lhs()), stmt.rhs());
         break;
@@ -1812,6 +1822,18 @@ struct to_ir {
         throw ErrorReport(stmt.lhs())
             << "unexpected expression on left-hand side of assignment.";
     }
+  }
+
+  void emitSelectAssign(const Assign& stmt) {
+    const auto lhs = Select(stmt.lhs());
+    const auto basename = Var(lhs.value()).name();
+    const auto rhsValue =
+        emitSugaredExpr(stmt.rhs(), 1)->asValue(stmt.rhs().range(), method);
+    auto userObject = environment_stack->getSugaredVar(basename);
+    const bool shouldDefine =
+        method.name() == "__init__" && basename.name() == "self";
+    userObject->setAttr(
+        stmt.range(), method, lhs.selector().name(), rhsValue, shouldDefine);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -2252,6 +2274,15 @@ struct to_ir {
         } else if (!values.empty()) {
           elem_type = values.at(0)->type();
         }
+
+        // Tensors are special because they have dymnamic properties. So any
+        // list containing tensors should be typed with the unified typeof all
+        // the elements.
+        if (elem_type->isSubtypeOf(TensorType::get())) {
+          for (const auto& value : values) {
+            elem_type = unifyTypes(elem_type, value->type()).value();
+          }
+        }
         for (auto v : values) {
           if (!v->type()->isSubtypeOf(elem_type)) {
             throw ErrorReport(tree)
@@ -2349,7 +2380,8 @@ struct to_ir {
     // aten::slice, we should separate it from this function.
     if (dim) {
       AT_ASSERT(input->type()->isSubtypeOf(TensorType::get()));
-      args.emplace_back(loc, "dim", graph->insertConstant(dim.value(), nullptr, loc));
+      args.emplace_back(
+          loc, "dim", graph->insertConstant(dim.value(), nullptr, loc));
     } else {
       AT_ASSERT(!input->type()->isSubtypeOf(TensorType::get()));
     }
@@ -2366,7 +2398,8 @@ struct to_ir {
         return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
       }
     }
-    NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, nullptr, loc));
+    NamedValue step =
+        NamedValue(loc, "step", graph->insertConstant(1, nullptr, loc));
     return emitBuiltinCall(
         loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }
@@ -2608,7 +2641,8 @@ struct to_ir {
     } else {
       throw ErrorReport(loc)
           << "Indexing only supported on lists, dictionaries, "
-             "tensors, and tuples";
+             "tensors, and tuples, but got type '"
+          << gatherable->type()->str() << "'";
     }
   }
 };
@@ -2693,7 +2727,6 @@ void lambdaLiftFork(Node* fork_node) {
   fork_node->g_(attr::Subgraph, forked_graph);
   fork_node->eraseBlock(0);
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch

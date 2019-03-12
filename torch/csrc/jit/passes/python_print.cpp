@@ -130,10 +130,14 @@ struct QualifiedName : c10::intrusive_ptr_target {
 void createTensorToParameterNameMap(
     const script::Module& module,
     const QualifiedNamePtr& prefix,
-    std::unordered_map<at::Tensor*, QualifiedNamePtr>& result) {
+    std::unordered_map<IValue*, QualifiedNamePtr>& result) {
   for (const auto& elem : module.get_parameters()) {
-    const script::NamedParameter& param = elem.value();
-    result[param.slot()] = QualifiedName::create(prefix, param.name);
+    const script::NamedIValue& param = elem.value();
+    result[param.slot()] = QualifiedName::create(prefix, param.name_);
+  }
+  for (const auto& elem : module.get_attributes()) {
+    const script::NamedIValue& param = elem.value();
+    result[param.slot()] = QualifiedName::create(prefix, param.name_);
   }
   for (const auto& elem : module.get_modules()) {
     createTensorToParameterNameMap(
@@ -239,16 +243,6 @@ struct PythonPrintPass {
   // The inductive step is that the right-most input should be produced by the
   // node immediatly before the current node if it is in tree order.
 
-  bool isConstantLike(Node* n) {
-    switch (n->kind()) {
-      case prim::Constant:
-      case prim::Undefined:
-        return true;
-      default:
-        return false;
-    }
-  }
-
   bool canInline(Value* v) {
     Node* n = v->node();
     // there must be only 1 values, otherwise we need an assignment to handle
@@ -280,7 +274,7 @@ struct PythonPrintPass {
   // block_point's output.
   Node* scanValue(Node* block_point, Value* v) {
     Node* n = v->node();
-    AT_ASSERT(isConstantLike(n) || output_inline_.count(n) == 0);
+    AT_ASSERT(n->kind() == prim::Constant || output_inline_.count(n) == 0);
 
     if (n == block_point &&
         canInline(v)) { // the node must be at the expected point of the typical
@@ -288,7 +282,7 @@ struct PythonPrintPass {
       // recursively see if we can inline the inputs to this input
       block_point = scanNode(block_point);
       output_inline_.insert(n);
-    } else if (isConstantLike(n)) {
+    } else if (n->kind() == prim::Constant) {
       // constant nodes can always be inlined, we will de-dup them on parsing
       // and put them at the top of the function regardless
       output_inline_.insert(n);
@@ -298,7 +292,7 @@ struct PythonPrintPass {
   Node* previousNonConstant(Node* n) {
     do {
       n = n->prev();
-    } while (isConstantLike(n));
+    } while (n->kind() == prim::Constant);
     return n;
   }
 
@@ -343,7 +337,7 @@ struct PythonPrintPass {
   std::unordered_set<Node*> seen_constants;
   void buildConstantList(Node* n, std::vector<Node*>& constants) {
     for (auto input : n->inputs()) {
-      if (isConstantLike(input->node()) &&
+      if (input->node()->kind() == prim::Constant &&
           seen_constants.count(input->node()) == 0) {
         constants.push_back(input->node());
         seen_constants.insert(input->node());
@@ -593,8 +587,63 @@ struct PythonPrintPass {
     }
   }
 
+  bool isLongLine(const std::string& str) {
+    return str.size() + level * 2 >= 40;
+  }
+
+  bool isLongInline(Node* node) {
+    return output_inline_.count(node) && isLongLine(useOf(node->output()));
+  }
+
+  bool isNonConstantInline(Value* input) {
+    return input->node()->kind() != prim::Constant &&
+        output_inline_.count(input->node());
+  }
+
+  // [reordering of inlines]
+  // We inline anything that is semantically legal to inline, but sometimes
+  // we find that these lines get too long. In that case we break the lines
+  /// and it  is important that we un-inline all the inputs preceeding the long
+  /// input:
+  //   r = foo(x.add_(b), some_long + expression)
+  //  wrong!
+  //   _0 = some_long + expression
+  //   r = foo(x.add_(b), _0) # wrong! _0 runs before mutating add_
+  // legal!
+  //   _0 = x.add_(b)
+  //   _1 = some_long + expression
+  //   r = foo(_0, _1)
+  void splitLongInlines(at::ArrayRef<Value*> inputs) {
+    size_t long_inline_slice = 0;
+    // find the last input that is too long
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      if (isLongInline(inputs[i]->node())) {
+        long_inline_slice = i + 1;
+      }
+    }
+    // un-inline everything through the last long line
+    // constants are ignored since long constants are never inlined in the
+    // first place
+    for (size_t i = 0; i < long_inline_slice; ++i) {
+      if (isNonConstantInline(inputs[i])) {
+        printOutputDefinition(inputs[i]->node(), useOf(inputs[i]));
+      }
+    }
+  }
+
+  void printOutputDefinition(Node* node, const std::string& str) {
+    assignValuesToTheirUniqueNames(node->outputs());
+    indent();
+    // Print outputs
+    if (node->outputs().size() > 0) {
+      printValueList(out, node->outputs());
+      out << " = ";
+    }
+    out << str << "\n";
+  }
+
   void printNode(Node* node, bool print_const) {
-    if (!print_const && isConstantLike(node))
+    if (!print_const && node->kind() == prim::Constant)
       return;
     if (node->kind() == prim::PythonOp) {
       auto value = static_cast<const PythonOp*>(node);
@@ -605,6 +654,7 @@ struct PythonPrintPass {
         return;
       }
     }
+    splitLongInlines(node->inputs());
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
@@ -641,22 +691,17 @@ struct PythonPrintPass {
         std::stringstream ss;
         printRHS(ss, node);
 
-        // this node is safe to inline, so assign the output value
-        // to that expression directly
-        // guard against really long lines
-        if (output_inline_.count(node) > 0 &&
-            ss.str().size() + level * 2 < 40) {
+        // we prevent long constants from inlining here.
+        // it is not safe to do the same thing for non-constants here
+        // because of [reordering of inlines]
+        if (output_inline_.count(node) == 0 ||
+            (node->kind() == prim::Constant && isLongLine(ss.str()))) {
+          printOutputDefinition(node, ss.str());
+        } else {
+          // this node is safe to inline, so assign the output value
+          // to that expression directly
           assignValue(node->output(), ss.str());
-          return;
         }
-        assignValuesToTheirUniqueNames(node->outputs());
-        indent();
-        // Print outputs
-        if (node->outputs().size() > 0) {
-          printValueList(out, node->outputs());
-          out << " = ";
-        }
-        out << ss.str() << "\n";
     }
   }
 
@@ -750,8 +795,7 @@ struct PythonPrintPass {
         value->writeScalars(stmt);
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
-      case prim::Constant:
-      case prim::Undefined: {
+      case prim::Constant: {
         if (node->kind() == prim::Constant && !node->mustBeNone()) {
           IValue v = toIValue(node->output()).value();
           printConstant(stmt, v);
@@ -801,9 +845,10 @@ struct PythonPrintPass {
       } break;
       case prim::DictConstruct: {
         auto dict_type = node->output()->type()->expect<DictType>();
-        if (node->inputs().size() == 0 &&
-            !dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
-            !dict_type->getValueType()->isSubtypeOf(TensorType::get())) {
+        bool is_default_type =
+            dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
+            dict_type->getKeyType()->isSubtypeOf(TensorType::get());
+        if (node->inputs().size() == 0 && !is_default_type) {
           stmt << "annotate(" << node->output()->type()->python_str()
                << ", {})";
         } else {
@@ -838,6 +883,10 @@ struct PythonPrintPass {
             [graph, name, this] { printFunctionDefinition(*graph, name); });
         stmt << "self." << name;
       } break;
+      case prim::CreateObject:
+      case prim::SetAttr:
+      case prim::GetAttr:
+        throw std::runtime_error("NYI");
       default: {
         Symbol kind = node->kind();
         if (kind.is_aten()) {
@@ -993,27 +1042,27 @@ struct PythonPrintPass {
     }
   }
   void printMethod(script::Method& method) {
-    std::unordered_map<at::Tensor*, QualifiedNamePtr> parameter_names;
+    std::unordered_map<IValue*, QualifiedNamePtr> parameter_names;
     createTensorToParameterNameMap(
         method.owner(), QualifiedName::create("self"), parameter_names);
     printMethod(method, parameter_names);
   }
   void printMethod(
       script::Method& method,
-      const std::unordered_map<at::Tensor*, QualifiedNamePtr>&
-          parameter_names) {
-    std::vector<std::string> param_names = fmap(
-        method.params(),
-        [&](at::Tensor* slot) { return parameter_names.at(slot)->str(); });
+      const std::unordered_map<IValue*, QualifiedNamePtr>&
+          extra_ivalue_names) {
+    std::vector<std::string> ivalue_names = fmap(
+        method.initial_ivalues(),
+        [&](IValue* slot) { return extra_ivalue_names.at(slot)->str(); });
     const std::string& name = method.name();
     Graph& graph = *method.graph();
     auto defaults = fmap(
         method.getSchema().arguments(),
         [](const Argument& arg) { return arg.default_value(); });
-    printFunction(graph, name, defaults, param_names);
+    printFunction(graph, name, defaults, ivalue_names);
   }
   void printModule(script::Module& module) {
-    std::unordered_map<at::Tensor*, QualifiedNamePtr> parameter_names;
+    std::unordered_map<IValue*, QualifiedNamePtr> parameter_names;
     createTensorToParameterNameMap(
         module, QualifiedName::create("self"), parameter_names);
     for (auto& method : module.get_methods()) {
@@ -1080,7 +1129,9 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
       prim::DictIndex,
       prim::TupleSlice,
       prim::TupleUnpack,
-      prim::Undefined,
+      prim::CreateObject,
+      prim::GetAttr,
+      prim::SetAttr,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your
@@ -1090,7 +1141,8 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
   const static std::unordered_set<Symbol> unneeded = {
       c10::onnx::Reshape, // only used in onnx
       c10::onnx::Shape, // only used in onnx
-      prim::AnyDefined, // temporarily inserted by autograd
+      prim::AutogradZero, // temporarily inserted by autograd
+      prim::AutogradAnyNonZero, // temporarily inserted by autograd
       prim::AutogradAdd, // temporarily inserted by autograd
       prim::ConstantChunk, // optimization pass adds it
       prim::DifferentiableGraph, // optimization pass adds it

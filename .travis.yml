@@ -20,7 +20,7 @@ matrix:
           - sudo apt update
           - sudo apt install graphviz
           - pip3 install pygraphviz
-        script: cd .circleci && ./ensure-consistency.sh
+        script: cd .circleci && ./ensure-consistency.py
       - name: "Python 2.7 Lint"
         python: "2.7"
         install: pip install flake8
@@ -29,7 +29,7 @@ matrix:
         python: "3.7"
         dist: xenial    # required for Python 3.7 (travis-ci/travis-ci#9069)
         sudo: required  # required for Python 3.7 (travis-ci/travis-ci#9069)
-        install: pip install flake8
+        install: pip install flake8-mypy
         script: flake8
       - name: "MyPy typecheck"
         python: "3.6"

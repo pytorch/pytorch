@@ -59,8 +59,8 @@ TensorTypePtr TensorType::get() {
   static auto value = TensorType::create();
   return value;
 }
-UndefinedTensorTypePtr UndefinedTensorType::get() {
-  static auto value = UndefinedTensorType::create();
+AutogradZeroTensorTypePtr AutogradZeroTensorType::get() {
+  static auto value = AutogradZeroTensorType::create();
   return value;
 }
 NumberTypePtr NumberType::get() {
@@ -176,6 +176,19 @@ TypePtr attemptToRecoverType(const IValue& ivalue) {
 
 // Checks if input_ivalue is a subvalue of type.
 bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
+  if (ivalue.isTuple()) {
+    const auto& ivalue_elem = ivalue.toTuple()->elements();
+    auto tuple_type = type->cast<TupleType>();
+    if (!tuple_type || tuple_type->elements().size() != ivalue_elem.size()) {
+      return false;
+    }
+    auto type_elem = tuple_type->elements();
+    bool is_subvalue = true;
+    for (size_t i = 0; i < type_elem.size() && is_subvalue; ++i) {
+      is_subvalue = isSubvalueOf(ivalue_elem[i], type_elem[i]);
+    }
+    return is_subvalue;
+  }
   if (ivalue.isGenericList()) {
     auto list_type = type->cast<ListType>();
     if (!list_type) {
@@ -199,13 +212,20 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
   return incompleteInferTypeFrom(ivalue)->isSubtypeOf(type);
 }
 
-
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
-  //cases that t1 == t2, or t1 is a type refinement of t2 and vice versa
+c10::optional<TypePtr> tryEitherIsTheSuperType(const TypePtr& t1, const TypePtr& t2) {
   if (t1->isSubtypeOf(t2)) {
     return t2;
   } else if (t2->isSubtypeOf(t1)) {
     return t1;
+  } else {
+    return c10::nullopt;
+  }
+}
+
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
+  //cases that t1 == t2, or t1 is a type refinement of t2 and vice versa
+  if (auto maybe_supertype = tryEitherIsTheSuperType(t1, t2)) {
+    return *maybe_supertype;
   }
 
   // NB: we do not return NumberType because there is not currently enough
@@ -224,12 +244,14 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
 
   //types which contain other types
   if (t1->cast<ListType>() && t2->cast<ListType>()) {
-    auto unified_type = unifyTypes(t1->cast<ListType>()->getElementType(), t2->cast<ListType>()->getElementType());
-    if (unified_type) {
-      return static_cast<TypePtr>(ListType::create(*unified_type));
-    } else {
-      return c10::nullopt;
-    }
+    // because we have runtime specializations of lists, e.g. int[] = std::vector<int64_t>
+    // int?[] = std::vector<IValue>  we don't allow type coercion,
+    // since t1 & t2 may have different runtime representations.
+
+    // allow Lists of different tensor types
+    auto unshaped_t1 = unshapedType(t1);
+    auto unshaped_t2 = unshapedType(t2);
+    return tryEitherIsTheSuperType(unshaped_t1, unshaped_t2);
   } else if(t1->cast<TupleType>() && t2->cast<TupleType>()) {
     auto tuple1 = t1->cast<TupleType>();
     auto tuple2 = t2->cast<TupleType>();
@@ -415,4 +437,43 @@ bool Type::isSubtypeOf(const TypePtr rhs) const {
   return *this == *rhs;
 }
 
+namespace {
+class ClassTypeRegistry {
+ public:
+  void registerType(std::string name, ClassTypePtr type) {
+    std::lock_guard<std::mutex> g(mutex_);
+    // TODO: new type registrations will override the old ones. Is this safe?
+    reg_[name] = type;
+  }
+
+  ClassTypePtr getType(const std::string& name) {
+    std::lock_guard<std::mutex> g(mutex_);
+    if (reg_.count(name)) {
+      return reg_.at(name);
+    }
+    return nullptr;
+  }
+
+ private:
+  std::mutex mutex_;
+  std::unordered_map<std::string, ClassTypePtr> reg_;
+};
+
+ClassTypeRegistry& getRegistry() {
+  static ClassTypeRegistry r;
+  return r;
+}
+} // namespace
+
+ClassTypePtr ClassType::create(
+    const std::string& name,
+    std::shared_ptr<Module> module) {
+  auto ptr = ClassTypePtr(new ClassType(name, std::move(module)));
+  getRegistry().registerType(name, ptr);
+  return ptr;
+}
+
+ClassTypePtr ClassType::get(const std::string& name) {
+  return getRegistry().getType(name);
+}
 } // namespace c10

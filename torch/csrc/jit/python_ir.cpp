@@ -551,7 +551,7 @@ void initPythonIRBindings(PyObject* module_) {
             std::vector<torch::autograd::Variable> variables;
             variables.reserve(tensors.size());
             for (auto& tensor : tensors) {
-              variables.push_back(std::move(tensor));
+              variables.emplace_back(std::move(tensor));
             }
             return variables;
           })
@@ -644,7 +644,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &IntType::get);
   py::class_<FloatType, Type, std::shared_ptr<FloatType>>(m, "FloatType")
       .def_static("get", &FloatType::get);
-  py::class_<TensorType, Type, std::shared_ptr<TensorType>>(m, "DynamicType")
+  py::class_<TensorType, Type, std::shared_ptr<TensorType>>(m, "TensorType")
       .def_static("get", &TensorType::get);
   py::class_<BoolType, Type, std::shared_ptr<BoolType>>(m, "BoolType")
       .def_static("get", &BoolType::get);

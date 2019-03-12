@@ -49,10 +49,23 @@ static std::vector<int64_t> to_aten_shape(int ndim, npy_intp* values) {
   return result;
 }
 
-static int aten_to_dtype(const at::Type& type);
+static int aten_to_dtype(const ScalarType scalar_type);
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
-  auto dtype = aten_to_dtype(tensor.type());
+  if (tensor.is_cuda()) {
+    throw TypeError(
+        "can't convert CUDA tensor to numpy. Use Tensor.cpu() to "
+        "copy the tensor to host memory first.");
+  }
+  if (tensor.is_sparse()) {
+    throw TypeError(
+        "can't convert sparse tensor to numpy. Use Tensor.to_dense() to "
+        "convert to a dense tensor first.");
+  }
+  if (tensor.type().backend() != Backend::CPU) {
+      throw TypeError("NumPy conversion for %s is not supported", tensor.type().toString());
+  }
+  auto dtype = aten_to_dtype(tensor.scalar_type());
   auto sizes = to_numpy_shape(tensor.sizes());
   auto strides = to_numpy_shape(tensor.strides());
   // NumPy strides use bytes. Torch strides use element counts.
@@ -133,31 +146,19 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   });
 }
 
-static int aten_to_dtype(const at::Type& type) {
-  if (type.is_cuda()) {
-    throw TypeError(
-        "can't convert CUDA tensor to numpy. Use Tensor.cpu() to "
-        "copy the tensor to host memory first.");
+static int aten_to_dtype(const ScalarType scalar_type) {
+  switch (scalar_type) {
+    case kDouble: return NPY_DOUBLE;
+    case kFloat: return NPY_FLOAT;
+    case kHalf: return NPY_HALF;
+    case kLong: return NPY_INT64;
+    case kInt: return NPY_INT32;
+    case kShort: return NPY_INT16;
+    case kChar: return NPY_INT8;
+    case kByte: return NPY_UINT8;
+    default:
+      throw ValueError("Got unsupported ScalarType ", toString(scalar_type));
   }
-  if (type.is_sparse()) {
-    throw TypeError(
-        "can't convert sparse tensor to numpy. Use Tensor.to_dense() to "
-        "convert to a dense tensor first.");
-  }
-  if (type.backend() == Backend::CPU) {
-    switch (type.scalarType()) {
-      case kDouble: return NPY_DOUBLE;
-      case kFloat: return NPY_FLOAT;
-      case kHalf: return NPY_HALF;
-      case kLong: return NPY_INT64;
-      case kInt: return NPY_INT32;
-      case kShort: return NPY_INT16;
-      case kChar: return NPY_INT8;
-      case kByte: return NPY_UINT8;
-      default: break;
-    }
-  }
-  throw TypeError("NumPy conversion for %s is not supported", type.toString());
 }
 
 ScalarType numpy_dtype_to_aten(int dtype) {

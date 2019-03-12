@@ -653,10 +653,23 @@ std::string Value::uniqueNameBase() const {
   return name_base;
 }
 
+bool Value::isValidName(const std::string& name) {
+  // Empty strings are legal
+  if (!name.size()) {
+    return true;
+  }
+
+  // Numbers are not legal
+  if (name.find_first_not_of("0123456789") == std::string::npos) {
+    return false;
+  }
+
+  return true;
+}
+
 Value* Value::setUniqueName(const std::string& name) {
-  if (name.size() > 0 &&
-      name.find_first_not_of("0123456789") == std::string::npos) {
-    throw std::runtime_error("names may not be integers: " + name);
+  if (!isValidName(name)) {
+    throw std::runtime_error("Invalid name: '" + name + "'");
   }
 
   auto& names = node()->owningGraph()->unique_names_;
@@ -823,6 +836,7 @@ bool Node::hasSideEffects() const {
     case prim::IgnoredPythonOp:
     case prim::Print:
     case prim::RaiseException:
+    case prim::SetAttr:
     case aten::warn:
       return true;
   }
@@ -1180,8 +1194,8 @@ Node* Graph::create(
   return n;
 }
 
-Node* Graph::createUndefined() {
-  return create(prim::Undefined);
+Node* Graph::createAutogradZero() {
+  return create(prim::AutogradZero);
 }
 
 Node* Graph::createNone(TypePtr typ) {
@@ -1293,6 +1307,32 @@ Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
   auto* result = create(prim::ImplicitTensorToNum, {value});
   result->output()->setType(type);
   return result;
+}
+
+Node* Graph::createObject(const ClassTypePtr& type) {
+  auto result = create(prim::CreateObject);
+  result->output()->setType(type);
+  return result;
+}
+
+Node* Graph::createSetAttr(
+    Value* obj,
+    const std::string& field,
+    Value* newValue) {
+  auto n = create(prim::SetAttr, {obj, newValue}, /*num_outputs=*/0);
+  n->s_(attr::name, field);
+  return n;
+}
+
+Node* Graph::createGetAttr(Value* obj, const std::string& field) {
+  const auto classType = obj->type()->expect<ClassType>();
+
+  auto n = create(prim::GetAttr, {obj}, /*num_outputs=*/1);
+  n->s_(attr::name, field);
+
+  const auto outputType = classType->getAttribute(field);
+  n->output()->setType(outputType);
+  return n;
 }
 
 Node* Graph::createClone(

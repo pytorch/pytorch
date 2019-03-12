@@ -63,9 +63,21 @@ def type_argument_translations(arg):
         t = 'int64_t'
     elif t == 'int?':
         t = 'int64_t?'
+    elif t == 'int64_t':
+        raise RuntimeError("Please use int and not int64_t. "
+                           "See [temp translations] for details.")
+    elif t == 'int64_t?':
+        raise RuntimeError("Please use int? and not int64_t?. "
+                           "See [temp translations] for details.")
     # Enables float by translating to legacy double.
     elif t == 'float':
         t = 'double'
+    # Enables str by translating to legacy std::string.
+    elif t == 'str':
+        t = 'std::string'
+    elif t == 'double':
+        raise RuntimeError("Please use float and not double. "
+                           "See [temp translations] for details.")
     # Enables int[x] by translating to legacy IntArrayRef[x]. See [temp translations]
     elif re.match(r'int\[(\d+)\]', t):
         match = re.match(r'int\[(\d+)\]', t)
@@ -75,6 +87,9 @@ def type_argument_translations(arg):
     elif re.match(r'bool\[(\d+)\]', t):
         match = re.match(r'bool\[(\d+)\]', t)
         t = 'std::array<bool,{}>'.format(match.group(1))
+    elif re.match(r'std::array', t):
+        raise RuntimeError("Please use array notation, e.g. bool[3] and not std::array."
+                           "See [temp translations] for details.")
 
     # Legacy type sanitization. TODO: Do we really need this?
     if t == 'Generator*':
@@ -209,7 +224,8 @@ def parse_arguments(args, func_variants, declaration, func_return):
                 assert argument['annotation'] == func_return[arg_idx]['annotation'], \
                     "Inplace function annotations of function {} need to match between " \
                     "input and correponding output.".format(name)
-                assert argument['name'] == func_return[arg_idx]['name']
+                assert argument['name'] == func_return[arg_idx]['name'] or \
+                    argument['name'] == func_return[arg_idx]['name'] + "_return"
                 assert argument['type'] == func_return[arg_idx]['type']
         assert found_self, "Inplace function \"{}\" needs Tensor argument named self.".format(name)
 
@@ -226,7 +242,12 @@ def parse_return_arguments(return_decl, inplace, func_decl):
 
     for arg_idx, arg in enumerate(return_decl.split(', ')):
         t, name, default, nullable, size, annotation = type_argument_translations(arg)
-        argument_dict = {'type': t, 'name': name, 'annotation': annotation}
+        # name of arguments and name of return sometimes have collision
+        # in this case, we rename the return name to <name>_return.
+        return_name = name
+        if name in func_decl['func'].split('->')[0]:
+            return_name = name + "_return"
+        argument_dict = {'type': t, 'name': return_name, 'annotation': annotation}
         if name:
             # See Note [field_name versus name]
             argument_dict['field_name'] = name
@@ -287,6 +308,7 @@ def run(paths):
                 declaration['requires_tensor'] = func.get('requires_tensor', False)
                 declaration['matches_jit_signature'] = func.get('matches_jit_signature', False)
                 declaration['cpu_half'] = func.get('cpu_half', False)
+                declaration['cpu_bool'] = func.get('cpu_bool', False)
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
                 declaration['arguments'] = func.get('arguments', arguments)

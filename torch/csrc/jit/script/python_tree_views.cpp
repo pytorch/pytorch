@@ -91,9 +91,13 @@ void initTreeViewBindings(PyObject* module) {
           "name", [](const Ident& self) { return self.name(); });
 
   py::class_<Param, TreeView>(m, "Param")
-      .def(py::init([](const Expr& type, const Ident& name) {
+      .def(py::init([](const Expr& type, const Ident& name, bool kwarg_only) {
         return Param::create(
-            name.range(), name, type, Maybe<Expr>::create(name.range()));
+            name.range(),
+            name,
+            type,
+            Maybe<Expr>::create(name.range()),
+            kwarg_only);
       }));
   py::class_<Attribute, TreeView>(m, "Attribute")
       .def(py::init([](const Ident& name, const Expr& value) {
@@ -115,6 +119,11 @@ void initTreeViewBindings(PyObject* module) {
       py::init([](const Ident& name, Decl decl, std::vector<Stmt> body) {
         const auto& r = name.range();
         return Def::create(r, name, decl, wrap_list(r, std::move(body)));
+      }));
+  py::class_<ClassDef, TreeView>(m, "ClassDef")
+      .def(py::init([](const Ident& name, std::vector<Def> body) {
+        const auto& r = name.range();
+        return ClassDef::create(r, name, wrap_list(r, std::move(body)));
       }));
   py::class_<Decl, TreeView>(m, "Decl").def(py::init(
       [](const SourceRange& r, std::vector<Param> params, Expr* return_type) {
