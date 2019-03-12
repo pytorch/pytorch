@@ -25,7 +25,7 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel1(Dtype *output,
   // TODO: T4951791 Reuse code between updateOutput_kernel1 and
   // updateOutput_kernel.
 
-  int t = (int) *target - TH_INDEX_BASE;
+  int t = (int) *target;
   if (t != (int) ignore_index) {
     assert(t >= 0 && t < n_classes);
     Dtype cur_weight = weights ? weights[t] : ScalarConvert<int, Dtype>::to(1);
@@ -48,7 +48,7 @@ __global__ void ClassNLLCriterion_updateOutput_no_reduce_kernel(
     int ignore_index) {
 
   CUDA_KERNEL_LOOP(index, batch_size) {
-    int cur_target = target[index] - TH_INDEX_BASE;
+    int cur_target = target[index];
     if (cur_target == ignore_index) {
       output[index] = ScalarConvert<int, Dtype>::to(0);
       continue;
@@ -71,7 +71,7 @@ __global__ void ClassNLLCriterion_updateGradInput_no_reduce_kernel(
     int ignore_index) {
 
   CUDA_KERNEL_LOOP(index, batch_size) {
-    int cur_target = target[index] - TH_INDEX_BASE;
+    int cur_target = target[index];
     if (cur_target == ignore_index) {
       continue;
     }
@@ -100,7 +100,7 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel(Dtype *output,
   shInputs[threadIdx.x] = ScalarConvert<int, Acctype>::to(0);
   acc_weight[threadIdx.x] = ScalarConvert<int, Acctype>::to(0);
   for (i = threadIdx.x; i < nframe; i += NTHREADS) {
-      t = target[i] - TH_INDEX_BASE;
+      t = target[i];
       if (t != (int) ignore_index) {
         assert(t >= 0 && t < n_classes);
         cur_weight = weights ? weights[t] : ScalarConvert<int, Dtype>::to(1);
@@ -146,7 +146,7 @@ __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel1(
     return;
   }
   Dtype norm = size_average ? (ScalarConvert<int, Dtype>::to(1) / *total_weight) : ScalarConvert<int, Dtype>::to(1);
-  int t = (int)*target - TH_INDEX_BASE;
+  int t = (int)*target;
   if (t != (int) ignore_index) {
     assert(t >= 0 && t < n_classes);
     gradInput[t] = -(weights ? weights[t] : ScalarConvert<int, Dtype>::to(1)) * norm * gradOutput[0];
@@ -173,7 +173,7 @@ __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel(
   Dtype norm = size_average ? (ScalarConvert<int, Dtype>::to(1) / *total_weight) : ScalarConvert<int, Dtype>::to(1);
 
   for (i = threadIdx.x; i < nframe; i += NTHREADS) {
-    t = (int)target[i] - TH_INDEX_BASE;
+    t = (int)target[i];
     if (t != (int) ignore_index) {
       assert(t >= 0 && t < n_classes);
       gradInput[i * ndim + t] = -(weights ? weights[t] : ScalarConvert<int, Dtype>::to(1)) * norm * gradOutput[0];

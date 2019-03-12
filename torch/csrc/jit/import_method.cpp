@@ -19,11 +19,14 @@ struct ModuleAccessorValue : public script::SugaredValue {
       const std::string& field) override {
     if (script::NamedModule* v = module->find_module(field)) {
       return std::make_shared<ModuleAccessorValue>(v->module);
-    } else if (script::NamedParameter* v = module->find_parameter(field)) {
+    } else if (script::NamedIValue* v = module->find_parameter(field)) {
+      return std::make_shared<script::SimpleValue>(
+          m.get_or_add_parameter(v->slot()));
+    } else if (script::NamedIValue* v = module->find_buffer(field)) {
       return std::make_shared<script::SimpleValue>(
           m.get_or_add_parameter(v->slot()));
     } else if (script::Method* m = module->find_method(field)) {
-      return std::make_shared<script::MethodValue>(module, *m);
+      return std::make_shared<script::MethodValue>(shared_from_this(), *m);
     } else {
       throw script::ErrorReport(loc) << "unknown attr: " << field;
     }
@@ -146,7 +149,8 @@ void import_methods(
     resolvers.emplace_back(resolver);
   }
   auto self = std::make_shared<ModuleAccessorValue>(mod);
-  script::defineMethodsInModule(mod, definitions, resolvers, self);
+  script::defineMethodsInModule(
+      mod, definitions, resolvers, script::Self(self));
 }
 
 } // namespace jit

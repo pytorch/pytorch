@@ -63,6 +63,12 @@ def type_argument_translations(arg):
         t = 'int64_t'
     elif t == 'int?':
         t = 'int64_t?'
+    elif t == 'int64_t':
+        raise RuntimeError("Please use int and not int64_t. "
+                           "See [temp translations] for details.")
+    elif t == 'int64_t?':
+        raise RuntimeError("Please use int? and not int64_t?. "
+                           "See [temp translations] for details.")
     # Enables float by translating to legacy double.
     elif t == 'float':
         t = 'double'
@@ -81,6 +87,9 @@ def type_argument_translations(arg):
     elif re.match(r'bool\[(\d+)\]', t):
         match = re.match(r'bool\[(\d+)\]', t)
         t = 'std::array<bool,{}>'.format(match.group(1))
+    elif re.match(r'std::array', t):
+        raise RuntimeError("Please use array notation, e.g. bool[3] and not std::array."
+                           "See [temp translations] for details.")
 
     # Legacy type sanitization. TODO: Do we really need this?
     if t == 'Generator*':
@@ -299,6 +308,7 @@ def run(paths):
                 declaration['requires_tensor'] = func.get('requires_tensor', False)
                 declaration['matches_jit_signature'] = func.get('matches_jit_signature', False)
                 declaration['cpu_half'] = func.get('cpu_half', False)
+                declaration['cpu_bool'] = func.get('cpu_bool', False)
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
                 declaration['arguments'] = func.get('arguments', arguments)

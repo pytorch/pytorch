@@ -18,8 +18,9 @@ template <typename T, class Context, class Engine = DefaultEngine>
 class TTLinearOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  TTLinearOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit TTLinearOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         inp_sizes_(this->template GetRepeatedArgument<int>("inp_sizes")),
         out_sizes_(this->template GetRepeatedArgument<int>("out_sizes")),
         tt_ranks_(this->template GetRepeatedArgument<int>("tt_ranks")),
@@ -176,8 +177,9 @@ template <typename T, class Context, class Engine = DefaultEngine>
 class TTLinearGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  TTLinearGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit TTLinearGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   ~TTLinearGradientOp() {}
 
   bool RunOnDevice() override {
