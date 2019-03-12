@@ -340,7 +340,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 #ifdef DEBUG
     AT_ASSERT(compute_contiguous() == is_contiguous_);
 #endif
-    return is_contiguous_;
+    return !opaque_handle_ && is_contiguous_;
   }
 
   bool is_sparse() const {
@@ -1278,7 +1278,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * storage UNINITIALIZED after a Resize() or FreeMemory()
    */
   bool storage_initialized() const noexcept {
-    return opaque_handle_ || storage_.data() || numel_ == 0;
+    return !opaque_handle_ && (storage_.data() || numel_ == 0);
   }
 
   /**
