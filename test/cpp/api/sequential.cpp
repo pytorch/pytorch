@@ -60,7 +60,7 @@ TEST_F(SequentialTest, ConstructsFromConcreteType) {
   ASSERT_EQ(sequential->size(), 3);
   // NOTE: The current implementation expects each module to be copied exactly once,
   // which happens when the module is passed into `std::make_shared<T>()`.
-  // TODO: Find a way to avoid copying, and then delete the copy constructor.
+  // TODO: Find a way to avoid copying, and then delete the copy constructor of `M`.
   AT_ASSERT(copy_count == 3);
 
   copy_count = 0;
