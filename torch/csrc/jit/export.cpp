@@ -448,7 +448,7 @@ void GraphEncoder::EncodeTensor(
     AT_ASSERT(t.is_contiguous());
     tensor_proto->set_raw_data(std::string(
         static_cast<char*>(t.data_ptr()),
-        t.dtype().itemsize() * t.numel()));
+        t.element_size() * t.numel()));
   }
 }
 
@@ -588,7 +588,7 @@ void ScriptModuleSerializer::convertAndWriteTensor(
   tensor_proto->set_requires_grad(tensor.requires_grad());
 
   uint64_t record_size =
-      tensor.dtype().itemsize() * tensor.storage().size();
+      tensor.element_size() * tensor.storage().size();
   auto* key = tensor.storage().unsafeGetStorageImpl();
 
   auto storage_it = storageMap.find(key);
@@ -608,7 +608,7 @@ void ScriptModuleSerializer::convertAndWriteTensor(
                                /* stride = */ {1})
                            .cpu();
       AT_ASSERT(
-          storage_tensor.dtype().itemsize() *
+          storage_tensor.element_size() *
               storage_tensor.storage().size() ==
           record_size);
     }

@@ -925,7 +925,8 @@ void loadModule(const std::shared_ptr<script::Module>& module) {
 void loadFunctions() {
   for (const std::string& str : functions) {
     auto cu = std::make_shared<script::Module>();
-    script::defineMethodsInModule(cu, str, script::nativeResolver, nullptr);
+    script::defineMethodsInModule(
+        cu, str, script::nativeResolver, c10::nullopt);
     loadModule(cu);
   }
 }

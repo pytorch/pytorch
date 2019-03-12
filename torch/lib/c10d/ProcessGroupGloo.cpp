@@ -239,8 +239,7 @@ void ProcessGroupGloo::RecvWork::wait() {
 
 ProcessGroupGloo::Options::Options()
     : timeout(std::chrono::milliseconds(10 * 1000)),
-      threads(2),
-      cacheNumAlgorithmEntries(1) {}
+      threads(2) {}
 
 ProcessGroupGloo::ProcessGroupGloo(
     const std::shared_ptr<Store>& store,
@@ -1390,7 +1389,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
-  auto size = tensor.numel() * tensor.dtype().itemsize();
+  auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
@@ -1409,7 +1408,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
-  auto size = tensor.numel() * tensor.dtype().itemsize();
+  auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
@@ -1427,7 +1426,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
-  auto size = tensor.numel() * tensor.dtype().itemsize();
+  auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];

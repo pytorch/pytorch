@@ -237,7 +237,7 @@ void initPythonIRBindings(PyObject* module_) {
                 python_serialized_export_map;
             for (auto& kv : export_map) {
               auto t = kv.second;
-              size_t copy_bytes = t.dtype().itemsize() * t.numel();
+              size_t copy_bytes = t.element_size() * t.numel();
               // TODO: this is an unecessary copy. In theory we can directly
               // return the map from identifier to Tensor, but we need some API
               // in Python to get raw `bytes` containing the raw tensor data.
@@ -385,7 +385,8 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .VS(copyMetadata)
       .VS(isTensor)
-      .def("toIValue", [](Value& n) { return toIValue(&n); });
+      .def("toIValue", [](Value& n) { return toIValue(&n); })
+      .def("type", [](Value& v) { return v.type(); });
 #undef VS
 
   py::class_<Block, std::unique_ptr<Block, py::nodelete>>(m, "Block")
@@ -409,7 +410,27 @@ void initPythonIRBindings(PyObject* module_) {
           },
           "Find all nodes",
           py::arg("kind"),
-          py::arg("recurse") = true);
+          py::arg("recurse") = true)
+      .def(
+          "inputs",
+          [](Block& b) {
+            return py::make_iterator(b.inputs().begin(), b.inputs().end());
+          })
+      .def(
+          "outputs",
+          [](Block& b) {
+            return py::make_iterator(b.outputs().begin(), b.outputs().end());
+          })
+      .def(
+          "returnNode",
+          [](Block& b) {
+            return b.return_node();
+          })
+      .def(
+          "paramNode",
+          [](Block& b) {
+            return b.param_node();
+          });
 
 #define NS(name) def(#name, &Node ::name)
   py::class_<Node, std::unique_ptr<Node, py::nodelete>>(m, "Node")

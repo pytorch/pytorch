@@ -23,10 +23,10 @@ std::vector<TensorGroup> take_tensors(
     if (type.is_sparse()) {
       const auto& indices = tensor._indices();
       const auto& values = tensor._values();
-      tensor_size = indices.numel() * indices.dtype().itemsize() +
-                    values.numel() * indices.dtype().itemsize();
+      tensor_size = indices.numel() * indices.element_size() +
+                    values.numel() * indices.element_size();
     } else {
-      tensor_size = tensor.numel() * tensor.dtype().itemsize();
+      tensor_size = tensor.numel() * tensor.element_size();
     }
 
     auto& type_group = groups[type.ID()];

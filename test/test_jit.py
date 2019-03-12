@@ -2336,6 +2336,45 @@ class TestJit(JitTestCase):
         self.assertEqual(len(warns), 1)
         self.assertEqual(warns[0], "new_zeros is a legacy constructor and is not supported in the JIT.")
 
+    def test_python_bindings(self):
+        lstm_cell = torch.jit.script(LSTMCellS)
+
+        def lstm(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
+            for i in range(x.size(0)):
+                hx, cx = lstm_cell(x[i], hx, cx, w_ih, w_hh, b_ih, b_hh)
+            return hx
+
+        slstm = torch.jit.script(lstm)
+
+        inputs = get_lstm_inputs('cpu', training=True, seq_length=10)
+        slstm(*inputs).sum().backward()
+        global fw_graph
+        fw_graph = slstm.graph_for(*inputs)
+        nodes = [n for n in fw_graph.nodes()]
+        tested_blocks = False
+        for node in nodes:
+            for output in [o for o in node.outputs()]:
+                self.assertTrue(hasattr(output, 'type'))
+                self.assertTrue(output.type() is not None)
+            for input in [i for i in node.inputs()]:
+                self.assertTrue(hasattr(input, 'type'))
+                self.assertTrue(input.type() is not None)
+            for block in [b for b in node.blocks()]:
+                tested_blocks = True
+                self.assertTrue(hasattr(block, 'inputs'))
+                self.assertTrue(hasattr(block, 'outputs'))
+                for output in [o for o in block.outputs()]:
+                    self.assertTrue(hasattr(output, 'type'))
+                    self.assertTrue(output.type() is not None)
+                for input in [i for i in block.inputs()]:
+                    self.assertTrue(hasattr(input, 'type'))
+                    self.assertTrue(input.type() is not None)
+                self.assertTrue(hasattr(block, 'returnNode'))
+                self.assertTrue(type(block.returnNode()) == torch._C.Node)
+                self.assertTrue(hasattr(block, 'paramNode'))
+                self.assertTrue(type(block.paramNode()) == torch._C.Node)
+        self.assertTrue(tested_blocks)
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
@@ -3483,6 +3522,31 @@ a")
         # dynamic expression usage
         check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
         check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
+
+    def test_tensor_item(self):
+        def test_scalar_to_float_coercion(x):
+            return x.item() == 1
+
+        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1.0),))
+        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1),))
+
+        def test_scalar_cast(x):
+            scalar = x.item()
+            return int(scalar), float(scalar)
+
+        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1.0),))
+        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1),))
+
+        expected_str = r"Use int\(tensor\) or float\(tensor\) to retrieve"
+        with self.assertRaisesRegex(RuntimeError, expected_str):
+            @torch.jit.script
+            def int_fn(a):
+                # type: (int) -> int
+                return a
+
+            @torch.jit.script
+            def test_error_msg(x):
+                return int_fn(x.item())
 
     def test_method_on_number(self):
         def func():
@@ -8558,7 +8622,7 @@ a")
                 return self.ssm.bar() + x
 
         orig = TraceMe()
-        traced = torch.jit.trace(orig, (torch.rand(4, 3, dtype=torch.float),))
+        traced = torch.jit.trace(orig, (torch.rand(4, 3),))
         # for each of these checks, check that *BOTH* the underlying
         # _C.ScriptModule object has the expected method/param, as well as the
         # Python object that wraps it.
@@ -9015,7 +9079,7 @@ a")
         slices = tuple_graph.findAllNodes("prim::TupleSlice")
         num_outputs = set(map(lambda x: len(x.output().type().elements()), slices))
         # one tuple slice should have an output with 2 elements, other 4
-        self.assertTrue(num_outputs == set([2, 4]))
+        self.assertTrue(num_outputs == {2, 4})
         self.run_pass('lower_all_tuples', tuple_graph)
         self.assertTrue('Tuple' not in str(tuple_graph))
         tuple_comp = torch.jit.script(tuple_slice)
@@ -10601,6 +10665,14 @@ a")
         m._create_method_from_graph("forward", foo.graph)
         self.getExportImportCopy(m)
 
+    def test_split(self):
+        def split_two(tensor):
+            a, b, c = torch.split(tensor, 2, dim=1)
+            return a, b, c
+        x = torch.randn(3, 6)
+        y = torch.randn(3, 6)
+        self.checkScript(split_two, [(x + y)])
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -11211,9 +11283,6 @@ class TestPytorchExportModes(JitTestCase):
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
-    'test_split_dim',
-    'test_split_dim_neg0',
-
     # The following fail due to #12024.
     # A prim::ListConstruct is involved and the indices get traced as TensorType,
     # which always require_grad. This causes a crash in autodiff.
@@ -13752,6 +13821,26 @@ class TestClassType(JitTestCase):
 
             input = torch.ones(1)
             self.assertEqual(fn2(input), input)
+
+    def test_out_of_order_methods(self):
+        # Remove this when import/export is implemented for classes
+        with self.disableModuleHook():
+            @torch.jit.script
+            class FooTest:
+                def __init__(self, x):
+                    self.x = x
+                    self.x = self.get_stuff(x)
+
+                def get_stuff(self, y):
+                    return self.x + y
+
+            @torch.jit.script
+            def fn(x):
+                f = FooTest(x)
+                return f.x
+
+            input = torch.ones(1)
+            self.assertEqual(fn(input), input + input)
 
 
 for test in autograd_method_tests():
