@@ -77,7 +77,6 @@ Generators
 ----------------------------------
 .. autoclass:: torch.Generator
    :members:
-   :inherited-members:
 
 .. _random-sampling:
 
