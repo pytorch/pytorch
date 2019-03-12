@@ -165,19 +165,19 @@ struct Unpickler {
     return val;
   }
 
-  template<typename T>
+  template <typename T>
   void read(T& var) {
     const T* data = reinterpret_cast<const T*>(bytes_);
     bytes_ += sizeof(T);
     var = *data;
   }
 
-  double readBinfloat() {
+  double readFloat() {
     AT_ASSERT(sizeof(double) == 8)
     char float_data[8];
 
     // Pickle floats are big endian, so reverse the bytes
-    for(size_t i = 0; i < 8; ++i) {
+    for (size_t i = 0; i < 8; ++i) {
       float_data[i] = bytes_[8 - 1 - i];
     }
     bytes_ += 8;
@@ -199,10 +199,11 @@ struct Unpickler {
           break;
         }
         case OpCode::BINPUT: {
-          size_t pos = readByte();
-          if (memo_.size() <= pos)
-            memo_.resize(1 + 2 * pos);
-          memo_[pos] = stack_.back();
+          size_t memo_id = readByte();
+          if (memo_.size() <= memo_id) {
+            memo_.reserve(1 + 2 * memo_id);
+          }
+          memo_[memo_id] = stack_.back();
           break;
         }
         case OpCode::MARK: {
@@ -225,7 +226,7 @@ struct Unpickler {
           break;
         }
         case OpCode::BINFLOAT:
-          stack_.push_back(readBinfloat());
+          stack_.push_back(readFloat());
           break;
         case OpCode::TUPLE: {
           size_t start = marks_.back();
@@ -256,7 +257,7 @@ struct Unpickler {
           stack_.resize(start);
         } break;
         case OpCode::BINGET: {
-          // stack_.push_back(memo_[reader.readInt1()]);
+          stack_.push_back(memo_.at(readByte()));
         } break;
         case OpCode::STOP:
           return;
@@ -297,7 +298,7 @@ struct Unpickler {
   const uint8_t* bytes_;
   const uint8_t* end_ptr_;
   const std::vector<at::Tensor>& tensor_table_;
-}; // namespace
+};
 
 void ScriptModuleDeserializer::loadAttributeTable(
     const torch::ModuleDef* module_def) {
