@@ -498,7 +498,6 @@ class ScriptModuleSerializer final {
   // tensors has been collected. the method calls convertAndWriteTensor
   // to dump the content of a tensor
   void writeTensorTable(torch::ModelDef* model_def);
-  uint64_t writeIValue(const IValue& ivalue, std::vector<char>& data);
 
   void convertModule(
       const script::Module& module,
@@ -516,8 +515,6 @@ class ScriptModuleSerializer final {
 
   // all tensors that will be stored
   std::vector<at::Tensor> tensor_table_;
-
-  std::unordered_map<void*, uint64_t> written_ivalues_;
 };
 
 // ScriptModuleSerializer's methods
@@ -643,43 +640,6 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
     auto* tensor_proto = model_def->add_tensors();
     convertAndWriteTensor(tensor_id++, t, tensor_proto, storageMap);
   }
-}
-
-// size_t pushBytes(size_t num_bytes, std::vector<char>& data) {
-//   AT_ASSERT(num_bytes > 0);
-//   data.push_back(0);
-//   auto index = data.size() - 1;
-//
-//   for (size_t i = 1; i < num_bytes; ++i) {
-//     data.push_back(0);
-//   }
-//   return index;
-// }
-//
-// template <typename T>
-// size_t pushValue(T value, std::vector<char>& data) {
-//   auto index = pushBytes(sizeof(T), data);
-//   T* ptr = reinterpret_cast<T*>(&data[index]);
-//   *ptr = value;
-//   return index;
-// }
-
-// Estimate the number of bytes a serialized IValue will take
-size_t estimateIValueSize(const IValue& ivalue) {
-  if (ivalue.isString()) {
-    return ivalue.toStringRef().size() + 1;
-  } else if (ivalue.isGenericDict()) {
-    auto dict = ivalue.toGenericDictRef();
-    size_t dict_overhead = 2 * sizeof(uint64_t);
-    size_t element_size = 0;
-    if (dict.begin() != dict.end()) {
-      const auto item = dict.begin();
-      element_size =
-          estimateIValueSize(item->first) + estimateIValueSize(item->second);
-    }
-    return dict_overhead + element_size * dict.size();
-  }
-  return 0;
 }
 
 

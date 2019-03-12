@@ -59,10 +59,6 @@ class ScriptModuleDeserializer final {
 
   void loadTensorTable(torch::ModelDef* model_def);
   void loadAttributeTable(const torch::ModuleDef* model_def);
-  IValue loadIValue(
-      uint64_t byte_offset,
-      const TypePtr type,
-      const at::DataPtr& storage_ptr);
 
   caffe2::serialize::PyTorchStreamReader reader_;
   // this is a hack to make sure the script module created in C++ is the
@@ -147,8 +143,8 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
   }
 }
 
-struct Depickler {
-  Depickler(void* data, uint64_t size)
+struct Unpickler {
+  Unpickler(void* data, uint64_t size)
       : bytes_(static_cast<const uint8_t*>(data)), end_ptr_(bytes_ + size) {}
 
   const std::vector<IValue>& get_ivalue_list() {
@@ -288,8 +284,8 @@ void ScriptModuleDeserializer::loadAttributeTable(
   at::DataPtr attributes_ptr;
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) = reader_.getRecord("attributes");
-  Depickler depickler(attributes_ptr.get(), attributes_size);
-  auto& attribute_list = depickler.get_ivalue_list();
+  Unpickler unpickler(attributes_ptr.get(), attributes_size);
+  auto& attribute_list = unpickler.get_ivalue_list();
   AT_ASSERT(attribute_list.size() == size_t(module_def->attributes_size()));
   size_t index = 0;
   for (auto a : attribute_list) {

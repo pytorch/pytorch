@@ -10610,11 +10610,6 @@ a")
                 self.int = torch.jit.Attribute(99, int)
                 self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
                 self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
-                # self.x = torch.nn.Parameter(torch.tensor([100.0]))
-
-                # self.my_table = torch.jit.Attribute({"DOG": torch.ones(1, 1)}, Dict[str, torch.Tensor])
-                # self.my_table = torch.jit.Attribute(get_words(num=10, tensors=True, size=2), Dict[str, torch.Tensor])
-                # self.register_buffer('a', torch.ones(2, 2))
 
             @torch.jit.script_method
             def forward(self):
