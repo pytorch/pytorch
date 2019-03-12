@@ -39,6 +39,11 @@ EOL
 
 cat >$TMP_DIR/ci_scripts/setup_pytorch_env.bat <<EOL
 
+if exist "%TMP_DIR%/ci_scripts/pytorch_env_restore.bat" (
+    call %TMP_DIR%/ci_scripts/pytorch_env_restore.bat
+    exit /b 0
+)
+
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\ProgramData\\chocolatey\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
 :: Install Miniconda3
@@ -84,6 +89,8 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
 ) else (
     xcopy /s %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch %TMP_DIR_WIN%\\build\\torch\\
 )
+
+for /f "usebackq tokens=*" %%i in ('set') do echo set "%%i" >> %TMP_DIR%/ci_scripts/pytorch_env_restore.bat
 
 EOL
 
