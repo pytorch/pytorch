@@ -28,11 +28,16 @@ void convertNetDefToIR(
  * both formats will converge to PyTorch IR, so for now we try to keep as close
  * to it as possible. For short-term applications we might add a separate pass
  * that would fold such const-nodes into their users.
+ * \p If Prefix is specified, the prefix will be removed from operator name when
+ * converting from IR to NetDef.
  *
  * TODO: We might need to do a better job at preserving names of the variables,
  * especially external_inputs/external_outputs.
  */
-void convertIRToNetDef(caffe2::NetDef* net, const Graph& graph);
+void convertIRToNetDef(
+    caffe2::NetDef* net,
+    const Graph& graph,
+    const std::string& prefix = "");
 
 } // namespace jit
 } // namespace torch
