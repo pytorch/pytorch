@@ -28,7 +28,6 @@ namespace script {
   _(Differentiate)                 \
   _(DifferentiateWithRequiresGrad) \
   _(DynamicDAG)                    \
-  _(EvalModeForLoadedModule)       \
   _(FromQualString)                \
   _(InternedStrings)               \
   _(IValue)                        \
@@ -79,6 +78,10 @@ TH_FORALL_TESTS_CUDA(JIT_TEST_CUDA)
 void runJITCPPTests() {
   TH_FORALL_TESTS(JIT_TEST)
   TH_FORALL_TESTS_CUDA(JIT_TEST)
+
+  // This test is special since it requires prior setup in python.
+  // So it's included here but not in the pure cpp gtest suite
+  testEvalModeForLoadedModule();
 }
 #endif
 
