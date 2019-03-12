@@ -672,10 +672,10 @@ def broadcast_multigpu(tensor_list,
 
     Arguments:
         tensor_list (List[Tensor]): Tensors that participate in the collective
-            operation. if ``src`` is the rank, then ``src_tensor``th element of
-            ``tensor_list`` (``tensor_list[src_tensor]``) will be broadcasted
-            to all other tensors (on different GPUs) in the src process and
-            all tensors in ``tensor_list`` of other non-src processes.
+            operation. If ``src`` is the rank, then the specified ``src_tensor``
+            element of ``tensor_list`` (``tensor_list[src_tensor]``) will be
+            broadcast to all other tensors (on different GPUs) in the src process
+            and all tensors in ``tensor_list`` of other non-src processes.
             You also need to make sure that ``len(tensor_list)`` is the same
             for all the distributed processes calling this function.
 
