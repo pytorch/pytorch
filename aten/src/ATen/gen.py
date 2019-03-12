@@ -175,7 +175,7 @@ generators = {
 }
 
 backends = ['CPU', 'CUDA']
-densities = ['Dense', 'Sparse', 'Mkldnn'] # TODO: layout instead of densities?
+densities = ['Dense', 'Sparse', 'Mkldnn']  # TODO: layout instead of densities?
 extension_backends = ['MSNPU', 'XLA']
 
 # scalar_name, c_type, accreal, th_scalar_type, is_floating_type

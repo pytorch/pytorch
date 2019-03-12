@@ -33,6 +33,7 @@ mkldnn_map = {
     'CPU': 'MkldnnCPU',
 }
 
+
 def process_types_and_backends(option):
     # if specific pairs were not listed, then enumerate them
     # based on the backend and type attributes
