@@ -57,24 +57,22 @@ namespace script {
 
 #if defined(USE_GTEST)
 
-#define JIT_TEST(name)  \
+#define JIT_GTEST(name)  \
   TEST(JitTest, name) { \
     test##name();       \
   }
-
-TH_FORALL_TESTS(JIT_TEST)
+TH_FORALL_TESTS(JIT_GTEST)
 #undef JIT_TEST
 
-#define JIT_TEST_CUDA(name)    \
+#define JIT_GTEST_CUDA(name)    \
   TEST(JitTest, name##_CUDA) { \
     test##name();              \
   }
-TH_FORALL_TESTS_CUDA(JIT_TEST_CUDA)
+TH_FORALL_TESTS_CUDA(JIT_GTEST_CUDA)
 #undef JIT_TEST_CUDA
+#endif
 
-#else
 #define JIT_TEST(name) test##name();
-
 void runJITCPPTests() {
   TH_FORALL_TESTS(JIT_TEST)
   TH_FORALL_TESTS_CUDA(JIT_TEST)
@@ -83,7 +81,7 @@ void runJITCPPTests() {
   // So it's included here but not in the pure cpp gtest suite
   testEvalModeForLoadedModule();
 }
-#endif
+#undef JIT_TEST
 
 } // namespace script
 } // namespace jit
