@@ -65,7 +65,7 @@ class FilelikeMock(object):
             # This is used to test that.
             setattr(self, 'fileno', self.fileno_opt)
 
-        self.calls = set([])
+        self.calls = set()
         self.bytesio = io.BytesIO(data)
 
         def trace(fn, name):
@@ -1081,7 +1081,7 @@ class _TestTorchMixin(object):
             # check 1-d behavior
             x = cast(torch.randn(1))
             dim = 0
-            self.assertEqual(fn(x, dim).shape, tuple())
+            self.assertEqual(fn(x, dim).shape, ())
             self.assertEqual(fn(x, dim, keepdim=True).shape, (1,))
 
             # check reducing of a singleton dimension
@@ -4449,20 +4449,20 @@ class _TestTorchMixin(object):
         for device in devices:
             _from = random.random()
             to = _from + random.random()
-            res1 = torch.linspace(_from, to, 137)
-            res2 = torch.Tensor()
+            res1 = torch.linspace(_from, to, 137, device=device)
+            res2 = torch.tensor((), device=device)
             torch.linspace(_from, to, 137, out=res2)
             self.assertEqual(res1, res2, 0)
-            self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1))
-            self.assertEqual(torch.linspace(0, 1, 1), torch.zeros(1), 0)
+            self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1, device=device))
+            self.assertEqual(torch.linspace(0, 1, 1, device=device), torch.zeros(1, device=device), 0)
 
             # Check linspace for generating with start > end.
-            self.assertEqual(torch.linspace(2, 0, 3), torch.Tensor((2, 1, 0)), 0)
+            self.assertEqual(torch.linspace(2, 0, 3, device=device), torch.tensor((2, 1, 0), device=device), 0)
 
             # Check linspace for non-contiguous tensors.
-            x = torch.zeros(2, 3)
+            x = torch.zeros(2, 3, device=device)
             y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2))
-            self.assertEqual(x, torch.Tensor(((0, 0, 1), (0, 2, 3))), 0)
+            self.assertEqual(x, torch.tensor(((0, 0, 1), (0, 2, 3)), device=device), 0)
 
     def test_logspace(self):
         _from = random.random()
@@ -4606,8 +4606,8 @@ class _TestTorchMixin(object):
         A = cast(random_fullrank_matrix_distinct_singular_value(5, 4))
         b = cast(torch.randn(4, 5, 10))
 
-        x_exp_list = list()
-        LU_exp_list = list()
+        x_exp_list = []
+        LU_exp_list = []
         for i in range(4):
             x_exp, LU_exp = torch.gesv(b[i], A[i])
             x_exp_list.append(x_exp)
@@ -6014,7 +6014,7 @@ class _TestTorchMixin(object):
 
             # test against cholesky_solve in a loop: four batches with both choices of upper
             A, L, b = cholesky_solve_test_helper((5, 4), (4, 5, 10), cast, upper)
-            x_exp_list = list()
+            x_exp_list = []
             for i in range(4):
                 x_exp = torch.cholesky_solve(b[i], L[i], upper=upper)
                 x_exp_list.append(x_exp)
@@ -7193,7 +7193,7 @@ class _TestTorchMixin(object):
 
     def test_abs(self):
         def _test_abs(tensors_dict):
-            for category, tensors in tensors_dict.items():
+            for _category, tensors in tensors_dict.items():
                 for data in tensors:
                     _test_abs_single(data)
 
@@ -8991,7 +8991,7 @@ class _TestTorchMixin(object):
         filemock = FilelikeMock(b'', has_readinto=False)
         tensor = torch.randn(3, 5)
         torch.save(tensor, filemock)
-        expected_superset = set(['write', 'flush'])
+        expected_superset = {'write', 'flush'}
         self.assertTrue(expected_superset.issuperset(filemock.calls))
 
         # Reset between save and load
@@ -8999,7 +8999,7 @@ class _TestTorchMixin(object):
         filemock.calls.clear()
 
         _ = torch.load(filemock)
-        expected_superset = set(['read', 'readline', 'seek', 'tell'])
+        expected_superset = {'read', 'readline', 'seek', 'tell'}
         self.assertTrue(expected_superset.issuperset(filemock.calls))
 
     def _test_serialization_filelike(self, tensor, mock, desc):
@@ -9440,7 +9440,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(x.new(np.array((3, 4))).tolist(), [3, 4])
         self.assertEqual(x.new([z[2], z[0] + 3]).tolist(), [3, 4])
         self.assertEqual(x.new(size=(3, 4)).shape, [3, 4])
-        self.assertEqual(x.new(tuple()).shape, [0])
+        self.assertEqual(x.new(()).shape, [0])
         self.assertEqual(x.new(y.storage()).data_ptr(), y.data_ptr())
         self.assertEqual(x.new(y).data_ptr(), y.data_ptr())
         self.assertIsNot(x.new(y), y)
