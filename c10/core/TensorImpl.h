@@ -1452,8 +1452,8 @@ protected:
   // strided layout. A valid opaque handle manages the tensor storage by itself so the default
   // `storage_` is never initialized and getting data pointer from the default `storage_`
   // would fail. Metadata like device, dtype and dims can be queried like a normal tensor with
-  // strided layout but cannot be changed. Call to `is_contiguous()` always returns false
-  // since "contiguous" is not well-defined for a customized layout.
+  // strided layout but cannot be changed. The `strides()` is not supported. Call to `is_contiguous()`
+  // always returns false since "contiguous" is not well-defined for a customized layout.
   //
   // Following invariant holds when `opaque_handle_` is valid:
   //     `!is_contiguous() && !storage_initialized() && !allow_tensor_metadata_change()`

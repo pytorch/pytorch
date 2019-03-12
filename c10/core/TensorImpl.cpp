@@ -49,7 +49,7 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable
 TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable,
                        c10::intrusive_ptr<c10::intrusive_ptr_target> opaque_handle, IntArrayRef sizes)
   : TensorImpl({}, type_id, data_type, is_variable) {
-  AT_ASSERT(opaque_handle.get() != nullptr);
+  AT_ASSERT(opaque_handle);
   opaque_handle_ = opaque_handle;
   auto dim = sizes.size();
   sizes_.resize(dim);
@@ -77,6 +77,7 @@ IntArrayRef TensorImpl::sizes() const {
 }
 
 IntArrayRef TensorImpl::strides() const {
+  AT_ASSERTM(!opaque_handle_, "Opaque tensor does not support strides");
   return strides_;
 }
 
