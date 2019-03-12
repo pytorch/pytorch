@@ -371,13 +371,21 @@ class JitTestCase(TestCase):
         torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
         self.assertExpectedGraph(trace, *args, **kwargs)
 
-    def updateExampleGraph(self, trace, *args, **kwargs):
-        graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
+    def sanitizeGraph(self, graph):
         torch._C._jit_pass_lint(graph)
         torch._C._jit_pass_dce(graph)
         torch._C._jit_pass_lint(graph)
         graph = torch._C._jit_pass_canonicalize(graph)
         torch._C._jit_pass_lint(graph)
+
+    def assertExpectedGraph(self, trace, *args, **kwargs):
+        graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
+        self.sanitizeGraph(graph)
+        self.assertExpected(str(graph), *args, **kwargs)
+
+    def updateExampleGraph(self, trace, *args, **kwargs):
+        graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
+        self.sanitizeGraph(graph)
         self.updateExampleExpect(str(graph), *args, **kwargs)
 
     def run_pass(self, name, trace):
