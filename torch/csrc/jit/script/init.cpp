@@ -701,7 +701,10 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& script,
              ResolutionCallback rcb,
              bool has_self) {
-            auto self = has_self ? std::make_shared<ModuleValue>(m) : nullptr;
+            c10::optional<Self> self;
+            if (has_self) {
+              self = Self(std::make_shared<ModuleValue>(m));
+            }
             defineMethodsInModule(m, script, pythonResolver(rcb), self);
           })
       .def(
@@ -716,7 +719,7 @@ void initJitScriptBindings(PyObject* module) {
               resolvers.push_back(pythonResolver(callback));
             }
             defineMethodsInModule(
-                m, defs, resolvers, std::make_shared<ModuleValue>(m));
+                m, defs, resolvers, Self(std::make_shared<ModuleValue>(m)));
 
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
@@ -989,7 +992,8 @@ void initJitScriptBindings(PyObject* module) {
          ResolutionCallback rcb,
          FunctionDefaults defaults) {
         auto def_f = def.withName("forward");
-        defineMethodsInModule(mod, {def_f}, {pythonResolver(rcb)}, nullptr);
+        defineMethodsInModule(
+            mod, {def_f}, {pythonResolver(rcb)}, c10::nullopt);
         auto& method = mod->get_method("forward");
         method.setSchema(getSchemaWithNameAndDefaults(
             def.range(), method.getSchema(), def.name().name(), defaults));
@@ -1009,8 +1013,7 @@ void initJitScriptBindings(PyObject* module) {
           methodDefs.push_back(def);
           rcbs.push_back(pythonResolver(rcb));
         }
-        defineMethodsInModule(
-            module, methodDefs, rcbs, std::make_shared<ClassValue>(classType));
+        defineMethodsInModule(module, methodDefs, rcbs, Self(classType));
         return module;
       });
 
