@@ -3,6 +3,7 @@
   cname: set
   variants: function
   cpu_half: True
+  cpu_bool: True
   device_guard: False
   return: argument 0
   options:
@@ -39,6 +40,7 @@
   cname: fill
   variants: function
   cpu_half: True
+  cpu_bool: True
   options:
     - arguments:
       - THTensor* self
@@ -54,6 +56,7 @@
   variants:
     - function
   cpu_half: True
+  cpu_bool: True
   device_guard: False
   return: bool
   arguments:
@@ -120,6 +123,7 @@
   variants:
     - function
   cpu_half: True
+  cpu_bool: True
   arguments:
     - THTensor* self
 ]]
@@ -238,6 +242,7 @@
   variants:
     - function
   cpu_half: True
+  cpu_bool: True
   device_guard: False
   return: argument 0
   arguments:
@@ -1693,6 +1698,7 @@
   cname: zero
   return: self
   cpu_half: True
+  cpu_bool: True
   variants:
     - function
   arguments:
@@ -2493,51 +2499,6 @@
       default: N
 ]]
 [[
-  name: _th_btrifact
-  cname: btrifact
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0,1
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THIntegerTensor* pivots
-      output: True
-    - CONSTANT NULL
-    - arg: bool pivot
-      kwarg_only: True
-      default: "true"
-    - THTensor* self
-]]
-[[
-  name: _th_btrifact_with_info
-  cname: btrifact
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0,1,2
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THIntegerTensor* pivots
-      output: True
-    - arg: THIntegerTensor* info
-      output: True
-    - arg: bool pivot
-      kwarg_only: True
-      default: "true"
-    - THTensor* self
-]]
-[[
   name: _th_btrisolve
   cname: btrisolve
   types:
@@ -2561,6 +2522,7 @@
     - CPU
     - CUDA
   return: self
+  cpu_bool: True
   variants: function
   options:
     - cname: random
@@ -2824,6 +2786,7 @@
   name: _th_alias
   return: THTensor*
   cpu_half: True
+  cpu_bool: True
   variants:
     - function
   options:

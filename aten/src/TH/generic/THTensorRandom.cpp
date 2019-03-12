@@ -29,6 +29,8 @@ void THTensor_(random)(THTensor *self, THGenerator *_generator)
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (float)(THRandom_random(_generator) % ((1ULL << FLT_MANT_DIG) + 1)););
 #elif defined(TH_REAL_IS_DOUBLE)
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (double)(THRandom_random64(_generator) % ((1ULL << DBL_MANT_DIG) + 1)););
+#elif defined(TH_REAL_IS_BOOL)
+    TH_TENSOR_APPLY(scalar_t, self, *self_data = (bool)(THRandom_random(_generator) % 2););
 #else
 #error "Unknown type"
 #endif
