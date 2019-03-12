@@ -1733,13 +1733,6 @@ prod(dim=None, keepdim=False, dtype=None) -> Tensor
 See :func:`torch.prod`
 """)
 
-add_docstr_all('pstrf',
-               r"""
-pstrf(upper=True, tol=-1) -> (Tensor, IntTensor)
-
-See :func:`torch.pstrf`
-""")
-
 add_docstr_all('put_',
                r"""
 put_(indices, tensor, accumulate=False) -> Tensor
