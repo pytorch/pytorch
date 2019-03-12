@@ -226,7 +226,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
   auto src_indices_accessor = src_indices.accessor<int64_t, 2>();
 
   AT_DISPATCH_ALL_TYPES(
-      t_values.type(), "cadd_sparse", [&] {
+      t_values.scalar_type(), "cadd_sparse", [&] {
         scalar_t* t_values_ptr = t_values.data<scalar_t>();
         scalar_t* s_values_ptr = s_values.data<scalar_t>();
         scalar_t* r_values_ptr = r_values.data<scalar_t>();
@@ -347,7 +347,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef
     }
   } else {
     AT_DISPATCH_ALL_TYPES(
-        values.type(), "add_dense_sparse", [&] {
+        values.scalar_type(), "add_dense_sparse", [&] {
           add_dense_sparse_worker_cpu<scalar_t>(r, value, sparse, indices, values);
         });
   }
@@ -435,7 +435,7 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
     }
   } else {
     AT_DISPATCH_ALL_TYPES(
-        r_values.type(), "mul_out_sparse", [&] {
+        r_values.scalar_type(), "mul_out_sparse", [&] {
           auto r_accessor = r_values.accessor<scalar_t, 1>();
           auto t_accessor = t_values.accessor<scalar_t, 1>();
           auto s_accessor = s_values.accessor<scalar_t, 1>();
@@ -551,7 +551,7 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   Tensor values      = sparse_._values();
 
   AT_DISPATCH_ALL_TYPES(
-      values.type(), "addmm_sparse_dense", [&] {
+      values.scalar_type(), "addmm_sparse_dense", [&] {
         s_addmm_out_sparse_dense_worker<scalar_t>(nnz, dim_i, dim_j, dim_k, r, beta, t, alpha, indices, values, dense);
       }
   );
@@ -757,7 +757,7 @@ SparseTensor& _sspaddmm_out_cpu(
   int64_t newv_stride0 = newv.stride(0);
 
   AT_DISPATCH_ALL_TYPES(
-      values.type(), "sspmm", [&] {
+      values.scalar_type(), "sspmm", [&] {
         auto values_accessor = values.accessor<scalar_t, 1>();
         scalar_t* dense_ptr = dense.data<scalar_t>();
         scalar_t* newv_ptr = newv.data<scalar_t>();

@@ -24,17 +24,20 @@ namespace math {
 
 namespace {
 
-#define DELEGATE_ROWWISE_REDUCE_FUNCTION(Func, EigenFunc)                    \
-  template <typename T>                                                      \
-  void Rowwise##Func(                                                        \
-      const int rows,                                                        \
-      const int cols,                                                        \
-      const T alpha,                                                         \
-      const T* X,                                                            \
-      T* Y,                                                                  \
-      CPUContext* /* context */) {                                           \
-    EigenVectorMap<T>(Y, rows) =                                             \
-        ConstEigenMatrixMap<T>(X, cols, rows).colwise().EigenFunc() * alpha; \
+#define DELEGATE_ROWWISE_REDUCE_FUNCTION(Func, EigenFunc)              \
+  template <typename T>                                                \
+  void Rowwise##Func(                                                  \
+      const int rows,                                                  \
+      const int cols,                                                  \
+      const T alpha,                                                   \
+      const T* X,                                                      \
+      T* Y,                                                            \
+      CPUContext* /* context */) {                                     \
+    EigenVectorMap<T>(Y, rows) = ConstEigenMatrixMap<T>(X, cols, rows) \
+                                     .colwise()                        \
+                                     .EigenFunc()                      \
+                                     .transpose() *                    \
+        alpha;                                                         \
   }
 DELEGATE_ROWWISE_REDUCE_FUNCTION(ReduceMin, minCoeff)
 DELEGATE_ROWWISE_REDUCE_FUNCTION(ReduceMax, maxCoeff)
@@ -184,7 +187,8 @@ void BothEndsReduceSum(
   EigenVectorArrayMap<T> Y_arr(Y, N);
   Y_arr = ConstEigenArrayMap<T>(X, K, N).colwise().sum();
   for (int i = 1; i < M; ++i) {
-    Y_arr += ConstEigenArrayMap<T>(X + i * N * K, K, N).colwise().sum();
+    Y_arr +=
+        ConstEigenArrayMap<T>(X + i * N * K, K, N).colwise().sum().transpose();
   }
   Scale<T, T, CPUContext>(N, alpha, Y, Y, context);
 }
@@ -199,11 +203,12 @@ void BothEndsReduceMean(
     T* Y,
     CPUContext* context) {
   EigenVectorArrayMap<T> Y_arr(Y, N);
-  Y_arr = ConstEigenArrayMap<T>(X, K, N).colwise().mean();
+  Y_arr = ConstEigenArrayMap<T>(X, K, N).colwise().sum();
   for (int i = 1; i < M; ++i) {
-    Y_arr += ConstEigenArrayMap<T>(X + i * N * K, K, N).colwise().mean();
+    Y_arr +=
+        ConstEigenArrayMap<T>(X + i * N * K, K, N).colwise().sum().transpose();
   }
-  Scale<T, T, CPUContext>(N, alpha / static_cast<T>(M), Y, Y, context);
+  Scale<T, T, CPUContext>(N, alpha / static_cast<T>(M * K), Y, Y, context);
 }
 
 template <typename T>
@@ -220,7 +225,8 @@ void BothEndsReduceL1(
   for (int i = 1; i < M; ++i) {
     Y_vec += ConstEigenMatrixMap<T>(X + i * N * K, K, N)
                  .colwise()
-                 .template lpNorm<1>();
+                 .template lpNorm<1>()
+                 .transpose();
   }
   Scale<T, T, CPUContext>(N, alpha, Y, Y, context);
 }
@@ -234,13 +240,18 @@ void BothEndsReduceL2(
     const T* X,
     T* Y,
     CPUContext* /* context */) {
-  EigenVectorMap<T> Y_vec(Y, N);
-  Y_vec = ConstEigenMatrixMap<T>(X, K, N).colwise().squaredNorm();
-  for (int i = 1; i < M; ++i) {
-    Y_vec +=
-        ConstEigenMatrixMap<T>(X + i * N * K, K, N).colwise().squaredNorm();
+  ConstEigenArrayMap<T> X0_arr(X, K, N);
+  EigenVectorArrayMap<T> Y_arr(Y, N);
+  for (int i = 0; i < N; ++i) {
+    Y_arr(i) = X0_arr.col(i).square().sum();
   }
-  Y_vec = Y_vec.cwiseSqrt() * alpha;
+  for (int i = 1; i < M; ++i) {
+    ConstEigenArrayMap<T> Xi_arr(X + i * N * K, K, N);
+    for (int j = 0; j < N; ++j) {
+      Y_arr(j) += Xi_arr.col(j).square().sum();
+    }
+  }
+  Y_arr = Y_arr.sqrt() * alpha;
 }
 
 template <typename T, class Reducer>
@@ -404,10 +415,10 @@ void RowwiseMoments(
     T* mean,
     T* var) {
   ConstEigenArrayMap<T> X_arr(X, cols, rows);
-  EigenVectorArrayMap<T> mean_arr(mean, rows);
-  EigenVectorArrayMap<T> var_arr(var, rows);
-  mean_arr = X_arr.colwise().mean();
-  var_arr = X_arr.square().colwise().mean() - mean_arr.square().transpose();
+  for (int i = 0; i < rows; ++i) {
+    mean[i] = X_arr.col(i).mean();
+    var[i] = X_arr.col(i).square().mean() - mean[i] * mean[i];
+  }
 }
 
 template <typename T>
@@ -420,7 +431,6 @@ void ColwiseMoments(
   ConstEigenArrayMap<T> X_arr(X, cols, rows);
   EigenVectorArrayMap<T> mean_arr(mean, cols);
   EigenVectorArrayMap<T> var_arr(var, cols);
-  // Eigen rowwise reduction is about 10 times slower than this for-loop.
   mean_arr = X_arr.col(0);
   var_arr = X_arr.col(0).square();
   for (int i = 1; i < rows; ++i) {
@@ -440,15 +450,19 @@ void BothEndsMoments(
     const T* X,
     T* mean,
     T* var) {
+  ConstEigenArrayMap<T> X_arr(X, K, M * N);
   EigenVectorArrayMap<T> mean_arr(mean, N);
   EigenVectorArrayMap<T> var_arr(var, N);
-  ConstEigenArrayMap<T> X0_arr(X, K, N);
-  mean_arr = X0_arr.colwise().sum();
-  var_arr = X0_arr.square().colwise().sum();
+  for (int i = 0; i < N; ++i) {
+    mean_arr(i) = X_arr.col(i).sum();
+    var_arr(i) = X_arr.col(i).square().sum();
+  }
   for (int i = 1; i < M; ++i) {
-    ConstEigenArrayMap<T> X_arr(X + i * N * K, K, N);
-    mean_arr += X_arr.colwise().sum();
-    var_arr += X_arr.square().colwise().sum();
+    for (int j = 0; j < N; ++j) {
+      const int c = i * N + j;
+      mean_arr(j) += X_arr.col(c).sum();
+      var_arr(j) += X_arr.col(c).square().sum();
+    }
   }
   const T scale = T(1) / static_cast<T>(M * K);
   mean_arr *= scale;

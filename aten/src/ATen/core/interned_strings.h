@@ -87,6 +87,7 @@ namespace c10 {
   _(prim, SetAttr)                 \
   _(prim, GetAttr)                 \
   _(aten, append)                  \
+  _(aten, item)                    \
   _(aten, format)                  \
   _(aten, __not__)                 \
   _(aten, __is__)                  \

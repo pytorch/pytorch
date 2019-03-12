@@ -92,8 +92,10 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             OperatorExportTypes.RAW: export raw ir.
         opset_version (int, default is 9): by default we export the model to the
             opset version of the onnx submodule. Since ONNX's latest opset may
-            evolve before next stable release, we may want to export to some stable
+            evolve before next stable release, by default we export to one stable
             opset version. Right now, supported stable opset version is 9.
+            The opset_version must be _onnx_master_opset or in _onnx_stable_opsets
+            which are defined in torch/onnx/symbolic.py
     """
     if aten or export_raw_ir:
         assert operator_export_type is None
@@ -225,7 +227,7 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
             graph = method.propagate_and_assign_input_and_output_shapes(
                 args, example_outputs, False, propagate)
             # Erase number types to bring the graph to a pre-NumberType state
-            params = method.params()
+            params = method.initial_ivalues()
         except AttributeError:
             # TODO: just trace it
             raise RuntimeError('\'forward\' method must be a script method')
