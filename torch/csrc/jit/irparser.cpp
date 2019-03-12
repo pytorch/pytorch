@@ -79,8 +79,13 @@ void parseIR(const std::string& str, torch::jit::Graph* graph) {
 }
 
 VarWithType IRParser::parseVarWithType() {
+  L.expect('%');
   VarWithType r;
-  r.name = parseVar();
+  if (L.cur().kind == TK_IDENT) {
+    r.name = L.expect(TK_IDENT).text();
+  } else {
+    r.name = L.expect(TK_NUMBER).text();
+  }
   r.type = TensorType::get();
   if (L.nextIf(':')) {
     auto type_alias = type_parser.parseType();
@@ -93,16 +98,9 @@ VarWithType IRParser::parseVarWithType() {
 std::string IRParser::parseVar() {
   L.expect('%');
   if (L.cur().kind == TK_IDENT) {
-    auto name = L.expect(TK_IDENT).text();
-    if (L.cur().kind == TK_NUMBER) {
-      auto suffix = L.expect(TK_NUMBER).text();
-      AT_ASSERT(suffix[0] == '.');
-      name += suffix;
-    }
-    return name;
-  } else {
-    return L.expect(TK_NUMBER).text();
+    return L.expect(TK_IDENT).text();
   }
+  return L.expect(TK_NUMBER).text();
 }
 
 void IRParser::parseOperatorOutputs(std::vector<VarWithType>* outs) {

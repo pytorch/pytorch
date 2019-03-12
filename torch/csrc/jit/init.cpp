@@ -80,11 +80,11 @@ bool loadPythonClasses() {
 } // anonymous namespace
 
 #if defined(_WIN32)
-void runJITCPPTests() {
+std::string runJITCPPTests() {
   AT_ERROR("JIT tests not yet supported on Windows");
 }
 #else
-void runJITCPPTests();
+std::string runJITCPPTests();
 #endif
 
 void initJITBindings(PyObject* module) {

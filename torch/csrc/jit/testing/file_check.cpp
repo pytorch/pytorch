@@ -18,7 +18,7 @@
 #include <sstream>
 #include <string>
 
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
@@ -301,12 +301,6 @@ FileCheck::~FileCheck() {
 
 void FileCheck::run(const std::string& test_file) {
   fcImpl->run(test_file);
-};
-
-void FileCheck::run(const Graph& graph) {
-  std::stringstream graph_str;
-  graph_str << graph;
-  fcImpl->run(graph_str.str());
 };
 
 FileCheck* FileCheck::check(const std::string& str) {
