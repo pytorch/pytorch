@@ -357,22 +357,22 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
   THCudaLongTensor_free(state, larger_short);
 }
 
-void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, THCudaLongTensor *_J, THCTensor *_q){
+void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, THCudaLongTensor *_J, THCTensor *_q, int n_sample){
   THAssert(THCTensor_(isContiguous)(state, _q));
   THAssert(THCudaLongTensor_isContiguous(state, _J));
   THCGenerator* gen = THCRandom_getGenerator(state);
   int64_t K = THCudaLongTensor_nElement(state, _J);
-  int64_t output_nelem = THCudaLongTensor_nElement(state, self);
+  THCudaLongTensor_resize1d(state, self, n_sample);
   ptrdiff_t size = THCudaLongTensor_nElement(state, self);
 
-  THCTensor *uniform = THCTensor_(newWithSize1d)(state, output_nelem);
-  THCTensor *bernoulli = THCTensor_(newWithSize1d)(state, output_nelem);
+  THCTensor *uniform = THCTensor_(newWithSize1d)(state, n_sample);
+  THCTensor *bernoulli = THCTensor_(newWithSize1d)(state, n_sample);
 
   THCTensor_(uniform)(state, uniform, 0, K);
   THCTensor_(uniform)(state, bernoulli, 0, 1);
 
   multinomialAliasDrawKernel
-    <<<THCCeilDiv((int)output_nelem+BLOCK_SIZE-1, BLOCK_SIZE), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+    <<<THCCeilDiv((int)n_sample+BLOCK_SIZE-1, BLOCK_SIZE), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
           size,
           THCudaLongTensor_data(state, self),
           THCudaLongTensor_data(state, _J),

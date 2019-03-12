@@ -220,16 +220,16 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
   THLongTensor_free(smaller);
   THLongTensor_free(larger);
 }
-void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator, THLongTensor *J, THTensor *q)
+void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator, THLongTensor *J, THTensor *q, int n_sample)
 {
   std::lock_guard<std::mutex> lock(_generator->mutex);
   int64_t K = THLongTensor_nElement(J);
-  int64_t output_nelem = THLongTensor_nElement(self);
   int64_t i = 0, _mask=0;
   scalar_t _q;
+  THLongTensor_resize1d(self, n_sample);
   int64_t rand_ind, sample_idx, J_sample;
 
-  for (i=0; i < output_nelem; i++)
+  for (i=0; i < n_sample; i++)
     {
       rand_ind = THRandom_uniform(_generator, 0, K);
 
