@@ -175,7 +175,7 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
 }
 #endif
 
-#define IMPLEMENT_FLOAT_KERNEL_HELPER(dispatchtypes, op, idempotent)       \
+#define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                          \
   static void op##_kernel(Tensor& result, const Tensor& self) {            \
     checkBackend(#op, {result}, Backend::CPU);                             \
     AT_DISPATCH_##dispatchtypes##_TYPES(self.scalar_type(), #op, [&] {     \
@@ -213,13 +213,6 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
     });                                                                    \
   }                                                                        \
   REGISTER_DISPATCH(op##Impl, &op##_kernel)
-
-#define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                          \
-  IMPLEMENT_FLOAT_KERNEL_HELPER(dispatchtypes, op, false)
-
-#define IMPLEMENT_IDEMPOTENT_FLOAT_KERNEL(dispatchtypes, op)               \
-  IMPLEMENT_FLOAT_KERNEL_HELPER(dispatchtypes, op, true)
-
 } // anonymous namespace
 
 REGISTER_DISPATCH(sigmoidImpl, &sigmoid_kernel)
