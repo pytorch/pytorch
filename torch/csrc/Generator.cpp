@@ -19,26 +19,6 @@ using namespace torch;
 
 PyObject *THPGeneratorClass = nullptr;
 
-const char *doc_string = 
-"Generator(device='cpu', default=False) -> Generator\n"
-"\n"
-"Creates and returns a generator object which manages the state of the algorithm that\n"
-"produces pseudo random numbers. Used as a keyword argument in many random tensors in\n"
-":ref:`inplace-random-sampling`. Currently only creation of CPU Generator is supported through\n"
-"this API.\n"
-"\n"
-"Arguments:\n"
-"    device (:class:`torch.device`, optional): the desired device for the generator.\n"
-"    default (bool, optional): If using the default CPU/CUDA generator.\n"
-"\n"
-"Returns:\n"
-"    Generator: An ATen Generator object.\n"
-"\n"
-"Example::\n"
-"\n"
-"    >>> g_cpu = torch.Generator()\n"
-"    >>> g_cpu_default = torch.Generator(default=True)\n";
-
 static void THPGenerator_dealloc(THPGenerator* self)
 {
   if (self->owner) {
@@ -162,7 +142,7 @@ static struct PyMemberDef THPGenerator_members[] = {
 
 PyTypeObject THPGeneratorType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch._C.Generator",                  /* tp_name */
+  "torch._C._GeneratorBase",                  /* tp_name */
   sizeof(THPGenerator),                  /* tp_basicsize */
   0,                                     /* tp_itemsize */
   (destructor)THPGenerator_dealloc,      /* tp_dealloc */
@@ -181,7 +161,7 @@ PyTypeObject THPGeneratorType = {
   nullptr,                                     /* tp_setattro */
   nullptr,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-  doc_string,                                  /* tp_doc */
+  nullptr,                                  /* tp_doc */
   nullptr,                                     /* tp_traverse */
   nullptr,                                     /* tp_clear */
   nullptr,                                     /* tp_richcompare */
@@ -207,6 +187,6 @@ bool THPGenerator_init(PyObject *module)
   if (PyType_Ready(&THPGeneratorType) < 0)
     return false;
   Py_INCREF(&THPGeneratorType);
-  PyModule_AddObject(module, "Generator", (PyObject *)&THPGeneratorType);
+  PyModule_AddObject(module, "_GeneratorBase", (PyObject *)&THPGeneratorType);
   return true;
 }

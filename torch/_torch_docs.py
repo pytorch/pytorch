@@ -6336,7 +6336,7 @@ Example::
 """)
 
 
-add_docstr(torch.Generator.set_state,
+add_docstr(torch._C._GeneratorBase.set_state,
            r"""
 Generator.set_state(new_state) -> void
 
@@ -6353,7 +6353,7 @@ Example::
 """)
 
 
-add_docstr(torch.Generator.get_state,
+add_docstr(torch._C._GeneratorBase.get_state,
            r"""
 Generator.get_state() -> Tensor
 
@@ -6371,11 +6371,11 @@ Example::
 """)
 
 
-add_docstr(torch.Generator.manual_seed,
+add_docstr(torch._C._GeneratorBase.manual_seed,
            r"""
 Generator.manual_seed(seed) -> Generator
 
-Sets the seed for generating random numbers. Returns a `torch._C.Generator` object.
+Sets the seed for generating random numbers. Returns a `torch.Generator` object.
 It is recommended to set a large seed, i.e. a number that has a good balance of 0
 and 1 bits. Avoid having many 0 bits in the seed.
 
@@ -6392,7 +6392,7 @@ Example::
 """)
 
 
-add_docstr(torch.Generator.initial_seed,
+add_docstr(torch._C._GeneratorBase.initial_seed,
            r"""
 Generator.initial_seed() -> int
 
@@ -6406,7 +6406,7 @@ Example::
 """)
 
 
-add_docstr(torch.Generator.seed,
+add_docstr(torch._C._GeneratorBase.seed,
            r"""
 Generator.seed() -> int
 

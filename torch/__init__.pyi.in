@@ -17,6 +17,7 @@ import builtins
 # exposed (or use a wildcard); regular syntax is not exposed.
 from .random import set_rng_state as set_rng_state, get_rng_state as get_rng_state, \
     manual_seed as manual_seed, initial_seed as initial_seed, seed as seed
+from .generator import Generator as Generator
 from ._tensor_str import set_printoptions as set_printoptions
 from .functional import *
 from .serialization import save as save, load as load
@@ -36,8 +37,6 @@ _float = builtins.float
 
 class device:
    def __init__(self, device: Union[_int, str, None]=None) -> None: ...
-
-class Generator: ...
 
 class Size(tuple): ...
 

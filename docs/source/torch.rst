@@ -77,6 +77,7 @@ Generators
 ----------------------------------
 .. autoclass:: torch.Generator
    :members:
+   :inherited-members:
 
 .. _random-sampling:
 
@@ -86,7 +87,7 @@ Random sampling
 .. autofunction:: initial_seed
 .. autofunction:: get_rng_state
 .. autofunction:: set_rng_state
-.. autodata:: default_generator
+.. autoattribute:: random.default_generator
 .. autofunction:: bernoulli
 .. autofunction:: multinomial
 .. autofunction:: normal
