@@ -492,6 +492,8 @@ class ScriptModuleSerializer final {
   // to dump the content of a tensor
   void writeTensorTable(torch::ModelDef* model_def);
 
+  void writeLibs(torch::ModelDef* model_def);
+
   void convertModule(
       const script::Module& module,
       const std::string& prefix,
@@ -503,9 +505,7 @@ class ScriptModuleSerializer final {
       torch::ParameterDef* param_def,
       bool is_parameter);
 
-  void convertClass(
-      const ClassTypePtr& type,
-      torch::ModelDef* model_def);
+  void convertClass(const ClassTypePtr& type, torch::ModelDef* model_def);
 
   std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
@@ -514,7 +514,9 @@ class ScriptModuleSerializer final {
   std::vector<at::Tensor> tensor_table_;
   // all classes used by this module hierarchy
   std::vector<ClassTypePtr> class_table_;
-  std::unordered_set<ClassTypePtr> exported_classes_;
+  OrderedDict<ClassTypePtr, std::string> converted_classes_;
+
+  static const size_t op_version_set = 0;
 };
 
 // ScriptModuleSerializer's methods
@@ -553,32 +555,51 @@ void ScriptModuleSerializer::serialize(
   writer_.writeEndOfFile();
 }
 
+void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
+  auto lib_def = model_def->mutable_libs();
+  std::ostringstream lib_stream;
+  lib_stream << "op_version_set = " << op_version_set << "\n";
+  // Convert all the classes that
+  for (const auto& class_type : class_table_) {
+    convertClass(class_type, model_def);
+  }
+  // convertClass does a DFS to compile dependencies, so now converted_classes_
+  // contains all the classes the model depends on in reverse-dependency order
+  // (e.g. dependers come before their dependencies).
+  //
+  // So we write out the classes in reverse so that we get dependency order
+  const auto& classesToWrite = converted_classes_.items();
+  for (auto it = classesToWrite.rbegin(); it != classesToWrite.rend(); ++it) {
+    const auto& classString = it->value();
+    lib_stream << classString << "\n";
+  }
+
+  torch::RecordRef* lib_record = lib_def->mutable_torchscript_arena();
+  const auto filename = "libs.py";
+  const auto& lib_str = lib_stream.str();
+  writer_.writeRecord(filename, lib_str.c_str(), lib_str.size());
+  lib_record->set_key(filename);
+}
+
+// python print the class and add to the converted_classes_. Recursively
+// python print all classes that this class depends on.
 void ScriptModuleSerializer::convertClass(
     const ClassTypePtr& class_type,
     torch::ModelDef* model_def) {
-  if (exported_classes_.count(class_type)) {
+  if (converted_classes_.contains(class_type)) {
     return;
   }
-  exported_classes_.insert(class_type);
-  auto class_def = model_def->add_libs();
-  class_def->set_name(class_type->name());
 
   std::vector<ClassTypePtr> class_deps;
   std::ostringstream class_stream;
-  class_stream << "op_version_set = 0\n";
   PythonPrint(
       class_stream,
       class_type,
       tensor_table_,
       class_deps,
       /*enforce_importable=*/true);
-  torch::RecordRef* class_record = class_def->mutable_torchscript_arena();
-  std::stringstream filename;
-  filename << "lib/" << class_type->name() << ".py";
-  const auto& class_str = class_stream.str();
-  writer_.writeRecord(filename.str(), class_str.c_str(), class_str.size());
-  class_record->set_key(filename.str());
 
+  converted_classes_.insert(class_type, class_stream.str());
   for (const auto& c : class_deps) {
     convertClass(c, model_def);
   }
@@ -595,24 +616,7 @@ void ScriptModuleSerializer::convertModel(
   convertModule(
       module, "", writer_.archiveName(), model_def->mutable_main_module());
   writeTensorTable(model_def);
-
-  // Write out class deps
-  for (const auto& class_type : class_table_) {
-    convertClass(class_type, model_def);
-  }
-
-  // Reverse the class list. This because we write out classes in dependency
-  // order. Reversing it ensures that we load classes before their dependents.
-  const auto libs = model_def->mutable_libs();
-  if (libs->size() > 1) {
-    size_t i = 0;
-    size_t j = libs->size() - 1;
-    while (i < j) {
-      libs->SwapElements(i, j);
-      i++;
-      j--;
-    }
-  }
+  writeLibs(model_def);
 
   // Write out extra files.
   for (const auto& kv : extra_files) {
@@ -716,7 +720,7 @@ void ScriptModuleSerializer::convertModule(
 
   if (module.get_methods().size() > 0) {
     std::ostringstream methods;
-    methods << "op_version_set = 0\n";
+    methods << "op_version_set = " << op_version_set << "\n";
     PythonPrint(
         methods,
         module,

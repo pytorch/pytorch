@@ -12,5 +12,10 @@ TORCH_API void import_methods(
     const std::string& src,
     const std::vector<at::Tensor>& constant_table);
 
+TORCH_API void import_libs(
+    const std::string& src,
+    bool optimize,
+    const std::vector<at::Tensor>& constant_table);
+
 } // namespace jit
 } // namespace torch

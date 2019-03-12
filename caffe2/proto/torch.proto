@@ -61,9 +61,8 @@ message ModuleDef {
 }
 
 message LibDef {
-  optional string name = 1;
-  optional RecordRef torchscript_arena = 2;
-  optional bool optimize = 3;
+  optional RecordRef torchscript_arena = 1;
+  optional bool optimize = 2;
 }
 
 enum ProtoVersion {
@@ -92,7 +91,5 @@ message ModelDef {
 
   // TorchScript code that this module hierarchy depends on
   // Libs will be loaded in before the main module is compiled.
-  // They should be in dependency order (e.g. you should be able to compile
-  // the libs in forward order)
-  repeated LibDef libs = 9;
+  optional LibDef libs = 9;
 }

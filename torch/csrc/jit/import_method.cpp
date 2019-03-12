@@ -144,26 +144,65 @@ void import_methods(
   std::vector<script::Def> definitions;
   std::vector<script::Resolver> resolvers;
 
+  while (p.lexer().cur().kind != script::TK_EOF) {
+    auto def = script::Def(p.parseFunction(/*is_method=*/true));
+    definitions.emplace_back(def);
+    resolvers.emplace_back(resolver);
+  }
+  auto self = std::make_shared<ModuleAccessorValue>(mod);
+  script::defineMethodsInModule(
+      mod, definitions, resolvers, script::Self(self));
+}
+
+void import_libs(
+    const std::string& src,
+    bool optimize,
+    const std::vector<at::Tensor>& constant_table) {
+  script::Parser p(src);
+
+  size_t version = parseVersionNumber(p.lexer());
+
+  std::unordered_map<std::string, std::shared_ptr<script::SugaredValue>> env = {
+      {"torch", std::make_shared<script::BuiltinModule>("aten", version)},
+      {"ops", std::make_shared<OpsValue>(version)},
+      {"CONSTANTS", std::make_shared<ConstantTableValue>(constant_table)},
+      {"fork", std::make_shared<script::ForkValue>()},
+      {"annotate", std::make_shared<script::AnnotateValue>()},
+      {"inf",
+       std::make_shared<ConstantValue>(
+           std::numeric_limits<double>::infinity())},
+      {"nan",
+       std::make_shared<ConstantValue>(
+           std::numeric_limits<double>::quiet_NaN())},
+  };
+
+  auto resolver =
+      [&](const std::string& name,
+          script::Method& m,
+          const SourceRange& loc) -> std::shared_ptr<script::SugaredValue> {
+    auto it = env.find(name);
+    if (it == env.end()) {
+      return nullptr;
+    }
+    return it->second;
+  };
+
+  std::vector<script::Def> definitions;
+  std::vector<script::Resolver> resolvers;
+
   c10::optional<script::Self> self;
-  if (p.lexer().cur().kind == script::TK_CLASS_DEF) {
+  while (p.lexer().cur().kind != script::TK_EOF) {
     auto class_def = script::ClassDef(p.parseClass());
     for (const auto& method_def : class_def.defs()) {
       definitions.emplace_back(method_def);
       resolvers.emplace_back(resolver);
     }
 
+    std::shared_ptr<script::Module> mod;
+    mod->set_optimized(optimize);
     self = script::Self(ClassType::create(class_def.name().name(), mod));
-  } else {
-    while (p.lexer().cur().kind != script::TK_EOF) {
-      auto def = script::Def(p.parseFunction(/*is_method=*/true));
-      definitions.emplace_back(def);
-      resolvers.emplace_back(resolver);
-    }
-
-    self = script::Self(std::make_shared<ModuleAccessorValue>(mod));
+    script::defineMethodsInModule(mod, definitions, resolvers, self);
   }
-
-  script::defineMethodsInModule(mod, definitions, resolvers, self);
 }
 
 } // namespace jit

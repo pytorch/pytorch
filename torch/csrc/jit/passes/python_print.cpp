@@ -1100,10 +1100,10 @@ struct PythonPrintPass {
     }
   }
   void printMethod(script::Method& method) {
-    std::unordered_map<IValue*, QualifiedNamePtr> parameter_names;
+    std::unordered_map<IValue*, QualifiedNamePtr> extra_ivalue_names;
     createTensorToParameterNameMap(
-        method.owner(), QualifiedName::create("self"), parameter_names);
-    printMethod(method, /*is_class=*/false, parameter_names);
+        method.owner(), QualifiedName::create("self"), extra_ivalue_names);
+    printMethod(method, /*is_class=*/false, extra_ivalue_names);
   }
   void printMethod(
       script::Method& method,
@@ -1121,9 +1121,9 @@ struct PythonPrintPass {
     printFunction(graph, name, is_class, defaults, ivalue_names);
   }
   void printModule(script::Module& module) {
-    std::unordered_map<IValue*, QualifiedNamePtr> parameter_names;
+    std::unordered_map<IValue*, QualifiedNamePtr> extra_ivalue_names;
     createTensorToParameterNameMap(
-        module, QualifiedName::create("self"), parameter_names);
+        module, QualifiedName::create("self"), extra_ivalue_names);
     for (auto& method : module.get_methods()) {
       const std::string& name = method.value()->name();
       // we skip __forked_functions because they actually get inlined into their
@@ -1132,7 +1132,7 @@ struct PythonPrintPass {
       if (name.find("__forked_function") == 0) {
         continue;
       }
-      printMethod(*method.value(), /*is_class=*/false, parameter_names);
+      printMethod(*method.value(), /*is_class=*/false, extra_ivalue_names);
     }
   }
 
@@ -1140,9 +1140,9 @@ struct PythonPrintPass {
     out << "class " << classType->name() << ":\n";
     {
       const auto guard = WithIndented();
-      std::unordered_map<at::Tensor*, QualifiedNamePtr> parameter_names;
+      std::unordered_map<IValue*, QualifiedNamePtr> extra_ivalue_names;
       for (auto& method : classType->methods()) {
-        printMethod(*method, /*is_class=*/true, parameter_names);
+        printMethod(*method, /*is_class=*/true, extra_ivalue_names);
       }
     }
   }
