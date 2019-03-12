@@ -655,6 +655,19 @@ struct PythonPrintPass {
   }
 
   void printNode(Node* node, bool print_const) {
+    // Check for class dependencies. If this node inputs or outputs a class
+    // type, we need to add it to our table of dependencies.
+    for (const auto input : node->inputs()) {
+      if (auto classType = input->type()->cast<ClassType>()) {
+        addToClassTable(classType);
+      }
+    }
+    for (const auto output : node->outputs()) {
+      if (auto classType = output->type()->cast<ClassType>()) {
+        addToClassTable(classType);
+      }
+    }
+
     if (!print_const && node->kind() == prim::Constant)
       return;
     if (node->kind() == prim::PythonOp) {
@@ -704,7 +717,6 @@ struct PythonPrintPass {
         const auto obj = node->inputs().at(0);
         const auto newVal = node->inputs().at(1);
         const auto type = obj->type()->expect<ClassType>();
-        addToClassTable(type);
         const auto& attrname = node->s(attr::name);
         indent();
         out << useOf(obj) << "." << attrname << " = " << useOf(newVal) << "\n";
@@ -908,13 +920,11 @@ struct PythonPrintPass {
       } break;
       case prim::CreateObject: {
         const auto classType = node->output()->type()->expect<ClassType>();
-        addToClassTable(classType);
         stmt << classType->name() << ".__new__(" << classType->name() << ")";
       } break;
       case prim::GetAttr: {
         const auto obj = node->inputs().at(0);
         const auto classType = obj->type()->expect<ClassType>();
-        addToClassTable(classType);
         const auto& field = node->s(attr::name);
         stmt << useOf(obj) << "." << field;
       } break;
@@ -1040,9 +1050,6 @@ struct PythonPrintPass {
         if (def) {
           printDefaultValue(input->type(), out, *def);
         }
-      }
-      if (auto classType = input->type()->cast<ClassType>()) {
-        addToClassTable(classType);
       }
     }
 
