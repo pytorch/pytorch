@@ -10601,6 +10601,29 @@ a")
         m._create_method_from_graph("forward", foo.graph)
         self.getExportImportCopy(m)
 
+    def test_attribute_serialization(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.table = torch.jit.Attribute({"I": "am", "a test": "test"}, Dict[str, str])
+                self.float = torch.jit.Attribute(2.3, float)
+                self.int = torch.jit.Attribute(99, int)
+                self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
+                self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
+                # self.x = torch.nn.Parameter(torch.tensor([100.0]))
+
+                # self.my_table = torch.jit.Attribute({"DOG": torch.ones(1, 1)}, Dict[str, torch.Tensor])
+                # self.my_table = torch.jit.Attribute(get_words(num=10, tensors=True, size=2), Dict[str, torch.Tensor])
+                # self.register_buffer('a', torch.ones(2, 2))
+
+            @torch.jit.script_method
+            def forward(self):
+                return (self.table, self.float, self.int, self.tuple, self.list)
+
+        m = M()
+        imported_m = self.getExportImportCopy(m)
+        self.assertEqual(m(), imported_m())
+
 
 class MnistNet(nn.Module):
     def __init__(self):

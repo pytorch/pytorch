@@ -704,26 +704,16 @@ public:
   }
   uint64_t addIValue(const IValue& ivalue) {
     if (ivalue.isTensor()) {
-      AT_ASSERT(false);
-      auto tensor = ivalue.toTensor();
       // Write it to the tensor table
-      return uint64_t(serializer_.addTensor(tensor));
+      push(OpCode::GLOBAL);
+
+      return uint64_t(serializer_.addTensor(ivalue.toTensor()));
     } else if (ivalue.isBlob()) {
       AT_ERROR("Unsupported IValue type for pickling (Blob)");
     } else if (ivalue.isTuple()) {
       pushTuple(ivalue);
     } else if (ivalue.isDouble()) {
-      // TODO: flip endianness for valid pickle
-      double value = ivalue.toDouble();
-      AT_ASSERT(sizeof(double) == 8);
-      char bytes[8];
-      double* bytes_as_double = reinterpret_cast<double*>(bytes);
-      *bytes_as_double = value;
-
-      push(OpCode::BINFLOAT);
-      for (size_t i = 0; i < sizeof(bytes); ++i) {
-        push(bytes[sizeof(bytes) - i - 1]);
-      }
+      pushDouble(ivalue);
     } else if (ivalue.isFuture()) {
       AT_ERROR("Unsupported IValue type for pickling (Future)");
     } else if (ivalue.isInt()) {
@@ -738,13 +728,7 @@ public:
     } else if (ivalue.isIntList()) {
       AT_ERROR("Unsupported IValue type for pickling (IntList)");
     } else if (ivalue.isString()) {
-      auto string = ivalue.toStringRef();
-
-      push(OpCode::BINUNICODE);
-      push(uint32_t(string.size()));
-      stack_.insert(stack_.end(), string.begin(), string.end());
-
-      push(OpCode::BINPUT, memo_id++);
+      pushString(ivalue);
     } else if (ivalue.isDoubleList()) {
       AT_ERROR("Unsupported IValue type for pickling (DoubleList)");
     } else if (ivalue.isBoolList()) {
@@ -769,6 +753,29 @@ public:
   }
 
 private:
+  void pushString(const IValue& ivalue) {
+    auto string = ivalue.toStringRef();
+
+    push(OpCode::BINUNICODE);
+    push(uint32_t(string.size()));
+    stack_.insert(stack_.end(), string.begin(), string.end());
+
+    push(OpCode::BINPUT, memo_id++);
+  }
+
+  void pushDouble(const IValue& ivalue) {
+    double value = ivalue.toDouble();
+    AT_ASSERT(sizeof(double) == 8);
+    char bytes[8];
+    double* bytes_as_double = reinterpret_cast<double*>(bytes);
+    *bytes_as_double = value;
+
+    push(OpCode::BINFLOAT);
+    for (size_t i = 0; i < sizeof(bytes); ++i) {
+      push(bytes[sizeof(bytes) - i - 1]);
+    }
+  }
+
   void pushDict(const IValue& ivalue) {
     auto dict = ivalue.toGenericDictRef();
 
@@ -852,72 +859,6 @@ private:
   // and only memoize those)
   uint8_t memo_id = 0;
 };
-
-// uint64_t ScriptModuleSerializer::writeIValue(
-//     const IValue& ivalue,
-//     std::vector<char>& data) {
-//   // if (ivalue.isPtrType()) {
-//   //   if (ivalue.isString()) {
-//   //     auto ptr = ivalue.toString().get();
-//   //     auto entry = written_ivalues_.find(ptr);
-//   //     if (entry != written_ivalues_.end()) {
-//   //       return entry->second;
-//   //     }
-//   //   }
-//   //   // TODO: support other types
-//   // }
-//   // Write IValue into array as bytes, return pointer to start of data for the
-//   // IValue. This may be anywhere in 'data' (i.e. if the IValue contains other)
-//   // IValues, it will also write those
-//   uint64_t ivalue_offset = data.size();
-//   data.reserve(data.size() + estimateIValueSize(ivalue));
-//   static memo_id = 0;
-//
-//   if (ivalue.isString()) {
-//     auto string = ivalue.toStringRef();
-//
-//     pushValue(opcode::BINUNICODE, data);
-//     pushValue(uint32_t(string.size()), data);
-//     data.insert(data.end(), string.begin(), string.end());
-//
-//     pushValue(opcode::BINPUT, data);
-//     pushValue(uint8_t(memo_id++), data);
-//
-//     // String length
-//     // pushValue(uint64_t(string.size()), data);
-//     // String data
-//
-//     // Don't store the same ivalue multiple times
-//     // written_ivalues_[ivalue.toString().get()] = ivalue_offset;
-//   } else if (ivalue.isGenericDict()) {
-//     auto dict = ivalue.toGenericDictRef();
-//
-//     pushValue(opcode::EMPTY_DICT, data);
-//     pushValue(opcode::BINPUT, data);
-//     pushValue(uint8_t(memo_id++), data);
-//
-//     pushValue(opcode::MARK, data);
-//
-//     for (auto pair : dict) {
-//       writeIValue(pair.first, data);
-//       writeIValue(pair.second, data);
-//     }
-//
-//     pushValue(opcode::SETITEMS, data);
-//   } else if (ivalue.isTensor()) {
-//     AT_ASSERT(false);
-//     auto tensor = ivalue.toTensor();
-//     // Write it to the tensor table
-//     return uint64_t(addTensor(tensor));
-//   } else if (ivalue.isInt()) {
-//     AT_ASSERT(false);
-//     return pushValue(ivalue.toInt(), data);
-//   } else {
-//     AT_ERROR("Cannot write data for ivalue");
-//   }
-//
-//   return ivalue_offset;
-// }
 
 void ScriptModuleSerializer::convertModule(
     const script::Module& module,

@@ -149,7 +149,7 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
 
 struct Depickler {
   Depickler(void* data, uint64_t size)
-      : bytes_(static_cast<const uint8_t*>(data)), size_(size) {}
+      : bytes_(static_cast<const uint8_t*>(data)), end_ptr_(bytes_ + size) {}
 
   const std::vector<IValue>& get_ivalue_list() {
     run();
@@ -171,22 +171,11 @@ private:
     var = *data;
   }
 
-  // template <typename T>
-  // static void* read<T>() {
-  //   // auto index = pushBytes(sizeof(T));
-  //   // T* ptr = reinterpret_cast<T*>(&stack_[index]);
-  //   // *ptr = value;
-  //   // return index;
-  //   void* data = reinterpret_cast<void*>(bytes_);
-  //   bytes_ += sizeof(T);
-  //   return *data;
-  // }
-
   double readBinfloat() {
-    AT_ASSERT(sizeof(double) == 0)
+    AT_ASSERT(sizeof(double) == 8)
     char float_data[8];
 
-    // Pickle floats are big endian
+    // Pickle floats are big endian, so reverse the bytes
     for(size_t i = 0; i < 8; ++i) {
       float_data[i] = bytes_[8 - 1 - i];
     }
@@ -195,25 +184,18 @@ private:
     return *(reinterpret_cast<double*>(float_data));
   }
 
-  uint32_t readInt32() {
-    return 23;
-  }
-
   void run() {
-    while (1) {
+    while (bytes_ < end_ptr_) {
       uint8_t b = readByte();
       OpCode op = static_cast<OpCode>(b);
-      std::cout << "Doing OP: [" << static_cast<char>(op) << "]\n";
       switch (op) {
         case OpCode::PROTO: {
-          uint32_t version = readByte();
-          std::cout << "pickle protocol = " << version << "\n";
+          // Pickle protocol version, unused
+          readByte();
           break;
         }
         case OpCode::EMPTY_LIST: {
-          // generic list issue: we do not know what kind of list to create
-          // can possible use some fake classes like IntList to make it still
-          // loadable in python
+          // TODO: Use fake classes to mark list specializations
           stack_.push_back(std::vector<IValue>());
           break;
         }
@@ -229,10 +211,12 @@ private:
           marks_.push_back(stack_.size());
           break;
         }
-        // case OpCode::BININT1: {
-        //   stack_.push_back(uint64_t(readByte()));
-        //   break;
-        // }
+        case OpCode::BININT: {
+          uint32_t value;
+          read(value);
+          stack_.push_back(int64_t(value));
+          break;
+        }
         case OpCode::BINUNICODE: {
           uint32_t length;
           read(length);
@@ -255,19 +239,12 @@ private:
         case OpCode::EMPTY_DICT:
           stack_.push_back(c10::ivalue::UnorderedMap());
           break;
-        // case OpCode::SHORT_BINSTRING: {
-        //   size_t size = readByte();
-        //   stack_.push_back(readString(size));
-        // } break;
-        case OpCode::BININT:
-          // stack_.push_back(readInt32());
-          break;
         case OpCode::APPENDS: {
           size_t start = marks_.back();
           marks_.pop_back();
-          auto gl = stack_[start - 1].toGenericList();
-          gl->elements().insert(
-              gl->elements().end(), stack_.begin() + start, stack_.end());
+          auto list = stack_[start - 1].toGenericList();
+          list->elements().insert(
+              list->elements().end(), stack_.begin() + start, stack_.end());
           stack_.resize(start);
         } break;
         case OpCode::SETITEMS: {
@@ -285,9 +262,12 @@ private:
         case OpCode::STOP:
           return;
         default:
-          std::cout << "UNKNOWN OPCODE " << "\n";
-          // return;
+          AT_ERROR("Unknown opcode for unpickling");
       }
+    }
+
+    if (bytes_ >= end_ptr_) {
+      AT_ERROR("Overran buffer while unpickling data, didn't find STOP opcode");
     }
   }
 
@@ -295,7 +275,7 @@ private:
   std::vector<IValue> memo_;
   std::vector<size_t> marks_;
   const uint8_t* bytes_;
-  uint64_t size_;
+  const uint8_t* end_ptr_;
 }; // namespace
 
 void ScriptModuleDeserializer::loadAttributeTable(
@@ -311,63 +291,15 @@ void ScriptModuleDeserializer::loadAttributeTable(
   Depickler depickler(attributes_ptr.get(), attributes_size);
   auto& attribute_list = depickler.get_ivalue_list();
   AT_ASSERT(attribute_list.size() == size_t(module_def->attributes_size()));
-
-  for (auto ival : attribute_list) {
-    std::cout << "IVALUE: " << ival << "\n";
-  }
   size_t index = 0;
+  for (auto a : attribute_list) {
+    std::cout << "IValue: " << a << "\n";
+  }
   for (const torch::AttributeDef& attribute_def : module_def->attributes()) {
     auto type = script::parseType(attribute_def.type());
     attribute_table_[attribute_def.name()] =
         std::make_pair(type, attribute_list[index++]);
   }
-}
-
-/// Loads an IValue from a byte array
-///
-/// @param byte_offset the offset into the data array (as bytes) where the
-///                    IValue begins
-/// @param type the jit type of the IValue to be de-serialized
-/// @return storage_ptr the data itself
-IValue ScriptModuleDeserializer::loadIValue(
-    uint64_t byte_offset,
-    const TypePtr type,
-    const at::DataPtr& storage_ptr) {
-  const char* bytes = static_cast<const char*>(storage_ptr.get()) + byte_offset;
-
-  if (auto dict_type = type->cast<DictType>()) {
-    const uint64_t* data = reinterpret_cast<const uint64_t*>(bytes);
-    // A byte offset into bytes that says where the mappings of key pointers
-    // to value pointers start
-    uint64_t dict_pairs_byte_offset = data[0];
-
-    // Number of key value pairs in the dict
-    uint64_t num_dict_entries = data[1];
-
-    c10::ivalue::UnorderedMap result;
-    const uint64_t* dict_data =
-        reinterpret_cast<const uint64_t*>(bytes + dict_pairs_byte_offset);
-
-    // Load each key/value pair and store the result
-    for (size_t i = 0; i < num_dict_entries * 2; i += 2) {
-      auto k =
-          loadIValue(dict_data[i + 0], dict_type->getKeyType(), storage_ptr);
-      auto v =
-          loadIValue(dict_data[i + 1], dict_type->getValueType(), storage_ptr);
-      result[k] = v;
-    }
-    return result;
-  } else if (auto string_type = type->cast<StringType>()) {
-    const uint64_t* length_ptr = reinterpret_cast<const uint64_t*>(bytes);
-    const char* characters = reinterpret_cast<const char*>(length_ptr + 1);
-    return std::string(characters, /*n=*/length_ptr[0]);
-  } else if (auto tensor_type = type->cast<TensorType>()) {
-    return tensor_table_.at(byte_offset);
-  } else if (auto int_type = type->cast<IntType>()) {
-    return reinterpret_cast<const int64_t*>(bytes)[0];
-  }
-  // TODO: types other than dict and string
-  AT_ERROR("Unknown type for de-serialization:", type->python_str());
 }
 
 at::Tensor ScriptModuleDeserializer::loadTensor(
