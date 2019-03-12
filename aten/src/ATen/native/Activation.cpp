@@ -150,7 +150,7 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
 
   // case1: shared weight for all channels
   if (weight_num == 1) {
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "prelu_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "prelu_cpu", [&] {
       prelu_cpu_kernel_share_weights<scalar_t>(result, input, weight);
     });
   }
@@ -171,7 +171,7 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
       "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
       " and channel size = ", channel_size, ".");
 
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "prelu_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "prelu_cpu", [&] {
       prelu_cpu_kernel_multi_weights<scalar_t>(
         result,
         input,
@@ -277,7 +277,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
 
   // case1: shared parameter for all channels
   if (weight_num == 1) {
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "prelu_backward_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "prelu_backward_cpu", [&] {
       prelu_cpu_backward_kernel_share_weights<scalar_t>(input, weight, grad_out, input_grad, weight_grad);
     });
   }
@@ -298,7 +298,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
       "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
       " and channel size = ", channel_size, ".");
 
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "prelu_backward_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "prelu_backward_cpu", [&] {
       prelu_cpu_backward_kernel_multi_weights<scalar_t>(
         input,
         weight,
@@ -326,7 +326,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
 // -----------------------------------
 Tensor hardshrink_cpu(const Tensor & self, Scalar lambd) {
   auto out_tensor = at::empty_like(self);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "hardshrink_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "hardshrink_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
     at::CPU_tensor_apply2<scalar_t, scalar_t>(
       self,
@@ -342,7 +342,7 @@ Tensor hardshrink_cpu(const Tensor & self, Scalar lambd) {
 
 Tensor hardshrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar lambd) {
   auto out_tensor = at::empty_like(self);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "hardshrink_backward_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "hardshrink_backward_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
     at::CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
       self,

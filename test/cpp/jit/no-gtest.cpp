@@ -1,5 +1,6 @@
 #include <test/cpp/jit/test_alias_analysis.h>
 #include <test/cpp/jit/test_constant_pooling.h>
+#include <test/cpp/jit/test_class_parser.h>
 #include <test/cpp/jit/test_irparser.h>
 #include <test/cpp/jit/test_misc.h>
 #include <test/cpp/jit/test_netdef_converter.h>
@@ -7,6 +8,7 @@
 #include <sstream>
 #include <string>
 
+using namespace torch::jit::script;
 namespace torch {
 namespace jit {
 void runJITCPPTests() {
@@ -45,6 +47,7 @@ void runJITCPPTests() {
   testNetDefConverter();
   testIRParser();
   testConstantPooling();
+  testClassParser();
 }
 
 } // namespace jit

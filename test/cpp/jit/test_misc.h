@@ -1016,7 +1016,7 @@ bool isEqual(const CompleteArgumentInfo& ti, const autograd::Variable& v) {
   if (!ti.defined())
     return ti.defined() == v.defined();
   return ti.device() == device(v) && ti.requires_grad() == v.requires_grad() &&
-      ti.type() == v.type().scalarType() && isEqual(ti.sizes(), v.sizes()) &&
+      ti.type() == v.scalar_type() && isEqual(ti.sizes(), v.sizes()) &&
       isEqual(ti.strides(), v.strides());
 }
 
@@ -1182,7 +1182,7 @@ const auto cf_examples = R"JIT(
 void testControlFlow() {
   auto cu = std::make_shared<script::Module>();
   script::defineMethodsInModule(
-      cu, cf_examples, script::nativeResolver, nullptr);
+      cu, cf_examples, script::nativeResolver, c10::nullopt);
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
     auto graph = cu->get_method(name).graph();
     Code code(graph);

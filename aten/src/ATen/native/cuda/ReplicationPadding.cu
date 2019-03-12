@@ -235,7 +235,7 @@ void replication_pad1d_out_cuda_template(
 
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.type(), "replication_pad1d", [&] {
+      input.scalar_type(), "replication_pad1d_cuda", [&] {
 
 
       if (numInputDims == 2) {
@@ -306,7 +306,7 @@ void replication_pad1d_backward_out_cuda_template(
   gradInput.zero_();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.type(), "replication_pad1d_backward", [&] {
+      input.scalar_type(), "replication_pad1d_backward_cuda", [&] {
 
       auto gradInput_ = gradInput;
       auto gradOutput_ = gradOutput;
@@ -372,7 +372,7 @@ void replication_pad2d_out_cuda_template(
       " Calculated output H: ", outputH, " W: ", outputW);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.type(), "replication_pad2d", [&] {
+      input.scalar_type(), "replication_pad2d_cuda", [&] {
 
 
       if (numInputDims == 3) {
@@ -403,7 +403,7 @@ void replication_pad2d_out_cuda_template(
         dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
         replication_pad_forward_kernel2d <<<gridSize, blockSize, 0,
-                                       at::cuda::getCurrentCUDAStream()>>>(devInput, devOutput, 
+                                       at::cuda::getCurrentCUDAStream()>>>(devInput, devOutput,
                                            padT, padB, padL, padR);
       }
       }
@@ -427,7 +427,7 @@ void replication_pad2d_backward_out_cuda_template(
   int padL = paddingSize[0];
   int padR = paddingSize[1];
   int padT = paddingSize[2];
-  int padB = paddingSize[3]; 
+  int padB = paddingSize[3];
   int planeDim = 0;
   int dimh = 1;
   int dimw = 2;
@@ -454,7 +454,7 @@ void replication_pad2d_backward_out_cuda_template(
   gradInput.zero_();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.type(), "replication_pad2d_backward", [&] {
+      input.scalar_type(), "replication_pad2d_backward_cuda", [&] {
 
         auto gradInput_ = gradInput;
         auto gradOutput_ = gradOutput;
@@ -483,7 +483,7 @@ static inline void shapeCheck3d(
     int pleft, int pright,
     int ptop, int pbottom,
     int pfront, int pback) {
-  AT_CHECK(at::cuda::detail::canUse32BitIndexMath(input), 
+  AT_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
       "input tensor must fit into 32-bit index math");
   int numInputDims = input.dim();
 
@@ -521,7 +521,7 @@ static inline void shapeAndGradOutputCheck3d(
     int pleft, int pright,
     int ptop, int pbottom,
     int pfront, int pback) {
-  AT_CHECK(at::cuda::detail::canUse32BitIndexMath(input), 
+  AT_CHECK(at::cuda::detail::canUse32BitIndexMath(input),
       "input tensor must fit into 32-bit index math");
   int numInputDims = input.dim();
 
@@ -579,7 +579,7 @@ void replication_pad3d_out_cuda_template(
   int ptop = paddingSize[2];
   int pbottom = paddingSize[3];
   int pfront = paddingSize[4];
-  int pback = paddingSize[5]; 
+  int pback = paddingSize[5];
   shapeCheck3d(input, pleft, pright, ptop,
       pbottom, pfront, pback);
 
@@ -608,7 +608,7 @@ void replication_pad3d_out_cuda_template(
   int outputW  = inputW + pleft + pright;
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.type(), "replication_pad3d", [&] {
+      input.scalar_type(), "replication_pad3d_cuda", [&] {
 
       if (numInputDims == 4) {
         output.resize_({numPlanes, outputD, outputH, outputW});
@@ -660,7 +660,7 @@ void replication_pad3d_backward_out_cuda_template(
   int ptop = paddingSize[2];
   int pbottom = paddingSize[3];
   int pfront = paddingSize[4];
-  int pback = paddingSize[5]; 
+  int pback = paddingSize[5];
   shapeAndGradOutputCheck3d(input, gradOutput, pleft, pright, ptop,
       pbottom, pfront, pback);
 
@@ -681,7 +681,7 @@ void replication_pad3d_backward_out_cuda_template(
   gradInput.zero_();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.type(), "replication_pad3d_backward", [&] {
+      input.scalar_type(), "replication_pad3d_backward_cuda", [&] {
 
       auto gradInput_ = gradInput;
       auto gradOutput_ = gradOutput;

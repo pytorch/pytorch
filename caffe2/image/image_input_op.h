@@ -7,14 +7,14 @@
 #include <iostream>
 #include <algorithm>
 
+#include "c10/core/thread_pool.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/db.h"
+#include "caffe2/image/transform_gpu.h"
+#include "caffe2/operators/prefetch_op.h"
 #include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/utils/cast.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/utils/thread_pool.h"
-#include "caffe2/operators/prefetch_op.h"
-#include "caffe2/image/transform_gpu.h"
 
 namespace caffe2 {
 

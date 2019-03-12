@@ -133,7 +133,7 @@ TH_API void THTensor_(eqTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 
 TH_API void THTensor_(pow)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(tpow)(THTensor *r_, scalar_t value, THTensor *t);
-
+TH_API scalar_t THTensor_(powOne)(scalar_t x, scalar_t y);
 TH_API void THTensor_(abs)(THTensor *r_, THTensor *t);
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
