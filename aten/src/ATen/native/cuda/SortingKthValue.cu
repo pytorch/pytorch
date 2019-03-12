@@ -27,7 +27,6 @@ namespace native {
 
 namespace {
 
-
 template <typename scalar_t, typename index_t, int Dim>
 __global__ void gatherKthValue(
     cuda::detail::TensorInfo<scalar_t, index_t> input,
@@ -82,7 +81,7 @@ __global__ void gatherKthValue(
     bool inRange = (i < inputSliceSize);
     scalar_t v = inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride])
                          : static_cast<scalar_t>(0);
-    bool isKValue = inRange && (THCNumerics<scalar_t>::eq(v, kValue));
+    bool isKValue = inRange && THCNumerics<scalar_t>::eq_with_nan(v, kValue);
 
     if (isKValue) {
       kValueIndex = i;

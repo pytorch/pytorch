@@ -4048,9 +4048,10 @@ class _TestTorchMixin(object):
         self.assertEqual(top1, top2)
         self.assertEqual(idx1, idx2)
 
-    def test_kthvalue(self):
+    @staticmethod
+    def _test_kthvalue(self, device='cpu'):
         SIZE = 50
-        x = torch.rand(SIZE, SIZE, SIZE)
+        x = torch.rand(SIZE, SIZE, SIZE, device=device)
         x0 = x.clone()
 
         k = random.randint(1, SIZE)
@@ -4061,8 +4062,8 @@ class _TestTorchMixin(object):
         self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], 0)
         # test use of result tensors
         k = random.randint(1, SIZE)
-        res1val = torch.Tensor()
-        res1ind = torch.LongTensor()
+        res1val = torch.tensor([], device=device)
+        res1ind = torch.tensor([], dtype=torch.long, device=device)
         torch.kthvalue(x, k, keepdim=False, out=(res1val, res1ind))
         res2val, res2ind = torch.sort(x)
         self.assertEqual(res1val[:, :], res2val[:, :, k - 1], 0)
@@ -4088,9 +4089,23 @@ class _TestTorchMixin(object):
         self.assertEqual(x, x0, 0)
 
         # simple test case (with repetitions)
-        y = torch.Tensor((3, 5, 4, 1, 1, 5))
+        y = torch.tensor((3., 5, 4, 1, 1, 5), device=device)
         self.assertEqual(torch.kthvalue(y, 3)[0], 3, 0)
         self.assertEqual(torch.kthvalue(y, 2)[0], 1, 0)
+
+        # simple test case (with NaN)
+        SIZE = 50
+        x = torch.rand(SIZE, SIZE, SIZE, device=device)
+        x[torch.arange(SIZE), :, torch.randint(50, (50,))] = nan
+        ks = [random.randint(1, SIZE), 1, SIZE, SIZE - 1]
+        res2val, res2ind = torch.sort(x)
+        for k in ks:
+            res1val, res1ind = torch.kthvalue(x, k, keepdim=False)
+            self.assertEqual(res1val[:, :], res2val[:, :, k - 1], 0)
+            self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], 0)
+
+    def test_kthvalue(self):
+        self._test_kthvalue(self)
 
     def test_median(self):
         for size in (155, 156):
