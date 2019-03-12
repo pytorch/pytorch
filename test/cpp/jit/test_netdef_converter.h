@@ -24,7 +24,7 @@ static caffe2::OperatorDef createOperator(
   return op;
 }
 
-void testNetDefConverter(std::ostream& out = std::cout) {
+void testNetDefConverter() {
   {
     // Check a simple net conversion back and forth.
 

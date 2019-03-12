@@ -147,7 +147,8 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
   } else if (value_->type()->kind() == TypeKind::ListType) {
     if (!size_hint) {
       throw ErrorReport(loc)
-          << "cannot statically infer the expected size of a list in this context";
+          << "cannot statically infer the expected size of a "
+          << "list in this context";
     }
     auto graph = value_->owningGraph();
     Node* unpack =
@@ -162,21 +163,30 @@ void SimpleValue::setAttr(
     const SourceRange& loc,
     Method& m,
     const std::string& field,
-    Value* newValue,
-    bool shouldDefine) {
+    Value* newValue) {
   const auto classType = value_->type()->cast<ClassType>();
   if (!classType) {
     throw ErrorReport(loc) << "Tried to set an attribute: " << field
                            << " on a non-class: " << value_->type()->str();
   }
-
   auto expectedType = classType->getAttribute(field);
   if (!expectedType) {
-    // We don't have an attribute with this name, either add it to the type
-    // definition or throw an error
-    if (shouldDefine) {
+    // If we are still compiling the __init__ method for this class, then
+    // setting an unknown attribute adds it to the class's definition.
+
+    // We are initializing if:
+    const auto isInitializing =
+        // 1. The method we're currently inserting into is an init method
+        m.name() == "__init__" &&
+        // 2. The `self` arg matches this value's type (i.e. we are in the init
+        // method for this class, not some other class)
+        !m.graph()->inputs().empty() &&
+        m.graph()->inputs().at(0)->type() == classType;
+
+    if (isInitializing) {
       classType->addAttribute(field, newValue->type());
       expectedType = newValue->type();
+
       const auto insertPoint = m.graph()->insertPoint();
       const auto topLevelBlock = m.graph()->block();
       if (insertPoint->owningBlock() != topLevelBlock) {
@@ -190,6 +200,8 @@ void SimpleValue::setAttr(
           << ". Did you forget to initialize it in __init__()?";
     }
   }
+
+  AT_ASSERT(expectedType);
 
   // Check type correctness
   const auto newType = newValue->type();

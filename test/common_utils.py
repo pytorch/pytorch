@@ -403,23 +403,29 @@ class TestCase(expecttest.TestCase):
                         b = b.to(a.dtype).to(a.device)
                     else:
                         b = b.to(a)
-                    diff = a - b
-                    if a.is_floating_point():
-                        # check that NaNs are in the same locations
-                        nan_mask = torch.isnan(a)
-                        self.assertTrue(torch.equal(nan_mask, torch.isnan(b)), message)
-                        diff[nan_mask] = 0
-                        # inf check if allow_inf=True
-                        if allow_inf:
-                            inf_mask = torch.isinf(a)
-                            inf_sign = inf_mask.sign()
-                            self.assertTrue(torch.equal(inf_sign, torch.isinf(b).sign()), message)
-                            diff[inf_mask] = 0
-                    # TODO: implement abs on CharTensor (int8)
-                    if diff.is_signed() and diff.dtype != torch.int8:
-                        diff = diff.abs()
-                    max_err = diff.max()
-                    self.assertLessEqual(max_err, prec, message)
+
+                    if x.dtype == torch.bool and y.dtype == torch.bool:
+                        self.assertEqual(x.tolist(), y.tolist())
+                    elif x.dtype == torch.bool or y.dtype == torch.bool:
+                        raise TypeError("Was expecting both tensors to be bool type.")
+                    else:
+                        diff = a - b
+                        if a.is_floating_point():
+                            # check that NaNs are in the same locations
+                            nan_mask = torch.isnan(a)
+                            self.assertTrue(torch.equal(nan_mask, torch.isnan(b)), message)
+                            diff[nan_mask] = 0
+                            # inf check if allow_inf=True
+                            if allow_inf:
+                                inf_mask = torch.isinf(a)
+                                inf_sign = inf_mask.sign()
+                                self.assertTrue(torch.equal(inf_sign, torch.isinf(b).sign()), message)
+                                diff[inf_mask] = 0
+                        # TODO: implement abs on CharTensor (int8)
+                        if diff.is_signed() and diff.dtype != torch.int8:
+                            diff = diff.abs()
+                        max_err = diff.max()
+                        self.assertLessEqual(max_err, prec, message)
             super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
