@@ -114,14 +114,13 @@ TEST_F(SequentialTest, PushBackAddsAnElement) {
   sequential->push_back(M(2));
   ASSERT_EQ(sequential->size(), 3);
 
-  // Test named submodules
+  // Mix named and unnamed submodules
   Sequential sequential_named;
   ASSERT_EQ(sequential_named->size(), 0);
   ASSERT_TRUE(sequential_named->is_empty());
 
-  sequential_named->push_back({"linear1", Linear(3, 4)});
+  sequential_named->push_back(Linear(3, 4));
   ASSERT_EQ(sequential_named->size(), 1);
-  ASSERT_EQ(sequential_named->named_children()[0].key(), "linear1");
   sequential_named->push_back({std::string("linear2"), Linear(3, 4)});
   ASSERT_EQ(sequential_named->size(), 2);
   ASSERT_EQ(sequential_named->named_children()[1].key(), "linear2");
@@ -129,13 +128,11 @@ TEST_F(SequentialTest, PushBackAddsAnElement) {
   sequential_named->push_back({"shared_m1", std::make_shared<M>(1)});
   ASSERT_EQ(sequential_named->size(), 3);
   ASSERT_EQ(sequential_named->named_children()[2].key(), "shared_m1");
-  sequential_named->push_back({std::string("shared_m2"), std::make_shared<M>(1)});
+  sequential_named->push_back(std::make_shared<M>(1));
   ASSERT_EQ(sequential_named->size(), 4);
-  ASSERT_EQ(sequential_named->named_children()[3].key(), "shared_m2");
 
-  sequential_named->push_back({"m1", M(1)});
+  sequential_named->push_back(M(1));
   ASSERT_EQ(sequential_named->size(), 5);
-  ASSERT_EQ(sequential_named->named_children()[4].key(), "m1");
   sequential_named->push_back({std::string("m2"), M(1)});
   ASSERT_EQ(sequential_named->size(), 6);
   ASSERT_EQ(sequential_named->named_children()[5].key(), "m2");
