@@ -1,9 +1,9 @@
-#include <torch/csrc/jit/passes/python_print.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
+#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
@@ -1022,6 +1022,7 @@ struct PythonPrintPass {
       // following Python convention
       AT_ASSERT(true_inputs.size() > 0);
       out << useOf(*input_iter);
+      ++input_iter;
 
       AT_ASSERT(!defaults_offset->has_value());
       ++defaults_offset;
@@ -1108,8 +1109,7 @@ struct PythonPrintPass {
   void printMethod(
       script::Method& method,
       bool is_class,
-      const std::unordered_map<IValue*, QualifiedNamePtr>&
-          extra_ivalue_names) {
+      const std::unordered_map<IValue*, QualifiedNamePtr>& extra_ivalue_names) {
     std::vector<std::string> ivalue_names = fmap(
         method.initial_ivalues(),
         [&](IValue* slot) { return extra_ivalue_names.at(slot)->str(); });

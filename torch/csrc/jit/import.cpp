@@ -4,7 +4,7 @@
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/import_method.h>
+#include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 
@@ -147,7 +147,7 @@ void ScriptModuleDeserializer::loadLibs(torch::ModelDef* model_def) {
     size_t size;
     std::tie(data, size) = reader_.getRecord(lib_def.torchscript_arena().key());
     std::string data_str(static_cast<const char*>(data.get()), size);
-    import_libs(data_str, lib_def.optimize(), tensor_table_);
+    script::import_libs(data_str, lib_def.optimize(), tensor_table_);
   }
 }
 
@@ -247,7 +247,7 @@ void ScriptModuleDeserializer::convertModule(
     std::tie(data, size) =
         reader_.getRecord(module_def.torchscript_arena().key());
     std::string data_str(static_cast<const char*>(data.get()), size);
-    import_methods(module, data_str, tensor_table_);
+    script::import_methods(module, data_str, tensor_table_);
   }
 }
 
