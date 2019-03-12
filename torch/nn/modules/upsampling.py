@@ -132,7 +132,6 @@ class Upsample(Module):
 
     @weak_script_method
     def forward(self, input):
-        warnings.warn("nn.{} is deprecated. Use nn.functional.interpolate instead.".format(self.name))
         return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
 
     def extra_repr(self):
