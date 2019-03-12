@@ -148,15 +148,15 @@ test_api.exe --gtest_filter="-IntegrationTest.MNIST*"
 EOL
 
 run_tests() {
-    if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
+    if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
         $TMP_DIR/ci_scripts/test_python_nn.bat && \
         $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && \
         $TMP_DIR/ci_scripts/test_custom_script_ops.bat && \
         $TMP_DIR/ci_scripts/test_libtorch.bat
     else
-        if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
+        if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
             $TMP_DIR/ci_scripts/test_python_nn.bat
-        elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
+        elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
             $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && \
             $TMP_DIR/ci_scripts/test_custom_script_ops.bat && \
             $TMP_DIR/ci_scripts/test_libtorch.bat

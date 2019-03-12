@@ -796,7 +796,7 @@ class TestDistributions(TestCase):
         self.assertIsNotNone(cov.grad)
 
     def test_has_examples(self):
-        distributions_with_examples = set(e.Dist for e in EXAMPLES)
+        distributions_with_examples = {e.Dist for e in EXAMPLES}
         for Dist in globals().values():
             if isinstance(Dist, type) and issubclass(Dist, Distribution) \
                     and Dist is not Distribution and Dist is not ExponentialFamily:
@@ -2210,7 +2210,7 @@ class TestDistributions(TestCase):
 
     def test_independent_shape(self):
         for Dist, params in EXAMPLES:
-            for i, param in enumerate(params):
+            for param in params:
                 base_dist = Dist(**param)
                 x = base_dist.sample()
                 base_log_prob_shape = base_dist.log_prob(x).shape
@@ -3078,6 +3078,7 @@ class TestKL(TestCase):
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         lognormal = pairwise(LogNormal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
+        independent = (Independent(normal[0], 1), Independent(normal[1], 1))
         onehotcategorical = pairwise(OneHotCategorical, [[0.4, 0.3, 0.3],
                                                          [0.2, 0.7, 0.1],
                                                          [0.33, 0.33, 0.34],
@@ -3127,6 +3128,7 @@ class TestKL(TestCase):
             (gumbel, gumbel),
             (gumbel, normal),
             (halfnormal, halfnormal),
+            (independent, independent),
             (laplace, laplace),
             (lognormal, lognormal),
             (laplace, normal),
@@ -4147,7 +4149,7 @@ class TestValidation(TestCase):
 
     def test_valid(self):
         for Dist, params in EXAMPLES:
-            for i, param in enumerate(params):
+            for param in params:
                 Dist(validate_args=True, **param)
 
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
