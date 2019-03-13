@@ -2357,14 +2357,17 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_kthvalue(self, device='cuda')
 
     @skipIfRocm
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_btrifact(self):
         _TestTorchMixin._test_btrifact(self, lambda t: t.cuda())
 
     @skipIfRocm
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_btrisolve(self):
         _TestTorchMixin._test_btrisolve(self, lambda t: t.cuda())
 
     @skipIfRocm
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_btriunpack(self):
         _TestTorchMixin._test_btriunpack(self, lambda t: t.cuda())
 
