@@ -55,7 +55,7 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
 call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
-    call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf
+    call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf numba
 )
 pip install -q ninja future hypothesis "librosa>=0.6.2" psutil
 
@@ -71,6 +71,9 @@ set CUDNN_LIB_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\l
 set CUDA_TOOLKIT_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 set CUDNN_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 set PYTHONPATH=%TMP_DIR_WIN%\\build;%PYTHONPATH%
+set NUMBAPRO_CUDALIB=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\bin
+set NUMBAPRO_LIBDEVICE=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\nvvm\\libdevice
+set NUMBAPRO_NVVM=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\nvvm\\bin\\nvvm64_32_0.dll
 
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     cd %TMP_DIR_WIN%\\build
