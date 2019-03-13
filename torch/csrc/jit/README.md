@@ -1,5 +1,4 @@
-JIT Technical Overview
-======================
+# JIT Technical Overview
 
 The JIT can run and optimize PyTorch programs separate from the Python interpreter. This overview is organized into sections that go over different independent components:
 
@@ -13,11 +12,10 @@ For concepts that are actual classes in the JIT, we use capitalized words, e.g. 
 
 Sections start with a reference to the source file where the code related to the section resides.
 
-Core Program Representation
+# Core Program Representation
 ---------------------------
 
-
-### Modules ###
+## Modules ##
 
 [script/module.h](script/module.h)
 
@@ -29,13 +27,13 @@ At the top level, all TorchScript programs are represented as a Module. Modules 
 
 This mirrors the `nn.Module` objects used in Python. All TorchScript code is a member of some module. This includes pure functions such as those created by annotating a Python function with `@torch.jit.script`, which are represented internally as a Module that has a single method `forward` that contains the implementation of the function.
 
-### Parameters ###
+## Parameters ##
 
 [script/module.h](script/module.h)
 
 Modules contain Parameter objects, which simply hold a "slot" where a Tensor can be placed. These tensors are accessible by the Methods of the Module or the parent Module.
 
-### Method ###
+## Method ##
 
 [script/module.h](script/module.h)
 
@@ -45,13 +43,13 @@ The Graph inside the Method is a pure function. The Parameters used by the Metho
 
 Methods also contain helper functions for inserting calls to the Method from other Method objects.
 
-### FunctionSchema ###
+## FunctionSchema ##
 
 [aten/src/ATen/core/function_schema.h](../../../aten/src/ATen/core/function_schema.h)
 
 Each Method has a FunctionSchema that describes the Types of the arguments and return values of a function. Operators (builtin primitives that are called by the Interpreter) also have FunctionSchema. FunctionSchema are analogous to a function _declaration_ in C++. They describe how to call the function but do not provide an implementation.
 
-### Graph ###
+## Graph ##
 
 [ir.h](ir.h)
 
@@ -101,7 +99,7 @@ Graphs in the JIT are in single-static assignment (SSA) form, meaning that each 
 
 Because Graph owns all its Nodes, Values, and Blocks, these values are always passed around by raw pointer. Generally developers should not write code that holds Value, Node, or Block objects indefinitely without also holding a shared_ptr to their owning Graph.
 
-### Node ###
+## Node ##
 
 [ir.h](ir.h)
 
@@ -134,7 +132,7 @@ Each node also has a set of of attributes which are named integers, strings, flo
 
 Attributes are _rarely used_. Operators like convolution or matrix-multiply have no attributes and take of their arguments through the input list. This includes things that might be typically through of as constants, like the stride of the convolution. In PyTorch, any of this information is potentially a dynamic property of the program so Nodes are always encoded in a way that allows these values to be dynamically determined. However, we recognize that many inputs are almost always constants, so we make it easy to quickly check if an input is constant and get its value with `c10::optional<IValue> Node::get(Symbol name)`, which returns an IValue (a concrete value for the input) in the case the node is constant and `nullopt` otherwise.
 
-### Block ###
+## Block ##
 
 [ir.h](ir.h)
 
@@ -153,7 +151,7 @@ Block also contain a list if input and output values. The meaning of these value
 
 **Control-flow** is represented with using sub-blocks rather than a control-flow graph representation. A `prim::If` has one block for the true branch and one block for the else.A `prim:Loop` has a block for the loop body (there is no condition block, instead the end of the loop body computes whether to re-enter the loop body). This representation ensures we have structured control-flow. Currently TorchScript does not allow for early returns, breaking out of loops early. This limitation makes a lot of optimizations easier and is true for the vast majority of networks. Our frontend permits certain forms of syntax sugar that allow a limited amount of re-writing of if statements to avoid needing to support early returns. A Node can lookup what Block it is in, and a Block and can look up its parent (either the Node that has it as a subblock, or `nullptr` for the main Block).
 
-#### If ####
+### If ###
 For if-statements (`prim::If`) the Blocks have no inputs, and the outputs are the new values of variables in the outer block whose values were altered in an if-statement.
 Example IR for an if-statement looks like:
 ```
@@ -205,7 +203,7 @@ graph(%a : Dynamic
 
 The outputs of the if-statement serve a role similar to "phi" nodes in traditional SSA control-flow graphs.
 
-#### Loops ####
+### Loops ###
 Loops are implemented with `prim::Loop` which covers both `while` and `for` loops. A valid instantiation of this node always looks like this:
 ```
 %y_1, ..., %y_r = prim::Loop(%max_trip_count, %initial_condition, %x_1, ..., %x_r)
@@ -263,7 +261,7 @@ graph(%z.1 : Dynamic) {
 }
 ```
 
-### Value ###
+## Value ##
 
 [ir.h](ir.h)
 
@@ -274,7 +272,7 @@ Value objects have methods on them to from the Value to its definition (`v.node(
 Values are abstract representation of data in the program. When executing, the actual tensors, list, tuples, etc. are stored in IValues (_interpreter_ values), which are tagged unions of all possible values in TorchScript. In retrospect the name Value is a bit confusing because it seems like it should be the tagged union, but it originally came from analogy to `llvm::Value`, which serves the same purpose as `jit::Value`.
 
 
-### Type ###
+## Type ##
 
 [aten/src/ATen/core/jit_type.h](../../../aten/src/ATen/core/jit_type.h)
 
@@ -296,7 +294,7 @@ Generating Programs
 
 JIT programs are created using either the tracing frontend (`torch.jit.trace`) or the scripting frontend (`torch.jit.script`). In both cases, the result of these frontends is a complete Module that contains all the code in Methods, and all the model weights in the Parameters of the Module. However, each frontend goes through a different pathway for generating those Modules.
 
-### Tracer ###
+## Tracer ##
 
 
 [tracer.h](tracer.h)
@@ -343,13 +341,13 @@ The tracer has special behavior when tracing calls to other TorchScript function
 
 The resulting Graph created by tracing is installed as the 'forward' method of the Module being created. A Module is produced regardless of whether the thing being traced was a function or a `torch.nn.Module`. In the function case, the Module produced will simply have a single `forward` function, no Parameters, and no sub-Modules.
 
-### Script ###
+## Script ##
 
 The script frontend directly converts Python syntax into Modules. Like many compilers this happens in two phases. First, we generate an abstract syntax tree (AST), which is constructed out of Tree objects. The compiler (misnamed, but that is the name of the file) then does semantic analysis on the Tree and lowers it into a Module. We can generate Trees in two ways: (1) using frontend.py, which takes the Python AST and transliterates it into Tree objects, or (2) via the Lexer and Parser which parse python syntax directly.  The Lexer/Parser path may seem redundant but it is crucially important. We need to define builtin functions ([script/builtin_functions.py](script/builtin_functions.py)) when Python is not linked. We allow users to load TorchScript programs directly from strings without Python ([api/include/torch/jit.h](../../api/include/torch/jit.h)). We also use this Python syntax as the serialization format for TorchScript, since it allows us to make changes to our IR without breaking backward compatibility. Furthermore, the Lexer is reused to implement the FunctionSchema parser, which turns FunctionSchema declarations from strings into FunctionSchema objects.
 
 The following sections look into each the stages in the script frontend in detail.
 
-### Tree ###
+## Tree ##
 
 [script/tree.h](script/tree.h)
 
@@ -374,7 +372,7 @@ We provide utilities to construct, traverse, and print ASTs without a lot of com
 
 Each tree also has a mandatory SourceRange object that describes the range of text that it came from. These will be used for error reporting in the rest of the code.
 
-### Tree Views ###
+## Tree Views ##
 
 [script/tree_views.h](script/tree_views.h)
 
@@ -413,7 +411,7 @@ switch (tree.kind()) {
 
 ```
 
-### frontend.py ###
+## frontend.py ##
 
 [torch/jit/frontend.py](../../jit/frontend.py)
 
@@ -423,7 +421,7 @@ One way we construct Tree objects is directly from Python ASTs. This logic is co
 
 So this code simply constructs the Tree, filtering out the AST nodes of Python that we do not support.
 
-### Lexer ###
+## Lexer ##
 
 [script/lexer.h](script/lexer.h)
 
@@ -444,7 +442,7 @@ if
 
 We would get a token stream `TK_IF TK_NEWLINE TK_INDENT . TK_NEWLINE . TK_NEWLINE TK_DEDENT`. Unmatched opening brackets disable the injection of these tokens. The result is that the Parser can simply treat `TK_IDENT`, `TK_DEDENT` and `TK_NEWLINE` like C's `{`, `}`, and `;`.
 
-### Tokens ###
+## Tokens ##
 
 [script/lexer.h](script/lexer.h)
 
@@ -458,7 +456,7 @@ if (lexer.nextIf('+')) {
 
 Multi-character token kinds are defined in a list, `TC_FORALL_TOKEN_KINDS`. Tokens also have a `text()` field that records the actual string producing the token and is used by identifiers and literals to construct the actual values (e.g. the numeric value of a floating point literal).
 
-### Parser ###
+## Parser ##
 
 [script/parser.h](script/parser.h)
 
@@ -466,7 +464,7 @@ The Parser uses the Lexer to build a the AST for function definitions. `parseFun
 
 The Parser is written as a [top-down precedence parser](https://eli.thegreenplace.net/2010/01/02/top-down-operator-precedence-parsing), or "Pratt" parser.  They are simpler and easier to understand than typical parser generators, while still being flexible enough to parse programming languages. For the most part parsing is done by recursive decent. To resolve operator precedence issues, the function to parse an expression is augmented with a precedent _p_ such that calling the function means _parse an expression whose operators all have precedence higher than p_.
 
-### Compiler ###
+## Compiler ##
 
 [script/compiler.h](script/compiler.h)
 
@@ -476,7 +474,7 @@ A few helper objects exist in the lowering process.  SugaredValues are special v
 
 The Environment tracks the mapping between variable names and the SugaredValues they refer to.
 
-### SugaredValue ###
+## SugaredValue ##
 
 [script/sugared_value.h](script/sugared_value.h)
 
@@ -486,7 +484,7 @@ SugaredValues are also how we interact with Python runtime during the compilatio
 
 Finally, normal Values are also represented by the SimpleValue SugaredValue in places where it is valid either a SugaredValue or a normal Value to appear.
 
-### Resolver ###
+## Resolver ##
 
 [script/compiler.h](script/compiler.h)
 
@@ -496,13 +494,13 @@ Any undefined variable during compilation is resolved with a call to an external
 
 This makes it possible to use most of the compiler functionality when python is not present.
 
-### Environment ###
+## Environment ##
 
 [script/compiler.cpp](script/compiler.cpp)
 
 The Environment object tracks the assignment of variable names to SugaredValues during compilation. It is local to the compiler file. A stack of environments exist, with a new environment being created for sub-blocks introduced by control flow. The Environment also handles turning the AST representation into SSA-form by tracking which variables were modified inside a sub-block and inserting the correct inputs/outputs to the Blocks of if-statements and loops.
 
-### Python-Compiler Interaction ###
+## Python-Compiler Interaction ##
 
 [script/init.cpp](script/init.cpp)
 
@@ -515,7 +513,7 @@ Executing Programs
 TorchScript is executed using a interpreter attached to a JIT-optimizer and compiler. The entry-point for execution is the GraphExecutor object that is created on demand inside a Method when the method is first called. This section first goes over the semantics of graphs, i.e. what does it mean to execute a graph? And then details how the implementation works.
 
 
-### Evaluation Semantics ###
+## Evaluation Semantics ##
 
 TorchScript programs implement a very small subset of Python of that is necessary to run models.
 
@@ -578,7 +576,7 @@ Currently, the user is responsible for avoiding racing immutable operations betw
 Optimization passes that wish to exploit multi-threaded execution may automatically convert serial Blocks into parallel execution by inserting extra fork and wait events. This design enables our users to manually specify parallelism while also allowing optimization passes to exploit it when safe and profitable.
 
 
-### IValue ###
+## IValue ##
 
 [ivalue.h](../../include/ATen/core/ivalue.h)
 
@@ -586,7 +584,7 @@ All evaluation involves computation using IValues, a 16-byte tagged union that c
 
 IValue contains methods to check the type `isTensor` and to convert to particular to type `toTensor`. We do not publicly expose the type tag and force clients to use the `isX` methods. This enables us to change the underlying implementation of IValue later, e.g. to use an 8-byte value with NaN-boxing. Most operators work on a specific static type, so dynamic dispatch on the tag is not frequently required.
 
-### Operation ###
+## Operation ##
 
 All builtin operators are represented using a stack machine concept. An operator pops its arguments off the top of the stack and pushes its result to the stack:
 
@@ -615,14 +613,14 @@ In practice, the interpreter will allocate one Stack, and it will eventually rea
 
 Operations also return a jump offset relative to the address of the next operator in the program to for dynamic control flow. Except for special Operations in the interpreter that handle control-flow all Operations should return 0 here. It is a bit weird to force all Operations to return 0, but it avoids having to have another level of indirection to wrap void functions in something that returns 0.
 
-### Operator ###
+## Operator ##
 
 [operator.h](operator.h)
 
 The Operator object represents a single registered operator in the system. It combines a FunctionSchema that describes how an Operation executes with a method to lookup the corresponding Operation given the Node representing the operator in a Graph.  Most Operators are defined by providing a FunctionSchema and an Operation function. However, primitives like prim::Unpack require knowledge of their Node to know how to operate (e.g. how many elements to unpack). These Operators have a function that takes a Node* and returns an operation.
 
 
-### Interpreter ###
+## Interpreter ##
 
 [interpreter.cpp](interpreter.cpp)
 
@@ -693,7 +691,7 @@ graph(%x : Tensor
  = Store move(28)
 ```
 
-### Graph Executor ###
+## Graph Executor ##
 
 [graph_executor.cpp](graph_executor.cpp)
 
@@ -988,26 +986,26 @@ with prim::DifferentiableGraph_0 = graph(%13 : Float(*, *)
 }
 ```
 
-### DifferentiableGraphOp ###
+## DifferentiableGraphOp ##
 
 [graph_executor.cpp](graph_executor.cpp)
 
 
 A DifferentiableGraphOp combines an explicit forward Graph `f` with a paired backward graph `df`. When it runs, the input Tensors to `f` are detached from the autograd, the body of `f` is run, and then the autograd graph for the outputs of `f` are hooked up to the `df` function. The `df` function's outputs are also hooked up to the autograd graph.
 
-### Interpreter ###
+## Interpreter ##
 
 * Code
 * InterpreterState and interpreter design
 * Fork/Wait
 
-### FusionGroup ###
+## FusionGroup ##
 
 * inserted by passes
 
-### Handling Mutability ###
-#### Aliasing and mutation in the PyTorch API
-In PyTorch, tensors are reference types. Operators can return "views" of the input tensor, creating a new tensor object that shares the same underlying storage as the original: 
+## Handling Mutability ##
+### Aliasing and mutation in the PyTorch API
+In PyTorch, tensors are reference types. Operators can return "views" of the input tensor, creating a new tensor object that shares the same underlying storage as the original:
 ```py
 a = torch.rand(2, 3)
 b = a
@@ -1024,7 +1022,7 @@ a.add_(b)  # in-place add, so `a` is modified.
 torch.add(a, b, out=a) # another way to express the same thing
 ```
 
-#### Aliasing and mutation annotations in FunctionSchema
+### Aliasing and mutation annotations in FunctionSchema
 The JIT's `FunctionSchema`  allows operator writers to add annotations specifying the aliasing and mutation behavior of an operator. Optimization passes will use this information to determine whether transformations are semantics-preserving. This section provides a description of the alias annotation language, assuming that the reader already knows what `FunctionSchema` looks like.
 
 First, here is a pure function which always returns new memory:
@@ -1051,9 +1049,9 @@ list_select(Tensor[] list, int idx) -> Tensor(*)
 ```
 Note the alias set `*`. This is the **wildcard set**. Optimization passes must assume that values in the wildcard set may alias any other value in the graph. This behavior is conservative and will disallow optimizations, but is guaranteed to be safe. In most cases, people shouldn't be writing operators with wildcard annotations. They are used as temporary workaround for when our alias analysis isn't sophisticated enough to understand something yet but we don't want to block feature development.
 
-This annotation language is consumed by the `FunctionSchema` parser, which produces `AliasInfo` objects summarizing the aliasing relationships for each schema `Argument`. 
+This annotation language is consumed by the `FunctionSchema` parser, which produces `AliasInfo` objects summarizing the aliasing relationships for each schema `Argument`.
 
-#### Alias Analysis in the IR
+### Alias Analysis in the IR
 An alias analysis pass consumes the per-operator aliasing information to construct a database of aliasing and mutation relationships in a graph, called `AliasDb`. This section focuses on the alias analysis pass; the public interface to `AliasDb` will be described later.
 
 The core data structure in the AliasDb is called `AliasTracker`, which is a DAG where the edges are "may point to" relationships and the  vertices are aliasing `Element`s. The most common kind of `Element` is an IR `Value`, but there are other kinds of things that can alias that aren't first-class `Value`s in the IR, like wildcards or contained types (such as in a list or tuple).
@@ -1066,7 +1064,7 @@ the analyzer will examine the schema for `view()`:
 ```
 view(Tensor(a) self, int[] size) -> Tensor(a)
 ```
-and add an edge from `%output` to `%self`. The alias analysis pass is flow-insensitive, as we are only adding "points-to" edges when processing a node. 
+and add an edge from `%output` to `%self`. The alias analysis pass is flow-insensitive, as we are only adding "points-to" edges when processing a node.
 
 As a more involved example, the following TorchScript snippet:
 ```py
@@ -1093,10 +1091,10 @@ The last point demonstrates a key concept: *leaf elements uniquely describe memo
 
 So to determine whether  `a` and `b` may alias, we traverse the `AliasTracker` DAG and figure out if `a` and `b` share any leaf nodes. If they do, then we know `a` and `b` might point to the same memory location, i.e. `a` and `b` may alias. This kind of query is common enough that `AliasTracker` does path compression to speed up leaf-finding, so that aliasing queries can be serviced in amortized constant time.
 
-#### Writing optimization passes with `AliasDb`
-`AliasDb` provides a high-level interface to help people write mutability-safe optimization passes. 
+### Writing optimization passes with `AliasDb`
+`AliasDb` provides a high-level interface to help people write mutability-safe optimization passes.
 
-In particular, `moveAfterTopologicallyValid()` (and it's `moveBefore` variant) will reorder nodes in a way that preserves data dependencies and avoids any data hazards.  The rules for this are that all mutable *writes* to a give memory location must occur in the same order (avoid WAW hazards), and that no reads can be reordered before or after any write (WAR, RAW hazards). 
+In particular, `moveAfterTopologicallyValid()` (and it's `moveBefore` variant) will reorder nodes in a way that preserves data dependencies and avoids any data hazards.  The rules for this are that all mutable *writes* to a give memory location must occur in the same order (avoid WAW hazards), and that no reads can be reordered before or after any write (WAR, RAW hazards).
 
 However, reordering of reads across writes *is allowed* if we can prove that the read cannot alias the thing being written. This happens whenever we have tensors that come from functions that produce fresh results (common) inside of the function. It also happens whenever the creation of the mutable tensor is seen in the function (so it gets assigned a fresh variable), and all of its writes occur in that function.
 
@@ -1108,10 +1106,50 @@ TODO: differentiation, symbolic autograd,
 TODO: fusion, operators
 
 
-Saving Programs
+## Saving Programs
 ---------------
 
-TODO: python_print, serialization format
+### PythonPrint
+
+TODO: python_print
+
+### Serialization
+
+TorchScript programs are serialized with a call to `torch.jit.save()`. The resulting file (ending in `.pt` by convention) can be loaded/executed in C++ and Python.
+
+#### Overview
+
+The `.pt` file is a zip archive (which can be opened with tools such as `unzip`) and contains:
+  * code - the Python printed graph of a module
+  * `model.json` - a JSON file of a module Protobuf def (defined in [torch.proto](caffe2/proto/torch.proto))
+  * `tensors/` - each of the tensors of the module, with their tensor storage stored directly in a file
+  * `attributes` - a Python `pickle` archive of the attributes of a module
+
+#### `model.json`
+The `model.json` contains the structure information of the model. Each model must contain one main Module, and each module may contain multiple submodules, and
+each module contains a bunch of parameters (tensors). We serialize the metadata for each tensor inline in `model.json` (e.g., dims, strides, record name, etc).
+
+#### `code`
+
+TODO
+
+#### `tensors/`
+
+TODO
+
+#### `attributes`
+
+Attributes are module properties that are not parameters or constants. Attributes are saved as list in the order they
+were defined on the module as a Python `pickle` archive. Only the subset of `pickle` is implemented. This was chosen due to:
+* user friendliness - the attributes file can be loaded in Python with `pickle` without having PyTorch installed
+* size limits - formats such as Protobuf empose size limits on messages,
+* standard format - `pickle` is a standard Python module with a reasonably simple format
+* built-in memoization for shared reference types
+* self describing
+
+
+
+
 
 Python Bindings
 ---------------
