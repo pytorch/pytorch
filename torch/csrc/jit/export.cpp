@@ -456,8 +456,6 @@ void GraphEncoder::EncodeTensor(
   }
 }
 
-struct Pickler;
-
 // this is a serializer class which saves script modules to pt files. the
 // content of the file is written using PyTorchStreamWriter, for details please
 // check caffe2/serialize/inline_container.h. all the records except the last
@@ -465,7 +463,6 @@ struct Pickler;
 // in caffe2/proto/torch.proto. ModelProto contains all the metadata of the
 // model, and it is serialized as json.
 class ScriptModuleSerializer final {
-  friend Pickler;
  public:
   ScriptModuleSerializer(const std::string& filename);
 
@@ -642,186 +639,6 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
   }
 }
 
-
-struct Pickler {
-  Pickler(ScriptModuleSerializer& serializer) : serializer_(serializer) {}
-
-public:
-  std::vector<char>& stack() {
-    return stack_;
-  }
-  void start() {
-    push(OpCode::PROTO, uint8_t(2));
-
-    // All attributes get pushed into a list and their indices saved in the
-    // module def
-    push(OpCode::EMPTY_LIST);
-    push(OpCode::MARK);
-  }
-  void finish() {
-    push(OpCode::APPENDS);
-    push(OpCode::STOP);
-  }
-
-  uint64_t addIValue(const IValue& ivalue) {
-    if (ivalue.isTensor()) {
-      // Write it to the tensor table
-      push(OpCode::EXT1);
-      push(ExtensionCode::TENSOR);
-      auto tensor_id = serializer_.addTensor(ivalue.toTensor());
-      push(OpCode::BININT, uint32_t(tensor_id));
-    } else if (ivalue.isBlob()) {
-      AT_ERROR("Unsupported IValue type for pickling (Blob)");
-    } else if (ivalue.isTuple()) {
-      pushTuple(ivalue);
-    } else if (ivalue.isDouble()) {
-      pushDouble(ivalue);
-    } else if (ivalue.isFuture()) {
-      AT_ERROR("Unsupported IValue type for pickling (Future)");
-    } else if (ivalue.isInt()) {
-      // TODO: use BININT1/BININT2/LONG if possible/necessary
-      push(OpCode::BININT, uint32_t(ivalue.toInt()));
-    } else if (ivalue.isBool()) {
-      if (ivalue.toBool()) {
-        push(OpCode::NEWTRUE);
-      } else {
-        push(OpCode::NEWFALSE);
-      }
-    } else if (ivalue.isIntList()) {
-      AT_ERROR("Unsupported IValue type for pickling (IntList)");
-    } else if (ivalue.isString()) {
-      pushString(ivalue);
-    } else if (ivalue.isDoubleList()) {
-      AT_ERROR("Unsupported IValue type for pickling (DoubleList)");
-    } else if (ivalue.isBoolList()) {
-      AT_ERROR("Unsupported IValue type for pickling (BoolList)");
-    } else if (ivalue.isTensorList()) {
-      AT_ERROR("Unsupported IValue type for pickling (TensorList)");
-    } else if (ivalue.isGenericList()) {
-      pushList(ivalue);
-    } else if (ivalue.isGenericDict()) {
-      pushDict(ivalue);
-    } else if (ivalue.isObject()) {
-      AT_ERROR("Unsupported IValue type for pickling (Object)");
-    } else if (ivalue.isNone()) {
-      push(OpCode::NONE);
-    } else if (ivalue.isDevice()) {
-      AT_ERROR("Unsupported IValue type for pickling (Device)");
-    } else {
-      AT_ERROR("Unknown IValue type for pickling");
-    }
-
-    return 0;
-  }
-
-private:
-  void pushString(const IValue& ivalue) {
-    auto string = ivalue.toStringRef();
-
-    push(OpCode::BINUNICODE);
-    push(uint32_t(string.size()));
-    stack_.insert(stack_.end(), string.begin(), string.end());
-
-    push(OpCode::BINPUT, memo_id++);
-  }
-
-  void pushDouble(const IValue& ivalue) {
-    double value = ivalue.toDouble();
-    AT_ASSERT(sizeof(double) == 8);
-    char bytes[8];
-    double* bytes_as_double = reinterpret_cast<double*>(bytes);
-    *bytes_as_double = value;
-
-    push(OpCode::BINFLOAT);
-    for (size_t i = 0; i < sizeof(bytes); ++i) {
-      push(bytes[sizeof(bytes) - i - 1]);
-    }
-  }
-
-  void pushDict(const IValue& ivalue) {
-    auto dict = ivalue.toGenericDictRef();
-
-    push(OpCode::EMPTY_DICT);
-    push(OpCode::BINPUT, memo_id++);
-
-    push(OpCode::MARK);
-
-    for (auto pair : dict) {
-      addIValue(pair.first);
-      addIValue(pair.second);
-    }
-
-    push(OpCode::SETITEMS);
-  }
-
-  void pushList(const IValue& ivalue) {
-    auto list = ivalue.toGenericListRef();
-    push(OpCode::EMPTY_LIST);
-    push(OpCode::BINPUT, memo_id++);
-
-    push(OpCode::MARK);
-
-    for (auto item : list) {
-      addIValue(item);
-    }
-
-    push(OpCode::APPENDS);
-  }
-
-  void pushTuple(const IValue& ivalue) {
-    // TODO: Small tuple unrolling (e.g. TUPLE3)
-    push(OpCode::MARK);
-
-    for (const auto& item : ivalue.toTuple()->elements()) {
-      addIValue(item);
-    }
-
-    push(OpCode::TUPLE);
-    push(OpCode::BINPUT, memo_id++);
-  }
-
-  size_t pushBytes(size_t num_bytes) {
-    AT_ASSERT(num_bytes > 0);
-    stack_.push_back(0);
-    auto index = stack_.size() - 1;
-
-    for (size_t i = 1; i < num_bytes; ++i) {
-      stack_.push_back(0);
-    }
-    return index;
-  }
-
-  template <typename T>
-  size_t push(T value) {
-    auto index = pushBytes(sizeof(T));
-    T* ptr = reinterpret_cast<T*>(&stack_[index]);
-    *ptr = value;
-    return index;
-  }
-
-  template <typename T>
-  size_t push(OpCode opcode, T value) {
-    push(opcode);
-    auto index = pushBytes(sizeof(T));
-    T* ptr = reinterpret_cast<T*>(&stack_[index]);
-    *ptr = value;
-    return index;
-  }
-
-  // Stack of opcodes/data
-  std::vector<char> stack_;
-
-  // Memoization of IValues that have been written (index in table is used for
-  // BINPUT opcodes) to enable shared references
-  std::vector<IValue> memo_;
-
-  ScriptModuleSerializer& serializer_;
-
-  // TODO: only use this if necessary (add a pass to find all shared ivalues,
-  // and only memoize those)
-  uint8_t memo_id = 0;
-};
-
 void ScriptModuleSerializer::convertModule(
     const script::Module& module,
     const std::string& prefix,
@@ -835,7 +652,7 @@ void ScriptModuleSerializer::convertModule(
   }
 
   if (module.get_attributes().size() > 0) {
-    Pickler p(*this);
+    Pickler p(tensor_table_);
     p.start();
     for (const auto& item : module.get_attributes()) {
       auto& attribute = item.value();
