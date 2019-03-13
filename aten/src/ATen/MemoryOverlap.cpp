@@ -15,7 +15,7 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
   }
 
   auto strides = t->strides();
-  if (std::find_if(
+  if (strides.end() != std::find_if(
         strides.begin(), strides.end(), [](int64_t s) { return s == 0; })) {
     return MemOverlap::YES;
   }
