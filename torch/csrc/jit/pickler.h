@@ -85,7 +85,8 @@ using ::c10::IValue;
 
 struct Pickler {
   Pickler(std::vector<at::Tensor>& tensor_table)
-      : tensor_table_(tensor_table) {}
+      : tensor_table_(tensor_table),
+        tensor_class_name_("__main__\n", "TensorID\n") {}
 
  public:
   std::vector<char>& stack() {
@@ -108,32 +109,23 @@ struct Pickler {
   }
 
   void addIValue(const IValue& ivalue) {
-    const void* ptr = getPointer(ivalue);
-    if (ptr) {
-      auto memo_entry = memo_.find(ptr);
+    // Check if reference ivalue has been saved before
+    const void* ivalue_ptr = getPointer(ivalue);
+    if (ivalue_ptr) {
+      auto memo_entry = memo_.find(ivalue_ptr);
       if (memo_entry != memo_.end()) {
         // This value has already been pushed, just do a BINGET
-        AT_CHECK(false, "NYI");
+        pushBinGet(memo_entry->second);
+        return;
       }
     }
 
     if (ivalue.isTensor()) {
-      // Write it to the tensor table
-      // push<OpCode>(OpCode::EXT1);
-      // push<OpCode>(ExtensionCode::TENSOR);
-      // TODO: tensors
-      // tensor_table_.push_back(ivalue.toTensor());
-      // auto tensor_id = tensor_table_.size() - 1;
-      // push<OpCode>(OpCode::BININT);
-      // push<uint32_t>(tensor_id);
-    } else if (ivalue.isBlob()) {
-      AT_ERROR("Unsupported IValue type for pickling (Blob)");
+      pushTensor(ivalue);
     } else if (ivalue.isTuple()) {
       pushTuple(ivalue);
     } else if (ivalue.isDouble()) {
       pushDouble(ivalue);
-    } else if (ivalue.isFuture()) {
-      AT_ERROR("Unsupported IValue type for pickling (Future)");
     } else if (ivalue.isInt()) {
       // TODO: use BININT1/BININT2/LONG if possible/necessary
       AT_ASSERT(ivalue.toInt() <= std::numeric_limits<int32_t>::max());
@@ -145,26 +137,14 @@ struct Pickler {
       } else {
         push<OpCode>(OpCode::NEWFALSE);
       }
-    } else if (ivalue.isIntList()) {
-      AT_ERROR("Unsupported IValue type for pickling (IntList)");
     } else if (ivalue.isString()) {
       pushString(ivalue);
-    } else if (ivalue.isDoubleList()) {
-      AT_ERROR("Unsupported IValue type for pickling (DoubleList)");
-    } else if (ivalue.isBoolList()) {
-      AT_ERROR("Unsupported IValue type for pickling (BoolList)");
-    } else if (ivalue.isTensorList()) {
-      AT_ERROR("Unsupported IValue type for pickling (TensorList)");
     } else if (ivalue.isGenericList()) {
       pushList(ivalue);
     } else if (ivalue.isGenericDict()) {
       pushDict(ivalue);
-    } else if (ivalue.isObject()) {
-      AT_ERROR("Unsupported IValue type for pickling (Object)");
     } else if (ivalue.isNone()) {
       push<OpCode>(OpCode::NONE);
-    } else if (ivalue.isDevice()) {
-      AT_ERROR("Unsupported IValue type for pickling (Device)");
     } else {
       AT_ERROR("Unknown IValue type for pickling");
     }
@@ -175,14 +155,25 @@ struct Pickler {
     if (ivalue.isGenericDict()) {
       return &(ivalue.toGenericDictRef());
     } else if (ivalue.isGenericList()) {
-      return &(ivalue.toGenericDictRef());
+      return &(ivalue.toGenericListRef());
     } else if (ivalue.isTuple()) {
-      return &(ivalue.toGenericDictRef());
+      return &(ivalue.toTuple()->elements());
     } else if (ivalue.isString()) {
-      return &(ivalue.toGenericDictRef());
+      return &(ivalue.toStringRef());
     }
 
     return nullptr;
+  }
+
+  void pushBinGet(uint32_t memo_id) {
+    if (memo_id <= std::numeric_limits<uint8_t>::max()) {
+      push<OpCode>(OpCode::BINGET);
+      push<uint8_t>(memo_id);
+    } else {
+      // Memoized too many items, issue a LONG_BINGET instead
+      push<OpCode>(OpCode::LONG_BINGET);
+      push<uint32_t>(memo_id);
+    }
   }
 
   void pushString(const IValue& ivalue) {
@@ -190,9 +181,36 @@ struct Pickler {
 
     push<OpCode>(OpCode::BINUNICODE);
     push<uint32_t>(string.size());
-    stack_.insert(stack_.end(), string.begin(), string.end());
-
+    pushString(string);
     pushMemoization(ivalue);
+  }
+
+  void pushString(const std::string& string) {
+    stack_.insert(stack_.end(), string.begin(), string.end());
+  }
+
+  void pushTensor(const IValue& ivalue) {
+    // Write it to the tensor table
+    auto memo_entry = memo_.find(&tensor_class_name_);
+    if (memo_entry == memo_.end()) {
+      push<OpCode>(OpCode::GLOBAL);
+      // Module name + "\n"
+      pushString(tensor_class_name_.first);
+      // Class name + "\n"
+      pushString(tensor_class_name_.second);
+      pushMemoization((void*)&tensor_class_name_);
+    } else {
+      pushBinGet(memo_entry->second);
+    }
+    push<OpCode>(OpCode::EMPTY_TUPLE);
+    push<OpCode>(OpCode::NEWOBJ);
+
+    tensor_table_.push_back(ivalue.toTensor());
+    auto tensor_id = tensor_table_.size() - 1;
+    push<OpCode>(OpCode::BININT);
+    push<uint32_t>(tensor_id);
+
+    push<OpCode>(OpCode::BUILD);
   }
 
   void pushDouble(const IValue& ivalue) {
@@ -206,17 +224,18 @@ struct Pickler {
     }
   }
 
+  using ivalue_pair = std::pair<IValue, IValue>;
+
   struct IValueComparator {
-    bool operator()(std::shared_ptr<IValue>& lhs, std::shared_ptr<IValue>& rhs)
-        const {
-      if (lhs->isString()) {
-        return lhs->toString() < rhs->toString();
+    bool operator()(const ivalue_pair& lhs, const ivalue_pair& rhs) const {
+      if (lhs.first.isString()) {
+        return lhs.first.toString() < rhs.first.toString();
       }
-      if (lhs->isInt()) {
-        return lhs->toInt() < rhs->toInt();
+      if (lhs.first.isInt()) {
+        return lhs.first.toInt() < rhs.first.toInt();
       }
-      if (lhs->isDouble()) {
-        return lhs->toDouble() < rhs->toDouble();
+      if (lhs.first.isDouble()) {
+        return lhs.first.toDouble() < rhs.first.toDouble();
       }
       AT_ERROR("Uncomparable IValue types");
     }
@@ -242,8 +261,7 @@ struct Pickler {
     push<OpCode>(OpCode::SETITEMS);
   }
 
-  void pushMemoization(const IValue& ivalue) {
-    const void* item = getPointer(ivalue);
+  void pushMemoization(const void* item) {
     AT_ASSERT(item != nullptr);
     if (memo_id <= std::numeric_limits<uint8_t>::max()) {
       push<OpCode>(OpCode::BINPUT);
@@ -255,6 +273,10 @@ struct Pickler {
     }
     memo_[item] = memo_id;
     ++memo_id;
+  }
+
+  void pushMemoization(const IValue& ivalue) {
+    pushMemoization(getPointer(ivalue));
   }
 
   void pushList(const IValue& ivalue) {
@@ -309,6 +331,9 @@ struct Pickler {
   // External table of tensors to serialize
   std::vector<at::Tensor>& tensor_table_;
 
+  // Module name, class name for fake tensor class
+  std::pair<std::string, std::string> tensor_class_name_;
+
   // TODO: only use this if necessary (add a pass to find all shared ivalues,
   // and only memoize those)
   uint32_t memo_id = 0;
@@ -317,7 +342,7 @@ struct Pickler {
 struct Unpickler {
   Unpickler(
       void* data,
-      uint64_t size,
+      size_t size,
       const std::vector<at::Tensor>& tensor_table)
       : bytes_(static_cast<const uint8_t*>(data)),
         end_ptr_(bytes_ + size),
@@ -335,7 +360,7 @@ struct Unpickler {
   template <typename T>
   T read() {
     AT_CHECK(
-        bytes_ + sizeof(T) < end_ptr_,
+        bytes_ + sizeof(T) <= end_ptr_,
         "Unpickler overran buffer while reading a value");
     const T* data = reinterpret_cast<const T*>(bytes_);
     bytes_ += sizeof(T);
@@ -356,88 +381,146 @@ struct Unpickler {
   }
 
   void run() {
+    // Expect a PROTO opcode and protocol number at the start of blob
+    AT_ASSERT(readOpCode() == OpCode::PROTO);
+    uint8_t protocol = read<uint8_t>();
+    AT_CHECK(
+        protocol == 2,
+        "Only Pickle protocol 2 is supported, found protocol = ",
+        protocol);
+
     while (bytes_ < end_ptr_) {
-      switch (readOpCode()) {
-        case OpCode::PROTO: {
-          uint8_t protocol = read<uint8_t>();
-          AT_CHECK(
-              protocol == 2,
-              "Only Pickle protocol 2 is supported, found protocol = ",
-              protocol);
-          break;
-        }
-        case OpCode::EMPTY_LIST: {
-          // TODO: Use fake classes to mark list specializations
-          stack_.push_back(std::vector<IValue>());
-          break;
-        }
-        case OpCode::BINPUT: {
-          size_t memo_id = read<uint8_t>();
-          if (memo_.size() <= memo_id) {
-            memo_.reserve(1 + 2 * memo_id);
-          }
-          memo_[memo_id] = stack_.back();
-          break;
-        }
-        case OpCode::MARK: {
-          // Mark location of the container ivalue in the stack
-          marks_.push_back(stack_.size());
-          break;
-        }
-        case OpCode::BININT: {
-          int32_t value = read<uint32_t>();
-          stack_.push_back(int64_t(value));
-          break;
-        }
-        case OpCode::BINUNICODE: {
-          int32_t length = read<uint32_t>();
-          const char* characters = reinterpret_cast<const char*>(bytes_);
-          bytes_ += length;
-          stack_.push_back(std::string(characters, /*n=*/length));
-          break;
-        }
-        case OpCode::BINFLOAT:
-          stack_.push_back(readFloat());
-          break;
-        case OpCode::TUPLE: {
-          size_t start = marks_.back();
-          marks_.pop_back();
-          IValue tup = c10::ivalue::Tuple::create(
-              std::vector<IValue>(stack_.begin() + start, stack_.end()));
-          stack_.resize(start);
-          stack_.push_back(tup);
-        } break;
-        case OpCode::EMPTY_DICT:
-          stack_.push_back(c10::ivalue::UnorderedMap());
-          break;
-        case OpCode::APPENDS: {
-          size_t start = marks_.back();
-          marks_.pop_back();
-          auto list = stack_[start - 1].toGenericList();
-          list->elements().insert(
-              list->elements().end(), stack_.begin() + start, stack_.end());
-          stack_.resize(start);
-        } break;
-        case OpCode::SETITEMS: {
-          size_t start = marks_.back();
-          marks_.pop_back();
-          auto dict = stack_[start - 1].toGenericDict();
-          for (size_t i = start; i < stack_.size(); i += 2) {
-            dict->elements()[stack_[i]] = stack_[i + 1];
-          }
-          stack_.resize(start);
-        } break;
-        case OpCode::BINGET: {
-          stack_.push_back(memo_.at(read<uint8_t>()));
-        } break;
-        case OpCode::STOP:
-          return;
-        default:
-          AT_ERROR("Unknown opcode for unpickling");
+      OpCode opcode = readInstruction();
+      if (opcode == OpCode::STOP) {
+        return;
       }
+      last_opcode_ = opcode;
     }
 
     AT_ERROR("Overran buffer while unpickling data, didn't find STOP opcode");
+  }
+
+  OpCode readInstruction() {
+    auto op = readOpCode();
+    std::cout << "reading: " << static_cast<char>(op) << "\n";
+    switch (op) {
+      case OpCode::EMPTY_LIST: {
+        // TODO: Use fake classes to mark list specializations
+        stack_.push_back(std::vector<IValue>());
+        break;
+      }
+      case OpCode::EMPTY_TUPLE: {
+        stack_.push_back(c10::ivalue::Tuple::create({}));
+        break;
+      }
+      case OpCode::BINPUT: {
+        size_t memo_id = read<uint8_t>();
+        if (memo_.size() <= memo_id) {
+          memo_.reserve(1 + 2 * memo_id);
+        }
+        memo_.push_back(stack_.back());
+        break;
+      }
+      case OpCode::MARK: {
+        // Mark location of the container ivalue in the stack
+        marks_.push_back(stack_.size());
+        break;
+      }
+      case OpCode::BININT: {
+        int32_t value = read<uint32_t>();
+        stack_.push_back(int64_t(value));
+        break;
+      }
+      case OpCode::BINUNICODE: {
+        int32_t length = read<uint32_t>();
+        const char* characters = reinterpret_cast<const char*>(bytes_);
+        bytes_ += length;
+        stack_.push_back(std::string(characters, /*n=*/length));
+        break;
+      }
+      case OpCode::BINFLOAT:
+        stack_.push_back(readFloat());
+        break;
+      case OpCode::TUPLE: {
+        size_t start = marks_.back();
+        marks_.pop_back();
+        IValue tup = c10::ivalue::Tuple::create(
+            std::vector<IValue>(stack_.begin() + start, stack_.end()));
+        stack_.resize(start);
+        stack_.push_back(tup);
+      } break;
+      case OpCode::EMPTY_DICT:
+        stack_.push_back(c10::ivalue::UnorderedMap());
+        break;
+      case OpCode::APPENDS: {
+        size_t start = marks_.back();
+        marks_.pop_back();
+        auto list = stack_[start - 1].toGenericList();
+        list->elements().insert(
+            list->elements().end(), stack_.begin() + start, stack_.end());
+        stack_.resize(start);
+      } break;
+      case OpCode::SETITEMS: {
+        size_t start = marks_.back();
+        marks_.pop_back();
+        auto dict = stack_[start - 1].toGenericDict();
+        for (size_t i = start; i < stack_.size(); i += 2) {
+          dict->elements()[stack_[i]] = stack_[i + 1];
+        }
+        stack_.resize(start);
+      } break;
+      case OpCode::BINGET: {
+        stack_.push_back(memo_.at(read<uint8_t>()));
+      } break;
+      case OpCode::STOP:
+        return op;
+      case OpCode::GLOBAL: {
+        AT_ASSERT(readString() == "__main__");
+        // Push class name to stack
+        stack_.push_back(readString());
+      } break;
+      case OpCode::NEWOBJ: {
+        // Do nothing, should be followed by BUILD
+      } break;
+      case OpCode::BUILD: {
+        // TODO: this only works for Tensors
+        auto tensor_id = stack_.back().toInt();
+        stack_.pop_back();
+        // pop empty tuple
+        stack_.pop_back();
+        auto class_name = stack_.back().toStringRef();
+        stack_.pop_back();
+        AT_ASSERT(class_name == "TensorID");
+        stack_.push_back(tensor_table_.at(tensor_id));
+
+      } break;
+      default:
+        AT_ERROR("Unknown opcode for unpickling");
+    }
+
+    return op;
+  }
+
+  std::string readString(char terminator = '\n') {
+    const char* chars = reinterpret_cast<const char*>(bytes_);
+    size_t n = 0;
+    while (true) {
+      char c = chars[n];
+      if (c == '\n') {
+        break;
+      }
+      AT_ASSERT(isValidChar(c));
+      // Increment after to exclude newline from string
+      ++n;
+    }
+
+    // Increment by string length + newline char
+    bytes_ += n + 1;
+    return std::string(chars, n);
+  }
+
+  bool isValidChar(char value) {
+    return value >= 'A' && value <= 'z';
   }
 
   OpCode readOpCode() {
@@ -450,6 +533,7 @@ struct Unpickler {
   const uint8_t* bytes_;
   const uint8_t* end_ptr_;
   const std::vector<at::Tensor>& tensor_table_;
+  OpCode last_opcode_;
 };
 
 } // namespace jit
