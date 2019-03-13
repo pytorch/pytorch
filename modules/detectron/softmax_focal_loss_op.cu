@@ -17,7 +17,7 @@
 #include <cfloat>
 
 #include "caffe2/core/context_gpu.h"
-#include "softmax_focal_loss_op.h"
+#include "modules/detectron/softmax_focal_loss_op.h"
 
 namespace caffe2 {
 
@@ -69,7 +69,7 @@ __global__ void SoftmaxFocalLossKernel(
     int n = i / (W * H * A);
     const int label = static_cast<int>(targets[i]);
 
-    float Np = max(weight_pos[0], 1.0);
+    float Np = c10::cuda::compat::max(weight_pos[0], static_cast<float>(1.0));
     float z = (label == 0) * (1 - alpha) / Np +
               (label >= 1) * alpha / Np;
 
@@ -79,7 +79,7 @@ __global__ void SoftmaxFocalLossKernel(
       int idx = n * (H * W * D) + (offset + label) * (H * W) + y * W + x;
       losses[i] =
           -(pow(1.0f - Pdata[idx], gamma) *
-          log(max(Pdata[idx], FLT_MIN))) * z;
+          log(c10::cuda::compat::max(Pdata[idx], FLT_MIN))) * z;
     }
   }
 }
@@ -97,7 +97,7 @@ __global__ void SoftmaxFocalLossGradientWeightKernel(
     int a = (i / (W * H)) % A;
     int n = i / (W * H * A);
     const int label = static_cast<int>(targets[i]);
-    float Np = max(weight_pos[0], 1.0);
+    float Np = c10::cuda::compat::max(weight_pos[0], static_cast<float>(1.0));
     float z =  (label == 0) * (1 - alpha) / Np +
                (label >= 1) * alpha / Np;
 
@@ -109,7 +109,7 @@ __global__ void SoftmaxFocalLossGradientWeightKernel(
       float p = Pdata[idx];
       buff[i] =
           (-pow(onemp, gamma) +
-          gamma * pow(onemp, gamma - 1) * p * log(max(p, FLT_MIN))) * z;
+          gamma * pow(onemp, gamma - 1) * p * log(c10::cuda::compat::max(p, FLT_MIN))) * z;
     }
   }
 }
