@@ -73,7 +73,7 @@ set CUDNN_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 set PYTHONPATH=%TMP_DIR_WIN%\\build;%PYTHONPATH%
 set NUMBAPRO_CUDALIB=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\bin
 set NUMBAPRO_LIBDEVICE=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\nvvm\\libdevice
-set NUMBAPRO_NVVM=C:\\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.0\nvvm\bin\nvvm64_32_0.dll
+set NUMBAPRO_NVVM=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\nvvm\\bin\\nvvm64_32_0.dll
 
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     cd %TMP_DIR_WIN%\\build
