@@ -592,16 +592,16 @@ const std::vector<std::string> functions = {
 
         def max(self, other):
             def backward(grad_output):
-                grad_self = grad_output.clone().masked_fill_(self <= other, 0)._grad_sum_to_size(self.size())
-                grad_other = grad_output.clone().masked_fill_(self > other, 0)._grad_sum_to_size(other.size())
+                grad_self = (grad_output * (self > other).type_as(grad_output))._grad_sum_to_size(self.size())
+                grad_other = (grad_output * (other > self).type_as(grad_output))._grad_sum_to_size(other.size())
                 return grad_self, grad_other
 
             return torch.max(self, other), backward
 
         def min(self, other):
             def backward(grad_output):
-                grad_self = grad_output.clone().masked_fill_(self >= other, 0)._grad_sum_to_size(self.size())
-                grad_other = grad_output.clone().masked_fill_(self < other, 0)._grad_sum_to_size(other.size())
+                grad_self = (grad_output * (self < other).type_as(grad_output))._grad_sum_to_size(self.size())
+                grad_other = (grad_output * (other < self).type_as(grad_output))._grad_sum_to_size(other.size())
                 return grad_self, grad_other
 
             return torch.min(self, other), backward
@@ -622,12 +622,12 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
-        ## Share backward with threshold
+        # Share backward with threshold
         def relu(self):
             result = torch.relu(self)
             self_size = self.size()
             def backward(grad_output):
-                grad_self = grad_output.clone().masked_fill_(result <= 0, 0)._grad_sum_to_size(self_size)
+                grad_self = grad_output * (result > 0).type_as(result)
                 return grad_self
 
             return result, backward
@@ -833,7 +833,7 @@ const std::vector<std::string> functions = {
         def rsqrt(self):
             result = torch.rsqrt(self)
             def backward(grad_output):
-                grad_self = grad_output * result * result * result / 2
+                grad_self = -grad_output * result * result * result / 2
                 return grad_self
 
             return result, backward
@@ -1036,21 +1036,6 @@ const std::vector<std::string> functions = {
                 return grad_self, None, None, None, None, None
 
             return result0, result1, backward
-
-        def native_batch_norm(input,
-                              weight: Optional[Tensor],
-                              bias: Optional[Tensor],
-                              running_mean: Optional[Tensor],
-                              running_var: Optional[Tensor],
-                              training: bool,
-                              momentum: float,
-                              eps: float):
-            result0, result1, result2 = torch.native_batch_norm(input, weight, bias, running_mean, running_var, training, momentum, eps)
-            def backward(grad_output):
-                grad_input, grad_weight, grad_bias = torch.native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, result1, result2, training, eps, [True, True, True])
-                return grad_input, grad_weight, grad_bias, None, None, None, None, None
-
-            return result0, result1, result2, backward
 
         def nll_loss(self, target, weight: Optional[Tensor], reduction: int, ignore_index: int):
             result, total_weight = torch.nll_loss_forward(self, target, weight, reduction, ignore_index)
