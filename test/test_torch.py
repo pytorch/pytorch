@@ -1671,60 +1671,82 @@ class _TestTorchMixin(object):
         self._test_remainder_overflow(self, dtype=torch.int64, device='cpu')
 
     def test_mm(self):
-        # helper function
-        def matrixmultiply(mat1, mat2):
-            n = mat1.size(0)
-            m = mat1.size(1)
-            p = mat2.size(1)
-            res = torch.zeros(n, p)
-            for i, j in iter_indices(res):
-                res[i, j] = sum(mat1[i, k] * mat2[k, j] for k in range(m))
-            return res
+        def _test_mm(n, m, p, dtype, genf):
+            # helper function
+            def matrixmultiply(mat1, mat2):
+                n = mat1.size(0)
+                m = mat1.size(1)
+                p = mat2.size(1)
+                res = torch.zeros(n, p, dtype=dtype)
+                for i, j in iter_indices(res):
+                    res[i, j] = sum(mat1[i, k] * mat2[k, j] for k in range(m))
+                return res
 
-        # contiguous case
-        n, m, p = 10, 10, 5
-        mat1 = torch.randn(n, m)
-        mat2 = torch.randn(m, p)
-        res = torch.mm(mat1, mat2)
+            # contiguous case
+            mat1 = genf(n, m)
+            mat2 = genf(m, p)
+            res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1, mat2)
-        self.assertEqual(res, res2)
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
 
-        # non contiguous case 1
-        n, m, p = 10, 10, 5
-        mat1 = torch.randn(n, m)
-        mat2 = torch.randn(p, m).t()
-        res = torch.mm(mat1, mat2)
+            # non contiguous case 1
+            mat1 = genf(n, m)
+            mat2 = genf(p, m).t()
+            res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1, mat2)
-        self.assertEqual(res, res2)
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
 
-        # non contiguous case 2
-        n, m, p = 10, 10, 5
-        mat1 = torch.randn(m, n).t()
-        mat2 = torch.randn(m, p)
-        res = torch.mm(mat1, mat2)
+            # non contiguous case 2
+            mat1 = genf(m, n).t()
+            mat2 = genf(m, p)
+            res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1, mat2)
-        self.assertEqual(res, res2)
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
 
-        # non contiguous case 3
-        n, m, p = 10, 10, 5
-        mat1 = torch.randn(m, n).t()
-        mat2 = torch.randn(p, m).t()
-        res = torch.mm(mat1, mat2)
+            # non contiguous case 3
+            mat1 = genf(m, n).t()
+            mat2 = genf(p, m).t()
+            res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1, mat2)
-        self.assertEqual(res, res2)
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
 
-        # test with zero stride
-        n, m, p = 10, 10, 5
-        mat1 = torch.randn(n, m)
-        mat2 = torch.randn(m, 1).expand(m, p)
-        res = torch.mm(mat1, mat2)
+            # test with zero stride
+            mat1 = genf(n, m)
+            mat2 = genf(m, 1).expand(m, p)
+            res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1, mat2)
-        self.assertEqual(res, res2)
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
+
+            # explicitly exercise the _out variant in torch.mm().
+            # contiguous case
+            mat1 = genf(n, m)
+            mat2 = genf(m, p)
+            res = genf(n, p)
+            torch.mm(mat1, mat2, out=res)
+
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
+
+            # explicitly exercise the _out variant in torch.mm().
+            # non contiguous case 3
+            mat1 = genf(m, n).t()
+            mat2 = genf(p, m).t()
+            res = genf(n, p)
+            torch.mm(mat1, mat2, out=res)
+
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
+
+        for (n, m, p) in [(20, 10, 5), (15, 5, 10), (5, 18, 10)]:
+            _test_mm(n, m, p, torch.float32, lambda x, y: torch.randn(x, y, dtype=torch.float32))
+            _test_mm(n, m, p, torch.float64, lambda x, y: torch.randn(x, y, dtype=torch.float64))
+            _test_mm(n, m, p, torch.int32, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int32))
+            _test_mm(n, m, p, torch.int64, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int64))
 
     @staticmethod
     def _test_btrifact(self, cast):
@@ -4446,7 +4468,7 @@ class _TestTorchMixin(object):
 
     def test_linspace(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for _device in devices:
             _from = random.random()
             to = _from + random.random()
             res1 = torch.linspace(_from, to, 137, device=device)
