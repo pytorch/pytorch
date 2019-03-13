@@ -340,7 +340,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 #ifdef DEBUG
     AT_ASSERT(compute_contiguous() == is_contiguous_);
 #endif
-    return !opaque_handle_ && is_contiguous_;
+    return is_contiguous_;
   }
 
   bool is_sparse() const {
@@ -377,8 +377,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (tid == CUDATensorId() || tid == HIPTensorId() || tid == MSNPUTensorId() || tid == XLATensorId()) {
       // TODO: #12934 investigate caching device on TensorImpl to avoid this vdispatch.
       return storage().device().index();
-    } else if (tid == MkldnnCPUTensorId()) {
-      return -1;
     }
     return get_device_slow();
   }
@@ -828,14 +826,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    */
   virtual void set_allow_tensor_metadata_change(bool value) {
-    allow_tensor_metadata_change_ = value;
+    allow_tensor_metadata_change_ = value && !opaque_handle_;
   }
 
   /**
    * True if a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    */
   virtual bool allow_tensor_metadata_change() const {
-    return !opaque_handle_ && allow_tensor_metadata_change_;
+    return allow_tensor_metadata_change_;
   }
 
   /**
@@ -1278,7 +1276,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * storage UNINITIALIZED after a Resize() or FreeMemory()
    */
   bool storage_initialized() const noexcept {
-    return !opaque_handle_ && (storage_.data() || numel_ == 0);
+    return storage_ && (storage_.data() || numel_ == 0);
   }
 
   /**
@@ -1433,6 +1431,18 @@ protected:
   // You get to have eight byte-size fields here, before you
   // should pack this into a bitfield.
   TensorTypeId type_id_;
+
+  // An opaque handle `opaque_handle_` allows customized data layout other than the default
+  // strided layout. A valid opaque handle manages the tensor storage by itself so the default
+  // `storage_` is never initialized and getting data pointer from the default `storage_`
+  // would fail. Metadata like device, dtype and dims can be queried like a normal tensor with
+  // strided layout but cannot be changed. The `strides()` is not supported. Call to `is_contiguous()`
+  // always returns false since "contiguous" is not well-defined for a customized layout.
+  //
+  // Following invariant holds when `opaque_handle_` is valid:
+  //     `!is_contiguous() && !storage_initialized() && !allow_tensor_metadata_change()`
+  c10::intrusive_ptr<c10::intrusive_ptr_target> opaque_handle_;
+
   bool is_contiguous_ = true;
   bool is_variable_ = false;
   bool is_wrapped_number_ = false;
@@ -1447,17 +1457,6 @@ protected:
   // NOTE: For a full list of tensor metadata fields, please see `shallow_copy_and_detach()` in TensorImpl
   // and its subclasses to find which fields are copied by value.
   bool allow_tensor_metadata_change_ = true;
-
-  // An opaque handle `opaque_handle_` allows customized data layout other than the default
-  // strided layout. A valid opaque handle manages the tensor storage by itself so the default
-  // `storage_` is never initialized and getting data pointer from the default `storage_`
-  // would fail. Metadata like device, dtype and dims can be queried like a normal tensor with
-  // strided layout but cannot be changed. The `strides()` is not supported. Call to `is_contiguous()`
-  // always returns false since "contiguous" is not well-defined for a customized layout.
-  //
-  // Following invariant holds when `opaque_handle_` is valid:
-  //     `!is_contiguous() && !storage_initialized() && !allow_tensor_metadata_change()`
-  c10::intrusive_ptr<c10::intrusive_ptr_target> opaque_handle_;
 
   // we decide to keep reserved_ and it will
   // live in Tensor after the split
@@ -1496,6 +1495,7 @@ protected:
 //    strong refcount           TODO: pack these into one word
 //    weak refcount
 //    storage pointer
+//    autograd metadata pointer
 //    sizes SmallVector (begin)
 //    sizes SmallVector (end)
 //    sizes SmallVector (capacity)
@@ -1515,7 +1515,7 @@ protected:
 //    storage offset
 //    numel
 //    data type pointer
-//    autograd metadata pointer
+//    opaque handler pointer
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...

@@ -2070,7 +2070,7 @@ Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const T
 }
 
 Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
-  AT_ASSERT(input_.is_sparse() || input_.layout() == c10::kMkldnn);
+  AT_ASSERT(input_.layout() != c10::kStrided);
   if (input_.is_sparse()) {
     auto input = input_.coalesce();
     return grad.sparse_mask(at::SparseTensorRef(input));

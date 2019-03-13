@@ -51,11 +51,7 @@ TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, 
   : TensorImpl({}, type_id, data_type, is_variable) {
   AT_ASSERT(opaque_handle);
   opaque_handle_ = opaque_handle;
-  auto dim = sizes.size();
-  sizes_.resize(dim);
-  for (size_t d = 0; d < dim; ++d) {
-    sizes_[d] = sizes[d];
-  }
+  sizes_ = sizes;
   is_contiguous_ = false;
   allow_tensor_metadata_change_ = false;
   refresh_numel();
