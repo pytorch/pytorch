@@ -8497,6 +8497,50 @@ a")
             FileCheck().check("prim::Constant[value=<Tensor>]").check("Loop") \
                 .run(str(traced_fn.graph))
 
+    def test_weak_script_fn_from_tracing_fn(self):
+        with self.disableModuleHook():
+            @torch._jit_internal.weak_script
+            def weak_script_fn(x):
+                for i in range(int(x)):
+                    x *= (i + 1)
+                return x
+
+            def traced_fn(x):
+                return weak_script_fn(x)
+
+            graph = torch.jit.trace(traced_fn, (torch.tensor(5),)).graph
+            FileCheck().check("prim::Loop").run(graph)
+
+    def test_weak_script_fn_from_traced_module(self):
+        with self.disableModuleHook():
+            @torch._jit_internal.weak_script
+            def weak_script_fn(x):
+                for i in range(int(x)):
+                    x *= (i + 1)
+                return x
+
+            class TracedModule(torch.nn.Module):
+                def __init__(self):
+                    super(TracedModule, self).__init__()
+
+                def forward(self, x):
+                    return weak_script_fn(x)
+
+            graph = torch.jit.trace(TracedModule(), torch.tensor(5)).graph
+            FileCheck().check("prim::Loop").run(str(graph))
+
+    @unittest.expectedFailure
+    def test_trace_non_tensor_input(self):
+        @torch.jit.script
+        def test(x, y):
+            # type: (Tensor, List[int]) -> Tensor
+            return x
+
+        def traced_fn(x):
+                return test(x, [1, 2])
+
+        torch.jit.trace(traced_fn, (torch.randn(3, 3, 3),))
+
     def test_call_python_fn_from_traced_module(self):
         def python_fn(x):
             return torch.neg(x)
