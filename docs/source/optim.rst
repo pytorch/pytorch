@@ -57,7 +57,7 @@ For example, this is very useful when one wants to specify per-layer learning ra
 
 This means that ``model.base``'s parameters will use the default learning rate of ``1e-2``,
 ``model.classifier``'s parameters will use a learning rate of ``1e-3``, and a momentum of
-``0.9`` will be used for all parameters
+``0.9`` will be used for all parameters.
 
 Taking an optimization step
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
