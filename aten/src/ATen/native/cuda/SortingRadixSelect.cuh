@@ -14,11 +14,15 @@ struct TopKTypeConfig<float> {
   // We use this to enable radix selection of floating-point values.
   // This also gives a relative order for NaNs, but that's ok, as they
   // will all be adjacent
+  // neg inf: signbit=1 exp=ff fraction=0 --> radix = 0 00 ff..
+  // pos inf: signbit=0 exp=ff fraction=0 --> radix = 1 ff 00..
+  // pos nan: signbit=0 exp=ff fraction>0 --> radix = 1 ff x>0
+  // neg nan: signbit=1 exp=ff fraction>0 --> radix = 0 00 x<ff...
   static inline __device__ RadixType convert(float v) {
     RadixType x = __float_as_int(v);
     RadixType mask = (x & 0x80000000) ? 0xffffffff : 0x80000000;
 
-    return (x ^ mask);
+    return (v == v) ? (x ^ mask) : 0xffffffff;
   }
 
   static inline __device__ float deconvert(RadixType v) {
@@ -103,7 +107,7 @@ struct TopKTypeConfig<double> {
   static inline __device__ RadixType convert(double v) {
     RadixType x = __double_as_longlong(v);
     RadixType mask = -((x >> 63)) | 0x8000000000000000;
-    return (x ^ mask);
+    return (v == v) ? (x ^ mask) : 0xffffffffffffffff;
   }
 
   static inline __device__ double deconvert(RadixType v) {
@@ -120,7 +124,7 @@ struct TopKTypeConfig<at::Half> {
 #if CUDA_VERSION >= 8000 || defined __HIP_PLATFORM_HCC__
     RadixType x = __half_as_ushort(v);
     RadixType mask = -((x >> 15)) | 0x8000;
-    return (x ^ mask);
+    return (v == v) ? (x ^ mask) : 0xffff;
 #else
     assert(false);
     return 0u;

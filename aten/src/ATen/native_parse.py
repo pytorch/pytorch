@@ -3,6 +3,7 @@ import re
 import yaml
 import pprint
 import sys
+import copy
 
 try:
     # use faster C loader if available
@@ -185,6 +186,82 @@ def parse_arguments(args, func_variants, declaration, func_return):
     name = declaration['name']
     if is_out_fn:
         declaration['name'] += "_out"
+
+    # Reverse splat of TensorOptions
+    # As we move towards the JIT function schema for native_functions.yaml we need to support
+    # the expanded version of TensorOptions. For now we discover whether there are three
+    # types and names of keyword arguments: "ScalarType dtype", "Layout layout" and "Device device"
+    # Each, if set, must have default arguments set to long or float, strided and "cpu" respectively.
+    # They must appear in this order and in this order only in order for us to be able to process them.
+    # In the future we will get rid of this specific processing as downstream consumers start relying
+    # less on the content of Declarations.yaml. If you want to support more than this you'll
+    # potentially have to extend the JIT.
+
+    supported_topt_arguments = [
+        [
+            {'name': 'dtype', 'type': 'ScalarType', 'is_nullable': False, 'annotation': None},
+            {'name': 'layout', 'type': 'Layout', 'is_nullable': False, 'annotation': None},
+            {'name': 'device', 'type': 'Device', 'is_nullable': False, 'annotation': None},
+        ]
+    ]
+    supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[0]))
+    supported_topt_arguments[1][0]['kwarg_only'] = True
+    supported_topt_arguments[1][1]['kwarg_only'] = True
+    supported_topt_arguments[1][2]['kwarg_only'] = True
+    supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[1]))
+    supported_topt_arguments[2][0]['default'] = 'c10::nullopt'
+    supported_topt_arguments[2][1]['default'] = 'c10::nullopt'
+    supported_topt_arguments[2][2]['default'] = 'c10::nullopt'
+    supported_topt_arguments[2][0]['is_nullable'] = True
+    supported_topt_arguments[2][1]['is_nullable'] = True
+    supported_topt_arguments[2][2]['is_nullable'] = True
+
+    corresponding_topts = [
+        {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None},
+    ]
+    corresponding_topts.append(corresponding_topts[0].copy())
+    corresponding_topts[1]['kwarg_only'] = True
+    corresponding_topts.append(corresponding_topts[1].copy())
+    corresponding_topts[2]['default'] = '{}'
+
+    def check_topt_representation(topt_representation):
+        for idx, supported_topt in enumerate(supported_topt_arguments):
+            matches = True
+            matches = matches and topt_representation[0] == supported_topt[0]
+            matches = matches and topt_representation[1] == supported_topt[1]
+            matches = matches and topt_representation[2] == supported_topt[2]
+            if matches:
+                return corresponding_topts[idx]
+        return None
+
+    def is_tensor_option(argument):
+        return argument['name'] in ['dtype', 'layout', 'device']
+
+    new_arguments = []
+    idx = 0
+    while idx < len(arguments):
+        argument = arguments[idx]
+        if is_tensor_option(argument) and len(arguments) - idx >= 3:
+            topt_representation = []
+            for i in range(3):
+                argument = arguments[idx]
+                if not is_tensor_option(argument):
+                    break
+                topt_representation.append(argument)
+                idx += 1
+            if len(topt_representation) == 3:
+                merged_argument = check_topt_representation(topt_representation)
+                assert merged_argument, \
+                    "Unsupported combination of TensorOptions {}, the only currently supported combinations are {}"\
+                    .format(str(topt_representation), str(supported_topt_arguments))
+                new_arguments.append(merged_argument)
+            else:
+                new_arguments += topt_representation
+        else:
+            new_arguments.append(argument)
+            idx += 1
+
+    arguments = new_arguments
 
     # Sanity checks
 
