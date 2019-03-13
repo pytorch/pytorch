@@ -107,6 +107,10 @@ Value* tryConvertToType(
         DeviceObjType::get()->isSubtypeOf(concrete_type)) {
       return graph.insert(aten::device, {value}, {}, loc);
     }
+    if (concrete_type == FloatType::get() &&
+        value->type() == NumberType::get()) {
+      return graph.insert(prim::Float, {value}, {}, loc);
+    }
   }
 
   return value;
@@ -145,10 +149,16 @@ Value* tryMatchArgument(
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
 
   if (!value->type()->isSubtypeOf(concrete_type)) {
-    err() << "expected a value of type " << concrete_type->str()
-          << " for argument '" << arg.name() << "' but found "
-          << value->type()->str() << "\n"
-          << named_value.locOr(loc);
+    auto& ostream = err() << "expected a value of type " << concrete_type->str()
+                          << " for argument '" << arg.name() << "' but found "
+                          << value->type()->str() << "\n";
+
+    if (value->type() == NumberType::get() &&
+        value->node()->kind() == aten::item) {
+      ostream
+          << "Use int(tensor) or float(tensor) to retrieve item() from a tensor with the appropriate type\n";
+    }
+    ostream << named_value.locOr(loc);
     return nullptr;
   }
   return value;
@@ -212,7 +222,8 @@ c10::optional<MatchedSchema> tryMatchSchema(
       self = c10::nullopt;
     } else if (!arg.kwarg_only() && used_args < args.size()) {
       // allow zeros(IntArrayRef sizes) to work with zeros(1, 2) or zeros(1)
-      if (allow_conversions && arg.type()->kind() ==
+      if (allow_conversions &&
+          arg.type()->kind() ==
               TypeKind::ListType && // the formal must be a list
           !arg.N() && // it must not be a broadcasting list like int[3],
                       // otherwise a single int is a valid input
@@ -300,26 +311,32 @@ c10::optional<MatchedSchema> tryMatchSchema(
     }
   }
 
-  const auto &returns = schema.returns();
+  const auto& returns = schema.returns();
   auto return_types = fmap(returns, [&](const Argument& r) {
     return evalTypeVariables(r.type(), type_env);
   });
   // Codegen does not support return of namedtuples with undefined field names.
   // Therefore, either all or none returns has field names.
-  bool return_has_field_names = std::all_of(returns.begin(), returns.end(),
-    [&](const Argument& r) { return r.name().length() > 0; });
+  bool return_has_field_names =
+      std::all_of(returns.begin(), returns.end(), [&](const Argument& r) {
+        return r.name().length() > 0;
+      });
   c10::OptNameList return_field_names = c10::nullopt;
   if (return_has_field_names) {
-    return_field_names = fmap(returns, [&](const Argument& r) {
-      return r.name();
-    });
+    return_field_names =
+        fmap(returns, [&](const Argument& r) { return r.name(); });
   }
-  return MatchedSchema{std::move(positional_inputs), std::move(return_types), std::move(return_field_names)};
+  return MatchedSchema{std::move(positional_inputs),
+                       std::move(return_types),
+                       std::move(return_field_names)};
 }
 
 // pack outputs of a function following python rules. If there is a single value
 // return a SimpleValue, otherwise pack all the values into a Tuple.
-Value* packOutputs(Graph& g, at::ArrayRef<Value*> values, c10::OptNameList field_names) {
+Value* packOutputs(
+    Graph& g,
+    at::ArrayRef<Value*> values,
+    c10::OptNameList field_names) {
   if (values.size() == 1) {
     return values[0];
   }
@@ -439,7 +456,6 @@ Value* emitBuiltinCall(
                          << prefixLine(failure_messages.str(), "  ")
                          << "for call at";
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch
