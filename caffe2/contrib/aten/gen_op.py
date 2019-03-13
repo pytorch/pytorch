@@ -73,7 +73,7 @@ def value_is_tensor_type(v):
 # for each aten type, how do we handle a return value of that type?
 RETURN_MAP = {
     'Tensor': 'assignTo(Output(${offset}),${output});',
-    'Scalar': 'assignTo(Output(${offset}),*inferred_type, ${output});',
+    'Scalar': 'assignTo(Output(${offset}),self.scalar_type(), ${output});',
     'bool': 'assignToValue<int64_t>(Output(${offset}),${output});',
     'int64_t': 'assignToValue<int64_t>(Output(${offset}),${output});',
     'std::vector<Tensor>': 'assignListStartingAt(${offset}, ${output});',
@@ -235,16 +235,12 @@ if __name__ == '__main__':
             'initialization': [],
             'key': str(key),
         }
-        defined_inferred_type = False
 
         if 'namespace' not in o['method_of'] and 'Tensor' not in o['method_of']:
             # methods on type like 'ones' or 'zeros' always take a
             # string attribute that is translated into the at::Type object
             # e.g. "Float" is at::kFloat
             assert('Type' in o['method_of'])
-            defined_inferred_type = True
-            env['initialization'].append(
-                'auto inferred_type = readTypeAttribute("type");')
 
         static_tensor_inputs = sum(arg['type'] != 'TensorList' and value_is_tensor_type(arg) for arg in o['arguments'])
         has_tensorlist = any(arg['type'] == 'TensorList' for arg in o['arguments'])
@@ -269,12 +265,6 @@ if __name__ == '__main__':
                 env['statements'].append(
                     'auto {} = peek({}, {});'.format(arg['name'], real_inputs, view_length))
                 real_inputs += 1
-                if arg['dynamic_type'] == 'Tensor' and not defined_inferred_type:
-                    # first tensor input is used to define the output type.
-                    defined_inferred_type = True
-                    env['statements'].append(
-                        'auto inferred_type = &at::getType({});'.format(
-                            arg['name']))
             else:
                 init = CT(ARGUMENT_MAP[arg['type']]).substitute(env, arg=arg['name'])
                 env['initialization'].append(init)
@@ -286,13 +276,10 @@ if __name__ == '__main__':
 
         if 'namespace' in o['method_of']:
             env['invocation'] = CT("at::${name}(${arguments})").substitute(env)
-        elif 'Tensor' in o['method_of']:
+        else:
+            assert('Tensor' in o['method_of'])
             env['invocation'] = "self.{}({})".format(
                 o['name'], ', '.join(env['arguments'][1:]))
-        else:
-            assert('Type' in o['method_of'])
-            env['invocation'] = CT(
-                'inferred_type->${name}(${arguments})').substitute(env)
 
         top_env['implementations'].append(OPTION_TEMPLATE.substitute(env))
         key += 1

@@ -149,7 +149,8 @@ void import_methods(
     resolvers.emplace_back(resolver);
   }
   auto self = std::make_shared<ModuleAccessorValue>(mod);
-  script::defineMethodsInModule(mod, definitions, resolvers, self);
+  script::defineMethodsInModule(
+      mod, definitions, resolvers, script::Self(self));
 }
 
 } // namespace jit

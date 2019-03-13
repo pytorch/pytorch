@@ -12,7 +12,7 @@ bool FloatToHalfOp<CPUContext>::RunOnDevice() {
   at::Half* out = output->template mutable_data<at::Half>();
   auto N = input.numel();
 
-  for (auto i = 0; i < N; i++) {
+  for (size_t i = 0; i < N; i++) {
     out[i] = data[i];
   }
 
@@ -28,7 +28,7 @@ bool HalfToFloatOp<CPUContext>::RunOnDevice() {
   float* out = output->template mutable_data<float>();
   auto N = input.numel();
 
-  for (auto i = 0; i < N; i++) {
+  for (size_t i = 0; i < N; i++) {
     out[i] = data[i];
   }
   return true;

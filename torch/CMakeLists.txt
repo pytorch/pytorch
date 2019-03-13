@@ -191,7 +191,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/fuser/executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
-  ${TORCH_ROOT}/test/cpp/jit/no-gtest.cpp
+  ${TORCH_ROOT}/test/cpp/jit/test.cpp
   )
 
 if (WIN32)
