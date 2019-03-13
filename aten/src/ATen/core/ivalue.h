@@ -424,15 +424,13 @@ struct CAFFE2_API IValue final {
     }
   }
   bool isScalar() const {
-    return isDouble() || isInt() || isBool();
+    return isDouble() || isInt();
   }
   at::Scalar toScalar() const {
     if(isDouble())
       return toDouble();
     else if(isInt())
       return toInt();
-    else if (isBool())
-      return int(toBool());
     throw std::runtime_error("IValue is not a Scalar");
   }
 

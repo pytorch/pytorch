@@ -16,7 +16,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/operator.h"
-#include "spatial_narrow_as_op.h"
+#include "modules/detectron/spatial_narrow_as_op.h"
 
 namespace caffe2 {
 

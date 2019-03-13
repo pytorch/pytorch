@@ -8,11 +8,11 @@
 using namespace std;
 namespace at {
 
-static DLDataType getDLDataType(const Type& type) {
+static DLDataType getDLDataType(const Tensor& t) {
   DLDataType dtype;
   dtype.lanes = 1;
-  dtype.bits = type.elementSizeInBytes() * 8;
-  switch (type.scalarType()) {
+  dtype.bits = t.dtype().itemsize() * 8;
+  switch (t.scalar_type()) {
     case ScalarType::Byte:
       dtype.code = DLDataTypeCode::kDLUInt;
       break;
@@ -160,7 +160,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   }
   atDLMTensor->tensor.dl_tensor.ctx = getDLContext(src.type(), device_id);
   atDLMTensor->tensor.dl_tensor.ndim = src.dim();
-  atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src.type());
+  atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
   atDLMTensor->tensor.dl_tensor.shape = const_cast<int64_t*>(src.sizes().data());
   atDLMTensor->tensor.dl_tensor.strides = const_cast<int64_t*>(src.strides().data());
   atDLMTensor->tensor.dl_tensor.byte_offset = 0;

@@ -1,5 +1,4 @@
-#include <ATen/core/ivalue.h>
-#include <ATen/core/thread_pool.h>
+#include <c10/core/thread_pool.h>
 
 namespace c10 {
 
@@ -68,10 +67,10 @@ void ThreadPool::waitWorkComplete() {
 void ThreadPool::main_loop(std::size_t index) {
   init_thread();
 
+  std::unique_lock<std::mutex> lock(mutex_);
   while (running_) {
     // Wait on condition variable while the task is empty and
     // the pool is still running.
-    std::unique_lock<std::mutex> lock(mutex_);
     while (tasks_.empty() && running_) {
       condition_.wait(lock);
     }
@@ -113,6 +112,10 @@ void ThreadPool::main_loop(std::size_t index) {
         complete_ = true;
         completed_.notify_one();
       }
+
+      // Deliberately hold the lock on the backedge, so this thread has an
+      // opportunity to acquire a new task before another thread acquires
+      // the lock.
     }
   } // while running_
 }
@@ -125,9 +128,32 @@ void setNumThreads(size_t v) {
   }
 }
 
-ThreadPool& global_work_queue() {
-   static ThreadPool thread_pool(num_threads.exchange(-1));
-   return thread_pool;
+TaskThreadPoolBase& global_work_queue() {
+  static std::shared_ptr<TaskThreadPoolBase> pool =
+      ThreadPoolRegistry()->Create("C10", 0, num_threads.exchange(-1), false);
+  return *pool;
 }
+
+C10_DEFINE_SHARED_REGISTRY(
+    ThreadPoolRegistry,
+    TaskThreadPoolBase,
+    int,
+    int,
+    bool);
+
+namespace {
+
+std::shared_ptr<TaskThreadPoolBase> createC10ThreadPool(
+    int device_id,
+    int pool_size,
+    bool create_new) {
+  static std::shared_ptr<TaskThreadPoolBase> pool =
+      std::make_shared<ThreadPool>(pool_size);
+  return pool;
+}
+
+} // namespace
+
+C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, createC10ThreadPool);
 
 } // namespace c10
