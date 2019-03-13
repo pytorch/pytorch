@@ -402,7 +402,6 @@ struct Unpickler {
 
   OpCode readInstruction() {
     auto op = readOpCode();
-    std::cout << "reading: " << static_cast<char>(op) << "\n";
     switch (op) {
       case OpCode::EMPTY_LIST: {
         // TODO: Use fake classes to mark list specializations
