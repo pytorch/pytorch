@@ -687,12 +687,8 @@ const std::vector<std::string> functions = {
         def AD_fused_dropout_backward(grad,
                                       mask,
                                       p1m: float):
-            if grad.requires_grad:
-                grad_input = grad * (mask.type_as(grad) * (1. / p1m))
-            else:
-                grad_input = torch._masked_scale(grad, mask, 1. / p1m)
-            return grad_input
-            
+            return grad * (mask.type_as(grad) * (1. / p1m))
+
         def dropout(input,
                     p: float,
                     train: bool):
