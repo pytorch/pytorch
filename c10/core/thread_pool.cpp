@@ -19,8 +19,12 @@ ThreadPool::~ThreadPool() {
   {
     std::unique_lock<std::mutex> lock(mutex_);
     running_ = false;
-    condition_.notify_all();
   }
+
+  // Notify after releasing the lock so that the worker does not wake
+  // up and then immediately block on the lock.
+  condition_.notify_all();
+
 
   for (auto& t : threads_) {
     try {
@@ -48,20 +52,26 @@ bool ThreadPool::inThreadPool() const {
 }
 
 void ThreadPool::run(const std::function<void()>& func) {
-  std::unique_lock<std::mutex> lock(mutex_);
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
 
-  // Set task and signal condition variable so that a worker thread will
-  // wake up and use the task.
-  tasks_.push(task_element_t(func));
-  complete_ = false;
+    // Set task and signal condition variable so that a worker thread will
+    // wake up and use the task.
+    tasks_.push(task_element_t(func));
+    complete_ = false;
+  }
+
+  // Notify after releasing the lock so that the worker does not wake
+  // up and then immediately block on the lock.
   condition_.notify_one();
 }
 
 void ThreadPool::waitWorkComplete() {
-  std::unique_lock<std::mutex> lock(mutex_);
-  while (!complete_) {
-    completed_.wait(lock);
-  }
+  // This mutex is only used for waiting on the work complete notification.
+  // By splitting it from mutex_ we allow these notifications to be received
+  // without either the receiver blocking the sender or vice versa.
+  std::unique_lock<std::mutex> lock(work_complete_mutex_);
+  completed_.wait(lock, [&] { return complete_.load(); });
 }
 
 void ThreadPool::main_loop(std::size_t index) {
@@ -69,11 +79,10 @@ void ThreadPool::main_loop(std::size_t index) {
 
   std::unique_lock<std::mutex> lock(mutex_);
   while (running_) {
-    // Wait on condition variable while the task is empty and
-    // the pool is still running.
-    while (tasks_.empty() && running_) {
-      condition_.wait(lock);
-    }
+    // Wait on condition variable until there is either a task to run,
+    // of the pool is no longer running.
+    condition_.wait(lock, [&] { return !tasks_.empty() || !running_; });
+
     // If pool is no longer running, break out of loop.
     if (!running_) {
       break;
