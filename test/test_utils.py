@@ -201,7 +201,7 @@ class TestCheckpoint(TestCase):
         )
 
     def test_checkpoint_rng_cpu(self):
-        for i in range(5):
+        for _ in range(5):
             inp = torch.randn(20000, device='cpu').requires_grad_()
             phase1 = torch.nn.Dropout()
             phase2 = torch.nn.Dropout()
@@ -229,7 +229,7 @@ class TestCheckpoint(TestCase):
 
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
     def test_checkpoint_rng_cuda(self):
-        for i in range(5):
+        for _ in range(5):
             inp = torch.randn(20000, device='cuda').requires_grad_()
             phase1 = torch.nn.Dropout()
             phase2 = torch.nn.Dropout()
@@ -325,7 +325,7 @@ class TestBottleneck(TestCase):
         import subprocess
         from common_utils import PY3
 
-        p = subprocess.Popen(command, stdout=subprocess.PIPE,
+        p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa
                              stderr=subprocess.PIPE, shell=True)
         output, err = p.communicate()
         rc = p.returncode
