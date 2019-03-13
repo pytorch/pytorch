@@ -255,6 +255,17 @@ class TestCheckpoint(TestCase):
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
+    def test_checkpoint_non_tensor(self):
+
+        def run_fn(tensor1, tensor2):
+            if tensor2 is None:
+                return tensor1
+            return tensor1 + tensor2
+
+        input_var = torch.randn(1, 100, requires_grad=True)
+        out = checkpoint(run_fn, input_var, None)
+        out.sum().backward()
+
 
 class TestDataLoader(TestCase):
     def setUp(self):
