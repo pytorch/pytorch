@@ -308,7 +308,7 @@ static variable_list call_post_hooks(Function& fn, variable_list outputs, const 
   return outputs;
 }
 
-static bool is_compatible_type(const at::Type& expected, const at::Type& actual) {
+static bool is_compatible_type(const at::TypeProperties& expected, const at::TypeProperties& actual) {
   // Types are compatible if they exactly match or if the gradient is a sparse
   // version of the expected type.
   return expected == actual || (actual.is_sparse() &&

@@ -173,7 +173,7 @@ void Variable::Impl::set_data(Tensor new_data) {
 
   // Updates metadata
   data_type_ = new_data.type().typeMeta();
-  type_id_ = new_data.type().type_id();
+  type_id_ = new_data.dispatch_type().type_id();
   is_variable_ = true;
 
   auto new_data_copy = at::Tensor(new_data.getIntrusivePtr()->shallow_copy_and_detach());

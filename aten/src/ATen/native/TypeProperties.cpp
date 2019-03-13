@@ -10,7 +10,7 @@ bool is_cuda(const Tensor& self) {
 }
 
 bool is_distributed(const Tensor& self) {
-  return self.type().is_distributed();
+  return self.dispatch_type().is_distributed();
 }
 
 bool is_complex(const Tensor& self) {
@@ -35,7 +35,7 @@ bool is_sparse(const Tensor& self) {
 }
 
 Tensor type_as(const Tensor& self, const Tensor& other) {
-  return self.toType(other.type());
+  return self.toType(other.dispatch_type());
 }
 
 }} // namespace at::native

@@ -154,7 +154,7 @@ Tensor& ger_out(Tensor& result, const Tensor& self, const Tensor& vec2) {
 
 Tensor mm(const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
-    return mat2.type().addmm(at::zeros({}, mat2.type()), self, mat2, 0, 1);
+    return at::zeros({}, mat2.type()).addmm(self, mat2, 0, 1);
   }
   return at::legacy::th::_th_mm(self, mat2);
 }
@@ -366,7 +366,7 @@ Tensor dot(const Tensor& self, const Tensor& tensor) {
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
   result.resize_({});
   // dispatching through type ensures we don't allow mismatched types.
-  return self.type().fill_(result, self.dot(tensor));
+  return self.dispatch_type().fill_(result, self.dot(tensor));
 }
 
 /*

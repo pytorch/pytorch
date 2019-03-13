@@ -121,7 +121,7 @@ static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
 
-  auto ipiv = at::empty({n}, b.type().toScalarType(kInt));
+  auto ipiv = at::empty({n}, b.options().dtype(kInt));
 
   int info;
   if (b.dim() == 2) {
@@ -195,7 +195,7 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
   auto batch_size = batchCount(self);
   auto n = self.size(-2);
 
-  auto ipiv = at::empty({n}, self.type().toScalarType(kInt));
+  auto ipiv = at::empty({n}, self.options().dtype(kInt));
   int lwork;
   scalar_t wkopt;
   Tensor work;

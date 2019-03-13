@@ -84,8 +84,8 @@ Tensor new_with_storage(const Type& type, Storage storage) {
 }
 
 Tensor new_with_tensor(const Type& type, const Tensor& other) {
-  if (other.type() != type) {
-    throw TypeError("expected %s (got %s)", type.toString(), other.type().toString());
+  if (other.dispatch_type() != type) {
+    throw TypeError("expected %s (got %s)", type.toString(), other.type().toString().c_str());
   }
   return other.slice();
 }
@@ -228,7 +228,7 @@ Tensor internal_new_from_data(
   auto tensor = autograd::make_variable(at::empty(sizes, at::initialTensorOptions().dtype(scalar_type)), /*requires_grad=*/false);
   recursive_store(
       (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
-      scalar_type, tensor.type().elementSizeInBytes(), data);
+      scalar_type, tensor.element_size(), data);
   auto device = device_opt.has_value() ? *device_opt : at::Device(torch::getDeviceType(type));
   AutoNoGIL no_gil;
   maybe_initialize_cuda(device);
@@ -480,7 +480,7 @@ Tensor sparse_coo_tensor_ctor(const Type& default_type, PyObject* args, PyObject
     at::OptionalDeviceGuard device_guard(r.deviceOptional(3));
     // if no dtype provided, infer type based on value type.
     Tensor values = internal_new_from_data(values_type, r.deviceOptional(3), r.pyobject(1), false, true, type_inference);
-    const auto& indices_type = values.type().toScalarType(kLong);
+    const auto& indices_type = values.dispatch_type().toScalarType(kLong);
     Tensor indices = internal_new_from_data(indices_type, r.deviceOptional(3), r.pyobject(0), false, true, false);
     return at::sparse_coo_tensor(indices, values, values.options().layout(at::kSparse)).set_requires_grad(r.toBool(4));
   } else if (r.idx == 1) {
@@ -489,7 +489,7 @@ Tensor sparse_coo_tensor_ctor(const Type& default_type, PyObject* args, PyObject
     const auto& values_type = type.toDense();
     at::OptionalDeviceGuard device_guard(r.deviceOptional(4));
     Tensor values = internal_new_from_data(values_type, r.deviceOptional(4), r.pyobject(1), false, true, type_inference);
-    const auto& indices_type = values.type().toScalarType(kLong);
+    const auto& indices_type = values.dispatch_type().toScalarType(kLong);
     Tensor indices = internal_new_from_data(indices_type, r.deviceOptional(4), r.pyobject(0), false, true, false);
     return at::sparse_coo_tensor(indices, values, r.intlist(2), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(5));
   } else if (r.idx == 2) {

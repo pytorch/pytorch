@@ -128,7 +128,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   /// Adds the type and shape metadata for a new input. Returns the index of
   /// of the new input.
   uint32_t add_input_metadata(
-    const at::Type& type
+    const at::TypeProperties type
   , at::IntArrayRef shape
   , const int64_t device) noexcept {
     uint32_t input_nr = input_metadata_.size();

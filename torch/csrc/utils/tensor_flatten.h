@@ -31,7 +31,7 @@ struct TensorGroup {
   std::vector<at::Tensor> tensors;
   size_t size = 0;
 
-  at::Type& type() {
+  at::TypeProperties type() {
     AT_ASSERT(!tensors.empty());
     return tensors[0].type();
   }

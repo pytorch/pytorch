@@ -122,7 +122,7 @@ void setOutput(O& opts, at::Tensor& tensor) {
 #ifdef USE_CUDA
 
 at::Tensor pinnedLike(at::Tensor& tensor) {
-  auto& type = tensor.type().toBackend(at::Backend::CPU);
+  auto& type = tensor.dispatch_type().toBackend(at::Backend::CPU);
   auto* allocator = at::cuda::getPinnedMemoryAllocator();
   return type.tensorWithAllocator(tensor.sizes(), tensor.strides(), allocator);
 }
@@ -1389,7 +1389,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
-  auto size = tensor.numel() * tensor.type().elementSizeInBytes();
+  auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
@@ -1408,7 +1408,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
-  auto size = tensor.numel() * tensor.type().elementSizeInBytes();
+  auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
@@ -1426,7 +1426,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
-  auto size = tensor.numel() * tensor.type().elementSizeInBytes();
+  auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];

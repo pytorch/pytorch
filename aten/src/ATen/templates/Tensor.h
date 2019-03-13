@@ -13,6 +13,7 @@
 #include <c10/util/Optional.h>
 #include <c10/core/Tensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/TypeProperties.h>
 
 namespace c10{
 struct TensorOptions;
@@ -196,7 +197,10 @@ class CAFFE2_API Tensor {
     return impl_->itemsize();
   }
 
-  Type & type() const {
+  TypeProperties type() const {
+    return TypeProperties(deviceTypeToBackend(device().type()), scalar_type());
+  }
+  Type & dispatch_type() const {
     return legacyTensorType(*impl_);
   }
   TensorTypeId type_id() const {
@@ -217,6 +221,7 @@ class CAFFE2_API Tensor {
   Tensor toType(const Type & t, bool non_blocking=false) const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
   Tensor toType(ScalarType t) const;
+  Tensor toType(Backend b, ScalarType t) const;
   Tensor toBackend(Backend b) const;
 
   /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.

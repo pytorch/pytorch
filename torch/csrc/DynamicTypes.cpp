@@ -133,7 +133,7 @@ THPLayout* getLayout(at::Backend backend) {
   return layout;
 }
 
-at::Device::Type getDeviceType(const at::Type& type) {
+at::Device::Type getDeviceType(const at::TypeProperties& type) {
   return type.is_cuda() ? at::Device::Type::CUDA : at::Device::Type::CPU;
 }
 

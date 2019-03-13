@@ -52,9 +52,9 @@ static void check_out_type_matches(Tensor result,
   }
   auto scalarType_arg = scalarType_is_none ? result.scalar_type() : scalarType;
   auto layout_arg = layout_is_none ? *torch::getLayout(result.type().backend()) : layout;
-  auto device_type_arg = device_is_none ? torch::getDeviceType(result.type()) : device.type();
+  auto device_type_arg = device_is_none ? result.device().type() : device.type();
   const auto& type = torch::getVariableType(scalarType_arg, layout_arg, device_type_arg);
-  if (result.type() != type) {
+  if (result.dispatch_type() != type) {
     AT_ERROR(
         "type corresponding to ", type.toString(),
         " does not match type of out parameter (", result.type().toString(), ")");
