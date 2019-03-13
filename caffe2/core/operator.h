@@ -250,13 +250,13 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
           "device must be provided in options.");
       return BlobGetMutableTensor(outputs_.at(idx), dims, options);
     }
-    auto& ival = newstyle_outputs_[idx];
+    auto& output = newstyle_outputs_[idx];
     Tensor tensor =
-        GetSizedTensorWithOptions(caffe2::Tensor(ival), dims, options);
+        GetSizedTensorWithOptions(caffe2::Tensor(output), dims, options);
     // assign it back in case it changed
-    ival = at::Tensor(std::move(tensor.getIntrusivePtr()));
+    output = at::Tensor(std::move(tensor.getIntrusivePtr()));
 
-    output_tensors_[idx] = caffe2::Tensor(ival);
+    output_tensors_[idx] = caffe2::Tensor(output);
     return &output_tensors_[idx];
   }
 
