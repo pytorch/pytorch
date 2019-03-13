@@ -37,7 +37,7 @@ git clone https://github.com/pytorch/pytorch
 cd pytorch
 ```
 
-3. Install PyTorch in `build develop` mode:
+3. Install PyTorch in `develop` mode:
 
 A full set of instructions on installing PyTorch from source is here:
 https://github.com/pytorch/pytorch#from-source
@@ -51,7 +51,7 @@ python setup.py install
 with
 
 ```bash
-python setup.py build develop
+python setup.py develop
 ```
 
 This is especially useful if you are only changing Python files.
@@ -62,7 +62,7 @@ Python install.
 Hence, if you modify a Python file, you do not need to reinstall PyTorch again and again.
 
 For example:
-- Install local PyTorch in `build develop` mode
+- Install local PyTorch in `develop` mode
 - modify your Python file `torch/__init__.py` (for example)
 - test functionality
 - modify your Python file `torch/__init__.py`
@@ -73,7 +73,7 @@ For example:
 You do not need to repeatedly install after modifying Python files.
 
 In case you want to reinstall, make sure that you uninstall PyTorch first by running `pip uninstall torch`
-and `python setup.py clean`. Then you can install in `build develop` mode again.
+and `python setup.py clean`. Then you can install in `develop` mode again.
 
 ## Codebase structure
 
@@ -212,7 +212,7 @@ specific build of PyTorch. To set one up:
 conda create -n pytorch-myfeature
 source activate pytorch-myfeature
 # if you run python now, torch will NOT be installed
-python setup.py build develop
+python setup.py develop
 ```
 
 ## C++ Development tips
@@ -254,7 +254,7 @@ variables `DEBUG` and `NO_CUDA`.
 
 For example:
 ```bash
-NO_CUDA=1 DEBUG=1 python setup.py build develop
+NO_CUDA=1 DEBUG=1 python setup.py develop
 ```
 
 Make sure you continue to pass these flags on subsequent builds.
@@ -283,9 +283,13 @@ Even when dependencies are tracked with file modification,
 there are many situations where files get rebuilt when a previous
 compilation was exactly the same.
 
-Using ccache in a situation like this is a real time-saver. However, by
-default, ccache does not properly support CUDA stuff, so here are the
-instructions for installing a custom ccache fork that has CUDA support:
+Using ccache in a situation like this is a real time-saver. The ccache manual
+describes [two ways to use ccache](https://ccache.samba.org/manual/latest.html#_run_modes).
+In the PyTorch project, currently only the latter method of masquerading as
+the compiler via symlinks works for CUDA compilation.
+
+Here are the instructions for installing ccache from source (tested at commit
+`7abac8f` of the `ccache` repo):
 
 ```bash
 # install and export ccache
@@ -297,7 +301,7 @@ then
     mkdir -p ~/ccache
     pushd /tmp
     rm -rf ccache
-    git clone https://github.com/colesbury/ccache -b ccbin
+    git clone https://github.com/ccache/ccache.git
     pushd ccache
     ./autogen.sh
     ./configure
@@ -320,6 +324,14 @@ export PATH=~/ccache/lib:$PATH
 export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
 ```
 
+Alternatively, `ccache` provided by newer Linux distributions (e.g. Debian/sid)
+also works, but the `nvcc` symlink to `ccache` as described above is still required.
+
+Note that the original `nvcc` binary (typically at `/usr/local/cuda/bin`) must
+be on your `PATH`, otherwise `ccache` will emit the following error:
+
+    ccache: error: Could not find compiler "nvcc" in PATH
+
 ## CUDA Development tips
 
 If you are working on the CUDA code, here are some useful CUDA debugging tips:
@@ -334,6 +346,9 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
 Hope this helps, and thanks for considering to contribute.
 
 ## Windows development tips
+
+For building from source on Windows, consult
+[our documentation](https://pytorch.org/docs/stable/notes/windows.html) on it.
 
 Occasionally, you will write a patch which works on Linux, but fails CI on Windows.
 There are a few aspects in which MSVC (the Windows compiler toolchain we use) is stricter
@@ -434,6 +449,11 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
   are too large. Splitting such files into separate files helps.
   (Example: `THTensorMath`, `THTensorMoreMath`, `THTensorEvenMoreMath`.)
 
+* MSVC's preprocessor (but not the standard compiler) has a bug
+  where it incorrectly tokenizes raw string literals, ending when it sees a `"`.
+  This causes preprocessor tokens inside the literal like an`#endif`  to be incorrectly
+  treated as preprocessor directives. See https://godbolt.org/z/eVTIJq as an example.
+
 ### Running Clang-Tidy
 
 [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
@@ -467,11 +487,12 @@ which is in PyTorch's `requirements.txt`.
 
 ### Pre-commit Tidy/Linting Hook
 
-We use clang-tidy and flake8 to perform additional formatting and semantic checking
-of code. We provide a pre-commit git hook for performing these checks, before
-a commit is created:
+We use clang-tidy and flake8 (installed with flake-mypy) to perform additional
+formatting and semantic checking of code. We provide a pre-commit git hook for
+performing these checks, before a commit is created:
 
   ```bash
+  pip install flake8-mypy
   ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
   ```
 

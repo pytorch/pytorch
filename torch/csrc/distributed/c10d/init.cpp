@@ -138,7 +138,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<const std::string&, int>());
 
   shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
-      .def(py::init<const std::string&, int, bool>());
+      .def(py::init<const std::string&, int, int, bool>());
 
   shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store)
       .def(py::init<const std::string&, ::c10d::Store&>());
@@ -337,10 +337,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<>())
       .def_readwrite("devices", &::c10d::ProcessGroupGloo::Options::devices)
       .def_readwrite("timeout", &::c10d::ProcessGroupGloo::Options::timeout)
-      .def_readwrite("threads", &::c10d::ProcessGroupGloo::Options::threads)
-      .def_readwrite(
-          "cacheNumAlgorithmEntries",
-          &::c10d::ProcessGroupGloo::Options::cacheNumAlgorithmEntries);
+      .def_readwrite("threads", &::c10d::ProcessGroupGloo::Options::threads);
 
   processGroupGloo.def_static(
       "create_tcp_device",

@@ -49,7 +49,7 @@ class C10_API Error : public std::exception {
   Error(SourceLocation source_location, const std::string& msg);
   Error(
       const char* file,
-      const int line,
+      const uint32_t line,
       const char* condition,
       const std::string& msg,
       const std::string& backtrace,
@@ -101,6 +101,13 @@ class C10_API Warning {
   static handler_t warning_handler_;
 };
 
+// Used in ATen for out-of-bound indices that can reasonably only be detected
+// lazily inside a kernel (See: advanced indexing).
+class C10_API IndexError : public Error {
+  using Error::Error;
+};
+
+
 // A utility function to return an exception std::string by prepending its
 // exception type before its what() content
 C10_API std::string GetExceptionString(const std::exception& e);
@@ -117,11 +124,20 @@ C10_API std::string GetExceptionString(const std::exception& e);
 // TODO: merge AT_CHECK with AT_ASSERTM. CHECK in fbcode means strict failure if
 // not met.
 
+// In the debug build With MSVC, __LINE__ might be of long type (a.k.a int32_t),
+// which is different from the definition of `SourceLocation` that requires
+// unsigned int (a.k.a uint32_t) and may cause a compile error with the message:
+// error C2397: conversion from 'long' to 'uint32_t' requires a narrowing conversion
+// Here the static cast is used to pass the build.
+
 #define AT_ERROR(...) \
-  throw ::c10::Error({__func__, __FILE__, __LINE__}, ::c10::str(__VA_ARGS__))
+  throw ::c10::Error({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__))
+
+#define AT_INDEX_ERROR(...) \
+  throw ::c10::IndexError({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__))
 
 #define AT_WARN(...) \
-  ::c10::Warning::warn({__func__, __FILE__, __LINE__}, ::c10::str(__VA_ARGS__))
+  ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__))
 
 #define AT_ASSERT(cond)                       \
   if (!(cond)) {                              \

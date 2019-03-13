@@ -4,10 +4,14 @@
 #include <array>
 #include <vector>
 
+#include <ATen/core/dispatch/OpSchemaRegistration.h>
+
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
+
+C10_DECLARE_CAFFE2_OPERATOR(LayerNorm)
 
 namespace caffe2 {
 
@@ -16,12 +20,11 @@ class LayerNormOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  LayerNormOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit LayerNormOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "axis", axis_, 1),
         OP_SINGLE_ARG(float, "epsilon", epsilon_, 1e-5f) {}
-
-  ~LayerNormOp() {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
@@ -37,42 +40,47 @@ class LayerNormOp final : public Operator<Context> {
     moments_dims.push_back(1);
     auto* mean = Output(1, moments_dims, at::dtype<T>());
     auto* sig = Output(2, moments_dims, at::dtype<T>());
-    runLayerNorm<T>(X, Y, mean, sig, canonical_axis, epsilon_, &scale_, &bias_, &context_);
+    RunLayerNorm<T>(
+        X, canonical_axis, epsilon_, Y, mean, sig, &scale_, &bias_, &context_);
     return true;
   }
 
-  template<typename T>
-  static void runLayerNorm(
-    const Tensor& X,
-    Tensor* Y,
-    Tensor* mean,
-    Tensor* sig,
-    int canonical_axis,
-    float epsilon,
-    Tensor* scale_buffer,
-    Tensor* bias_buffer,
-    Context* context
-  ) {
+  template <typename T>
+  static void RunLayerNorm(
+      const Tensor& X,
+      const int canonical_axis,
+      const float epsilon,
+      Tensor* Y,
+      Tensor* mean,
+      Tensor* sig,
+      Tensor* scale_buffer,
+      Tensor* bias_buffer,
+      Context* context) {
     CAFFE_ENFORCE_GE(X.dim(), 2, "LayerNorm requires input dim >= 2.");
     const int M = X.size_to_dim(canonical_axis);
     const int N = X.size_from_dim(canonical_axis);
     Y->ResizeLike(X);
     scale_buffer->Resize(M);
     bias_buffer->Resize(M);
-
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
     T* mean_data = mean->template mutable_data<T>();
     T* sig_data = sig->template mutable_data<T>();
     T* scale_data = scale_buffer->template mutable_data<T>();
     T* bias_data = bias_buffer->template mutable_data<T>();
-
-    const std::array<int, 2> dims = {M, N};
-    const int axis = 1;
+    const std::array<int, 2> X_dims = {M, N};
+    const std::array<int, 2> Y_dims = {M, 1};
     math::Moments<T, Context>(
-        2, dims.data(), 1, &axis, X_data, mean_data, sig_data, context);
+        2, X_dims.data(), Y_dims.data(), X_data, mean_data, sig_data, context);
     ComputeStdDevAndFusedParams<T>(
-        M, mean_data, sig_data, sig_data, scale_data, bias_data, epsilon, context);
+        M,
+        mean_data,
+        sig_data,
+        sig_data,
+        scale_data,
+        bias_data,
+        epsilon,
+        context);
     LayerNormForward<T>(M, N, X_data, scale_data, bias_data, Y_data, context);
   }
 
@@ -109,8 +117,9 @@ template <class Context>
 class LayerNormGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  LayerNormGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit LayerNormGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "axis", axis_, 1) {}
 
   ~LayerNormGradientOp() {}
@@ -132,11 +141,16 @@ class LayerNormGradientOp final : public Operator<Context> {
     const int N = X.size_from_dim(canonical_axis);
 
     auto* dX = Output(0, X.sizes(), at::dtype<T>());
-    ds_.Resize(M);
-    db_.Resize(M);
-    dY_scale_.Resize(M);
-    X_scale_.Resize(M);
-    bias_.Resize(M);
+    ReinitializeTensor(
+        &ds_, {M}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &db_, {M}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &dY_scale_, {M}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &X_scale_, {M}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &bias_, {M}, at::dtype<T>().device(Context::GetDeviceType()));
     const T* dY_data = dY.template data<T>();
     const T* X_data = X.template data<T>();
     const T* mean_data = mean.template data<T>();
@@ -200,11 +214,11 @@ class LayerNormGradientOp final : public Operator<Context> {
 
   const int axis_;
 
-  Tensor ds_{Context::GetDeviceType()};
-  Tensor db_{Context::GetDeviceType()};
-  Tensor dY_scale_{Context::GetDeviceType()};
-  Tensor X_scale_{Context::GetDeviceType()};
-  Tensor bias_{Context::GetDeviceType()};
+  Tensor ds_;
+  Tensor db_;
+  Tensor dY_scale_;
+  Tensor X_scale_;
+  Tensor bias_;
 };
 
 } // namespace caffe2

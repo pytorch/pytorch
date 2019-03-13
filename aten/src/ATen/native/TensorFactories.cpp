@@ -12,7 +12,8 @@
 #include <ATen/LegacyTHFunctions.h>
 #include <ATen/LegacyTHDispatcher.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/Deprecated.h>
+#include <c10/util/Deprecated.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorFactories.h>
 #include <c10/core/TensorOptions.h>
 #include <TH/THRandom.h>
@@ -22,22 +23,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-
-// Note [Native bindings for legacy TH factory functions]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// A number of factory functions are implemented in the following way:
-//
-//    return at::getType(options)._arange(start, end, step);
-//
-// That is to say, they grab a Type for TensorOptions, and then call some
-// internal method.  What's going on?
-//
-// The reason for the folderol is that these particular factory functions
-// are still implemented in a legacy way in TH.  The TH bindings don't
-// (and never will) understand TensorOptions, so we need to handle TensorOptions
-// inside native before batting over to TH.  The expectation is that when
-// these factories get ported to native, this is no longer necessary,
-// and we can eliminate the getType call.
 
 namespace at {
 namespace native {
@@ -72,6 +57,10 @@ const TypeExtendedInterface& getFactoryType(const TensorOptions& options) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+Tensor arange(Scalar end, const TensorOptions& options) {
+  return native::arange(/*start=*/0, end, options);
+}
+
 Tensor arange(Scalar start, Scalar end, const TensorOptions& options) {
   return native::arange(start, end, /*step=*/1, options);
 }
@@ -81,36 +70,28 @@ Tensor arange(
     Scalar end,
     Scalar step,
     const TensorOptions& options) {
-  // Note [Native bindings for legacy TH factory functions]
-  return getFactoryType(options)._th_arange(start, end, step);
-}
-
-Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
-  return native::arange_out(result, start, end, /*step=*/1);
-}
-
-Tensor& arange_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
-  return at::legacy::th::_th_arange_out(result, start, end, step);
-}
-
-Tensor arange(Scalar end, const TensorOptions& options) {
-  // Note [Native bindings for legacy TH factory functions]
-  return getFactoryType(options)._th_arange(end);
+  Tensor result = at::empty({0}, options);  // to be filled by arange_out
+  return at::arange_out(result, start, end, step);
 }
 
 Tensor& arange_out(Tensor& result, Scalar end) {
-  return at::legacy::th::_th_arange_out(result, end);
+  return at::arange_out(result, /*start=*/0, end);
+}
+
+Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
+  return at::arange_out(result, start, end, /*step=*/1);
 }
 
 Tensor _dim_arange(const Tensor& like, int64_t dim) {
-  return getFactoryType(like.options().dtype(at::kLong))._th_arange(like.size(dim));
+  return at::arange(like.size(dim), like.options().dtype(at::kLong));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor empty_cpu(IntList size, const TensorOptions& options) {
+Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == Backend::CPU);
-  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'
+  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
+  check_size_nonnegative(size);
 
   auto* allocator = at::getCPUAllocator();
   int64_t nelements = prod_intlist(size);
@@ -130,7 +111,15 @@ Tensor empty_cpu(IntList size, const TensorOptions& options) {
   return tensor;
 }
 
-Tensor& empty_out(Tensor& result, IntList size) {
+Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
+  check_size_nonnegative(size);
+  auto t = at::native::empty_cpu({0}, options);
+  at::native::resize_impl_cpu_(t.unsafeGetTensorImpl(), size, stride);
+  return t;
+}
+
+Tensor& empty_out(Tensor& result, IntArrayRef size) {
+  check_size_nonnegative(size);
   if (result.is_sparse()) {
     result.sparse_resize_and_clear_(size, size.size(), 0);
   } else {
@@ -138,12 +127,6 @@ Tensor& empty_out(Tensor& result, IntList size) {
   }
   return result;
 }
-
-Tensor empty_strided(IntList size, IntList stride, const TensorOptions& options) {
-  // Note [Native bindings for legacy TH factory functions]
-  return getFactoryType(options)._th_tensor(size, stride);
-}
-
 
 // Temporary type cast operators. These are needed to trace type-casts now since
 // Type's are not supported in the IR. Instead, we call down to these
@@ -201,7 +184,7 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
-  AT_DISPATCH_ALL_TYPES(result.type(), "eye", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "eye", [&]() -> void {
     scalar_t* result_data = result.data<scalar_t>();
     for(int64_t i = 0; i < sz; i++) {
       result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
@@ -213,7 +196,7 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ full ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor full(IntList size, Scalar fill_value, const TensorOptions& options) {
+Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions& options) {
   if (options.layout() == kSparse) {
     AT_ERROR("full(...) is not implemented for sparse layout");
   }
@@ -221,7 +204,7 @@ Tensor full(IntList size, Scalar fill_value, const TensorOptions& options) {
   return result.fill_(fill_value);
 }
 
-Tensor& full_out(Tensor& result, IntList size, Scalar fill_value) {
+Tensor& full_out(Tensor& result, IntArrayRef size, Scalar fill_value) {
   if (result.is_sparse()) {
     AT_ERROR("full(...) is not implemented for sparse layout");
   }
@@ -250,34 +233,22 @@ Tensor linspace(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor logspace(Scalar start, Scalar end, const TensorOptions& options) {
-  return native::logspace(start, end, /*steps=*/100, options);
-}
-
 Tensor logspace(
     Scalar start,
     Scalar end,
     int64_t steps,
     const TensorOptions& options) {
-  // Note [Native bindings for legacy TH factory functions]
-  return getFactoryType(options)._th_logspace(start, end, steps);
-}
-
-Tensor& logspace_out(Tensor& result, Scalar start, Scalar end) {
-  return native::logspace_out(result, start, end, /*steps=*/100);
-}
-
-Tensor& logspace_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
-  return at::legacy::th::_th_logspace_out(result, start, end, steps);
+  Tensor result = at::empty({steps}, options);
+  return at::logspace_out(result, start, end, steps);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ones ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor ones(IntList size, const TensorOptions& options) {
+Tensor ones(IntArrayRef size, const TensorOptions& options) {
   return native::full(size, /*fill_value=*/1, options);
 }
 
-Tensor& ones_out(Tensor& result, IntList size) {
+Tensor& ones_out(Tensor& result, IntArrayRef size) {
   return native::full_out(result, size, /*fill_value=*/1);
 }
 
@@ -297,20 +268,20 @@ Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ rand ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor rand(IntList size, const TensorOptions& options) {
+Tensor rand(IntArrayRef size, const TensorOptions& options) {
   return native::rand(size, nullptr, options);
 }
 
-Tensor rand(IntList size, Generator* generator, const TensorOptions& options) {
+Tensor rand(IntArrayRef size, Generator* generator, const TensorOptions& options) {
   auto result = at::empty(size, options);
   return result.uniform_(0, 1, generator);
 }
 
-Tensor& rand_out(Tensor& result, IntList size) {
+Tensor& rand_out(Tensor& result, IntArrayRef size) {
   return native::rand_out(result, size, nullptr);
 }
 
-Tensor& rand_out(Tensor& result, IntList size, Generator* generator) {
+Tensor& rand_out(Tensor& result, IntArrayRef size, Generator* generator) {
   result.resize_(size);
   return result.uniform_(0, 1, generator);
 }
@@ -325,13 +296,13 @@ Tensor rand_like(const Tensor& self, const TensorOptions& options) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randint ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor randint(int64_t high, IntList size, const TensorOptions& options) {
+Tensor randint(int64_t high, IntArrayRef size, const TensorOptions& options) {
   return native::randint(high, size, nullptr, options);
 }
 
 Tensor randint(
     int64_t high,
-    IntList size,
+    IntArrayRef size,
     Generator* generator,
     const TensorOptions& options) {
   return native::randint(0, high, size, generator, options);
@@ -340,7 +311,7 @@ Tensor randint(
 Tensor randint(
     int64_t low,
     int64_t high,
-    IntList size,
+    IntArrayRef size,
     const TensorOptions& options) {
   return native::randint(low, high, size, nullptr, options);
 }
@@ -348,27 +319,27 @@ Tensor randint(
 Tensor randint(
     int64_t low,
     int64_t high,
-    IntList size,
+    IntArrayRef size,
     Generator* generator,
     const TensorOptions& options) {
   auto result = at::empty(size, options);
   return result.random_(low, high, generator);
 }
 
-Tensor& randint_out(Tensor& result, int64_t high, IntList size) {
+Tensor& randint_out(Tensor& result, int64_t high, IntArrayRef size) {
   return native::randint_out(result, high, size, nullptr);
 }
 
 Tensor& randint_out(
     Tensor& result,
     int64_t high,
-    IntList size,
+    IntArrayRef size,
     Generator* generator) {
   result.resize_(size);
   return result.random_(0, high, generator);
 }
 
-Tensor& randint_out(Tensor& result, int64_t low, int64_t high, IntList size) {
+Tensor& randint_out(Tensor& result, int64_t low, int64_t high, IntArrayRef size) {
   return native::randint_out(result, low, high, size, nullptr);
 }
 
@@ -376,7 +347,7 @@ Tensor& randint_out(
     Tensor& result,
     int64_t low,
     int64_t high,
-    IntList size,
+    IntArrayRef size,
     Generator* generator) {
   result.resize_(size);
   return result.random_(low, high, generator);
@@ -407,20 +378,20 @@ Tensor randint_like(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randn ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor randn(IntList size, const TensorOptions& options) {
+Tensor randn(IntArrayRef size, const TensorOptions& options) {
   return native::randn(size, nullptr, options);
 }
 
-Tensor randn(IntList size, Generator* generator, const TensorOptions& options) {
+Tensor randn(IntArrayRef size, Generator* generator, const TensorOptions& options) {
   auto result = at::empty(size, options);
   return result.normal_(0, 1, generator);
 }
 
-Tensor& randn_out(Tensor& result, IntList size) {
+Tensor& randn_out(Tensor& result, IntArrayRef size) {
   return native::randn_out(result, size, nullptr);
 }
 
-Tensor& randn_out(Tensor& result, IntList size, Generator* generator) {
+Tensor& randn_out(Tensor& result, IntArrayRef size, Generator* generator) {
   result.resize_(size);
   return result.normal_(0, 1, generator);
 }
@@ -482,7 +453,7 @@ Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
   AT_CHECK(n >= 0, "n must be non-negative, got", n);
   result.resize_({n});
   auto gen = get_generator(generator);
-  AT_DISPATCH_ALL_TYPES(result.type(), "randperm", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "randperm", [&]() -> void {
     randperm_cpu<scalar_t>(result, n, gen);
   });
 
@@ -491,25 +462,20 @@ Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ range ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor range(Scalar start, Scalar end, const TensorOptions& options) {
-  return native::range(start, end, /*step=*/1, options);
-}
-
 Tensor range(
     Scalar start,
     Scalar end,
     Scalar step,
     const TensorOptions& options) {
-  // Note [Native bindings for legacy TH factory functions]
-  return getFactoryType(options)._th_range(start, end, step);
+  Tensor result = at::empty({0}, options);
+  return at::range_out(result, start, end, step);
 }
 
-Tensor& range_out(Tensor& result, Scalar start, Scalar end) {
-  return native::range_out(result, start, end, 1);
-}
-
-Tensor& range_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
-  return at::legacy::th::_th_range_out(result, start, end, step);
+Tensor range(
+    Scalar start,
+    Scalar end,
+    const TensorOptions& options) {
+  return at::native::range(start, end, 1, options);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -535,7 +501,7 @@ Tensor tril_indices_cpu(
   //
   // 3. sequential RAM + transpose: create an n X 2 Tensor, fill the Tensor
   //    sequentially, and then transpose it.
-  AT_DISPATCH_ALL_TYPES(result.type(), "tril_indices", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tril_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data<scalar_t>();
     int64_t i = 0;
@@ -568,7 +534,7 @@ Tensor triu_indices_cpu(
   // create an empty Tensor with correct size
   auto result = at::empty({2, triu_size}, options);
 
-  AT_DISPATCH_ALL_TYPES(result.type(), "triu_indices", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data<scalar_t>();
     int64_t i = 0;
@@ -597,12 +563,12 @@ Tensor triu_indices_cpu(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor zeros(IntList size, const TensorOptions& options) {
+Tensor zeros(IntArrayRef size, const TensorOptions& options) {
   auto result = at::empty(size, options);
   return result.zero_();
 }
 
-Tensor& zeros_out(Tensor& result, IntList size) {
+Tensor& zeros_out(Tensor& result, IntArrayRef size) {
   if (result.is_sparse()) {
     result.sparse_resize_and_clear_(size, size.size(), 0);
     return result;
@@ -739,7 +705,7 @@ template <typename T>
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
   AT_ASSERT(result.is_contiguous());
-  AT_DISPATCH_ALL_TYPES(result.type(), "tensor_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tensor_cpu", [&] {
     std::copy(values.begin(), values.end(), result.template data<scalar_t>());
   });
   return result;

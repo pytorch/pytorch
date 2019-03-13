@@ -25,7 +25,7 @@ Error::Error(
 // Caffe2-style error message
 Error::Error(
     const char* file,
-    const int line,
+    const uint32_t line,
     const char* condition,
     const std::string& msg,
     const std::string& backtrace,

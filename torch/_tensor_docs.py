@@ -198,14 +198,14 @@ In-place version of :meth:`~Tensor.add`
 
 add_docstr_all('addbmm',
                r"""
-addbmm(beta=1, mat, alpha=1, batch1, batch2) -> Tensor
+addbmm(beta=1, alpha=1, batch1, batch2) -> Tensor
 
 See :func:`torch.addbmm`
 """)
 
 add_docstr_all('addbmm_',
                r"""
-addbmm_(beta=1, mat, alpha=1, batch1, batch2) -> Tensor
+addbmm_(beta=1, alpha=1, batch1, batch2) -> Tensor
 
 In-place version of :meth:`~Tensor.addbmm`
 """)
@@ -240,28 +240,28 @@ In-place version of :meth:`~Tensor.addcmul`
 
 add_docstr_all('addmm',
                r"""
-addmm(beta=1, mat, alpha=1, mat1, mat2) -> Tensor
+addmm(beta=1, alpha=1, mat1, mat2) -> Tensor
 
 See :func:`torch.addmm`
 """)
 
 add_docstr_all('addmm_',
                r"""
-addmm_(beta=1, mat, alpha=1, mat1, mat2) -> Tensor
+addmm_(beta=1, alpha=1, mat1, mat2) -> Tensor
 
 In-place version of :meth:`~Tensor.addmm`
 """)
 
 add_docstr_all('addmv',
                r"""
-addmv(beta=1, tensor, alpha=1, mat, vec) -> Tensor
+addmv(beta=1, alpha=1, mat, vec) -> Tensor
 
 See :func:`torch.addmv`
 """)
 
 add_docstr_all('addmv_',
                r"""
-addmv_(beta=1, tensor, alpha=1, mat, vec) -> Tensor
+addmv_(beta=1, alpha=1, mat, vec) -> Tensor
 
 In-place version of :meth:`~Tensor.addmv`
 """)
@@ -466,7 +466,7 @@ add_docstr_all('bernoulli_',
     The :math:`\text{i}^{th}` element of :attr:`self` tensor will be set to a
     value sampled from :math:`\text{Bernoulli}(\texttt{p\_tensor[i]})`.
 
-    :attr:`self` can have integral ``dtype``, but :attr`p_tensor` must have
+    :attr:`self` can have integral ``dtype``, but :attr:`p_tensor` must have
     floating point ``dtype``.
 
 See also :meth:`~Tensor.bernoulli` and :func:`torch.bernoulli`
@@ -1263,6 +1263,13 @@ is_contiguous() -> bool
 Returns True if :attr:`self` tensor is contiguous in memory in C order.
 """)
 
+add_docstr_all('is_floating_point',
+               r"""
+is_floating_point() -> bool
+
+Returns True if the data type of :attr:`self` is a floating point data type.
+""")
+
 add_docstr_all('is_set_to',
                r"""
 is_set_to(tensor) -> bool
@@ -1310,14 +1317,14 @@ In-place version of :meth:`~Tensor.le`
 
 add_docstr_all('lerp',
                r"""
-lerp(start, end, weight) -> Tensor
+lerp(end, weight) -> Tensor
 
 See :func:`torch.lerp`
 """)
 
 add_docstr_all('lerp_',
                r"""
-lerp_(start, end, weight) -> Tensor
+lerp_(end, weight) -> Tensor
 
 In-place version of :meth:`~Tensor.lerp`
 """)
@@ -1726,13 +1733,6 @@ prod(dim=None, keepdim=False, dtype=None) -> Tensor
 See :func:`torch.prod`
 """)
 
-add_docstr_all('pstrf',
-               r"""
-pstrf(upper=True, tol=-1) -> (Tensor, IntTensor)
-
-See :func:`torch.pstrf`
-""")
-
 add_docstr_all('put_',
                r"""
 put_(indices, tensor, accumulate=False) -> Tensor
@@ -2023,7 +2023,10 @@ Args:
     index (LongTensor): the indices of elements to scatter,
       can be either empty or the same size of src.
       When empty, the operation returns identity
-    src (Tensor or float): the source element(s) to scatter
+    src (Tensor): the source element(s) to scatter,
+      incase `value` is not specified
+    value (float): the source element(s) to scatter,
+      incase `src` is not specified
 
 Example::
 
@@ -2199,9 +2202,16 @@ Example::
 
 add_docstr_all('sort',
                r"""
-sort(dim=None, descending=False) -> (Tensor, LongTensor)
+sort(dim=-1, descending=False) -> (Tensor, LongTensor)
 
 See :func:`torch.sort`
+""")
+
+add_docstr_all('argsort',
+               r"""
+argsort(dim=-1, descending=False) -> LongTensor
+
+See :func: `torch.argsort`
 """)
 
 add_docstr_all('sparse_dim',
@@ -2534,9 +2544,12 @@ add_docstr_all('to_sparse',
 to_sparse(sparseDims) -> Tensor
 Returns a sparse copy of the tensor.  PyTorch supports sparse tensors in
 :ref:`coordinate format <sparse-docs>`.
+
 Args:
     sparseDims (int, optional): the number of sparse dimensions to include in the new sparse tensor
+
 Example::
+
     >>> d = torch.tensor([[0, 0, 0], [9, 0, 10], [0, 0, 0]])
     >>> d
     tensor([[ 0,  0,  0],
@@ -2649,11 +2662,9 @@ type_as(tensor) -> Tensor
 Returns this tensor cast to the type of the given tensor.
 
 This is a no-op if the tensor is already of the correct type. This is
-equivalent to::
+equivalent to ``self.type(tensor.type())``
 
-    self.type(tensor.type())
-
-Params:
+Args:
     tensor (Tensor): the tensor which has the desired type
 """)
 
@@ -2666,11 +2677,11 @@ Returns a tensor which contains all slices of size :attr:`size` from
 
 Step between two slices is given by :attr:`step`.
 
-If `sizedim` is the size of dimension dim for :attr:`self`, the size of
+If `sizedim` is the size of dimension :attr:`dim` for :attr:`self`, the size of
 dimension :attr:`dim` in the returned tensor will be
 `(sizedim - size) / step + 1`.
 
-An additional dimension of size size is appended in the returned tensor.
+An additional dimension of size :attr:`size` is appended in the returned tensor.
 
 Args:
     dim (int): dimension in which unfolding happens
@@ -2764,6 +2775,18 @@ Example::
     >>> z.size()
     torch.Size([2, 8])
 
+    >>> a = torch.randn(1, 2, 3, 4)
+    >>> a.size()
+    torch.Size([1, 2, 3, 4])
+    >>> b = a.transpose(1, 2)  # Swaps 2nd and 3rd dimension
+    >>> b.size()
+    torch.Size([1, 3, 2, 4])
+    >>> c = a.view(1, 3, 2, 4)  # Does not change tensor layout in memory
+    >>> c.size()
+    torch.Size([1, 3, 2, 4])
+    >>> torch.equal(b, c)
+    False
+
 """)
 
 add_docstr_all('view_as',
@@ -2802,6 +2825,13 @@ memory.
 
 Args:
     *sizes (torch.Size or int...): the desired expanded size
+
+.. warning::
+
+    More than one element of an expanded tensor may refer to a single
+    memory location. As a result, in-place operations (especially ones that
+    are vectorized) may result in incorrect behavior. If you need to write
+    to the tensors, please clone them first.
 
 Example::
 
@@ -2941,6 +2971,55 @@ add_docstr_all('pinverse',
 pinverse() -> Tensor
 
 See :func:`torch.pinverse`
+""")
+
+add_docstr_all('index_add',
+               r"""
+index_add(dim, index, tensor) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.index_add_`
+""")
+
+add_docstr_all('index_copy',
+               r"""
+index_copy(dim, index, tensor) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.index_copy_`
+""")
+
+add_docstr_all('index_fill',
+               r"""
+index_fill(dim, index, value) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.index_fill_`
+""")
+
+add_docstr_all('scatter',
+               r"""
+scatter(dim, index, source) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.scatter_`
+""")
+
+add_docstr_all('scatter_add',
+               r"""
+scatter_add(dim, index, source) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.scatter_add_`
+""")
+
+add_docstr_all('masked_scatter',
+               r"""
+masked_scatter(mask, tensor) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
+""")
+
+add_docstr_all('masked_fill',
+               r"""
+masked_fill(mask, value) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.masked_fill_`
 """)
 
 add_docstr_all('grad',

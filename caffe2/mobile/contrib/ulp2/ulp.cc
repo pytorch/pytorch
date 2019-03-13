@@ -15,7 +15,7 @@ void uniformQuantize2b1b(const TensorCPU& X,
   const auto N = X.size_to_dim(X.ndim() - 1);
   auto C = X.size() / N;
   const auto QC = divRoundUp(C,  8);
-  auto XQs = X.dims().vec();
+  auto XQs = X.sizes().vec();
   XQs[X.ndim() - 1] = QC;
   CAFFE_ENFORCE_EQ(XQ.size(), k2b1bXBits);
   for (auto i = 0; i < k2b1bXBits; ++i) {
@@ -118,7 +118,7 @@ void qpad_zero(const ConvArgs& args, const TensorCPU& X, TensorCPU* Y) {
             X.dim32(2) + args.pad_l + args.pad_r,
             X.dim32(3));
   auto* Ydata = Y->mutable_data<uint8_t>();
-  ::memset(Ydata, Y->nbytes(), 0);
+  ::memset(Ydata, 0, Y->nbytes());
   const auto C = Y->dim32(3);
   const auto XrowSize = X.dim32(3) * X.dim32(2);
   const auto YrowSize = Y->dim32(3) * Y->dim32(2);
@@ -137,7 +137,7 @@ void signQuantize(const TensorCPU& X, TensorCPU* XQ) {
   const auto N = X.size_to_dim(X.ndim() - 1);
   auto C = X.size() / N;
   const auto QC = divRoundUp(C,  8);
-  auto XQs = X.dims().vec();
+  auto XQs = X.sizes().vec();
   XQs[X.ndim() - 1] = QC;
   XQ->Resize(XQs);
   const float* Xdata = X.data<float>();
@@ -280,7 +280,7 @@ std::unique_ptr<QConvState> create2b1bConvState(Workspace* ws,
   //   r->WQL1Norm.mutable_data<float>()[i] *= center_distance;
   // }
   state->parallelFor = [ws](size_t range, std::function<void(size_t)> f) {
-#if CAFFE2_MOBILE
+#ifdef C10_MOBILE
     ws->GetThreadPool()->run([&](int, size_t v) { f(v); }, range);
 #else
     for (size_t v = 0; v < range; ++v) {

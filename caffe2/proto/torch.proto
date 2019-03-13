@@ -83,6 +83,4 @@ message ModelDef {
   // the table contains all the tensor information
   // the tensor id is defined as TensorProto.name
   repeated TensorDef tensors = 5;
-
-  // future: add a way to provide additional meta-data
 }

@@ -911,12 +911,10 @@ if __name__ == '__main__':
     output_init_net = args.init_net
     output_predict_net = args.predict_net
 
-    text_format.Merge(
-        open(input_proto, 'r').read(), caffenet
-    )
-    caffenet_pretrained.ParseFromString(
-        open(input_caffemodel, 'rb').read()
-    )
+    with open(input_proto) as f:
+        text_format.Merge(f.read(), caffenet)
+    with open(input_caffemodel, 'rb') as f:
+        caffenet_pretrained.ParseFromString(f.read())
     net, pretrained_params = TranslateModel(
         caffenet, caffenet_pretrained, is_test=True,
         remove_legacy_pad=args.remove_legacy_pad,

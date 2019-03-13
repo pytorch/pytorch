@@ -73,21 +73,8 @@ namespace {
   void adaptive_avg_pool2d_out_cpu_template(
     at::Tensor& output,
     at::Tensor const& input,
-    IntList output_size)
+    IntArrayRef output_size)
   {
-    int dimD = 0;
-    int dimH = 1;
-    int dimW = 2;
-    int64_t sizeB = 1;
-    int64_t sizeD = 0;
-    int64_t isizeH = 0;
-    int64_t isizeW = 0;
-
-    int64_t istrideB = 0;
-    int64_t istrideD = 0;
-    int64_t istrideH = 0;
-    int64_t istrideW = 0;
-
     for (int64_t i = 0; i < input.ndimension(); i++) {
       AT_CHECK(input.size(i) > 0,
         "adaptive_avg_pooling2d(): expected input to have non-empty spatial dimensions, "
@@ -98,23 +85,14 @@ namespace {
     AT_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
       "non-empty 3D or 4D (batch mode) tensor expected for input");
 
-    if (input.ndimension() == 4)
-    {
-      istrideB = input.stride(0);
-      sizeB = input.size(0);
-      dimD++;
-      dimH++;
-      dimW++;
-    }
-
     /* sizes */
-    sizeD  = input.size(dimD);
-    isizeH = input.size(dimH);
-    isizeW = input.size(dimW);
+    int64_t sizeD  = input.size(-3);
+    int64_t isizeH = input.size(-2);
+    int64_t isizeW = input.size(-1);
     /* strides */
-    istrideD = input.stride(dimD);
-    istrideH = input.stride(dimH);
-    istrideW = input.stride(dimW);
+    int64_t istrideD = input.stride(-3);
+    int64_t istrideH = input.stride(-2);
+    int64_t istrideW = input.stride(-1);
 
     auto osizeH = output_size[0];
     auto osizeW = output_size[1];
@@ -124,7 +102,7 @@ namespace {
     {
       output.resize_({sizeD, osizeH, osizeW});
 
-      AT_DISPATCH_FLOATING_TYPES(input.type(), "adaptive_avg_pool2d", [&] {
+      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_avg_pool2d_cpu", [&] {
           auto input_data = input.data<scalar_t>();
           auto output_data = output.data<scalar_t>();
           adaptive_avg_pool2d_out_frame<scalar_t>(input_data, output_data,
@@ -138,16 +116,15 @@ namespace {
     }
     else
     {
-      output.resize_({sizeB, sizeD, osizeH, osizeW});
-
+      output.resize_({input.size(-4), sizeD, osizeH, osizeW});
       int64_t b;
     #pragma omp parallel for private(b)
-      for (b = 0; b < sizeB; b++)
+      for (b = 0; b < input.size(0); b++)
       {
-        AT_DISPATCH_FLOATING_TYPES(input.type(), "adaptive_avg_pool2d", [&] {
+        AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_avg_pool2d_cpu", [&] {
             auto input_data = input.data<scalar_t>();
             auto output_data = output.data<scalar_t>();
-            adaptive_avg_pool2d_out_frame<scalar_t>(input_data+b*istrideB, output_data+b*sizeD*osizeH*osizeW,
+            adaptive_avg_pool2d_out_frame<scalar_t>(input_data+b*input.stride(0), output_data+b*sizeD*osizeH*osizeW,
                                                     sizeD,
                                                     isizeH, isizeW,
                                                     osizeH, osizeW,
@@ -212,29 +189,12 @@ namespace {
     const Tensor& gradOutput_,
     const Tensor& input)
   {
-    int dimD = 0;
-    int dimH = 1;
-    int dimW = 2;
-    int64_t sizeB = 1;
-    int sizeD;
-    int isizeH;
-    int isizeW;
-    int osizeH;
-    int osizeW;
-
-    if (input.ndimension() == 4) {
-      sizeB = input.size(0);
-      dimD++;
-      dimH++;
-      dimW++;
-    }
-
     /* sizes */
-    sizeD  = input.size(dimD);
-    isizeH = input.size(dimH);
-    isizeW = input.size(dimW);
-    osizeH = gradOutput_.size(dimH);
-    osizeW = gradOutput_.size(dimW);
+    int sizeD  = input.size(-3);
+    int isizeH = input.size(-2);
+    int isizeW = input.size(-1);
+    int osizeH = gradOutput_.size(-2);
+    int osizeW = gradOutput_.size(-1);
 
     /* get contiguous gradOutput */
     auto gradOutput = gradOutput_.contiguous();
@@ -243,7 +203,7 @@ namespace {
     if (input.ndimension() == 3)
     {
       AT_DISPATCH_FLOATING_TYPES(
-        input.type(), "adaptive_avg_pool2d_backward", [&] {
+        input.scalar_type(), "adaptive_avg_pool2d_backward_cpu", [&] {
           /* get raw pointers */
           scalar_t *gradInput_data = gradInput.data<scalar_t>();
           scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
@@ -260,10 +220,10 @@ namespace {
     {
       int64_t b;
     #pragma omp parallel for private(b)
-      for (b = 0; b < sizeB; b++)
+      for (b = 0; b < input.size(0); b++)
       {
         AT_DISPATCH_FLOATING_TYPES(
-          input.type(), "adaptive_avg_pool2d_backward", [&] {
+          input.scalar_type(), "adaptive_avg_pool2d_backward_cpu", [&] {
             /* get raw pointers */
             scalar_t *gradInput_data = gradInput.data<scalar_t>();
             scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
@@ -285,7 +245,7 @@ namespace {
   Tensor& adaptive_avg_pool2d_out_cpu(
     Tensor& output,
     const Tensor& input,
-    IntList output_size)
+    IntArrayRef output_size)
   {
     adaptive_avg_pool2d_out_cpu_template(
       output, input, output_size);
@@ -294,12 +254,25 @@ namespace {
 
   Tensor adaptive_avg_pool2d_cpu(
     at::Tensor const& input,
-    IntList output_size)
+    IntArrayRef output_size)
   {
     auto output = at::empty({0}, input.options());
     adaptive_avg_pool2d_out_cpu_template(
       output, input, output_size);
     return output;
+  }
+
+  Tensor adaptive_avg_pool2d(
+    at::Tensor const& input,
+    IntArrayRef output_size){
+    if (output_size[0] == 1 && output_size[1] == 1) {
+//in this case, adaptive pooling is just computing mean over hw dimensions, which can be done more efficiently
+       int64_t mean_size = input.size(-1) * input.size(-2);
+       Tensor out = input.contiguous().view({-1, mean_size}).mean(-1);
+       return input.ndimension() == 3 ? out.view({input.size(0), 1, 1}) : out.view({input.size(0), input.size(1), 1, 1});
+    } else {
+       return _adaptive_avg_pool2d(input, output_size);
+    }
   }
 
   Tensor& adaptive_avg_pool2d_backward_out_cpu(

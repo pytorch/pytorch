@@ -1,7 +1,8 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
-#include <c10/Half.h>
+#include <c10/util/Half.h>
+#include <c10/util/Optional.h>
 #include <c10/util/typeid.h>
 
 #include <cstdint>
@@ -23,7 +24,8 @@ _(float,Float,d)   /* 6 */ \
 _(double,Double,d) /* 7 */ \
 _(at::ComplexHalf,ComplexHalf,z)        /* 8 */ \
 _(std::complex<float>,ComplexFloat,z)   /* 9 */ \
-_(std::complex<double>,ComplexDouble,z) /* 10 */
+_(std::complex<double>,ComplexDouble,z) /* 10 */ \
+_(bool,Bool,i) /* 11 */
 
 // If you want to support ComplexHalf for real, replace occurrences
 // of this macro with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX.  But
@@ -38,7 +40,8 @@ _(at::Half,Half,d) \
 _(float,Float,d)   \
 _(double,Double,d) \
 _(std::complex<float>,ComplexFloat,z) \
-_(std::complex<double>,ComplexDouble,z)
+_(std::complex<double>,ComplexDouble,z) \
+_(bool,Bool,i)
 
 #define AT_FORALL_SCALAR_TYPES(_) \
 _(uint8_t,Byte,i)  \
@@ -68,19 +71,6 @@ enum class ScalarType : int8_t {
   NumOptions
 };
 
-static inline at::DataType scalarTypeToDataType(ScalarType scalar_type) {
-#define DEFINE_CASE(ctype, name, _) \
-  case ScalarType::name:            \
-    return caffe2::TypeIdentifier::Get<ctype>();
-
-  switch(scalar_type) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
-    case ScalarType::Undefined: return at::DataType::uninitialized();
-    default: AT_ERROR("Unrecognized Scalartype ", scalar_type, " (please report this error)");
-  }
-#undef DEFINE_CASE
-}
-
 static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
 #define DEFINE_CASE(ctype,name,_) \
   case ScalarType:: name : return caffe2::TypeMeta::Make<ctype>();
@@ -93,25 +83,35 @@ static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
 #undef DEFINE_CASE
 }
 
-static inline ScalarType typeMetaToScalarType(caffe2::TypeMeta dtype) {
+static inline c10::optional<ScalarType> tryTypeMetaToScalarType(caffe2::TypeMeta dtype) {
 #define DEFINE_IF(ctype, name, _)                      \
   if (dtype == caffe2::TypeMeta::Make<ctype>()) { \
-    return ScalarType::name;                           \
+    return {ScalarType::name};                         \
   }
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_IF)
 #undef DEFINE_IF
   if (dtype == caffe2::TypeMeta()) {
-    return ScalarType::Undefined;
+    return {ScalarType::Undefined};
+  }
+  return c10::nullopt;
+}
+
+static inline ScalarType typeMetaToScalarType(caffe2::TypeMeta dtype) {
+  if (auto scalar_type = tryTypeMetaToScalarType(dtype)) {
+    return *scalar_type;
   }
   AT_ERROR("Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
 }
 
 static inline bool operator==(ScalarType t, caffe2::TypeMeta m) {
-  return typeMetaToScalarType(m) == t;
+  if (auto mt = tryTypeMetaToScalarType(m)) {
+    return (*mt) == t;
+  }
+  return false;
 }
 
 static inline bool operator==(caffe2::TypeMeta m, ScalarType t) {
-  return typeMetaToScalarType(m) == t;
+  return t == m;
 }
 
 #define DEFINE_CONSTANT(_,name,_2) \
@@ -174,6 +174,7 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   constexpr auto f2 = ScalarType::Half;
   constexpr auto f4 = ScalarType::Float;
   constexpr auto f8 = ScalarType::Double;
+  constexpr auto b1 = ScalarType::Bool;
   constexpr auto ud = ScalarType::Undefined;
   if (a == ud || b == ud) {
     return ScalarType::Undefined;
@@ -184,15 +185,16 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   static constexpr ScalarType _promoteTypesLookup
       [static_cast<int>(ScalarType::NumOptions)]
       [static_cast<int>(ScalarType::NumOptions)] = {
-            /* u1  i1  i2  i4  i8  f2  f4  f8 */
-    /* u1 */ { u1, i2, i2, i4, i8, f2, f4, f8 },
-    /* i1 */ { i2, i1, i2, i4, i8, f2, f4, f8 },
-    /* i2 */ { i2, i2, i2, i4, i8, f2, f4, f8 },
-    /* i4 */ { i4, i4, i4, i4, i8, f2, f4, f8 },
-    /* i8 */ { i8, i8, i8, i8, i8, f2, f4, f8 },
-    /* f2 */ { f2, f2, f2, f2, f2, f2, f4, f8 },
-    /* f4 */ { f4, f4, f4, f4, f4, f4, f4, f8 },
-    /* f8 */ { f8, f8, f8, f8, f8, f8, f8, f8 },
+            /* u1  i1  i2  i4  i8  f2  f4  f8  b1 */
+    /* u1 */ { u1, i2, i2, i4, i8, f2, f4, f8, u1 },
+    /* i1 */ { i2, i1, i2, i4, i8, f2, f4, f8, i1 },
+    /* i2 */ { i2, i2, i2, i4, i8, f2, f4, f8, i2 },
+    /* i4 */ { i4, i4, i4, i4, i8, f2, f4, f8, i4 },
+    /* i8 */ { i8, i8, i8, i8, i8, f2, f4, f8, i8 },
+    /* f2 */ { f2, f2, f2, f2, f2, f2, f4, f8, f2 },
+    /* f4 */ { f4, f4, f4, f4, f4, f4, f4, f8, f4 },
+    /* f8 */ { f8, f8, f8, f8, f8, f8, f8, f8, f8 },
+    /* b1 */ { u1, i1, i2, i4, i8, f2, f4, f8, b1 },
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
 }

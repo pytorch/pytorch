@@ -7,11 +7,16 @@ import warnings
 import weakref
 from torch._six import imap
 from torch._C import _add_docstr
+from numbers import Number
 
 
 # NB: If you subclass Tensor, and want to share the subclassed class
 # across processes, you must also update torch/multiprocessing/reductions.py
 # to define a ForkingPickler serialization mode for the class.
+#
+# NB: If you add a new method to Tensor, you must update
+# torch/__init__.py.in to add a type annotation for your method;
+# otherwise, it will not show up in autocomplete.
 class Tensor(torch._C._TensorBase):
     def __deepcopy__(self, memo):
         if not self.is_leaf:
@@ -175,9 +180,17 @@ class Tensor(torch._C._TensorBase):
 
     .. note::
 
-      Returned Tensor uses the same data tensor as the original one.
+      Returned Tensor shares the same storage with the original one.
       In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
+      IMPORTANT NOTE: Previously, in-place size / stride / storage changes
+      (such as `resize_` / `resize_as_` / `set_` / `transpose_`) to the returned tensor
+      also update the original tensor. Now, these in-place changes will not update the
+      original tensor anymore, and will instead trigger an error.
+      For sparse tensors:
+      In-place indices / values changes (such as `zero_` / `copy_` / `add_`) to the
+      returned tensor will not update the original tensor anymore, and will instead
+      trigger an error.
     """)
 
     detach_ = _add_docstr(_C._TensorBase.detach_, r"""
@@ -243,13 +256,9 @@ class Tensor(torch._C._TensorBase):
         r"""See :func:`torch.argmin`"""
         return torch.argmin(self, dim, keepdim)
 
-    def argsort(self, dim=None, descending=False):
-        r"""See :func: `torch.argsort`"""
-        return torch.argsort(self, dim, descending)
-
-    def norm(self, p="fro", dim=None, keepdim=False):
-        r"""See :func: `torch.norm`"""
-        return torch.norm(self, p, dim, keepdim)
+    def norm(self, p="fro", dim=None, keepdim=False, dtype=None):
+        r"""See :func:`torch.norm`"""
+        return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
     def potrf(self, upper=True):
         r"""See :func:`torch.cholesky`"""
@@ -257,6 +266,12 @@ class Tensor(torch._C._TensorBase):
                       "in the next release. Please use torch.cholesky instead and note that the "
                       ":attr:`upper` argument in torch.cholesky defaults to ``False``.", stacklevel=2)
         return super(Tensor, self).cholesky(upper=upper)
+
+    def pstrf(self, upper=True):
+        r"""See :func:`torch.pstrf`"""
+        warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
+                      "in the next release.", stacklevel=2)
+        return super(Tensor, self).pstrf(upper=upper)
 
     def potrs(self, u, upper=True):
         r"""See :func:`torch.cholesky_solve`"""
@@ -294,41 +309,6 @@ class Tensor(torch._C._TensorBase):
             return super(Tensor, self).split(split_size, dim)
         else:
             return super(Tensor, self).split_with_sizes(split_size, dim)
-
-    def index_add(self, dim, index, tensor):
-        r"""Out-of-place version of :meth:`torch.Tensor.index_add_`
-        """
-        return self.clone().index_add_(dim, index, tensor)
-
-    def index_copy(self, dim, index, tensor):
-        r"""Out-of-place version of :meth:`torch.Tensor.index_copy_`
-        """
-        return self.clone().index_copy_(dim, index, tensor)
-
-    def index_fill(self, dim, index, value):
-        r"""Out-of-place version of :meth:`torch.Tensor.index_fill_`
-        """
-        return self.clone().index_fill_(dim, index, value)
-
-    def scatter(self, dim, index, source):
-        r"""Out-of-place version of :meth:`torch.Tensor.scatter_`
-        """
-        return self.clone().scatter_(dim, index, source)
-
-    def scatter_add(self, dim, index, source):
-        r"""Out-of-place version of :meth:`torch.Tensor.scatter_add_`
-        """
-        return self.clone().scatter_add_(dim, index, source)
-
-    def masked_scatter(self, mask, tensor):
-        r"""Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
-        """
-        return self.clone().masked_scatter_(mask, tensor)
-
-    def masked_fill(self, mask, value):
-        r"""Out-of-place version of :meth:`torch.Tensor.masked_fill_`
-        """
-        return self.clone().masked_fill_(mask, value)
 
     def unique(self, sorted=True, return_inverse=False, dim=None):
         r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
@@ -376,7 +356,7 @@ class Tensor(torch._C._TensorBase):
         raise NotImplementedError("in-place pow not implemented")
 
     def __rpow__(self, other):
-        return self.new([other]) ** self
+        return self.new_tensor(other) ** self
 
     def __floordiv__(self, other):
         result = self / other
@@ -452,6 +432,17 @@ class Tensor(torch._C._TensorBase):
             # Workaround, torch has no built-in bool tensor
             array = array.astype('uint8')
         return torch.from_numpy(array)
+
+    def __contains__(self, element):
+        r"""Check if `element` is present in tensor
+
+        Arguments:
+            element (Tensor or scalar): element to be checked
+                for presence in current tensor"
+        """
+        if isinstance(element, (torch.Tensor, Number)):
+            return (element == self).any().item()
+        return NotImplemented
 
     @property
     def __cuda_array_interface__(self):

@@ -121,18 +121,19 @@ __global__ void renormRowsL1(T* dist, long rows, long cols) {
 }
 
 template <typename T>
-__device__ int binarySearchForMultinomial(T* dist,
+__device__ int binarySearchForMultinomial(T* cumdist,
+                                          T* dist,
                                           int size,
                                           T val) {
   int start = 0;
   int end = size;
-  // dist[size - 1] = 0 => all zero prob dist
-  assert(THCNumerics<T>::gt(dist[size - 1], 0));
+  // cumdist[size - 1] = 0 => all zero prob dist
+  assert(THCNumerics<T>::gt(cumdist[size - 1], 0));
 
   while (end - start > 0) {
     int mid = start + (end - start) / 2;
 
-    T midVal = dist[mid];
+    T midVal = cumdist[mid];
     if (THCNumerics<T>::lt(midVal, val)) {
       start = mid + 1;
     } else {
@@ -149,8 +150,7 @@ __device__ int binarySearchForMultinomial(T* dist,
     start = size - 1;
   }
 
-  T curVal = dist[start];
-  while(start >= 1 && THCNumerics<T>::eq(dist[start - 1], curVal)) start--;
+  while(start >= 1 && THCNumerics<T>::eq(dist[start], 0)) start--;
 
   return start;
 }
@@ -211,7 +211,7 @@ sampleMultinomialOnce(int64_t* dest,
     if (THCNumerics<AccT>::eq(sum,  accZero)) {
       // Choose the first element
       if (threadIdx.x == 0) {
-        dest[curDist] = TH_INDEX_BASE;
+        dest[curDist] = 0;
       }
 
       continue;
@@ -265,7 +265,7 @@ sampleMultinomialOnce(int64_t* dest,
       if (inBucket) {
         // We're done; we have the sample
         // Torch indices are 1-based
-        dest[curDist] = cat + TH_INDEX_BASE;
+        dest[curDist] = cat;
         found = true;
       }
 
@@ -284,7 +284,7 @@ sampleMultinomialOnce(int64_t* dest,
       // rarity in which this occurs, this should not be an issue.
       for (int cat = categories - 1; cat >= 0; --cat) {
         if (THCNumerics<T>::gt(dist[curDist * stride_dist + cat * stride_categories], zero)) {
-          dest[curDist] = cat + TH_INDEX_BASE;
+          dest[curDist] = cat;
           break;
         }
       }
@@ -299,7 +299,8 @@ sampleMultinomialWithReplacement(curandStateMtgp32* state,
                                  int64_t* dest,
                                  int64_t distributions,
                                  int categories,
-                                 T* normDistPrefixSum) {
+                                 T* normDistPrefixSum,
+                                 T* normDist) {
   // At the moment, each warp computes one sample value in the binary
   // search due to divergence. It seems possible to compute multiple
   // values and limit divergence though later on. However, no matter
@@ -322,11 +323,12 @@ sampleMultinomialWithReplacement(curandStateMtgp32* state,
         // Find the bucket that a uniform sample lies in
         int choice = binarySearchForMultinomial<T>(
           normDistPrefixSum + curDist * categories,
+          normDist + curDist * categories,
           categories,
           r);
 
         // Torch indices are 1-based
-        dest[curDist * totalSamples + sample] = choice + TH_INDEX_BASE;
+        dest[curDist * totalSamples + sample] = choice;
       }
     }
   }
@@ -363,11 +365,12 @@ sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
       // Find the bucket that a uniform sample lies in
       int choice = binarySearchForMultinomial<T>(
         normDistPrefixSum + curDist * categories,
+        origDist + curDist * categories,
         categories,
         r);
 
       // Torch indices are 1-based
-      dest[curDist * totalSamples + sample] = choice + TH_INDEX_BASE;
+      dest[curDist * totalSamples + sample] = choice;
 
       // Without replacement, so update the original probability so it
       // is not considered a second time

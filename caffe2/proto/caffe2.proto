@@ -168,7 +168,7 @@ message Argument {
 // DeviceType that Caffe2 currently supports.
 // Note: if you add a device type, make sure you add the corresponding device
 // line in the DeviceTypeName() function in caffe2/utils/proto_utils.cc
-// and update c10/DeviceType.h
+// and update c10/core/DeviceType.h
 enum DeviceTypeProto {
   PROTO_CPU = 0;                    // In default, we will use CPU.
   PROTO_CUDA = 1;                   // CUDA.
@@ -178,8 +178,10 @@ enum DeviceTypeProto {
   PROTO_IDEEP = 5;                  // IDEEP.
   PROTO_HIP = 6;                    // AMD HIP
   PROTO_FPGA = 7;                   // FPGA
+  PROTO_MSNPU = 8;                  // MSNPU
+  PROTO_XLA = 9;                    // XLA / TPU
   // Change the following number if you add more devices in the code.
-  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 8;
+  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 10;
   PROTO_ONLY_FOR_TEST = 20901;   // This device type is only for test.
 }
 

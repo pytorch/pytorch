@@ -73,7 +73,7 @@
 #include <cfloat>
 
 #include "caffe2/core/context_gpu.h"
-#include "ps_roi_pool_op.h"
+#include "modules/detectron/ps_roi_pool_op.h"
 
 namespace caffe2 {
 
@@ -123,8 +123,8 @@ __global__ void PSRoIPoolForward(
       roundf(offset_bottom_rois[4]) + 1.) * spatial_scale;
 
     // Force too small ROIs to be 1x1
-    T roi_width = max(roi_end_w - roi_start_w, 0.1);  // avoid 0
-    T roi_height = max(roi_end_h - roi_start_h, 0.1);
+    T roi_width = c10::cuda::compat::max(roi_end_w - roi_start_w, static_cast<T>(0.1));  // avoid 0
+    T roi_height = c10::cuda::compat::max(roi_end_h - roi_start_h, static_cast<T>(0.1));
 
     // Compute w and h at bottom
     T bin_size_h = roi_height / static_cast<T>(pooled_height);
@@ -200,8 +200,8 @@ __global__ void PSRoIPoolBackward(
       roundf(offset_bottom_rois[4]) + 1.) * spatial_scale;
 
     // Force too small ROIs to be 1x1
-    T roi_width = max(roi_end_w - roi_start_w, 0.1); //avoid 0
-    T roi_height = max(roi_end_h - roi_start_h, 0.1);
+    T roi_width = c10::cuda::compat::max(roi_end_w - roi_start_w, static_cast<T>(0.1)); //avoid 0
+    T roi_height = c10::cuda::compat::max(roi_end_h - roi_start_h, static_cast<T>(0.1));
 
     // Compute w and h at bottom
     T bin_size_h = roi_height / static_cast<T>(pooled_height);
@@ -243,12 +243,10 @@ template<>
 bool PSRoIPoolOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);  // Input data to pool
   auto& R = Input(1);  // RoIs
-  auto* Y = Output(0); // PSRoI pooled data
-  auto* A = Output(1); // mapping_channel
 
-  Y->Resize(R.dim32(0), output_dim_, pooled_height_, pooled_width_);
-  A->Resize(Y->dims());
-  int output_size = Y->size();
+  auto* Y = Output(0, {R.dim32(0), output_dim_, pooled_height_, pooled_width_}, at::dtype<float>()); // PSRoI pooled data
+  auto* A = Output(1, Y->sizes(), at::dtype<int>()); // mapping_channel
+  int output_size = Y->numel();
   PSRoIPoolForward<float><<<CAFFE_GET_BLOCKS(output_size),
                             CAFFE_CUDA_NUM_THREADS,
                             0, context_.cuda_stream()>>>(
@@ -266,10 +264,9 @@ bool PSRoIPoolGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& A  = Input(2);  // mapping channels
   auto& dY = Input(3);  // Gradient of net w.r.t. output of "forward" op
                         // (aka "gradOutput")
-  auto* dX = Output(0); // Gradient of net w.r.t. input to "forward" op
-                        // (aka "gradInput")
 
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<float>()); // Gradient of net w.r.t. input to "forward" op
+                                                       // (aka "gradInput")
   // Must zero-out dX before accumulating gradients
   math::Set<float, CUDAContext>(
       dX->size(), 0.f, dX->mutable_data<float>(), &context_);

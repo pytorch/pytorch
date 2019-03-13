@@ -15,9 +15,8 @@ namespace int8 {
 
 class Int8FCOp final : public Operator<CPUContext> {
  public:
-  Int8FCOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
-        ws_(ws) {
+  explicit Int8FCOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws), ws_(ws) {
     createSharedBuffer<CPUContext>(ws_);
   }
 
@@ -43,7 +42,7 @@ class Int8FCOp final : public Operator<CPUContext> {
     CHECK_EQ(K, W.t.size(1));
     CHECK_EQ(N, B.t.numel());
     const auto M = X.t.numel() / K;
-    Y->t.Resize(M, N);
+    ReinitializeTensor(&Y->t, {M, N}, at::dtype<uint8_t>().device(CPU));
 
     runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
       initQNNPACK();
@@ -59,12 +58,19 @@ class Int8FCOp final : public Operator<CPUContext> {
             X.scale,
             W.zero_point,
             W.scale,
+#ifndef _MSC_VER
             W.t.template data<uint8_t>(),
             B.t.template data<int32_t>(),
+#else
+            W.t.data<uint8_t>(),
+            B.t.data<int32_t>(),
+#endif
+
             Y->zero_point,
             Y->scale,
             std::numeric_limits<uint8_t>::min(),
             std::numeric_limits<uint8_t>::max(),
+            0 /* flags */,
             &this->qnnpackObject_);
         CAFFE_ENFORCE(
             createStatus == qnnp_status_success,
@@ -88,8 +94,7 @@ class Int8FCOp final : public Operator<CPUContext> {
             inputPtr,
             K /* input stride */,
             Y->t.template mutable_data<uint8_t>(),
-            N /* output stride */,
-            nullptr /* threadpool */);
+            N /* output stride */);
         CAFFE_ENFORCE(
             setupStatus == qnnp_status_success,
             "failed to setup QNNPACK fully connected operator");

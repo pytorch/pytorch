@@ -5,6 +5,7 @@
 #endif
 
 #include "caffe2/core/tensor_int8.h"
+#include "caffe2/operators/conv_op_shared.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/quantization/server/fbgemm_pack_blob.h"
 #include "caffe2/quantization/server/op_wrapper.h"
@@ -12,6 +13,8 @@
 #ifdef _OPENMP
 C10_DECLARE_int(caffe2_omp_num_threads);
 #endif
+C10_DECLARE_bool(caffe2_dnnlowp_shared_int32_buffer);
+C10_DECLARE_bool(caffe2_force_shared_col_buffer);
 
 namespace caffe2 {
 
@@ -31,6 +34,14 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
       omp_set_num_threads(FLAGS_caffe2_omp_num_threads);
     }
 #endif
+
+    if (this->debug_def().engine() == "DNNLOWP_16" ||
+        this->debug_def().engine() == "DNNLOWP_ROWWISE_16") {
+      LOG(WARNING)
+          << this->debug_def().engine()
+          << " is an experimental feature mostly for testing accuracy with "
+             "fixed-point precision higher than 8 and performance is very slow";
+    }
   }
 
   virtual ~ConvPoolDNNLowPOpBase() {
@@ -55,20 +66,17 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
   }
 
   TensorCPU* OutputTensorCPU_(int idx) {
-    if (dequantize_output_) {
-      return Output(idx);
-    } else {
-      return &Outputs()[idx]->template GetMutable<int8::Int8TensorCPU>()->t;
-    }
+    return &Outputs()[idx]->template GetMutable<int8::Int8TensorCPU>()->t;
+  }
+
+  Tensor* OutputTensorCPU_(int idx, at::IntList dims, at::TensorOptions options) {
+    auto* t = &Outputs()[idx]->template GetMutable<int8::Int8TensorCPU>()->t;
+    ReinitializeTensor(t, dims, options.device(CPU));
+    return t;
   }
 
   T* GetQuantizedOutputData_() {
-    if (dequantize_output_) {
-      out_temp_.resize(Output(0)->size());
-      return out_temp_.data();
-    } else {
-      return OutputTensorCPU_(0)->template mutable_data<T>();
-    }
+    return OutputTensorCPU_(0)->template mutable_data<T>();
   }
 
   void MeasureQuantizationError_() {
@@ -82,7 +90,7 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
       actual = OutputTensorCPU_(0)->template data<float>();
     } else {
       actual_temp.resize(OutputTensorCPU_(0)->numel());
-      Dequantize(
+      fbgemm::Dequantize<T>(
           OutputTensorCPU_(0)->template data<T>(),
           actual_temp.data(),
           OutputTensorCPU_(0)->numel(),
@@ -104,26 +112,23 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
   }
 
   void RunOnDeviceEpilogue_() {
-    if (dequantize_output_) {
-      Dequantize(
-          out_temp_.data(),
-          OutputTensorCPU_(0)->template mutable_data<float>(),
-          OutputTensorCPU_(0)->size(),
-          out_qparams_);
-    } else {
-      dnnlowp::PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
-    }
+    dnnlowp::PropagateOutputTensorQuantizationParams(this, 0, out_qparams_);
 
     MeasureQuantizationError_();
   }
 
   void ParseDNNLowPOperatorArguments_() {
     if (!arguments_parsed_) {
+      bool dequantize_output;
       dnnlowp::ParseDNNLowPOperatorArguments(
           this,
-          &dequantize_output_,
+          &dequantize_output,
           &measure_quantization_error_,
           &followed_by_);
+      CAFFE_ENFORCE_EQ(
+          dequantize_output,
+          false,
+          "Conv DNNLOWP operators don't support dequantize_output");
       arguments_parsed_ = true;
     }
   }
@@ -169,21 +174,37 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
     ws_->CreateBlob("__CAFFE2_DNNLOWP_SHARED_INT32_BUFFER_CPU__");
   }
 
-  void RunWithSharedInt32Buffer_(
-      std::function<void(vector<int32_t>* Y_int32)> f) {
-    auto* mutexBlob =
-        ws_->GetBlob("__CAFFE2_DNNLOWP_SHARED_INT32_BUFFER_CPU_MUTEX__");
-    CAFFE_ENFORCE(mutexBlob, "Must call CreateSharedInt32Buffer() first");
+  void RunWithSharedBuffer_(
+      Tensor* col_buffer,
+      vector<int32_t>* Y_int32,
+      std::function<
+          void(Tensor* col_buffer_shared, vector<int32_t>* Y_int32_shared)> f) {
+    auto f2 = [this, Y_int32, f](Tensor* col_buffer_shared) {
+      if (FLAGS_caffe2_dnnlowp_shared_int32_buffer) {
+        auto* mutexBlob =
+            ws_->GetBlob("__CAFFE2_DNNLOWP_SHARED_INT32_BUFFER_CPU_MUTEX__");
+        CAFFE_ENFORCE(mutexBlob, "Must call CreateSharedInt32Buffer() first");
 
-    auto* mutexPtr = mutexBlob->GetMutable<std::unique_ptr<std::mutex>>();
-    std::lock_guard<std::mutex> g(**mutexPtr);
+        auto* mutexPtr = mutexBlob->GetMutable<std::unique_ptr<std::mutex>>();
+        std::lock_guard<std::mutex> g(**mutexPtr);
 
-    auto* Y_int32 = ws_->GetBlob("__CAFFE2_DNNLOWP_SHARED_INT32_BUFFER_CPU__")
-                        ->template GetMutable<vector<int32_t>>();
-    f(Y_int32);
+        auto* Y_int32_shared =
+            ws_->GetBlob("__CAFFE2_DNNLOWP_SHARED_INT32_BUFFER_CPU__")
+                ->template GetMutable<vector<int32_t>>();
+        f(col_buffer_shared, Y_int32_shared);
+      } else {
+        f(col_buffer_shared, Y_int32);
+      }
+    };
+
+    if (FLAGS_caffe2_force_shared_col_buffer || this->shared_buffer_) {
+      runWithSharedBuffer<CPUContext>(this->ws_, f2);
+    } else {
+      f2(col_buffer);
+    }
   }
 
-  bool dequantize_output_{false}, measure_quantization_error_{false};
+  bool measure_quantization_error_{false};
   std::string followed_by_;
 
   std::vector<dnnlowp::TensorQuantizationParams> in_qparams_;
@@ -210,7 +231,6 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
   /* using override */ using BaseType::MeasureQuantizationError_;          \
   /* using override */ using BaseType::OutputTensorCPU_;                   \
   /* using override */ using BaseType::RunOnDeviceEpilogue_;               \
-  /* using override */ using BaseType::dequantize_output_;                 \
   /* using override */ using BaseType::followed_by_;                       \
   /* using override */ using BaseType::in_qparams_;                        \
   /* using override */ using BaseType::measure_quantization_error_;        \

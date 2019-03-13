@@ -18,7 +18,7 @@ struct StridedData {
     , elementSize(tensor.type().elementSizeInBytes()) {}
 
   void* data;
-  IntList strides;
+  IntArrayRef strides;
   int64_t elementSize;
 
   void step(int dim) {
@@ -27,7 +27,7 @@ struct StridedData {
 };
 
 template<size_t N>
-static void recursive_apply(IntList sizes, ScalarType scalarType, int64_t dim,
+static void recursive_apply(IntArrayRef sizes, ScalarType scalarType, int64_t dim,
                             PyObject* fn, std::array<StridedData, N> strided_data) {
   int64_t ndim = sizes.size();
   if (dim == ndim) {
@@ -57,7 +57,7 @@ Tensor & apply_(Tensor & self, PyObject* fn) {
   if (self.type().backend() != Backend::CPU) {
     throw TypeError("apply_ is only implemented on CPU tensors");
   }
-  auto scalarType = self.type().scalarType();
+  auto scalarType = self.scalar_type();
   recursive_apply<1>(self.sizes(), scalarType, 0, fn, {{ self }});
   return self;
 }
@@ -72,7 +72,7 @@ Tensor & map_(Tensor & self, const Tensor & other_, PyObject* fn) {
   }
   Tensor other;
   std::tie(other) = expand_inplace(self, other_, "map_");
-  auto scalarType = self.type().scalarType();
+  auto scalarType = self.scalar_type();
   recursive_apply<2>(self.sizes(), scalarType, 0, fn, {{ self, other }});
   return self;
 }
@@ -91,7 +91,7 @@ Tensor & map2_(Tensor & self, const Tensor & x_, const Tensor & y_, PyObject* fn
   }
   Tensor other1, other2;
   std::tie(other1, other2) = expand_inplace(self, x_, y_, "map2_");
-  auto scalarType = self.type().scalarType();
+  auto scalarType = self.scalar_type();
   recursive_apply<3>(self.sizes(), scalarType, 0, fn, {{ self, other1, other2 }});
   return self;
 }

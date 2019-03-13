@@ -118,9 +118,6 @@
 #include <THNN/generic/SoftShrink.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/SparseLinear.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/IndexLinear.c>
 #include <TH/THGenerateFloatTypes.h>
 
@@ -155,9 +152,6 @@
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/SpatialAveragePooling.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/SpatialFractionalMaxPooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/SpatialDilatedMaxPooling.c>
@@ -196,25 +190,7 @@
 #include <THNN/generic/VolumetricDilatedMaxPooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/VolumetricFractionalMaxPooling.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/VolumetricMaxUnpooling.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/SpatialReflectionPadding.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/SpatialReplicationPadding.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/TemporalReflectionPadding.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/TemporalReplicationPadding.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricReplicationPadding.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricUpSamplingNearest.c>

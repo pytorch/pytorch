@@ -37,10 +37,10 @@ SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeM
     , indices_(at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(ScalarType::Long)))
     , values_(at::empty({0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(data_type))) {}
 
-IntList SparseTensorImpl::sizes() const {
+IntArrayRef SparseTensorImpl::sizes() const {
   return sizes_;
 }
-IntList SparseTensorImpl::strides() const {
+IntArrayRef SparseTensorImpl::strides() const {
   AT_ERROR("sparse tensors do not have strides");
 }
 bool SparseTensorImpl::is_contiguous() const {
@@ -72,6 +72,9 @@ TensorImpl* SparseTensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
            " changing dimensionality via maybe_zero_dim");
   return this;
 }
+bool SparseTensorImpl::has_storage() const {
+  return false;
+}
 const Storage& SparseTensorImpl::storage() const {
   AT_ERROR("sparse tensors do not have storage");
 }
@@ -79,13 +82,14 @@ int64_t SparseTensorImpl::storage_offset() const {
   AT_ERROR("sparse tensors do not have storage");
 }
 void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {
-  AT_ASSERT(!indices.is_variable() && !values.is_variable());  // They should be plain tensors!
+  AT_CHECK(allow_tensor_metadata_change(), "set_indices_and_values_unsafe is not allowed on Tensor created from .data or .detach()");
+  AT_ASSERT(!indices.is_variable() && !values.is_variable());  // They should be plain tensors!  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
 
   AT_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
   AT_CHECK(!values.is_sparse(), "expected values to be a dense tensor, but got values of layout ", values.layout());
 
   AT_CHECK(values.type().toSparse() == legacyTensorType(*this), "values type must match sparse tensor type");
-  AT_CHECK(indices.type().scalarType() == kLong, "indices must be an int64 tensor");
+  AT_CHECK(indices.scalar_type() == kLong, "indices must be an int64 tensor");
   AT_CHECK(indices.type().backend() == values.type().backend(), "backend of indices (", indices.type().backend(), ") must match backend of values (", values.type().backend(), ")");
   AT_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(), ") must match device of values (", values.get_device(), ")");
 
@@ -97,7 +101,7 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   auto dense_size_original = sizes().slice(sparse_dim_);
   std::vector<int64_t> expected_values_size_vec = {values.size(0)};
   expected_values_size_vec.insert(expected_values_size_vec.end(), dense_size_original.begin(), dense_size_original.end());
-  IntList expected_values_size(expected_values_size_vec);
+  IntArrayRef expected_values_size(expected_values_size_vec);
   auto new_values_size = values.sizes();
   AT_CHECK(
     std::equal(expected_values_size.begin(), expected_values_size.end(), new_values_size.begin()),

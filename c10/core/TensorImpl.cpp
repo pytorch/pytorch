@@ -18,11 +18,19 @@ C10_DEFINE_int64(
 namespace c10 {
 
 at::Tensor& TensorImpl::grad() {
-  AT_ERROR("grad is not implemented for Tensor");
+  if (autograd_meta()) {
+    return autograd_meta()->grad();
+  } else {
+    AT_ERROR("grad is not implemented for Tensor");
+  }
 }
 
 const at::Tensor& TensorImpl::grad() const {
-  AT_ERROR("grad is not implemented for Tensor");
+  if (autograd_meta()) {
+    return autograd_meta()->grad();
+  } else {
+    AT_ERROR("grad is not implemented for Tensor");
+  }
 }
 
 TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, Allocator *allocator, bool is_variable)
@@ -48,11 +56,11 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::Ty
   strides_.push_back(1);
 }
 
-IntList TensorImpl::sizes() const {
+IntArrayRef TensorImpl::sizes() const {
   return sizes_;
 }
 
-IntList TensorImpl::strides() const {
+IntArrayRef TensorImpl::strides() const {
   return strides_;
 }
 
@@ -102,6 +110,10 @@ TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
   return this;
 }
 
+bool TensorImpl::has_storage() const {
+  return storage_;
+}
+
 const Storage& TensorImpl::storage() const {
   return storage_;
 }
@@ -121,5 +133,7 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
           &deletePlacementDeleteContext,
           device};
 }
+
+AutogradMetaInterface::~AutogradMetaInterface() {}
 
 } // namespace c10

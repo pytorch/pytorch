@@ -192,11 +192,11 @@ def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12, dim=No
     r"""Applies spectral normalization to a parameter in the given module.
 
     .. math::
-         \mathbf{W} = \dfrac{\mathbf{W}}{\sigma(\mathbf{W})} \\
-         \sigma(\mathbf{W}) = \max_{\mathbf{h}: \mathbf{h} \ne 0} \dfrac{\|\mathbf{W} \mathbf{h}\|_2}{\|\mathbf{h}\|_2}
+        \mathbf{W}_{SN} = \dfrac{\mathbf{W}}{\sigma(\mathbf{W})},
+        \sigma(\mathbf{W}) = \max_{\mathbf{h}: \mathbf{h} \ne 0} \dfrac{\|\mathbf{W} \mathbf{h}\|_2}{\|\mathbf{h}\|_2}
 
     Spectral normalization stabilizes the training of discriminators (critics)
-    in Generaive Adversarial Networks (GANs) by rescaling the weight tensor
+    in Generative Adversarial Networks (GANs) by rescaling the weight tensor
     with spectral norm :math:`\sigma` of the weight matrix calculated using
     power iteration method. If the dimension of the weight tensor is greater
     than 2, it is reshaped to 2D in power iteration method to get spectral
@@ -211,22 +211,23 @@ def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12, dim=No
         module (nn.Module): containing module
         name (str, optional): name of weight parameter
         n_power_iterations (int, optional): number of power iterations to
-            calculate spectal norm
+            calculate spectral norm
         eps (float, optional): epsilon for numerical stability in
             calculating norms
         dim (int, optional): dimension corresponding to number of outputs,
-            the default is 0, except for modules that are instances of
-            ConvTranspose1/2/3d, when it is 1
+            the default is ``0``, except for modules that are instances of
+            ConvTranspose{1,2,3}d, when it is ``1``
 
     Returns:
-        The original module with the spectal norm hook
+        The original module with the spectral norm hook
 
     Example::
 
         >>> m = spectral_norm(nn.Linear(20, 40))
-        Linear (20 -> 40)
+        >>> m
+        Linear(in_features=20, out_features=40, bias=True)
         >>> m.weight_u.size()
-        torch.Size([20])
+        torch.Size([40])
 
     """
     if dim is None:
@@ -244,7 +245,7 @@ def remove_spectral_norm(module, name='weight'):
     r"""Removes the spectral normalization reparameterization from a module.
 
     Args:
-        module (nn.Module): containing module
+        module (Module): containing module
         name (str, optional): name of weight parameter
 
     Example:

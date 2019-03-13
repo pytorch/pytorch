@@ -1,17 +1,21 @@
 #pragma once
 
-#include <torch/csrc/jit/function_schema.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/stack.h>
+#include <ATen/core/stack.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 
+#include <ATen/core/function_schema.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 
 namespace torch {
 namespace jit {
 namespace detail {
+
+using ::c10::Argument;
+using ::c10::FunctionSchema;
+
 /// Checks the static C++ type `T` for correctness to catch common error cases.
 template <typename T>
 void checkStaticTypes() {
@@ -32,28 +36,28 @@ void checkStaticTypes() {
 }
 
 template <typename... Ts, size_t... Is>
-std::vector<Argument> createArgumentVectorFromTypes(Indices<Is...> indices) {
+::std::vector<Argument> createArgumentVectorFromTypes(Indices<Is...> indices) {
   checkStaticTypes<decay_t<Ts>...>();
   // Arguments are named "_<index>"
   return {Argument("_" + std::to_string(Is), getTypePtr<decay_t<Ts>>())...};
 }
 
 template <typename... Ts, size_t... Is>
-std::vector<Argument> createReturns(Indices<Is...> indices) {
+::std::vector<Argument> createReturns(Indices<Is...> indices) {
   return createArgumentVectorFromTypes<Ts..., Is...>();
 }
 
 /// Unpack a tuple return type into a vector of return types, one per tuple
 /// element.
 template <typename... Ts>
-std::vector<Argument> createReturns(std::tuple<Ts...>* tuple) {
+::std::vector<Argument> createReturns(std::tuple<Ts...>* tuple) {
   // Create an index pack so we can call `get<Indices>` on the tuple next.
   return createReturns<Ts...>(typename MakeIndices<sizeof...(Ts)>::indices{});
 }
 
 /// Create a single-element `vector` for simple (non-tuple) return types.
 template <typename ReturnType>
-std::vector<Argument> createReturns(ReturnType*) {
+::std::vector<Argument> createReturns(ReturnType*) {
   checkStaticTypes<decay_t<ReturnType>>();
   return {Argument("_1", getTypePtr<decay_t<ReturnType>>())};
 }
@@ -61,7 +65,7 @@ std::vector<Argument> createReturns(ReturnType*) {
 /// Creates a vector of `Argument` from `FunctionTraits` and a pack of indices
 /// into the argument list.
 template <typename FunctionTraits, size_t... Is>
-std::vector<Argument> createArgumentVectorFromTraits(Indices<Is...> indices) {
+::std::vector<Argument> createArgumentVectorFromTraits(Indices<Is...> indices) {
   using ArgumentTypes = typename FunctionTraits::parameter_types;
   return createArgumentVectorFromTypes<
       c10::guts::typelist::element_t<Is, ArgumentTypes>...>(indices);
@@ -98,7 +102,7 @@ Node* getTracedNode(
        0)...};
   (void)_; // ignore
 
-  graph->appendNode(node);
+  graph->insertNode(node);
 
   return node;
 }

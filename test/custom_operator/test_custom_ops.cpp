@@ -15,7 +15,7 @@ void check_all_parameters(
     const torch::jit::script::Module& module,
     Predicate predicate) {
   for (const auto& parameter : module.get_parameters()) {
-    AT_ASSERT(predicate(*parameter->slot()));
+    AT_ASSERT(predicate(parameter->slot()->toTensor()));
   }
   for (const auto& child : module.get_modules()) {
     check_all_parameters(*child->module, predicate);

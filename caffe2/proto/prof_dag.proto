@@ -42,6 +42,10 @@ message ProfDAGProto {
 
   // Blob profiles that this node outputs.
   repeated BlobProfile output_profile = 5;
+
+  // The extra_info from the operator device option.
+  repeated string extra_info = 7;
+
 }
 
 // Operator profiling information.

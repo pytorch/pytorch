@@ -53,7 +53,7 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
     dim3 block(blockSize);                                              \
                                                                         \
     if (dir) {                                                          \
-      bitonicSortKVInPlace<scalar_t, int64_t, A, -1, GTComp<scalar_t>, TYPE, SIZE> \
+      bitonicSortKVInPlace<scalar_t, int64_t, A, -1, GTComp<scalar_t, true>, TYPE, SIZE> \
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(         \
           keyInfo,                                                      \
           keySlices,                                                    \
@@ -61,9 +61,9 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
           (TYPE) keyInfo.strides[collapseKeyDim],                       \
           valueInfo,                                                    \
           (TYPE) valueInfo.strides[collapseValueDim],                   \
-          GTComp<scalar_t>());                                              \
+          GTComp<scalar_t, true>());                                    \
     } else {                                                            \
-      bitonicSortKVInPlace<scalar_t, int64_t, A, -1, LTComp<scalar_t>, TYPE, SIZE> \
+      bitonicSortKVInPlace<scalar_t, int64_t, A, -1, LTComp<scalar_t, true>, TYPE, SIZE> \
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(         \
           keyInfo,                                                      \
           keySlices,                                                    \
@@ -71,7 +71,7 @@ void THCTensor_(sortKeyValueInplace)(THCState* state,
           (TYPE) keyInfo.strides[collapseKeyDim],                       \
           valueInfo,                                                    \
           (TYPE) valueInfo.strides[collapseValueDim],                   \
-          LTComp<scalar_t>());                                              \
+          LTComp<scalar_t, true>());                                              \
     }                                                                   \
   } while (0)
 
@@ -222,7 +222,7 @@ void THCTensor_(sortViaThrust)(THCState* state,
   thrust::counting_iterator<int64_t> countIter(0);
 
   thrust::copy(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     countIter, countIter + totalElements, indexIter);
@@ -231,16 +231,16 @@ void THCTensor_(sortViaThrust)(THCState* state,
   // (the values we're sorting)
   if (dir) {
     thrust::stable_sort_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
-      keyIter, keyIter + totalElements, indexIter, ThrustGTOp<scalar_t>());
+      keyIter, keyIter + totalElements, indexIter, ThrustGTOp<scalar_t, true>());
   } else {
     thrust::stable_sort_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
-      keyIter, keyIter + totalElements, indexIter, ThrustLTOp<scalar_t>());
+      keyIter, keyIter + totalElements, indexIter, ThrustLTOp<scalar_t, true>());
   }
 
   // Then, re-sort according to slice that each index is
@@ -248,7 +248,7 @@ void THCTensor_(sortViaThrust)(THCState* state,
   // stably sorting here, preserving the relative order of values
   // per each slice
   thrust::stable_sort_by_key(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     indexIter, indexIter + totalElements, keyIter,
@@ -257,7 +257,7 @@ void THCTensor_(sortViaThrust)(THCState* state,
   // Translate the global integer 0-based index to a per-slice real
   // Lua index
   thrust::for_each(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     indexIter, indexIter + totalElements,
@@ -309,12 +309,7 @@ void THCTensor_(sort)(THCState* state,
   int maxSliceSize = 2048;
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
-  // TODO bitonicSortKVInPlace hangs on ROCm currently.
-  if (0) {
-#else
   if (sliceSize <= maxSliceSize) {
-#endif
     // Fill `indices` (the values) with the
     // slice-relative index.
     THCudaLongTensor_fillSliceWithIndex(state, indices, dim);

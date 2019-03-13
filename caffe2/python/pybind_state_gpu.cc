@@ -29,10 +29,8 @@ REGISTER_CUDA_OPERATOR(
     PythonGradient,
     GPUFallbackOp);
 
-REGISTER_CUDA_OPERATOR(PythonDLPack, PythonOp<CUDAContext, true>);
-REGISTER_CUDA_OPERATOR(
-    PythonDLPackGradient,
-    PythonGradientOp<CUDAContext, true>);
+REGISTER_CUDA_OPERATOR(PythonDLPack, GPUFallbackOp);
+REGISTER_CUDA_OPERATOR(PythonDLPackGradient, GPUFallbackOp);
 
 REGISTER_BLOB_FEEDER(CUDA, TensorFeeder<CUDAContext>);
 
@@ -46,6 +44,11 @@ void addCUDAGlobalMethods(py::module& m) {
   m.attr("cudnn_convolution_fwd_algo_count") = py::int_((int) CUDNN_CONVOLUTION_FWD_ALGO_COUNT);
   m.attr("cudnn_convolution_bwd_data_algo_count") = py::int_((int) CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT);
   m.attr("cudnn_convolution_bwd_filter_algo_count") = py::int_((int) CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT);
+#else
+  m.def("get_cudnn_version", [](){ return static_cast<size_t>(0);});
+  m.attr("cudnn_convolution_fwd_algo_count") = py::int_(0);
+  m.attr("cudnn_convolution_bwd_data_algo_count") = py::int_(0);
+  m.attr("cudnn_convolution_bwd_filter_algo_count") = py::int_(0);
 #endif
   m.def("get_cuda_peer_access_pattern", []() {
     std::vector<std::vector<bool>> pattern;

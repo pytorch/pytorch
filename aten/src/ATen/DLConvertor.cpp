@@ -8,11 +8,11 @@
 using namespace std;
 namespace at {
 
-static DLDataType getDLDataType(const Type& type) {
+static DLDataType getDLDataType(const Tensor& t) {
   DLDataType dtype;
   dtype.lanes = 1;
-  dtype.bits = type.elementSizeInBytes() * 8;
-  switch (type.scalarType()) {
+  dtype.bits = t.dtype().itemsize() * 8;
+  switch (t.scalar_type()) {
     case ScalarType::Byte:
       dtype.code = DLDataTypeCode::kDLUInt;
       break;
@@ -36,6 +36,9 @@ static DLDataType getDLDataType(const Type& type) {
       break;
     case ScalarType::Half:
       dtype.code = DLDataTypeCode::kDLFloat;
+      break;
+    case ScalarType::Bool:
+      dtype.code = DLDataTypeCode::kDLUInt;
       break;
     case ScalarType::ComplexHalf:
       throw std::logic_error("ComplexHalf is not supported by dlpack");
@@ -157,7 +160,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   }
   atDLMTensor->tensor.dl_tensor.ctx = getDLContext(src.type(), device_id);
   atDLMTensor->tensor.dl_tensor.ndim = src.dim();
-  atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src.type());
+  atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
   atDLMTensor->tensor.dl_tensor.shape = const_cast<int64_t*>(src.sizes().data());
   atDLMTensor->tensor.dl_tensor.strides = const_cast<int64_t*>(src.strides().data());
   atDLMTensor->tensor.dl_tensor.byte_offset = 0;
@@ -172,8 +175,8 @@ Tensor fromDLPack(const DLManagedTensor* src) {
     src->deleter(const_cast<DLManagedTensor*>(src));
   };
   return at::from_blob(src->dl_tensor.data,
-      IntList(src->dl_tensor.shape, src->dl_tensor.ndim),
-      IntList(src->dl_tensor.strides, src->dl_tensor.ndim),
+      IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
+      IntArrayRef(src->dl_tensor.strides, src->dl_tensor.ndim),
       deleter,
       at::device(device_type).dtype(stype));
 }

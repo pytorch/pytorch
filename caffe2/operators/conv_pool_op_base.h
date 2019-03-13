@@ -1,6 +1,7 @@
 #ifndef CAFFE2_OPERATORS_CONV_POOL_OP_BASE_H_
 #define CAFFE2_OPERATORS_CONV_POOL_OP_BASE_H_
 
+#include <algorithm>
 #include <vector>
 
 #include "caffe2/core/context.h"
@@ -28,7 +29,7 @@ template <class Context>
 class ConvPoolOpBase : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
+  explicit ConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         legacy_pad_(
             static_cast<LegacyPadding>(this->template GetSingleArgument<int>(
@@ -207,7 +208,7 @@ class ConvPoolOpBase : public Operator<Context> {
     return size;
   }
 
-  // Sets the output size. The output channel is manually provided since
+  // Gets the output size. The output channel is manually provided since
   // it may not be identical to the input channels.
   // This function can be used in the forward functions to obtain the output
   // sizes.
@@ -215,81 +216,119 @@ class ConvPoolOpBase : public Operator<Context> {
   // implementations that do not use first-class Tensor objects, such as the
   // MKL operator. One can still call this function with dummy
   // Tensor objects in order to obtain the sizes.
+  std::vector<int64_t> GetOutputSize(const Tensor& input, int output_channel) {
+    CAFFE_ENFORCE_GE(input.dim(), 2);
+    const int inner_size = input.size_from_dim(1);
+    CAFFE_ENFORCE_GT(inner_size, 0);
+    std::vector<int64_t> output_dims;
+    InferOutputSize64(
+        input.sizes(),
+        output_channel,
+        order_,
+        global_pooling_,
+        legacy_pad_,
+        dilation_,
+        stride_,
+        &kernel_,
+        &pads_,
+        &output_dims);
+    return output_dims;
+  }
+
   void SetOutputSize(const Tensor& input, Tensor* output, int output_channel) {
-    CAFFE_ENFORCE(input.numel() > 0);
-    vector<int> output_dims;
-    int N = input.dim32(0);
-    bool channel_first;
+    const int inner_size = input.size_from_dim(1);
+    CAFFE_ENFORCE_GT(inner_size, 0);
+    std::vector<int> output_dims;
     InferOutputSize(
         input.sizes(),
         output_channel,
         order_,
         global_pooling_,
         legacy_pad_,
-        N,
-        kernel_,
-        output_dims,
         dilation_,
         stride_,
-        pads_,
-        channel_first);
-
-    if (channel_first) {
-      output_dims.insert(output_dims.begin(), {N, output_channel});
-    } else {
-      output_dims.insert(output_dims.begin(), N);
-      output_dims.push_back(output_channel);
-    }
+        &kernel_,
+        &pads_,
+        &output_dims);
     output->Resize(output_dims);
   }
 
   // Helper function that is also called from OperatorSchema. Modified
   // kernel parameters and output output_dims and channel_first.
-  static inline void InferOutputSize(
-      at::IntList input_dims,
-      int /*output_channel*/,
-      StorageOrder order,
-      bool global_pooling,
-      LegacyPadding legacy_pad,
-      int /*N*/,
-      vector<int>& kernel,
-      vector<int>& output_dims,
-      const vector<int>& dilation,
-      const vector<int>& stride,
-      vector<int>& pads,
-      bool& channel_first) {
-    channel_first = false; // initialized to suppress compiler warning.
-    vector<int64_t> dims;
-    switch (order) {
-      case StorageOrder::NHWC:
-        channel_first = false;
-        dims.assign(input_dims.begin() + 1, input_dims.end() - 1);
-        break;
-      case StorageOrder::NCHW:
-        // Old Caffe order.
-        channel_first = true;
-        dims.assign(input_dims.begin() + 2, input_dims.end());
-        break;
-      default:
-        CAFFE_THROW("Unknown Storage order: ", order);
-    }
-
-    if (global_pooling) {
-      kernel.assign(dims.begin(), dims.end());
-      output_dims.assign(dims.size(), 1);
+  static void InferOutputSize(
+      const at::IntArrayRef& input_dims,
+      const int output_channel,
+      const StorageOrder order,
+      const bool global_pooling,
+      const LegacyPadding legacy_pad,
+      const std::vector<int>& dilation,
+      const std::vector<int>& stride,
+      std::vector<int>* kernel,
+      std::vector<int>* pads,
+      std::vector<int>* output_dims) {
+    CAFFE_ENFORCE_NE(order, StorageOrder::UNKNOWN);
+    const int ndim = input_dims.size() - 2;
+    output_dims->resize(ndim + 2);
+    output_dims->front() = input_dims.front();
+    if (order == StorageOrder::NCHW) {
+      output_dims->at(1) = output_channel;
     } else {
-      for (int dim = 0; dim < dims.size(); ++dim) {
-        int dim_size = 0;
+      output_dims->back() = output_channel;
+    }
+    const int offset = order == StorageOrder::NCHW ? 2 : 1;
+    if (global_pooling) {
+      std::copy_n(input_dims.cbegin() + offset, ndim, kernel->begin());
+      std::fill_n(output_dims->begin() + offset, ndim, 1LL);
+    } else {
+      for (int i = 0; i < ndim; ++i) {
         ComputeSizeAndPad(
-            dims[dim],
-            stride[dim],
-            kernel[dim],
-            dilation[dim],
+            input_dims[i + offset],
+            stride[i],
+            kernel->at(i),
+            dilation[i],
             legacy_pad,
-            &pads[dim],
-            &pads[dims.size() + dim],
-            &dim_size);
-        output_dims.push_back(dim_size);
+            &pads->at(i),
+            &pads->at(i + ndim),
+            &output_dims->at(i + offset));
+      }
+    }
+  }
+
+  static void InferOutputSize64(
+      const at::IntList& input_dims,
+      const int output_channel,
+      const StorageOrder order,
+      const bool global_pooling,
+      const LegacyPadding legacy_pad,
+      const std::vector<int>& dilation,
+      const std::vector<int>& stride,
+      std::vector<int>* kernel,
+      std::vector<int>* pads,
+      std::vector<int64_t>* output_dims) {
+    CAFFE_ENFORCE_NE(order, StorageOrder::UNKNOWN);
+    const int ndim = input_dims.size() - 2;
+    output_dims->resize(ndim + 2);
+    output_dims->front() = input_dims.front();
+    if (order == StorageOrder::NCHW) {
+      output_dims->at(1) = output_channel;
+    } else {
+      output_dims->back() = output_channel;
+    }
+    const int offset = order == StorageOrder::NCHW ? 2 : 1;
+    if (global_pooling) {
+      std::copy_n(input_dims.cbegin() + offset, ndim, kernel->begin());
+      std::fill_n(output_dims->begin() + offset, ndim, 1LL);
+    } else {
+      for (int i = 0; i < ndim; ++i) {
+        ComputeSizeAndPad64(
+            input_dims[i + offset],
+            stride[i],
+            kernel->at(i),
+            dilation[i],
+            legacy_pad,
+            &pads->at(i),
+            &pads->at(i + ndim),
+            &output_dims->at(i + offset));
       }
     }
   }
@@ -486,8 +525,6 @@ class ConvPoolOpBase : public Operator<Context> {
     ArgumentHelper helper(def);
     CAFFE_ENFORCE_GT(in.size(), 0);
     CAFFE_ENFORCE_GT(in[0].dims_size(), 0);
-    int N = in[0].dims(0);
-    bool channel_first;
     vector<int> pads = helper.GetRepeatedArgument<int>("pads");
     vector<int> kernel = helper.GetRepeatedArgument<int>("kernels");
     vector<int> strides = helper.GetRepeatedArgument<int>("strides");
@@ -539,7 +576,7 @@ class ConvPoolOpBase : public Operator<Context> {
     check_and_set_default_value(pads, kernel.size() * 2, 0);
     check_and_set_default_value(dilations, kernel.size(), 1);
 
-    vector<int> output_dims;
+    std::vector<int> output_dims;
     ConvPoolOpBase<CPUContext>::InferOutputSize(
         GetDimsVector(in[0]),
         output_channel,
@@ -547,23 +584,12 @@ class ConvPoolOpBase : public Operator<Context> {
         helper.GetSingleArgument<int>("global_pooling", 0),
         static_cast<LegacyPadding>(
             helper.GetSingleArgument<int>("legacy_pad", LegacyPadding::NOTSET)),
-        N,
-        kernel,
-        output_dims,
         dilations,
         strides,
-        pads,
-        channel_first);
-    vector<TensorShape> out(1);
-    if (channel_first) {
-      output_dims.insert(output_dims.begin(), {N, output_channel});
-    } else {
-      output_dims.push_back(output_channel);
-      output_dims.insert(output_dims.begin(), N);
-    }
-
-    out[0] = CreateTensorShape(output_dims, TensorProto::FLOAT);
-    return out;
+        &kernel,
+        &pads,
+        &output_dims);
+    return {CreateTensorShape(output_dims, TensorProto::FLOAT)};
   }
 
   static std::vector<TensorShape> TensorInferenceForConv(
@@ -631,6 +657,85 @@ class ConvPoolOpBase : public Operator<Context> {
       int* pad_head,
       int* pad_tail,
       int* out_size) {
+    const int dkernel = dilation * (kernel - 1) + 1;
+    switch (legacy_pad) {
+      case LegacyPadding::NOTSET:
+        // We will just use the direct padding head and tail values, but we
+        // will verify that they are non-negative.
+        CAFFE_ENFORCE_GE(in_size + *pad_head + *pad_tail, dkernel);
+        *out_size = static_cast<int>(
+            static_cast<float>(in_size + *pad_head + *pad_tail - dkernel) /
+                stride +
+            1);
+        break;
+      case LegacyPadding::VALID:
+        *pad_head = 0;
+        *pad_tail = 0;
+        *out_size = (in_size - dkernel) / stride + 1;
+        break;
+      case LegacyPadding::SAME: {
+        CAFFE_ENFORCE(
+            1 == dilation, "Dilation not supported for legacy padding.");
+        int legacy_target_size = (in_size + stride - 1) / stride;
+        int pad_needed = (legacy_target_size - 1) * stride + kernel - in_size;
+        if (CAFFE2_PAD_HEAD_MORE) {
+          *pad_head = (pad_needed + 1) / 2;
+        } else {
+          *pad_head = pad_needed / 2;
+        }
+        *pad_tail = pad_needed - *pad_head;
+        *out_size = (in_size + pad_needed - dkernel) / stride + 1;
+        break;
+      }
+      case LegacyPadding::CAFFE_LEGACY_POOLING:
+        // This is in order to adapt Caffe's pooling padding case. In this case,
+        // we will only use pad_head and will compute pad_tail to match the
+        // old caffe pooling strategy. Also see caffe2_legacy.proto for more
+        // details.
+        CAFFE_ENFORCE_GE(*pad_head, 0);
+        // Here, notice that caffe casts UP while caffe2 casts DOWN for the
+        // output size computation.
+        *out_size = std::ceil(
+            static_cast<float>(in_size + *pad_head * 2 - kernel) / stride + 1);
+        // If we have padding, caffe also ensures that the last pooling starts
+        // strictly inside the image (instead of at the padding); otherwise clip
+        // the last.
+        if (*pad_head > 0 && (*out_size - 1) * stride >= in_size + *pad_head) {
+          --*out_size;
+        }
+        // Now, compare the output size with the standard Caffe2 output size.
+        // The
+        // caffe2 standard output size should always be no larger than the
+        // output
+        // size of caffe.
+        int standard_out_size = static_cast<int>(
+            static_cast<float>(in_size + *pad_head * 2 - kernel) / stride + 1);
+        CAFFE_ENFORCE_GE(
+            *out_size,
+            standard_out_size,
+            "This should never happen. If this happens, double check the logic "
+            "above.");
+        if (*out_size > standard_out_size) {
+          LOG(WARNING)
+              << "You are hitting a case where Caffe's legacy padding calculation "
+                 "is hit. This leads to inefficient and sometimes incorrect "
+                 "results. We are keeping this behavior for backward compatibility"
+                 ", but you are strongly recommended to move away from it.";
+        }
+        *pad_tail = *pad_head + stride * (*out_size - standard_out_size);
+        break;
+    }
+  }
+
+  static inline void ComputeSizeAndPad64(
+      const int in_size,
+      const int stride,
+      const int kernel,
+      const int dilation,
+      LegacyPadding legacy_pad,
+      int* pad_head,
+      int* pad_tail,
+      int64_t* out_size) {
     const int dkernel = dilation * (kernel - 1) + 1;
     switch (legacy_pad) {
       case LegacyPadding::NOTSET:

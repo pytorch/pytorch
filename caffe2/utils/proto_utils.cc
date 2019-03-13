@@ -1,6 +1,6 @@
 #include "caffe2/utils/proto_utils.h"
 
-#include <c10/DeviceType.h>
+#include <c10/core/DeviceType.h>
 
 #include <fcntl.h>
 #include <cerrno>

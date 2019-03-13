@@ -63,6 +63,9 @@ PY34 = sys.version_info >= (3, 4)
 IS_WINDOWS = sys.platform == "win32"
 IS_PPC = platform.machine() == "ppc64le"
 
+# Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
+IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI', 0))
+
 
 def _check_module_exists(name):
     r"""Returns if a top-level module with :attr:`name` exists *without**
@@ -159,7 +162,9 @@ def get_gpu_type(type_name):
     return getattr(torch.cuda, name)
 
 
-def to_gpu(obj, type_map={}):
+def to_gpu(obj, type_map=None):
+    if type_map is None:
+        type_map = {}
     if isinstance(obj, torch.Tensor):
         assert obj.is_leaf
         t = type_map.get(obj.type(), get_gpu_type(obj.type()))
@@ -178,7 +183,10 @@ def to_gpu(obj, type_map={}):
 
 
 def get_function_arglist(func):
-    return inspect.getargspec(func).args
+    if sys.version_info > (3,):
+        return inspect.getfullargspec(func).args
+    else:
+        return inspect.getargspec(func).args
 
 
 def set_rng_seed(seed):
@@ -324,7 +332,8 @@ class TestCase(expecttest.TestCase):
             #        needed for inplace operations done on `x`, e.g., copy_().
             #        Remove after implementing something equivalent to CopySlice
             #        for sparse views.
-            x = x.detach()
+            # NOTE: We do clone() after detach() here because we need to be able to change size/storage of x afterwards
+            x = x.detach().clone()
         return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):
@@ -385,25 +394,38 @@ class TestCase(expecttest.TestCase):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
                 if a.numel() > 0:
-                    b = b.type_as(a)
-                    b = b.cuda(device=a.get_device()) if a.is_cuda else b.cpu()
-                    # check that NaNs are in the same locations
-                    nan_mask = a != a
-                    self.assertTrue(torch.equal(nan_mask, b != b), message)
-                    diff = a - b
-                    diff[nan_mask] = 0
-                    # inf check if allow_inf=True
-                    if allow_inf:
-                        inf_mask = (a == float("inf")) | (a == float("-inf"))
-                        self.assertTrue(torch.equal(inf_mask,
-                                                    (b == float("inf")) | (b == float("-inf"))),
-                                        message)
-                        diff[inf_mask] = 0
-                    # TODO: implement abs on CharTensor
-                    if diff.is_signed() and 'CharTensor' not in diff.type():
-                        diff = diff.abs()
-                    max_err = diff.max()
-                    self.assertLessEqual(max_err, prec, message)
+                    if a.device.type == 'cpu' and a.dtype == torch.float16:
+                        # CPU half tensors don't have the methods we need below
+                        a = a.to(torch.float32)
+                    if TEST_WITH_ROCM:
+                        # Workaround for bug https://github.com/pytorch/pytorch/issues/16448
+                        # TODO: remove after the bug is resolved.
+                        b = b.to(a.dtype).to(a.device)
+                    else:
+                        b = b.to(a)
+
+                    if x.dtype == torch.bool and y.dtype == torch.bool:
+                        self.assertEqual(x.tolist(), y.tolist())
+                    elif x.dtype == torch.bool or y.dtype == torch.bool:
+                        raise TypeError("Was expecting both tensors to be bool type.")
+                    else:
+                        diff = a - b
+                        if a.is_floating_point():
+                            # check that NaNs are in the same locations
+                            nan_mask = torch.isnan(a)
+                            self.assertTrue(torch.equal(nan_mask, torch.isnan(b)), message)
+                            diff[nan_mask] = 0
+                            # inf check if allow_inf=True
+                            if allow_inf:
+                                inf_mask = torch.isinf(a)
+                                inf_sign = inf_mask.sign()
+                                self.assertTrue(torch.equal(inf_sign, torch.isinf(b).sign()), message)
+                                diff[inf_mask] = 0
+                        # TODO: implement abs on CharTensor (int8)
+                        if diff.is_signed() and diff.dtype != torch.int8:
+                            diff = diff.abs()
+                        max_err = diff.max()
+                        self.assertLessEqual(max_err, prec, message)
             super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
@@ -731,12 +753,20 @@ def brute_pdist(inp, p=2):
     k = n * (n - 1) // 2
     if k == 0:
         # torch complains about empty indices
-        return torch.empty(inp.shape[:-2] + (0,), device=inp.device)
+        return torch.empty(inp.shape[:-2] + (0,), dtype=inp.dtype, device=inp.device)
     square = torch.norm(inp[..., None, :] - inp[..., None, :, :], p=p, dim=-1)
     unroll = square.view(square.shape[:-2] + (n * n,))
     inds = torch.ones(k, dtype=torch.int)
     inds[torch.arange(n - 1, 1, -1, dtype=torch.int).cumsum(0)] += torch.arange(2, n, dtype=torch.int)
     return unroll[..., inds.cumsum(0)]
+
+
+def brute_cdist(x, y, p=2):
+    r1 = x.shape[-2]
+    r2 = y.shape[-2]
+    if r1 == 0 or r2 == 0:
+        return torch.empty(r1, r2, device=x.device)
+    return torch.norm(x[..., None, :] - y[..., None, :, :], p=p, dim=-1)
 
 
 def do_test_dtypes(self, dtypes, layout, device):
@@ -806,6 +836,7 @@ IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 's
 
 THESE_TAKE_WAY_TOO_LONG = {
     'test_Conv3d_groups',
+    'test_conv_double_backward',
     'test_conv_double_backward_groups',
     'test_Conv3d_dilated',
     'test_Conv3d_stride_padding',

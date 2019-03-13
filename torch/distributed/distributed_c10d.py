@@ -303,6 +303,8 @@ def init_process_group(backend,
         world_size (int, optional): Number of processes participating in
                                     the job.
         rank (int, optional): Rank of the current process.
+        store(Store, optional): Rendevous key/value store as an alternative
+                                to other init methods.
         timeout (timedelta, optional): Timeout for operations executed against
             the process group. Default value equals 30 minutes.
             This is only applicable for the ``gloo`` backend.
@@ -329,6 +331,10 @@ def init_process_group(backend,
     world_size = kwargs.pop('world_size', -1)
     group_name = kwargs.pop('group_name', '')
     rank = kwargs.pop('rank', -1)
+    store = kwargs.pop('store', None)
+    if store is not None:
+        assert world_size > 0, 'world_size needs to be positive'
+        assert rank >= 0, 'rank needs to be non-negative'
     assert len(kwargs) == 0, \
         "got unexpected keyword arguments: %s" % ",".join(kwargs.keys())
 
@@ -351,7 +357,8 @@ def init_process_group(backend,
         elif world_size != -1:
             url += "?world_size={}".format(world_size)
 
-        store, rank, world_size = next(rendezvous(url))
+        if store is None:
+            store, rank, world_size = next(rendezvous(url))
         if backend == Backend.GLOO:
             _default_pg = ProcessGroupGloo(
                 store,
@@ -473,7 +480,7 @@ def destroy_process_group(group=group.WORLD):
 
 def get_rank(group=group.WORLD):
     """
-    Returns the rank of currrent process group
+    Returns the rank of current process group
 
     Rank is a unique identifier assigned to each process within a distributed
     process group. They are always consecutive integers ranging from 0 to
@@ -665,10 +672,10 @@ def broadcast_multigpu(tensor_list,
 
     Arguments:
         tensor_list (List[Tensor]): Tensors that participate in the collective
-            operation. if ``src`` is the rank, then ``src_tensor``th element of
-            ``tensor_list`` (``tensor_list[src_tensor]``) will be broadcasted
-            to all other tensors (on different GPUs) in the src process and
-            all tensors in ``tensor_list`` of other non-src processes.
+            operation. If ``src`` is the rank, then the specified ``src_tensor``
+            element of ``tensor_list`` (``tensor_list[src_tensor]``) will be
+            broadcast to all other tensors (on different GPUs) in the src process
+            and all tensors in ``tensor_list`` of other non-src processes.
             You also need to make sure that ``len(tensor_list)`` is the same
             for all the distributed processes calling this function.
 

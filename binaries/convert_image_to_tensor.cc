@@ -285,36 +285,36 @@ int getBatchSize(int num_items) {
 }
 
 void writeValues(
-    std::vector<std::vector<float>>& values,
-    std::vector<int>& dims,
+    std::vector<std::vector<std::vector<float>>>& values,
+    std::vector<std::vector<int>>& dims,
     std::string output_file) {
 
   caffe2::Timer timer;
   timer.Start();
 
-  int batch_size = getBatchSize(values.size());
-  int num_batches = values.size() / batch_size;
-  assert(dims[0] == batch_size);
+  assert(dims.size() == values.size());
+  int num_batches = dims.size();
 
   TensorProtos protos;
   for (int k = 0; k < num_batches; k++) {
     TensorProto* data;
     data = protos.add_protos();
     data->set_data_type(TensorProto::FLOAT);
-    for (int dim : dims) {
+    auto one_dim = dims[k];
+    for (int dim : one_dim) {
       data->add_dims(dim);
     }
+    int batch_size = one_dim[0];
     long long int entry_size = 1;
-    for (int i = 1; i < dims.size(); i++) {
-      entry_size *= dims[i];
+    for (int i = 1; i < one_dim.size(); i++) {
+      entry_size *= one_dim[i];
     }
 
     // Not optimized
     for (int i = 0; i < batch_size; i++) {
-      int idx = k * batch_size + i;
-      assert(values[idx].size() == entry_size);
-      for (int j = 0; j < values[idx].size(); j++) {
-        data->add_float_data(values[idx][j]);
+      assert(values[k][i].size() == entry_size);
+      for (int j = 0; j < values[k][i].size(); j++) {
+        data->add_float_data(values[k][i][j]);
       }
     }
   }
@@ -348,26 +348,34 @@ void convertImages() {
   } else {
     return;
   }
-  std::vector<std::vector<float>> values;
+  int batch_size = getBatchSize(file_names.size());
+  int num_batches = file_names.size() / batch_size;
+  assert(file_names.size() == batch_size * num_batches);
+  std::vector<std::vector<std::vector<float>>> values;
+  std::vector<std::vector<int>> dims;
   int C = FLAGS_color ? 3 : 1;
-  int height = -1;
-  int width = -1;
-  for (int i = 0; i < file_names.size(); i++) {
-    int one_height, one_width;
-    std::vector<float> one_image_values =
-        convertOneImage(file_names[i], &one_height, &one_width);
-    if (height < 0 && width < 0) {
-      height = one_height;
-      width = one_width;
-    } else {
-      assert(height == one_height);
-      assert(width == one_width);
+  for (int k = 0; k < num_batches; k++) {
+    std::vector<std::vector<float>> one_value;
+    int height = -1;
+    int width = -1;
+    for (int i = 0; i < batch_size; i++) {
+      int idx = k * batch_size + i;
+      int one_height, one_width;
+      std::vector<float> one_image_values =
+          convertOneImage(file_names[idx], &one_height, &one_width);
+      if (height < 0 && width < 0) {
+        height = one_height;
+        width = one_width;
+      } else {
+        assert(height == one_height);
+        assert(width == one_width);
+      }
+      one_value.push_back(one_image_values);
     }
-    values.push_back(one_image_values);
+    vector<int> one_dim = {batch_size, C, height, width};
+    dims.push_back(one_dim);
+    values.push_back(one_value);
   }
-
-  int batch_size = getBatchSize(values.size());
-  vector<int> dims = {batch_size, C, height, width};
   writeValues(values, dims, FLAGS_output_tensor);
 }
 
@@ -395,29 +403,39 @@ void convertValues() {
   std::ifstream infile(FLAGS_input_text_file);
   std::string line;
   std::getline(infile, line);
-  vector<int> dims = splitString <int>(line);
-  assert(dims.size() >= 2);
+  vector<int> file_dims = splitString <int>(line);
+  assert(file_dims.size() >= 2);
 
-  int num_items = dims[0];
+  int num_items = file_dims[0];
   int batch_size = getBatchSize(num_items);
+  int num_batches = num_items / batch_size;
+  assert(num_items == batch_size * num_batches);
   vector<string> lines;
   while (std::getline(infile, line)) {
     lines.push_back(line);
   }
   assert(lines.size() == num_items);
-  std::vector<std::vector<float>> values;
-  int num = -1;
-  for (std::string line : lines) {
-    vector<float> item = splitString<float>(line);
-    if (num < 0) {
-      num = item.size();
-    } else {
-      assert(num == item.size());
+  std::vector<std::vector<std::vector<float>>> values;
+  std::vector<std::vector<int>> dims;
+  for (int i = 0; i < num_batches; i++) {
+    std::vector<std::vector<float>> one_value;
+    int num = -1;
+    for (int j = 0; j < batch_size; j++) {
+      int idx = i * batch_size + j;
+      std::string line = lines[idx];
+      vector<float> item = splitString<float>(line);
+      if (num < 0) {
+        num = item.size();
+      } else {
+        assert(num == item.size());
+      }
+      one_value.push_back(item);
     }
-    values.push_back(item);
+    vector<int> batch_dims = file_dims;
+    batch_dims[0] = batch_size;
+    dims.push_back(batch_dims);
+    values.push_back(one_value);
   }
-  vector<int> batch_dims = dims;
-  batch_dims[0] = batch_size;
 
   writeValues(values, dims, FLAGS_output_text_tensor);
 }

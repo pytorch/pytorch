@@ -2,6 +2,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Reduce.cuh>
@@ -10,20 +11,10 @@
 #include <ATen/native/ReduceOps.h>
 #include <limits>
 #include <tuple>
+#include <THC/THCNumerics.cuh>
 
 
 namespace at { namespace native {
-
-namespace {
-
-template <typename scalar_t>
-struct SimpleCopy {
-  __device__ __forceinline__ scalar_t operator() (const scalar_t a) const {
-    return a;
-  }
-};
-
-} // namespace
 
 template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
 void sum_kernel_impl(TensorIterator& iter) {
@@ -33,27 +24,14 @@ void sum_kernel_impl(TensorIterator& iter) {
 }
 
 template <typename scalar_t>
-void std_kernel_impl(TensorIterator& iter, bool unbiased) {
-  gpu_reduce_kernel<scalar_t, scalar_t>(iter, WelfordOps<scalar_t, scalar_t> { unbiased }, WelfordData<scalar_t> {});
+void std_var_kernel_impl(TensorIterator& iter, bool unbiased, bool take_sqrt) {
+  gpu_reduce_kernel<scalar_t, scalar_t>(iter, WelfordOps<scalar_t, scalar_t, int32_t, float> { unbiased, take_sqrt }, WelfordData<scalar_t, int32_t, float> {});
 }
 
 template <>
-void std_kernel_impl<at::Half>(TensorIterator& iter, bool unbiased) {
-  gpu_reduce_kernel<at::Half, at::Half>(iter, WelfordOps<at::Half, float> { unbiased }, WelfordData<float> {});
+void std_var_kernel_impl<at::Half>(TensorIterator& iter, bool unbiased, bool take_sqrt) {
+  gpu_reduce_kernel<at::Half, at::Half>(iter, WelfordOps<at::Half, float, int32_t, float> { unbiased, take_sqrt }, WelfordData<float, int32_t, float> {});
 }
-
-#ifdef __HIPCC__
-template <>
-void sum_kernel_impl<int16_t, int16_t>(TensorIterator& iter) {
-  // There is a Register Coalescing bug in LLVM causing the hcc
-  // compiler segfaults:
-  // https://bugs.llvm.org/show_bug.cgi?id=39602
-  // To work around it, use int32 as the accumulate type.
-  gpu_reduce_kernel<int16_t, int16_t>(iter, func_wrapper<int16_t> ([]GPU_LAMBDA(int32_t a, int32_t b) -> int32_t {
-    return a + b;
-  }));
-}
-#endif
 
 template <typename scalar_t, typename acc_t=scalar_t>
 void prod_kernel_impl(TensorIterator& iter) {
@@ -62,9 +40,9 @@ void prod_kernel_impl(TensorIterator& iter) {
   }), 1);
 }
 
-static void std_kernel_cuda(TensorIterator& iter, bool unbiased) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.type(), "std", [&]() {
-    std_kernel_impl<scalar_t>(iter, unbiased);
+static void std_var_kernel_cuda(TensorIterator& iter, bool unbiased, bool take_sqrt) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "std", [&]() {
+    std_var_kernel_impl<scalar_t>(iter, unbiased, take_sqrt);
   });
 }
 
@@ -74,54 +52,125 @@ void mean_kernel_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t, out_t>(iter, MeanOps<acc_t, float> {factor});
 }
 
-#ifdef __HIPCC__
-template <>
-void mean_kernel_impl<int16_t, int16_t, int16_t>(TensorIterator& iter) {
-  // There is a Register Coalescing bug in LLVM causing the hcc
-  // compiler segfaults:
-  // https://bugs.llvm.org/show_bug.cgi?id=39602
-  // To work around it, use int32 as the accumulate type.
-  float factor = float(iter.num_output_elements()) / iter.numel();
-  gpu_reduce_kernel<int16_t, int16_t>(iter, MeanOps<int32_t, float> {factor});
+template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
+void norm_kernel_cuda_impl(TensorIterator& iter, Scalar val) {
+  float p;
+  if (val.isIntegral()) {
+     p = val.to<int64_t>();
+  } else if (val.isFloatingPoint()) {
+     p = val.to<acc_t>();
+  } else {
+     AT_ERROR("norm_kernel_cuda_impl expects norm to be integer or float");
+  }
+
+  if (p == static_cast<float>(0)) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormZeroOps<acc_t>(), 0);
+  } else if (p == static_cast<float>(1)) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormOneOps<acc_t>(), 0);
+  } else if (p == static_cast<float>(INFINITY)) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, AbsMaxOps<acc_t>(), std::numeric_limits<acc_t>::min());
+  } else if (p == static_cast<float>(-INFINITY)) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, AbsMinOps<acc_t>(), std::numeric_limits<acc_t>::max());
+  } else {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormOps<acc_t>{ acc_t(p) }, 0);
+  }
 }
-#endif // __HIPCC__
 
 static void sum_kernel_cuda(TensorIterator& iter) {
-  if (iter.type().scalarType() == kHalf) {
+  if (iter.dtype() == kHalf) {
     return sum_kernel_impl<at::Half, float>(iter);
-  } else if (iter.type(1).scalarType() == kHalf && iter.type().scalarType() == kFloat) {
+  } else if (iter.dtype(1) == kHalf && iter.dtype() == kFloat) {
     // type promotion that does cast and reduction in a single kernel
     return sum_kernel_impl<at::Half, float, float>(iter);
   }
-  AT_DISPATCH_ALL_TYPES(iter.type(), "sum", [&]() {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "sum_cuda", [&]() {
     sum_kernel_impl<scalar_t>(iter);
   });
 }
 
 static void prod_kernel_cuda(TensorIterator& iter) {
-  if (iter.type().scalarType() == kHalf) {
+  if (iter.dtype() == kHalf) {
     return prod_kernel_impl<at::Half, float>(iter);
   }
-  AT_DISPATCH_ALL_TYPES(iter.type(), "prod", [&]() {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "prod_cuda", [&]() {
     prod_kernel_impl<scalar_t>(iter);
   });
 }
 
 static void mean_kernel_cuda(TensorIterator& iter) {
-  if (iter.type().scalarType() == kHalf) {
+  if (iter.dtype() == kHalf) {
     return mean_kernel_impl<at::Half, float>(iter);
-  } else if (iter.type(1).scalarType() == kHalf && iter.type().scalarType() == kFloat) {
+  } else if (iter.dtype(1) == kHalf && iter.dtype() == kFloat) {
     // type promotion that does cast and reduction in a single kernel
     return mean_kernel_impl<at::Half, float, float>(iter);
   }
-  AT_DISPATCH_ALL_TYPES(iter.type(), "mean", [&]() {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "mean_cuda", [&]() {
     mean_kernel_impl<scalar_t>(iter);
   });
 }
 
-REGISTER_DISPATCH(std_stub, &std_kernel_cuda);
+static void norm_kernel_cuda(TensorIterator& iter, Scalar p) {
+  if (iter.dtype() == kHalf) {
+    return norm_kernel_cuda_impl<at::Half, float>(iter, p);
+  } else if (iter.dtype(1) == kHalf && iter.dtype() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return norm_kernel_cuda_impl<at::Half, float, float>(iter, p);
+  }
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "norm_cuda", [&]() {
+    norm_kernel_cuda_impl<scalar_t>(iter, p);
+  });
+}
+
+void and_kernel_cuda(TensorIterator& iter) {
+  gpu_reduce_kernel<uint8_t, uint8_t>(
+    iter, func_wrapper<uint8_t> ([]GPU_LAMBDA(uint8_t a, uint8_t b) -> uint8_t {
+      return a && b;
+    }), true);
+}
+
+void or_kernel_cuda(TensorIterator& iter) {
+  gpu_reduce_kernel<uint8_t, uint8_t>(
+    iter, func_wrapper<uint8_t> ([]GPU_LAMBDA(uint8_t a, uint8_t b) -> uint8_t {
+      return a || b;
+    }), false);
+}
+
+template <typename scalar_t>
+void max_values_kernel_cuda_impl(TensorIterator& iter) {
+  gpu_reduce_kernel<scalar_t, scalar_t>(
+    iter, func_wrapper<scalar_t> ([]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return (THCNumerics<scalar_t>::isnan(a) || a > b) ? a : b;
+    }), at::numeric_limits<scalar_t>::lower_bound());
+}
+
+template <typename scalar_t>
+void min_values_kernel_cuda_impl(TensorIterator& iter) {
+  gpu_reduce_kernel<scalar_t, scalar_t>(
+    iter, func_wrapper<scalar_t> ([]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return (THCNumerics<scalar_t>::isnan(a) || a < b) ? a : b;
+    }), at::numeric_limits<scalar_t>::upper_bound());
+}
+
+void max_values_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "max_values_cuda", [&]() {
+    max_values_kernel_cuda_impl<scalar_t>(iter);
+  });
+}
+
+void min_values_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "min_values_cuda", [&]() {
+    min_values_kernel_cuda_impl<scalar_t>(iter);
+  });
+}
+
+REGISTER_DISPATCH(std_var_stub, &std_var_kernel_cuda);
 REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_cuda);
+REGISTER_DISPATCH(norm_stub, &norm_kernel_cuda);
+REGISTER_DISPATCH(and_stub, &and_kernel_cuda);
+REGISTER_DISPATCH(or_stub, &or_kernel_cuda);
+REGISTER_DISPATCH(max_values_stub, &max_values_kernel_cuda);
+REGISTER_DISPATCH(min_values_stub, &min_values_kernel_cuda);
 
 }} // namespace at::native

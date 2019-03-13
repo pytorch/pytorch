@@ -239,16 +239,24 @@ void VariableType::set_data(Tensor & self, Tensor new_data) const {
   as_variable_ref(self).set_data(new_data);
 }
 Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
-  jit::Node* node = nullptr;
+  jit::Value* output = nullptr;
   if(torch::jit::tracer::isTracing()) {
-    auto& graph = jit::tracer::getTracingState()->graph;
-    // if you have no views of self, then an in place copy is equivalent to
-    // making sure we expand src to the same size as self
-    node = graph->create(jit::aten::expand_as, /*num_outputs=*/0);
-    jit::tracer::addInputs(node, "src", src);
-    jit::tracer::addInputs(node, "self", self);
-    graph->appendNode(node);
-    jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
+    const jit::tracer::TracingState& state = *jit::tracer::getTracingState();
+    auto& graph = state.graph;
+    if (state.force_outplace) {
+      // if you have no views of self, then an in place copy is equivalent to
+      // making sure we expand src to the same size as self
+      jit::Node* node = graph->create(jit::aten::expand_as, /*num_outputs=*/1);
+      jit::tracer::addInputs(node, "src", src);
+      jit::tracer::addInputs(node, "self", self);
+      graph->insertNode(node);
+      jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
+      output = node->output();
+    } else {
+      output = graph->insert(
+          jit::aten::copy_,
+          {jit::tracer::getValueTrace(self), jit::tracer::getValueTrace(src)});
+    }
   }
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
@@ -257,20 +265,23 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
-  requires_grad &= isFloatingPoint(self.type().scalarType());
+  requires_grad &= isFloatingPoint(self.scalar_type());
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
     grad_fn->src_type = &src.type();
     grad_fn->src_device = src.device();
   }
-  if (self.is_sparse() && src.is_sparse()) baseType->copy_sparse_to_sparse_(self_, src_, non_blocking);
-  else if (!self.is_sparse() && !src.is_sparse()) baseType->s_copy_(self_, src_, non_blocking);
-  else AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ", self.type(), " and src type = ", src.type());
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    if (self.is_sparse() && src.is_sparse()) baseType->copy_sparse_to_sparse_(self_, src_, non_blocking);
+    else if (!self.is_sparse() && !src.is_sparse()) baseType->s_copy_(self_, src_, non_blocking);
+    else AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ", self.type(), " and src type = ", src.type());
+  }
   increment_version(self);
   rebase_history(as_variable_ref( self ), std::move(grad_fn));
   if(torch::jit::tracer::isTracing()) {
-    jit::tracer::addOutput(node, self);
+    jit::tracer::setOutput(output, self);
   }
   return self;
 }
@@ -279,17 +290,20 @@ Tensor VariableType::_s_copy_from(const Tensor & self, const Tensor & dst, bool 
   AT_ERROR("copy_from does not support automatic differentiation; use copy_ instead");
 }
 
-Tensor & VariableType::resize_(Tensor & self, IntList size) const {
+Tensor & VariableType::resize_(Tensor & self, IntArrayRef size) const {
   auto& self_ = unpack(self, "self", 0);
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
   if (torch::jit::tracer::isTracing()) {
-    jit::tracer::ArgumentStash::popIntList("size");
+    jit::tracer::ArgumentStash::popIntArrayRef("size");
     jit::tracer::warn("resize_", jit::tracer::WARN_RESIZE);
     jit::tracer::delValueTrace(self);
   }
-  baseType->resize_(self_, size);
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    baseType->resize_(self_, size);
+  }
   return self;
 }
 
@@ -303,7 +317,10 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) co
     jit::tracer::warn("resize_as_", jit::tracer::WARN_RESIZE);
     jit::tracer::delValueTrace(self);
   }
-  baseType->resize_as_(self_, the_template_);
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    baseType->resize_as_(self_, the_template_);
+  }
   return self;
 }
 
@@ -315,7 +332,7 @@ Tensor VariableType::detach(const Tensor & self) const {
     node = graph->create(jit::aten::detach, /*num_outputs=*/0);
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
-    graph->appendNode(node);
+    graph->insertNode(node);
 
   }
   // <NON_GENERATED_CODE>
@@ -324,7 +341,7 @@ Tensor VariableType::detach(const Tensor & self) const {
   if (jit::tracer::isTracing()) {
     jit::tracer::addOutput(node, result);
   }
-  return result;
+  return std::move(result);
 }
 
 Tensor & VariableType::detach_(Tensor & self) const {
@@ -335,7 +352,7 @@ Tensor & VariableType::detach_(Tensor & self) const {
     node = graph->create(jit::aten::detach, /*num_outputs=*/0);
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
-    graph->appendNode(node);
+    graph->insertNode(node);
     jit::tracer::ensureUniqueIfOutOfPlaced("detach_", self);
   }
   // <NON_GENERATED_CODE>

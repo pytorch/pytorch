@@ -45,7 +45,12 @@ namespace caffe2 {
  *        C2 operators with DNNLOWP engine have the following arguments:
  *        - dequantize_output (default=false): when true, output is dequantized
  *          as fp32. Useful when we're only quantizing individual operators
- *          rather than doing end-to-end quantization.
+ *          rather than doing end-to-end quantization. Conv operators don't
+            support dequantize_output option as an exception because doing so
+            complicate the implementation significantly and having a separate
+            Dequantize operator doesn't add much overhead because Conv ops are
+            usually used in deep networks where regions of quantization are
+            long chains.
  *        - followed_by (default=null): can be relu, sigmoid, or tanh. When
  *          specified, the current operator is only followed by relu, sigmoid,
  *          or tanh, and this fact can be used for more accurate output
@@ -83,6 +88,13 @@ class DNNLowPOp : public Operator<CPUContext> {
       omp_set_num_threads(FLAGS_caffe2_omp_num_threads);
     }
 #endif
+    if (this->debug_def().engine() == "DNNLOWP_16" ||
+        this->debug_def().engine() == "DNNLOWP_ROWWISE_16") {
+      LOG(WARNING)
+          << this->debug_def().engine()
+          << " is an experimental feature mostly for testing accuracy with "
+             "fixed-point precision higher than 8 and performance is very slow";
+    }
   }
 
   virtual ~DNNLowPOp() {
@@ -110,6 +122,16 @@ class DNNLowPOp : public Operator<CPUContext> {
     }
   }
 
+  Tensor* OutputTensorCPU_(int idx, at::IntList dims, at::TensorOptions options) {
+    if (dequantize_output_) {
+      return Output(idx, dims, options.device(CPU));
+    } else {
+      auto* t = &Outputs()[idx]->template GetMutable<int8::Int8TensorCPU>()->t;
+      ReinitializeTensor(t, dims, options.device(CPU));
+      return t;
+    }
+  }
+
   T* GetQuantizedOutputData_() {
     if (dequantize_output_) {
       out_temp_.resize(Output(0)->numel());
@@ -130,8 +152,8 @@ class DNNLowPOp : public Operator<CPUContext> {
       actual = OutputTensorCPU_(0)->template data<float>();
     } else {
       actual_temp.resize(OutputTensorCPU_(0)->numel());
-      Dequantize(
-          OutputTensorCPU_(0)->template data<float>(),
+      fbgemm::Dequantize<T>(
+          OutputTensorCPU_(0)->template data<T>(),
           actual_temp.data(),
           OutputTensorCPU_(0)->numel(),
           out_qparams_);
@@ -151,7 +173,7 @@ class DNNLowPOp : public Operator<CPUContext> {
 
   void RunOnDeviceEpilogue_() {
     if (dequantize_output_) {
-      Dequantize(
+      fbgemm::Dequantize<T>(
           out_temp_.data(),
           OutputTensorCPU_(0)->template mutable_data<float>(),
           OutputTensorCPU_(0)->numel(),

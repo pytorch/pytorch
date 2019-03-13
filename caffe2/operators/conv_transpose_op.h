@@ -11,15 +11,16 @@ template <typename T, class Context>
 class ConvTransposeOp final : public ConvTransposeUnpoolBase<Context> {
  public:
   USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS(Context);
-  ConvTransposeOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvTransposeUnpoolBase<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit ConvTransposeOp(Args&&... args)
+      : ConvTransposeUnpoolBase<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;
 
  private:
-  Tensor col_buffer_{Context::GetDeviceType()};
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor col_buffer_;
+  Tensor bias_multiplier_;
   // Input: X, W, b
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
@@ -29,8 +30,9 @@ template <typename T, class Context>
 class ConvTransposeGradientOp final : public ConvTransposeUnpoolBase<Context> {
  public:
   USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS(Context);
-  ConvTransposeGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvTransposeUnpoolBase<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ConvTransposeGradientOp(Args&&... args)
+      : ConvTransposeUnpoolBase<Context>(std::forward<Args>(args)...),
         no_bias_(this->template GetSingleArgument<bool>("no_bias", false)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
@@ -41,8 +43,8 @@ class ConvTransposeGradientOp final : public ConvTransposeUnpoolBase<Context> {
   bool RunOnDeviceWithOrderNHWC() override;
 
  private:
-  Tensor col_buffer_{Context::GetDeviceType()};
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor col_buffer_;
+  Tensor bias_multiplier_;
   const bool no_bias_;
   // input: X, W, dY
   // output: dW, optionally db and dX
