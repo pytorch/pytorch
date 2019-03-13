@@ -492,7 +492,6 @@ endif()
 
 
 
-
 if (NOT NO_API)
   target_include_directories(torch PUBLIC
     ${TORCH_SRC_DIR}/csrc/api
@@ -627,9 +626,17 @@ endif()
 # ==========================================================
 
 
+
 # Compile exposed libraries.
 add_library(caffe2 ${Caffe2_CPU_SRCS} $<TARGET_OBJECTS:torch>)
 
+
+
+if (NOT NO_API)
+  target_include_directories(caffe2 PUBLIC
+    $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/api>
+    $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/api/include>)
+endif()
 
 
 if (MSVC)
@@ -662,8 +669,6 @@ if(USE_ROCM)
     /opt/rocm/hipsparse/include
     )
 endif()
-
-
 
 
 
@@ -796,7 +801,8 @@ if(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   target_link_libraries(caffe2_gpu INTERFACE caffe2::cudart)
   target_link_libraries(caffe2_gpu PUBLIC c10_cuda)
-
+  
+  
   target_include_directories(
       caffe2_gpu INTERFACE $<INSTALL_INTERFACE:include>)
   target_include_directories(
@@ -830,6 +836,7 @@ if(USE_CUDA)
   install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
   list(APPEND Caffe2_MAIN_LIBS caffe2_gpu_library)
+
 
   # Install PDB files for MSVC builds
   if (MSVC AND BUILD_SHARED_LIBS)
