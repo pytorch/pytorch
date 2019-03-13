@@ -419,12 +419,10 @@ struct Converter<
 
 // In some versions of MSVC, there will be a compiler error when building.
 // C4146: unary minus operator applied to unsigned type, result still unsigned
-// C4804: unsafe use of type 'bool' in operation
-// It can be addressed by disabling the following warning. 
+// It can be addressed by disabling the following warning.
 #ifdef _MSC_VER
 #pragma warning( push )
 #pragma warning( disable : 4146 )
-#pragma warning( disable : 4804 )
 #endif
 
 // skip isnan and isinf check for integral types
@@ -443,6 +441,10 @@ typename std::enable_if<std::is_integral<From>::value, bool>::type overflows(
   }
 }
 
+#ifdef _MSC_VER
+#pragma warning( pop )
+#endif
+
 template <typename To, typename From>
 typename std::enable_if<std::is_floating_point<From>::value, bool>::type
 overflows(From f) {
@@ -455,10 +457,6 @@ overflows(From f) {
   }
   return f < limit::lowest() || f > limit::max();
 }
-
-#ifdef _MSC_VER
-#pragma warning( pop )
-#endif
 
 template <typename To, typename From>
 typename std::enable_if<is_complex_t<From>::value, bool>::type overflows(
@@ -489,6 +487,11 @@ To checked_convert(From f, const char* name) {
     throw std::domain_error(oss.str());
   }
   return convert<To, From>(f);
+}
+
+template <typename From>
+bool checked_convert(From f, const char* name) {
+  return convert<bool, From>(f);
 }
 
 C10_API std::ostream& operator<<(std::ostream& out, const Half& value);
