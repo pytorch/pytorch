@@ -1258,7 +1258,6 @@ void loadModule(const std::shared_ptr<script::Module>& module) {
     // modify canonical string for function overloading
     // prefer not to modify the schema name
     auto schema_string = overloadedSchemaString(actual_schema);
-    //std::cout << "Adding " << schema_string << std::endl;
 
     schema_to_graphs[schema_string] = std::move(pair);
   }
@@ -1284,7 +1283,6 @@ c10::optional<GradientPair> gradientInfoForSchema(
     return cache_it->second;
   } else {
     auto schema_str = canonicalSchemaString(schema);
-    //std::cout << "Looking for " << schema_str << std::endl;
     auto sym_script_it = schema_to_graphs.find(schema_str);
 
     if (sym_script_it != schema_to_graphs.end()) {
