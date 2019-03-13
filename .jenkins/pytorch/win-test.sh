@@ -90,7 +90,7 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
     xcopy /s %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch %TMP_DIR_WIN%\\build\\torch\\
 )
 
-for /f "usebackq tokens=*" %%i in ('set') do echo set "%%i" >> %TMP_DIR%/ci_scripts/pytorch_env_restore.bat
+for /f "usebackq tokens=*" %%i in (\`set\`) do echo set "%%i" >> %TMP_DIR%/ci_scripts/pytorch_env_restore.bat
 
 EOL
 
