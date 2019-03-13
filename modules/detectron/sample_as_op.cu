@@ -21,7 +21,7 @@ Y's output samples are the samples of X for which L > 0.
 #include <cfloat>
 
 #include "caffe2/core/context_gpu.h"
-#include "sample_as_op.h"
+#include "modules/detectron/sample_as_op.h"
 
 #include <stdio.h>
 

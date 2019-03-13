@@ -823,12 +823,13 @@ Both input operands should be of type `bool`.
 }
 
 #define CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(name, symbol, onnx_schema, extra) \
-  OPERATOR_SCHEMA(name)                                                \
-      .NumInputs(2)                                                    \
-      .NumOutputs(1)                                                   \
-      .AllowInplace({{0, 0}})                                          \
-      .FillUsing(LogicalDocGenerator(symbol, extra))                   \
-      .InheritOnnxSchema(onnx_schema);                                 \
+  OPERATOR_SCHEMA(name)                                                       \
+      .NumInputs(2)                                                           \
+      .NumOutputs(1)                                                          \
+      .AllowInplace({{0, 0}})                                                 \
+      .FillUsing(LogicalDocGenerator(symbol, extra))                          \
+      .TensorInferenceFunction(ElementwiseOpShapeInference)                   \
+      .InheritOnnxSchema(onnx_schema);                                        \
   SHOULD_NOT_DO_GRADIENT(name)
 
 CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Or, "or", "Or", kOrExample);
