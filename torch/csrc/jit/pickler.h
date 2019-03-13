@@ -348,7 +348,7 @@ struct Unpickler {
         end_ptr_(bytes_ + size),
         tensor_table_(tensor_table) {}
 
-  const std::vector<IValue>& get_ivalue_list() {
+  const std::vector<IValue> get_ivalue_list() {
     run();
     AT_ASSERT(stack_.size() == 1);
     return stack_[0].toGenericListRef();

@@ -68,7 +68,7 @@ class ScriptModuleDeserializer final {
   std::vector<std::string> moduleStack_;
 
   std::vector<at::Tensor> tensor_table_;
-  std::unordered_map<std::string, std::pair<TypePtr, IValue>> attribute_table_;
+  std::vector<IValue> attribute_table_;
 };
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
@@ -131,6 +131,7 @@ void ScriptModuleDeserializer::deserialize(
 
   loadTensorTable(&model_def);
   loadAttributeTable(&module_def);
+
   // TODO: this can be simplified when C++/Python interop lands,
   // and the submodules would be created as the same in either C++ or Python
   convertModule(module_def);
@@ -143,8 +144,6 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
   }
 }
 
-
-
 void ScriptModuleDeserializer::loadAttributeTable(
     const torch::ModuleDef* module_def) {
   if (module_def->attributes_size() == 0) {
@@ -154,17 +153,10 @@ void ScriptModuleDeserializer::loadAttributeTable(
 
   at::DataPtr attributes_ptr;
   size_t attributes_size;
-  std::tie(attributes_ptr, attributes_size) = reader_.getRecord("attributes");
+  std::tie(attributes_ptr, attributes_size) =
+      reader_.getRecord("attributes.pkl");
   Unpickler unpickler(attributes_ptr.get(), attributes_size, tensor_table_);
-  auto& attribute_list = unpickler.get_ivalue_list();
-  AT_ASSERT(attribute_list.size() == size_t(module_def->attributes_size()));
-
-  size_t index = 0;
-  for (const torch::AttributeDef& attribute_def : module_def->attributes()) {
-    auto type = script::parseType(attribute_def.type());
-    attribute_table_[attribute_def.name()] =
-        std::make_pair(type, attribute_list[index++]);
-  }
+  attribute_table_ = unpickler.get_ivalue_list();
 }
 
 at::Tensor ScriptModuleDeserializer::loadTensor(
@@ -258,16 +250,19 @@ void ScriptModuleDeserializer::convertModule(
     }
   }
   for (int i = 0; i < module_def.attributes_size(); ++i) {
-    const torch::AttributeDef& attr_def = module_def.attributes(i);
+    const torch::AttributeDef& attr_def =
+        module_def.attributes(module_def.attributes_size() - 1 - i);
     if (module->find_buffer(attr_def.name())) {
       // TODO: handle this above to this can be removed
       continue;
     }
-    auto attribute = attribute_table_.at(attr_def.name());
+
     module->register_attribute(
-        attr_def.name(),
-        attribute.first,
-        attribute.second);
+      attr_def.name(),
+      script::parseType(attr_def.type()),
+      attribute_table_.back()
+    );
+    attribute_table_.pop_back();
   }
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;

@@ -509,16 +509,18 @@ class ScriptModuleSerializer final {
 
   // all tensors that will be stored
   std::vector<at::Tensor> tensor_table_;
+
+  Pickler pickler_;
 };
 
 // ScriptModuleSerializer's methods
 ScriptModuleSerializer::ScriptModuleSerializer(const std::string& filename)
-    : writer_(filename.c_str()) {
+    : writer_(filename.c_str()), pickler_(tensor_table_) {
   // TODO appropriate support for mmap, right now we still use stream writer
 }
 
 ScriptModuleSerializer::ScriptModuleSerializer(std::ostream* ofs)
-    : ofs_(), writer_(ofs) {}
+    : ofs_(), writer_(ofs), pickler_(tensor_table_) {}
 
 void ScriptModuleSerializer::serialize(
     const script::Module& module,
@@ -555,9 +557,18 @@ void ScriptModuleSerializer::convertModel(
   model_def->set_producer_version("1.0"); // TODO: set the producer version
                                           // using appropriate function call
   model_def->set_proto_version(torch::ProtoVersion::PROTO_VERSION_NEWEST);
+
+  pickler_.start();
+
   convertModule(
       module, "", writer_.archiveName(), model_def->mutable_main_module());
   writeTensorTable(model_def);
+
+  pickler_.finish();
+  if (pickler_.stack().size() > 0) {
+    writer_.writeRecord(
+        "attributes.pkl", pickler_.stack().data(), pickler_.stack().size());
+  }
 
   // Write out extra files.
   for (const auto& kv : extra_files) {
@@ -648,22 +659,15 @@ void ScriptModuleSerializer::convertModule(
     convertParameter(elem.value(), param_def, /*is_buffer=*/false);
   }
 
-  if (module.get_attributes().size() > 0) {
-    Pickler p(tensor_table_);
-    p.start();
-    for (const auto& item : module.get_attributes()) {
-      auto& attribute = item.value();
+  for (const auto& item : module.get_attributes()) {
+    auto& attribute = item.value();
+    // Add attribute to ModuleDef
+    torch::AttributeDef* attribute_def = module_def->add_attributes();
+    attribute_def->set_name(attribute.name_);
+    attribute_def->set_type(attribute.type->python_str());
 
-      // Add attribute to ModuleDef
-      torch::AttributeDef* attribute_def = module_def->add_attributes();
-      attribute_def->set_name(attribute.name_);
-      attribute_def->set_type(attribute.type->python_str());
-
-      // Add attribute to pickle blob
-      p.addIValue(*attribute.slot());
-    }
-    p.finish();
-    writer_.writeRecord("attributes", p.stack().data(), p.stack().size());
+    // Add attribute to pickle blob
+    pickler_.addIValue(*attribute.slot());
   }
 
   std::stringstream module_name;

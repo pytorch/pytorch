@@ -10691,10 +10691,10 @@ a")
 
     def test_submodule_attribute_serialization(self):
         class S(torch.jit.ScriptModule):
-            def __init__(self):
-                super(M, self).__init__()
+            def __init__(self, list_data):
+                super(S, self).__init__()
                 self.table = torch.jit.Attribute({"I": "am", "a test": "test"}, Dict[str, str])
-                self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
+                self.list = torch.jit.Attribute(list_data, List[Tuple[int, int]])
 
             @torch.jit.script_method
             def forward(self):
@@ -10705,13 +10705,16 @@ a")
                 super(M, self).__init__()
                 self.table = torch.jit.Attribute({"this": "is", "a different": "dict"}, Dict[str, str])
                 self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
-                self.s1 = S()
-                self.s2 = S()
+                self.s1 = S([(1, 2)])
+                self.s2 = S([(4, 5)])
 
             @torch.jit.script_method
             def forward(self):
-                return (self.table, self.tensor)
+                return (self.table, self.tensor, self.s1.table, self.s2.list, self.s1.list)
 
+        m = M()
+        imported_m = self.getExportImportCopy(m)
+        self.assertEqual(m(), imported_m())
 
     def test_split(self):
         def split_two(tensor):
