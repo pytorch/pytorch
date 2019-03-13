@@ -10,7 +10,7 @@
 
 namespace c10 {
 
-#if !C10_MOBILE
+#ifndef C10_MOBILE
 #define FORALL_NS_SYMBOLS(_)       \
   _(namespaces, prim)              \
   _(namespaces, aten)              \
@@ -24,7 +24,6 @@ namespace c10 {
   _(prim, BroadcastSizes)          \
   _(prim, Constant)                \
   _(prim, ChunkSizes)              \
-  _(prim, None)                    \
   _(prim, Drop)                    \
   _(prim, Eval)                    \
   _(prim, Expand) /* onnx */       \
@@ -46,7 +45,8 @@ namespace c10 {
   _(prim, Reverse)                 \
   _(prim, Return)                  \
   _(prim, Store)                   \
-  _(prim, Undefined)               \
+  _(prim, AutogradZero)            \
+  _(prim, AutogradAnyNonZero)      \
   _(prim, Starred)                 \
   _(prim, TupleConstruct)          \
   _(prim, TupleUnpack)             \
@@ -67,13 +67,13 @@ namespace c10 {
   _(prim, requires_grad)           \
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
-  _(prim, AnyDefined)              \
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
   _(prim, MMTreeReduce)            \
   _(prim, MMBatchSide)             \
   _(prim, min)                     \
   _(prim, max)                     \
+  _(prim, rangelist)               \
   _(aten, _grad_sum_to_size)       \
   _(aten, _ncf_unsqueeze)          \
   _(aten, warn)                    \
@@ -83,10 +83,11 @@ namespace c10 {
   _(prim, fork)                    \
   _(prim, RaiseException)          \
   _(prim, Function)                \
-  _(prim, CreateUserObject)        \
+  _(prim, CreateObject)            \
   _(prim, SetAttr)                 \
   _(prim, GetAttr)                 \
   _(aten, append)                  \
+  _(aten, item)                    \
   _(aten, format)                  \
   _(aten, __not__)                 \
   _(aten, __is__)                  \

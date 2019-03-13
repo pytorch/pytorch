@@ -10,7 +10,15 @@ DequantizeDNNLowPOp<T>::DequantizeDNNLowPOp(
     const OperatorDef& operator_def,
     Workspace* ws)
     : Operator<CPUContext>(operator_def, ws),
-      qfactory_(dnnlowp::GetQuantizationFactoryOf(this)) {}
+      qfactory_(dnnlowp::GetQuantizationFactoryOf(this)) {
+  if (this->debug_def().engine() == "DNNLOWP_16" ||
+      this->debug_def().engine() == "DNNLOWP_ROWWISE_16") {
+    LOG(WARNING)
+        << this->debug_def().engine()
+        << " is an experimental feature mostly for testing accuracy with "
+           "fixed-point precision higher than 8 and performance is very slow";
+  }
+}
 
 template <typename T>
 bool DequantizeDNNLowPOp<T>::RunOnDevice() {

@@ -34,14 +34,14 @@ int THTensor_(nDimensionLegacyAll)(const THTensor *self)
 int64_t THTensor_(size)(const THTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->dim()), 2, "dimension %d out of range of %dD tensor",
-      dim+TH_INDEX_BASE, THTensor_(nDimensionLegacyNoScalars)(self));
+      dim, THTensor_(nDimensionLegacyNoScalars)(self));
   return self->size(dim);
 }
 
 int64_t THTensor_(stride)(const THTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->dim()), 2, "dimension %d out of range of %dD tensor",
-      dim+TH_INDEX_BASE, THTensor_(nDimensionLegacyNoScalars)(self));
+      dim, THTensor_(nDimensionLegacyNoScalars)(self));
   return self->stride(dim);
 }
 

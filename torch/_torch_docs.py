@@ -2309,18 +2309,19 @@ add_docstr(torch.lerp,
 lerp(start, end, weight, out=None)
 
 Does a linear interpolation of two tensors :attr:`start` and :attr:`end` based
-on a scalar :attr:`weight` and returns the resulting :attr:`out` tensor.
+on a scalar or tensor :attr:`weight` and returns the resulting :attr:`out` tensor.
 
 .. math::
-    \text{out}_i = \text{start}_i + \text{weight} \times (\text{end}_i - \text{start}_i)
+    \text{out}_i = \text{start}_i + \text{weight}_i \times (\text{end}_i - \text{start}_i)
 
 The shapes of :attr:`start` and :attr:`end` must be
-:ref:`broadcastable <broadcasting-semantics>`.
+:ref:`broadcastable <broadcasting-semantics>`. If :attr:`weight` is a tensor, then
+the shapes of :attr:`start`, :attr:`end` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     start (Tensor): the tensor with the starting points
     end (Tensor): the tensor with the ending points
-    weight (float): the weight for the interpolation formula
+    weight (float or tensor): the weight for the interpolation formula
     out (Tensor, optional): the output tensor
 
 Example::
@@ -2332,6 +2333,8 @@ Example::
     >>> end
     tensor([ 10.,  10.,  10.,  10.])
     >>> torch.lerp(start, end, 0.5)
+    tensor([ 5.5000,  6.0000,  6.5000,  7.0000])
+    >>> torch.lerp(start, end, torch.full_like(start, 0.5))
     tensor([ 5.5000,  6.0000,  6.5000,  7.0000])
 """)
 
@@ -3625,45 +3628,6 @@ Example::
     tensor([-0.2018, -0.2962, -0.0821, -1.1831])
 """.format(**single_dim_common))
 
-add_docstr(torch.pstrf, r"""
-pstrf(a, upper=True, out=None) -> (Tensor, Tensor)
-
-Computes the pivoted Cholesky decomposition of a positive semidefinite
-matrix :attr:`a`. returns a namedtuple (u, pivot) of matrice.
-
-If :attr:`upper` is ``True`` or not provided, `u` is upper triangular
-such that :math:`a = p^T u^T u p`, with `p` the permutation given by `pivot`.
-
-If :attr:`upper` is ``False``, `u` is lower triangular such that
-:math:`a = p^T u u^T p`.
-
-Args:
-    a (Tensor): the input 2-D tensor
-    upper (bool, optional): whether to return a upper (default) or lower triangular matrix
-    out (tuple, optional): namedtuple of `u` and `pivot` tensors
-
-Example::
-
-    >>> a = torch.randn(3, 3)
-    >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> a
-    tensor([[ 3.5405, -0.4577,  0.8342],
-            [-0.4577,  1.8244, -0.1996],
-            [ 0.8342, -0.1996,  3.7493]])
-    >>> u,piv = torch.pstrf(a)
-    >>> u
-    tensor([[ 1.9363,  0.4308, -0.1031],
-            [ 0.0000,  1.8316, -0.2256],
-            [ 0.0000,  0.0000,  1.3277]])
-    >>> piv
-    tensor([ 2,  0,  1], dtype=torch.int32)
-    >>> p = torch.eye(3).index_select(0,piv.long()).index_select(0,piv.long()).t() # make pivot permutation
-    >>> torch.mm(torch.mm(p.t(),torch.mm(u.t(),u)),p) # reconstruct
-    tensor([[ 3.5405, -0.4577,  0.8342],
-            [-0.4577,  1.8244, -0.1996],
-            [ 0.8342, -0.1996,  3.7493]])
-""")
-
 add_docstr(torch.qr,
            r"""
 qr(input, out=None) -> (Tensor, Tensor)
@@ -4732,16 +4696,27 @@ add_docstr(torch.t,
            r"""
 t(input) -> Tensor
 
-Expects :attr:`input` to be a matrix (2-D tensor) and transposes dimensions 0
+Expects :attr:`input` to be <= 2-D tensor and transposes dimensions 0
 and 1.
 
-Can be seen as a short-hand function for ``transpose(input, 0, 1)``.
+0-D and 1-D tensors are returned as it is and
+2-D tensor can be seen as a short-hand function for ``transpose(input, 0, 1)``.
 
 Args:
     input (Tensor): the input tensor
 
 Example::
 
+    >>> x = torch.randn(())
+    >>> x
+    tensor(0.1995)
+    >>> torch.t(x)
+    tensor(0.1995)
+    >>> x = torch.randn(3)
+    >>> x
+    tensor([ 2.4320, -0.4608,  0.7702])
+    >>> torch.t(x)
+    tensor([.2.4320,.-0.4608,..0.7702])
     >>> x = torch.randn(2, 3)
     >>> x
     tensor([[ 0.4875,  0.9158, -0.5872],
@@ -5435,6 +5410,11 @@ Batch LU factorization.
 
 Returns a tuple containing the LU factorization and pivots. Pivoting is done if
 :attr:`pivot` is set.
+
+.. note::
+    LU factorization with :attr:`pivot` = ``True`` is not available for CPU, and attempting
+    to do so will throw an error. However, LU factorization with :attr:`pivot` = ``True`` is
+    available for CUDA.
 
 Arguments:
     A (Tensor): the tensor to factor

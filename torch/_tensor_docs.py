@@ -1733,13 +1733,6 @@ prod(dim=None, keepdim=False, dtype=None) -> Tensor
 See :func:`torch.prod`
 """)
 
-add_docstr_all('pstrf',
-               r"""
-pstrf(upper=True, tol=-1) -> (Tensor, IntTensor)
-
-See :func:`torch.pstrf`
-""")
-
 add_docstr_all('put_',
                r"""
 put_(indices, tensor, accumulate=False) -> Tensor
@@ -2832,6 +2825,13 @@ memory.
 
 Args:
     *sizes (torch.Size or int...): the desired expanded size
+
+.. warning::
+
+    More than one element of an expanded tensor may refer to a single
+    memory location. As a result, in-place operations (especially ones that
+    are vectorized) may result in incorrect behavior. If you need to write
+    to the tensors, please clone them first.
 
 Example::
 

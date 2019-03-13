@@ -25,7 +25,7 @@ class OnnxifiOp final : public Operator<Context> {
 
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  OnnxifiOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit OnnxifiOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     lib_ = onnx::initOnnxifiLibrary();
     backend_graph_map_ptr_ = onnx::getOnnxBackendGraphMap();
@@ -75,20 +75,15 @@ class OnnxifiOp final : public Operator<Context> {
     // map the weight names
     auto initializers =
         this->template GetRepeatedArgument<std::string>("initializers");
-    CAFFE_ENFORCE_EQ(
-        initializers.size() % 2, 0, "initializers should come in pairs");
     std::unordered_set<std::string> initializer_set;
-    std::unordered_map<std::string, std::string> input_mapping;
     for (auto it = initializers.begin(); it != initializers.end(); ++it) {
-      auto key = *it++;
-      input_mapping.emplace(key, *it);
+      auto key = *it;
       initializer_set.emplace(key);
     }
-    Workspace mapped_ws(ws, input_mapping);
     std::vector<std::string> weight_names;
     std::vector<std::vector<uint64_t>> weight_shapes;
     auto weight_descs = buildInitializationList(
-        &mapped_ws, &initializer_set, &weight_names, &weight_shapes);
+        ws, &initializer_set, &weight_names, &weight_shapes);
 
     BuildBackendAndGraph(property_pointers, onnx_model_str, weight_descs);
   }
@@ -192,6 +187,19 @@ class OnnxifiOp final : public Operator<Context> {
     backend_id_ = backend_graph_shared_ptr_->backend_id;
     backend_ = backend_graph_shared_ptr_->backend;
     graph_ = backend_graph_shared_ptr_->graph;
+
+// Set up function pointer if onnxifi_ext is enabled
+#ifdef ONNXIFI_ENABLE_EXT
+    onnxExtensionFunctionPointer p;
+    if (lib_->onnxGetExtensionFunctionAddress(
+            backend_id_, "onnxSetIOAndRunGraphFunction", &p) !=
+        ONNXIFI_STATUS_SUCCESS) {
+      onnxSetIOAndRunGraphPointer_ = nullptr;
+      return;
+    }
+    onnxSetIOAndRunGraphPointer_ =
+        reinterpret_cast<decltype(onnxSetIOAndRunGraphPointer_)>(p);
+#endif
   }
 
   std::vector<onnxTensorDescriptorV1> buildInitializationList(
@@ -213,6 +221,17 @@ class OnnxifiOp final : public Operator<Context> {
   // input/output descriptors
   std::vector<onnxTensorDescriptorV1> input_desc_;
   std::vector<onnxTensorDescriptorV1> output_desc_;
+
+#ifdef ONNXIFI_ENABLE_EXT
+  // onnxifi extension mode function pointer
+  onnxStatus (*onnxSetIOAndRunGraphPointer_)(
+      onnxGraph,
+      uint32_t,
+      const onnxTensorDescriptorV1*,
+      uint32_t,
+      const onnxTensorDescriptorV1*,
+      onnxMemoryFenceV1*);
+#endif
 
   // We bind the op input/output by position while ONNXIFI binds input/output by
   // names. In addition, op input/output names can be writtten by, for example,
