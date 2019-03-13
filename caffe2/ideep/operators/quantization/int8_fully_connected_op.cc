@@ -30,6 +30,10 @@ public:
     const auto& X = Input(INPUT);
     const auto& filter = Input(FILTER);
     auto* Y = Output(OUTPUT);
+    bool with_bias=(InputSize() > BIAS);
+
+    CAFFE_ENFORCE(X.has_scale());
+    CAFFE_ENFORCE(X.get_data_type() == idtype::s8 || X.get_data_type() == idtype::u8);
 
     itensor X_in = X;
     auto X_dims = CanonicalDims(X_in.get_dims(), axis_);
@@ -40,7 +44,6 @@ public:
     if (cached_X_descriptor_ != X.get_descriptor()) {
       op_key_.clear();
       cached_X_descriptor_ = X.dup_descriptor();
-      Y_.init({{X.get_dim(0), filter.get_dim(0)}, idtype::f32});
     }
 
     if (cached_weights_descriptor_ != filter.get_descriptor()) {
@@ -48,42 +51,66 @@ public:
       cached_weights_descriptor_ = filter.dup_descriptor();
       CAFFE_ENFORCE(filter.get_data_type() == idtype::s8 && filter.has_scale());
 
-      // INT8 FC is not supported so far.
-      filter_ = filter.to_public();
-      auto filter_dims = CanonicalDims(filter_.get_dims(), axis_w_);
-      if (filter_.get_dims() != filter_dims) {
-        filter_.reshape(filter_dims);
+      itensor filter_in = filter;
+      auto filter_dims = CanonicalDims(filter_in.get_dims(), axis_w_);
+      if (filter_in.get_dims() != filter_dims) {
+        filter_in.reshape(filter_dims);
       }
 
-      if (InputSize() > BIAS) {
-        bias_ = Input(BIAS).to_public();
+      auto X_dt = X.get_data_type();
+      lowp_kind_ = ilowp_kind::LOWP_U8S8;
+      auto filter_scale = filter_in.get_scale();
+      auto filter_mask =
+        IDEEP_TENSOR_SCALE_MASK(filter_scale.size(), 0);
+      if (X_dt == idtype::s8) {
+        lowp_kind_ = ilowp_kind::LOWP_S8S8;
+        filter_ = filter_in.as_weights().to_public();
+      } else {
+        filter_ = filter_in.as_weights();
       }
 
-      Y_.init({{X.get_dim(0), filter.get_dim(0)}, idtype::f32});
+      auto expected_descriptor =
+          ideep::inner_product_forward::expected_weights_descriptor(filter_in.get_dims(), idtype::s8, X_dt);
+      if (filter_in.get_descriptor() != expected_descriptor) {
+        filter_.init(expected_descriptor);
+        filter_.set_scale(filter_scale);
+        filter_.feed_from(filter_in);
+      }
+
+      if (with_bias) {
+        auto bias = Input(BIAS);
+        bias_.init({bias.get_dims(), idtype::s32});
+        iscale bias_scales (filter_.get_scale());
+        for (auto &scale : bias_scales) { scale *= X.get_scale()[0]; }
+        bias_.set_scale(bias_scales);
+        bias_.feed_from(bias);
+      }
     }
 
-    if (InputSize() > BIAS) {
+    if (with_bias) {
       ideep::inner_product_forward::compute(
-          op_key_, X_in, filter_, bias_, Y_);
+          op_key_, X_in, filter_, bias_, *Y,
+          iscale(), iscale(), Y_scales_, attr_, lowp_kind_, iprop::forward_inference);
     } else {
-      ideep::inner_product_forward::compute(op_key_, X_in, filter_, Y_);
+      ideep::inner_product_forward::compute(
+          op_key_, X_in, filter_, *Y,
+          iscale(), iscale(), Y_scales_, attr_, lowp_kind_, iprop::forward_inference);
     }
 
-    Y->init({Y_.get_dims(), Y_data_type_});
-    Y->set_scale(Y_scales_);
-    Y->feed_from(Y_);
     return true;
   }
 
 private:
+  iattr attr_;
   size_t axis_{1};
   size_t axis_w_{1};
   float scale_;
   int32_t zero_point_;
+  ilowp_kind lowp_kind_;
 
   ikey op_key_;
   idtype Y_data_type_;
-  itensor filter_, bias_, Y_;
+  itensor filter_, bias_;
   iscale  Y_scales_;
   itensor::descriptor cached_X_descriptor_, cached_weights_descriptor_;
 
