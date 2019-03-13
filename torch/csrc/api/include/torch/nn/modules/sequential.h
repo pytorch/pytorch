@@ -90,66 +90,6 @@ namespace nn {
 /// \endrst
 class SequentialImpl : public Cloneable<SequentialImpl> {
  public:
-  class NamedSubmodule {
-   public:
-    /// We don't allow constructing an empty `NamedSubmodule`.
-    NamedSubmodule() = delete;
-
-    /// Creates a `NamedSubmodule` from a (boxed) `Module`.
-    template <typename ModuleType>
-    NamedSubmodule(std::string name, std::shared_ptr<ModuleType> module_ptr) {
-      // Nesting Sequential doesn't work because `forward()`'s return type is
-      // templatized, so it'll give a nasty compiler error.
-      static_assert(
-          !std::is_same<SequentialImpl, ModuleType>::value,
-          "Sequential is not nestable");
-      static_assert(
-          torch::detail::is_module<ModuleType>::value,
-          "Can only add objects derived from nn::Module to Sequential");
-      static_assert(
-          torch::detail::has_forward<ModuleType>::value,
-          "Can only add modules with a forward() method to Sequential");
-      new (this) NamedSubmodule(std::move(name), AnyModule(std::move(module_ptr)));
-    }
-
-    /// Creates a `NamedSubmodule` from a `Module`, moving or copying it
-    /// into a `shared_ptr` internally.
-    template <typename M, typename = torch::detail::enable_if_module_t<M>>
-    NamedSubmodule(std::string name, M&& module) {
-      // Need to get rid of any reference components for make_unique.
-      using Type = typename std::remove_reference<M>::type;
-      // Here we move (or copy) the module into a new shared_ptr.
-      new (this) NamedSubmodule(std::move(name), std::make_shared<Type>(std::forward<M>(module)));
-    }
-
-    /// Creates a `NamedSubmodule` from a `Module` that is unwrapped from
-    /// a `ModuleHolder`.
-    template <typename M>
-    NamedSubmodule(std::string name, const ModuleHolder<M>& module_holder) {
-      new (this) NamedSubmodule(std::move(name), module_holder.ptr());
-    }
-
-    /// Returns a reference to the name.
-    std::string name() const noexcept {
-      return name_;
-    }
-
-    /// Returns a reference to the module.
-    AnyModule& module() noexcept {
-      return module_;
-    }
-
-   private:
-    /// Creates a `NamedSubmodule` from a type-erased `AnyModule`.
-    NamedSubmodule(std::string name, AnyModule any_module) {
-      name_ = std::move(name);
-      module_ = std::move(any_module);
-    }
-
-    std::string name_;
-    AnyModule module_;
-  };
-
   using Iterator = std::vector<AnyModule>::iterator;
   using ConstIterator = std::vector<AnyModule>::const_iterator;
 
@@ -235,7 +175,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// Adds a new (boxed) `Module` to the `Sequential` container.
   template <typename ModuleType>
   void push_back(std::shared_ptr<ModuleType> module_ptr) {
-    push_back(NamedSubmodule(std::to_string(modules_.size()), std::move(module_ptr)));
+    push_back(modules_ordered_dict({{std::to_string(modules_.size()), std::move(module_ptr)}}));
   }
 
   /// Adds a new `Module` to the `Sequential` container, moving or copying it
@@ -245,26 +185,19 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// `Sequential(std::make_shared<Module>(3, 4))`.
   template <typename M, typename = torch::detail::enable_if_module_t<M>>
   void push_back(M&& module) {
-    push_back(NamedSubmodule(std::to_string(modules_.size()), std::forward<M>(module)));
+    push_back(modules_ordered_dict({{std::to_string(modules_.size()), std::forward<M>(module)}}));
   }
 
   /// Unwraps the contained module of a `ModuleHolder` and adds it to the
   /// `Sequential`.
   template <typename M>
   void push_back(const ModuleHolder<M>& module_holder) {
-    push_back(NamedSubmodule(std::to_string(modules_.size()), module_holder));
-  }
-
-  /// Adds a new `NamedSubmodule` to the `Sequential` container.
-  /// This method allows creating the `NamedSubmodule` from braced-init-list, e.g.
-  /// `push_back({"linear", Linear(3, 4)})`
-  void push_back(NamedSubmodule named_module) {
-    push_back(named_module.name(), std::move(named_module.module()));
+    push_back(modules_ordered_dict({{std::to_string(modules_.size()), module_holder}}));
   }
 
   /// Adds an `OrderedDict` of named `AnyModule`s to the `Sequential` container.
-  /// Combining with `named_submodules()`, it enables the following use case:
-  /// `Sequential sequential(named_submodules({{"m1", M(1)}, {"m2", M(2)}}))`
+  /// Combining with `modules_ordered_dict()`, it enables the following use case:
+  /// `Sequential sequential(modules_ordered_dict({{"m1", M(1)}, {"m2", M(2)}}))`
   void push_back(torch::OrderedDict<std::string, AnyModule>&& ordered_dict) {
     for (auto& item : ordered_dict) {
       push_back(std::move(item.key()), std::move(item.value()));
@@ -391,22 +324,6 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   // `vector<AnyModule>`.
   std::vector<AnyModule> modules_;
 };
-
-// NOTE: We might wonder why we need to have the `NamedSubmodule` class and have
-// the `named_submodules()` function signature be `named_submodules(std::initializer_list<SequentialImpl::NamedSubmodule> named_modules)`,
-// instead of `named_submodules(std::initializer_list<torch::OrderedDict<std::string, ModuleType>::Item> named_modules)`.
-// The reason is that when we pass in a braced-init list such as `named_submodules({{"m1", M(1)}, {"m2", M(2)}})`,
-// if we use the second signature, at the template argument deduction step the compiler is not able to deduce the type of `ModuleType`
-// to the type of `M(1)` or `M(2)`, since the compiler doesn't actually look into the braced-init list `{"m1", M(1)}` and figure out
-// what the types of its elements are. Instead, we have to pass the braced-init list as a whole to the `NamedSubmodule` constructors,
-// and let the constructors do the job of figuring out the types of its elements and do the matching to the correct module type.
-inline torch::OrderedDict<std::string, AnyModule> named_submodules(std::initializer_list<SequentialImpl::NamedSubmodule> named_modules) {
-  torch::OrderedDict<std::string, AnyModule> dict;
-  for (auto named_module : named_modules) {
-    dict.insert(named_module.name(), std::move(named_module.module()));
-  }
-  return dict;
-}
 
 /// A `ModuleHolder` subclass for `SequentialImpl`.
 /// See the documentation for `SequentialImpl` class to learn what methods it

@@ -33,7 +33,7 @@ TEST_F(SequentialTest, ConstructsFromSharedPointer) {
       std::make_shared<M>(1), std::make_shared<M>(2), std::make_shared<M>(3));
   ASSERT_EQ(sequential->size(), 3);
 
-  Sequential sequential_named(named_submodules({
+  Sequential sequential_named(modules_ordered_dict({
     {"m1", std::make_shared<M>(1)},
     {std::string("m2"), std::make_shared<M>(2)},
     {"m3", std::make_shared<M>(3)}
@@ -64,7 +64,7 @@ TEST_F(SequentialTest, ConstructsFromConcreteType) {
   ASSERT_EQ(copy_count, 3);
 
   copy_count = 0;
-  Sequential sequential_named(named_submodules({
+  Sequential sequential_named(modules_ordered_dict({
     {"m1", M(1)},
     {std::string("m2"), M(2)},
     {"m3", M(3)}
@@ -90,7 +90,7 @@ TEST_F(SequentialTest, ConstructsFromModuleHolder) {
   Sequential sequential(M(1), M(2), M(3));
   ASSERT_EQ(sequential->size(), 3);
 
-  Sequential sequential_named(named_submodules({
+  Sequential sequential_named(modules_ordered_dict({
     {"m1", M(1)},
     {std::string("m2"), M(2)},
     {"m3", M(3)}
@@ -126,11 +126,11 @@ TEST_F(SequentialTest, PushBackAddsAnElement) {
   sequential_named->push_back(Linear(3, 4));
   ASSERT_EQ(sequential_named->size(), 1);
   ASSERT_EQ(sequential_named->named_children()[0].key(), "0");
-  sequential_named->push_back({std::string("linear2"), Linear(3, 4)});
+  sequential_named->push_back(modules_ordered_dict({{std::string("linear2"), Linear(3, 4)}}));
   ASSERT_EQ(sequential_named->size(), 2);
   ASSERT_EQ(sequential_named->named_children()[1].key(), "linear2");
 
-  sequential_named->push_back({"shared_m1", std::make_shared<M>(1)});
+  sequential_named->push_back(modules_ordered_dict({{"shared_m1", std::make_shared<M>(1)}}));
   ASSERT_EQ(sequential_named->size(), 3);
   ASSERT_EQ(sequential_named->named_children()[2].key(), "shared_m1");
   sequential_named->push_back(std::make_shared<M>(1));
@@ -140,7 +140,7 @@ TEST_F(SequentialTest, PushBackAddsAnElement) {
   sequential_named->push_back(M(1));
   ASSERT_EQ(sequential_named->size(), 5);
   ASSERT_EQ(sequential_named->named_children()[4].key(), "4");
-  sequential_named->push_back({std::string("m2"), M(1)});
+  sequential_named->push_back(modules_ordered_dict({{std::string("m2"), M(1)}}));
   ASSERT_EQ(sequential_named->size(), 6);
   ASSERT_EQ(sequential_named->named_children()[5].key(), "m2");
 }
@@ -405,7 +405,7 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
       "  (5): torch::nn::LSTM(input_size=4, hidden_size=5, layers=1, dropout=0)\n"
       ")");
 
-  Sequential sequential_named(named_submodules({
+  Sequential sequential_named(modules_ordered_dict({
       {"linear", Linear(10, 3)},
       {"conv2d", Conv2d(1, 2, 3)},
       {"dropout", Dropout(0.5)},

@@ -416,10 +416,19 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AnyModule ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename ModuleType>
-AnyModule::AnyModule(std::shared_ptr<ModuleType> module)
-    : content_(make_holder(
+AnyModule::AnyModule(std::shared_ptr<ModuleType> module) {
+  // `AnyModule` can only store an `nn::Module` subclass object that provides
+  // a `forward()` method.
+  static_assert(
+      torch::detail::is_module<ModuleType>::value,
+      "Can only store object derived from nn::Module into AnyModule");
+  static_assert(
+      torch::detail::has_forward<ModuleType>::value,
+      "Can only store module with a forward() method into AnyModule");
+  content_ = make_holder(
           std::move(module),
-          &std::remove_reference<ModuleType>::type::forward)) {}
+          &std::remove_reference<ModuleType>::type::forward);
+}
 
 template <typename ModuleType, typename>
 AnyModule::AnyModule(ModuleType&& module)
@@ -550,6 +559,66 @@ ModuleType& AnyModule::get_(
       c10::demangle(type_info().name()),
       " to type ",
       c10::demangle(typeid(ModuleType).name()));
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ NamedAnyModule ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+class NamedAnyModule {
+ public:
+  /// We don't allow constructing an empty `NamedAnyModule`.
+  NamedAnyModule() = delete;
+
+  /// Creates a `NamedAnyModule` from a (boxed) `Module`.
+  template <typename ModuleType>
+  NamedAnyModule(std::string name, std::shared_ptr<ModuleType> module_ptr) : NamedAnyModule(std::move(name), AnyModule(std::move(module_ptr))) {}
+
+  /// Creates a `NamedAnyModule` from a `Module`, moving or copying it
+  /// into a `shared_ptr` internally.
+  // NOTE: We need to use `std::remove_reference<M>::type` to get rid of
+  // any reference components for make_unique.
+  template <typename M, typename = torch::detail::enable_if_module_t<M>>
+  NamedAnyModule(std::string name, M&& module) : NamedAnyModule(std::move(name), std::make_shared<typename std::remove_reference<M>::type>(std::forward<M>(module))) {}
+
+  /// Creates a `NamedAnyModule` from a `Module` that is unwrapped from
+  /// a `ModuleHolder`.
+  template <typename M>
+  NamedAnyModule(std::string name, const ModuleHolder<M>& module_holder) : NamedAnyModule(std::move(name), module_holder.ptr()) {}
+
+  /// Returns a reference to the name.
+  std::string name() const noexcept {
+    return name_;
+  }
+
+  /// Returns a reference to the module.
+  AnyModule& module() noexcept {
+    return module_;
+  }
+
+ private:
+  /// Creates a `NamedAnyModule` from a type-erased `AnyModule`.
+  NamedAnyModule(std::string name, AnyModule any_module) {
+    name_ = std::move(name);
+    module_ = std::move(any_module);
+  }
+
+  std::string name_;
+  AnyModule module_;
+};
+
+// NOTE: We might wonder why we need to have the `NamedAnyModule` class and have
+// the `modules_ordered_dict()` function signature be `modules_ordered_dict(std::initializer_list<NamedAnyModule> named_modules)`,
+// instead of `modules_ordered_dict(std::initializer_list<torch::OrderedDict<std::string, ModuleType>::Item> named_modules)`.
+// The reason is that when we pass in a braced-init list such as `modules_ordered_dict({{"m1", M(1)}, {"m2", M(2)}})`,
+// if we use the second signature, at the template argument deduction step the compiler is not able to deduce the type of `ModuleType`
+// to the type of `M(1)` or `M(2)`, since the compiler doesn't actually look into the braced-init list `{"m1", M(1)}` and figure out
+// what the types of its elements are. Instead, we have to pass the braced-init list as a whole to the `NamedAnyModule` constructors,
+// and let the constructors do the job of figuring out the types of its elements and do the matching to the correct module type.
+inline torch::OrderedDict<std::string, AnyModule> modules_ordered_dict(std::initializer_list<NamedAnyModule> named_modules) {
+  torch::OrderedDict<std::string, AnyModule> dict;
+  for (auto named_module : named_modules) {
+    dict.insert(named_module.name(), std::move(named_module.module()));
+  }
+  return dict;
 }
 
 } // namespace nn
