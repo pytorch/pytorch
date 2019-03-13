@@ -660,6 +660,13 @@ void ScriptModuleSerializer::convertModule(
   }
 
   for (const auto& item : module.get_attributes()) {
+    if (item.value().type->isSubtypeOf(TensorType::get())) {
+      // Old path for buffers
+      torch::ParameterDef* param_def = module_def->add_parameters();
+      convertParameter(item.value(), param_def, /*is_buffer=*/true);
+      continue;
+    }
+
     auto& attribute = item.value();
     // Add attribute to ModuleDef
     torch::AttributeDef* attribute_def = module_def->add_attributes();

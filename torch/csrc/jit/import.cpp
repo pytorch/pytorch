@@ -257,6 +257,7 @@ void ScriptModuleDeserializer::convertModule(
       continue;
     }
 
+    AT_ASSERT(attribute_table_.size() > 0);
     module->register_attribute(
       attr_def.name(),
       script::parseType(attr_def.type()),

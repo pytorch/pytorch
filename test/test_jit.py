@@ -10686,7 +10686,7 @@ a")
             archive_name = os.path.basename(os.path.normpath(fname))
             archive = zipfile.ZipFile(fname, 'r')
 
-            pickled_data = archive.read(os.path.join(archive_name, 'attributes'))
+            pickled_data = archive.read(os.path.join(archive_name, 'attributes.pkl'))
             JitUnpickler(io.BytesIO(pickled_data)).load()
 
     def test_submodule_attribute_serialization(self):
