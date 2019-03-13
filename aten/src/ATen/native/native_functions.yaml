@@ -73,13 +73,13 @@
   dispatch:
      CUDA: masked_scale_cuda
 
-- func: _sobol_engine_draw(Tensor quasi, int64_t n, Tensor sobolstate, int64_t dimension, int64_t num_generated) -> (Tensor, Tensor)
+- func: _sobol_engine_draw(Tensor quasi, int n, Tensor sobolstate, int dimension, int num_generated) -> (Tensor, Tensor)
 
-- func: _sobol_engine_ff(Tensor quasi, int64_t n, Tensor sobolstate, int64_t dimension, int64_t num_generated) -> Tensor
+- func: _sobol_engine_ff(Tensor quasi, int n, Tensor sobolstate, int dimension, int num_generated) -> Tensor
 
-- func: _sobol_engine_scramble(Tensor sobolstate, Tensor ltm, int64_t dimension) -> Tensor
+- func: _sobol_engine_scramble(Tensor sobolstate, Tensor ltm, int dimension) -> Tensor
 
-- func: _sobol_engine_initialize_state(Tensor sobolstate, int64_t dimension) -> Tensor
+- func: _sobol_engine_initialize_state(Tensor sobolstate, int dimension) -> Tensor
 
 - func: _reshape_from_tensor(Tensor self, Tensor shape) -> Tensor
   matches_jit_signature: True
