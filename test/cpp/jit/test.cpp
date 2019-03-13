@@ -14,9 +14,9 @@
 #include <test/cpp/jit/test_misc.h>
 #include <test/cpp/jit/test_netdef_converter.h>
 
+using namespace torch::jit::script;
 namespace torch {
 namespace jit {
-namespace script {
 #define TH_FORALL_TESTS(_)         \
   _(ADFormulas)                    \
   _(Attributes)                    \
@@ -83,6 +83,5 @@ void runJITCPPTests() {
 }
 #undef JIT_TEST
 
-} // namespace script
 } // namespace jit
 } // namespace torch
