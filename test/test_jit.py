@@ -9,7 +9,7 @@ import torch.cuda
 import torch.jit.quantized
 from contextlib import contextmanager
 from itertools import product, chain
-import torch.jit.frontend
+import torch.frontend
 from torch.autograd import Variable, Function
 from torch.nn import Module
 from torch.autograd.function import traceable
@@ -47,7 +47,7 @@ from torch._C import TensorType, TupleType, FloatType, IntType, \
 from copy import deepcopy
 import random
 from typing import List, Dict, Optional, Tuple
-from torch.jit.frontend import NotSupportedError
+from torch.frontend import NotSupportedError
 from torch.jit import BatchTensor
 from torch import Tensor
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3
@@ -4503,21 +4503,21 @@ a")
             assert 1 == 1, "hello"
             return x
 
-        ast = torch.jit.frontend.get_jit_def(fn)
+        ast = torch.frontend.get_jit_def(fn)
         self.assertExpected(str(ast))
 
     @unittest.skipIf(not PY2, "Requires python 2")
     def test_python_frontend_py2(self):
         def fn():
             raise Exception("hello")
-        ast = torch.jit.frontend.get_jit_def(fn)
+        ast = torch.frontend.get_jit_def(fn)
         self.assertExpected(str(ast))
 
     @unittest.skipIf(PY2, "Requires python 3")
     def test_python_frontend_py3(self):
         def fn():
             raise Exception("hello")
-        ast = torch.jit.frontend.get_jit_def(fn)
+        ast = torch.frontend.get_jit_def(fn)
         self.assertExpected(str(ast))
 
     def _make_scalar_vars(self, arr, dtype):
