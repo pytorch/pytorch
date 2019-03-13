@@ -10607,7 +10607,7 @@ a")
             if x is None:
                 new_x = (1, 2)
             else:
-                new_x = torch.jit._unwrap_optional(x)
+                new_x = x
             return new_x
 
         self.checkScript(fn, ((3, 4),))
