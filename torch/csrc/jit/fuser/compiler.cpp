@@ -28,6 +28,9 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+// nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
+constexpr size_t fusion_kernel_args_limit = 128;
+
 std::mutex fusion_backends_lock_;
 static std::unordered_map<at::Device::Type, FusedKernelConstructor>&
 getFusionBackends() {
@@ -329,8 +332,14 @@ std::shared_ptr<FusedKernel> compileKernel(
     }
   }
 
-  const std::string name = "kernel_" + std::to_string(next_kernel_id++);
   const bool use_cuda = device.is_cuda();
+  if( use_cuda &&
+      ((flat_inputs.size() + flat_outputs.size()) >
+          fusion_kernel_args_limit) ) {
+      return nullptr;
+  }
+
+  const std::string name = "kernel_" + std::to_string(next_kernel_id++);
   std::string code =
       generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
   const FusedKernelConstructor& kernel_ctor =

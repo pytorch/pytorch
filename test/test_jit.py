@@ -556,8 +556,50 @@ class FooToPickle(torch.nn.Module):
         super(FooToPickle, self).__init__()
         self.bar = torch.jit.ScriptModule()
 
+class GRU(nn.Module):
+    ''' GRU simplified for testing
+    '''
+
+    def __init__(self, input_size, seq_len):
+        super(GRU, self).__init__()
+        self.input_size = input_size
+        self.batch_first = True
+        self.seq_len = seq_len
+
+    def forward(self, input):
+
+        if self.batch_first:
+            input = input.transpose(0, 1)
+
+        # Main loop
+        output = []
+        for i in range(self.seq_len):
+            b = input[i] * 2
+            output.append(b)
+
+        output = torch.cat(output, 0).view(input.size(0), *output[0].size())
+
+        if self.batch_first:
+            output = output.transpose(0, 1)
+
+        return output
+
 
 class TestJit(JitTestCase):
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_large_nbr_kernel_args(self):
+        input_size = 8
+        batch_size = 2
+        seq_len = 130
+
+        gru = GRU(input_size, seq_len)
+        input = torch.rand(batch_size, seq_len, input_size)
+
+        torch.cuda.set_device(0)
+        gru = gru.cuda()
+        input = input.cuda()
+
+        traced_gru = torch.jit.trace(gru, (input))
 
     @unittest.skip("Requires a lot of RAM")
     def test_big(self):
