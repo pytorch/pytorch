@@ -200,7 +200,7 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
       .kernel<&caffe2::detail::call_caffe2_op_from_c10<                       \
           ::caffe2::_c10_ops::OperatorName,                                   \
           OperatorClass>>()                                                   \
-      .dispatchKey(CUDATensorId());                                           \
+      .dispatchKey(HIPTensorId());                                            \
   }
 
 #else
