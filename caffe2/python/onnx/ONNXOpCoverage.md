@@ -103,7 +103,7 @@ This doc keeps tracking why operators are not covered by the testcases.
 |Tile||OK|&#x1F49B;OK, need some enhance|
 |TopK||OK|&#x1F49A;OK|
 |Transpose|Yes|OK|&#x1F49A;OK|
-|Upsample|||&#x1F49B;No bilinear|
+|Upsample||OK|&#x1F49A;OK|
 |Xor|Yes||&#x1F49A;OK|
 |experimental ATen|||&#x1F49A;OK|
 |experimental Affine|||&#x1F494;No op|

@@ -162,7 +162,6 @@ class Caffe2Backend(Backend):
         'BatchNormalization':    'SpatialBN',
         'InstanceNormalization': 'InstanceNorm',
         'MatMul':                'BatchMatMul',
-        'Upsample':              'ResizeNearest',
         'Identity':              'Copy',
         'InstanceNormalization': 'InstanceNorm',
         'Equal':                 'EQ',
@@ -196,7 +195,6 @@ class Caffe2Backend(Backend):
         'RNN': '_create_rnn_variant',
         'Loop': '_create_loop',
         'If': '_create_if',
-        'Upsample': '_create_upsample',
         'RandomNormal': '_create_gaussian_fill'
     }
 

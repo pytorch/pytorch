@@ -1225,7 +1225,7 @@ Caffe2Ops Caffe2Backend::CreateUpsample(
     c2_op = ret.ops.Add();
     BuildOperator(
         c2_op,
-        "ResizeNearest",
+        "UpsampleBilinear",
         {node.input(0), sliced_input},
         {node.output(0)},
         {});
