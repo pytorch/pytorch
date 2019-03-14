@@ -7,18 +7,19 @@ using caffe2::CPUContext;
 namespace caffe2 {
 namespace ops {
 // TODO Parse schema string instead of creating FunctionSchema manually
-C10_DEFINE_OP_SCHEMA(BatchMatmul, FunctionSchema(
-    "_c10_experimental::BatchMatmul",
-    (std::vector<c10::Argument>{
-      c10::Argument("A"),
-      c10::Argument("B"),
-      c10::Argument("output"),
-      c10::Argument("trans_a", IntType::get()),
-      c10::Argument("trans_b", IntType::get()),
-      c10::Argument("broadcast", IntType::get())
-    }), (std::vector<c10::Argument>{
-    })
-));
+C10_DEFINE_OP_SCHEMA(
+    BatchMatmul,
+    FunctionSchema(
+        "_c10_experimental::BatchMatmul",
+        "",
+        (std::vector<c10::Argument>{
+            c10::Argument("A"),
+            c10::Argument("B"),
+            c10::Argument("output"),
+            c10::Argument("trans_a", IntType::get()),
+            c10::Argument("trans_b", IntType::get()),
+            c10::Argument("broadcast", IntType::get())}),
+        (std::vector<c10::Argument>{})));
 }
 }
 

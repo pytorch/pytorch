@@ -7,18 +7,18 @@ using caffe2::CPUContext;
 namespace caffe2 {
 namespace ops {
 // TODO Parse schema string instead of creating FunctionSchema manually
-C10_DEFINE_OP_SCHEMA(FullyConnected, FunctionSchema(
-    "_c10_experimental::FullyConnected",
-    (std::vector<c10::Argument>{
-      c10::Argument("X"),
-      c10::Argument("W"),
-      c10::Argument("b"),
-      c10::Argument("output"),
-      c10::Argument("axis", IntType::get()),
-      c10::Argument("axis_w", IntType::get())
-    }), (std::vector<c10::Argument>{
-    })
-));
+C10_DEFINE_OP_SCHEMA(
+    FullyConnected,
+    FunctionSchema(
+        "_c10_experimental::FullyConnected",
+        "",
+        (std::vector<c10::Argument>{c10::Argument("X"),
+                                    c10::Argument("W"),
+                                    c10::Argument("b"),
+                                    c10::Argument("output"),
+                                    c10::Argument("axis", IntType::get()),
+                                    c10::Argument("axis_w", IntType::get())}),
+        (std::vector<c10::Argument>{})));
 }
 }
 

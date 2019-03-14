@@ -116,7 +116,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       }
       rets.push_back(Argument("0", ret_type, {}, {}, false));
     }
-    return FunctionSchema("", std::move(args), std::move(rets));
+    return FunctionSchema("", "", std::move(args), std::move(rets));
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
@@ -657,6 +657,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
 
   return FunctionSchema(
       new_name.value_or(schema.name()),
+      schema.overload_name(),
       new_args,
       schema.returns(),
       schema.is_vararg(),
