@@ -251,13 +251,11 @@ void ScriptModuleDeserializer::convertModule(
       continue;
     }
 
-    AT_ASSERT(attribute_table_.size() > 0);
     module->register_attribute(
       attr_def.name(),
       script::parseType(attr_def.type()),
-      attribute_table_.back()
+      attribute_table_.at(attr_def.id())
     );
-    attribute_table_.pop_back();
   }
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;

@@ -493,6 +493,8 @@ class ScriptModuleSerializer final {
   // to dump the content of a tensor
   void writeTensorTable(torch::ModelDef* model_def);
 
+  void writeAttributeTable();
+
   void convertModule(
       const script::Module& module,
       const std::string& prefix,
@@ -510,17 +512,17 @@ class ScriptModuleSerializer final {
   // all tensors that will be stored
   std::vector<at::Tensor> tensor_table_;
 
-  Pickler pickler_;
+  std::vector<IValue> attribute_table_;
 };
 
 // ScriptModuleSerializer's methods
 ScriptModuleSerializer::ScriptModuleSerializer(const std::string& filename)
-    : writer_(filename.c_str()), pickler_(tensor_table_) {
+    : writer_(filename.c_str()) {
   // TODO appropriate support for mmap, right now we still use stream writer
 }
 
 ScriptModuleSerializer::ScriptModuleSerializer(std::ostream* ofs)
-    : ofs_(), writer_(ofs), pickler_(tensor_table_) {}
+    : ofs_(), writer_(ofs) {}
 
 void ScriptModuleSerializer::serialize(
     const script::Module& module,
@@ -558,15 +560,13 @@ void ScriptModuleSerializer::convertModel(
                                           // using appropriate function call
   model_def->set_proto_version(torch::ProtoVersion::PROTO_VERSION_NEWEST);
 
-  pickler_.start();
-
   convertModule(
       module, "", writer_.archiveName(), model_def->mutable_main_module());
-  writeTensorTable(model_def);
 
-  pickler_.finish();
-  writer_.writeRecord(
-      "attributes.pkl", pickler_.stack().data(), pickler_.stack().size());
+  // This may write some attributes to the tensor_table_
+  writeAttributeTable();
+
+  writeTensorTable(model_def);
 
   // Write out extra files.
   for (const auto& kv : extra_files) {
@@ -645,6 +645,17 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
   }
 }
 
+void ScriptModuleSerializer::writeAttributeTable() {
+  Pickler pickler(tensor_table_);
+  pickler.start();
+  for (const IValue& ivalue : attribute_table_) {
+    pickler.addIValue(ivalue);
+  }
+  pickler.finish();
+  writer_.writeRecord(
+        "attributes.pkl", pickler.stack().data(), pickler.stack().size());
+}
+
 void ScriptModuleSerializer::convertModule(
     const script::Module& module,
     const std::string& prefix,
@@ -664,8 +675,8 @@ void ScriptModuleSerializer::convertModule(
     attribute_def->set_name(attribute.name_);
     attribute_def->set_type(attribute.type->python_str());
 
-    // Add attribute to pickle blob
-    pickler_.addIValue(*attribute.slot());
+    attribute_table_.push_back(*attribute.slot());
+    attribute_def->set_id(attribute_table_.size() - 1);
   }
 
   std::stringstream module_name;

@@ -27,6 +27,9 @@ message AttributeDef {
   // The mypy type of this attribute
   required string type = 1;
   required string name = 2;
+
+  // Offset into attribute table
+  required int64 id = 3;
 }
 
 message ParameterDef {

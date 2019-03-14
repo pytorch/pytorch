@@ -10655,6 +10655,7 @@ a")
         imported_m = self.getExportImportCopy(m)
         self.assertEqual(m(), imported_m())
 
+    @unittest.skipIf(IS_WINDOWS, "TemporaryFileName support on Windows")
     def test_attribute_unpickling(self):
         import zipfile
 
