@@ -90,6 +90,7 @@ RegisterOperators reg({
     Operator(
         FunctionSchema(
             prim::Constant,
+            "",
             {},
             {},
             /*is_vararg=*/false,

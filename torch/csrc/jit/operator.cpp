@@ -25,10 +25,14 @@ struct SchemaParser {
       : L(str), type_parser(L, /*parse_complete_tensor_types*/ false) {}
 
   FunctionSchema parseDeclaration() {
-    auto name = L.expect(TK_IDENT).text();
+    std::string name = L.expect(TK_IDENT).text();
     if (L.nextIf(':')) {
       L.expect(':');
       name = name + "::" + L.expect(TK_IDENT).text();
+    }
+    std::string overload_name = "";
+    if (L.nextIf('.')) {
+      overload_name = L.expect(TK_IDENT).text();
     }
     std::vector<Argument> arguments;
     std::vector<Argument> returns;
@@ -60,7 +64,7 @@ struct SchemaParser {
           parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false));
     }
     return FunctionSchema{
-        name, std::move(arguments), std::move(returns), is_vararg, false};
+        std::move(name), std::move(overload_name), std::move(arguments), std::move(returns), is_vararg, false};
   }
 
   std::vector<FunctionSchema> parseDeclarations() {

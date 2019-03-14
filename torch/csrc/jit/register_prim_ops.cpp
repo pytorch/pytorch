@@ -471,7 +471,8 @@ RegisterOperators reg(
          }),
      Operator(
          FunctionSchema(
-             "aten::warn",
+             "aten::warn(str message, *, int stacklevel=2)",
+             "",
              {Argument("message", StringType::get()),
               Argument("stacklevel", IntType::get(), c10::nullopt, 2, true)},
              {}),
