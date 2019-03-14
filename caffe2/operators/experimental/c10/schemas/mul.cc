@@ -22,5 +22,7 @@ C10_DEFINE_OP_SCHEMA(Mul, FunctionSchema(
 }
 
 namespace caffe2 {
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(ops::Mul(), C10Mul_DontUseThisOpYet)
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    ops::Mul(),
+    C10Mul_DontUseThisOpYet)
 }
