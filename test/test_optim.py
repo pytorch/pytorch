@@ -233,6 +233,13 @@ class TestOptim(TestCase):
         return [dict(params=bias, **kwargs)]
 
     def test_sgd(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.SGD([bias], lr=1e-3)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.SGD([weight, bias], lr=1e-3)
         )
@@ -278,6 +285,13 @@ class TestOptim(TestCase):
         )
 
     def test_adam(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.Adam([bias], lr=1e-3)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Adam([weight, bias], lr=1e-3)
         )
@@ -327,6 +341,13 @@ class TestOptim(TestCase):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
 
     def test_adadelta(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.Adadelta([bias], rho=0.95)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Adadelta([weight, bias])
         )
@@ -390,6 +411,13 @@ class TestOptim(TestCase):
         )
 
     def test_adamax(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.Adamax([bias], lr=1e-1)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1)
         )
@@ -402,6 +430,13 @@ class TestOptim(TestCase):
             optim.Adamax(None, lr=1e-2, betas=(0.0, 1.0))
 
     def test_rmsprop(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.RMSprop([bias], lr=1e-2)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.RMSprop([weight, bias], lr=1e-2)
         )
@@ -414,6 +449,13 @@ class TestOptim(TestCase):
             optim.RMSprop(None, lr=1e-2, momentum=-1.0)
 
     def test_asgd(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.ASGD([bias], lr=1e-3, t0=100)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.ASGD([weight, bias], lr=1e-3, t0=100)
         )
@@ -426,6 +468,13 @@ class TestOptim(TestCase):
             optim.ASGD(None, lr=1e-2, weight_decay=-0.5)
 
     def test_rprop(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.Rprop([bias], lr=1e-3)
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Rprop([weight, bias], lr=1e-3)
         )
@@ -438,6 +487,13 @@ class TestOptim(TestCase):
             optim.Rprop(None, lr=1e-2, etas=(1.0, 0.5))
 
     def test_lbfgs(self):
+        def add_param_constructor(weight, bias):
+            """Test the `add_param_group` method"""
+            optimizer = optim.ASGD([bias])
+            optimizer.add_param_group({'params': [weight]})
+            return optimizer
+
+        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.LBFGS([weight, bias]),
             ignore_multidevice=True
