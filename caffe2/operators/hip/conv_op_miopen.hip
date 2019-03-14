@@ -669,6 +669,9 @@ bool MIOPENConvGradientOp::RunOnDevice() {
 REGISTER_MIOPEN_OPERATOR(Conv, MIOPENConvOp);
 REGISTER_MIOPEN_OPERATOR(ConvGradient, MIOPENConvGradientOp);
 
+REGISTER_MIOPEN_OPERATOR(GroupConv, MIOPENConvOp);
+REGISTER_MIOPEN_OPERATOR(GroupConvGradient, MIOPENConvGradientOp);
+
 REGISTER_MIOPEN_OPERATOR(DepthWiseConv, MIOPENConvOp);
-REGISTER_MIOPEN_OPERATOR(DepthWiseGradient, MIOPENConvGradientOp);
+REGISTER_MIOPEN_OPERATOR(DepthWiseConvGradient, MIOPENConvGradientOp);
 } // namespace caffe2
