@@ -144,7 +144,7 @@ using ivalue_pair = std::pair<IValue, IValue>;
 struct IValueComparator {
   bool operator()(const ivalue_pair& lhs, const ivalue_pair& rhs) const {
     if (lhs.first.isString()) {
-      return lhs.first.toString() < rhs.first.toString();
+      return lhs.first.toStringRef() < rhs.first.toStringRef();
     }
     if (lhs.first.isInt()) {
       return lhs.first.toInt() < rhs.first.toInt();
