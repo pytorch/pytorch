@@ -232,8 +232,8 @@ Tensor& upsample_nearest2d_backward_out_cpu(
 
 Tensor upsample_nearest2d_backward_cpu(
     const Tensor& grad_output,
-    IntArrayRef input_size,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    IntArrayRef input_size) {
   auto grad_input = at::zeros_like(grad_output);
   upsample_nearest2d_backward_out_cpu_template(
       grad_input, grad_output, output_size, input_size);
