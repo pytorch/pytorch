@@ -709,12 +709,12 @@ class SGDR(_LRScheduler):
 
         This function can be called in an interleaved way.
 
-	Example:
-	    >>> scheduler = SGDR(optimizer, T_0, T_mult)
-	    >>> for epoch in range(20):
-	    >>>     scheduler.step()
-	    >>> scheduler.step(26)
-	    >>> scheduler.step() # scheduler.step(27), instead of scheduler(20)
+        Example:
+            >>> scheduler = SGDR(optimizer, T_0, T_mult)
+            >>> for epoch in range(20):
+            >>>     scheduler.step()
+            >>> scheduler.step(26)
+            >>> scheduler.step() # scheduler.step(27), instead of scheduler(20)
         """
         if epoch is None:
             epoch = self.last_epoch + 1
