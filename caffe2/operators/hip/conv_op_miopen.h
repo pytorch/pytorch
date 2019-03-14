@@ -249,7 +249,7 @@ bool MIOPENConvOp::DoRunWithType() {
       mio_weight_dims_ = Weight.sizes().vec();
       MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
           conv_desc_,
-          KmiopenConvolutionMode,
+          (group_ > 1)? miopenGroupConv : KmiopenConvolutionMode,
           pad_t(),
           pad_l(),
           stride_h(),
@@ -465,7 +465,7 @@ bool MIOPENConvGradientOp::DoRunWithType() {
       mio_weight_dims_ = Weight.sizes().vec();
       MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
           conv_desc_,
-          KmiopenConvolutionMode,
+          (group_ > 1)? miopenGroupConv : KmiopenConvolutionMode,
           pad_t(),
           pad_l(),
           stride_h(),
