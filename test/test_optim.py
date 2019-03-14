@@ -20,6 +20,7 @@ from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
+
 def rosenbrock(tensor):
     x, y = tensor
     return (1 - x) ** 2 + 100 * (y - x ** 2) ** 2
