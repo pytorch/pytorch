@@ -1059,72 +1059,40 @@ class TestLRScheduler(TestCase):
         self._test(scheduler, targets, epochs)
 
     def test_sgdr_lr1(self):
-        iters = 50
+        iters = 100
         eta_min = 1e-10
-        T = 10
-        T_mult = 1
-        T_cur = 0
-        targets = [[0.05], [0.5]]
-        scheduler = SGDR(self.opt, T_0=T, T_mult=T_mult, eta_min=eta_min)
-        for i in range(1, iters, 1):
-            T_cur += 1
-            if T_cur == T:
-                T_cur = 0
-                T *= T_mult
-            targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
-            targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
-        self._test(scheduler, targets, iters)
+        T_mults = [1, 2]
+        for T_mult in T_mults:
+            T = 10
+            T_cur = 0
+            targets = [[0.05], [0.5]]
+            scheduler = SGDR(self.opt, T_0=T, T_mult=T_mult, eta_min=eta_min)
+            for _ in range(1, iters, 1):
+                T_cur += 1
+                if T_cur == T:
+                    T_cur = 0
+                    T *= T_mult
+                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
+                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
+            self._test(scheduler, targets, iters)
 
     def test_sgdr_lr2(self):
-        iters = 70
-        eta_min = 1e-10
-        T = 10
-        T_mult = 2
-        T_cur = 0
-        targets = [[0.05], [0.5]]
-        scheduler = SGDR(self.opt, T_0=T, T_mult=T_mult, eta_min=eta_min)
-        for i in range(1, iters, 1):
-            T_cur += 1
-            if T_cur == T:
-                T_cur = 0
-                T *= T_mult
-            targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
-            targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
-        self._test(scheduler, targets, iters)
-
-    def test_sgdr_lr3(self):
-        iters = 20
-        eta_min = 1e-10
-        T = 10
-        T_mult = 1
-        T_cur = 0
-        targets = [[0.05], [0.5]]
-        scheduler = SGDR(self.opt, T_0=T, T_mult=T_mult, eta_min=eta_min)
-        for i in torch.arange(0.1, iters, 0.1):
-            T_cur = round(T_cur + 0.1, 1)
-            if T_cur == T:
-                T_cur = 0
-                T *= T_mult
-            targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
-            targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
-        self._test_sgdr(scheduler, targets, iters)
-
-    def test_sgdr_lr4(self):
         iters = 30
         eta_min = 1e-10
-        T = 10
-        T_mult = 2
-        T_cur = 0
-        targets = [[0.05], [0.5]]
-        scheduler = SGDR(self.opt, T_0=T, T_mult=T_mult, eta_min=eta_min)
-        for i in torch.arange(0.1, iters, 0.1):
-            T_cur = round(T_cur + 0.1, 1)
-            if T_cur == T:
-                T_cur = 0
-                T *= T_mult
-            targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
-            targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
-        self._test_sgdr(scheduler, targets, iters)
+        T_mults = [1, 2]
+        for T_mult in T_mults:
+            T = 10
+            T_cur = 0
+            targets = [[0.05], [0.5]]
+            scheduler = SGDR(self.opt, T_0=T, T_mult=T_mult, eta_min=eta_min)
+            for _ in torch.arange(0.1, iters, 0.1):
+                T_cur = round(T_cur + 0.1, 1)
+                if T_cur == T:
+                    T_cur = 0
+                    T *= T_mult
+                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
+                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
+            self._test_sgdr(scheduler, targets, iters)
 
     def test_step_lr_state_dict(self):
         self._check_scheduler_state_dict(

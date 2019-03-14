@@ -654,8 +654,9 @@ class CyclicLR(_LRScheduler):
 
 class SGDR(_LRScheduler):
     r"""Set the learning rate of each parameter group using a cosine annealing
-    schedule, where :math:`\eta_{max}` is set to the initial lr and
-    :math:`T_{cur}` is the number of epochs since the last restart in SGDR:
+    schedule, where :math:`\eta_{max}` is set to the initial lr, :math:`T_{cur}`
+    is the number of epochs since the last restart and :math:`T_{i}` is the number
+    of epochs between two warm restarts in SGDR:
 
     .. math::
 
@@ -663,7 +664,7 @@ class SGDR(_LRScheduler):
         \cos(\frac{T_{cur}}{T_{i}}\pi))
 
     When :math:`\T_{cur}=T_{i}`, set :math:`\eta_t = \eta_{min}`.
-    When :math:`\T_{cut}=0`(after restart), set :math:`\eta_t=\eta_{max}`.
+    When :math:`\T_{cur}=0`(after restart), set :math:`\eta_t=\eta_{max}`.
 
     It has been proposed in
     `SGDR: Stochastic Gradient Descent with Warm Restarts`_.
@@ -680,40 +681,57 @@ class SGDR(_LRScheduler):
     """
 
     def __init__(self, optimizer, T_0, T_mult=1, eta_min=0, last_epoch=-1):
+        if T_0 < 0:
+            raise ValueError("Expected positive T_0, but got {}".format(T_0))
+        if T_mult < 0:
+            raise ValueError("Expected positive T_mul, but got {}".format(T_mul))
         self.T_0 = int(T_0)
-        self.T = int(T_0)
+        self.T_i = int(T_0)
         self.T_mult = T_mult
         self.eta_min = eta_min
         super(SGDR, self).__init__(optimizer, last_epoch)
+        for i, group in enumerate(optimizer.param_groups):
+            if 'initial_lr' not in group:
+                raise KeyError("param 'initial_lr' is not specified "
+                               "in param_groups[{}] when resuming an optimizer".format(i))
+            if group['initial_lr'] < eta_min:
+                raise ValueError("Initial_lr should be larger than eta_min, \
+                        but got initial_lr: {}, eta_min: {}".format(group['initial_lr'], eta_min))
         self.T_cur = last_epoch
 
     def get_lr(self):
-        return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T)) / 2
+        return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2
                 for base_lr in self.base_lrs]
 
     def step(self, epoch=None):
-        """Step could be called after every update, i.e. if one epoch has 10 iterations(num_train / batch_size),
-        we could called SGDR.step(0.1), SGDR.step(0.2), etc.
+        """Step could be called after every update, i.e. if one epoch has 10 iterations
+        (number_of_train_examples / batch_size), we should call SGDR.step(0.1), SGDR.step(0.2), etc.
+
+        This function can be called in an interleaved way.
+
+	Example:
+	    >>> scheduler = SGDR(optimizer, T_0, T_mult)
+	    >>> for epoch in range(20):
+	    >>>     scheduler.step()
+	    >>> scheduler.step(26)
+	    >>> scheduler.step() # scheduler.step(27), instead of scheduler(20)
         """
         if epoch is None:
             epoch = self.last_epoch + 1
             self.T_cur = self.T_cur + 1
-            if self.T_cur >= self.T:
-                self.T_cur = self.T_cur - self.T
-                self.T = int(self.T * self.T_mult)
+            if self.T_cur >= self.T_i:
+                self.T_cur = 0
+                self.T_i = int(self.T_i * self.T_mult)
         else:
             if epoch >= self.T_0:
                 if self.T_mult == 1:
                     self.T_cur = epoch % self.T_0
                 else:
-                    T = self.T_0
-                    self.T_cur = epoch
-                    while self.T_cur >= T:
-                        self.T_cur = self.T_cur - T
-                        T = int(T * self.T_mult)
-                    self.T = T
+                    n = int(math.log((epoch / self.T_0 * (self.T_mult - 1) + 1), self.T_mult))
+                    self.T_cur = epoch - self.T_0 * (self.T_mult ** n - 1) / (self.T_mult - 1)
+                    self.T_i = self.T_0 * self.T_mult ** (n)
             else:
-                self.T = self.T_0
+                self.T_i = self.T_0
                 self.T_cur = epoch
         self.last_epoch = math.floor(epoch)
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
