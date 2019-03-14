@@ -8610,7 +8610,7 @@ a")
             return x
 
         def traced_fn(x):
-                return test(x, [1, 2])
+            return test(x, [1, 2])
 
         torch.jit.trace(traced_fn, (torch.randn(3, 3, 3),))
 
