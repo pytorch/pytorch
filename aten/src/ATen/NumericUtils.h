@@ -7,7 +7,7 @@ namespace at {
 // (uselessly) convert to floating point and then do the test.
 // This function is.
 
-template <typename T
+template <typename T,
           typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
 inline bool _isnan(T val) {
   return false;
