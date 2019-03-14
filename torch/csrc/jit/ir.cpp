@@ -81,8 +81,8 @@ struct const_value_list_with_types {
   std::string delim;
   const_value_list_with_types(
       ArrayRef<const Value*> values,
-      const std::string& delim = ", ")
-      : values(values), delim(delim) {}
+      std::string delim_ = ", ")
+      : values(values), delim(std::move(delim_)) {}
 };
 
 std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
