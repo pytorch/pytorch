@@ -54,8 +54,7 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
         "Cannot input a tensor of dimension other than 0 as a scalar argument");
   }
   if (toInt &&
-      !isIntegralType(
-          autograd::as_variable_ref(t).data().scalar_type())) {
+      !isIntegralType(autograd::as_variable_ref(t).data().scalar_type())) {
     std::stringstream ss;
     ss << "Cannot input a tensor of type " << t.scalar_type()
        << " as an integral argument";
@@ -525,23 +524,23 @@ RegisterOperators reg(
              return 0;
            };
          }),
-    Operator(
-        prim::AutogradAnyNonZero,
-        [](const Node* node) {
-          size_t num_inputs = node->inputs().size();
-          return [=](Stack& stack) {
-            bool result = false;
-            for (const IValue& t : last(stack, num_inputs)) {
-              if (t.toTensor().defined()) {
-                result = true;
-                break;
-              }
-            }
-            drop(stack, num_inputs);
-            stack.emplace_back(result);
-            return 0;
-          };
-        }),
+     Operator(
+         prim::AutogradAnyNonZero,
+         [](const Node* node) {
+           size_t num_inputs = node->inputs().size();
+           return [=](Stack& stack) {
+             bool result = false;
+             for (const IValue& t : last(stack, num_inputs)) {
+               if (t.toTensor().defined()) {
+                 result = true;
+                 break;
+               }
+             }
+             drop(stack, num_inputs);
+             stack.emplace_back(result);
+             return 0;
+           };
+         }),
      Operator(
          prim::AutogradAdd,
          [](const Node* node) {
@@ -1089,7 +1088,7 @@ int listIndex(Stack& stack) {
   auto pos = std::find(elements.begin(), elements.end(), elem);
 
   if (pos != elements.end()) {
-    push(stack, std::distance(elements.begin(), pos));
+    push(stack, static_cast<int64_t>(std::distance(elements.begin(), pos)));
   } else {
     AT_ERROR("'", elem, "' is not in list");
   }
@@ -1104,13 +1103,14 @@ int listIndex<Shared<TensorList>, at::Tensor>(Stack& stack) {
   pop(stack, list, elem);
 
   auto& elements = list->elements();
-  auto pos = std::find_if(elements.begin(), elements.end(), [elem](const at::Tensor& b) {
-    const auto cmp_result = elem.eq(b);
-    return cmp_result.is_nonzero();
-  });
+  auto pos = std::find_if(
+      elements.begin(), elements.end(), [elem](const at::Tensor& b) {
+        const auto cmp_result = elem.eq(b);
+        return cmp_result.is_nonzero();
+      });
 
   if (pos != elements.end()) {
-    push(stack, std::distance(elements.begin(), pos));
+    push(stack, static_cast<int64_t>(std::distance(elements.begin(), pos)));
   } else {
     AT_ERROR("'", elem, "' is not in list");
   }
@@ -1138,10 +1138,11 @@ int listCount<Shared<TensorList>, at::Tensor>(Stack& stack) {
   pop(stack, list, elem);
 
   auto& elements = list->elements();
-  const int64_t count = std::count_if(elements.begin(), elements.end(), [elem](const at::Tensor& b) {
-    const auto cmp_result = elem.eq(b);
-    return cmp_result.is_nonzero();
-  });
+  const int64_t count = std::count_if(
+      elements.begin(), elements.end(), [elem](const at::Tensor& b) {
+        const auto cmp_result = elem.eq(b);
+        return cmp_result.is_nonzero();
+      });
   push(stack, count);
 
   return 0;
@@ -1515,9 +1516,11 @@ RegisterOperators reg2({
     Operator(
         "aten::remove(Tensor[](a!) self, Tensor el) -> ()",
         listRemove<Shared<TensorList>, at::Tensor>),
-    Operator("aten::index(Tensor[] self, Tensor el) -> int",
+    Operator(
+        "aten::index(Tensor[] self, Tensor el) -> int",
         listIndex<Shared<TensorList>, at::Tensor>),
-    Operator("aten::count(Tensor[] self, Tensor el) -> int",
+    Operator(
+        "aten::count(Tensor[] self, Tensor el) -> int",
         listCount<Shared<TensorList>, at::Tensor>),
 
 // Mutable ops for lists containing immutable types.
@@ -1556,16 +1559,20 @@ RegisterOperators reg2({
           " decl_type " el) -> ()",                                    \
           listRemove<Shared<c_type>, c_type::ElemType>),               \
       Operator(                                                        \
-          "aten::index(" decl_type "[] self,                           \
+          "aten::index(" decl_type                                     \
+          "[] self,                           \
           " decl_type " el) -> int",                                   \
           listIndex<Shared<c_type>, c_type::ElemType>),                \
       Operator(                                                        \
-          "aten::count(" decl_type "[] self,                           \
+          "aten::count(" decl_type                                     \
+          "[] self,                           \
           " decl_type " el) -> int",                                   \
           listCount<Shared<c_type>, c_type::ElemType>),                \
       Operator(                                                        \
-          "aten::pop(" decl_type "[](a!) self, int idx=-1)             \
-          -> " decl_type, listPop<Shared<c_type>>)
+          "aten::pop(" decl_type                                       \
+          "[](a!) self, int idx=-1)             \
+          -> " decl_type,                                              \
+          listPop<Shared<c_type>>)
 
     CREATE_IMMUTABLE_LIST_OPS("int", IntList),
     CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
