@@ -92,7 +92,7 @@ void Pickler::pushBinGet(uint32_t memo_id) {
 }
 
 void Pickler::pushString(const IValue& ivalue) {
-  auto string = ivalue.toStringRef();
+  const auto& string = ivalue.toStringRef();
 
   push<OpCode>(OpCode::BINUNICODE);
   push<uint32_t>(string.size());
@@ -168,7 +168,7 @@ void Pickler::pushDict(const IValue& ivalue) {
   std::multiset<std::pair<IValue, IValue>, IValueComparator> dict_items(
       dict.begin(), dict.end());
 
-  for (auto pair : dict_items) {
+  for (const auto& pair : dict_items) {
     addIValue(pair.first);
     addIValue(pair.second);
   }
@@ -201,7 +201,7 @@ void Pickler::pushList(const IValue& ivalue) {
 
   push<OpCode>(OpCode::MARK);
 
-  for (auto item : list) {
+  for (const auto& item : list) {
     addIValue(item);
   }
 
@@ -266,11 +266,11 @@ OpCode Unpickler::readInstruction() {
   switch (op) {
     case OpCode::EMPTY_LIST: {
       // TODO: Use fake classes to mark list specializations
-      stack_.push_back(std::vector<IValue>());
+      stack_.emplace_back(std::vector<IValue>());
       break;
     }
     case OpCode::EMPTY_TUPLE: {
-      stack_.push_back(c10::ivalue::Tuple::create({}));
+      stack_.emplace_back(c10::ivalue::Tuple::create({}));
       break;
     }
     case OpCode::BINPUT: {
@@ -288,18 +288,18 @@ OpCode Unpickler::readInstruction() {
     }
     case OpCode::BININT: {
       int32_t value = read<uint32_t>();
-      stack_.push_back(int64_t(value));
+      stack_.emplace_back(int64_t(value));
       break;
     }
     case OpCode::BINUNICODE: {
       int32_t length = read<uint32_t>();
       const char* characters = reinterpret_cast<const char*>(bytes_);
       bytes_ += length;
-      stack_.push_back(std::string(characters, /*n=*/length));
+      stack_.emplace_back(std::string(characters, /*n=*/length));
       break;
     }
     case OpCode::BINFLOAT:
-      stack_.push_back(readFloat());
+      stack_.emplace_back(readFloat());
       break;
     case OpCode::TUPLE: {
       size_t start = marks_.back();
@@ -310,7 +310,7 @@ OpCode Unpickler::readInstruction() {
       stack_.push_back(tup);
     } break;
     case OpCode::EMPTY_DICT:
-      stack_.push_back(c10::ivalue::UnorderedMap());
+      stack_.emplace_back(c10::ivalue::UnorderedMap());
       break;
     case OpCode::APPENDS: {
       size_t start = marks_.back();
@@ -337,7 +337,7 @@ OpCode Unpickler::readInstruction() {
     case OpCode::GLOBAL: {
       AT_ASSERT(readString() == "__main__");
       // Push class name to stack
-      stack_.push_back(readString());
+      stack_.emplace_back(readString());
     } break;
     case OpCode::NEWOBJ: {
       // Do nothing, should be followed by BUILD
@@ -351,7 +351,7 @@ OpCode Unpickler::readInstruction() {
       auto class_name = stack_.back().toStringRef();
       stack_.pop_back();
       AT_ASSERT(class_name == "TensorID");
-      stack_.push_back(tensor_table_.at(tensor_id));
+      stack_.emplace_back(tensor_table_.at(tensor_id));
 
     } break;
     default:
