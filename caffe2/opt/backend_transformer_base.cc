@@ -5,7 +5,7 @@
 namespace caffe2 {
 
 namespace {
-void AnnotateOpIndex(NetDef* net) {
+void annotateOpIndex(NetDef* net) {
   int i = 0;
   for (auto& op : *(net->mutable_op())) {
     AddArgument(kNetPos, i++, &op);
@@ -52,7 +52,7 @@ BackendTransformerBase::ssaRewriteAndMapNames(
     const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
   input_mapping_ = onnx::SsaRewrite(nullptr, pred_net);
   // Annote the ops with net position
-  AnnotateOpIndex(pred_net);
+  annotateOpIndex(pred_net);
 
   // Since we are going to create a mapped workspace, we need to make sure that
   // the parent workspace has the mapped blob names. If the blobs don't exist
