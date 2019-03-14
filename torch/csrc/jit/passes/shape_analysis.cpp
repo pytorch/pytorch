@@ -48,6 +48,20 @@ bool isValidReturnForRunning(Value* v) {
       v->type()->isSubtypeOf(NumberType::get());
 }
 
+bool containsTensorType(const TypePtr& t) {
+  if (t->isSubtypeOf(TensorType::get())) {
+    return true;
+  } else if (t->kind() == TypeKind::ListType) {
+    return containsTensorType(t->cast<ListType>()->getElementType());
+  } else if (t->kind() == TypeKind::TupleType) {
+    auto types = t->cast<TupleType>()->elements();
+    return std::any_of(types.begin(),
+                       types.end(),
+                       containsTensorType);
+  }
+  return false;
+}
+
 class ShapePropagator {
  public:
   explicit ShapePropagator(std::shared_ptr<Graph> graph) : aliasDb_(graph) {
@@ -298,15 +312,8 @@ class ShapePropagator {
     return true;
   }
 
-  bool containsTensorType(const TypePtr& t) {
-    if (t->isSubtypeOf(TensorType::get())) {
-      return true;
-    } else if (t->kind() == TypeKind::ListType) {
-      return containsTensorType(t->cast<ListType>()->getElementType());
-    }
-    return false;
-  }
-
+  // If there's no Tensor in outputs, e.g float / float,
+  // we don't need to propagate shape.
   bool DoesntRefineOutputs(Node* node) {
     auto outputs = node->outputs();
     for (auto& out: outputs) {
