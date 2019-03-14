@@ -8474,6 +8474,79 @@ a")
 
         FileCheck().check("aten::neg").check("aten::add").run(str(traced_fn.graph))
 
+    def test_call_weak_script_mod_from_tracing_fn(self):
+        with self.disableModuleHook():
+            @torch._jit_internal.weak_module
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super(Mod, self).__init__()
+
+                @torch._jit_internal.weak_script_method
+                def forward(self, x):
+                    for _i in range(int(x)):
+                        x += 1
+                    return x
+
+                def not_scripted(self, x):
+                    for _i in range(4):
+                        x *= x
+                    return x
+
+                def test(self):
+                    print("hey mang")
+
+            sm = Mod()
+
+            def traced_fn(x):
+                return sm(x) + 1.0
+
+            trace = torch.jit.trace(traced_fn, torch.tensor(4))
+            FileCheck().check("prim::Loop").run(str(trace.graph))
+            self.assertEqual(trace(torch.tensor(4)), 9)
+
+            def trace_not_scrpited(x):
+                return sm.not_scripted(x) + 1.0
+
+            trace = torch.jit.trace(trace_not_scrpited, torch.tensor(4))
+            FileCheck().check_not("prim::Loop").run(str(trace.graph))
+
+    def test_call_weak_script_mod_from_tracing_mod(self):
+        with self.disableModuleHook():
+            @torch._jit_internal.weak_module
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super(Mod, self).__init__()
+
+                @torch._jit_internal.weak_script_method
+                def forward(self, x):
+                    for _i in range(int(x)):
+                        x += 1
+                    return x
+
+                def not_scripted(self, x):
+                    for _i in range(4):
+                        x *= x
+                    return x
+
+            sm = Mod()
+
+            class TracedModule(torch.nn.Module):
+                def __init__(self):
+                    super(TracedModule, self).__init__()
+
+                def forward(self, x):
+                    return sm(x) + 1
+
+                def not_scripted(self, x):
+                    return sm.not_scripted(x)
+
+            trace = torch.jit.trace(TracedModule(), torch.tensor(5))
+            FileCheck().check("prim::Loop").run(str(trace.graph))
+            self.assertEqual(trace(torch.tensor(4)), 9)
+
+            trace = torch.jit.trace(TracedModule().not_scripted, torch.tensor(4))
+            FileCheck().check_not("prim::Loop").run(str(trace.graph))
+
     def test_call_script_mod_from_tracing_fn(self):
         with self.disableModuleHook():
             class ScriptMod(torch.jit.ScriptModule):

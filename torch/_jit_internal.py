@@ -131,11 +131,21 @@ def weak_module(cls):
 
 
 def weak_script_method(fn):
-    weak_script_methods[fn] = {
+    def wrap_fn(*args, **kwargs):
+        if _get_tracing_state():
+            # first arg is the module, remaining args are to the method
+            strong_mod = _make_strong(args[0])
+            compiled_fn = strong_mod._get_method(fn.__name__)
+            return compiled_fn(*args[1:], **kwargs)
+        else:
+            return fn(*args, **kwargs)
+
+    weak_script_methods[wrap_fn] = {
         "rcb": createResolutionCallback(frames_up=2),
         "original_method": fn
     }
-    return fn
+
+    return wrap_fn
 
 
 def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_name, func_name):
@@ -402,7 +412,9 @@ def _try_get_weak_module(mod):
     """
     if not isinstance(mod, Module):
         return None
-    return weak_modules.get(mod)
+    if mod.__class__ not in weak_types:
+        return mod
+    return _make_strong(mod)
 
 
 def _try_get_ignored_op(fn):
