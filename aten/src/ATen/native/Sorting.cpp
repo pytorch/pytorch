@@ -2,6 +2,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/SortingUtils.h>
+#include <ATen/NumericUtils.h>
 
 namespace at {
 namespace native {
@@ -171,7 +172,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
               tmp_values,
               k - 1,
               [](scalar_t x, scalar_t y) -> bool {
-                return ((x != x && y == y) || (x > y));
+                return ((_isnan<scalar_t>(x) && !_isnan<scalar_t>(y)) || (x > y));
               },
               [&](int64_t i, int64_t j) {
                 std::swap(tmp_values[i], tmp_values[j]);
