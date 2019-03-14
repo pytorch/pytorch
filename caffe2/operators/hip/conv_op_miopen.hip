@@ -15,7 +15,7 @@
  */
 
 #include "caffe2/operators/conv_op.h"
-#include "caffe2/operators/hip/conv_ops_miopen.h"
+#include "caffe2/operators/hip/conv_op_miopen.h"
 
 namespace caffe2 {
 
