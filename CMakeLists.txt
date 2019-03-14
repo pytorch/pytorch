@@ -468,9 +468,11 @@ if (BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
-  install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
-      FILE Caffe2Targets.cmake
-      COMPONENT dev)
+
+    # FIXME KARL - figure out what to do with thnvrtc
+#  install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
+#      FILE Caffe2Targets.cmake
+#      COMPONENT dev)
 else()
   message(WARNING
       "Generated cmake files are only available when building "

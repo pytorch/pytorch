@@ -384,18 +384,19 @@ else ()
     ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
   )
   if (USE_CUDA AND NOT USE_ROCM)
-    list(APPEND TORCH_SRCS
+    list(APPEND Caffe2_GPU_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
     )
     add_library(thnvrtc SHARED ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/thnvrtc.cpp)
     target_link_libraries(thnvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
     target_include_directories(thnvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
     install(TARGETS thnvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+
   endif()
 endif ()
 
 if (USE_CUDA)
-  list(APPEND TORCH_SRCS
+  list(APPEND Caffe2_GPU_SRCS
     ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
     ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
@@ -516,9 +517,6 @@ if(USE_CUDA)
       ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvrtc.dylib
       ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib
       ${CUDA_LIBRARIES})
-
-    # TODO What to do with this line?
-    set_target_properties(torch PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
 
   else()
     find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64/)
@@ -796,11 +794,21 @@ endif()
 
 # ---[ CUDA library.
 if(USE_CUDA)
+
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   torch_cuda_based_add_library(caffe2_gpu ${Caffe2_GPU_SRCS})
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   target_link_libraries(caffe2_gpu INTERFACE caffe2::cudart)
   target_link_libraries(caffe2_gpu PUBLIC c10_cuda)
+
+  target_link_libraries(caffe2_gpu PUBLIC ${TORCH_CUDA_LIBRARIES})
+
+  # FIXME This is probably not desirable
+  target_link_libraries(caffe2_gpu PUBLIC thnvrtc)
+
+  # TODO What to do with this line?
+#  set_target_properties(torch PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
+
   
   
   target_include_directories(
