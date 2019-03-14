@@ -12,3 +12,4 @@
 // This hack can be removed once PyTorch is out-of-place HIPified, and
 // doesn't pretend CUDA is HIP.
 C10_REGISTER_GUARD_IMPL(CUDA, at::cuda::HIPGuardImplMasqueradingAsCUDA);
+C10_REGISTER_GUARD_IMPL(HIP, at::cuda::HIPGuardImplMasqueradingAsCUDA);

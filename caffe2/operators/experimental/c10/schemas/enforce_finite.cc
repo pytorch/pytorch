@@ -18,7 +18,7 @@ C10_DEFINE_OP_SCHEMA(EnforceFinite, FunctionSchema(
 }
 
 namespace caffe2 {
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
     ops::EnforceFinite(),
     C10EnforceFinite_DontUseThisOpYet)
 }
