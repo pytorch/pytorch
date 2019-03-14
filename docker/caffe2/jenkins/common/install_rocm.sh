@@ -44,6 +44,12 @@ install_ubuntu() {
     sed -i 's/find_dependency(hip)/find_dependency(HIP)/g' /opt/rocm/rocfft/lib/cmake/rocfft/rocfft-config.cmake
     sed -i 's/find_dependency(hip)/find_dependency(HIP)/g' /opt/rocm/miopen/lib/cmake/miopen/miopen-config.cmake
     sed -i 's/find_dependency(hip)/find_dependency(HIP)/g' /opt/rocm/rocblas/lib/cmake/rocblas/rocblas-config.cmake
+
+    # for now correct the host compiler definition for forceinline here, will be part of ROCm 2.3 release
+    cd /opt/rocm/hip/include/hip/hcc_detail
+    wget https://github.com/ROCm-Developer-Tools/HIP/pull/934.diff
+    patch -p4 < 934.diff
+    rm -f 934.diff && cd -
 }
 
 install_centos() {
