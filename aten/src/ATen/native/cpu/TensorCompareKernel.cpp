@@ -6,7 +6,7 @@
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/NumericUtils.h>
+#include <ATen/NumericUtils.h>
 #include <c10/util/Optional.h>
 
 namespace at { namespace native { namespace {

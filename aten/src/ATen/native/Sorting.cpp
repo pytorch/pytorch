@@ -2,7 +2,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/SortingUtils.h>
-#include <ATen/native/NumericUtils.h>
+#include <ATen/NumericUtils.h>
 
 namespace at {
 namespace native {
