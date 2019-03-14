@@ -10646,10 +10646,11 @@ a")
                 self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
                 self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
                 self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
+                self.int_list = torch.jit.Attribute([1, 2, 3, 4], List[int])
 
             @torch.jit.script_method
             def forward(self):
-                return (self.table, self.float, self.int, self.tuple, self.list)
+                return (self.table, self.float, self.int, self.tuple, self.list, self.int_list)
 
         m = M()
         imported_m = self.getExportImportCopy(m)
@@ -10668,19 +10669,29 @@ a")
                 self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
                 self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
                 self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
+                self.int_list = torch.jit.Attribute([1, 2, 3, 4], List[int])
 
             @torch.jit.script_method
             def forward(self):
-                return (self.table, self.float, self.int, self.tuple, self.list)
+                return (self.table, self.float, self.int, self.tuple, self.list, self.int_list)
 
         class TensorID(object):
             def __setstate__(self, id):
                 self.id = id
 
+        class IntList(object):
+            def __setstate__(self, data):
+                self.data = data
+
         class JitUnpickler(pickle.Unpickler):
             def find_class(self, module, name):
-                if module == '__main__' and name == 'TensorID':
+                if not module == '__main__':
+                    return None
+
+                if name == 'TensorID':
                     return TensorID
+                elif name == 'IntList':
+                    return IntList
 
         with TemporaryFileName() as fname:
             M().save(fname)

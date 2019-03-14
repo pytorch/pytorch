@@ -81,12 +81,16 @@ enum class OpCode : char {
   FRAME = '\x95'
 };
 
+enum PicklerClass : uint8_t {
+  TENSOR = 0,
+  INTLIST = 1
+};
+
 using ::c10::IValue;
 
 struct Pickler {
   Pickler(std::vector<at::Tensor>& tensor_table)
-      : tensor_table_(tensor_table),
-        tensor_class_name_("__main__\n", "TensorID\n") {}
+      : tensor_table_(tensor_table) {}
 
   const std::vector<char>& stack();
   void start();
@@ -102,8 +106,10 @@ struct Pickler {
   void pushMemoization(const void* item);
   void pushMemoization(const IValue& ivalue);
   void pushList(const IValue& ivalue);
+  void pushIntList(const IValue& ivalue);
   void pushTuple(const IValue& ivalue);
   void pushDict(const IValue& ivalue);
+  void pushClass(PicklerClass cls);
   const void* getPointer(const IValue& ivalue);
 
   void pushUint8(uint8_t value);
@@ -120,9 +126,6 @@ struct Pickler {
 
   // External table of tensors to serialize
   std::vector<at::Tensor>& tensor_table_;
-
-  // Module name, class name for fake tensor class
-  std::pair<std::string, std::string> tensor_class_name_;
 
   // TODO: only use this if necessary (add a pass to find all shared ivalues,
   // and only memoize those)
@@ -158,6 +161,7 @@ struct Unpickler {
   OpCode readInstruction();
   std::string readString();
   OpCode readOpCode();
+  void readList();
 
   std::vector<IValue> stack_;
   std::vector<IValue> memo_;
@@ -165,6 +169,7 @@ struct Unpickler {
   const uint8_t* bytes_;
   const uint8_t* end_ptr_;
   const std::vector<at::Tensor>& tensor_table_;
+  OpCode last_opcode_;
 };
 
 } // namespace jit
