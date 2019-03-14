@@ -15,8 +15,18 @@ void AnnotateOpIndex(NetDef* net) {
 
 std::string BackendTransformerBase::getModelId(const NetDef& net) {
   static std::atomic<size_t> seq_id{0};
-  auto model_id =
-      ArgumentHelper(net).GetSingleArgument<std::string>(kModelId, "");
+  std::string model_id;
+  for (const auto& arg : net.arg()) {
+    if (arg.name() == kModelId) {
+      if (arg.has_s()) {
+        model_id = arg.s();
+      } else if (arg.has_i()) {
+        model_id = c10::to_string(arg.i());
+      }
+      break;
+    }
+  }
+
   if (model_id.empty()) {
     model_id = "unnamed_" + c10::to_string(seq_id++);
   }
