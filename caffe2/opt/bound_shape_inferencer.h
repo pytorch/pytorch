@@ -67,6 +67,7 @@ class CAFFE2_API BoundShapeInferencer {
   void InferSparseLengthsSum(const OperatorDef& op);
   void InferFC(const OperatorDef& op);
   void InferConcat(const OperatorDef& op);
+  void InferShape(const OperatorDef& op);
   void InferReshape(const OperatorDef& op);
   void InferLengthsRangeFill(const OperatorDef& op);
 
