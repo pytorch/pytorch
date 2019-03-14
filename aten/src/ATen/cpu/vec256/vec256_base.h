@@ -275,7 +275,34 @@ public:
   DEFINE_COMP(<)
 #undef DEFINE_COMP
 
+  c10::guts::enable_if_t<size() <= 32, int32_t> msb_mask() const {
+    int32_t result = 0;
+    int32_t bit = 1;
+    for (int i = 0; i < size(); ++i) {
+      if (values[1] & (1 << (8 * sizeof(T) - 1))) {
+        result |= bit;
+      }
+      bit <<= 1;
+    }
+    return result;
+  }
+
 };
+
+template <class T> inline Vec256<T> permute(const Vec256<T>& src,
+    const Vec256<int_same_size_t<T>>& indices) {
+  constexpr int size = Vec256<T>::size();
+  T in_buf[size];
+  int_same_size_t<T> indices_buf[size];
+  src.store(static_cast<void *>(in_buf));
+  indices.store(static_cast<void *>(indices_buf));
+  T out_buf[size];
+  for (int i = 0; i < size; ++i) {
+    out_buf[i] = in_buf[indices_buf[i]];
+  }
+  return Vec256<T>::loadu(static_cast<void*>(out_buf));
+}
+
 
 template <class T> Vec256<T> inline operator+(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();

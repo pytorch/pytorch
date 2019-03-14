@@ -176,6 +176,10 @@ public:
   Vec256<float> pow(const Vec256<float> &b) const {
     return Vec256<float>(Sleef_powf8_u10(values, b));
   }
+  int32_t msb_mask() const {
+    return _mm256_movemask_ps(values);
+  }
+
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN
@@ -201,6 +205,10 @@ public:
 
   Vec256<float> operator>=(const Vec256<float>& other) const {
     return _mm256_cmp_ps(values, other.values, _CMP_GE_OQ);
+  }
+
+  Vec256<float> not_leq(const Vec256<float>& other) const {
+    return _mm256_cmp_ps(values, other.values, _CMP_NLE_UQ);
   }
 };
 

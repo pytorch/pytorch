@@ -1,35 +1,19 @@
 #include <ATen/ATen.h>
+#include <ATen/LegacyTHFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/native/cpu/QuickPartition.h>
+#include <vector>
 
 namespace at {
 namespace native {
 
 namespace {
 
-// maybe these days, one should define a random access iterator and use
-// std::sort...
-/* Note from TH:
 
-   I cut and pasted (slightly adapted) the quicksort code from
-   Sedgewick's 1978 "Implementing Quicksort Programs" article
-   http://www.csie.ntu.edu.tw/~b93076/p847-sedgewick.pdf
-
-   It is the state of the art existing implementation. The macros
-   are here to make as close a match as possible to the pseudocode of
-   Program 2 p.851
-
-   Note that other partition schemes exist, and are typically presented
-   in textbook, but those are less efficient. See e.g.
-   http://cs.stackexchange.com/questions/11458/quicksort-partitioning-hoare-vs-lomuto
-
-   Julien, November 12th 2013
-*/
-
-constexpr int64_t MAX_LEVELS = 300;
-constexpr int64_t M_SMALL = 10; // Limit for small subfiles
+using vec256::int_same_size_t;
 
 template <typename Fn>
 void dim_apply(TensorList tensors, int64_t dim, Fn f) {
@@ -66,16 +50,21 @@ void dim_apply(TensorList tensors, int64_t dim, Fn f) {
   });
 }
 
-template <typename scalar_t, typename Comp, typename Fn>
+
+
+template <typename scalar_t, typename ScalarComp, typename ScalarFn, typename PartitionFn>
 void quick_select_template(
-    TensorAccessor<scalar_t, 1> arr,
+    scalar_t *arr,
+    int64_t sz,
     int64_t k,
-    Comp gt_or_nan,
-    Fn swap_fn) {
-  int64_t P, L, R, i, j, swap;
-  scalar_t rswap, piv;
+    ScalarComp gt_or_nan,
+    ScalarFn swap_fn,
+    PartitionFn partition
+    ) {
+  int64_t P, L, R;
+  scalar_t piv;
   L = 0;
-  R = arr.size(0) - 1;
+  R = sz - 1;
 
   do {
     if (R <= L) // One element only
@@ -101,31 +90,95 @@ void quick_select_template(
       swap_fn(L + 1, L);
     }
 
-    i = L + 1;
-    j = R;
     piv = arr[L];
-    do {
-      do
-        i++;
-      while (gt_or_nan(piv, arr[i]));
-      do
-        j--;
-      while (gt_or_nan(arr[j], piv));
-      if (j < i)
-        break;
-      swap_fn(i, j);
-    } while (1);
-    swap_fn(L, j);
+    int64_t j = partition(L + 1, R, piv);
 
     // Re-set active partition
     if (j <= k)
-      L = i;
+      L = j;
     if (j >= k)
       R = j - 1;
   } while (1);
 }
 
 } // namespace
+
+// via SFINAE, this version will be used
+// if only a scalar partition function is available
+template <typename scalar_t, typename index_t>
+index_t partition(
+    scalar_t *values,
+    index_t *indices,
+    index_t L,
+    index_t R,
+    scalar_t piv,
+    bool largest,
+    long) {
+  auto cmp = largest ? [](scalar_t x, scalar_t y) {
+      return gt_or_nan<scalar_t>(x, y);
+    } : [](scalar_t x, scalar_t y) {
+      return gt_or_nan<scalar_t>(y, x);
+    };
+  auto swap = [&](index_t i, index_t j) {
+    std::swap(values[i], values[j]);
+    std::swap(indices[i], indices[j]);
+  };
+  return scalar_partition(values, cmp, swap, L, R, piv);
+}
+
+template <typename scalar_t, typename index_t>
+auto partition(
+    scalar_t *values,
+    index_t *indices,
+    index_t L,
+    index_t R,
+    scalar_t piv,
+    bool largest,
+    int) -> decltype(vec_qs_partition_inplace((scalar_t *)(nullptr), (scalar_t *)(nullptr), (index_t *)(nullptr), scalar_t(), bool()), index_t()){
+  scalar_t *begin = values + L;
+  scalar_t *end = values + R + 1;
+  return L + vec_qs_partition_inplace(
+    begin, end, indices + L, piv, largest
+  );
+}
+
+
+
+template <typename scalar_t, typename index_t, typename ValFn, typename IdxFn>
+void qsel_with_indices(const Tensor& self, Tensor& values, Tensor& indices, ValFn finalize_vals, IdxFn finalize_idxs, index_t k, bool largest, int64_t dim) {
+  dim_apply(
+    {self, values, indices},
+    dim,
+    [&](int64_t i, TensorList tl) {
+      auto self = tl[0].accessor<scalar_t, 1>();
+      std::vector<index_t> tmp_indices;
+      std::vector<scalar_t> tmp_values;
+      for (index_t j = 0; j < self.size(0); ++j) {
+        tmp_indices.push_back(j);
+        tmp_values.push_back(self[j]);
+      }
+      quick_select_template(tmp_values.data(),
+          tmp_values.size(),
+          k,
+          [largest] (scalar_t x, scalar_t y) -> bool {
+            return largest ? gt_or_nan<scalar_t>(x,y)
+              : gt_or_nan<scalar_t>(y,x);
+          },
+          [&] (index_t i, index_t j) {
+            std::swap(tmp_values[i], tmp_values[j]);
+            std::swap(tmp_indices[i], tmp_indices[j]);
+          },
+          [&] (index_t L, index_t R, scalar_t piv) {
+            return partition<scalar_t, index_t>(tmp_values.data(),
+                tmp_indices.data(), L, R, piv, largest, 0);
+          }
+        );
+      finalize_vals(tmp_values, tl[1]);
+      finalize_idxs(tmp_indices, tl[2]);
+    }
+  );
+}
+
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
     Tensor& values,
@@ -153,34 +206,34 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
     indices.zero_();
     return std::forward_as_tuple(values, indices);
   }
-  auto tmp_values = self.clone();
-  auto tmp_indices = at::empty(self.sizes(), self.options().dtype(kLong));
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "kthvalue_cpu", [&] {
-    dim_apply(
-        {tmp_values, tmp_indices, values, indices},
-        dim,
-        [&](int64_t i, TensorList tl) {
-          auto tmp_values = tl[0].accessor<scalar_t, 1>();
-          auto tmp_indices = tl[1].accessor<int64_t, 1>();
-          scalar_t* mode_value = tl[2].data<scalar_t>();
-          int64_t* mode_index = tl[3].data<int64_t>();
-          for (int64_t j = 0; j < tmp_indices.size(0); j++) {
-            tmp_indices[j] = j;
-          }
-          // we want NaN to be sorted as top for numpy compatibility
-          quick_select_template(
-              tmp_values,
-              k - 1,
-              [](scalar_t x, scalar_t y) -> bool {
-                return ((_isnan<scalar_t>(x) && !_isnan<scalar_t>(y)) || (x > y));
-              },
-              [&](int64_t i, int64_t j) {
-                std::swap(tmp_values[i], tmp_values[j]);
-                std::swap(tmp_indices[i], tmp_indices[j]);
-              });
-          *mode_value = tmp_values[k - 1];
-          *mode_index = tmp_indices[k - 1];
-        });
+    bool can_use_small_index = self.size(dim) <= std::numeric_limits<int_same_size_t<scalar_t>>::max();
+    if (can_use_small_index) {
+      using index_t = int_same_size_t<scalar_t>;
+      qsel_with_indices<scalar_t, index_t>(self, values, indices,
+          [k](const std::vector<scalar_t>& vals, const Tensor& val_slice) {
+            *val_slice.data<scalar_t>() = vals[k - 1];
+          },
+          [k](const std::vector<index_t>& idxs, const Tensor& idx_slice) {
+            *idx_slice.data<int64_t>() = idxs[k - 1];
+          },
+          k,
+          true,
+          dim
+        );
+    } else {
+      qsel_with_indices<scalar_t, int64_t>(self, values, indices,
+          [k](const std::vector<scalar_t>& vals, const Tensor& val_slice) {
+            *val_slice.data<scalar_t>() = vals[k - 1];
+          },
+          [k](const std::vector<int64_t>& idxs, const Tensor& idx_slice) {
+            *idx_slice.data<int64_t>() = idxs[k - 1];
+          },
+          k,
+          true,
+          dim
+        );
+    }
   });
   if (!keepdim) {
     values.squeeze_(dim);
@@ -188,6 +241,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
   }
   return std::forward_as_tuple(values, indices);
 }
+
 
 std::tuple<Tensor, Tensor> kthvalue(
     const Tensor& self,

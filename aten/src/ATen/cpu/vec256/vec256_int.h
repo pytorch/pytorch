@@ -96,6 +96,7 @@ struct Vec256<int64_t> : public Vec256i {
     auto inverse = _mm256_xor_si256(values, is_larger);
     return _mm256_sub_epi64(inverse, is_larger);
   }
+
   Vec256<int64_t> operator==(const Vec256<int64_t>& other) const {
     return _mm256_cmpeq_epi64(values, other.values);
   }
@@ -127,6 +128,9 @@ struct Vec256<int32_t> : public Vec256i {
   Vec256(int32_t val1, int32_t val2, int32_t val3, int32_t val4,
          int32_t val5, int32_t val6, int32_t val7, int32_t val8) {
     values = _mm256_setr_epi32(val1, val2, val3, val4, val5, val6, val7, val8);
+  }
+  explicit operator __m256() const {
+    return (__m256)values;
   }
   template <int64_t mask>
   static Vec256<int32_t> blend(Vec256<int32_t> a, Vec256<int32_t> b) {
@@ -180,6 +184,7 @@ struct Vec256<int32_t> : public Vec256i {
       std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
     }
   }
+
   const int32_t& operator[](int idx) const  = delete;
   int32_t& operator[](int idx)  = delete;
   Vec256<int32_t> abs() const {
@@ -204,6 +209,11 @@ struct Vec256<int32_t> : public Vec256i {
     return invert(_mm256_cmpgt_epi32(other.values, values));
   }
 };
+
+template <>
+Vec256<int32_t> permute(const Vec256<int32_t>& src, const Vec256<int32_t>& indices) {
+  return (Vec256<int32_t>)_mm256_permutevar8x32_ps((__m256)src, indices);
+}
 
 template <>
 void convert(const int32_t *src, float *dst, int64_t n) {

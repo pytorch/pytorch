@@ -228,6 +228,12 @@ inline deinterleave2<float>(const Vec256<float>& a, const Vec256<float>& b) {
                         _mm256_permute2f128_ps(a_grouped, b_grouped, swap_ctrl_b));
 }
 
+template<>
+Vec256<float> permute(const Vec256<float>& src, const Vec256<int32_t>& indices) {
+  return _mm256_permutevar8x32_ps(src, (__m256i)indices);
+}
+
+
 #endif  // defined(__AVX2__)
 
 #endif // defined(__AVX__) && !defined(_MSC_VER)
