@@ -1886,7 +1886,7 @@ class TestNN(NNTestCase):
                 self.assertEqual(wrapped_m(input), pre_remove_out)
 
                 m = torch.nn.utils.spectral_norm(m)
-                for i in range(3):
+                for _ in range(3):
                     pre_remove_out = wrapped_m(input)
                 m = torch.nn.utils.remove_spectral_norm(m)
                 self.assertEqual(wrapped_m(input), pre_remove_out)
@@ -2215,7 +2215,7 @@ class TestNN(NNTestCase):
         probs = logits.softmax(dim=-1)
 
         counts = torch.zeros_like(logits)
-        for draw in range(num_draws):
+        for _ in range(num_draws):
             y_draw = F.gumbel_softmax(logits, hard=True)
             counts = counts + y_draw
 
@@ -4022,7 +4022,7 @@ class TestNN(NNTestCase):
                 my_stream = torch.cuda.Stream()
                 results[t] = input
                 with torch.cuda.stream(my_stream):
-                    for i in range(test_iters):
+                    for _ in range(test_iters):
                         # If all threads are sharing the same cudnn handle,
                         # the following sequence may occur:
                         # thread 0 calls setCuDNNStreamToCurrent()
@@ -4035,7 +4035,7 @@ class TestNN(NNTestCase):
                         results[t].div_(4.0)
                 torch.cuda.current_stream().wait_stream(my_stream)
 
-            for trial in range(trials):
+            for _ in range(trials):
                 for t in range(num_threads):
                     results[t] = torch.ones((1, 1, 2048, 2048), device='cuda')
 
@@ -4320,7 +4320,7 @@ class TestNN(NNTestCase):
                 input = torch.randn(3, 10)
                 hx = torch.randn(3, 20)
                 cell = module(10, 20, bias=bias)
-                for i in range(6):
+                for _ in range(6):
                     hx = cell(input, hx)
 
                 hx.sum().backward()
@@ -4337,7 +4337,7 @@ class TestNN(NNTestCase):
 
         input = Variable(cast(torch.randn(3, 5)))
         target = Variable(cast(torch.randn(5, 3)))
-        for name, fn in losses.items():
+        for _name, fn in losses.items():
             self.assertRaises(Exception, lambda: fn(input, target))
 
     def test_loss_equal_input_target_shape(self):
@@ -4770,7 +4770,7 @@ class TestNN(NNTestCase):
             hx = torch.randn(3, 20)
             cx = torch.randn(3, 20)
             lstm = nn.LSTMCell(10, 20, bias=bias)
-            for i in range(6):
+            for _ in range(6):
                 hx, cx = lstm(input, (hx, cx))
 
             (hx + cx).sum().backward()
@@ -4815,7 +4815,7 @@ class TestNN(NNTestCase):
             with torch.no_grad():
                 weight.set_(weight_data)
 
-            for i in range(2):
+            for _ in range(2):
                 with warnings.catch_warnings(record=True) as w:
                     output_noncontig = rnn(input, hx)
                 if first_warn:
@@ -5057,7 +5057,7 @@ class TestNN(NNTestCase):
             output = rnn(input)
             output[0].sum().backward(retain_graph=True)
             grads = [input.grad.data.clone()] + [p.grad.data.clone() for p in rnn.parameters()]
-            for i in range(4):
+            for _ in range(4):
                 rnn.zero_grad()
                 input.grad.data.zero_()
                 output[0].sum().backward(retain_graph=True)
@@ -5932,7 +5932,7 @@ class TestNN(NNTestCase):
         }
 
         input = torch.randn(2, 1, requires_grad=True)
-        for name, fn in losses.items():
+        for _name, fn in losses.items():
             for requires_grad in [True, False]:
                 # When target.requires_grad=True, its impl is in Python, while the other is in TH.
                 target = torch.randn(2, 10, requires_grad=requires_grad)
