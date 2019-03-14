@@ -4,16 +4,6 @@
 
 namespace caffe2 {
 
-// Wrap around axis_index if it is negative, s.t., -1 is the last dim
-int canonical_axis_index(int axis_index, int ndims) {
-  CAFFE_ENFORCE_GE(axis_index, -ndims);
-  CAFFE_ENFORCE_LT(axis_index, ndims);
-  if (axis_index < 0) {
-    return axis_index + ndims;
-  }
-  return axis_index;
-}
-
 class IDEEPConcatOp final : public IDEEPOperator {
  public:
   USE_IDEEP_DEF_ALIASES();
@@ -61,7 +51,7 @@ class IDEEPConcatOp final : public IDEEPOperator {
 
     if (!fallback_to_cpu) {
       int adj_size = inputs_itensor[0].ndims() + (add_axis_ ? 1 : 0);
-      int canonical_axis = canonical_axis_index(axis_, adj_size);
+      int canonical_axis = canonical_axis_index_(axis_, adj_size);
       auto* output = Output(OUTPUT);
       Tensor* axis_info = OutputTensor(AXIS_INFO,
         vector<int64_t>(1, InputSize()), at::dtype<int>().device(CPU));
@@ -111,7 +101,7 @@ class IDEEPSplitOp final : public IDEEPOperator {
 
   bool RunOnDevice() override {
     const auto& input = Input(INPUT);
-    int canonical_axis = canonical_axis_index(axis_, input.ndims());
+    int canonical_axis = canonical_axis_index_(axis_, input.ndims());
     const int input_channels = input.get_dim(canonical_axis);
     vector<int> axis_vdata(OutputSize(), 0);
     if (InputSize() == 2) {
