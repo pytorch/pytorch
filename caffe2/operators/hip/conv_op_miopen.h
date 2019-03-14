@@ -89,7 +89,18 @@ class MIOPENConvOp final : public MIOPENConvOpBase {
             OperatorBase::GetSingleArgument<bool>("bestAlgoFound_", false)),
         fwdConvWs_(nullptr),
         fwdConvWsSize_(0),
-        fwdAlgo_(miopenConvolutionFwdAlgoGEMM) {}
+        fwdAlgo_(miopenConvolutionFwdAlgoGEMM) {
+
+      MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
+            conv_desc_,
+            (group_ > 1)? miopenGroupConv : KmiopenConvolutionMode,
+            pad_t(),
+            pad_l(),
+            stride_h(),
+            stride_w(),
+            dilation_h(),
+            dilation_w()));
+  }
 
   ~MIOPENConvOp() {
     if (fwdConvWs_) {
@@ -143,6 +154,16 @@ class MIOPENConvGradientOp final : public MIOPENConvOpBase {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
         "If bias is not present, you should not have 3 grad output.");
+
+    MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
+            conv_desc_,
+            (group_ > 1)? miopenGroupConv : KmiopenConvolutionMode,
+            pad_t(),
+            pad_l(),
+            stride_h(),
+            stride_w(),
+            dilation_h(),
+            dilation_w()));
   }
 
   ~MIOPENConvGradientOp() {
@@ -247,15 +268,6 @@ bool MIOPENConvOp::DoRunWithType() {
 
     if (weight_changed) {
       mio_weight_dims_ = Weight.sizes().vec();
-      MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
-          conv_desc_,
-          (group_ > 1)? miopenGroupConv : KmiopenConvolutionMode,
-          pad_t(),
-          pad_l(),
-          stride_h(),
-          stride_w(),
-          dilation_h(),
-          dilation_w()));
 
       MIOPEN_ENFORCE(miopenSetConvolutionGroupCount(conv_desc_, group_));
 
@@ -463,15 +475,6 @@ bool MIOPENConvGradientOp::DoRunWithType() {
 
     if (weight_changed) {
       mio_weight_dims_ = Weight.sizes().vec();
-      MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
-          conv_desc_,
-          (group_ > 1)? miopenGroupConv : KmiopenConvolutionMode,
-          pad_t(),
-          pad_l(),
-          stride_h(),
-          stride_w(),
-          dilation_h(),
-          dilation_w()));
 
       MIOPEN_ENFORCE(miopenSetConvolutionGroupCount(conv_desc_, group_));
 
