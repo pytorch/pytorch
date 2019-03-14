@@ -298,6 +298,25 @@ class ShapePropagator {
     return true;
   }
 
+  bool containsTensorType(const TypePtr& t) {
+    if (t->isSubtypeOf(TensorType::get())) {
+      return true;
+    } else if (t->kind() == TypeKind::ListType) {
+      return containsTensorType(t->cast<ListType>()->getElementType());
+    }
+    return false;
+  }
+
+  bool DoesntRefineOutputs(Node* node) {
+    auto outputs = node->outputs();
+    for (auto& out: outputs) {
+      if (containsTensorType(out->type())) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   bool PropagateShapeOnNodeByRunningIt(Node* node) {
     if (!canPropagateShapeByRunningIt(node))
       return false;
@@ -531,6 +550,10 @@ class ShapePropagator {
     }
 
     if (PropagateTensorShapeOnNode(node, insert_expands)) {
+      return;
+    }
+
+    if (DoesntRefineOutputs(node)) {
       return;
     }
 

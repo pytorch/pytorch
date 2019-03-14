@@ -687,8 +687,12 @@ const std::vector<std::string> functions = {
         def AD_fused_dropout_backward(grad,
                                       mask,
                                       p1m: float):
-            # FIXME: _masked_scale is not used because schema of (float / float) is not supported.
-            return grad * (mask.type_as(grad) / p1m)
+            p1r = 1. / p1m
+            if grad.requires_grad:
+                grad_input = grad * (mask.type_as(grad) * p1r)
+            else:
+                grad_input = torch._masked_scale(grad, mask, p1r)
+            return grad_input
 
         def dropout(input,
                     p: float,
