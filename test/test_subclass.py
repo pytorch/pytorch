@@ -960,8 +960,12 @@ class Test_clone(TestSubclassFuncIn1InOut0Out1): funcs = {"torch": torch.Tensor.
 
 
 
-class Test_resize_as(TestSubclassFuncIn2InOut0Out1): funcs = {"torch": torch.Tensor.resize_as, "numpy": None}
+class Test_resize_as(TestSubclassFuncIn2InOut0Out1):
+    funcs = {"torch": torch.Tensor.resize_as, "numpy": None}
 
+    @unittest.expectedFailure
+    def test_func_a_c(self):
+        super().test_func_a_c()
 
 
 class Test_pow(TestSubclassFuncIn2InOut0Out1): funcs = {"torch": torch.Tensor.pow, "numpy": np.power}

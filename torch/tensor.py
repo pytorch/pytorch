@@ -42,6 +42,7 @@ def _nonsense(*args, **kwargs):
 # torch/__init__.py.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C._TensorBase):
+
     def __deepcopy__(self, memo):
         if not self.is_leaf:
             raise RuntimeError("Only Tensors created explicitly by the user "
@@ -383,8 +384,6 @@ class Tensor(torch._C._TensorBase):
     def __mul__(self, *args, **kwargs):
         return _call_ufunc(torch.mul, "__call__", *(self, *args), **kwargs)
 
-    multiply = __mul__
-
     def __and__(self, *args, **kwargs):
         return _call_ufunc(_C._TensorBase.__and__, "__call__", *(self, *args), **kwargs)
 
@@ -408,8 +407,6 @@ class Tensor(torch._C._TensorBase):
 
     def __ipow__(self, other):
         raise NotImplementedError("in-place pow not implemented")
-
-    __itruediv__ = _C._TensorBase.__idiv__
 
     def __le__(self, *args, **kwargs):
         return _call_ufunc(torch.le, "__call__", *(self, *args), **kwargs)
@@ -444,16 +441,12 @@ class Tensor(torch._C._TensorBase):
     def __rsub__(self, *args, **kwargs):
         return _call_ufunc(torch.rsub, "__call__", *(self, *args), **kwargs)
 
-    __rtruediv__ = __rdiv__
-
-    def abs(self, *args, **kwargs):
-        return _call_ufunc(torch.abs, "__call__", *(self, *args), **kwargs)
-
-    def add(self, *args, **kwargs):
-        return _call_ufunc(torch.add, "__call__", *(self, *args), **kwargs)
-
     def nonsense(self, *args, **kwargs):
         return _nonsense(*(self, *args), **kwargs)
+
+    multiply = __mul__
+    __itruediv__ = _C._TensorBase.__idiv__
+    __rtruediv__ = __rdiv__
 
     # auto generated
 
