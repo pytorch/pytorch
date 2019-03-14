@@ -409,6 +409,15 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
     const caffe2::NetDef& net,
     const std::unordered_set<std::string>& weights_in_ws,
     const ShapeInfoMap& shape_hints) {
+  if (opts_.min_ops > net.op_size()) {
+    return net;
+  }
+  int onnxifi_op_id = onnxifi_op_id_;
+
+  if (opts_.debug) {
+    WriteProtoToTextFile(
+        net, "debug_original_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt");
+  }
   // We already have all the ops and external inputs and outputs!
   NetDef onnxifi_net(net);
 
@@ -437,8 +446,11 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   // names for external_inputs/outputs and input_shape_info for the onnxifi_net.
   vector<OperatorDef> input_ops;
   vector<OperatorDef> output_ops;
-  auto renaming_map =
-      AddAdjustBatchOps(shape_hints, &onnxifi_net, &input_ops, &output_ops);
+  std::unordered_map<std::string, std::string> renaming_map;
+  if (opts_.add_adjust_batch_ops) {
+    renaming_map =
+        AddAdjustBatchOps(shape_hints, &onnxifi_net, &input_ops, &output_ops);
+  }
 
   // Figure out weights and add it to external_inputs too
   std::unordered_set<std::string> initialization_list;
@@ -498,14 +510,11 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   // Debugging stuff
   if (opts_.debug) {
     WriteProtoToTextFile(
-        net,
-        "debug_original_net_" + c10::to_string(onnxifi_op_id_) + ".pb_txt");
-    WriteProtoToTextFile(
         onnxifi_net,
-        "debug_onnxifi_net_" + c10::to_string(onnxifi_op_id_) + ".pb_txt");
+        "debug_onnxifi_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt");
     WriteProtoToTextFile(
         net_opt,
-        "debug_optimized_net_" + c10::to_string(onnxifi_op_id_) + ".pb_txt");
+        "debug_optimized_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt");
   }
   return net_opt;
 }
@@ -516,6 +525,9 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
     Workspace* ws,
     onnx::OnnxExporter* exporter,
     ShapeInfoMap* shape_hints) {
+  if (opts_.min_ops > net.op_size()) {
+    return net;
+  }
   ::ONNX_NAMESPACE::ModelProto onnx_model;
   FillModelInfo(&onnx_model);
 
