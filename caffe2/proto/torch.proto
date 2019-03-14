@@ -60,9 +60,11 @@ message ModuleDef {
   optional bool optimize = 8;
 }
 
+// Represents all non-module code that the model depends on.
+// Right now it's just a straight list of classes, defined in dependency order
+// (i.e. dependencies appear before their dependers)
 message LibDef {
   optional RecordRef torchscript_arena = 1;
-  optional bool optimize = 2;
 }
 
 enum ProtoVersion {

@@ -147,7 +147,7 @@ void ScriptModuleDeserializer::loadLibs(torch::ModelDef* model_def) {
     size_t size;
     std::tie(data, size) = reader_.getRecord(lib_def.torchscript_arena().key());
     std::string data_str(static_cast<const char*>(data.get()), size);
-    script::import_libs(data_str, lib_def.optimize(), tensor_table_);
+    script::import_libs(data_str, tensor_table_);
   }
 }
 

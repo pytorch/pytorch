@@ -563,15 +563,9 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
   for (const auto& class_type : class_table_) {
     convertClass(class_type, model_def);
   }
-  // convertClass does a DFS to compile dependencies, so now converted_classes_
-  // contains all the classes the model depends on in reverse-dependency order
-  // (e.g. dependers come before their dependencies).
-  //
-  // So we write out the classes in reverse so that we get dependency order
-  const auto& classesToWrite = converted_classes_.items();
-  for (auto it = classesToWrite.rbegin(); it != classesToWrite.rend(); ++it) {
-    const auto& classString = it->value();
-    lib_stream << classString << "\n";
+
+  for (const auto& c : converted_classes_) {
+    lib_stream << *c << "\n";
   }
 
   torch::RecordRef* lib_record = lib_def->mutable_torchscript_arena();
@@ -599,10 +593,18 @@ void ScriptModuleSerializer::convertClass(
       class_deps,
       /*enforce_importable=*/true);
 
-  converted_classes_.insert(class_type, class_stream.str());
   for (const auto& c : class_deps) {
+    if (c == class_type) {
+      // Don't re-process this class and enter an infinite loop. We need this
+      // because we insert to converted_classes_ post-traversal, so the current
+      // class isn't in there yet.
+      continue;
+    }
     convertClass(c, model_def);
   }
+  // Insert *after* we've traversed the dependencies. This ensures that any
+  // given class will appear after its dependencies in the order.
+  converted_classes_.insert(class_type, class_stream.str());
 }
 
 void ScriptModuleSerializer::convertModel(

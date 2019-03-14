@@ -170,7 +170,6 @@ void import_methods(
 
 void import_libs(
     const std::string& src,
-    bool optimize,
     const std::vector<at::Tensor>& constant_table) {
   SourceImporter importer(src, constant_table);
   auto& p = importer.parser_;
@@ -185,7 +184,6 @@ void import_libs(
     }
 
     auto mod = std::make_shared<Module>();
-    mod->set_optimized(optimize);
     Self self(ClassType::create(class_def.name().name(), mod));
     defineMethodsInModule(mod, definitions, resolvers, self);
   }

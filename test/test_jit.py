@@ -268,6 +268,7 @@ class JitTestCase(TestCase):
         # needs to be cleared because python might be unloaded before
         # the callback gets destucted
         torch._C._jit_set_emit_module_hook(None)
+        torch._C._jit_clear_class_registry()
 
     @contextmanager
     def disableModuleHook(self):
@@ -13777,6 +13778,11 @@ class TestClassType(JitTestCase):
 
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
+
+        # classes are globally registered for now, so we need to clear the JIT
+        # registry to simulate loading a new model
+        torch._C._jit_clear_class_registry()
+
         buffer.seek(0)
         m_loaded = torch.jit.load(buffer)
 
@@ -13813,6 +13819,12 @@ class TestClassType(JitTestCase):
 
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
+        torch.jit.save(m, "/Users/suo/scratch/foo.pt")
+
+        # classes are globally registered for now, so we need to clear the JIT
+        # registry to simulate loading a new model
+        torch._C._jit_clear_class_registry()
+
         buffer.seek(0)
         m_loaded = torch.jit.load(buffer)
 

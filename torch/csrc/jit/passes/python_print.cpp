@@ -654,18 +654,24 @@ struct PythonPrintPass {
     out << str << "\n";
   }
 
+  // Recursively check contained types for any class dependencies
+  void registerClassDependencies(const TypePtr& type) {
+    if (const auto classType = type->cast<ClassType>()) {
+      addToClassTable(classType);
+    }
+    for (const auto& containedType : type->containedTypes()) {
+      registerClassDependencies(containedType);
+    }
+  }
+
   void printNode(Node* node, bool print_const) {
     // Check for class dependencies. If this node inputs or outputs a class
     // type, we need to add it to our table of dependencies.
     for (const auto input : node->inputs()) {
-      if (auto classType = input->type()->cast<ClassType>()) {
-        addToClassTable(classType);
-      }
+      registerClassDependencies(input->type());
     }
     for (const auto output : node->outputs()) {
-      if (auto classType = output->type()->cast<ClassType>()) {
-        addToClassTable(classType);
-      }
+      registerClassDependencies(output->type());
     }
 
     if (!print_const && node->kind() == prim::Constant)
