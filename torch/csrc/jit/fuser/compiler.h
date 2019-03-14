@@ -23,7 +23,7 @@ TORCH_API int64_t registerFusion(const Node* fusion_group);
 // Performs device-specific "runtime" compilation of the given kernel
 //  with the runtime arguments specified in ArgSpec.
 //  Outputs are allocated using map_size on the specified device.
-TORCH_API std::shared_ptr<FusedKernel> compileKernel(
+TORCH_API c10::optional<std::shared_ptr<FusedKernel>> compileKernel(
     const KernelSpec& spec,
     const ArgSpec& arg_spec,
     const std::vector<int64_t>& map_size,

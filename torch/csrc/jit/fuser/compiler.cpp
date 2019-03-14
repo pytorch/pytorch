@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/code_template.h>
 #include <torch/csrc/jit/fuser/codegen.h>
 #include <torch/csrc/jit/fuser/interface.h>
@@ -262,7 +263,7 @@ int64_t registerFusion(const Node* fusion_group) {
   return key;
 }
 
-std::shared_ptr<FusedKernel> compileKernel(
+c10::optional<std::shared_ptr<FusedKernel>> compileKernel(
     const KernelSpec& spec,
     const ArgSpec& arg_spec,
     const std::vector<int64_t>& map_size,
@@ -336,7 +337,7 @@ std::shared_ptr<FusedKernel> compileKernel(
   if( use_cuda &&
       ((flat_inputs.size() + flat_outputs.size()) >
           fusion_kernel_args_limit) ) {
-      return nullptr;
+      return c10::nullopt;
   }
 
   const std::string name = "kernel_" + std::to_string(next_kernel_id++);

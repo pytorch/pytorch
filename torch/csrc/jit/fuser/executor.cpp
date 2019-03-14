@@ -357,7 +357,7 @@ bool runFusion(const int64_t key, Stack& stack) {
   if (!maybe_kernel) {
     const auto kernel = compileKernel(spec, arg_spec, *maybe_map_size, device);
     if( !kernel ) { return false; }
-    spec.cacheKernel(arg_spec, kernel);
+    spec.cacheKernel(arg_spec, kernel.value());
   }
   maybe_kernel = spec.findKernel(arg_spec);
   AT_ASSERT(maybe_kernel);
