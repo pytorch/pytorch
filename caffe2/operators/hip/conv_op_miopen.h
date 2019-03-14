@@ -15,7 +15,6 @@
  */
 
 #include "caffe2/operators/conv_pool_op_base.h"
-
 #include "caffe2/core/hip/context_gpu.h"
 #include "caffe2/core/hip/miopen_wrapper.h"
 #include "caffe2/operators/conv_op.h"
@@ -49,15 +48,6 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&top_desc_for_bias_));
     MIOPEN_ENFORCE(miopenCreateConvolutionDescriptor(&conv_desc_));
 
-    if ((operator_def.type().substr(0, 15) == "DepthWiseConv") ||
-        (operator_def.type().substr(0, 23) == "DepthWiseConvGradient")) {
-          mode_ = miopenDepthwise;
-        }
-    else if ((group_ > 1)) {
-      mode_ = miopenGroupConv;
-    } else {
-      mode_ = miopenConvolution;
-    }
   }
 
   ~MIOPENConvOpBase() {
@@ -79,7 +69,6 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
   miopenTensorDescriptor_t top_desc_;
   miopenTensorDescriptor_t top_desc_for_bias_;
   miopenConvolutionDescriptor_t conv_desc_;
-  miopenConvolutionMode_t mode_;
   size_t miopen_state_;
   const size_t miopen_ws_nbytes_limit_;
   bool exhaustive_search_;
@@ -87,6 +76,7 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
   const float beta_;
 };
 
+template <miopenConvolutionMode_t KmiopenConvolutionMode>
 class MIOPENConvOp final : public MIOPENConvOpBase {
  public:
   MIOPENConvOp(const OperatorDef& operator_def, Workspace* ws)
@@ -130,6 +120,7 @@ class MIOPENConvOp final : public MIOPENConvOpBase {
   INPUT_TAGS(INPUT, FILTER, BIAS);
 };
 
+template <miopenConvolutionMode_t KmiopenConvolutionMode>
 class MIOPENConvGradientOp final : public MIOPENConvOpBase {
  public:
   MIOPENConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
@@ -258,7 +249,7 @@ bool MIOPENConvOp::DoRunWithType() {
       mio_weight_dims_ = Weight.sizes().vec();
       MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
           conv_desc_,
-          mode_,
+          KmiopenConvolutionMode,
           pad_t(),
           pad_l(),
           stride_h(),
@@ -474,7 +465,7 @@ bool MIOPENConvGradientOp::DoRunWithType() {
       mio_weight_dims_ = Weight.sizes().vec();
       MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
           conv_desc_,
-          mode_,
+          KmiopenConvolutionMode,
           pad_t(),
           pad_l(),
           stride_h(),
@@ -666,12 +657,4 @@ bool MIOPENConvGradientOp::RunOnDevice() {
   return true;
 }
 
-REGISTER_MIOPEN_OPERATOR(Conv, MIOPENConvOp);
-REGISTER_MIOPEN_OPERATOR(ConvGradient, MIOPENConvGradientOp);
-
-REGISTER_MIOPEN_OPERATOR(GroupConv, MIOPENConvOp);
-REGISTER_MIOPEN_OPERATOR(GroupConvGradient, MIOPENConvGradientOp);
-
-REGISTER_MIOPEN_OPERATOR(DepthWiseConv, MIOPENConvOp);
-REGISTER_MIOPEN_OPERATOR(DepthWiseConvGradient, MIOPENConvGradientOp);
 } // namespace caffe2
