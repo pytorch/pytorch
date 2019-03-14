@@ -15,6 +15,7 @@ Sections start with a reference to the source file where the code related to the
 ## Table of Contents
 
 - [JIT Technical Overview](#jit-technical-overview)
+  * [Table of Contents](#table-of-contents)
 - [Core Program Representation](#core-program-representation)
   * [Modules](#modules)
   * [Parameters](#parameters)
@@ -27,7 +28,7 @@ Sections start with a reference to the source file where the code related to the
     + [Loops](#loops)
   * [Value](#value)
   * [Type](#type)
-  * [Generating Programs](#generating-programs)
+- [Generating Programs](#generating-programs)
   * [Tracer](#tracer)
   * [Script](#script)
   * [Tree](#tree)
@@ -41,7 +42,7 @@ Sections start with a reference to the source file where the code related to the
   * [Resolver](#resolver)
   * [Environment](#environment)
   * [Python-Compiler Interaction](#python-compiler-interaction)
-  * [Executing Programs](#executing-programs)
+- [Executing Programs](#executing-programs)
   * [Evaluation Semantics](#evaluation-semantics)
   * [IValue](#ivalue)
   * [Operation](#operation)
@@ -64,6 +65,8 @@ Sections start with a reference to the source file where the code related to the
       - [`code`](#-code-)
       - [`tensors/`](#-tensors--)
       - [`attributes`](#-attributes-)
+        * [Pickling and Unpickling](#pickling-and-unpickling)
+      - [Implementation Details](#implementation-details)
   * [Python Bindings](#python-bindings)
 
 
