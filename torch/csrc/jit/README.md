@@ -109,7 +109,7 @@ Each Method has a FunctionSchema that describes the Types of the arguments and r
 
 Graphs are the root of the intermediate representation (IR) used to define the implementation of TorchScript functions. If you are familiar with [LLVM](llvm.org), they are analogous to an `llvm::Function` object. A Graph is composed of Nodes, Blocks, and Values. Nodes are instructions (e.g. do a matrix multiply). Nodes are organized into Blocks of sequentially executed Nodes. Each Node produces a list of output Values, and also consumes a list of input Values. As an example, a user may write the following TorchScript code:
 
-```py
+```python
 @torch.jit.script
 def f(a, b):
   c = a + b
@@ -224,7 +224,7 @@ Values corresponding to `%y_1, ..., %y_r` will become either `%t_1, ..., %t_r`, 
 
 Here's an example translation of a Python program:
 
-```py
+```python
 def f(a, b, c):
     d = a + b
     if c:
@@ -269,7 +269,7 @@ Loops are implemented with `prim::Loop` which covers both `while` and `for` loop
 ```
 
 The simplest way to explain the semantics is to consider this Python-like pseudo-code:
-```py
+```python
 y_1, ..., y_r = x_1, ..., x_r
 condition = initial_condition
 i = 0
@@ -291,7 +291,7 @@ while condition and i < max_trip_count:
 
 For example, this program:
 
-```py
+```python
 def f(x):
     z = x
     for i in range(x.size(0)):
@@ -343,8 +343,7 @@ TorchScript, unlike Python, is statically typed, so every Value has a Type assoc
 If type S is a subtype of P, then we can substitute an IValue that has type S anywhere something of type P is expected. This means that all subtyping relationships also require the representation of the IValue for subtypes to be compatible with the representation for the base type.
 
 
-Generating Programs
--------------------
+# Generating Programs #
 
 JIT programs are created using either the tracing frontend (`torch.jit.trace`) or the scripting frontend (`torch.jit.script`). In both cases, the result of these frontends is a complete Module that contains all the code in Methods, and all the model weights in the Parameters of the Module. However, each frontend goes through a different pathway for generating those Modules.
 
@@ -363,7 +362,7 @@ An initial IValue to Value mapping is setup up between the inputs to the functio
 
 As the trace runs, individual operators create Nodes in the Graph being traced to record what happens. This code is currently generated per operator in [tools/autograd/gen_variable_type.py](../../../tools/autograd/gen_variable_type.py). It results in code that looks like the following:
 
-```
+```cpp
 torch::jit::Node* node = nullptr;
 std::shared_ptr<jit::tracer::TracingState> tracer_state;
 if (jit::tracer::isTracing()) {
@@ -432,7 +431,7 @@ Each tree also has a mandatory SourceRange object that describes the range of te
 
 Trees are easy to construct visualize and traverse, but extracting information from a large compound tree like that of a function definition is unwieldy since it requires numeric indexing. Tree _Views_ are a small layer on top of a tree that make it possible to create and de-structure trees of particular kinds. For example, here is the tree view for the apply node which provides named accessors for its subtrees: the function being called, the inputs, and the attributes (i.e. kwargs):
 
-```
+```cpp
 struct Apply : public Expr {
   Expr callee() const {
     return Expr(subtree(0));
@@ -448,7 +447,7 @@ struct Apply : public Expr {
 
 The typical way to traverse a tree is to `switch` on the kind and then construct the appropriate Treeview:
 
-```
+```cpp
 switch (tree.kind()) {
   case TK_VAR:
   	auto var = Var(tree); // construct tree-view
@@ -488,7 +487,7 @@ When loading TorchScript code directly from a string, we using a standard Lexer/
 
 Similar to Python, the Lexer handles the white-space sensitive nature of Python blocks. The Tokens `TK_INDENT`, `TK_DEDENT`, and `TK_NEWLINE` are injected into the token stream when code first becomes indented, when it dedents, and at the end of a statement. For instance for this stream:
 
-```
+```cpp
 if
   .
   .
@@ -502,7 +501,7 @@ We would get a token stream `TK_IF TK_NEWLINE TK_INDENT . TK_NEWLINE . TK_NEWLIN
 
 Tokens are either keywords (`def`), operators (`+`), literals (`3.4`), or identifiers (`foo`). A `token_kind` integer identifies what it is and is the exact same type as the `kind` of a Tree. For single-character Tokens (e.g. `+`), the kind is the same as the character, enable statements like:
 
-```
+```cpp
 if (lexer.nextIf('+')) {
 	// handle + ...
 }
@@ -561,8 +560,7 @@ The Environment object tracks the assignment of variable names to SugaredValues 
 A set of special SugaredValues are used to translate between objects in the Python environment and Values in the Graph during the compilation process. The entry-point for this behavior is `toSugaredValue(py::object obj, ...)` which takes a pybind11 Python value and figures out how to turn it into an appropriate SugaredValue. Values exist to represent Python functions, Python modules, and ScriptModule objects.
 
 
-Executing Programs
-------------------
+# Executing Programs #
 
 TorchScript is executed using a interpreter attached to a JIT-optimizer and compiler. The entry-point for execution is the GraphExecutor object that is created on demand inside a Method when the method is first called. This section first goes over the semantics of graphs, i.e. what does it mean to execute a graph? And then details how the implementation works.
 
@@ -585,14 +583,14 @@ A value of a reference type points to an underlying memory location where the da
 
 It is important to remember that TorchScript uses these semantics for Tensors so not all computation on Tensor is pure. Individual Tensors may be *views* of the same underlying data. Views are established by special view creating operations, such as indexing into a tensor:
 
-```
+```python
 t = torch.rand(3, 4)
 t2 =  t[0] # view of one slice of t
 ```
 
 Some builtin operators also mutably write to the underlying tensor. In the standard library these operators are always named with a training underscore, or take a named `out` tensor where the result is written:
 
-```
+```python
 t2.relu_() # inplace relu operator, note t is modified as well!
 torch.add(t, t, out=t) # update t, without using temporary memory if possible
 ```
@@ -614,7 +612,7 @@ it is not distinguishable from the original serial execution order. These semant
 
 We also provide user-accessible parallel execution through the `fork` and `wait` primitives. The `fork` primitive begins execution of `fn` in parallel with the current thread of execution, immediately returning a Future object that will hold the result of the forked function. The `wait` method of the future then causes the invoking task to wait for the value being computed on the forked task.
 
-```
+```python
 def fn(arg0, arg1, ...):
   ...
   return v
@@ -642,7 +640,7 @@ IValue contains methods to check the type `isTensor` and to convert to particula
 
 All builtin operators are represented using a stack machine concept. An operator pops its arguments off the top of the stack and pushes its result to the stack:
 
-```
+```cpp
 using Stack = std::vector<IValue>;
 using Operation = std::function<int(Stack&)>;
 
@@ -756,7 +754,7 @@ In this section, we use a running example program that computs one step of a LST
 
 This section will use an example this LSTM program:
 
-```
+```python
 @torch.jit.script
 def LSTMCellS(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
     gates = x.mm(w_ih.t()) + hx.mm(w_hh.t()) + b_ih + b_hh
@@ -1060,7 +1058,7 @@ A DifferentiableGraphOp combines an explicit forward Graph `f` with a paired bac
 ## Handling Mutability ##
 ### Aliasing and mutation in the PyTorch API
 In PyTorch, tensors are reference types. Operators can return "views" of the input tensor, creating a new tensor object that shares the same underlying storage as the original:
-```py
+```python
 a = torch.rand(2, 3)
 b = a
 # At this point, `a` and `b` share their storage.
@@ -1069,7 +1067,7 @@ c = b[0]
 ```
 
 Some operators will *mutate* one or more of their operands in-place. These are typically denoted with a trailing underscore, or by taking an `out` argument as input:
-```py
+```python
 a = torch.zeros(2, 3)
 b = torch.ones(2, 3)
 a.add_(b)  # in-place add, so `a` is modified.
@@ -1121,7 +1119,7 @@ view(Tensor(a) self, int[] size) -> Tensor(a)
 and add an edge from `%output` to `%self`. The alias analysis pass is flow-insensitive, as we are only adding "points-to" edges when processing a node.
 
 As a more involved example, the following TorchScript snippet:
-```py
+```python
 @torch.jit.script
 def foo(a : Tensor, b : Tensor):
 	c = 2 * b
@@ -1265,7 +1263,6 @@ JitUnpickler(open("my_model/attributes.pkl", "rb")).load()
 [export.cpp](export.cpp) and [import.cpp](import.cpp) handle producing the proper protobuf definitions and serializing tensor data. They call out to [pickler.h](pickler.cpp) to handle attribute serialization.
 
 
-Python Bindings
----------------
+## Python Bindings
 
 TODO: Script Module, torch.jit.trace, __constant__ handling, weak script modules
