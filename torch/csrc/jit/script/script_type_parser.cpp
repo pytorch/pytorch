@@ -190,7 +190,7 @@ TypePtr parseTypeFromExpr(const Expr& expr) {
       << " cannot be used in a type expression";
 }
 
-TypePtr parseType(std::string str) {
+TypePtr parseType(const std::string& str) {
   Parser p(str);
   return parseTypeFromExpr(p.parseExp());
 }

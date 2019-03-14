@@ -58,7 +58,7 @@ class ScriptModuleDeserializer final {
   void convertModule(const torch::ModuleDef& module_def);
 
   void loadTensorTable(torch::ModelDef* model_def);
-  void loadAttributeTable(const torch::ModuleDef* model_def);
+  void loadAttributeTable();
 
   caffe2::serialize::PyTorchStreamReader reader_;
   // this is a hack to make sure the script module created in C++ is the
@@ -130,7 +130,7 @@ void ScriptModuleDeserializer::deserialize(
   }
 
   loadTensorTable(&model_def);
-  loadAttributeTable(&module_def);
+  loadAttributeTable();
 
   // TODO: this can be simplified when C++/Python interop lands,
   // and the submodules would be created as the same in either C++ or Python
@@ -144,13 +144,7 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
   }
 }
 
-void ScriptModuleDeserializer::loadAttributeTable(
-    const torch::ModuleDef* module_def) {
-  if (module_def->attributes_size() == 0) {
-    // No attributes, no attribute file to read
-    return;
-  }
-
+void ScriptModuleDeserializer::loadAttributeTable() {
   at::DataPtr attributes_ptr;
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) =
@@ -253,7 +247,7 @@ void ScriptModuleDeserializer::convertModule(
     const torch::AttributeDef& attr_def =
         module_def.attributes(module_def.attributes_size() - 1 - i);
     if (module->find_buffer(attr_def.name())) {
-      // TODO: handle this above to this can be removed
+      // TODO: handle this above so this can be removed
       continue;
     }
 

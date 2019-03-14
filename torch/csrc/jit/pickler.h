@@ -368,16 +368,18 @@ struct Unpickler {
   }
 
   double readFloat() {
-    AT_ASSERT(sizeof(double) == 8)
-    char float_data[8];
+    AT_ASSERT(sizeof(double) == 8);
+    AT_ASSERT(bytes_ + 8 < end_ptr_);
+    double result;
 
     // Pickle floats are big endian, so reverse the bytes
-    for (size_t i = 0; i < 8; ++i) {
-      float_data[i] = bytes_[8 - 1 - i];
-    }
-    bytes_ += 8;
+    std::reverse_copy(
+        reinterpret_cast<const char*>(bytes_),
+        reinterpret_cast<const char*>(bytes_ + 8),
+        reinterpret_cast<char*>(&result));
 
-    return *(reinterpret_cast<double*>(float_data));
+    bytes_ += 8;
+    return result;
   }
 
   void run() {
@@ -394,7 +396,6 @@ struct Unpickler {
       if (opcode == OpCode::STOP) {
         return;
       }
-      last_opcode_ = opcode;
     }
 
     AT_ERROR("Overran buffer while unpickling data, didn't find STOP opcode");
@@ -532,7 +533,6 @@ struct Unpickler {
   const uint8_t* bytes_;
   const uint8_t* end_ptr_;
   const std::vector<at::Tensor>& tensor_table_;
-  OpCode last_opcode_;
 };
 
 } // namespace jit

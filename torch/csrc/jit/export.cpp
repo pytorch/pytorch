@@ -565,10 +565,8 @@ void ScriptModuleSerializer::convertModel(
   writeTensorTable(model_def);
 
   pickler_.finish();
-  if (pickler_.stack().size() > 0) {
-    writer_.writeRecord(
-        "attributes.pkl", pickler_.stack().data(), pickler_.stack().size());
-  }
+  writer_.writeRecord(
+      "attributes.pkl", pickler_.stack().data(), pickler_.stack().size());
 
   // Write out extra files.
   for (const auto& kv : extra_files) {
