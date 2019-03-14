@@ -409,7 +409,7 @@ OpCode Unpickler::readInstruction() {
     case OpCode::GLOBAL: {
       AT_ASSERT(readString() == "__main__");
       // Push class name to stack
-      stack_.emplace_back(getClass(readString()));
+      stack_.emplace_back(static_cast<uint8_t>(getClass(readString())));
     } break;
     case OpCode::NEWOBJ: {
       // pop empty tuple
