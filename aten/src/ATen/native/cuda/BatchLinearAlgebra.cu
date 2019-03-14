@@ -88,7 +88,7 @@ void magmaCholeskyBatched(
 template<class scalar_t>
 void magmaTrsm(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
-    scalar_t* dA, magma_int_t ldda, scalar_t* dB, magma_int_t lddb, const MAGMAQueue& magma_queue) {
+    scalar_t* dA, magma_int_t ldda, scalar_t* dB, magma_int_t lddb) {
   AT_ERROR("trtrs only takes float or double Tensors");
 }
 
@@ -235,15 +235,15 @@ void magmaCholeskyBatched<float>(
 template<>
 void magmaTrsm<double>(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
-    double* dA, magma_int_t ldda, double* dB, magma_int_t lddb, const MAGMAQueue& magma_queue) {
-  magma_dtrsm(MagmaLeft, uplo, trans, diag, m, n, 1, dA, ldda, dB, lddb, magma_queue.get_queue());
+    double* dA, magma_int_t ldda, double* dB, magma_int_t lddb) {
+  magma_dtrsm(MagmaLeft, uplo, trans, diag, m, n, 1, dA, ldda, dB, lddb);
 }
 
 template<>
 void magmaTrsm<float>(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
-    float* dA, magma_int_t ldda, float* dB, magma_int_t lddb, const MAGMAQueue& magma_queue) {
-  magma_strsm(MagmaLeft, uplo, trans, diag, m, n, 1, dA, ldda, dB, lddb, magma_queue.get_queue());
+    float* dA, magma_int_t ldda, float* dB, magma_int_t lddb) {
+  magma_strsm(MagmaLeft, uplo, trans, diag, m, n, 1, dA, ldda, dB, lddb);
 }
 
 template<>
@@ -701,9 +701,8 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
   magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
 
-  MAGMAQueue magma_queue(b.get_device());
   if (b.dim() == 2) {
-    magmaTrsm<scalar_t>(uplo, trans, diag, n, nrhs, A_data, n, b_data, n, magma_queue);
+    magmaTrsm<scalar_t>(uplo, trans, diag, n, nrhs, A_data, n, b_data, n);
   } else {
     auto A_mat_stride = matrixStride(A);
     auto b_mat_stride = matrixStride(b);
@@ -721,6 +720,7 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
       b_array[i] = &b_data[i * b_mat_stride];
     }
 
+    MAGMAQueue magma_queue(b.get_device());
     magmaTrsmBatched<scalar_t>(
         uplo, trans, diag, n, nrhs, A_array, n,
         b_array, n, batch_size, magma_queue);
