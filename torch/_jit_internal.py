@@ -113,7 +113,8 @@ def weak_script(fn, _frames_up=0):
     }
 
     def wrap_fn(*args, **kwargs):
-        if _get_tracing_state():
+        tracing_state = _get_tracing_state()
+        if tracing_state and tracing_state.compile_weak_script():
             compiled_fn = _try_compile_weak_script(fn)
             return compiled_fn(*args, **kwargs)
         else:
@@ -132,7 +133,8 @@ def weak_module(cls):
 
 def weak_script_method(fn):
     def wrap_fn(*args, **kwargs):
-        if _get_tracing_state():
+        tracing_state = _get_tracing_state()
+        if tracing_state and tracing_state.compile_weak_script():
             # first arg is the module, remaining args are to the method
             strong_mod = _make_strong(args[0])
             compiled_fn = strong_mod._get_method(fn.__name__)

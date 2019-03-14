@@ -24,7 +24,8 @@ std::shared_ptr<Graph> createGraphByTracing(
     Stack inputs,
     const py::function& var_name_lookup_fn,
     bool force_outplace,
-    const c10::optional<size_t>& num_real_inputs = c10::nullopt);
+    const c10::optional<size_t>& num_real_inputs = c10::nullopt,
+    bool compile_weak_script = false);
 } // namespace tracer
 } // namespace jit
 } // namespace torch

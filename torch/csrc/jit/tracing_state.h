@@ -59,6 +59,7 @@ struct TORCH_API TracingState
   std::shared_ptr<Graph> graph;
   bool warn = true;
   bool force_outplace = false;
+  bool compile_weak_script = false;
   std::function<std::string(const Variable& var)> lookup_var_name_fn =
       [](const Variable& var) { return ""; };
 };

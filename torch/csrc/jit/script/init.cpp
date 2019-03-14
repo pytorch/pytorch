@@ -838,7 +838,8 @@ void initJitScriptBindings(PyObject* module) {
              py::function func,
              py::tuple input_tuple,
              py::function var_lookup_fn,
-             bool force_outplace) {
+             bool force_outplace,
+             bool compile_weak_script) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
             std::vector<IValue*> parameters;
@@ -852,7 +853,8 @@ void initJitScriptBindings(PyObject* module) {
                 inputs,
                 var_lookup_fn,
                 force_outplace,
-                input_tuple.size());
+                input_tuple.size(),
+                compile_weak_script);
             self->create_method(name, std::move(graph), std::move(parameters));
             didFinishEmitModule(self);
           })

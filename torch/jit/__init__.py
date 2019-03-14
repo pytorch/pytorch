@@ -430,7 +430,7 @@ class TracingCheckError(Exception):
 
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
-def _check_trace(check_inputs, func, executor_options, module, check_tolerance, force_outplace):
+def _check_trace(check_inputs, func, executor_options, module, check_tolerance, force_outplace, compile_weak_script):
     # Note: tracing is independent of optimizations, which consume the trace
     executor_options['optimize'] = False
     for inputs in check_inputs:
@@ -441,6 +441,7 @@ def _check_trace(check_inputs, func, executor_options, module, check_tolerance, 
             _clone_inputs(inputs),
             check_trace=False,
             _force_outplace=force_outplace,
+            compile_weak_script=compile_weak_script,
             **executor_options)
 
         def graph_diagnostic_info():
@@ -573,7 +574,8 @@ def trace(func,
           check_inputs=None,
           check_tolerance=1e-5,
           _force_outplace=False,
-          _module_class=None):
+          _module_class=None,
+          compile_weak_script=False):
     """
     Trace a function and return an executable trace that will be optimized
     using just-in-time compilation.
@@ -645,14 +647,16 @@ def trace(func,
         module = TopLevelTracedModule(func, **executor_options)
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
     module._create_method_from_trace('forward', func, example_inputs,
-                                     var_lookup_fn, _force_outplace)
+                                     var_lookup_fn, _force_outplace, compile_weak_script)
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
         if check_inputs is not None:
-            _check_trace(check_inputs, func, executor_options, module, check_tolerance, _force_outplace)
+            _check_trace(check_inputs, func, executor_options, module, check_tolerance,
+                         _force_outplace, compile_weak_script)
         else:
-            _check_trace([example_inputs], func, executor_options, module, check_tolerance, _force_outplace)
+            _check_trace([example_inputs], func, executor_options, module, check_tolerance,
+                         _force_outplace, compile_weak_script)
 
     return module
 

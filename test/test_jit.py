@@ -8500,14 +8500,14 @@ a")
             def traced_fn(x):
                 return sm(x) + 1.0
 
-            trace = torch.jit.trace(traced_fn, torch.tensor(4))
+            trace = torch.jit.trace(traced_fn, torch.tensor(4), compile_weak_script=True)
             FileCheck().check("prim::Loop").run(str(trace.graph))
             self.assertEqual(trace(torch.tensor(4)), 9)
 
             def trace_not_scrpited(x):
                 return sm.not_scripted(x) + 1.0
 
-            trace = torch.jit.trace(trace_not_scrpited, torch.tensor(4))
+            trace = torch.jit.trace(trace_not_scrpited, torch.tensor(4), compile_weak_script=True)
             FileCheck().check_not("prim::Loop").run(str(trace.graph))
 
     def test_call_weak_script_mod_from_tracing_mod(self):
@@ -8540,11 +8540,11 @@ a")
                 def not_scripted(self, x):
                     return sm.not_scripted(x)
 
-            trace = torch.jit.trace(TracedModule(), torch.tensor(5))
+            trace = torch.jit.trace(TracedModule(), torch.tensor(5), compile_weak_script=True)
             FileCheck().check("prim::Loop").run(str(trace.graph))
             self.assertEqual(trace(torch.tensor(4)), 9)
 
-            trace = torch.jit.trace(TracedModule().not_scripted, torch.tensor(4))
+            trace = torch.jit.trace(TracedModule().not_scripted, torch.tensor(4), compile_weak_script=True)
             FileCheck().check_not("prim::Loop").run(str(trace.graph))
 
     def test_call_script_mod_from_tracing_fn(self):
@@ -8574,21 +8574,23 @@ a")
         with self.disableModuleHook():
             @torch._jit_internal.weak_script
             def weak_script_fn(x):
+                y = x.clone()
                 for i in range(int(x)):
-                    x *= (i + 1)
-                return x
+                    y += (i + 1)
+                return y
 
             def traced_fn(x):
                 return weak_script_fn(x)
 
-            graph = torch.jit.trace(traced_fn, (torch.tensor(5),)).graph
-            FileCheck().check("prim::Loop").run(graph)
+            graph = torch.jit.trace(traced_fn, (torch.tensor(5),), compile_weak_script=True).graph
+            FileCheck().check("prim::Loop").run(str(graph))
 
     def test_weak_script_fn_from_traced_module(self):
         with self.disableModuleHook():
             @torch._jit_internal.weak_script
             def weak_script_fn(x):
-                for i in range(int(x)):
+                iters = int(x)
+                for i in range(iters):
                     x *= (i + 1)
                 return x
 
@@ -8599,7 +8601,7 @@ a")
                 def forward(self, x):
                     return weak_script_fn(x)
 
-            graph = torch.jit.trace(TracedModule(), torch.tensor(5)).graph
+            graph = torch.jit.trace(TracedModule(), torch.tensor(5), compile_weak_script=True).graph
             FileCheck().check("prim::Loop").run(str(graph))
 
     @unittest.expectedFailure

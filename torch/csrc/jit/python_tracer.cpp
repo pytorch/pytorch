@@ -41,7 +41,8 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     Stack trace_inputs,
     const py::function& var_name_lookup_fn,
     bool force_outplace,
-    const c10::optional<size_t>& num_real_inputs) {
+    const c10::optional<size_t>& num_real_inputs,
+    bool compile_weak_script) {
   size_t num_func_inputs = num_real_inputs.value_or(trace_inputs.size());
   auto enter_info = tracer::enter(std::move(trace_inputs));
   getTracingState()->lookup_var_name_fn =
@@ -50,6 +51,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     return py::cast<std::string>(var_name_lookup_fn(var));
   };
   getTracingState()->force_outplace = force_outplace;
+  getTracingState()->compile_weak_script = compile_weak_script;
   try {
     py::tuple py_inputs(num_func_inputs);
     for (size_t i = 0; i < num_func_inputs; ++i) {
@@ -141,7 +143,8 @@ void initPythonTracerBindings(PyObject* module) {
       .def(
           "set_graph",
           [](TracingState& s, std::shared_ptr<Graph> g) { s.graph = g; })
-      .def("graph", [](TracingState& s) { return s.graph; });
+      .def("graph", [](TracingState& s) { return s.graph; })
+      .def("compile_weak_script", [](TracingState& s) { return s.compile_weak_script; });
 
   m.def("_tracer_warn_use_python", []() { tracer::setWarn(pythonWarn); });
   m.def("_tracer_enter", [](py::args trace_inputs) {
