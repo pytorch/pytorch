@@ -39,7 +39,7 @@ struct Argument {
   c10::optional<int32_t> N() const {
     return N_;
   }
-  c10::optional<IValue> default_value() const {
+  const c10::optional<IValue>& default_value() const {
     return default_value_;
   }
   bool kwarg_only() const {

@@ -19,10 +19,7 @@ C10_DEFINE_OP_SCHEMA(AveragedLoss, FunctionSchema(
 }
 
 namespace caffe2 {
-
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
-    ops::AveragedLoss,
-    C10AveragedLoss_DontUseThisOpYet,
-    1
-  )
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
+    ops::AveragedLoss(),
+    C10AveragedLoss_DontUseThisOpYet)
 }

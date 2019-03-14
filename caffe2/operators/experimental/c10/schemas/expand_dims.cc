@@ -21,20 +21,9 @@ C10_DEFINE_OP_SCHEMA(ExpandDims, FunctionSchema(
 }
 }
 
-namespace {
-struct DimsParameter final {
-  using type = intrusive_ptr<IntList>;
-  static intrusive_ptr<IntList> parse(const caffe2::ArgumentHelper& helper) {
-    return IntList::create(helper.GetRepeatedArgument<int64_t>("dims"));
-  }
-};
-} // namespace
-
 namespace caffe2 {
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
-    ops::ExpandDims,
-    C10ExpandDims_DontUseThisOpYet,
-    1,
-    DimsParameter)
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
+    ops::ExpandDims(),
+    C10ExpandDims_DontUseThisOpYet)
 }
