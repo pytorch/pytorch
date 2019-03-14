@@ -57,18 +57,17 @@ Sections start with a reference to the source file where the code related to the
     + [Aliasing and mutation annotations in FunctionSchema](#aliasing-and-mutation-annotations-in-functionschema)
     + [Alias Analysis in the IR](#alias-analysis-in-the-ir)
     + [Writing optimization passes with `AliasDb`](#writing-optimization-passes-with--aliasdb-)
-  * [Saving Programs](#saving-programs)
-    + [PythonPrint](#pythonprint)
-    + [Serialization](#serialization)
-      - [Overview](#overview)
-      - [`model.json`](#-modeljson-)
-      - [`code`](#-code-)
-      - [`tensors/`](#-tensors--)
-      - [`attributes`](#-attributes-)
-        * [Pickling and Unpickling](#pickling-and-unpickling)
-      - [Implementation Details](#implementation-details)
-  * [Python Bindings](#python-bindings)
-
+- [Saving Programs](#saving-programs)
+  * [PythonPrint](#pythonprint)
+  * [Serialization](#serialization)
+    + [Overview](#overview)
+    + [`model.json`](#-modeljson-)
+    + [`code`](#-code-)
+    + [`tensors/`](#-tensors--)
+    + [`attributes`](#-attributes-)
+      - [Pickling and Unpickling](#pickling-and-unpickling)
+    + [Implementation Details](#implementation-details)
+- [Python Bindings](#python-bindings)
 
 # Core Program Representation
 
@@ -1161,18 +1160,18 @@ TODO: differentiation, symbolic autograd,
 TODO: fusion, operators
 
 
-## Saving Programs
+# Saving Programs
 
 
-### PythonPrint
+## PythonPrint
 
 TODO: python_print
 
-### Serialization
+## Serialization
 
 TorchScript programs are serialized with a call to `torch.jit.save()`. The resulting file (ending in `.pt` by convention) can be loaded/executed in C++ and Python.
 
-#### Overview
+### Overview
 
 The `.pt` file is a zip archive (which can be opened with tools such as `unzip`) and contains:
   * code - the Python printed graph of a module
@@ -1180,18 +1179,18 @@ The `.pt` file is a zip archive (which can be opened with tools such as `unzip`)
   * `tensors/` - each of the tensors of the module, with their tensor storage stored directly in a file
   * `attributes` - a Python `pickle` archive of the attributes of a module
 
-#### `model.json`
+### `model.json`
 The `model.json` contains the structure information of the model. Each model must contain one main Module, and each module may contain multiple submodules, and each module contains a bunch of parameters (tensors). We serialize the metadata for each tensor inline in `model.json` (e.g., dims, strides, record name, etc).
 
-#### `code`
+### `code`
 
 TODO
 
-#### `tensors/`
+### `tensors/`
 
 TODO
 
-#### `attributes`
+### `attributes`
 
 Attributes are module properties that are not parameters or constants. Attributes are saved as list in the order they were defined on the module as a Python `pickle` archive. Only the subset of `pickle` is implemented. This was chosen due to:
 * **user friendliness** - the attributes file can be loaded in Python with `pickle` without having PyTorch installed
@@ -1238,7 +1237,7 @@ A given module may have many attributes of different types and many submodules, 
 }
 ```
 
-##### Pickling and Unpickling
+#### Pickling and Unpickling
 
 Attributes of the main module and its submodules are saved to a single file in the `zip` archive of a `.pt` file named `attributes.pkl`. Unpickling this will return a list of values corresponding to the attributes. Values appear in the list in the order they appear in `model.json` (i.e. submodule attributes come first, then main module attributes).
 
@@ -1261,11 +1260,11 @@ class JitUnpickler(pickle.Unpickler):
 JitUnpickler(open("my_model/attributes.pkl", "rb")).load()
 ```
 
-#### Implementation Details
+### Implementation Details
 
 [export.cpp](export.cpp) and [import.cpp](import.cpp) handle producing the proper protobuf definitions and serializing tensor data. They call out to [pickler.h](pickler.cpp) to handle attribute serialization.
 
 
-## Python Bindings
+# Python Bindings
 
 TODO: Script Module, torch.jit.trace, __constant__ handling, weak script modules
