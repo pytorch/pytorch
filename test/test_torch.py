@@ -4468,7 +4468,7 @@ class _TestTorchMixin(object):
 
     def test_linspace(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for _device in devices:
+        for device in devices:
             _from = random.random()
             to = _from + random.random()
             res1 = torch.linspace(_from, to, 137, device=device)
