@@ -3,6 +3,9 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/SortingUtils.h>
 
+// Just for THCNumerics<T>::isnan
+#include <THC/THCNumerics.cuh>
+
 namespace at {
 namespace native {
 
@@ -171,7 +174,10 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
               tmp_values,
               k - 1,
               [](scalar_t x, scalar_t y) -> bool {
-                return ((x != x && y == y) || (x > y));
+                return (
+                    (THCNumerics<scalar_t>::isnan(x) &&
+                     !THCNumerics<scalar_t>::isnan(y))
+                    || (x > y));
               },
               [&](int64_t i, int64_t j) {
                 std::swap(tmp_values[i], tmp_values[j]);
