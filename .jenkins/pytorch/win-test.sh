@@ -12,6 +12,7 @@ export TMP_DIR="${PWD}/build/win_tmp"
 export TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 mkdir -p $TMP_DIR/ci_scripts/
 mkdir -p $TMP_DIR/build/torch
+rm $TMP_DIR/ci_scripts/*
 
 cat >$TMP_DIR/ci_scripts/download_image.py << EOL
 
