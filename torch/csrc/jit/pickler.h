@@ -106,19 +106,10 @@ struct Pickler {
   void pushDict(const IValue& ivalue);
   const void* getPointer(const IValue& ivalue);
 
-  template <typename T>
-  struct identity {
-    typedef T type;
-  };
-  // identity is a trick to force the template type to be manually specified
-  // (e.g. push<uint8_t>(2) compiles, push(2) does not). We want this so the
-  // types pushed on the stack are explicit:
-  // https://stackoverflow.com/questions/28171518/is-there-a-way-to-force-the-user-to-explicitly-specify-the-template-argument-typ
-  template <typename T>
-  void push(typename identity<const T&>::type value) {
-    const char* begin = reinterpret_cast<const char*>(&value);
-    stack_.insert(stack_.end(), begin, begin + sizeof(T));
-  }
+  void pushUint8(uint8_t value);
+  void pushOpCode(OpCode value);
+  void pushUint32(uint32_t value);
+  void pushInt32(int32_t value);
 
   // Stack of opcodes/data
   std::vector<char> stack_;
@@ -147,7 +138,7 @@ struct Unpickler {
         end_ptr_(bytes_ + size),
         tensor_table_(tensor_table) {}
 
-  const std::vector<IValue> get_ivalue_list();
+  std::vector<IValue> get_ivalue_list();
 
  private:
   // No arguments ensures that a template arugment must be specified
@@ -165,8 +156,7 @@ struct Unpickler {
   double readFloat();
   void run();
   OpCode readInstruction();
-  std::string readString(char terminator = '\n');
-  bool isValidChar(char value);
+  std::string readString();
   OpCode readOpCode();
 
   std::vector<IValue> stack_;
