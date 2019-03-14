@@ -13,6 +13,10 @@ export TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 mkdir -p $TMP_DIR/ci_scripts/
 mkdir -p $TMP_DIR/build/torch
 
+if [ ! -z "$(ls $TMP_DIR/ci_scripts/*)" ]; then
+    rm $TMP_DIR/ci_scripts/*
+fi
+
 cat >$TMP_DIR/ci_scripts/download_image.py << EOL
 
 import os
@@ -38,6 +42,11 @@ except botocore.exceptions.ClientError as e:
 EOL
 
 cat >$TMP_DIR/ci_scripts/setup_pytorch_env.bat <<EOL
+
+if exist "%TMP_DIR%/ci_scripts/pytorch_env_restore.bat" (
+    call %TMP_DIR%/ci_scripts/pytorch_env_restore.bat
+    exit /b 0
+)
 
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\ProgramData\\chocolatey\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
@@ -84,6 +93,8 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
 ) else (
     xcopy /s %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch %TMP_DIR_WIN%\\build\\torch\\
 )
+
+for /f "usebackq tokens=*" %%i in (\`set\`) do echo set "%%i" >> %TMP_DIR%/ci_scripts/pytorch_env_restore.bat
 
 EOL
 
