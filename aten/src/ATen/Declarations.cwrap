@@ -2243,38 +2243,6 @@
     - THTensor* A
 ]]
 [[
-  name: _th_trtrs
-  cname: trtrs
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0,1
-  arguments:
-    - arg: THTensor* res1
-      output: True
-    - arg: THTensor* res2
-      output: True
-    - THTensor* self
-    - THTensor* A
-    - arg: bool upper
-      if_true: U
-      if_false: L
-      default: U
-    - arg: bool transpose
-      if_true: T
-      if_false: N
-      default: N
-    - arg: bool unitriangular
-      if_true: U
-      if_false: N
-      default: N
-]]
-[[
   name: _th_symeig
   cname: syev
   types:
