@@ -12,8 +12,62 @@ For concepts that are actual classes in the JIT, we use capitalized words, e.g. 
 
 Sections start with a reference to the source file where the code related to the section resides.
 
+## Table of Contents
+
+- [JIT Technical Overview](#jit-technical-overview)
+- [Core Program Representation](#core-program-representation)
+  * [Modules](#modules)
+  * [Parameters](#parameters)
+  * [Method](#method)
+  * [FunctionSchema](#functionschema)
+  * [Graph](#graph)
+  * [Node](#node)
+  * [Block](#block)
+    + [If](#if)
+    + [Loops](#loops)
+  * [Value](#value)
+  * [Type](#type)
+  * [Generating Programs](#generating-programs)
+  * [Tracer](#tracer)
+  * [Script](#script)
+  * [Tree](#tree)
+  * [Tree Views](#tree-views)
+  * [frontend.py](#frontendpy)
+  * [Lexer](#lexer)
+  * [Tokens](#tokens)
+  * [Parser](#parser)
+  * [Compiler](#compiler)
+  * [SugaredValue](#sugaredvalue)
+  * [Resolver](#resolver)
+  * [Environment](#environment)
+  * [Python-Compiler Interaction](#python-compiler-interaction)
+  * [Executing Programs](#executing-programs)
+  * [Evaluation Semantics](#evaluation-semantics)
+  * [IValue](#ivalue)
+  * [Operation](#operation)
+  * [Operator](#operator)
+  * [Interpreter](#interpreter)
+  * [Graph Executor](#graph-executor)
+  * [DifferentiableGraphOp](#differentiablegraphop)
+  * [Interpreter](#interpreter-1)
+  * [FusionGroup](#fusiongroup)
+  * [Handling Mutability](#handling-mutability)
+    + [Aliasing and mutation in the PyTorch API](#aliasing-and-mutation-in-the-pytorch-api)
+    + [Aliasing and mutation annotations in FunctionSchema](#aliasing-and-mutation-annotations-in-functionschema)
+    + [Alias Analysis in the IR](#alias-analysis-in-the-ir)
+    + [Writing optimization passes with `AliasDb`](#writing-optimization-passes-with--aliasdb-)
+  * [Saving Programs](#saving-programs)
+    + [PythonPrint](#pythonprint)
+    + [Serialization](#serialization)
+      - [Overview](#overview)
+      - [`model.json`](#-modeljson-)
+      - [`code`](#-code-)
+      - [`tensors/`](#-tensors--)
+      - [`attributes`](#-attributes-)
+  * [Python Bindings](#python-bindings)
+
+
 # Core Program Representation
----------------------------
 
 ## Modules ##
 
@@ -1080,7 +1134,7 @@ def foo(a : Tensor, b : Tensor):
 ```
 Will produce a graph like this:
 
-![AliasTracker graph](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/aliastracker_graph.png)
+![AliasTracker graph](/Users/davidriazati/Desktop/notes/assets/aliastracker_graph.png)
 
 A few things to note:
 - "Graph Input Element" is an example of an `Element` that isn't a first-class `Value`. Alias analysis happens on a per-function level, so we don't necessarily know the aliasing relationships of the inputs. The only safe assumption is that `a` and `b` may alias each other, so they point to a special `Element` that describes "the world outside of this function".
@@ -1107,7 +1161,7 @@ TODO: fusion, operators
 
 
 ## Saving Programs
----------------
+
 
 ### PythonPrint
 
@@ -1126,8 +1180,7 @@ The `.pt` file is a zip archive (which can be opened with tools such as `unzip`)
   * `attributes` - a Python `pickle` archive of the attributes of a module
 
 #### `model.json`
-The `model.json` contains the structure information of the model. Each model must contain one main Module, and each module may contain multiple submodules, and
-each module contains a bunch of parameters (tensors). We serialize the metadata for each tensor inline in `model.json` (e.g., dims, strides, record name, etc).
+The `model.json` contains the structure information of the model. Each model must contain one main Module, and each module may contain multiple submodules, and each module contains a bunch of parameters (tensors). We serialize the metadata for each tensor inline in `model.json` (e.g., dims, strides, record name, etc).
 
 #### `code`
 
@@ -1139,16 +1192,77 @@ TODO
 
 #### `attributes`
 
-Attributes are module properties that are not parameters or constants. Attributes are saved as list in the order they
-were defined on the module as a Python `pickle` archive. Only the subset of `pickle` is implemented. This was chosen due to:
-* user friendliness - the attributes file can be loaded in Python with `pickle` without having PyTorch installed
-* size limits - formats such as Protobuf empose size limits on messages,
-* standard format - `pickle` is a standard Python module with a reasonably simple format
-* built-in memoization for shared reference types
-* self describing
+Attributes are module properties that are not parameters or constants. Attributes are saved as list in the order they were defined on the module as a Python `pickle` archive. Only the subset of `pickle` is implemented. This was chosen due to:
+* **user friendliness** - the attributes file can be loaded in Python with `pickle` without having PyTorch installed
+* **size limits** - formats such as Protobuf empose size limits on total message size, whereas pickle limits are on individual values (e.g. strings cannot be longer than 4 GB)
+* **standard format** - `pickle` is a standard Python module with a reasonably simple format. The format is a program to be consumed by a stack machine that is detailed in Python's [`pickletools.py`](https://svn.python.org/projects/python/trunk/Lib/pickletools.py)
+* **built-in memoization** - for shared reference types (e.g. Tensor, string, lists, dicts)
+* **self describing** - a separate definition file is not needed to understand the pickled data
 
+A given module may have many attributes of different types and many submodules, each with their own attributes. Attribute names and types (in Mypy syntax) are recorded in `model.json`:
 
+```json
+{
+  "mainModule": {
+    "submodules": [
+      {
+        ...
+        "attributes": [
+          {
+            "type": "Dict[str, str]",
+            "name": "my_submodule_dictionary"
+          },
+          {
+            "type": "List[Tuple[int, int]]",
+            "name": "my_submodule_list"
+          }
+        ]
+        ...
+      },
+      ...
+    ],
+    ...
+    "attributes": [
+      {
+        "type": "Dict[str, str]",
+        "name": "my_main_module_dictionary"
+      },
+      {
+        "type": "Tensor",
+        "name": "my_main_module_tensor"
+      }
+    ]
+    ...
+  },
+}
+```
 
+##### Pickling and Unpickling
+
+Attributes of the main module and its submodules are saved to a single file in the `zip` archive of a `.pt` file named `attributes.pkl`. Unpickling this will return a list of values corresponding to the attributes. Values appear in the list in the order they appear in `model.json` (i.e. submodule attributes come first, then main module attributes).
+
+All values are written into the `attributes.pkl` file with the exception of tensors, which only have a tensor table index (see "tensors" above) written to the file. A data class (defined as `__main__.TensorID`) is used to indicate that a value is a tensor. This class must be defined for `pickle` to be able to decode the file, so a custom [`Unpickler`](https://docs.python.org/3/library/pickle.html#pickle.Unpickler) is necessary:
+
+```python
+import pickle
+
+# Tensor objects are stored as instances of this class
+class TensorID(object):
+    def __setstate__(self, tensor_table_index):
+        self.tensor_table_index = tensor_table_index
+
+# This Unpickler provides the link between
+class JitUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if module == '__main__' and name == 'TensorID':
+            return TensorID
+
+JitUnpickler(open("my_model/attributes.pkl", "rb")).load()
+```
+
+#### Implementation Details
+
+[export.cpp](export.cpp) and [import.cpp](import.cpp) handle producing the proper protobuf definitions and serializing tensor data. They call out to [pickler.h](pickler.cpp) to handle attribute serialization.
 
 
 Python Bindings
