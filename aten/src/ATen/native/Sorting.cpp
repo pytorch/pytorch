@@ -171,7 +171,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
               tmp_values,
               k - 1,
               [](scalar_t x, scalar_t y) -> bool {
-                return ((x != x && y == y) || (x > y));
+                return ((std::isnan(x) && !std::isnan(y)) || (x > y));
               },
               [&](int64_t i, int64_t j) {
                 std::swap(tmp_values[i], tmp_values[j]);
