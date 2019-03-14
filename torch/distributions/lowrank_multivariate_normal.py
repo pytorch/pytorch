@@ -3,8 +3,7 @@ import math
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.multivariate_normal import (_batch_mahalanobis, _batch_mv,
-                                                     _batch_trtrs_lower)
+from torch.distributions.multivariate_normal import _batch_mahalanobis, _batch_mv
 from torch.distributions.utils import _standard_normal, lazy_property
 
 
@@ -163,7 +162,7 @@ class LowRankMultivariateNormal(Distribution):
         # where :math:`C` is the capacitance matrix.
         Wt_Dinv = (self._unbroadcasted_cov_factor.transpose(-1, -2)
                    / self._unbroadcasted_cov_diag.unsqueeze(-2))
-        A = _batch_trtrs_lower(Wt_Dinv, self._capacitance_tril)
+        A = torch.trtrs(Wt_Dinv, self._capacitance_tril, upper=False)[0]
         precision_matrix = (torch.diag_embed(self._unbroadcasted_cov_diag.reciprocal())
                             - torch.matmul(A.transpose(-1, -2), A))
         return precision_matrix.expand(self._batch_shape + self._event_shape +

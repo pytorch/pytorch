@@ -22,8 +22,7 @@ from .laplace import Laplace
 from .logistic_normal import LogisticNormal
 from .lowrank_multivariate_normal import (LowRankMultivariateNormal, _batch_lowrank_logdet,
                                           _batch_lowrank_mahalanobis)
-from .multivariate_normal import (MultivariateNormal, _batch_mahalanobis,
-                                  _batch_trtrs_lower)
+from .multivariate_normal import (MultivariateNormal, _batch_mahalanobis)
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -313,7 +312,7 @@ def _kl_lowrankmultivariatenormal_lowrankmultivariatenormal(p, q):
     #                  = [inv(qD) - A.T @ A] @ (pD + pW @ pW.T)
     qWt_qDinv = (q._unbroadcasted_cov_factor.transpose(-1, -2) /
                  q._unbroadcasted_cov_diag.unsqueeze(-2))
-    A = _batch_trtrs_lower(qWt_qDinv, q._capacitance_tril)
+    A = torch.trtrs(qWt_qDinv, q._capacitance_tril, upper=False)[0]
     term21 = (p._unbroadcasted_cov_diag / q._unbroadcasted_cov_diag).sum(-1)
     term22 = _batch_trace_XXT(p._unbroadcasted_cov_factor *
                               q._unbroadcasted_cov_diag.rsqrt().unsqueeze(-1))
@@ -340,7 +339,7 @@ def _kl_multivariatenormal_lowrankmultivariatenormal(p, q):
     #                  = [inv(qD) - A.T @ A] @ p_tril @ p_tril.T
     qWt_qDinv = (q._unbroadcasted_cov_factor.transpose(-1, -2) /
                  q._unbroadcasted_cov_diag.unsqueeze(-2))
-    A = _batch_trtrs_lower(qWt_qDinv, q._capacitance_tril)
+    A = torch.trtrs(qWt_qDinv, q._capacitance_tril, upper=False)[0]
     term21 = _batch_trace_XXT(p._unbroadcasted_scale_tril *
                               q._unbroadcasted_cov_diag.rsqrt().unsqueeze(-1))
     term22 = _batch_trace_XXT(A.matmul(p._unbroadcasted_scale_tril))
@@ -368,8 +367,8 @@ def _kl_lowrankmultivariatenormal_multivariatenormal(p, q):
                                                       (n, p.cov_factor.size(-1)))
     p_cov_diag = (torch.diag_embed(p._unbroadcasted_cov_diag.sqrt())
                   .expand(combined_batch_shape + (n, n)))
-    term21 = _batch_trace_XXT(_batch_trtrs_lower(p_cov_factor, q_scale_tril))
-    term22 = _batch_trace_XXT(_batch_trtrs_lower(p_cov_diag, q_scale_tril))
+    term21 = _batch_trace_XXT(torch.trtrs(p_cov_factor, q_scale_tril, upper=False)[0])
+    term22 = _batch_trace_XXT(torch.trtrs(p_cov_diag, q_scale_tril, upper=False)[0])
     term2 = term21 + term22
     return 0.5 * (term1 + term2 + term3 - p.event_shape[0])
 
@@ -388,7 +387,7 @@ def _kl_multivariatenormal_multivariatenormal(p, q):
     n = p.event_shape[0]
     q_scale_tril = q._unbroadcasted_scale_tril.expand(combined_batch_shape + (n, n))
     p_scale_tril = p._unbroadcasted_scale_tril.expand(combined_batch_shape + (n, n))
-    term2 = _batch_trace_XXT(_batch_trtrs_lower(p_scale_tril, q_scale_tril))
+    term2 = _batch_trace_XXT(torch.trtrs(p_scale_tril, q_scale_tril, upper=False)[0])
     term3 = _batch_mahalanobis(q._unbroadcasted_scale_tril, (q.loc - p.loc))
     return half_term1 + 0.5 * (term2 + term3 - n)
 
