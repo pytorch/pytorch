@@ -220,6 +220,9 @@ auto Engine::thread_init(int device) -> void {
     if (at::hasHIP()) {
       guard.reset_device(at::Device(at::DeviceType::HIP, device));
     }
+    if (at::hasXLA()) {
+      guard.reset_device(at::Device(at::DeviceType::XLA, device));
+    }
   }
   worker_device = device;
   thread_main(nullptr);
@@ -352,7 +355,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
       ss << metadata.type() << " but got " << grads[i].type();
       AT_ERROR(format_error(ss.str()));
     }
-    const auto output_device = output.is_cuda() ? output.get_device() : -1;
+    const auto output_device = get_tensor_device(output);
     if (output_device != metadata.device()) {
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected device ";

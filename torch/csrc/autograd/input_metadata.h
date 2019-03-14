@@ -6,6 +6,14 @@
 
 namespace torch { namespace autograd {
 
+inline int get_tensor_device(const at::Tensor& tensor) {
+  if (tensor.is_cuda() ||
+      (tensor.type().backend() == at::Backend::XLA && at::hasXLA())) {
+    return tensor.get_device();
+  }
+  return -1;
+}
+
 /// A tensor's type and shape. Each Function records the required type and
 /// shape of its inputs. If is_valid() is false, then the corresponding input
 /// is not used and may be an undefined tensor.
@@ -16,7 +24,7 @@ struct InputMetadata {
   : type_{&type} , shape_{shape}, device_{device} { }
 
   InputMetadata(const at::Tensor& t)
-  : InputMetadata(t.type(), t.sizes(), t.is_cuda() ? t.get_device() : - 1) { }
+  : InputMetadata(t.type(), t.sizes(), get_tensor_device(t)) { }
 
   bool is_valid() const {
     return type_ != nullptr;

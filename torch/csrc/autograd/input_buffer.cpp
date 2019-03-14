@@ -1,6 +1,7 @@
 #include <torch/csrc/autograd/input_buffer.h>
 
 #include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/autograd/input_metadata.h>
 
 #include <ATen/DeviceGuard.h>
 
@@ -42,8 +43,11 @@ void InputBuffer::add(size_t pos, Variable var) {
 
 auto InputBuffer::device() const -> int {
   for (auto& var : buffer) {
-    if (var.defined() && var.is_cuda()) {
-      return var.get_device();
+    if (var.defined()) {
+      int device = get_tensor_device(var);
+      if (device >= 0) {
+        return device;
+      }
     }
   }
   return -1;

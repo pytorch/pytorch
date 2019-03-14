@@ -12,6 +12,7 @@
 #include <ATen/core/VariableHooksInterface.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
+#include <ATen/detail/XLAHooksInterface.h>
 #include <ATen/detail/ComplexHooksInterface.h>
 #include <c10/util/Exception.h>
 
@@ -75,6 +76,9 @@ class CAFFE2_API Context {
   }
   bool hasHIP() const {
     return detail::getHIPHooks().hasHIP();
+  }
+  bool hasXLA() const {
+    return detail::getXLAHooks().hasXLA();
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
@@ -204,7 +208,14 @@ static inline bool hasHIP() {
   return globalContext().hasHIP();
 }
 
+static inline bool hasXLA() {
+  return globalContext().hasXLA();
+}
+
 static inline size_t getNumGPUs() {
+  if (hasXLA()) {
+    return detail::getXLAHooks().getNumDevices();
+  }
   if (hasCUDA()) {
     return detail::getCUDAHooks().getNumGPUs();
   }
