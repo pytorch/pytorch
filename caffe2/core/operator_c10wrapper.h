@@ -56,7 +56,7 @@ class C10OperatorWrapper final : public Operator<Context> {
   }
 
   size_t num_inputs() {
-    return op_.schema().arguments().size() - num_output_parameters - num_parameters();
+    return op_.schema().arguments().size() - 1 - num_parameters();
   }
 
   static constexpr size_t num_parameters() {
@@ -116,14 +116,13 @@ class C10OperatorWrapper final : public Operator<Context> {
   }
 
   void pushOutputParameters_() {
+    std::vector<at::Tensor> preallocated_outputs;
+    preallocated_outputs.reserve(num_output_parameters);
     for (size_t i = 0; i < num_output_parameters; ++i) {
-      caffe2::Tensor preallocated_output_tensor = OperatorBase::OutputTensorOrUndefined(i);
-      if (preallocated_output_tensor.defined()) {
-        stack_.emplace_back(at::Tensor(std::move(preallocated_output_tensor)));
-      } else {
-        stack_.emplace_back(IValue());
-      }
+      preallocated_outputs.push_back(
+          at::Tensor(OperatorBase::OutputTensorOrUndefined(i)));
     }
+    stack_.emplace_back(std::move(preallocated_outputs));
   }
 
   void callKernel_() {
