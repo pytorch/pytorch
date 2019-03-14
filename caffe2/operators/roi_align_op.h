@@ -7,6 +7,8 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 
+C10_DECLARE_CAFFE2_OPERATOR(RoIAlign)
+
 namespace caffe2 {
 
 template <typename T, class Context>
