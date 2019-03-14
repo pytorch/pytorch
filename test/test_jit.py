@@ -13819,7 +13819,6 @@ class TestClassType(JitTestCase):
 
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
-        torch.jit.save(m, "/Users/suo/scratch/foo.pt")
 
         # classes are globally registered for now, so we need to clear the JIT
         # registry to simulate loading a new model
