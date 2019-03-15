@@ -175,7 +175,13 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// Adds a new (boxed) `Module` to the `Sequential` container.
   template <typename ModuleType>
   void push_back(std::shared_ptr<ModuleType> module_ptr) {
-    push_back(modules_ordered_dict({{std::to_string(modules_.size()), std::move(module_ptr)}}));
+    push_back(std::to_string(modules_.size()), std::move(module_ptr));
+  }
+
+  /// Adds a new named (boxed) `Module` to the `Sequential` container.
+  template <typename ModuleType>
+  void push_back(std::string name, std::shared_ptr<ModuleType> module_ptr) {
+    push_back(std::move(name), AnyModule(std::move(module_ptr)));
   }
 
   /// Adds a new `Module` to the `Sequential` container, moving or copying it
@@ -185,14 +191,30 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// `Sequential(std::make_shared<Module>(3, 4))`.
   template <typename M, typename = torch::detail::enable_if_module_t<M>>
   void push_back(M&& module) {
-    push_back(modules_ordered_dict({{std::to_string(modules_.size()), std::forward<M>(module)}}));
+    push_back(std::to_string(modules_.size()), std::forward<M>(module));
+  }
+
+  /// Adds a new named `Module` to the `Sequential` container, moving or copying it
+  /// into a `shared_ptr` internally. This method allows passing value types,
+  /// and letting the container deal with the boxing.
+  template <typename M, typename = torch::detail::enable_if_module_t<M>>
+  void push_back(std::string name, M&& module) {
+    using Type = typename std::remove_reference<M>::type;
+    push_back(std::move(name), std::make_shared<Type>(std::forward<M>(module)));
   }
 
   /// Unwraps the contained module of a `ModuleHolder` and adds it to the
   /// `Sequential`.
   template <typename M>
   void push_back(const ModuleHolder<M>& module_holder) {
-    push_back(modules_ordered_dict({{std::to_string(modules_.size()), module_holder}}));
+    push_back(std::to_string(modules_.size()), module_holder);
+  }
+
+  /// Unwraps the contained named module of a `ModuleHolder` and adds it to the
+  /// `Sequential`.
+  template <typename M>
+  void push_back(std::string name, const ModuleHolder<M>& module_holder) {
+    push_back(std::move(name), module_holder.ptr());
   }
 
   /// Adds an `OrderedDict` of named `AnyModule`s to the `Sequential` container.
