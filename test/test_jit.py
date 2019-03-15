@@ -1259,6 +1259,28 @@ class TestJit(JitTestCase):
         inputs = (torch.randn(1), (torch.randn(1), torch.randn(1)))
         self.checkTrace(fn, inputs)
 
+    def test_input_dict_flattens(self):
+        class Test(torch.nn.Module):
+            def forward(self, d):
+                return d['x'] + d['y']
+
+        inputs = {'x': torch.rand(3,4), 'y': torch.rand(3,4)}
+        module = torch.jit.trace(Test(), inputs)
+        kinds = [node.kind() for node in module.graph.nodes()]
+        self.assertEqual(kinds[0], 'prim::DictUnpackValues')
+
+    def test_input_dict_flattens_recursive(self):
+        class Test(torch.nn.Module):
+            def forward(self, d):
+                a,b = d['x']
+                return a + b
+
+        inputs = {'x': (torch.rand(2,2), torch.rand(2,2)) }
+        module = torch.jit.trace(Test(), inputs)
+        kinds = [node.kind() for node in module.graph.nodes()]
+        self.assertEqual(kinds[0], 'prim::DictUnpackValues')
+        self.assertEqual(kinds[1], 'prim::TupleUnpack')
+
     # TODO: adapt to a GraphExecutor test
     @unittest.skip("Need to instrument GraphExecutors a bit more")
     def test_flags(self):

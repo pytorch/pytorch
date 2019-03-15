@@ -379,6 +379,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::CreateObject:
       return analyzeCreator(node);
     case prim::TupleUnpack:
+    case prim::DictUnpackValues:
     case prim::TupleIndex:
     case prim::DictIndex:
     case prim::TupleSlice:
@@ -1135,6 +1136,7 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::BroadcastSizes,
       prim::ChunkSizes,
       prim::Function,
+      prim::DictUnpackValues,
       prim::TupleUnpack,
       prim::TupleIndex,
       prim::DictIndex,

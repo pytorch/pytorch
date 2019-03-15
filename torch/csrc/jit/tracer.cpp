@@ -227,6 +227,19 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
         elems[i] = add_input(elems[i], elem_types[i], elem_values[i]);
       }
       return Tuple::create(std::move(elems));
+    } else if (auto dict_type = type->cast<DictType>()) {
+      auto elem_pairs = input.toGenericDict()->elements();
+      auto unpack_node = state->graph->insertNode(state->graph->createDictUnpackValues(value, elem_pairs.size()));
+      auto elem_values = unpack_node->outputs();
+
+      AT_ASSERT(elem_pairs.size() == elem_values.size());
+
+      size_t i = 0;
+      for (auto pair : elem_pairs) {
+        elem_pairs[pair.first] = add_input(pair.second, dict_type->getValueType(), elem_values[i++]);
+      }
+
+      return c10::ivalue::GenericDict::create(std::move(elem_pairs));
     } else {
       AT_ERROR(
           "Only tensors or tuples of tensors can be inputs to traced functions");
@@ -234,7 +247,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
   };
   for (IValue& input : inputs) {
     input = add_input(
-        input, incompleteInferTypeFrom(input), state->graph->addInput());
+        input, attemptToRecoverType(input), state->graph->addInput());
   }
   return std::make_pair(state, inputs);
 }

@@ -608,6 +608,26 @@ RegisterOperators reg(
            };
          }),
      Operator(
+         prim::DictUnpackValues,
+         [](const Node* node) {
+           size_t num_elems = node->outputs().size();
+           return [=](Stack& stack) {
+             auto d = pop(stack).toGenericDict();
+             const auto& pairs = d->elements();
+             if (pairs.size() != num_elems) {
+               AT_ERROR(
+                   "Expected a dictionary of ",
+                   num_elems,
+                   " entries, but got ",
+                   pairs.size());
+             }
+             for (auto pair : pairs) {
+               push(stack, pair.second);
+             }
+             return 0;
+           };
+         }),
+     Operator(
          prim::TupleSlice,
          [](const Node* node) {
            int64_t beg_ind = node->i(attr::beg);

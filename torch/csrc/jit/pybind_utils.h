@@ -76,6 +76,18 @@ inline void findErrorInKwargs(const FunctionSchema& schema, py::kwargs kwargs) {
 }
 } // namespace detail
 
+inline IValue toDictKeyIValue(py::handle key) {
+  if (py::isinstance<py::str>(key)) {
+    return ConstantString::create(py::cast<std::string>(key));
+  } else if (PyLong_Check(key.ptr())) {
+    return py::cast<int64_t>(key);
+  } else if (PyFloat_Check(key.ptr())) {
+    return py::cast<double>(key);
+  } else {
+    AT_ERROR("Dictionary inputs may only have string, int, or float keys");
+  }
+}
+
 inline IValue toIValue(py::handle input) {
   if (THPVariable_Check(input.ptr())) {
     auto ten = py::cast<at::Tensor>(input);
@@ -91,9 +103,37 @@ inline IValue toIValue(py::handle input) {
       s.push_back(toIValue(elem));
     }
     return Tuple::create(s);
+  } else if (PyDict_Check(input.ptr())) {
+    // Check to make sure we can generate useful input/output types
+    auto dict = py::cast<py::dict>(input);
+    at::ivalue::UnorderedMap elems;
+    elems.reserve(py::len(dict));
+
+    TypePtr keyType = nullptr;
+    TypePtr valueType = nullptr;
+    for (auto entry : dict) {
+      auto keyIVal = toDictKeyIValue(entry.first);
+      auto valIVal = toIValue(entry.second);
+
+      if (!keyType) {
+        AT_ASSERT(!valueType);
+        keyType = incompleteInferTypeFrom(keyIVal);
+        valueType = attemptToRecoverType(valIVal);
+      } else {
+        if (*keyType != *incompleteInferTypeFrom(keyIVal) ||
+            *valueType != *attemptToRecoverType(valIVal))
+        {
+          AT_ERROR(
+              "Dictionary inputs to traced functions must have consistent "
+              "key and value types");
+        }
+      }
+      elems.insert(std::make_pair(keyIVal, valIVal));
+    }
+    return at::ivalue::GenericDict::create(std::move(elems));
   } else {
     AT_ERROR(
-        "Only tensors and (possibly nested) tuples of tensors are supported "
+        "Only tensors and (possibly nested) tuples or dicts of tensors are supported "
         "as inputs or outputs of traced functions");
   }
 }
