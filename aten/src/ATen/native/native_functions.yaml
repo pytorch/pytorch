@@ -2311,7 +2311,7 @@
   variants: method
   device_guard: False
 
-- func: one_hot(IndexTensor self, int num_classes=-1) -> Tensor
+- func: one_hot(Tensor self, int num_classes=-1) -> Tensor
   python_module: nn
   variants: function
 
