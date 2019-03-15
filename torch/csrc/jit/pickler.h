@@ -156,9 +156,10 @@ class Unpickler {
     AT_CHECK(
         bytes_ + sizeof(T) <= end_ptr_,
         "Unpickler overran buffer while reading a value");
-    const T* data = reinterpret_cast<const T*>(bytes_);
+    T item;
+    std::memcpy(&item, bytes_, sizeof(T));
     bytes_ += sizeof(T);
-    return *data;
+    return item;
   }
 
   double readFloat();

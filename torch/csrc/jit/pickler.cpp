@@ -366,11 +366,11 @@ OpCode Unpickler::readInstruction() {
       marks_.push_back(stack_.size());
     } break;
     case OpCode::BININT: {
-      int32_t value = read<uint32_t>();
+      int32_t value = read<int32_t>();
       stack_.emplace_back(int64_t(value));
     } break;
     case OpCode::BINUNICODE: {
-      int32_t length = read<uint32_t>();
+      uint32_t length = read<uint32_t>();
       const char* characters = reinterpret_cast<const char*>(bytes_);
       bytes_ += length;
       stack_.emplace_back(std::string(characters, /*n=*/length));
@@ -416,7 +416,6 @@ OpCode Unpickler::readInstruction() {
       stack_.pop_back();
     } break;
     case OpCode::BUILD: {
-
       auto setitem_data = stack_.back();
       stack_.pop_back();
 
@@ -426,7 +425,7 @@ OpCode Unpickler::readInstruction() {
 
       switch (class_name) {
         case PicklerClass::TENSOR:
-        stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
+          stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
           break;
         case PicklerClass::INTLIST:
           stack_.push_back(setitem_data);
@@ -455,7 +454,7 @@ void Unpickler::readList() {
   } else {
     auto list = stack_.at(start - 1).toGenericList();
     list->elements().insert(
-      list->elements().end(), stack_.begin() + start, stack_.end());
+        list->elements().end(), stack_.begin() + start, stack_.end());
   }
   stack_.resize(start);
 }
