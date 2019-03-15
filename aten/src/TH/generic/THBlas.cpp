@@ -380,7 +380,6 @@ void THBlas_(gemm)(
   }
 #endif
   {
-
     if(!transa_ && !transb_)
     {
       if (beta == 0) {
