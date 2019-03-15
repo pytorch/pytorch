@@ -1,10 +1,10 @@
+#include <ATen/core/dispatch/OperatorRegistration.h>
 #include "caffe2/core/context.h"
-#include <ATen/core/dispatch/KernelRegistration.h>
 #include "caffe2/core/operator.h"
-#include "caffe2/operators/experimental/c10/schemas/fc.h"
+#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/tensor.h"
 
 using caffe2::BaseContext;
 using caffe2::Tensor;
@@ -124,12 +124,29 @@ void fc_op_cpu_impl(
       static_cast<Context*>(&context),
       math_type);
 }
-} // namespace
-} // namespace caffe2
 
-namespace c10 {
-C10_REGISTER_KERNEL(caffe2::ops::FullyConnected)
-    .withCache<caffe2::Cache>()
-    .kernel<decltype(caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>), &caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>>()
-    .dispatchKey(CPUTensorId());
-} // namespace c10
+static auto registry = c10::RegisterOperators().op(
+    FunctionSchema(
+        "_c10_experimental::FullyConnected",
+        "",
+        (std::vector<c10::Argument>{c10::Argument("X"),
+                                    c10::Argument("W"),
+                                    c10::Argument("b"),
+                                    c10::Argument("output"),
+                                    c10::Argument("axis", IntType::get()),
+                                    c10::Argument("axis_w", IntType::get())}),
+        (std::vector<c10::Argument>{})),
+    c10::kernel<
+        decltype(fc_op_cpu_impl<float, CPUContext>),
+        &fc_op_cpu_impl<float, CPUContext>,
+        Cache>(),
+    c10::dispatchKey(CPUTensorId()));
+
+} // namespace
+
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::FullyConnected",
+    "",
+    C10FC_DontUseThisOpYet)
+
+} // namespace caffe2

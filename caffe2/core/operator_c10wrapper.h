@@ -1,10 +1,11 @@
 #pragma once
 
 #include <ATen/core/dispatch/Dispatcher.h>
-#include "caffe2/core/operator.h"
-#include <c10/util/ArrayRef.h>
-#include <c10/util/Metaprogramming.h>
 #include <ATen/core/ivalue.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/C++17.h>
+#include <c10/util/Metaprogramming.h>
+#include "caffe2/core/operator.h"
 
 namespace caffe2 {
 
@@ -117,6 +118,8 @@ class C10OperatorWrapper final : public Operator<Context> {
     AT_ASSERT(stack_.size() == op_.schema().arguments().size());
     if (!kernel_.has_value()) {
       // TODO if kernel is already set, try re-dispatch to assert it goes to the same kernel
+      std::cerr << "Lookup " << this << " " << &op_ << " " << &stack_
+                << std::endl;
       kernel_ = c10::Dispatcher::singleton().lookup(op_, &stack_);
     }
     kernel_->call(&stack_);
@@ -202,10 +205,19 @@ class C10OperatorWrapper final : public Operator<Context> {
 template <class Context>
 inline std::function<
     std::unique_ptr<OperatorBase>(const OperatorDef&, Workspace*)>
-createC10OperatorWrapper(const c10::OperatorHandle& op_handle) {
-  return [op_handle](const OperatorDef& op_def, Workspace* ws) {
+createC10OperatorWrapper(const char* op_name, const char* overload_name) {
+  return [op_name, overload_name](const OperatorDef& op_def, Workspace* ws) {
+    auto op_handle =
+        c10::Dispatcher::singleton().findSchema(op_name, overload_name);
+    AT_ASSERTM(
+        op_handle.has_value(),
+        "Tried to register c10 operator ",
+        op_name,
+        ".",
+        overload_name,
+        " with caffe2, but didn't find the c10 operator.");
     return c10::guts::make_unique<C10OperatorWrapper<Context>>(
-        op_handle, op_def, ws);
+        *op_handle, op_def, ws);
   };
 }
 
@@ -215,18 +227,30 @@ createC10OperatorWrapper(const c10::OperatorHandle& op_handle) {
 #ifndef C10_MOBILE
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(OperatorHandle, Name) \
-  REGISTER_CPU_OPERATOR_CREATOR(                                            \
-      Name, detail::createC10OperatorWrapper<CPUContext>(OperatorHandle))
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(OperatorHandle, Name) \
-  REGISTER_CUDA_OPERATOR_CREATOR(                                            \
-      Name, detail::createC10OperatorWrapper<CUDAContext>(OperatorHandle))
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP(OperatorHandle, Name) \
-  REGISTER_HIP_OPERATOR_CREATOR(                                            \
-      Name, detail::createC10OperatorWrapper<HIPContext>(OperatorHandle))
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(        \
+    OperatorName, OverloadName, Name)                         \
+  REGISTER_CPU_OPERATOR_CREATOR(                              \
+      Name,                                                   \
+      ::caffe2::detail::createC10OperatorWrapper<CPUContext>( \
+          OperatorName, OverloadName))
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(        \
+    OperatorName, OverloadName, Name)                          \
+  REGISTER_CUDA_OPERATOR_CREATOR(                              \
+      Name,                                                    \
+      ::caffe2::detail::createC10OperatorWrapper<CUDAContext>( \
+          OperatorName, OverloadName))
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP(        \
+    OperatorName, OverloadName, Name)                         \
+  REGISTER_HIP_OPERATOR_CREATOR(                              \
+      Name,                                                   \
+      ::caffe2::detail::createC10OperatorWrapper<HIPContext>( \
+          OperatorName, OverloadName))
 #else
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(OperatorHandle, Name)
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(OperatorHandle, Name)
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP(OperatorHandle, Name)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU( \
+    OperatorName, OverloadName, Name)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA( \
+    OperatorName, OverloadName, Name)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP( \
+    OperatorName, OverloadName, Name)
 #endif
 } // namespace caffe2
