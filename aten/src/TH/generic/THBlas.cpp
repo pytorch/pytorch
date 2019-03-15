@@ -380,6 +380,7 @@ void THBlas_(gemm)(
   }
 #endif
   {
+
     if(!transa_ && !transb_)
     {
       if (beta == 0) {
@@ -399,7 +400,7 @@ void THBlas_(gemm)(
       // #pragma omp parallel for
       int64_t l;
       // #pragma omp parallel for if(k > TH_OMP_OVERHEAD_THRESHOLD) private(l)
-      #pragma omp parallel for private(l)
+      // #pragma omp parallel for private(l)
       for (l = 0; l < k; l++) {
         for (int64_t j = 0; j < n; j++) {
           scalar_t val = b[l + j * ldb] * alpha;
@@ -421,7 +422,7 @@ void THBlas_(gemm)(
       // #pragma omp parallel for
       int64_t i;
       // #pragma omp parallel for if(m > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-      #pragma omp parallel for private(i)
+      // #pragma omp parallel for private(i)
       for(i = 0; i < m; i++)
       {
         scalar_t *b_ = b;
@@ -457,7 +458,7 @@ void THBlas_(gemm)(
       // #pragma omp parallel for
       int64_t l;
       // #pragma omp parallel for if(k > TH_OMP_OVERHEAD_THRESHOLD) private(l)
-      #pragma omp parallel for private(l)
+      // #pragma omp parallel for private(l)
       for (l = 0; l < k; l++) {
         for (int64_t j = 0; j < n; j++) {
           scalar_t val = b[j + l * ldb] * alpha;
@@ -487,22 +488,23 @@ void THBlas_(gemm)(
       // #pragma omp parallel for
       int64_t i;
       // #pragma omp parallel for if(m > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-      #pragma omp parallel for private(i)
+      // #pragma omp parallel for private(i)
       for (i = 0; i < m; i++) {
         for (int64_t j = 0; j < n; j++) {
-          int64_t l_k = k / 4;
-          for (int64_t l_l = 0; l_l < l_k; l_l++) {
-              c[j * ldc + i] += a[i * lda + l_l * 4 + 0] //
-                          * b[(l_l * 4 + 0) * ldb + j] * alpha;
-              c[j * ldc + i] += a[i * lda + l_l * 4 + 1] //
-                          * b[(l_l * 4 + 1) * ldb + j] * alpha;
-              c[j * ldc + i] += a[i * lda + l_l * 4 + 2] //
-                          * b[(l_l * 4 + 2) * ldb + j] * alpha;
-              c[j * ldc + i] += a[i * lda + l_l * 4 + 3] //
-                          * b[(l_l * 4 + 3) * ldb + j] * alpha;
-          }
-          int64_t l = l_k * 4;
-          for (; l < k; l++)
+          // int64_t l_k = k / 4;
+          // for (int64_t l_l = 0; l_l < l_k; l_l++) {
+          //     c[j * ldc + i] += a[i * lda + l_l * 4 + 0] //
+          //                 * b[(l_l * 4 + 0) * ldb + j] * alpha;
+          //     c[j * ldc + i] += a[i * lda + l_l * 4 + 1] //
+          //                 * b[(l_l * 4 + 1) * ldb + j] * alpha;
+          //     c[j * ldc + i] += a[i * lda + l_l * 4 + 2] //
+          //                 * b[(l_l * 4 + 2) * ldb + j] * alpha;
+          //     c[j * ldc + i] += a[i * lda + l_l * 4 + 3] //
+          //                 * b[(l_l * 4 + 3) * ldb + j] * alpha;
+          // }
+          int64_t l;
+          #pragma omp parallel for private(l)
+          for (l = 0; l < k; l++)
               c[j * ldc + i] += a[i * lda + l] * b[l * ldb + j] * alpha;
         }
       }
