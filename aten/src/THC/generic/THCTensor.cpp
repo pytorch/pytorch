@@ -447,28 +447,23 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
 /* we have to handle the case where the result is a number */
 void THCTensor_(squeeze)(THCState *state, THCTensor *self, THCTensor *src)
 {
-  int ndim = 0;
-  int d;
-
   if(!src)
     src = self;
 
   THCTensor_(set)(state, self, src);
 
-  for(d = 0; d < src->dim(); d++)
+  std::vector<int64_t> newSize;
+  std::vector<int64_t> newStride;
+  for(int d = 0; d < src->dim(); ++d)
   {
     if(src->size(d) != 1)
     {
-      if(d != ndim)
-      {
-        self->set_size(ndim, src->size(d));
-        self->set_stride(ndim, src->stride(d));
-      }
-      ndim++;
+      newSize.push_back(src->size(d));
+      newStride.push_back(src->stride(d));
     }
   }
 
-  self->resize_dim(ndim);
+  self->set_sizes_and_strides(newSize, newStride);
 }
 
 void THCTensor_(squeeze1d)(THCState *state, THCTensor *self, THCTensor *src, int dimension)
