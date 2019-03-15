@@ -254,7 +254,7 @@
   self: cumsum_backward(grad, dim)
 
 - name: cumsum(Tensor self, int64_t dim, *, ScalarType dtype)
-  self: cumsum_backward(grad, dim, self.type().scalarType())
+  self: cumsum_backward(grad, dim, self.scalar_type())
 
 - name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad)
   self, weight, bias: conv_tbc_backward(grad, self, weight, bias, pad)
@@ -340,8 +340,8 @@
 - name: frac(Tensor self)
   self: grad
 
-- name: gather(Tensor self, int64_t dim, Tensor index)
-  self: at::zeros(self.sizes(), grad.options()).scatter_add_(dim, index, grad)
+- name: gather(Tensor self, int64_t dim, Tensor index, bool sparse_grad)
+  self: "sparse_grad ? at::_gather_sparse_backward(self, dim, index, grad) : at::zeros(self.sizes(), grad.options()).scatter_add_(dim, index, grad)"
 
 - name: ge_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -433,6 +433,10 @@
   self: grad * (1 - weight.toDouble())
   end: grad * weight
 
+- name: lerp(Tensor self, Tensor end, Tensor weight)
+  self: grad * (1 - weight)
+  end: grad * weight
+
 - name: lgamma(Tensor self)
   self: grad * digamma(self)
 
@@ -501,16 +505,16 @@
   self: grad.expand(self.sizes()) / self.numel()
 
 - name: mean(Tensor self, ScalarType dtype)
-  self: grad.expand(self.sizes()).to(self.type().scalarType()) / self.numel()
+  self: grad.expand(self.sizes()).to(self.scalar_type()) / self.numel()
 
 - name: mean(Tensor self, IntArrayRef dim, bool keepdim)
   self: sum_backward(grad, self.sizes(), dim, keepdim) / _safe_size(self.sizes(), dim)
 
 - name: mean(Tensor self, IntArrayRef dim, ScalarType dtype)
-  self: sum_backward(grad, self.sizes(), dim, false).to(self.type().scalarType()) / _safe_size(self.sizes(), dim)
+  self: sum_backward(grad, self.sizes(), dim, false).to(self.scalar_type()) / _safe_size(self.sizes(), dim)
 
 - name: mean(Tensor self, IntArrayRef dim, bool keepdim, ScalarType dtype)
-  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.type().scalarType()) / _safe_size(self.sizes(), dim)
+  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.scalar_type()) / _safe_size(self.sizes(), dim)
 
 - name: median(Tensor self)
   self: select_equals_backward(grad, self, result)
@@ -588,11 +592,11 @@
   self: norm_backward(grad, self, p, result, dim, keepdim)
 
 - name: norm(Tensor self, Scalar? p, ScalarType dtype)
-  self: norm_backward(grad, self.to(grad.type().scalarType()), p, result).to(self.type().scalarType())
+  self: norm_backward(grad, self.to(grad.scalar_type()), p, result).to(self.scalar_type())
 
 
 - name: norm(Tensor self, Scalar? p, IntArrayRef dim, bool keepdim, ScalarType dtype)
-  self: norm_backward(grad, self.to(grad.type().scalarType()), p, result, dim, keepdim).to(self.type().scalarType())
+  self: norm_backward(grad, self.to(grad.scalar_type()), p, result, dim, keepdim).to(self.scalar_type())
 
 - name: _pdist_forward(Tensor self, double p)
   self: _pdist_backward(grad, self, p, result)
@@ -647,16 +651,16 @@
   self: prod_backward(grad, self, result)
 
 - name: prod(Tensor self, ScalarType dtype)
-  self: prod_backward(grad, self.to(grad.type().scalarType()), result).to(self.type().scalarType())
+  self: prod_backward(grad, self.to(grad.scalar_type()), result).to(self.scalar_type())
 
 - name: prod(Tensor self, int64_t dim, bool keepdim)
   self: prod_backward(grad, self, result, dim, keepdim)
 
 - name: prod(Tensor self, int64_t dim, ScalarType dtype)
-  self: prod_backward(grad, self.to(grad.type().scalarType()), result, dim, false).to(self.type().scalarType())
+  self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, false).to(self.scalar_type())
 
 - name: prod(Tensor self, int64_t dim, bool keepdim, ScalarType dtype)
-  self: prod_backward(grad, self.to(grad.type().scalarType()), result, dim, keepdim).to(self.type().scalarType())
+  self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim).to(self.scalar_type())
 
 - name: pstrf(Tensor self, bool upper, Scalar tol)
   self: not_implemented("pstrf")
@@ -786,16 +790,16 @@
   self: grad.expand(self.sizes())
 
 - name: sum(Tensor self, ScalarType dtype)
-  self: grad.expand(self.sizes()).to(self.type().scalarType())
+  self: grad.expand(self.sizes()).to(self.scalar_type())
 
 - name: sum(Tensor self, IntArrayRef dim, bool keepdim)
   self: sum_backward(grad, self.sizes(), dim, keepdim)
 
 - name: sum(Tensor self, IntArrayRef dim, ScalarType dtype)
-  self: sum_backward(grad, self.sizes(), dim, false).to(self.type().scalarType())
+  self: sum_backward(grad, self.sizes(), dim, false).to(self.scalar_type())
 
 - name: sum(Tensor self, IntArrayRef dim, bool keepdim, ScalarType dtype)
-  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.type().scalarType())
+  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.scalar_type())
 
 - name: svd(Tensor self, bool some, bool compute_uv)
   self: svd_backward(grads, self, some, compute_uv, U, S, V)
@@ -935,6 +939,8 @@
   weight: embedding_backward(grad, indices, weight.size(0), padding_idx, scale_grad_by_freq, sparse)
 
 - name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int64_t mode, bool sparse)
+  indices: not_differentiable
+  offsets: not_differentiable
   weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse)
 
 - name: embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
@@ -1405,6 +1411,12 @@
   self, weight, bias: miopen_convolution_backward(self, grad, weight, padding, stride, dilation, groups, benchmark, deterministic, grad_input_mask)
 
 - name: miopen_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark, bool deterministic, std::array<bool,3> output_mask)
+  grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), groups, benchmark, deterministic, true, grad_input_mask)
+
+- name: miopen_depthwise_convolution(Tensor self, Tensor weight, Tensor bias, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark, bool deterministic)
+  self, weight, bias: miopen_depthwise_convolution_backward(self, grad, weight, padding, stride, dilation, groups, benchmark, deterministic, grad_input_mask)
+
+- name: miopen_depthwise_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark, bool deterministic, std::array<bool,3> output_mask)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), groups, benchmark, deterministic, true, grad_input_mask)
 
 - name: miopen_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double exponential_average_factor, double epsilon)

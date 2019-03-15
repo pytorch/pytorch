@@ -169,8 +169,9 @@ bool BatchBucketOneHotOp<CPUContext>::RunOnDevice() {
 
 class SegmentOneHotOp : public Operator<CPUContext> {
  public:
-  SegmentOneHotOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit SegmentOneHotOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& lengths = Input(0);

@@ -102,7 +102,7 @@ namespace {
     {
       output.resize_({sizeD, osizeH, osizeW});
 
-      AT_DISPATCH_FLOATING_TYPES(input.type(), "adaptive_avg_pool2d", [&] {
+      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_avg_pool2d_cpu", [&] {
           auto input_data = input.data<scalar_t>();
           auto output_data = output.data<scalar_t>();
           adaptive_avg_pool2d_out_frame<scalar_t>(input_data, output_data,
@@ -121,7 +121,7 @@ namespace {
     #pragma omp parallel for private(b)
       for (b = 0; b < input.size(0); b++)
       {
-        AT_DISPATCH_FLOATING_TYPES(input.type(), "adaptive_avg_pool2d", [&] {
+        AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_avg_pool2d_cpu", [&] {
             auto input_data = input.data<scalar_t>();
             auto output_data = output.data<scalar_t>();
             adaptive_avg_pool2d_out_frame<scalar_t>(input_data+b*input.stride(0), output_data+b*sizeD*osizeH*osizeW,
@@ -203,7 +203,7 @@ namespace {
     if (input.ndimension() == 3)
     {
       AT_DISPATCH_FLOATING_TYPES(
-        input.type(), "adaptive_avg_pool2d_backward", [&] {
+        input.scalar_type(), "adaptive_avg_pool2d_backward_cpu", [&] {
           /* get raw pointers */
           scalar_t *gradInput_data = gradInput.data<scalar_t>();
           scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
@@ -223,7 +223,7 @@ namespace {
       for (b = 0; b < input.size(0); b++)
       {
         AT_DISPATCH_FLOATING_TYPES(
-          input.type(), "adaptive_avg_pool2d_backward", [&] {
+          input.scalar_type(), "adaptive_avg_pool2d_backward_cpu", [&] {
             /* get raw pointers */
             scalar_t *gradInput_data = gradInput.data<scalar_t>();
             scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
@@ -262,7 +262,7 @@ namespace {
     return output;
   }
 
-  Tensor adaptive_avg_pool2d(  
+  Tensor adaptive_avg_pool2d(
     at::Tensor const& input,
     IntArrayRef output_size){
     if (output_size[0] == 1 && output_size[1] == 1) {

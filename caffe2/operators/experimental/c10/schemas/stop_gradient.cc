@@ -20,8 +20,6 @@ C10_DEFINE_OP_SCHEMA(StopGradient, FunctionSchema(
 
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
-    ops::StopGradient,
-    C10StopGradient_DontUseThisOpYet,
-    1
-  )
+    ops::StopGradient(),
+    C10StopGradient_DontUseThisOpYet)
 }

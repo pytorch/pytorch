@@ -320,5 +320,3 @@ class EmbeddingBag(Module):
             sparse=sparse)
         embeddingbag.weight.requires_grad = not freeze
         return embeddingbag
-
-# TODO: SparseLinear

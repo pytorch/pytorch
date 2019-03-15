@@ -26,7 +26,7 @@ class NCCLContext {
     streams_.resize(devices_.size());
     events_.resize(devices_.size());
     for (auto i = 0; i < devices_.size(); ++i) {
-      DeviceGuard g(devices_[i]);
+      CUDAGuard g(devices_[i]);
       // get stream priorities
       int lo_pri, hi_pri;
       CUDA_ENFORCE(cudaDeviceGetStreamPriorityRange(&lo_pri, &hi_pri));
@@ -35,18 +35,18 @@ class NCCLContext {
       CUDA_ENFORCE(cudaEventCreateWithFlags(
           &events_[i], cudaEventDefault | cudaEventDisableTiming));
     }
-    DeviceGuard g(master_gpu_id_);
+    CUDAGuard g(master_gpu_id_);
     CUDA_ENFORCE(cudaEventCreateWithFlags(
         &master_event_, cudaEventDefault | cudaEventDisableTiming));
   }
 
   ~NCCLContext() {
     for (auto i = 0; i < devices_.size(); ++i) {
-      DeviceGuard g(devices_[i]);
+      CUDAGuard g(devices_[i]);
       CUDA_ENFORCE(cudaStreamDestroy(streams_[i]));
       CUDA_ENFORCE(cudaEventDestroy(events_[i]));
     }
-    DeviceGuard g(master_gpu_id_);
+    CUDAGuard g(master_gpu_id_);
     CUDA_ENFORCE(cudaEventDestroy(master_event_));
 
     /*
@@ -137,7 +137,7 @@ void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
   // do initialization
   for (auto i = 0; i < ex.elements.size(); ++i) {
     auto& ctx = ex.elements[i];
-    DeviceGuard g(ctx.device);
+    CUDAGuard g(ctx.device);
     init_f(ex.elements[i]);
   }
 
@@ -150,7 +150,7 @@ void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
   // children streams, so the children streams are synchronized WRT
   // the original stream.
   {
-    DeviceGuard g(ex.stream_gpu_id);
+    CUDAGuard g(ex.stream_gpu_id);
     CUDA_ENFORCE(cudaEventRecord(context->master_event_, ex.stream));
   }
 
@@ -164,7 +164,7 @@ void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
 
     for (auto i = 0; i < ex.elements.size(); ++i) {
       auto& ctx = ex.elements[i];
-      DeviceGuard g(ctx.device);
+      CUDAGuard g(ctx.device);
       auto& comm = comms[i];
       auto& stream = streams[i];
       auto& event = events[i];
@@ -180,7 +180,7 @@ void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
 
     for (auto i = 0; i < ex.elements.size(); ++i) {
       auto& ctx = ex.elements[i];
-      DeviceGuard g(ctx.device);
+      CUDAGuard g(ctx.device);
       auto& comm = comms[i];
       auto& stream = streams[i];
       auto& event = events[i];
@@ -192,7 +192,7 @@ void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
   }
 
   // Now, wait on all the events in the original stream.
-  DeviceGuard dg(ex.stream_gpu_id);
+  CUDAGuard dg(ex.stream_gpu_id);
   for (auto& event : events) {
     CUDA_ENFORCE(cudaStreamWaitEvent(CHECK_NOTNULL(ex.stream), event, 0));
   }

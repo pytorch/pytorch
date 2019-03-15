@@ -12,8 +12,9 @@ namespace caffe2 {
 template <class Context>
 class FindOp final : public Operator<Context> {
  public:
-  FindOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit FindOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         missing_value_(
             this->template GetSingleArgument<int>("missing_value", -1)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;

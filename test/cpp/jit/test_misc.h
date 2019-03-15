@@ -2,6 +2,7 @@
 
 #include "test/cpp/jit/test_base.h"
 
+#include <torch/csrc/jit/passes/canonicalize.h>
 #include "ATen/core/interned_strings.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
@@ -34,6 +35,7 @@
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
 
+#include <torch/csrc/jit/testing/file_check.h>
 #include "ATen/core/ivalue.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/compiler.h"
@@ -150,7 +152,7 @@ void testFusion() {
   };
   testSimple();
 
-  auto testOne = [&](int ti, int tj, int toi, int toj) {
+  auto testOne = [&](int ti, int tj) {
     Graph graph;
 
     Var i0 = Var::asNewInput(graph);
@@ -200,14 +202,10 @@ void testFusion() {
     float max_diff = (outputs.front() - out0).abs().max().item<double>();
     ASSERT_TRUE(max_diff < 1e-6);
   };
-  testOne(0, 0, 0, 0);
-  testOne(0, 1, 0, 0);
-  testOne(1, 2, 0, 0);
-  testOne(0, 2, 0, 0);
-
-  testOne(0, 0, 0, 1);
-  testOne(0, 1, 1, 2);
-  testOne(1, 2, 0, 2);
+  testOne(0, 0);
+  testOne(0, 1);
+  testOne(1, 2);
+  testOne(0, 2);
 
   auto createFusedConcat =
       [](Graph& graph, at::ArrayRef<Value*> inputs, int64_t dim) -> Value* {
@@ -835,7 +833,7 @@ void testADFormulas() {
   }
 }
 
-void testDifferentiate(std::ostream& out = std::cout) {
+void testDifferentiate() {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
   auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
@@ -856,13 +854,19 @@ void testDifferentiate(std::ostream& out = std::cout) {
   ASSERT_EQ(grad_spec.df_input_captured_outputs, expected_captured_outputs);
   ASSERT_EQ(grad_spec.df_input_vjps, expected_input_vjps);
   ASSERT_EQ(grad_spec.df_output_vjps, expected_output_vjps);
-  out << "testDifferentiate\n";
-  out << *grad_spec.f;
-  out << *grad_spec.df;
-  out << "\n";
+  testing::FileCheck()
+      .check_count("aten::mul", 2)
+      ->check("aten::size")
+      ->check("aten::add")
+      ->run(*grad_spec.f);
+  testing::FileCheck()
+      .check("prim::GradOf[name=\"aten::add\"]")
+      ->check_count("prim::GradOf[name=\"aten::mul\"]", 2)
+      ->check_count("AutogradAdd", 2)
+      ->run(*grad_spec.df);
 }
 
-void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
+void testDifferentiateWithRequiresGrad() {
   // Build up a fake graph
   auto graph = std::make_shared<Graph>();
   auto a = SymbolicVariable::asNewInput(*graph);
@@ -888,10 +892,17 @@ void testDifferentiateWithRequiresGrad(std::ostream& out = std::cout) {
   ASSERT_EQ(grad_spec.df_input_captured_outputs, std::vector<size_t>({2, 3}));
   ASSERT_EQ(grad_spec.df_input_vjps, expected_input_vjps);
   ASSERT_EQ(grad_spec.df_output_vjps, expected_output_vjps);
-  out << "testDifferentiateWithRequiresGrad\n";
-  out << *grad_spec.f;
-  out << *grad_spec.df;
-  out << "\n";
+  testing::FileCheck()
+      .check("aten::mul")
+      ->check_count("aten::add", 2)
+      ->check("aten::mul")
+      ->check("aten::size")
+      ->check("aten::add")
+      ->run(*grad_spec.f);
+
+  testing::FileCheck()
+      .check_count("prim::GradOf[name=\"aten::mul\"]", 1, /*exactly*/ true)
+      ->run(*grad_spec.df);
 }
 
 void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
@@ -941,11 +952,18 @@ void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
   ASSERT_EQ(second_key, expected_key);
 }
 
-void testCreateAutodiffSubgraphs(std::ostream& out = std::cout) {
+void testCreateAutodiffSubgraphs() {
   auto graph = build_lstm();
   CreateAutodiffSubgraphs(graph, /*threshold=*/2);
-  out << "testCreateAutodiffSubgraphs\n";
-  out << *graph << "\n";
+  // all of the ops are within the DifferentiableGraph
+  testing::FileCheck()
+      .check_not("aten::mm")
+      ->check_not("aten::sigmoid")
+      ->check_not("aten::tanh")
+      ->check_not("aten::mul")
+      ->check("DifferentiableGraph")
+      ->check_next("return")
+      ->run(*graph);
 }
 
 void testSubgraphUtils() {
@@ -998,7 +1016,7 @@ bool isEqual(const CompleteArgumentInfo& ti, const autograd::Variable& v) {
   if (!ti.defined())
     return ti.defined() == v.defined();
   return ti.device() == device(v) && ti.requires_grad() == v.requires_grad() &&
-      ti.type() == v.type().scalarType() && isEqual(ti.sizes(), v.sizes()) &&
+      ti.type() == v.scalar_type() && isEqual(ti.sizes(), v.sizes()) &&
       isEqual(ti.strides(), v.strides());
 }
 
@@ -1092,11 +1110,13 @@ void testGraphExecutor() {
 }
 
 void testBlocks(std::ostream& out = std::cout) {
-  Graph g;
-  auto a = Var::asNewInput(g, "a");
-  auto b = Var::asNewInput(g, "b");
+  auto g = std::make_shared<Graph>();
+  // auto g = *graph;
+  auto a = Var::asNewInput(*g, "a");
+  auto b = Var::asNewInput(*g, "b");
   auto c = a + b;
-  auto r = g.appendNode(g.create(prim::If, {Var::asNewInput(g, "c").value()}));
+  auto r =
+      g->appendNode(g->create(prim::If, {Var::asNewInput(*g, "c").value()}));
   auto then_block = r->addBlock();
   auto else_block = r->addBlock();
   {
@@ -1110,15 +1130,32 @@ void testBlocks(std::ostream& out = std::cout) {
     auto e = d + c;
     else_block->registerOutput(e.value());
   }
-  g.registerOutput((Var(r->output()) + c).value());
-  g.lint();
-  out << "testBlocks\n" << g << "\n";
+  g->registerOutput((Var(r->output()) + c).value());
+  g->lint();
+  testing::FileCheck()
+      .check("add")
+      ->check("prim::If")
+      ->check("block0")
+      ->check("aten::add")
+      ->check("block1")
+      ->check_count("aten::add", 3)
+      ->run(*g);
   r->eraseBlock(0);
-  out << g << "\n";
-  g.lint();
+  testing::FileCheck()
+      .check("add")
+      ->check("prim::If")
+      ->check("block0")
+      ->check_not("block")
+      ->run(*g);
+  g->lint();
   // test recursive copy of blocks works
-  auto g2 = g.copy();
-  out << *g2 << "\n";
+  auto g2 = g->copy();
+  testing::FileCheck()
+      .check("add")
+      ->check("prim::If")
+      ->check("block0")
+      ->check_not("block")
+      ->run(*g2);
 }
 
 const auto cf_examples = R"JIT(
@@ -1145,7 +1182,7 @@ const auto cf_examples = R"JIT(
 void testControlFlow() {
   auto cu = std::make_shared<script::Module>();
   script::defineMethodsInModule(
-      cu, cf_examples, script::nativeResolver, nullptr);
+      cu, cf_examples, script::nativeResolver, c10::nullopt);
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
     auto graph = cu->get_method(name).graph();
     Code code(graph);
@@ -1474,7 +1511,7 @@ void testSchemaParser() {
     // The list itself is annotated with `a`
     const auto& aliasInfo = *s.arguments().at(0).alias_info();
     ASSERT_TRUE(
-        aliasInfo.sets() ==
+        aliasInfo.beforeSets() ==
         std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
     ASSERT_TRUE(aliasInfo.isWrite());
 
@@ -1485,7 +1522,36 @@ void testSchemaParser() {
         Symbol::fromQualString("alias::b"),
         Symbol::fromQualString("alias::c"),
     };
-    ASSERT_TRUE(containedAliasInfo.sets() == expected);
+    ASSERT_TRUE(containedAliasInfo.beforeSets() == expected);
+    ASSERT_TRUE(containedAliasInfo.afterSets() == expected);
+    ASSERT_FALSE(containedAliasInfo.isWrite());
+  }
+  {
+    const auto s = parseSchema(
+        "at::what(Tensor(b -> b|c)[](a!) list, Tensor(c) element)"
+        " -> (Tensor(b|c)[](a!))");
+
+    // The list itself is annotated with `a`
+    const auto& aliasInfo = *s.arguments().at(0).alias_info();
+    ASSERT_EQ(
+        aliasInfo.beforeSets(),
+        std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
+    ASSERT_EQ(
+        aliasInfo.afterSets(),
+        std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
+    ASSERT_TRUE(aliasInfo.isWrite());
+    ASSERT_EQ(aliasInfo.containedTypes().size(), 1);
+
+    // Check the contained types
+    ASSERT_TRUE(!aliasInfo.containedTypes().empty());
+    const auto& containedAliasInfo = aliasInfo.containedTypes()[0];
+    const auto expectedBefore = std::unordered_set<Symbol>{
+        Symbol::fromQualString("alias::b"),
+    };
+    const auto expectedAfter = std::unordered_set<Symbol>{
+        Symbol::fromQualString("alias::b"), Symbol::fromQualString("alias::c")};
+    ASSERT_TRUE(containedAliasInfo.beforeSets() == expectedBefore);
+    ASSERT_TRUE(containedAliasInfo.afterSets() == expectedAfter);
     ASSERT_FALSE(containedAliasInfo.isWrite());
   }
 }
@@ -1493,10 +1559,10 @@ void testSchemaParser() {
 void testTopologicalIndex() {
   {
     Graph graph;
-    auto node1 = graph.create(prim::Undefined);
-    auto node2 = graph.create(prim::Undefined);
-    auto node3 = graph.create(prim::Undefined);
-    auto node4 = graph.create(prim::Undefined);
+    auto node1 = graph.create(prim::AutogradZero);
+    auto node2 = graph.create(prim::AutogradZero);
+    auto node3 = graph.create(prim::AutogradZero);
+    auto node4 = graph.create(prim::AutogradZero);
 
     graph.appendNode(node4);
     graph.prependNode(node1);
@@ -1521,12 +1587,12 @@ void testTopologicalIndex() {
     //      \      ...
     //      C    block2
     auto block1 = node3->addBlock();
-    auto A = graph.create(prim::Undefined);
+    auto A = graph.create(prim::AutogradZero);
     block1->appendNode(A);
-    auto B = graph.create(prim::Undefined);
+    auto B = graph.create(prim::AutogradZero);
     block1->appendNode(B);
     auto block2 = B->addBlock();
-    auto C = graph.create(prim::Undefined);
+    auto C = graph.create(prim::AutogradZero);
     block2->appendNode(C);
 
     // Check isAfter on different block levels
@@ -1536,7 +1602,7 @@ void testTopologicalIndex() {
 
     // make sure things don't blow up on deletions
     node2->destroy();
-    auto node2p = graph.create(prim::Undefined);
+    auto node2p = graph.create(prim::AutogradZero);
     node2p->insertAfter(node1);
     ASSERT_TRUE(node1->isBefore(node2p));
     ASSERT_TRUE(node2p->isBefore(node3));
@@ -1546,11 +1612,11 @@ void testTopologicalIndex() {
     Graph graph;
     std::map<size_t, Node*> nodes;
 
-    auto anchor = graph.create(prim::Undefined);
+    auto anchor = graph.create(prim::AutogradZero);
     graph.appendNode(anchor);
     // Inserting to the same place a lot will trigger reindexing
     for (auto i = 0; i < 100; ++i) {
-      auto n = graph.create(prim::Undefined);
+      auto n = graph.create(prim::AutogradZero);
       n->insertAfter(anchor);
       nodes[i] = n;
     }
@@ -1822,7 +1888,6 @@ void testNoneSchemaMatch() {
   // checking that constant propagation ran wo/failure
   AT_ASSERT(std::distance(nodes.begin(), nodes.end()) == 1);
 }
-
 } // namespace
 } // namespace jit
 } // namespace torch

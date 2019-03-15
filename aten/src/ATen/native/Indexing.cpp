@@ -78,8 +78,7 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
 static void checkIndexTensorTypes(TensorList indices) {
   for (auto& tensor : indices) {
     if (tensor.defined()) {
-      auto& type = tensor.type();
-      auto scalarType = type.scalarType();
+      auto scalarType = tensor.scalar_type();
       if (scalarType != kLong && scalarType != kByte) {
           AT_INDEX_ERROR("tensors used as indices must be long or byte tensors");
       }
@@ -91,7 +90,7 @@ static std::vector<Tensor> expandByteTensors(const Tensor & self, TensorList ind
   // Expands byte tensors (masks) into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
   for (auto & index : indices) {
-    if (index.type().scalarType() == kByte) {
+    if (index.scalar_type() == kByte) {
       // The sizes of the ByteTensor mask must match the sizes of the
       // corresponding dimensions in self
       for (int64_t j = 0; j < index.dim(); j++) {
@@ -475,7 +474,7 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   if (source.dim() == 0 && numIndices != 1) {
     AT_INDEX_ERROR("index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
   }
-  if (index.type().scalarType() != ScalarType::Long) {
+  if (index.scalar_type() != ScalarType::Long) {
     AT_INDEX_ERROR("index_copy_(): Expected LongTensor for index");
   }
 
@@ -549,6 +548,26 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
   return _self.clone().masked_fill_(mask, source);
+}
+
+Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){
+// special case scalar input and/or index
+    if (self.ndimension() == 0) return at::_sparse_coo_tensor_unsafe(at::empty({0,grad.numel()}, index.options()), grad, self.sizes());
+    if (grad.ndimension() == 0) return at::_sparse_coo_tensor_unsafe(index.view({1,1}), grad, self.sizes());
+    Tensor sparse_ind = at::empty({self.ndimension(), grad.numel()}, self.options().dtype(at::kLong));
+    int64_t n_above = grad.numel();
+    int64_t n_below = 1;
+    if (dim < 0) dim += self.ndimension();
+    for (int i=0; i<self.ndimension(); i++) {
+        n_above /= grad.size(i);
+        if (i == dim) {
+            sparse_ind[i] = index.reshape(-1);
+        } else {
+            sparse_ind[i] = at::arange(grad.size(i),self.options().dtype(at::kLong)).unsqueeze(1).expand({grad.size(i), n_above}).reshape(-1).repeat(n_below);
+        }
+        n_below *= grad.size(i);
+    }
+    return at::_sparse_coo_tensor_unsafe(sparse_ind, grad.reshape(-1), self.sizes());
 }
 
 }} // at::native
