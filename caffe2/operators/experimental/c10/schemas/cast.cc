@@ -20,21 +20,6 @@ C10_DEFINE_OP_SCHEMA(Cast, FunctionSchema(
 }
 }
 
-namespace {
-
-struct ToParameter final {
-  using type = caffe2::TensorProto_DataType;
-  static caffe2::TensorProto_DataType parse(
-      const caffe2::ArgumentHelper& helper) {
-    return caffe2::cast::GetCastDataType(helper, "to");
-  }
-};
-} // namespace
-
 namespace caffe2 {
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
-    ops::Cast,
-    C10Cast_DontUseThisOpYet,
-    1,
-    ToParameter)
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(ops::Cast(), C10Cast_DontUseThisOpYet)
 }
