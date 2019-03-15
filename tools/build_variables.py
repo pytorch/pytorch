@@ -99,7 +99,7 @@ libtorch_sources = [
     "torch/csrc/jit/script/class_type.cpp",
     "torch/csrc/jit/script/parser.cpp",
     "torch/csrc/jit/testing/file_check.cpp",
-    "torch/csrc/jit/import_method.cpp",
+    "torch/csrc/jit/import_source.cpp",
     "torch/csrc/jit/hooks_for_testing.cpp",
     "torch/csrc/jit/script/builtin_functions.cpp",
     "torch/csrc/jit/script/lexer.cpp",

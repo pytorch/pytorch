@@ -16,16 +16,25 @@ TORCH_API void PythonPrint(
     std::ostream& out,
     const Graph& graph,
     std::vector<at::Tensor>& tensor_table,
+    std::vector<ClassTypePtr>& class_table,
     bool enforce_importable = false);
 TORCH_API void PythonPrint(
     std::ostream& out,
     const script::Method& graph,
     std::vector<at::Tensor>& tensor_table,
+    std::vector<ClassTypePtr>& class_table,
     bool enforce_importable = false);
 TORCH_API void PythonPrint(
     std::ostream& out,
     const script::Module& module,
     std::vector<at::Tensor>& tensor_table,
+    std::vector<ClassTypePtr>& class_table,
+    bool enforce_importable = false);
+TORCH_API void PythonPrint(
+    std::ostream& out,
+    const ClassTypePtr& classType,
+    std::vector<at::Tensor>& tensor_table,
+    std::vector<ClassTypePtr>& class_table,
     bool enforce_importable = false);
 
 TORCH_API bool printerHasSpecialCaseFor(c10::Symbol sym);

@@ -404,8 +404,15 @@ struct Environment {
           {"rangelist", std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
       };
       auto it = globals.find(ident);
-      if (it != globals.end())
+      if (it != globals.end()) {
         retval = it->second;
+      }
+    }
+
+    if (!retval) {
+      if (auto class_type = ClassType::get(ident)) {
+        retval = std::make_shared<script::ClassValue>(class_type);
+      }
     }
 
     if (!retval) {
@@ -2018,7 +2025,8 @@ struct to_ir {
           return true;
         } else if (val->type()->cast<OptionalType>()) {
           throw ErrorReport(loc)
-              << "Optional isinstance check is not supported, consider use is/isnot None instead";
+              << "Optional isinstance check is not supported, "
+              << "consider use is/isnot None instead";
         } else {
           TypePtr type = parseTypeFromExpr(classinfo);
           if (val->type()->isSubtypeOf(type)) {
@@ -2032,6 +2040,12 @@ struct to_ir {
           isInstanceCheck(apply.inputs()[0], apply.inputs()[1]);
       return std::make_shared<SimpleValue>(
           graph->insertConstant(is_instance_val, nullptr, loc));
+    } else if (auto classNew = dynamic_cast<ClassNewMethod*>(sv.get())) {
+      if (apply.inputs().size() != 1) {
+        throw ErrorReport(loc) << "Only one argument to __new__ allowed";
+      }
+      return classNew->createObject(
+          apply.range(), method, Var(apply.inputs()[0]).name().name());;
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());
@@ -2682,7 +2696,10 @@ void defineMethodsInModule(
   for (Method* method : methods) {
     method->ensure_defined();
   }
-  didFinishEmitModule(m);
+  if (!self || !self->asFirstClass()) {
+    // Disable module hooks if the module is only used to store a class's code.
+    didFinishEmitModule(m);
+  }
 }
 
 void defineMethodsInModule(
