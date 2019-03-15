@@ -166,8 +166,7 @@ namespace detail {
   // WrapKernelFunctionRuntime: Wraps a runtime function pointer into a kernel functor.
   // Since it is a runtime function pointer, there is an overhead for calling
   // the function pointer whenever the kernel is invoked.
-  // TODO Enable this and use it for deprecated API
-  /*template<class FuncType, class ReturnType, class ParameterList> class WrapKernelFunctionRuntime_ {};
+  template<class FuncType, class ReturnType, class ParameterList> class WrapKernelFunctionRuntime_ {};
   template<class FuncType, class ReturnType, class... Parameters>
   class WrapKernelFunctionRuntime_<FuncType, ReturnType, guts::typelist::typelist<Parameters...>> final : public c10::OperatorKernel {
   public:
@@ -186,7 +185,7 @@ namespace detail {
       FuncType,
       typename guts::function_traits<FuncType>::return_type,
       typename guts::function_traits<FuncType>::parameter_types
-  >;*/
+  >;
 
   struct KernelRegistrationConfig final {
     TensorTypeId dispatch_key;
@@ -273,7 +272,9 @@ inline detail::KernelRegistrationConfigParameter kernel(ConstructorParameters&&.
   return detail::KernelRegistrationConfigParameter(
       &detail::wrap_kernel_functor<KernelFunctor>::call,
       [parameters] {
-        return guts::apply(&guts::make_unique<KernelFunctor>, *parameters);
+        return guts::apply(
+          [] (const ConstructorParameters&... params) {return guts::make_unique<KernelFunctor>(params...); },
+          *parameters);
       }
   );
 }
@@ -365,7 +366,7 @@ KernelRegistrationConfig make_registration_config(ConfigParameters&&... configPa
 }
 
 // TODO doc comments
-class RegisterOperators final {
+class C10_API RegisterOperators final {
 public:
   RegisterOperators() = default;
   RegisterOperators(const RegisterOperators&) = delete;
@@ -384,14 +385,17 @@ public:
   // TODO allow input schema to be just the operator name + overload name, in that case use schema generated from kernel function
   // TODO if schema is fully specified, still generate schema from kernel function and make sure it's correct
 
+  // TODO error if dispatch key is not specified
+
   // Deprecated. For backwards compatibility only.
   // Don't use this, it introduces a performance overhead on each kernel call
   // due to the kernel being stored in the wrapper as a runtime function pointer.
-  // TODO Enable this
-  /*template<class KernelFunc>
+  template<class KernelFunc>
   RegisterOperators op(FunctionSchema schema, KernelFunc* func) && {
-    return op(std::move(schema), kernel(func));
-  }*/
+    return op(std::move(schema), kernel<detail::WrapKernelFunctionRuntime>(func));
+  }
+
+  // TODO Add deprecated lambda-based API
 
 private:
   std::vector<c10::detail::OperatorRegistrar> registrars_;
