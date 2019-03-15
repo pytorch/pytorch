@@ -20,7 +20,7 @@ C10_DEFINE_OP_SCHEMA(BatchGather, FunctionSchema(
 }
 
 namespace caffe2 {
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
     ops::BatchGather(),
     C10BatchGather_DontUseThisOpYet)
 }
