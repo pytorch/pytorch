@@ -2,6 +2,7 @@
 #define CAFFE2_CORE_OPERATOR_H_
 
 #include <array>
+#include <cfenv>
 #include <climits>
 #include <cstddef>
 #include <exception>
@@ -26,6 +27,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
+
+C10_DECLARE_bool(caffe2_operator_throw_if_fp_exceptions);
 
 namespace caffe2 {
 
@@ -823,7 +826,22 @@ class Operator : public OperatorBase {
       StartAllObservers();
 
       context_.SwitchToDevice(stream_id);
+
+      if (FLAGS_caffe2_operator_throw_if_fp_exceptions) {
+        std::feclearexcept(FE_ALL_EXCEPT);
+      }
       bool result = RunOnDevice();
+      if (FLAGS_caffe2_operator_throw_if_fp_exceptions) {
+        CAFFE_ENFORCE(
+            !std::fetestexcept(FE_DIVBYZERO),
+            "Division by zero floating point exception (FE_DIVBYZERO) reported.");
+        CAFFE_ENFORCE(
+            !std::fetestexcept(FE_INVALID),
+            "Invalid floating point exception (FE_INVALID) reported.");
+        CAFFE_ENFORCE(
+            !std::fetestexcept(FE_OVERFLOW),
+            "Overflow floating point exception (FE_OVERFLOW) reported.");
+      }
       if (!result) {
         this->RecordLastFailedOpNetPosition();
       }
