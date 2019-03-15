@@ -7,6 +7,7 @@
 #include <ATen/CPUGenerator.h>
 #include <ATen/CheckGenerator.h>
 #include <ATen/Generator.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/cpu/vml.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/native/DispatchStub.h>
@@ -183,6 +184,7 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
             result.data<scalar_t>(), self.data<scalar_t>(), self.numel()); \
                                                                            \
       } else {                                                             \
+        assert_no_internal_overlap(result, #op);                           \
         static constexpr int64_t WIDTH = 131072 / sizeof(scalar_t);        \
         CPU_tensor_parallel_kernel_apply2<scalar_t, scalar_t>(             \
             result,                                                        \
@@ -211,7 +213,6 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
     });                                                                    \
   }                                                                        \
   REGISTER_DISPATCH(op##Impl, &op##_kernel)
-
 } // anonymous namespace
 
 REGISTER_DISPATCH(sigmoidImpl, &sigmoid_kernel)

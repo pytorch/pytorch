@@ -4,17 +4,19 @@
 namespace at {
 
 MemOverlap has_internal_overlap(const Tensor& tensor) {
-  auto* t = tensor.unsafeGetTensorImpl();
+  return has_internal_overlap(tensor.unsafeGetTensorImpl());
+}
 
-  AT_ASSERT(tensor.layout() == kStrided);
+MemOverlap has_internal_overlap(TensorImpl* t) {
+  AT_ASSERT(t->layout() == kStrided);
 
   if (t->is_contiguous()) {
     return MemOverlap::NO;
   }
 
   auto strides = t->strides();
-  if (std::find_if(
-        strides.begin(), strides.end(), [](int s) { return s == 0; })) {
+  if (strides.end() != std::find_if(
+        strides.begin(), strides.end(), [](int64_t s) { return s == 0; })) {
     return MemOverlap::YES;
   }
 
@@ -22,6 +24,10 @@ MemOverlap has_internal_overlap(const Tensor& tensor) {
 }
 
 void assert_no_internal_overlap(const Tensor& t, std::string op) {
+  assert_no_internal_overlap(t.unsafeGetTensorImpl(), op);
+}
+
+void assert_no_internal_overlap(TensorImpl* t, std::string op) {
   if (has_internal_overlap(t) == MemOverlap::YES) {
     AT_ERROR(
         op, ": unsupported operation: more than one element of the written-to "
