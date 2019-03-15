@@ -50,7 +50,7 @@ class TypeProperties {
   TypeProperties& operator=(const TypeProperties& other) {
     if (this != &other) {
       backend_ = other.backend();
-      scalar_type_ == other.scalarType();
+      scalar_type_ = other.scalarType();
     }
     return *this;
   }
@@ -67,29 +67,6 @@ class TypeProperties {
     std::stringstream ss;
     ss << at::toString(backend()) << at::toString(scalarType()) << "Type";
     return ss.str();
-  }
-
-  /// Constructs the `TensorOptions` from a type and a `device_index`.
-  TensorOptions options(int16_t device_index = -1) const {
-    return TensorOptions().dtype(scalarType())
-                          .device(device_type(), device_index)
-                          .layout(layout_from_backend(backend()));
-  }
-
-  /// Constructs the `TensorOptions` from a type and a Device.  Asserts that
-  /// the device type matches the device type of the type.
-  TensorOptions options(c10::optional<Device> device_opt) const {
-    if (!device_opt.has_value()) {
-      return options(-1);
-    } else {
-      Device device = device_opt.value();
-      AT_ASSERT(device.type() == device_type());
-      return options(device.index());
-    }
-  }
-
-  operator TensorOptions() const {
-    return options();
   }
 
  private:

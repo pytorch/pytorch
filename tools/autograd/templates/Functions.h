@@ -31,17 +31,17 @@ inline std::vector<Tensor> unpack_list(at::ArrayRef<SavedVariable> xs) {
 }
 
 struct TypeAndSize {
-  TypeAndSize() : type(at::Backend::Undefined, at::ScalarType::Undefined) {}
+  TypeAndSize() : type(nullptr) {}
   /* implicit */
   TypeAndSize(const Tensor & t)
     : sizes(t.sizes().vec())
-    , type(t.type()) {}
+    , type(&t.dispatch_type()) {}
 
-  Tensor zeros() { return at::zeros(sizes, type); }
+  Tensor zeros() { return at::zeros(sizes, *type); }
 
 private:
   std::vector<int64_t> sizes;
-  at::TypeProperties type;
+  Type* type;
 };
 
 ${autograd_function_declarations}

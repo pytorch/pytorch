@@ -214,7 +214,7 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
     lapackGetri<scalar_t>(n, self_working_ptr, n, ipiv.data<int>(), &wkopt, lwork, &info);
 
     lwork = static_cast<int>(wkopt);
-    work = at::empty({lwork}, self.type());
+    work = at::empty({lwork}, self.options());
 
     // now to compute the actual inverse
     lapackGetri<scalar_t>(n, self_working_ptr, n, ipiv.data<int>(), work.data<scalar_t>(), lwork, &info);

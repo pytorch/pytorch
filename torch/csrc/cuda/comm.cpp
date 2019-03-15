@@ -36,18 +36,18 @@ using namespace torch::autograd;
 // of a single type only. Adding this logic directly in the loop makes it a bit
 // ugly, so here's a helper for it.
 struct unique_type_checker {
-  void show(const at::TypeProperties& t) {
+  void show(const at::Type& t) {
     if (!unique) return;
-    if (!type.is_defined()) type = t;
-    unique = (type == t);
+    if (!type) type = &t;
+    unique = (type == &t);
   }
 
-  at::TypeProperties type;
+  const at::Type *type = nullptr;
   bool unique = true;
 };
 
 std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
-  auto type = tensor.type();
+  auto & type = tensor.dispatch_type();
   if (type.is_cuda() && tensor.get_device() != devices[0])
     throw std::runtime_error("device of broadcasted tensor must appear as the "
                              "first on devices list");
@@ -66,13 +66,14 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
 #else
   {
 #endif
+    auto & gpu_type = type.toBackend(type.is_sparse() ? at::Backend::SparseCUDA : at::Backend::CUDA);
     if (type.is_cuda()) {
       tensors.push_back(tensor);
     }
     IntArrayRef loop_devices = type.is_cuda() ? devices.slice(1) : devices;
     for (auto device : loop_devices) {
       _device_guard.set_index(device);
-      tensors.push_back(tensor.to(type.backend(), true));
+      tensors.push_back(gpu_type.copy(tensor, true));
     }
   }
   return tensors;
@@ -125,7 +126,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_
   unique_type_checker type_checker;
   at::cuda::CUDAGuard device_guard(devices[0]);
   for (auto & chunk : utils::take_tensors(tensors, buffer_size)) {
-    auto type = chunk.type();
+    auto & type = chunk.type();
     type_checker.show(type);
     std::vector<at::Tensor> results;
     if (chunk.type().is_sparse()) {

@@ -206,7 +206,7 @@ Tensor internal_new_from_data(
     // infer the scalar type and device type; it's not expected to infer the layout since these constructors
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
     const auto& scalar_type = type_inference ? var.scalar_type() : type.scalarType();
-    auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(torch::getDeviceType(type)));
+    auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : type.device_type());
     AutoNoGIL no_gil;
     maybe_initialize_cuda(device);
     return var.to(device, scalar_type, /*non_blocking=*/false, /*copy=*/copy_variables);
@@ -229,7 +229,7 @@ Tensor internal_new_from_data(
   recursive_store(
       (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
       scalar_type, tensor.element_size(), data);
-  auto device = device_opt.has_value() ? *device_opt : at::Device(torch::getDeviceType(type));
+  auto device = device_opt.has_value() ? *device_opt : type.device_type();
   AutoNoGIL no_gil;
   maybe_initialize_cuda(device);
   return tensor.to(device, scalar_type, /*non_blocking=*/false, /*copy=*/false);

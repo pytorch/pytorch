@@ -198,7 +198,7 @@ class CAFFE2_API Tensor {
   }
 
   TypeProperties type() const {
-    return TypeProperties(deviceTypeToBackend(device().type()), scalar_type());
+    return TypeProperties(tensorTypeIdToBackend(type_id()), scalar_type());
   }
   Type & dispatch_type() const {
     return legacyTensorType(*impl_);
