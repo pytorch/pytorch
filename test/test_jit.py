@@ -11947,7 +11947,8 @@ class TestFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_scalar_arg_cuda(self):
-        def fn_test_scalar_arg(x, p: float):
+        def fn_test_scalar_arg(x, p):
+            # type: (Tensor, float) -> Tensor
             return p * (x * x + x)
 
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
