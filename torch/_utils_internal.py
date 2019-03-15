@@ -29,5 +29,9 @@ def prepare_multiprocessing_environment(path):
     pass
 
 
+def resolve_library_path(path):
+    return os.path.realpath(path)
+
+
 TEST_MASTER_ADDR = '127.0.0.1'
 TEST_MASTER_PORT = 29500
