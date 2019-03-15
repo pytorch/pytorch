@@ -383,6 +383,17 @@ const std::vector<std::string> functions = {
             return torch.matmul(self, other), backward
     )",
     R"(
+        def addcmul(self,
+                    tensor1,
+                    tensor2,
+                    *,
+                    value: float = 1.0):
+            def backward(grad_output):
+                grad_tensor1 = (grad_output * tensor2 * value)._grad_sum_to_size(tensor1.size())
+                grad_tensor2 = (grad_output * tensor1 * value)._grad_sum_to_size(tensor2.size())
+                return grad_output._grad_sum_to_size(self.size()), grad_tensor1, grad_tensor2, None
+            return torch.addcmul(self, tensor1, tensor2, value=value), backward
+
         def _dim_arange(like,
                         dim: int):
             def backward(grad_output):
@@ -438,6 +449,15 @@ const std::vector<std::string> functions = {
                 return None, None
 
             return torch.full_like(self, fill_value), backward
+
+        def lerp(self,
+                 end,
+                 weight: float):
+            def backward(grad_output):
+                grad_self = (grad_output * (1 - weight))._grad_sum_to_size(self.size())
+                grad_end = (grad_output * weight)._grad_sum_to_size(end.size())
+                return grad_self, grad_end, None
+            return torch.lerp(self, end, weight), backward
 
         def mul(self, other):
             def backward(grad_output):
@@ -870,6 +890,7 @@ std::string overloadedSchemaString(const FunctionSchema& schema) {
         schema_name.length(),
         schema_name.substr(0, pos));
   }
+
   return schema_string;
 }
 
@@ -949,6 +970,20 @@ c10::optional<GradientPair> gradientInfoForSchema(
     return cache_it->second;
   } else {
     auto schema_str = canonicalSchemaString(schema);
+    // Specialize Scalar to float for the arg type of the node schema
+    // this is used to:
+    // 1. define scalar type as float in TorchScript autodiff formula
+    // 2. to make sure the input of any graph node does not contain scalar type
+    //    in its argument, all scalar arg should already be passed with float
+    //    value since scalar/int aren't differentiable either way.
+    for (const Argument& arg : schema.arguments()) {
+      if (arg.type() == NumberType::get()) {
+        const auto& arg_type_str = arg.type()->str();
+        schema_str.replace(
+            schema_str.find(arg_type_str), arg_type_str.length(), "float");
+      }
+    }
+
     auto sym_script_it = schema_to_graphs.find(schema_str);
 
     if (sym_script_it != schema_to_graphs.end()) {

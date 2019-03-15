@@ -129,7 +129,8 @@ bool isDifferentiable(Node* n) {
     return true;
 
   if (n->matches(
-          "aten::dropout(Tensor input, float p, bool train) -> Tensor", attr::train)) {
+          "aten::dropout(Tensor input, float p, bool train) -> Tensor",
+          attr::train)) {
     return n->get<bool>(attr::train).value();
   }
 
@@ -162,6 +163,18 @@ bool isDifferentiable(Node* n) {
         body->nodes().begin(),
         body->nodes().end(),
         static_cast<bool (*)(Node*)>(isDifferentiable));
+  }
+
+  // check if the node inputs' value type is scalar type, in autodiff, scalar
+  // value aren't differentiable, so user should cast the scalar to double
+  // before using it.
+  for (const Value* input : n->inputs()) {
+    if (input->type() == NumberType::get()) {
+      throw std::runtime_error(
+          std::string("differentiation of ") + n->kind().toDisplayString() +
+          " is not supported, cannot pass Scalar/Number type to op during differentiation," +
+          " you need to cast it to double before passing it to the op");
+    }
   }
 
   return false;
@@ -204,7 +217,6 @@ static c10::optional<std::vector<Value*>> build_script_grad(
     Node* node,
     const ArrayRef<Value*>& grads) {
   auto graph = node->owningGraph();
-
   auto compiled_graphs = gradientInfoForSchema(node->schema());
   if (!compiled_graphs) {
     return c10::nullopt;
@@ -228,7 +240,7 @@ static c10::optional<std::vector<Value*>> build_script_grad(
   auto bw_graph = compiled_graphs->backward;
   auto grad_vec = grads.vec();
   if (needTrimGrad(node)) {
-    grad_vec.erase(grad_vec.begin()+1, grad_vec.end());
+    grad_vec.erase(grad_vec.begin() + 1, grad_vec.end());
   }
   auto it = grad_vec.begin();
   grad_vec.insert(it, new_outputs.back());
