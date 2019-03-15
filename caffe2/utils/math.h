@@ -460,40 +460,6 @@ CAFFE2_API void BiasCHW(
     T* image,
     Context* context);
 
-template <class Context>
-CAFFE2_API void CopyMatrix(
-    const size_t item_size,
-    const int M,
-    const int N,
-    const void* A,
-    const int lda,
-    void* B,
-    const int ldb,
-    Context* context,
-    TypeMeta::Copy copy = nullptr);
-
-template <typename T, class Context>
-CAFFE2_API void CopyMatrix(
-    const int M,
-    const int N,
-    const T* A,
-    const int lda,
-    T* B,
-    const int ldb,
-    Context* context);
-
-template <typename T, class Context>
-CAFFE2_API void CopyMatrix(
-    const int M,
-    const int N,
-    const T* A,
-    const int A_outer_stride,
-    const int A_inner_stride,
-    T* B,
-    const int B_outer_stride,
-    const int B_inner_stride,
-    Context* context);
-
 template <typename T, class Context>
 CAFFE2_API void CopyVector(const int N, const T* A, T* B, Context* context);
 

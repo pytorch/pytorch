@@ -2721,58 +2721,6 @@ CAFFE2_CUDA_EXPORT void Col2ImNd<float, CUDAContext, StorageOrder::NHWC>(
 }
 
 template <>
-CAFFE2_CUDA_EXPORT void CopyMatrix<CUDAContext>(
-    const size_t itemsize,
-    const int M,
-    const int N,
-    const void* A,
-    const int lda,
-    void* B,
-    const int ldb,
-    CUDAContext* context,
-    TypeMeta::Copy copy) {
-  CAFFE_ENFORCE(!copy, "Copy constructor is not supported in CUDA context");
-  cudaMemcpy2DAsync(
-      B,
-      ldb * itemsize,
-      A,
-      lda * itemsize,
-      N * itemsize,
-      M,
-      cudaMemcpyDeviceToDevice,
-      context->cuda_stream());
-}
-
-#define CAFFE2_SPECIALIZED_CUDA_COPY_MATRIX(T) \
-  template <>                                  \
-  void CopyMatrix<T, CUDAContext>(             \
-      const int M,                             \
-      const int N,                             \
-      const T* A,                              \
-      const int lda,                           \
-      T* B,                                    \
-      const int ldb,                           \
-      CUDAContext* context) {                  \
-    if (M == 0 || N == 0) {                    \
-      return;                                  \
-    }                                          \
-    cudaMemcpy2DAsync(                         \
-        B,                                     \
-        sizeof(T) * ldb,                       \
-        A,                                     \
-        sizeof(T) * lda,                       \
-        sizeof(T) * N,                         \
-        M,                                     \
-        cudaMemcpyDeviceToDevice,              \
-        context->cuda_stream());               \
-  }
-CAFFE2_SPECIALIZED_CUDA_COPY_MATRIX(float)
-CAFFE2_SPECIALIZED_CUDA_COPY_MATRIX(double)
-CAFFE2_SPECIALIZED_CUDA_COPY_MATRIX(int)
-CAFFE2_SPECIALIZED_CUDA_COPY_MATRIX(int64_t)
-#undef CAFFE2_SPECIALIZED_CUDA_COPY_MATRIX
-
-template <>
 CAFFE2_CUDA_EXPORT void CopyVector<float, CUDAContext>(
     const int N,
     const float* src,

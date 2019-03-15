@@ -69,6 +69,34 @@ template <typename TAlpha, typename TData, class Context>
 CAFFE2_API void
 Scale(int N, const TAlpha* alpha, const TData* X, TData* Y, Context* context);
 
+template <class Context>
+CAFFE2_API void CopyMatrix(
+    size_t item_size,
+    int M,
+    int N,
+    const void* A,
+    int lda,
+    void* B,
+    int ldb,
+    Context* context,
+    TypeMeta::Copy copy = nullptr);
+
+template <typename T, class Context>
+CAFFE2_API void
+CopyMatrix(int M, int N, const T* A, int lda, T* B, int ldb, Context* context);
+
+template <typename T, class Context>
+CAFFE2_API void CopyMatrix(
+    int M,
+    int N,
+    const T* A,
+    int A_outer_stride,
+    int A_inner_stride,
+    T* B,
+    int B_outer_stride,
+    int B_inner_stride,
+    Context* context);
+
 template <typename T, class Context>
 CAFFE2_API void Add(int N, const T* A, const T* B, T* C, Context* context);
 template <typename T, class Context>

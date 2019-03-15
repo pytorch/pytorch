@@ -97,6 +97,46 @@ DELEGATE_POWX(float, vsPowx)
 DELEGATE_POWX(double, vdPowx)
 #undef DELEGATE_POWX
 
+#define DELEGATE_COPY_MATRIX(T, MKLFunc1, MKLFunc2) \
+  template <>                                       \
+  C10_EXPORT void CopyMatrix<T, CPUContext>(        \
+      const int M,                                  \
+      const int N,                                  \
+      const T* A,                                   \
+      const int lda,                                \
+      T* B,                                         \
+      const int ldb,                                \
+      CPUContext* /* context */) {                  \
+    MKLFunc1('R', 'N', M, N, T(1), A, lda, B, ldb); \
+  }                                                 \
+  template <>                                       \
+  C10_EXPORT void CopyMatrix<T, CPUContext>(        \
+      const int M,                                  \
+      const int N,                                  \
+      const T* A,                                   \
+      const int A_outer_stride,                     \
+      const int A_inner_stride,                     \
+      T* B,                                         \
+      const int B_outer_stride,                     \
+      const int B_inner_stride,                     \
+      CPUContext* /* context */) {                  \
+    MKLFunc2(                                       \
+        'R',                                        \
+        'N',                                        \
+        M,                                          \
+        N,                                          \
+        T(1),                                       \
+        A,                                          \
+        A_outer_stride,                             \
+        A_inner_stride,                             \
+        B,                                          \
+        B_outer_stride,                             \
+        B_inner_stride);                            \
+  }
+DELEGATE_COPY_MATRIX(float, mkl_somatcopy, mkl_somatcopy2)
+DELEGATE_COPY_MATRIX(double, mkl_domatcopy, mkl_domatcopy2)
+#undef DELEGATE_COPY_MATRIX
+
 #define DELEGATE_SIMPLE_BINARY_FUNCTION(T, Func, MKLFunc)                     \
   template <>                                                                 \
   C10_EXPORT void Func<T, CPUContext>(                                        \
@@ -447,6 +487,108 @@ CAFFE2_SPECIALIZED_NEG(double)
 CAFFE2_SPECIALIZED_SCALE(std::int32_t, std::int32_t)
 CAFFE2_SPECIALIZED_SCALE(std::int64_t, std::int64_t)
 #undef CAFFE2_SPECIALIZED_SCALE
+
+template <>
+C10_EXPORT void CopyMatrix<CPUContext>(
+    const size_t itemsize,
+    const int M,
+    const int N,
+    const void* A,
+    const int lda,
+    void* B,
+    const int ldb,
+    CPUContext* /*context*/,
+    TypeMeta::Copy copy) {
+  if (A == nullptr || B == nullptr) {
+    return;
+  }
+  if (lda == N && ldb == N) {
+    // can coalese to a single memcpy of size M * N
+    if (copy) {
+      copy(static_cast<const char*>(A), static_cast<char*>(B), N * M);
+    } else {
+      memcpy(
+          static_cast<char*>(B), static_cast<const char*>(A), itemsize * N * M);
+    }
+    return;
+  }
+
+  for (int i = 0; i < M; ++i) {
+    if (copy) {
+      copy(
+          static_cast<const char*>(A) + lda * i * itemsize,
+          static_cast<char*>(B) + ldb * i * itemsize,
+          N);
+    } else {
+      memcpy(
+          static_cast<char*>(B) + ldb * i * itemsize,
+          static_cast<const char*>(A) + lda * i * itemsize,
+          itemsize * N);
+    }
+  }
+}
+
+#define CAFFE2_SPECIALIZED_COPY_MATRIX(T)                                \
+  template <>                                                            \
+  C10_EXPORT void CopyMatrix<T, CPUContext>(                             \
+      const int M,                                                       \
+      const int N,                                                       \
+      const T* A,                                                        \
+      const int lda,                                                     \
+      T* B,                                                              \
+      const int ldb,                                                     \
+      CPUContext* /* context */) {                                       \
+    if (M == 0 || N == 0) {                                              \
+      return;                                                            \
+    }                                                                    \
+    if (lda == N) {                                                      \
+      if (ldb == N) {                                                    \
+        std::memcpy(B, A, sizeof(T) * M * N);                            \
+      } else {                                                           \
+        EigenOuterStridedMatrixMap<T>(B, N, M, EigenOuterStride(ldb)) =  \
+            ConstEigenMatrixMap<T>(A, N, M);                             \
+      }                                                                  \
+    } else {                                                             \
+      if (ldb == N) {                                                    \
+        EigenMatrixMap<T>(B, N, M) = ConstEigenOuterStridedMatrixMap<T>( \
+            A, N, M, EigenOuterStride(lda));                             \
+      } else {                                                           \
+        EigenOuterStridedMatrixMap<T>(B, N, M, EigenOuterStride(ldb)) =  \
+            ConstEigenOuterStridedMatrixMap<T>(                          \
+                A, N, M, EigenOuterStride(lda));                         \
+      }                                                                  \
+    }                                                                    \
+  }                                                                      \
+  template <>                                                            \
+  C10_EXPORT void CopyMatrix<T, CPUContext>(                             \
+      const int M,                                                       \
+      const int N,                                                       \
+      const T* A,                                                        \
+      const int A_outer_stride,                                          \
+      const int A_inner_stride,                                          \
+      T* B,                                                              \
+      const int B_outer_stride,                                          \
+      const int B_inner_stride,                                          \
+      CPUContext* context) {                                             \
+    if (A_inner_stride == 1 && B_inner_stride == 1) {                    \
+      CopyMatrix<T, CPUContext>(                                         \
+          M, N, A, A_outer_stride, B, B_outer_stride, context);          \
+      return;                                                            \
+    }                                                                    \
+    EigenStridedMatrixMap<T>(                                            \
+        B, N, M, EigenStride(B_outer_stride, B_inner_stride)) =          \
+        ConstEigenStridedMatrixMap<T>(                                   \
+            A, N, M, EigenStride(A_outer_stride, A_inner_stride));       \
+  }
+#ifndef CAFFE2_USE_MKL
+CAFFE2_SPECIALIZED_COPY_MATRIX(float)
+CAFFE2_SPECIALIZED_COPY_MATRIX(double)
+#endif // CAFFE2_USE_MKL
+CAFFE2_SPECIALIZED_COPY_MATRIX(std::int32_t)
+CAFFE2_SPECIALIZED_COPY_MATRIX(std::int64_t)
+CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint8_t)
+CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint16_t)
+#undef CAFFE2_SPECIALIZXED_COPY_MATRIX
 
 #define DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(T, Func, EigenOp)   \
   template <>                                                                 \
