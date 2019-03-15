@@ -731,14 +731,19 @@ def create_generic(top_env, declarations):
     def find_dispatch_tensor(formals):
         # type: (List[AtFormal]) -> Optional[str]
         # dispatch to self if it's a parameter
+        def is_any_tensor_type(formal):
+            return (formal['dynamic_type'] == 'Tensor' or formal['dynamic_type'] == 'BoolTensor'
+                    or formal['dynamic_type'] == 'IndexTensor')
+
         for formal in formals:
-            if formal['name'] == 'self' and formal['dynamic_type'] == 'Tensor' and not formal.get('is_nullable', False):
+            if formal['name'] == 'self' and is_any_tensor_type(formal) and not formal.get('is_nullable', False):
                 return formal['name']
         # otherwise dispatch to the first Tensor or TensorList
         for formal in formals:
-            if 'TensorList' == formal['dynamic_type'] or formal['dynamic_type'] == 'Tensor' and \
+            if 'TensorList' == formal['dynamic_type'] or is_any_tensor_type(formal) and \
                not formal.get('is_nullable', False):
                 return formal['name']
+
         return None
 
     def format_formal(f):
