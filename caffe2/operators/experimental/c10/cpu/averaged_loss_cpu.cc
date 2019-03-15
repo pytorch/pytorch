@@ -10,39 +10,41 @@ using std::vector;
 namespace caffe2 {
 namespace {
 
-struct Cache final : public c10::KernelCache {
-  at::Tensor scratch = at::Tensor(C10Tensor(empty({}, CPU)));
-};
-
 template <class T, class Context>
-void averaged_loss_op_cpu_impl(
+class averaged_loss_cpu final : public c10::OperatorKernel {
+public:
+  void operator()(
     const at::Tensor& X_,
-    const at::Tensor& sum_,
-    Cache* state) {
-  Tensor X{C10Tensor(X_)};
-  Tensor sum{C10Tensor(sum_)};
-  CPUContext context;
+    const at::Tensor& sum_) {
 
-  sum.Resize(vector<int64_t>());
+    Tensor X{C10Tensor(X_)};
+    Tensor sum{C10Tensor(sum_)};
+    CPUContext context;
 
-  T* data = sum.template mutable_data<T>();
+    sum.Resize(vector<int64_t>());
 
-  Tensor scratch(state->scratch);
-  caffe2::math::Sum<T, Context>(
-      X.numel(),
-      X.template data<T>(),
-      data,
-      static_cast<Context*>(&context),
-      &scratch);
-  if (X.numel() > 0) {
-    caffe2::math::Scale<T, T, Context>(
-        1,
-        static_cast<T>(1.) / X.numel(),
-        sum.template data<T>(),
+    T* data = sum.template mutable_data<T>();
+
+    Tensor scratch(scratch_);
+    caffe2::math::Sum<T, Context>(
+        X.numel(),
+        X.template data<T>(),
         data,
-        static_cast<Context*>(&context));
+        static_cast<Context*>(&context),
+        &scratch);
+    if (X.numel() > 0) {
+      caffe2::math::Scale<T, T, Context>(
+          1,
+          static_cast<T>(1.) / X.numel(),
+          sum.template data<T>(),
+          data,
+          static_cast<Context*>(&context));
+    }
   }
-}
+
+private:
+  at::Tensor scratch_ = at::Tensor(C10Tensor(empty({}, CPU)));
+};
 
 static auto registry = c10::RegisterOperators().op(
     FunctionSchema(
@@ -51,10 +53,7 @@ static auto registry = c10::RegisterOperators().op(
         (std::vector<c10::Argument>{c10::Argument("input"),
                                     c10::Argument("output")}),
         (std::vector<c10::Argument>{})),
-    c10::kernel<
-        decltype(averaged_loss_op_cpu_impl<float, CPUContext>),
-        &averaged_loss_op_cpu_impl<float, CPUContext>,
-        Cache>(),
+    c10::kernel<averaged_loss_cpu<float, CPUContext>>(),
     c10::dispatchKey(CPUTensorId()));
 
 } // namespace

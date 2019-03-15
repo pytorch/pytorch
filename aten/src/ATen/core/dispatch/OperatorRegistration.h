@@ -4,26 +4,38 @@
 
 namespace c10 {
 
+/**
+ * Inherit from OperatorKernel to implement a c10 kernel.
+ *
+ * Example:
+ * > namespace {
+ * >   class my_kernel_cpu final : public c10::OperatorKernel {
+ * >   public:
+ * >     Tensor operator()(Tensor a, Tensor b) {...}
+ * >   };
+ * > }
+ *
+ * The kernel class is allowed to have members to cache things between calls
+ * but it is not allowed to change behavior based on the cache.
+ * The cache is purely a performance optimization and the kernel must
+ * return the same outputs regardless of what's in the cache.
+ *
+ * See below for how to register this kernel with PyTorch.
+ */
+class OperatorKernel : public c10::KernelCache {};
+
 namespace detail {
-  /**
-   * Class which, on construction, registers an operator in the dispatch table
-   * and on destruction deregisters it. The intent is that this class is
-   * constructed at static initialization time so that operators automatically
-   * get registered when a dlopen() occurs.
-   *
-   * You shouldn't call this directly; instead, use the RegisterOperators class.
-   */
+
+  // OperatorRegistrar in its constructor registers an operator in the dispatch
+  // table deregisters it in the destructor. The intent is that this class is
+  // constructed at static initialization time so that operators automatically
+  // get registered when a dlopen() occurs.
+  // You shouldn't call this directly; instead, use the RegisterOperators class.
   class OperatorRegistrar final {
   public:
-    /**
-     * @param schema The operator schema to register the kernel for
-     * @param dispatch_key  The dispatch key to register the function to
-     * @param kernel The concrete function implementation to register
-     * @param cache_creator A function initializing the cache for the kernel
-     */
-    explicit OperatorRegistrar(FunctionSchema&& schema, TensorTypeId dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction* cache_creator)
+    explicit OperatorRegistrar(FunctionSchema&& schema, TensorTypeId dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction&& cache_creator)
     : op_(Dispatcher::singleton().registerSchema(std::move(schema))), dispatch_key_(std::move(dispatch_key)), owns_registration_(true) {
-      Dispatcher::singleton().registerKernel(op_, dispatch_key_, kernel, cache_creator);
+      Dispatcher::singleton().registerKernel(op_, dispatch_key_, kernel, std::move(cache_creator));
     }
 
     OperatorRegistrar(OperatorRegistrar&& rhs) noexcept
@@ -66,26 +78,17 @@ namespace detail {
     }
   };
 
-  // call_with_ivalue_args: Take a function pointer and an ArrayRef<IValue>
-  // containing the arguments to call the function pointer with, and call it.
-  // The extra_args are appended as additional arguments at the end of the function call.
-  // Example:
-  // int myfunc(int a, ArrayRef<int> b, string c);
-  // int main() {
-  //   std::vector<IValue> ivalue_args = {IValue(2), IntList::create(3, 4)};
-  //   call_with_ivalue_args<decltype(myfunc), &myfunc>(ivalue_args, "extra_arg");
-  // }
-  template<class FuncType, FuncType* func, class... ExtraArgs, size_t... ivalue_arg_indices>
-  typename guts::function_traits<FuncType>::return_type call_with_ivalue_args_(ArrayRef<IValue> ivalue_args, guts::index_sequence<ivalue_arg_indices...>, ExtraArgs&&... extra_args) {
-    using IValueArgTypes = typename guts::function_traits<FuncType>::parameter_types;
-    return (*func)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>>::call(ivalue_args[ivalue_arg_indices])..., std::forward<ExtraArgs>(extra_args)...);
+  template<class Functor, size_t... ivalue_arg_indices>
+  typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_ivalue_args_(Functor* functor, ArrayRef<IValue> ivalue_args, guts::index_sequence<ivalue_arg_indices...>) {
+    using IValueArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
+    return (*functor)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>>::call(ivalue_args[ivalue_arg_indices])...);
   }
 
-  template<class FuncType, FuncType* func, class... ExtraArgs>
-  typename guts::function_traits<FuncType>::return_type call_with_ivalue_args(ArrayRef<IValue> ivalue_args, ExtraArgs&&... extra_args) {
-    constexpr size_t num_ivalue_args = guts::function_traits<FuncType>::number_of_parameters - sizeof...(ExtraArgs);
+  template<class Functor>
+  typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_ivalue_args(Functor* functor, ArrayRef<IValue> ivalue_args) {
+    constexpr size_t num_ivalue_args = guts::infer_function_traits_t<Functor>::number_of_parameters;
     AT_ASSERTM(num_ivalue_args == ivalue_args.size(), "Wrong number of ivalue arguments");
-    return call_with_ivalue_args_<FuncType, func>(ivalue_args, guts::make_index_sequence<num_ivalue_args>(), std::forward<ExtraArgs>(extra_args)...);
+    return call_functor_with_ivalue_args_<Functor>(functor, ivalue_args, guts::make_index_sequence<num_ivalue_args>());
   }
 
   template<class OutputType>
@@ -103,40 +106,30 @@ namespace detail {
     }
   };
 
-  // SFINAE over (1) does the operator kernel have a cache and (2) does it return a value or void
-  template<class CacheTypeOrVoid, class FuncType, FuncType* kernel, class Enable = void> struct wrap_kernel {};
-  // SFINAE version for kernels with output and with cache
-  template<class CacheTypeOrVoid, class FuncType, FuncType* kernel>
-  struct wrap_kernel<CacheTypeOrVoid, FuncType, kernel, guts::enable_if_t<!std::is_same<void, CacheTypeOrVoid>::value && !std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
-    static typename guts::function_traits<FuncType>::return_type call(Stack* stack, KernelCache* cache) {
-      constexpr size_t num_inputs = guts::function_traits<FuncType>::number_of_parameters - 1; // -1 because it takes the kernel cache as last argument
-      auto output = call_with_ivalue_args<FuncType, kernel>(torch::jit::last(*stack, num_inputs), static_cast<CacheTypeOrVoid*>(cache));
-      push_outputs<typename guts::function_traits<FuncType>::return_type>(std::move(output), stack);
+  template<class KernelFunctor, class Enable = void> struct wrap_kernel_functor final {};
+
+  // SFINAE version for kernels that return an output
+  template<class KernelFunctor>
+  struct wrap_kernel_functor<KernelFunctor, guts::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+    static void call(Stack* stack, KernelCache* cache) {
+      static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Kernel functor must inherit from c10::OperatorKernel");
+
+      constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
+      KernelFunctor* functor = static_cast<KernelFunctor*>(cache);
+      auto output = call_functor_with_ivalue_args<KernelFunctor>(functor, torch::jit::last(*stack, num_inputs));
+      push_outputs<typename guts::infer_function_traits_t<KernelFunctor>::return_type>(std::move(output), stack);
     }
   };
-  // SFINAE version for kernels with output and without a cache
-  template<class CacheTypeOrVoid, class FuncType, FuncType* kernel>
-  struct wrap_kernel<CacheTypeOrVoid, FuncType, kernel, guts::enable_if_t<std::is_same<void, CacheTypeOrVoid>::value && !std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
-    static typename guts::function_traits<FuncType>::return_type call(Stack* stack, c10::KernelCache* /*cache*/) {
-      constexpr size_t num_inputs = guts::function_traits<FuncType>::number_of_parameters;
-      auto output = call_with_ivalue_args<FuncType, kernel>(torch::jit::last(*stack, num_inputs));
-      push_outputs<typename guts::function_traits<FuncType>::return_type>(std::move(output), stack);
-    }
-  };
-  // SFINAE version for kernels without output and with a cache
-  template<class CacheTypeOrVoid, class FuncType, FuncType* kernel>
-  struct wrap_kernel<CacheTypeOrVoid, FuncType, kernel, guts::enable_if_t<!std::is_same<void, CacheTypeOrVoid>::value && std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
-    static typename guts::function_traits<FuncType>::return_type call(Stack* stack, c10::KernelCache* cache) {
-      constexpr size_t num_inputs = guts::function_traits<FuncType>::number_of_parameters - 1; // -1 because it takes the kernel cache as last argument
-      call_with_ivalue_args<FuncType, kernel>(torch::jit::last(*stack, num_inputs), static_cast<CacheTypeOrVoid*>(cache));
-    }
-  };
-  // SFINAE version for kernels without output and without a cache
-  template<class CacheTypeOrVoid, class FuncType, FuncType* kernel>
-  struct wrap_kernel<CacheTypeOrVoid, FuncType, kernel, guts::enable_if_t<std::is_same<void, CacheTypeOrVoid>::value && std::is_same<void, typename guts::function_traits<FuncType>::return_type>::value>> final {
-    static typename guts::function_traits<FuncType>::return_type call(Stack* stack, c10::KernelCache* /*cache*/) {
-      constexpr size_t num_inputs = guts::function_traits<FuncType>::number_of_parameters;
-      call_with_ivalue_args<FuncType, kernel>(torch::jit::last(*stack, num_inputs));
+
+  // SFINAE version for kernels that don't return an output
+  template<class KernelFunctor>
+  struct wrap_kernel_functor<KernelFunctor, guts::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+    static void call(Stack* stack, KernelCache* cache) {
+      static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Kernel functor must inherit from c10::OperatorKernel");
+
+      constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
+      KernelFunctor* functor = static_cast<KernelFunctor*>(cache);
+      call_functor_with_ivalue_args<KernelFunctor>(functor, torch::jit::last(*stack, num_inputs));
     }
   };
 
@@ -151,36 +144,78 @@ namespace detail {
     return nullptr;
   }
 
-  struct KernelForRegistration final {
-    TensorTypeId dispatch_key;
-    KernelFunction* kernel_func = nullptr;
-    KernelCacheCreatorFunction* cache_creator_func = nullptr;
+  // WrapKernelFunction: Wraps a compile time function pointer into a kernel functor.
+  // Since it is a compile time function pointer, many compilers can inline it
+  // into the wrapper and you don't get any performance overhead for wrapping.
+  template<class FuncType, FuncType* kernel_func, class ReturnType, class ParameterList> class WrapKernelFunction_ {};
+  template<class FuncType, FuncType* kernel_func, class ReturnType, class... Parameters>
+  class WrapKernelFunction_<FuncType, kernel_func, ReturnType, guts::typelist::typelist<Parameters...>> final : public c10::OperatorKernel {
+  public:
+    auto operator()(Parameters&&... args) -> decltype(kernel_func(std::forward<Parameters>(args)...)) {
+      return (*kernel_func)(std::forward<Parameters>(args)...);
+    }
   };
+  template<class FuncType, FuncType* kernel_func>
+  using WrapKernelFunction = WrapKernelFunction_<
+      FuncType,
+      kernel_func,
+      typename guts::function_traits<FuncType>::return_type,
+      typename guts::function_traits<FuncType>::parameter_types
+  >;
 
-  struct KernelRegistrationConfigParameter final {
-    static constexpr bool is_c10_operator_registration_config_parameter = true;
+  // WrapKernelFunctionRuntime: Wraps a runtime function pointer into a kernel functor.
+  // Since it is a runtime function pointer, there is an overhead for calling
+  // the function pointer whenever the kernel is invoked.
+  // TODO Enable this and use it for deprecated API
+  /*template<class FuncType, class ReturnType, class ParameterList> class WrapKernelFunctionRuntime_ {};
+  template<class FuncType, class ReturnType, class... Parameters>
+  class WrapKernelFunctionRuntime_<FuncType, ReturnType, guts::typelist::typelist<Parameters...>> final : public c10::OperatorKernel {
+  public:
+    explicit WrapKernelFunctionRuntime_(FuncType* kernel_func)
+    : kernel_func_(kernel_func) {}
 
-    explicit constexpr KernelRegistrationConfigParameter(KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator_func)
-    : kernel_func_(kernel_func), cache_creator_func_(cache_creator_func) {
+    auto operator()(Parameters&&... args) -> decltype(kernel_func(std::forward<Parameters>(args)...)) {
+      return (*kernel_func_)(std::forward<Parameters>(args)...);
     }
 
-    void apply(KernelForRegistration* registration) const {
+  private:
+    FuncType* kernel_func_;
+  };
+  template<class FuncType>
+  using WrapKernelFunctionRuntime = WrapKernelFunctionRuntime_<
+      FuncType,
+      typename guts::function_traits<FuncType>::return_type,
+      typename guts::function_traits<FuncType>::parameter_types
+  >;*/
+
+  struct KernelRegistrationConfig final {
+    TensorTypeId dispatch_key;
+    KernelFunction* kernel_func = nullptr;
+    KernelCacheCreatorFunction cache_creator_func = nullptr;
+  };
+
+  // TODO If this was templated on KernelCacheCreatorFunction, it could be constexpr again.
+  struct KernelRegistrationConfigParameter final {
+    explicit KernelRegistrationConfigParameter(KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator_func)
+    : kernel_func_(kernel_func), cache_creator_func_(std::move(cache_creator_func)) {
+    }
+
+    void apply(KernelRegistrationConfig* registration) && {
       registration->kernel_func = kernel_func_;
-      registration->cache_creator_func = cache_creator_func_;
+      registration->cache_creator_func = std::move(cache_creator_func_);
     }
 
   private:
     KernelFunction* kernel_func_;
-    KernelCacheCreatorFunction* cache_creator_func_;
+    KernelCacheCreatorFunction cache_creator_func_;
   };
 
   struct DispatchKeyConfigParameter final {
-    static constexpr bool is_c10_operator_registration_config_parameter = true;
+    explicit constexpr DispatchKeyConfigParameter(TensorTypeId dispatch_key)
+    : dispatch_key_(dispatch_key) {}
 
-    explicit constexpr DispatchKeyConfigParameter(TensorTypeId dispatch_key): dispatch_key_(dispatch_key) {}
-
-    void apply(KernelForRegistration* registration) const {
-      registration->dispatch_key = dispatch_key_;
+    void apply(KernelRegistrationConfig* registration) && {
+      registration->dispatch_key = std::move(dispatch_key_);
     }
 
   private:
@@ -188,38 +223,148 @@ namespace detail {
   };
 }
 
-template<class FuncType, FuncType* kernel_func, class CacheTypeOrVoid = void>
-inline constexpr detail::KernelRegistrationConfigParameter kernel() {
-  return detail::KernelRegistrationConfigParameter(&detail::wrap_kernel<CacheTypeOrVoid, FuncType, kernel_func>::call, &detail::cacheCreator<CacheTypeOrVoid>);
+/**
+ * Use this to register an operator whose kernel is implemented as a functor
+ *
+ * Example:
+ *
+ * > namespace {
+ * >   class my_kernel_cpu final : public c10::OperatorKernel {
+ * >   public:
+ * >     Tensor operator()(Tensor a, Tensor b) {...}
+ * >   };
+ * > }
+ * >
+ * > static auto registry = c10::RegisterOperators()
+ * >     .op("my_op",
+ * >         c10::kernel<my_kernel_cpu>(),
+ * >         c10::dispatchKey(CPUTensorId()));
+ *
+ * The functor constructor can take arguments to configure the kernel.
+ * The arguments are defined in the kernel registration.
+ * Example:
+ *
+ * > namespace {
+ * >   class my_kernel_cpu final : public c10::OperatorKernel {
+ * >   public:
+ * >     explicit my_kernel_cpu(std::string some_configuration, int a, bool b)
+ * >         : ... {...}
+ * >
+ * >     Tensor operator()(Tensor a, Tensor b) {...}
+ * >   };
+ * > }
+ * >
+ * > static auto registry = c10::RegisterOperators()
+ * >     .op("my_op",
+ * >         c10::kernel<my_kernel_cpu>("some_configuration", 3, true),
+ * >         c10::dispatchKey(CPUTensorId()));
+ */
+template<class KernelFunctor, class... ConstructorParameters>
+inline detail::KernelRegistrationConfigParameter kernel(ConstructorParameters&&... constructorParameters) {
+  // TODO We're only doing this make_shared nonsense so we're able to perfectly
+  //      forward the constructorParameters into the lambda below and don't have
+  //      to copy them. Once we have C++14, we should change this to proper
+  //      capture like:
+  //      [parameters = std::make_tuple(std::forward<ConstructorParameters>(constructorParameters)...)]
+  //      With C++20, we could even directly forward-capture the parameter pack
+  //      without converting it into a tuple.
+  auto parameters = std::make_shared<std::tuple<guts::decay_t<ConstructorParameters>...>>(
+      std::forward<ConstructorParameters>(constructorParameters)...);
+  return detail::KernelRegistrationConfigParameter(
+      &detail::wrap_kernel_functor<KernelFunctor>::call,
+      [parameters] {
+        return guts::apply(&guts::make_unique<KernelFunctor>, *parameters);
+      }
+  );
 }
 
-inline constexpr detail::KernelRegistrationConfigParameter kernel(KernelFunction* kernel_func) {
+/**
+ * Use this to register an operator whose kernel is implemented by a function:
+ *
+ * Example:
+ *
+ * > namespace { Tensor my_kernel_cpu(Tensor a, Tensor b) {...} }
+ * >
+ * > static auto registry = c10::RegisterOperators()
+ * >     .op("my_op",
+ * >         c10::kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(),
+ * >         c10::dispatchKey(CPUTensorId()));
+ */
+template<class FuncType, FuncType* kernel_func>
+inline detail::KernelRegistrationConfigParameter kernel() {
+  return kernel<detail::WrapKernelFunction<FuncType, kernel_func>>();
+}
+
+/**
+ * Use this to register an operator whose kernel is implemented by a stack
+ * based function. This is meant to be used internally, for example for writing
+ * wrappers for other ways of writing operators. This is not part of the
+ * public API.
+ *
+ * Example:
+ *
+ * > namespace { void my_kernel_cpu(Stack* stack, KernelCache* cache) {...} }
+ * >
+ * > static auto registry = c10::RegisterOperators()
+ * >     .op("my_op",
+ * >         c10::kernel(my_kernel_cpu),
+ * >         c10::dispatchKey(CPUTensorId()));
+ */
+inline detail::KernelRegistrationConfigParameter kernel(KernelFunction* kernel_func) {
   return detail::KernelRegistrationConfigParameter(kernel_func, &detail::cacheCreator<void>);
 }
 
+/**
+ * Use this to register an operator with a kernel for a certain dispatch key.
+ *
+ * Example:
+ *
+ * > namespace {
+ * >   class my_kernel_cpu final : public c10::OperatorKernel {
+ * >   public:
+ * >     Tensor operator()(Tensor a, Tensor b) {...}
+ * >   };
+ * >   class my_kernel_cuda final : public c10::OperatorKernel {
+ * >   public:
+ * >     Tensor operator()(Tensor a, Tensor b) {...}
+ * >   };
+ * > }
+ * >
+ * > static auto registry = c10::RegisterOperators()
+ * >     .op("my_op",
+ * >         c10::kernel<my_kernel_cpu>(),
+ * >         c10::dispatchKey(CPUTensorId()))
+ * >     .op("my_op",
+ * >         c10::kernel<my_kernel_cuda>(),
+ * >         c10::dispatchKey(CUDATensorId()));
+ */
 inline constexpr detail::DispatchKeyConfigParameter dispatchKey(TensorTypeId dispatch_key) {
   return detail::DispatchKeyConfigParameter(dispatch_key);
 }
 
 namespace detail {
 
+// Take a list of configuration parameters and return a KernelRegistrationConfig
+// accumulating all their configurations.
 template<class... ConfigParameters>
-KernelForRegistration make_registration_config(const ConfigParameters&... configParameters) {
-  KernelForRegistration registration;
+KernelRegistrationConfig make_registration_config(ConfigParameters&&... configParameters) {
+  KernelRegistrationConfig config;
 
   // apply all configParameters
-  (void)std::initializer_list<int>{(configParameters.apply(&registration), 0)...};
+  (void)std::initializer_list<int>{(std::move(configParameters).apply(&config), 0)...};
 
   // TODO Allow this for just registering the schema?
-  AT_CHECK(registration.kernel_func != nullptr, "Cannot register operator without kernel");
+  AT_CHECK(config.kernel_func != nullptr, "Cannot register operator without kernel");
 
-  // if kernel_func is set, so must be cache_creator_func
-  AT_ASSERT(registration.cache_creator_func != nullptr);
+  // if kernel_func is set, so must be cache_creator_func,
+  // the API shouldn't allow anything else.
+  AT_ASSERT(static_cast<bool>(config.cache_creator_func));
 
-  return registration;
+  return config;
 }
 }
 
+// TODO doc comments
 class RegisterOperators final {
 public:
   RegisterOperators() = default;
@@ -228,12 +373,25 @@ public:
   RegisterOperators& operator=(const RegisterOperators&) = delete;
   RegisterOperators& operator=(RegisterOperators&&) = default;
 
+  // TODO doc comments
   template<class... ConfigParameters>
-  RegisterOperators op(FunctionSchema schema, const ConfigParameters&... configParameters) && {
-    const detail::KernelForRegistration registration = make_registration_config(configParameters...);
-    registrars_.emplace_back(std::move(schema), registration.dispatch_key, registration.kernel_func, registration.cache_creator_func);
+  RegisterOperators op(FunctionSchema schema, ConfigParameters&&... configParameters) && {
+    detail::KernelRegistrationConfig config = make_registration_config(configParameters...);
+    registrars_.emplace_back(std::move(schema), config.dispatch_key, config.kernel_func, std::move(config.cache_creator_func));
     return std::move(*this);
   }
+
+  // TODO allow input schema to be just the operator name + overload name, in that case use schema generated from kernel function
+  // TODO if schema is fully specified, still generate schema from kernel function and make sure it's correct
+
+  // Deprecated. For backwards compatibility only.
+  // Don't use this, it introduces a performance overhead on each kernel call
+  // due to the kernel being stored in the wrapper as a runtime function pointer.
+  // TODO Enable this
+  /*template<class KernelFunc>
+  RegisterOperators op(FunctionSchema schema, KernelFunc* func) && {
+    return op(std::move(schema), kernel(func));
+  }*/
 
 private:
   std::vector<c10::detail::OperatorRegistrar> registrars_;

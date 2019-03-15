@@ -39,8 +39,8 @@ public:
   }
 
 private:
-  explicit OpKernel(KernelFunction* kernel, KernelCacheCreatorFunction* cache_creator)
-  : kernel_(kernel), cache_((*cache_creator)()) {}
+  explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator)
+  : kernel_(kernel), cache_(cache_creator()) {}
   friend class Dispatcher;
 
   KernelFunction* kernel_;
@@ -126,7 +126,7 @@ public:
   /**
    * Register an operator to the dispatch table for an operator.
    */
-  void registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator_func);
+  void registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func);
 
   /**
    * Remove an operator from the dispatch table for an operator.

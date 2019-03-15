@@ -8,52 +8,54 @@ using caffe2::Tensor;
 namespace caffe2 {
 namespace {
 
-struct Cache final : public c10::KernelCache {
-  std::vector<int64_t> dims;
-  bool initialized = false;
-};
-
 template <class DataType>
-void expand_dims_op_cpu_impl(
+class expand_dims_cpu final : public c10::OperatorKernel {
+public:
+  void operator()(
     const at::Tensor& input_,
     const at::Tensor& output_,
-    ArrayRef<int64_t> dims,
-    Cache* cache) {
-  Tensor input{C10Tensor(input_)};
-  Tensor output{C10Tensor(output_)};
+    ArrayRef<int64_t> dims) {
+    Tensor input{C10Tensor(input_)};
+    Tensor output{C10Tensor(output_)};
 
-  if (!cache->initialized) {
-    cache->dims = dims.vec();
-    auto originalSize = cache->dims.size();
-    CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
-    std::sort(cache->dims.begin(), cache->dims.end());
-    cache->dims.erase(
-        std::unique(cache->dims.begin(), cache->dims.end()), cache->dims.end());
-    if (cache->dims.size() < originalSize) {
-      LOG(WARNING) << "Parameter `dims` has repeated dimensions.";
+    if (!initialized_) {
+      dims_ = dims.vec();
+      auto originalSize = dims_.size();
+      CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
+      std::sort(dims_.begin(), dims_.end());
+      dims_.erase(
+          std::unique(dims_.begin(), dims_.end()), dims_.end());
+      if (dims_.size() < originalSize) {
+        LOG(WARNING) << "Parameter `dims` has repeated dimensions.";
+      }
+      CAFFE_ENFORCE(
+          dims_.front() >= 0, "Dimension ids must be non-negative.");
+      initialized_ = true;
     }
-    CAFFE_ENFORCE(
-        cache->dims.front() >= 0, "Dimension ids must be non-negative.");
-    cache->initialized = true;
+
+    output.CopyFrom(input);
+    if (dims_.empty()) {
+      return;
+    }
+
+    auto newDims = input.sizes().vec();
+    CAFFE_ENFORCE_GE(
+        input.sizes().size() + dims_.size(),
+        dims_.back() + 1,
+        "Input needs at least ",
+        (1 + dims_.back() - dims_.size()),
+        " dimensions given `dims`.");
+    for (const auto dim : dims_) {
+      newDims.insert(newDims.begin() + dim, 1);
+    }
+    output.Reshape(newDims);
   }
 
-  output.CopyFrom(input);
-  if (cache->dims.empty()) {
-    return;
-  }
+private:
+  std::vector<int64_t> dims_;
+  bool initialized_ = false;
+};
 
-  auto newDims = input.sizes().vec();
-  CAFFE_ENFORCE_GE(
-      input.sizes().size() + cache->dims.size(),
-      cache->dims.back() + 1,
-      "Input needs at least ",
-      (1 + cache->dims.back() - cache->dims.size()),
-      " dimensions given `dims`.");
-  for (const auto dim : cache->dims) {
-    newDims.insert(newDims.begin() + dim, 1);
-  }
-  output.Reshape(newDims);
-}
 
 static auto registry = c10::RegisterOperators().op(
     FunctionSchema(
@@ -63,10 +65,7 @@ static auto registry = c10::RegisterOperators().op(
                                     c10::Argument("output"),
                                     c10::Argument("dims", ListType::ofInts())}),
         (std::vector<c10::Argument>{})),
-    c10::kernel<
-        decltype(expand_dims_op_cpu_impl<float>),
-        &expand_dims_op_cpu_impl<float>,
-        Cache>(),
+    c10::kernel<expand_dims_cpu<float>>(),
     c10::dispatchKey(CPUTensorId()));
 
 } // namespace
