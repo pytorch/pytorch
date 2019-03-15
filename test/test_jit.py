@@ -4315,6 +4315,76 @@ a")
             return a == [1, 2, 4]
         self.checkScript(test_list_remove, ())
 
+    def test_list_index_not_existing(self):
+        @torch.jit.script
+        def list_index_not_existing():
+            a = [4, 1, 3, 2]
+            i = a.index(5)
+
+            return i
+
+        with self.assertRaisesRegex(RuntimeError, "'5' is not in list"):
+            list_index_not_existing()
+
+    def test_list_index(self):
+        def list_index():
+            a = [4, 1, 3, 2]
+            i = a.index(3)
+
+            return i == 2
+        self.checkScript(list_index, ())
+
+    def test_tensor_list_index(self):
+        def tensor_list_index():
+            a = [torch.tensor(4), torch.tensor(1), torch.tensor(3), torch.tensor(2)]
+            i = a.index(torch.tensor(3))
+
+            return i == 2
+        self.checkScript(tensor_list_index, ())
+
+    def test_tensor_list_index_not_existing(self):
+        @torch.jit.script
+        def tensor_list_index_not_existing():
+            a = [torch.tensor(4), torch.tensor(1), torch.tensor(3), torch.tensor(2)]
+            i = a.index(torch.tensor(5))
+
+            return i
+
+        with self.assertRaisesRegex(RuntimeError, "is not in list"):
+            tensor_list_index_not_existing()
+
+    def test_list_count(self):
+        def list_count():
+            a = [4, 1, 4, 2, 4]
+            i = a.count(4)
+
+            return i == 3
+        self.checkScript(list_count, ())
+
+    def test_list_count_not_existing(self):
+        def list_count_not_existing():
+            a = [4, 1, 4, 2, 4]
+            i = a.count(5)
+
+            return i == 0
+        self.checkScript(list_count_not_existing, ())
+
+    def test_tensor_list_count(self):
+        def tensor_list_count():
+            a = [torch.tensor(4), torch.tensor(1), torch.tensor(4), torch.tensor(4)]
+            i = a.count(torch.tensor(4))
+
+            return i == 3
+        self.checkScript(tensor_list_count, ())
+
+    def test_tensor_list_count_not_existing(self):
+        def tensor_list_count_not_existing():
+            a = [torch.tensor(4), torch.tensor(1), torch.tensor(4), torch.tensor(4)]
+            i = a.count(torch.tensor(5))
+
+            return i == 0
+        self.checkScript(tensor_list_count_not_existing, ())
+
     def test_mutable_list_remove_tensor(self):
         def test_list_remove_tensor():
             a = [torch.ones(1), torch.zeros(1), torch.ones(2)]
