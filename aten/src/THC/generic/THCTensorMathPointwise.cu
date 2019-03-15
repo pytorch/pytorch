@@ -108,30 +108,18 @@ void THCTensor_(clamp)(THCState *state, THCTensor *self_, THCTensor *src, scalar
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(cross)(THCState *state, THCTensor *self, THCTensor *x, THCTensor *y, at::optional<int64_t> dim)
+void THCTensor_(cross)(THCState *state, THCTensor *self, THCTensor *x, THCTensor *y, int dimension)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self, x, y));
 
   int i;
-  int dimension = -1;
   int nd = x->dim();
   ptrdiff_t nelem = THCTensor_(nElement)(state, x);
   THArgCheck(nd == y->dim(), 1, "tensors must have same number of dimensions");
-  if (!dim.has_value()) {
-    for (i = 0; i < nd; i++) {
-      THArgCheck(THCTensor_(size)(state, x, i) == THCTensor_(size)(state, y, i), 1, "dimension %i of x and y does not match", i);
-      if (dimension < 0 && THCTensor_(size)(state, x, i) == 3) {
-        dimension = i;
-      }
-    }
-    if(dimension < 0) {
-      THDescBuff ba = THTensor_(sizeDesc)(a);
-      THError("no dimension of size 3 in a: %s", ba.str);
-    }
-  } else {
-    dimension = dim.value();
-    if (dimension < 0) {
-      dimension += nd;
+  for (i = 0; i < nd; i++) {
+    THArgCheck(THCTensor_(size)(state, x, i) == THCTensor_(size)(state, y, i), 1, "dimension %i of x and y does not match", i);
+    if (dimension < 0 && THCTensor_(size)(state, x, i) == 3) {
+      dimension = i;
     }
   }
 

@@ -2319,12 +2319,21 @@ class _TestTorchMixin(object):
         self._test_reduce_integer_upcast(lambda x, **kwargs: torch.cumprod(x, 0, **kwargs))
 
     def test_cross(self):
-        x = torch.rand(100, 3, 100)
-        y = torch.rand(100, 3, 100)
+        x = torch.rand(100, 3)
+        y = torch.rand(100, 3)
         res1 = torch.cross(x, y)
         res2 = torch.Tensor()
         torch.cross(x, y, out=res2)
         self.assertEqual(res1, res2)
+
+    def test_cross_with_and_without_dim(self):
+        x = torch.rand(100, 3, 100)
+        y = torch.rand(100, 3, 100)
+        res1 = torch.cross(x, y, dim = 1)
+        res2 = torch.cross(x, y, dim = -1)
+        res3 = torch.cross(x, y)
+        self.assertEqual(res1, res2)
+        self.assertEqual(res1, res3)
 
     def test_zeros(self):
         res1 = torch.zeros(100, 100)

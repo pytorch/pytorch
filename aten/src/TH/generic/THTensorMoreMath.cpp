@@ -467,62 +467,6 @@ accreal THTensor_(trace)(THTensor *t)
   return sum;
 }
 
-void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, c10::optional<int64_t> dim)
-{
-  int i;
-
-  if(THTensor_(nDimensionLegacyNoScalars)(a) != THTensor_(nDimensionLegacyNoScalars)(b))
-    THError("inconsistent tensor dimension %dD, %dD",
-        THTensor_(nDimensionLegacyNoScalars)(a), THTensor_(nDimensionLegacyNoScalars)(b));
-
-  for(i = 0; i < a->dim(); i++)
-  {
-    if(THTensor_(size)(a, i) != THTensor_(size)(b, i)) {
-        THDescBuff ba = THTensor_(sizeDesc)(a);
-        THDescBuff bb = THTensor_(sizeDesc)(b);
-        THError("inconsistent tensor sizes %s, %s", ba.str, bb.str);
-    }
-  }
-
-  int64_t dimension = -1;
-  if(!dim.has_value())
-  {
-    for(i = 0; i < THTensor_(nDimensionLegacyNoScalars)(a); i++)
-    {
-      if(THTensor_sizeLegacyNoScalars(a, i) == 3)
-      {
-        dimension = i;
-        break;
-      }
-    }
-    if(dimension < 0) {
-      THDescBuff ba = THTensor_(sizeDesc)(a);
-      THError("no dimension of size 3 in a: %s", ba.str);
-    }
-  }
-  else
-  {
-    dimension = dim.value();
-    if(dimension < 0)
-    {
-      dimension += THTensor_(nDimensionLegacyNoScalars)(a);
-    }
-  }
-
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(a), 3, "dimension %d out of range",
-      dimension + TH_INDEX_BASE);
-  THArgCheck(THTensor_sizeLegacyNoScalars(a, dimension) == 3, 3, "dimension %d does not have size 3",
-      dimension + TH_INDEX_BASE);
-
-  THTensor_(resizeAs)(r_, a);
-
-  TH_TENSOR_DIM_APPLY3(scalar_t, a, scalar_t, b, scalar_t, r_, dimension,
-                       TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
-                       r__data[0*r__stride] = a_data[1*a_stride]*b_data[2*b_stride] - a_data[2*a_stride]*b_data[1*b_stride];
-                       r__data[1*r__stride] = a_data[2*a_stride]*b_data[0*b_stride] - a_data[0*a_stride]*b_data[2*b_stride];
-                       r__data[2*r__stride] = a_data[0*a_stride]*b_data[1*b_stride] - a_data[1*a_stride]*b_data[0*b_stride];);
-}
-
 void THTensor_(cmax)(THTensor *r, THTensor *t, THTensor *src) {
   THTensor_(resizeAs)(r, t);
   TH_TENSOR_APPLY3(scalar_t, r, scalar_t, t, scalar_t, src,

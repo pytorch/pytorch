@@ -1929,14 +1929,15 @@
   cname: cross
   variants:
     - function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
       output: True
     - THTensor* self
     - THTensor* other
-    - arg: c10::optional<int64_t> dim
-      default: c10::nullopt
+    - arg: int64_t dim
 ]]
 [[
   name: _th_diag
