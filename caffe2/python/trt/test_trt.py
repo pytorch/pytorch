@@ -198,7 +198,8 @@ class TensorRTTransformTest(DownloadingTestCase):
             c2_init_net.ParseFromString(f.read())
         c2_init_net.name = model_name + '_init'
 
-        value_info = json.load(open(os.path.join(model_dir, 'value_info.json')))
+        with open(os.path.join(model_dir, 'value_info.json')) as f:
+            value_info = json.load(f)
         return c2_init_net, c2_predict_net, value_info
 
     def _add_head_tail(self, pred_net, new_head, new_tail):
