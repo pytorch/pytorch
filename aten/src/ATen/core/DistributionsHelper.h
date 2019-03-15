@@ -31,12 +31,14 @@ template <typename T>
 struct uniform_real_distribution {
 
   C10_HOST_DEVICE inline uniform_real_distribution(T a_in, T b_in) {
-    #ifdef __CUDA_ARCH__
-      assert(a_in <= b_in);
-      assert(b_in-a_in <= std::numeric_limits<T>::max());
-    #else
-      AT_ASSERT(a_in <= b_in);
-      AT_ASSERT(b_in-a_in <= std::numeric_limits<T>::max());
+    #ifndef __HIP_PLATFORM_HCC__
+      #ifdef __CUDA_ARCH__
+        assert(a_in <= b_in);
+        assert(b_in-a_in <= std::numeric_limits<T>::max());
+      #else
+        AT_ASSERT(a_in <= b_in);
+        AT_ASSERT(b_in-a_in <= std::numeric_limits<T>::max());
+      #endif
     #endif
     a = a_in;
     b = b_in;
@@ -72,10 +74,12 @@ template <typename T>
 struct normal_distribution {
 
   C10_HOST_DEVICE inline normal_distribution(T mean_in, T stdv_in) {
-    #ifdef __CUDA_ARCH__
-      assert(stdv_in > 0);
-    #else
-      AT_ASSERT(stdv_in > 0);
+    #ifndef __HIP_PLATFORM_HCC__
+      #ifdef __CUDA_ARCH__
+        assert(stdv_in > 0);
+      #else
+        AT_ASSERT(stdv_in > 0);
+      #endif
     #endif
     mean = mean_in;
     stdv = stdv_in;
@@ -128,10 +132,12 @@ template <typename T>
 struct bernoulli_distribution {
 
   C10_HOST_DEVICE inline bernoulli_distribution(T p_in) {
-    #ifdef __CUDA_ARCH__
-      assert(p_in >= 0 && p_in <= 1);
-    #else
-      AT_ASSERT(p_in >= 0 && p_in <= 1);
+    #ifndef __HIP_PLATFORM_HCC__
+      #ifdef __CUDA_ARCH__
+        assert(p_in >= 0 && p_in <= 1);
+      #else
+        AT_ASSERT(p_in >= 0 && p_in <= 1);
+      #endif
     #endif
     p = p_in;
   }
@@ -152,10 +158,12 @@ template <typename T>
 struct geometric_distribution {
 
   C10_HOST_DEVICE inline geometric_distribution(T p_in) {
-    #ifdef __CUDA_ARCH__
-      assert(p_in > 0 && p_in < 1);
-    #else
-      AT_ASSERT(p_in > 0 && p_in < 1);
+    #ifndef __HIP_PLATFORM_HCC__
+      #ifdef __CUDA_ARCH__
+        assert(p_in > 0 && p_in < 1);
+      #else
+        AT_ASSERT(p_in > 0 && p_in < 1);
+      #endif
     #endif
     p = p_in;
   }
@@ -228,10 +236,12 @@ template <typename T>
 struct lognormal_distribution {
 
   C10_HOST_DEVICE inline lognormal_distribution(T mean_in, T stdv_in) {
-    #ifdef __CUDA_ARCH__
-      assert(stdv_in > 0);
-    #else
-      AT_ASSERT(stdv_in > 0);
+    #ifndef __HIP_PLATFORM_HCC__
+      #ifdef __CUDA_ARCH__
+        assert(stdv_in > 0);
+      #else
+        AT_ASSERT(stdv_in > 0);
+      #endif
     #endif
     mean = mean_in;
     stdv = stdv_in;
