@@ -57,13 +57,13 @@ class DataLoader(object):
 
     .. note:: When num_workers != 0, corresponding worker processes are created each time
               iterator for the DataLoader is obtained (as in when you call
-			  ``enumerate(dataloader,0)``).
+              ``enumerate(dataloader,0)``).
               At this point, the dataset, ``collate_fn`` and ``worker_init_fn`` are passed to each
               worker, where they are used to access and initialize data based on the indices
               queued up from the main process. This means that dataset access together with
               its internal IO, transforms and collation runs in the worker, while any
-			  shuffle randomization is done in the main process which guides loading by assigning
-			  indices to load. Workers are shut down once the end of the iteration is reached.
+              shuffle randomization is done in the main process which guides loading by assigning
+              indices to load. Workers are shut down once the end of the iteration is reached.
               
               Since workers rely on Python multiprocessing, worker launch behavior is different
               on Windows compared to Unix. While on Unix, fork() is used internally, allowing
@@ -83,7 +83,7 @@ class DataLoader(object):
               they are available in workers as well
               (this is needed since functions are pickled as references only, not bytecode).
 			  
-			  By default, each worker will have its PyTorch seed set to
+              By default, each worker will have its PyTorch seed set to
               ``base_seed + worker_id``, where ``base_seed`` is a long generated
               by main process using its RNG. However, seeds for other libraies
               may be duplicated upon initializing workers (w.g., NumPy), causing
