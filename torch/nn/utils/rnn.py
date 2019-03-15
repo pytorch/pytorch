@@ -54,7 +54,7 @@ class PackedSequence(PackedSequence_):
     # NOTE [ device and dtype of a PackedSequence ]
     #
     # See the note above in doc string (starting with ":attr:`data` can be on
-    # arbitrary device...".
+    # arbitrary device...").
 
     def __new__(cls, data, batch_sizes=None, sorted_indices=None, unsorted_indices=None):
         # PackedSequence used to only have __init__(self, data, batch_sizes)
