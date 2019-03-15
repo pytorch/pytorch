@@ -249,7 +249,8 @@ def format_yaml(data):
     noalias_dumper.ignore_aliases = lambda self, data: True
     # Support serializing OrderedDict
     noalias_dumper.add_representer(OrderedDict, dict_representer)
-    return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper, width=2048)
+    # width=float('Inf') tunes off line breaks for portability of yaml-parser.
+    return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper, width=float('Inf'))
 
 
 def generate_storage_type_and_tensor(backend, density, scalar_type, declarations):
