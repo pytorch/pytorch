@@ -3,6 +3,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 #define KEPS 1e-12f
@@ -13,8 +14,9 @@ template <typename T, class Context>
 class NormalizeOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  NormalizeOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit NormalizeOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     const auto& x = Input(0);
@@ -34,16 +36,36 @@ class NormalizeOp final : public Operator<Context> {
 
  private:
   const T kEps_ = KEPS;
-  void
-  DoNormalize(const T* xData, T* yData, const int m, const int n, const int sf);
+  void DoNormalize(
+      const T* xData,
+      T* yData,
+      const int m,
+      const int n,
+      const int sf) {
+    using InnerStride = Eigen::InnerStride<Eigen::Dynamic>;
+    using StridedVec =
+        Eigen::Map<Eigen::Matrix<T, 1, Eigen::Dynamic>, 0, InnerStride>;
+    using ConstStridedVec =
+        Eigen::Map<const Eigen::Matrix<T, 1, Eigen::Dynamic>, 0, InnerStride>;
+
+    for (int i = 0; i < n; ++i) {
+      auto base = (i / sf) * sf * m + (i % sf);
+      ConstStridedVec xVec(xData + base, 1, m, InnerStride(sf));
+      auto norm = xVec.template lpNorm<2>();
+      norm = std::max(norm, kEps_);
+      StridedVec yVec(yData + base, 1, m, InnerStride(sf));
+      yVec = xVec / norm;
+    }
+  }
 };
 
 template <typename T, class Context>
 class NormalizeGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  NormalizeGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit NormalizeGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     const auto& x = Input(0);

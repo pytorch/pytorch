@@ -9,7 +9,7 @@
 template <typename Dtype, typename Acctype>
 __global__ void
 #if __CUDA_ARCH__ >= 320 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS(CUDA_NUM_THREADS)
+C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 #endif
 LRNFillScale(const int nthreads, const Dtype* const in,
     const int num, const int channels, const int height,
