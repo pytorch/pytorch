@@ -172,7 +172,8 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
             input_desc_.data(),
             output_desc_.size(),
             output_desc_.data(),
-            &output_fence),
+            &output_fence,
+            /* traceEvents */ nullptr),
         ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
         lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
