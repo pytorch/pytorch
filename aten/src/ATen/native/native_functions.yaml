@@ -61,6 +61,9 @@
   dispatch:
     CUDA: _cudnn_init_dropout_state
 
+- func: _debug_has_internal_overlap(Tensor self) -> int
+  variants: function
+
 - func: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
   matches_jit_signature: True
   variants: function
