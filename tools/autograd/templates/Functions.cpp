@@ -1748,7 +1748,7 @@ std::tuple<Tensor, Tensor> trtrs_backward(
   if (grad_x.defined()) {
     grad_b = std::get<0>(grad_x.trtrs(a, upper, !transpose, unitriangular));
     if (output_mask[1]) {
-      grad_a = transpose ? -x.mm(grad_b.t()) : -grad_b.mm(x.t());
+      grad_a = transpose ? -x.matmul(grad_b.transpose(-1, -2)) : -grad_b.matmul(x.transpose(-1, -2));
       if (upper) {
         grad_a = grad_a.triu((int) unitriangular);
       } else {

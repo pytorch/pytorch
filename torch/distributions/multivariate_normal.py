@@ -20,17 +20,6 @@ def _batch_mv(bmat, bvec):
     return torch.matmul(bmat, bvec.unsqueeze(-1)).squeeze(-1)
 
 
-def _batch_trtrs_lower(bb, bA):
-    """
-    Applies `torch.trtrs` for batches of matrices. `bb` and `bA` should have
-    the same batch shape.
-    """
-    flat_b = bb.reshape((-1,) + bb.shape[-2:])
-    flat_A = bA.reshape((-1,) + bA.shape[-2:])
-    flat_X = torch.stack([torch.trtrs(b, A, upper=False)[0] for b, A in zip(flat_b, flat_A)])
-    return flat_X.reshape(bb.shape)
-
-
 def _batch_mahalanobis(bL, bx):
     r"""
     Computes the squared Mahalanobis distance :math:`\mathbf{x}^\top\mathbf{M}^{-1}\mathbf{x}`
@@ -65,7 +54,7 @@ def _batch_mahalanobis(bL, bx):
     flat_L = bL.reshape(-1, n, n)  # shape = b x n x n
     flat_x = bx.reshape(-1, flat_L.size(0), n)  # shape = c x b x n
     flat_x_swap = flat_x.permute(1, 2, 0)  # shape = b x n x c
-    M_swap = _batch_trtrs_lower(flat_x_swap, flat_L).pow(2).sum(-2)  # shape = b x c
+    M_swap = torch.trtrs(flat_x_swap, flat_L, upper=False)[0].pow(2).sum(-2)  # shape = b x c
     M = M_swap.t()  # shape = c x b
 
     # Now we revert the above reshape and permute operators.
