@@ -621,14 +621,6 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
-        def tanh(self):
-            result = torch.tanh(self)
-            def backward(grad_output):
-                grad_self = grad_output * (1 - result * result)
-                return grad_self
-
-            return result, backward
-
         # Share backward with threshold
         def relu(self):
             result = torch.relu(self)
