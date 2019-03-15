@@ -1019,11 +1019,11 @@ ger(vec2) -> Tensor
 See :func:`torch.ger`
 """)
 
-add_docstr_all('gesv',
+add_docstr_all('solve',
                r"""
-gesv(A) -> Tensor, Tensor
+solve(A) -> Tensor, Tensor
 
-See :func:`torch.gesv`
+See :func:`torch.solve`
 """)
 
 add_docstr_all('indices',

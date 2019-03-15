@@ -364,10 +364,6 @@
   self: grad.mv(vec2)
   vec2: grad.t().mv(self)
 
-- name: gesv(Tensor self, Tensor A)
-  self: gesv_backward_self(grad, self, A)
-  A: gesv_backward_A(grad, self, A, result0)
-
 - name: indices(Tensor self)
   output_differentiability: [False]
 
@@ -741,6 +737,10 @@
 - name: slogdet(Tensor self)
   self: slogdet_backward(grad, self, result0, result1)
   output_differentiability: [false, true]
+
+- name: solve(Tensor self, Tensor A)
+  self: solve_backward_self(grad, self, A)
+  A: solve_backward_A(grad, self, A, result0)
 
 - name: sort(Tensor self, int64_t dim, bool descending)
   self: index_select_backward(grad, dim, result1, self.sizes(), true)

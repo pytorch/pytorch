@@ -20,18 +20,18 @@ namespace native {
 
 #ifdef USE_MAGMA
 template<class scalar_t>
-void magmaGesv(
+void magmaSolve(
     magma_int_t n, magma_int_t nrhs, scalar_t* dA, magma_int_t ldda,
     magma_int_t* ipiv, scalar_t* dB, magma_int_t lddb, magma_int_t* info) {
-  AT_ERROR("gesv only takes float or double Tensors");
+  AT_ERROR("solve only takes float or double Tensors");
 }
 
 template<class scalar_t>
-void magmaGesvBatched(
+void magmaSolveBatched(
     magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda,
     magma_int_t** dipiv_array, scalar_t** dB_array, magma_int_t lddb,
     magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
-  AT_ERROR("gesv only takes float or double Tensors");
+  AT_ERROR("solve only takes float or double Tensors");
 }
 
 template<class scalar_t>
@@ -86,7 +86,7 @@ void magmaCholeskyBatched(
 }
 
 template<>
-void magmaGesvBatched<double>(
+void magmaSolveBatched<double>(
     magma_int_t n, magma_int_t nrhs, double** dA_array, magma_int_t ldda,
     magma_int_t** dipiv_array, double** dB_array, magma_int_t lddb,
     magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
@@ -94,7 +94,7 @@ void magmaGesvBatched<double>(
 }
 
 template<>
-void magmaGesvBatched<float>(
+void magmaSolveBatched<float>(
     magma_int_t n, magma_int_t nrhs, float** dA_array, magma_int_t ldda,
     magma_int_t** dipiv_array, float** dB_array, magma_int_t lddb,
     magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
@@ -102,14 +102,14 @@ void magmaGesvBatched<float>(
 }
 
 template<>
-void magmaGesv<double>(
+void magmaSolve<double>(
     magma_int_t n, magma_int_t nrhs, double* dA, magma_int_t ldda,
     magma_int_t* ipiv, double* dB, magma_int_t lddb, magma_int_t* info) {
   magma_dgesv_gpu(n, nrhs, dA, ldda, ipiv, dB, lddb, info);
 }
 
 template<>
-void magmaGesv<float>(
+void magmaSolve<float>(
     magma_int_t n, magma_int_t nrhs, float* dA, magma_int_t ldda,
     magma_int_t* ipiv, float* dB, magma_int_t lddb, magma_int_t* info) {
   magma_sgesv_gpu(n, nrhs, dA, ldda, ipiv, dB, lddb, info);
@@ -222,12 +222,12 @@ void magmaCholeskyBatched<float>(
   auto storage_##name = pin_memory<type>(size, dummy_tensor); \
   name = static_cast<type*>(storage_##name.data());
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ gesv ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
+static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
-AT_ERROR("gesv: MAGMA library not found in "
+AT_ERROR("solve: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
   auto A_data = A.data<scalar_t>();
@@ -238,7 +238,7 @@ AT_ERROR("gesv: MAGMA library not found in "
   if (b.dim() == 2) {
     auto ipiv = at::empty({n}, at::kInt);
     magma_int_t info = 0;
-    magmaGesv<scalar_t>(n, nrhs, A_data, n, ipiv.data<magma_int_t>(),
+    magmaSolve<scalar_t>(n, nrhs, A_data, n, ipiv.data<magma_int_t>(),
                         b_data, n, &info);
     infos[0] = info;
   } else {
@@ -266,7 +266,7 @@ AT_ERROR("gesv: MAGMA library not found in "
     }
 
     MAGMAQueue magma_queue(b.get_device());
-    magmaGesvBatched<scalar_t>(
+    magmaSolveBatched<scalar_t>(
         n, nrhs, A_array, n, ipiv_array, b_array, n,
         info_array, batch_size, magma_queue);
 
@@ -277,17 +277,17 @@ AT_ERROR("gesv: MAGMA library not found in "
 #endif
 }
 
-std::tuple<Tensor, Tensor> _gesv_helper_cuda(const Tensor& self, const Tensor& A) {
+std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& A) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
   std::vector<int64_t> infos(batchCount(self), 0);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "gesv_cuda", [&]{
-    apply_gesv<scalar_t>(self_working_copy, A_working_copy, infos);
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "solve_cuda", [&]{
+    apply_solve<scalar_t>(self_working_copy, A_working_copy, infos);
   });
   if (self.dim() > 2) {
-    batchCheckErrors(infos, "gesv_cuda");
+    batchCheckErrors(infos, "solve_cuda");
   } else {
-    singleCheckErrors(infos[0], "gesv_cuda");
+    singleCheckErrors(infos[0], "solve_cuda");
   }
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }

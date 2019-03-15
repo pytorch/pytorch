@@ -281,6 +281,12 @@ class Tensor(torch._C._TensorBase):
                       "to ``False``.", stacklevel=2)
         return super(Tensor, self).cholesky_solve(u, upper=upper)
 
+    def gesv(self, A):
+        r"""See :func:`torch.solve`"""
+        warnings.warn("torch.gesv is deprecated in favour of torch.solve and will be removed in the "
+                      "next release. Please use torch.solve instead.", stacklevel=2)
+        return super(Tensor, self).solve(A)
+
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
         r"""See :func:`torch.stft`
