@@ -6,17 +6,18 @@ using caffe2::CPUContext;
 namespace caffe2 {
 namespace ops {
 // TODO Parse schema string instead of creating FunctionSchema manually
-C10_DEFINE_OP_SCHEMA(Add, FunctionSchema(
-    "_c10_experimental::Add",
-    (std::vector<c10::Argument>{
-      c10::Argument("input1"),
-      c10::Argument("input2"),
-      c10::Argument("output"),
-      c10::Argument("legacy_broadcast", BoolType::get()),
-      c10::Argument("axis", IntType::get())
-    }), (std::vector<c10::Argument>{
-    })
-));
+C10_DEFINE_OP_SCHEMA(
+    Add,
+    FunctionSchema(
+        "_c10_experimental::Add",
+        "",
+        (std::vector<c10::Argument>{
+            c10::Argument("input1"),
+            c10::Argument("input2"),
+            c10::Argument("output"),
+            c10::Argument("legacy_broadcast", BoolType::get()),
+            c10::Argument("axis", IntType::get())}),
+        (std::vector<c10::Argument>{})));
 }
 }
 
