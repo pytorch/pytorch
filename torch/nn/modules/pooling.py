@@ -817,7 +817,6 @@ class LPPool1d(_LPPoolNd):
     """
 
     @weak_script_method
-    @weak_script_method
     def forward(self, input):
         return F.lp_pool1d(input, float(self.norm_type), self.kernel_size,
                            self.stride, self.ceil_mode)
