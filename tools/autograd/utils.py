@@ -66,7 +66,7 @@ def write(dirname, name, template, env):
         old_val = None
     new_val = template.substitute(env)
     if old_val != new_val:
-        with open(path, 'w') as f:
+        with open(path, 'wb') as f:
             print("Writing {}".format(path))
             f.write(new_val)
     else:

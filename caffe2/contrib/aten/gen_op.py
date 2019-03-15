@@ -52,7 +52,7 @@ except ImportError:
 
 
 def write(filename, s):
-    with open(filename, "w") as f:
+    with open(filename, "wb") as f:
         f.write(s)
 
 

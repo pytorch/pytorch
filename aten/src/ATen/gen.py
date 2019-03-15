@@ -77,7 +77,7 @@ class FileManager(object):
         except IOError:
             old_contents = None
         if contents != old_contents:
-            with open(filename, 'w') as f:
+            with open(filename, 'wb') as f:
                 f.write(contents)
 
     def write_outputs(self, filename):

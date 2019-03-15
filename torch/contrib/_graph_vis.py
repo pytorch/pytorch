@@ -106,5 +106,5 @@ def write(self, filename):
                                       edges=json.dumps(edges),
                                       options=json.dumps(options),
                                       name=filename)
-    with open(filename, 'w') as f:
+    with open(filename, 'wb') as f:
         f.write(result)

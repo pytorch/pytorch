@@ -567,7 +567,7 @@ class Seq2SeqModelCaffe2(object):
             os.path.dirname(checkpoint_path_prefix),
             'checkpoint',
         )
-        with open(checkpoint_config_path, 'w') as checkpoint_config_file:
+        with open(checkpoint_config_path, 'wb') as checkpoint_config_file:
             checkpoint_config_file.write(
                 'model_checkpoint_path: "' + checkpoint_path + '"\n'
                 'all_model_checkpoint_paths: "' + checkpoint_path + '"\n'
