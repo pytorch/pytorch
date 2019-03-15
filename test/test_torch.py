@@ -4959,7 +4959,7 @@ class _TestTorchMixin(object):
 
     @skipIfNoLapack
     def test_trtrs_batched(self):
-        _TestTorchMixin._test_trtrs_batched(self, lambda t: t.cuda())
+        _TestTorchMixin._test_trtrs_batched(self, lambda t: t)
 
     @staticmethod
     def _test_trtrs_batched_dims(self, cast):
@@ -4968,7 +4968,7 @@ class _TestTorchMixin(object):
 
         from scipy.linalg import solve_triangular as tri_solve
 
-        def scipy_tri_solve_batched(A, B, upper, trans, diag):            
+        def scipy_tri_solve_batched(A, B, upper, trans, diag):       
             batch_dims_A, batch_dims_B = A.shape[:-2], B.shape[:-2]
             single_dim_A, single_dim_B = A.shape[-2:], B.shape[-2:]
             expand_dims = tuple(torch._C._infer_size(torch.Size(batch_dims_A),
