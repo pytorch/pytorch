@@ -134,9 +134,9 @@ def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
         if init_fn is not None:
             init_fn(worker_id)
 
-        from torch.utils.data import _DataLoaderMode
+        from torch.utils.data import _DataLoaderStrategy
 
-        if mode == _DataLoaderMode.Iterable:
+        if mode == _DataLoaderStrategy.Iterable:
             dataset_iter = iter(dataset)
 
         # When using Iterable mode, some worker can exit earlier than others due
@@ -171,7 +171,7 @@ def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
                 continue
             idx, index = r
             try:
-                if mode == _DataLoaderMode.Iterable:
+                if mode == _DataLoaderStrategy.Iterable:
                     try:
                         data = convert_fn(next(dataset_iter))
                     except StopIteration:
@@ -179,10 +179,10 @@ def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
                         # set `iteration_end` to save future `next(...)` calls,
                         # and to avoid sending multiple `IterableDatasetStopIteration`.
                         iteration_end = True
-                elif mode == _DataLoaderMode.Map:
+                elif mode == _DataLoaderStrategy.Map:
                     data = convert_fn(dataset[index])
                 else:
-                    # mode == _DataLoaderMode.MapWithBatchedRead:
+                    # mode == _DataLoaderStrategy.MapWithBatchedRead:
                     data = collate_fn([dataset[i] for i in index])
             except Exception:
                 # It is important that we don't store exc_info in a variable,

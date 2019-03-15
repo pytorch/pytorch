@@ -15,6 +15,11 @@ class Dataset(object):
     ``__len__``, which is expected to return the size of the dataset by many
     :class:`~torch.utils.data.Sampler` implementations and the default options
     of :class:`~torch.utils.data.DataLoader`.
+
+    .. note::
+      :class:`~torch.utils.data.DataLoader` by default constructs a index
+      sampler that yields integral indices.  To make it work with a map-style
+      dataset with non-integral indices/keys, a custom sampler must be provided.
     """
 
     def __getitem__(self, index):

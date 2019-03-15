@@ -24,7 +24,7 @@ get_worker_info = _utils.worker.get_worker_info
 default_collate = _utils.collate.default_collate
 
 
-class _DataLoaderMode(object):
+class _DataLoaderStrategy(object):
     Map = 0
     MapWithBatchedRead = 1
     Iterable = 2
@@ -35,6 +35,17 @@ class DataLoader(object):
     Data loader. Combines a dataset and a sampler, and provides
     single- or multi-process iterators over the dataset.
 
+    The :class:`~torch.utils.data.DataLoader` applies one of the following
+    data loading strategies based on the constructor arguments:
+
+    * batched loading from a map-style dataset (default)
+
+    * Loading individual members of a map-style dataset
+
+    * loading from an iterable-style dataset
+
+
+    See `Dataset Types`_ and `Data Loading Strategies`_ for more details.
 
     Arguments:
         dataset (Dataset): dataset from which to load the data.
@@ -43,15 +54,19 @@ class DataLoader(object):
         shuffle (bool, optional): set to ``True`` to have the data reshuffled
             at every epoch (default: ``False``).
         sampler (Sampler, optional): defines the strategy to draw samples from
-            the dataset. If specified, :attr:`shuffle must be False.
+            the dataset. If specified, :attr:`shuffle` must be False.
         batch_sampler (Sampler, optional): like :attr:`sampler`, but returns a batch of
             indices at a time. Mutually exclusive with :attr:`batch_size`,
             :attr:`shuffle`, :attr:`sampler`, and :attr:`drop_last`.
         num_workers (int, optional): how many subprocesses to use for data
             loading. ``0`` means that the data will be loaded in the main process.
             (default: ``0``)
-        convert_fn (callable, optional): converts a sample to Tensor(s).
-        collate_fn (callable, optional): merges a list of samples to form a mini-batch of Tensor(s).
+        collate_fn (callable, optional): merges a list of samples to form a
+            mini-batch of Tensor(s).  Used when using batched loading from a
+            map-style dataset.
+        convert_fn (callable, optional): converts a sample to Tensor(s).  Used
+            when loading individual samples from a map-style dataset, or
+            loading from an iterable-style dataset.
         pin_memory (bool, optional): If ``True``, the data loader will copy Tensors
             into CUDA pinned memory before returning them.  If your data elements
             are a custom type, or your :attr:`collate_fn` returns a batch that is a custom type,
@@ -108,11 +123,11 @@ class DataLoader(object):
         self.collate_fn = collate_fn
         if isinstance(dataset, IterableDataset):
             # FIXME: check default for some args
-            self.mode = _DataLoaderMode.Iterable
+            self.mode = _DataLoaderStrategy.Iterable
             self.sampler = None
         elif batch_size is None:
             # FIXME: check default for some args
-            self.mode = _DataLoaderMode.Map
+            self.mode = _DataLoaderStrategy.Map
             if sampler is None:
                 if shuffle:
                     sampler = RandomSampler(dataset)
@@ -121,7 +136,7 @@ class DataLoader(object):
             self.sampler = sampler
         else:
             # FIXME: check default for some args
-            self.mode = _DataLoaderMode.MapWithBatchedRead
+            self.mode = _DataLoaderStrategy.MapWithBatchedRead
 
             self.batch_size = batch_size
             self.drop_last = drop_last
@@ -170,7 +185,7 @@ class DataLoader(object):
             return _MultiProcessingDataLoaderIter(self)
 
     def __len__(self):
-        if self.mode == _DataLoaderMode.Iterable:
+        if self.mode == _DataLoaderStrategy.Iterable:
             raise len(self.dataset)
         return len(self.sampler)
 
@@ -186,12 +201,12 @@ class _BaseDataLoaderIter(object):
         self.convert_fn = loader.convert_fn
         self.collate_fn = loader.collate_fn
 
-        if self.mode == _DataLoaderMode.Iterable:
+        if self.mode == _DataLoaderStrategy.Iterable:
             self.sampler_iter = None
         else:
             self.sampler_iter = iter(self.sampler)
 
-        if self.mode == _DataLoaderMode.Iterable and self.num_workers == 0:
+        if self.mode == _DataLoaderStrategy.Iterable and self.num_workers == 0:
             self.dataset_iter = iter(self.dataset)
         else:
             self.dataset_iter = None
@@ -202,7 +217,7 @@ class _BaseDataLoaderIter(object):
         return self
 
     def _next_index(self):
-        if self.mode == _DataLoaderMode.Iterable:
+        if self.mode == _DataLoaderStrategy.Iterable:
             return None
         else:
             return next(self.sampler_iter)  # may raise StopIteration
@@ -211,7 +226,7 @@ class _BaseDataLoaderIter(object):
         raise NotImplementedError
 
     def __len__(self):
-        if self.mode == _DataLoaderMode.Iterable:
+        if self.mode == _DataLoaderStrategy.Iterable:
             raise len(self.dataset)
         else:
             return len(self.sampler)
@@ -232,14 +247,14 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         assert self.num_workers == 0
 
     def __next__(self):
-        if self.mode == _DataLoaderMode.Iterable:
+        if self.mode == _DataLoaderStrategy.Iterable:
             data = self.convert_fn(next(self.dataset_iter))  # may raise StopIteration
         else:
             index = self._next_index()  # may raise StopIteration
-            if self.mode == _DataLoaderMode.Map:
+            if self.mode == _DataLoaderStrategy.Map:
                 data = self.convert_fn(self.dataset[index])
             else:
-                # mode == _DataLoaderMode.MapWithBatchedRead:
+                # mode == _DataLoaderStrategy.MapWithBatchedRead:
                 data = self.collate_fn([self.dataset[i] for i in index])
         if self.pin_memory:
             data = _utils.pin_memory.pin_memory_data(data)
@@ -651,7 +666,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             idx, data = self.get_data()
             self.tasks_outstanding -= 1
 
-            if self.mode == _DataLoaderMode.Iterable:
+            if self.mode == _DataLoaderStrategy.Iterable:
                 # Check for IterableDatasetStopIteration
                 if isinstance(data, _utils.worker.IterableDatasetStopIteration):
                     worker_id = data.worker_id
