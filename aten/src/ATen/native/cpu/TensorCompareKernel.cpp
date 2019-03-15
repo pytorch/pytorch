@@ -6,24 +6,10 @@
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/NumericUtils.h>
 #include <c10/util/Optional.h>
 
 namespace at { namespace native { namespace {
-
-template <typename scalar_t>
-bool _isnan(scalar_t val) {
-  return false;
-}
-
-template <>
-bool _isnan(float val) {
-  return std::isnan(val);
-}
-
-template <>
-bool _isnan(double val) {
-  return std::isnan(val);
-}
 
 template <typename scalar_t, typename index_t>
 struct Reduction {
