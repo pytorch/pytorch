@@ -2901,6 +2901,26 @@ class _TestTorchMixin(object):
         self.assertTrue(x.is_cuda)
         torch.set_default_tensor_type(saved_type)
 
+    def test_tensor_randoms_bool(self):
+        expectedShape = (1, 2)
+
+        test = torch.rand(expectedShape, dtype=torch.bool)
+        self.assertEqual(expectedShape, test.shape)
+
+        test2 = torch.rand_like(test, dtype=torch.bool)
+        self.assertEqual(test, test2)
+
+        test = torch.rand(expectedShape, dtype=torch.bool)
+        self.assertEqual(expectedShape, test.shape)
+
+        # capped & clamped random
+        test = torch.tensor([[0, 0]], dtype=torch.bool)
+        test.random_(0, 2)
+        self.assertEqual(expectedShape, test.shape)
+
+        test.random_(2)
+        self.assertEqual(expectedShape, test.shape)
+
     # This is a temporary test for a boolean tensors on CPU. Once the CUDA part
     # will be done, these test cases will be moved down to test_tensor_factories_empty test
     def test_tensor_factories_bool(self):
@@ -2927,12 +2947,6 @@ class _TestTorchMixin(object):
         self.assertEqual(test, torch.tensor([[True, True]], dtype=torch.bool))
 
         test2 = torch.ones_like(test, dtype=torch.bool)
-        self.assertEqual(test, test2)
-
-        test = torch.rand(expectedShape, dtype=torch.bool)
-        self.assertEqual(expectedShape, test.shape)
-
-        test2 = torch.rand_like(test, dtype=torch.bool)
         self.assertEqual(test, test2)
 
     def test_tensor_factories_empty(self):
