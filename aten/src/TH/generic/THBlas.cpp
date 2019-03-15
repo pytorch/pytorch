@@ -398,7 +398,7 @@ void THBlas_(gemm)(
         }
       }
       int64_t l;
-      #pragma omp parallel for shared(c)
+      #pragma omp parallel for shared(a, b, c)
       for (l = 0; l < k; l++) {
         for (int64_t j = 0; j < n; j++) {
           scalar_t val = b[l + j * ldb] * alpha;
@@ -418,7 +418,7 @@ void THBlas_(gemm)(
     else if(transa_ && !transb_)
     {
       int64_t i;
-      #pragma omp parallel for shared(c)
+      #pragma omp parallel for shared(a, b, c)
       for(i = 0; i < m; i++)
       {
         scalar_t *b_ = b;
@@ -452,7 +452,7 @@ void THBlas_(gemm)(
         }
       }
       int64_t l;
-      #pragma omp parallel for shared(c)
+      #pragma omp parallel for shared(a, b, c)
       for (l = 0; l < k; l++) {
         for (int64_t j = 0; j < n; j++) {
           scalar_t val = b[j + l * ldb] * alpha;
@@ -481,7 +481,7 @@ void THBlas_(gemm)(
       }
       int64_t i;
 //       #pragma omp parallel for shared(c, a, b)
-      #pragma omp parallel for shared(c)
+      #pragma omp parallel for shared(a, b, c)
       for (i = 0; i < m; i++) {
         for (int64_t j = 0; j < n; j++) {
           int64_t l_k = k / 4;
