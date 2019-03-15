@@ -16,7 +16,7 @@ type_map = {
         'Int',
         'Long',
         'Bool'
-    ]
+    ],
 }
 
 all_types = type_map['floating_point'] + type_map['integral']

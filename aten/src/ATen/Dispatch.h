@@ -186,18 +186,17 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     }                                                                        \
   }()
 
-
 template <at::ScalarType N>
-struct ScalarTypeMap;
+struct ScalarTypeToCType;
 
 template<>
-struct ScalarTypeMap<at::ScalarType::Half> {
-  using type = at::Half;
+struct ScalarTypeToCType<at::ScalarType::Half> {
+using type = at::Half;
 };
 
 template<>
-struct ScalarTypeMap<at::ScalarType::Bool> {
-  using type = bool;
+struct ScalarTypeToCType<at::ScalarType::Bool> {
+using type = bool;
 };
 
 #define AT_DISPATCH_ALL_TYPES_AND(SCALARTYPE, TYPE, NAME, ...)                       \
@@ -210,7 +209,7 @@ struct ScalarTypeMap<at::ScalarType::Bool> {
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Int, int32_t, __VA_ARGS__)                \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Long, int64_t, __VA_ARGS__)               \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Short, int16_t, __VA_ARGS__)              \
-      AT_PRIVATE_CASE_TYPE(SCALARTYPE, ScalarTypeMap<SCALARTYPE>::type, __VA_ARGS__) \
+      AT_PRIVATE_CASE_TYPE(SCALARTYPE, ScalarTypeToCType<SCALARTYPE>::type, __VA_ARGS__) \
       default:                                                                       \
         AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");              \
     }                                                                                \
@@ -226,8 +225,8 @@ struct ScalarTypeMap<at::ScalarType::Bool> {
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Int, int32_t, __VA_ARGS__)                           \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Long, int64_t, __VA_ARGS__)                          \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Short, int16_t, __VA_ARGS__)                         \
-      AT_PRIVATE_CASE_TYPE(SCALARTYPE1, ScalarTypeMap<SCALARTYPE1>::type, __VA_ARGS__)          \
-      AT_PRIVATE_CASE_TYPE(SCALARTYPE2, ScalarTypeMap<SCALARTYPE2>::type, __VA_ARGS__)          \
+      AT_PRIVATE_CASE_TYPE(SCALARTYPE1, ScalarTypeToCType<SCALARTYPE1>::type, __VA_ARGS__) \
+      AT_PRIVATE_CASE_TYPE(SCALARTYPE2, ScalarTypeToCType<SCALARTYPE2>::type, __VA_ARGS__) \
       AT_PRIVATE_CASE_TYPE(                                                                     \
           at::ScalarType::ComplexFloat, std::complex<float>, __VA_ARGS__)                       \
       AT_PRIVATE_CASE_TYPE(                                                                     \

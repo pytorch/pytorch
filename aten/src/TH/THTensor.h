@@ -21,7 +21,6 @@
 #include <TH/generic/THTensorRandom.h>
 #include <TH/THGenerateAllTypes.h>
 
-#include <TH/THRandom.h>
 #include <TH/generic/THTensorRandom.h>
 #include <TH/THGenerateBoolType.h>
 

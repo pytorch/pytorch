@@ -6,7 +6,10 @@ TH_API void THTensor_(random)(THTensor *self, THGenerator *_generator);
 TH_API void THTensor_(clampedRandom)(THTensor *self, THGenerator *_generator, int64_t min, int64_t max);
 TH_API void THTensor_(cappedRandom)(THTensor *self, THGenerator *_generator, int64_t max);
 TH_API void THTensor_(geometric)(THTensor *self, THGenerator *_generator, double p);
+
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_BOOL)
 TH_API void THTensor_(uniform)(THTensor *self, THGenerator *_generator, double a, double b);
+#endif
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 TH_API void THTensor_(bernoulli_Tensor)(THTensor *self, THGenerator *_generator, THTensor *p);
