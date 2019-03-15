@@ -4,23 +4,20 @@ can be used in other places in torch/ (namely torch.nn) without running into
 circular dependency problems
 """
 
-import torch._C
 import weakref
 import inspect
 import textwrap
 import os
 import types
 import functools
+import torch
 from torch._C import _get_tracing_state
+from torch._C import _jit_script_compile, _jit_script_class_compile
 from torch._six import builtins, with_metaclass, get_function_from_type
 from torch.nn.modules import Module, Container, Sequential, ModuleList, \
     ModuleDict, Parameter, ParameterList, ParameterDict
-
 from torch.frontend import get_jit_class_def, get_jit_def, get_default_args
 from collections import defaultdict, OrderedDict, namedtuple
-
-_jit_script_compile = torch._C._jit_script_compile
-_jit_script_class_compile = torch._C._jit_script_class_compile
 
 # Tracks standalone weak script functions
 compiled_weak_fns = weakref.WeakKeyDictionary()  # noqa: T484
@@ -115,6 +112,7 @@ def weak_script(fn, _frames_up=0):
         "rcb": createResolutionCallback(_frames_up + 1)
     }
 
+    @functools.wraps(fn)
     def wrap_fn(*args, **kwargs):
         tracing_state = _get_tracing_state()
         if tracing_state and tracing_state.compile_weak_script():
@@ -141,6 +139,7 @@ def weak_script_method(fn):
     if not _get_enabled():
         return fn
 
+    @functools.wraps(fn)
     def wrap_fn(*args, **kwargs):
         tracing_state = _get_tracing_state()
         if tracing_state and tracing_state.compile_weak_script():
