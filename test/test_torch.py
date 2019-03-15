@@ -4466,6 +4466,7 @@ class _TestTorchMixin(object):
                 self.assertEqual(x.select(dim, i), res[i])
                 self.assertEqual(x.select(dim, i), res2[i])
 
+    @skipIfRocm
     def test_linspace(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -10385,6 +10386,65 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         expected = torch.empty(0, 2, dtype=a.dtype)
         self.assertEqual(c1, expected)
         self.assertEqual(c2, expected)
+
+    def test_has_internal_overlap(self):
+        OVERLAP_NO = 0
+        OVERLAP_YES = 1
+        OVERLAP_TOO_HARD = 2
+
+        # Check for contiguous tensors
+        a = torch.randn(3, 3)
+        self.assertEqual(torch._debug_has_internal_overlap(a), OVERLAP_NO)
+
+        # Checks for zero strides
+        b = torch.randn(1, 3)
+        b_expanded = b.expand(4, 3)
+        self.assertEqual(torch._debug_has_internal_overlap(b_expanded), OVERLAP_YES)
+
+    @staticmethod
+    def unary_check_mem_overlap(self, inplace_op, value=-0.5, device='cpu'):
+        tensor = torch.tensor(value, device=device).expand(3, 3)
+        with self.assertRaisesRegex(RuntimeError, 'single memory location'):
+            inplace_op(tensor)
+
+    @staticmethod
+    def _test_inplace_unary_mem_overlap(self, device='cpu'):
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.acos_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.asin_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.atan_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.ceil_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.cos_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.erf_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.erfc_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.exp_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.expm1_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.floor_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.log_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.log10_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.log1p_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.log2_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.round_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.rsqrt_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.sin_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.sqrt_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.tan_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.tanh_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.trunc_(), device=device)
+
+    def test_inplace_unary_mem_overlap(self):
+        return self._test_inplace_unary_mem_overlap(self)
+
+    @unittest.expectedFailure
+    def test_abs_unary_mem_overlap(self):
+        self.unary_check_mem_overlap(lambda t: t.abs_())
+
+    @unittest.expectedFailure
+    def test_sinh_unary_mem_overlap(self):
+        self.unary_check_mem_overlap(lambda t: t.sinh_())
+
+    @unittest.expectedFailure
+    def test_cosh_unary_mem_overlap(self):
+        self.unary_check_mem_overlap(lambda t: t.cosh_())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
     def test_reverse_binary_ops_multiple_device(self):
