@@ -318,7 +318,7 @@ DEFINE_TORCH_TENSOR_OP(bool, bool, at::empty({}, at::CPU(at::kByte).options()).f
             at::empty(sizes, at::initialTensorOptions().dtype(initial_scalar_type)));
 
           recursiveStore((char*)tensor.data_ptr(), sizes, tensor.strides(), 0,
-              tensor.type().elementSizeInBytes(), data);
+              tensor.element_size(), data);
 
           at::ScalarType scalar_type = dtype.isNone() ? tensor.scalar_type() : dtype.toScalarType();
           c10::Device dev = device.isNone() ? tensor.device() : device.toDevice();

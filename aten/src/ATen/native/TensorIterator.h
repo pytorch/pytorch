@@ -153,7 +153,7 @@ struct CAFFE2_API TensorIterator {
   }
   ScalarType dtype(int arg=0) const { return type(arg).scalarType(); }
   DeviceType device_type(int arg=0) const { return type(arg).device_type(); }
-  int64_t element_size(int arg) const { return type(arg).elementSizeInBytes(); }
+  int64_t element_size(int arg) const { return type(arg).typeMeta().itemsize(); }
   bool is_scalar(int arg) const;
   bool is_cpu_scalar(int arg) const;
 
