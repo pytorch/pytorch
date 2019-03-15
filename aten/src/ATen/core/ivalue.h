@@ -51,18 +51,22 @@ struct CAFFE2_API List : c10::intrusive_ptr_target {
   static c10::intrusive_ptr<List<Elem>> create(std::vector<Elem> elements_) {
     return c10::make_intrusive<List<Elem>>(std::move(elements_));
   }
-  const std::vector<Elem>& elements() const {
+  const std::vector<Elem>& elements() const & {
     return elements_;
   }
   operator const std::vector<Elem>&() const {
     return elements();
   }
 
-  std::vector<Elem>& elements() {
+  std::vector<Elem>& elements() & {
     return elements_;
   }
   operator std::vector<Elem>&() {
     return elements();
+  }
+
+  std::vector<Elem>&& elements() && {
+    return std::move(elements_);
   }
 };
 
@@ -424,15 +428,13 @@ struct CAFFE2_API IValue final {
     }
   }
   bool isScalar() const {
-    return isDouble() || isInt() || isBool();
+    return isDouble() || isInt();
   }
   at::Scalar toScalar() const {
     if(isDouble())
       return toDouble();
     else if(isInt())
       return toInt();
-    else if (isBool())
-      return int(toBool());
     throw std::runtime_error("IValue is not a Scalar");
   }
 

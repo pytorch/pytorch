@@ -13,6 +13,10 @@ export TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 mkdir -p $TMP_DIR/ci_scripts/
 mkdir -p $TMP_DIR/build/torch
 
+if [ ! -z "$(ls $TMP_DIR/ci_scripts/*)" ]; then
+    rm $TMP_DIR/ci_scripts/*
+fi
+
 cat >$TMP_DIR/ci_scripts/download_image.py << EOL
 
 import os
@@ -39,6 +43,11 @@ EOL
 
 cat >$TMP_DIR/ci_scripts/setup_pytorch_env.bat <<EOL
 
+if exist "%TMP_DIR%/ci_scripts/pytorch_env_restore.bat" (
+    call %TMP_DIR%/ci_scripts/pytorch_env_restore.bat
+    exit /b 0
+)
+
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\ProgramData\\chocolatey\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
 :: Install Miniconda3
@@ -55,7 +64,7 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
 call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
-    call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf
+    call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf numba
 )
 pip install -q ninja future hypothesis "librosa>=0.6.2" psutil
 
@@ -71,6 +80,9 @@ set CUDNN_LIB_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\l
 set CUDA_TOOLKIT_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 set CUDNN_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 set PYTHONPATH=%TMP_DIR_WIN%\\build;%PYTHONPATH%
+set NUMBAPRO_CUDALIB=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\bin
+set NUMBAPRO_LIBDEVICE=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\nvvm\\libdevice
+set NUMBAPRO_NVVM=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\nvvm\\bin\\nvvm64_32_0.dll
 
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     cd %TMP_DIR_WIN%\\build
@@ -81,6 +93,8 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
 ) else (
     xcopy /s %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch %TMP_DIR_WIN%\\build\\torch\\
 )
+
+for /f "usebackq tokens=*" %%i in (\`set\`) do echo set "%%i" >> %TMP_DIR%/ci_scripts/pytorch_env_restore.bat
 
 EOL
 
@@ -148,15 +162,15 @@ test_api.exe --gtest_filter="-IntegrationTest.MNIST*"
 EOL
 
 run_tests() {
-    if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
+    if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
         $TMP_DIR/ci_scripts/test_python_nn.bat && \
         $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && \
         $TMP_DIR/ci_scripts/test_custom_script_ops.bat && \
         $TMP_DIR/ci_scripts/test_libtorch.bat
     else
-        if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
+        if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
             $TMP_DIR/ci_scripts/test_python_nn.bat
-        elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
+        elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
             $TMP_DIR/ci_scripts/test_python_all_except_nn.bat && \
             $TMP_DIR/ci_scripts/test_custom_script_ops.bat && \
             $TMP_DIR/ci_scripts/test_libtorch.bat

@@ -192,3 +192,56 @@ class TorchIntegration(hu.HypothesisTestCase):
                 2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0)
         torch.testing.assert_allclose(rois, a.cpu())
         torch.testing.assert_allclose(rois_probs, b.cpu())
+
+    @given(
+        N=st.integers(min_value=1, max_value=2),
+        C=st.integers(min_value=4, max_value=4),
+        H=st.integers(min_value=10, max_value=10),
+        W=st.integers(min_value=8, max_value=8),
+    )
+    def _test_roi_align(self, N, C, H, W, device):
+        def rand_roi():
+            return np.array([
+                float(int(N * np.random.rand())),
+                0.5 * np.random.rand() * W,
+                0.5 * np.random.rand() * H,
+                (0.5 + 0.5 * np.random.rand()) * W,
+                (0.5 + 0.5 * np.random.rand()) * H,
+            ]).astype(np.float32)
+
+        feature = np.random.randn(N, C, H, W).astype(np.float32)
+        rois = np.array([rand_roi() for _ in range(10)])
+
+        def roi_align_ref(_feature, _rois):
+            ref_op = core.CreateOperator(
+                "RoIAlign",
+                ["feature", "rois"],
+                ["roi_feature"],
+                spatial_scale=1.0,
+                pooled_h=3,
+                pooled_w=3,
+                sampling_ratio=0
+            )
+            workspace.FeedBlob("feature", _feature)
+            workspace.FeedBlob("rois", _rois)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("roi_feature")
+
+        roi_feature_ref = roi_align_ref(feature, rois)
+        roi_feature = torch.ops._caffe2.RoIAlign(
+            torch.Tensor(feature).to(device),
+            torch.Tensor(rois).to(device),
+            order="NCHW",
+            spatial_scale=1.0,
+            pooled_h=3,
+            pooled_w=3,
+            sampling_ratio=0
+        )
+        torch.testing.assert_allclose(roi_feature_ref, roi_feature.cpu())
+
+    def test_roi_align_cpu(self):
+        self._test_roi_align(device="cpu")
+
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    def test_roi_align_cuda(self):
+        self._test_roi_align(device="cuda")

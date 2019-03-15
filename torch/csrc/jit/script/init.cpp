@@ -269,7 +269,6 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
   std::shared_ptr<Module> module_;
 };
 
-
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
 // in the future, we will add the ability to resolve `self.foo` to python
@@ -701,7 +700,10 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& script,
              ResolutionCallback rcb,
              bool has_self) {
-            auto self = has_self ? std::make_shared<ModuleValue>(m) : nullptr;
+            c10::optional<Self> self;
+            if (has_self) {
+              self = Self(std::make_shared<ModuleValue>(m));
+            }
             defineMethodsInModule(m, script, pythonResolver(rcb), self);
           })
       .def(
@@ -716,7 +718,7 @@ void initJitScriptBindings(PyObject* module) {
               resolvers.push_back(pythonResolver(callback));
             }
             defineMethodsInModule(
-                m, defs, resolvers, std::make_shared<ModuleValue>(m));
+                m, defs, resolvers, Self(std::make_shared<ModuleValue>(m)));
 
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
@@ -771,8 +773,7 @@ void initJitScriptBindings(PyObject* module) {
               auto& p = parameters[i];
               py::tuple r(2);
               result[i] = std::make_tuple(
-                  p.key(),
-                  autograd::as_variable_ref(p->slot()->toTensor()));
+                  p.key(), autograd::as_variable_ref(p->slot()->toTensor()));
             }
             return result;
           })
@@ -786,9 +787,7 @@ void initJitScriptBindings(PyObject* module) {
               py::tuple r(3);
               IValue v = *buffer->slot();
               result[i] = std::make_tuple(
-                  buffer.key(),
-                  buffer->type,
-                  toPyObject(std::move(v)));
+                  buffer.key(), buffer->type, toPyObject(std::move(v)));
             }
             return result;
           })
@@ -932,8 +931,7 @@ void initJitScriptBindings(PyObject* module) {
              std::shared_ptr<Module> orig) {
             std::vector<IValue*> member_inputs;
             for (auto& p : params) {
-              NamedIValue* np =
-                  std::get<0>(p)->find_parameter(std::get<1>(p));
+              NamedIValue* np = std::get<0>(p)->find_parameter(std::get<1>(p));
               if (np == nullptr) {
                 np = std::get<0>(p)->find_buffer(std::get<1>(p));
               }
@@ -942,8 +940,7 @@ void initJitScriptBindings(PyObject* module) {
             }
 
             Method* orig_method = orig->find_method(name);
-            m->create_method(
-                name, orig_method->graph()->copy(), member_inputs);
+            m->create_method(name, orig_method->graph()->copy(), member_inputs);
           });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
@@ -989,7 +986,8 @@ void initJitScriptBindings(PyObject* module) {
          ResolutionCallback rcb,
          FunctionDefaults defaults) {
         auto def_f = def.withName("forward");
-        defineMethodsInModule(mod, {def_f}, {pythonResolver(rcb)}, nullptr);
+        defineMethodsInModule(
+            mod, {def_f}, {pythonResolver(rcb)}, c10::nullopt);
         auto& method = mod->get_method("forward");
         method.setSchema(getSchemaWithNameAndDefaults(
             def.range(), method.getSchema(), def.name().name(), defaults));
@@ -1009,8 +1007,7 @@ void initJitScriptBindings(PyObject* module) {
           methodDefs.push_back(def);
           rcbs.push_back(pythonResolver(rcb));
         }
-        defineMethodsInModule(
-            module, methodDefs, rcbs, std::make_shared<ClassValue>(classType));
+        defineMethodsInModule(module, methodDefs, rcbs, Self(classType));
         return module;
       });
 
@@ -1071,7 +1068,14 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("str"),
           py::arg("count"),
           py::arg("exactly") = false)
-      .def("run", &testing::FileCheck::run);
+      .def(
+          "run",
+          [](testing::FileCheck& f, const std::string& str) {
+            return f.run(str);
+          })
+      .def("run", [](testing::FileCheck& f, const Graph& g) {
+        return f.run(g);
+      });
 }
 } // namespace script
 } // namespace jit

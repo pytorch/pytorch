@@ -1297,6 +1297,7 @@ class TestCuda(TestCase):
     def test_gather(self):
         self._test_gather(0)
 
+    @skipIfRocm
     def test_gather_dim(self):
         self._test_gather(1)
 
@@ -2353,15 +2354,21 @@ class TestCuda(TestCase):
     def test_advancedindex_big(self):
         _TestTorchMixin._test_advancedindex_big(self, lambda t: t.cuda())
 
+    def test_kthvalue(self):
+        _TestTorchMixin._test_kthvalue(self, device='cuda')
+
     @skipIfRocm
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_btrifact(self):
         _TestTorchMixin._test_btrifact(self, lambda t: t.cuda())
 
     @skipIfRocm
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_btrisolve(self):
         _TestTorchMixin._test_btrisolve(self, lambda t: t.cuda())
 
     @skipIfRocm
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_btriunpack(self):
         _TestTorchMixin._test_btriunpack(self, lambda t: t.cuda())
 

@@ -5,7 +5,7 @@
 namespace caffe2 {
 
 namespace {
-void AnnotateOpIndex(NetDef* net) {
+void annotateOpIndex(NetDef* net) {
   int i = 0;
   for (auto& op : *(net->mutable_op())) {
     AddArgument(kNetPos, i++, &op);
@@ -15,8 +15,18 @@ void AnnotateOpIndex(NetDef* net) {
 
 std::string BackendTransformerBase::getModelId(const NetDef& net) {
   static std::atomic<size_t> seq_id{0};
-  auto model_id =
-      ArgumentHelper(net).GetSingleArgument<std::string>(kModelId, "");
+  std::string model_id;
+  for (const auto& arg : net.arg()) {
+    if (arg.name() == kModelId) {
+      if (arg.has_s()) {
+        model_id = arg.s();
+      } else if (arg.has_i()) {
+        model_id = c10::to_string(arg.i());
+      }
+      break;
+    }
+  }
+
   if (model_id.empty()) {
     model_id = "unnamed_" + c10::to_string(seq_id++);
   }
@@ -42,7 +52,7 @@ BackendTransformerBase::ssaRewriteAndMapNames(
     const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
   input_mapping_ = onnx::SsaRewrite(nullptr, pred_net);
   // Annote the ops with net position
-  AnnotateOpIndex(pred_net);
+  annotateOpIndex(pred_net);
 
   // Since we are going to create a mapped workspace, we need to make sure that
   // the parent workspace has the mapped blob names. If the blobs don't exist
