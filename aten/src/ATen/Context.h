@@ -12,9 +12,9 @@
 #include <ATen/core/VariableHooksInterface.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
-#include <ATen/detail/XLAHooksInterface.h>
 #include <ATen/detail/ComplexHooksInterface.h>
 #include <c10/util/Exception.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 
 #include <memory>
 #include <mutex>
@@ -78,7 +78,7 @@ class CAFFE2_API Context {
     return detail::getHIPHooks().hasHIP();
   }
   bool hasXLA() const {
-    return detail::getXLAHooks().hasXLA();
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently

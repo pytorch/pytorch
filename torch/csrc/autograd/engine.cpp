@@ -203,25 +203,49 @@ Engine::Engine() = default;
 // This Engine's ReadyQueues and their corresponding threads are leaked here
 Engine::~Engine() = default;
 
-// TODO: Engine is not written in a way that it can deal with anything that's
-// not CUDA.
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
+  // Note [Allocating GPUs to autograd threads]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // What's our strategy here?  Originally, the autograd engine was written
+  // with only CUDA in mind.  We allocate one thread to handle all CPU
+  // operations, and a thread per CUDA device.
+  //
+  // But what if we have OTHER devices?  There are two plausible
+  // strategies:
+  //
+  //  - We can allocate threads equal to max(num_cuda_devices, num_xla_devices,
+  //    ...) and colocate cuda device 0 with xla device 0
+  //  - We can allocate threads equal to sum(num_cuda_devices, num_xla_devices,
+  //    ...) keeping everyone separate.
+  //
+  // We don't have any good reason to prefer one or the other, but for
+  // historical reasons we refer to devices by int and not Device, so
+  // the former is more convenient to do, and so that's what we do.
+  //
   // NB: We MUST NOT construct the guard for device -1,
   // as in some settings we compile with cuda, but
   // have lazy stubs for CUDA functionality (so actually
   // attempting to setup a guard(-1) will cause an
   // error, because it will still query cudaGetDevice).
-  at::OptionalDeviceGuard guard;
+  // NB: These are not OptionalCUDAGuard/etc because engine.cpp
+  // is built as part of the CPU-only library; so we need to
+  // dynamic dispatch.
+  at::OptionalDeviceGuard cuda_guard;
+  at::OptionalDeviceGuard hip_guard;
+  at::OptionalDeviceGuard xla_guard;
   if (device != -1) {
-    if (at::hasCUDA()) {
-      guard.reset_device(at::Device(at::DeviceType::CUDA, device));
+    if (c10::impl::hasDeviceGuardImpl(at::DeviceType::CUDA)) {
+      // NB: This is secretly setting *HIP* device as well for
+      // Torch builds where HIP is masquerading as CUDA.  In that
+      // case, the hip_guard below will lie fallow.
+      cuda_guard.reset_device(at::Device(at::DeviceType::CUDA, device));
     }
-    if (at::hasHIP()) {
-      guard.reset_device(at::Device(at::DeviceType::HIP, device));
+    if (c10::impl::hasDeviceGuardImpl(at::DeviceType::HIP)) {
+      hip_guard.reset_device(at::Device(at::DeviceType::HIP, device));
     }
-    if (at::hasXLA()) {
-      guard.reset_device(at::Device(at::DeviceType::XLA, device));
+    if (c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA)) {
+      xla_guard.reset_device(at::Device(at::DeviceType::XLA, device));
     }
   }
   worker_device = device;
@@ -355,7 +379,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
       ss << metadata.type() << " but got " << grads[i].type();
       AT_ERROR(format_error(ss.str()));
     }
-    const auto output_device = get_tensor_device(output);
+    const int output_device = assign_tensor_to_autograd_thread(output);
     if (output_device != metadata.device()) {
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected device ";
@@ -635,8 +659,15 @@ auto Engine::ready_queue(int device) -> ReadyQueue& {
 }
 
 auto Engine::start_threads() -> void {
-  int num_devices = at::getNumGPUs();
-  // One for CPU, plus one for every GPU device
+  // See Note [Allocating GPUs to autograd threads]
+  int num_devices = 0;
+  for (auto device_type : {at::DeviceType::CUDA, at::DeviceType::HIP, at::DeviceType::XLA}) {
+    if (c10::impl::hasDeviceGuardImpl(device_type)) {
+      num_devices = std::max(num_devices, getDeviceGuardImpl(device_type)->deviceCount());
+    }
+  }
+  // One for CPU, plus one for every GPU device (but colocate GPUs of different
+  // types)
   int num_threads = num_devices + 1;
   ready_queues = std::vector<std::shared_ptr<ReadyQueue>>(num_threads);
   for (auto& queue : ready_queues)

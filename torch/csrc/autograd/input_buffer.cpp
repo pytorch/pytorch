@@ -44,12 +44,14 @@ void InputBuffer::add(size_t pos, Variable var) {
 auto InputBuffer::device() const -> int {
   for (auto& var : buffer) {
     if (var.defined()) {
-      int device = get_tensor_device(var);
+      int device = assign_tensor_to_autograd_thread(var);
       if (device >= 0) {
         return device;
       }
     }
   }
+  // Only report to the CPU thread if there really were no tensors
+  // from other devices.
   return -1;
 }
 
