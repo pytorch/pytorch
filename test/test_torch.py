@@ -4953,9 +4953,9 @@ class _TestTorchMixin(object):
             A, b = trtrs_test_helper((3, 5, 5), (3, 5, 10), cast, upper, unitriangular)
             x = torch.trtrs(b, A, upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
             if transpose:
-                self.assertLessEqual(b.dist(torch.matmul(A.transpose(-1, -2), x)), 1e-12)
+                self.assertLessEqual(b.dist(torch.matmul(A.transpose(-1, -2), x)), 2e-12)
             else:
-                self.assertLessEqual(b.dist(torch.matmul(A, x)), 1e-12)
+                self.assertLessEqual(b.dist(torch.matmul(A, x)), 2e-12)
 
     @skipIfNoLapack
     def test_trtrs_batched(self):
@@ -4968,7 +4968,7 @@ class _TestTorchMixin(object):
 
         from scipy.linalg import solve_triangular as tri_solve
 
-        def scipy_tri_solve_batched(A, B, upper, trans, diag):       
+        def scipy_tri_solve_batched(A, B, upper, trans, diag):
             batch_dims_A, batch_dims_B = A.shape[:-2], B.shape[:-2]
             single_dim_A, single_dim_B = A.shape[-2:], B.shape[-2:]
             expand_dims = tuple(torch._C._infer_size(torch.Size(batch_dims_A),
