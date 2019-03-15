@@ -503,5 +503,4 @@ void THBlas_(gemm)(
     }
   }
 }
-
 #endif
