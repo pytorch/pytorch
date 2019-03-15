@@ -7,6 +7,7 @@
 #include <ATen/CPUGenerator.h>
 #include <ATen/CheckGenerator.h>
 #include <ATen/Generator.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/cpu/vml.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/native/DispatchStub.h>
@@ -81,7 +82,7 @@ int64_t _sigmoid(double* x, double* y, int64_t size) {
 }
 
 static void sigmoid_kernel(Tensor& result, const Tensor& self) {
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "sigmoid", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "sigmoid", [&] {
     using Vec = Vec256<scalar_t>;
     CPU_tensor_parallel_kernel_apply2<scalar_t, scalar_t>(
         result,
@@ -133,7 +134,7 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
   int64_t n = self.numel();
   bool contig = self.is_contiguous();
 
-  AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_scalar_cpu_", [&] {
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
     at::Tensor tmp_int_tensor;
     if (std::is_same<scalar_t, int>::value && contig) {
       tmp_int_tensor = self;
@@ -177,12 +178,13 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
 #define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                          \
   static void op##_kernel(Tensor& result, const Tensor& self) {            \
     checkBackend(#op, {result}, Backend::CPU);                             \
-    AT_DISPATCH_##dispatchtypes##_TYPES(self.type(), #op, [&] {            \
+    AT_DISPATCH_##dispatchtypes##_TYPES(self.scalar_type(), #op, [&] {     \
       if (self.is_contiguous() && result.is_contiguous()) {                \
         vml::v##op(                                                        \
             result.data<scalar_t>(), self.data<scalar_t>(), self.numel()); \
                                                                            \
       } else {                                                             \
+        assert_no_internal_overlap(result, #op);                           \
         static constexpr int64_t WIDTH = 131072 / sizeof(scalar_t);        \
         CPU_tensor_parallel_kernel_apply2<scalar_t, scalar_t>(             \
             result,                                                        \
@@ -211,7 +213,6 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
     });                                                                    \
   }                                                                        \
   REGISTER_DISPATCH(op##Impl, &op##_kernel)
-
 } // anonymous namespace
 
 REGISTER_DISPATCH(sigmoidImpl, &sigmoid_kernel)

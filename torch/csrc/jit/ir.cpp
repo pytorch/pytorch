@@ -81,8 +81,8 @@ struct const_value_list_with_types {
   std::string delim;
   const_value_list_with_types(
       ArrayRef<const Value*> values,
-      const std::string& delim = ", ")
-      : values(values), delim(delim) {}
+      std::string delim_ = ", ")
+      : values(values), delim(std::move(delim_)) {}
 };
 
 std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
@@ -805,19 +805,19 @@ bool Node::isNondeterministic() const {
       "aten::poisson(Tensor self, Generator? generator) -> Tensor",
       "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
-      "aten::rand(int[] size, *, int dtype, int layout, Device device) -> Tensor",
+      "aten::rand(int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
       "aten::rand_like(Tensor self) -> Tensor",
       "aten::rand_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
-      "aten::randint(int high, int[] size, *, int dtype, int layout, Device device) -> Tensor",
-      "aten::randint(int low, int high, int[] size, *, int dtype, int layout, Device device) -> Tensor",
+      "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
+      "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
       "aten::randint_like(Tensor self, int high) -> Tensor",
       "aten::randint_like(Tensor self, int low, int high) -> Tensor",
       "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device) -> Tensor",
       "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device) -> Tensor",
-      "aten::randn(int[] size, *, int dtype, int layout, Device device) -> Tensor",
+      "aten::randn(int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
       "aten::randn_like(Tensor self) -> Tensor",
       "aten::randn_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
-      "aten::randperm(int n, *, int dtype, int layout, Device device) -> Tensor"};
+      "aten::randperm(int n, *, int? dtype, int? layout, Device? device) -> Tensor"};
 
   if (nondeterministic_ops.find(this) == nullptr) {
     return false;

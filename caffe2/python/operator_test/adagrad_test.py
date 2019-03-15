@@ -28,6 +28,7 @@ class TestAdagrad(serial.SerializedTestCase):
     )
     def test_adagrad(self, inputs, lr, epsilon, gc, dc):
         param, momentum, grad = inputs
+        momentum = np.abs(momentum)
         lr = np.array([lr], dtype=np.float32)
 
         op = core.CreateOperator(
@@ -57,6 +58,7 @@ class TestAdagrad(serial.SerializedTestCase):
     )
     def test_adagrad_output_effective_lr(self, inputs, lr, epsilon, gc, dc):
         param, momentum, grad = inputs
+        momentum = np.abs(momentum)
         lr = np.array([lr], dtype=np.float32)
 
         op = core.CreateOperator(
@@ -86,6 +88,7 @@ class TestAdagrad(serial.SerializedTestCase):
     )
     def test_adagrad_output_effective_lr_and_update(self, inputs, lr, epsilon, gc, dc):
         param, momentum, grad = inputs
+        momentum = np.abs(momentum)
         lr = np.array([lr], dtype=np.float32)
 
         op = core.CreateOperator(

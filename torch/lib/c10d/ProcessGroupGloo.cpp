@@ -239,8 +239,7 @@ void ProcessGroupGloo::RecvWork::wait() {
 
 ProcessGroupGloo::Options::Options()
     : timeout(std::chrono::milliseconds(10 * 1000)),
-      threads(2),
-      cacheNumAlgorithmEntries(1) {}
+      threads(2) {}
 
 ProcessGroupGloo::ProcessGroupGloo(
     const std::shared_ptr<Store>& store,
@@ -1011,7 +1010,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
   void gather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs) {
-    const auto scalarType = inputs[0].type().scalarType();
+    const auto scalarType = inputs[0].scalar_type();
     gloo::GatherOptions opts(context);
     opts.setRoot(root);
     opts.setTag(tag);
@@ -1208,7 +1207,7 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
   void scatter(
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs) {
-    const auto scalarType = outputs[0].type().scalarType();
+    const auto scalarType = outputs[0].scalar_type();
     gloo::ScatterOptions opts(context);
     opts.setRoot(root);
     opts.setTag(tag);

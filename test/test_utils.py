@@ -201,7 +201,7 @@ class TestCheckpoint(TestCase):
         )
 
     def test_checkpoint_rng_cpu(self):
-        for i in range(5):
+        for _ in range(5):
             inp = torch.randn(20000, device='cpu').requires_grad_()
             phase1 = torch.nn.Dropout()
             phase2 = torch.nn.Dropout()
@@ -229,7 +229,7 @@ class TestCheckpoint(TestCase):
 
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
     def test_checkpoint_rng_cuda(self):
-        for i in range(5):
+        for _ in range(5):
             inp = torch.randn(20000, device='cuda').requires_grad_()
             phase1 = torch.nn.Dropout()
             phase2 = torch.nn.Dropout()
@@ -254,6 +254,17 @@ class TestCheckpoint(TestCase):
             grad_no_checkpointing = inp.grad
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
+
+    def test_checkpoint_non_tensor(self):
+
+        def run_fn(tensor1, tensor2):
+            if tensor2 is None:
+                return tensor1
+            return tensor1 + tensor2
+
+        input_var = torch.randn(1, 100, requires_grad=True)
+        out = checkpoint(run_fn, input_var, None)
+        out.sum().backward()
 
 
 class TestDataLoader(TestCase):
@@ -325,7 +336,7 @@ class TestBottleneck(TestCase):
         import subprocess
         from common_utils import PY3
 
-        p = subprocess.Popen(command, stdout=subprocess.PIPE,
+        p = subprocess.Popen(command, stdout=subprocess.PIPE,  # noqa
                              stderr=subprocess.PIPE, shell=True)
         output, err = p.communicate()
         rc = p.returncode

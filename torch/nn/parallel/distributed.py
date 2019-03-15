@@ -44,7 +44,7 @@ class DistributedDataParallel(Module):
     this way, you can simply construct the model as the following:
 
         >>> torch.distributed.init_process_group(backend="nccl")
-        >>> model = DistributedDataParallel(model) # device_ids will include all GPU devices be default
+        >>> model = DistributedDataParallel(model) # device_ids will include all GPU devices by default
 
     (2) Multi-Process Single-GPU
 
@@ -102,9 +102,9 @@ class DistributedDataParallel(Module):
         This module assumes all parameters are registered in the model of each
         distributed processes are in the same order. The module itself will
         conduct gradient all-reduction following the reverse order of the
-        registered parameters of the model. In other wise, it is users'
+        registered parameters of the model. In other words, it is users'
         responsibility to ensure that each distributed process has the exact
-        same model and thus the exact parameter registeration order.
+        same model and thus the exact same parameter registration order.
 
     .. warning::
         This module assumes all buffers and gradients are dense.
@@ -169,7 +169,7 @@ class DistributedDataParallel(Module):
                          You normally don't need this option enabled unless you
                          are observing weird behaviors such as different ranks
                          are getting different gradients, which should not
-                         happen if DistributedDataParallel is corrected used.
+                         happen if DistributedDataParallel is correctly used.
                          (default: ``False``)
 
     Attributes:
@@ -230,6 +230,7 @@ class DistributedDataParallel(Module):
         (2) bucketing the parameters for reductions
         (3) resetting the bucketing states
         (4) registering the grad hooks
+        (5) passing a handle of DDP to SyncBatchNorm Layer
         """
         if len(self.device_ids) > 1:
             # TODO: we don't need to replicate params in here. they're always going to
@@ -307,6 +308,9 @@ class DistributedDataParallel(Module):
         self.devs_ready = [0 for _ in range(len(self.bucket_sizes))]
         self._register_grad_hooks()
 
+        # passing a handle to torch.nn.SyncBatchNorm layer
+        self._passing_sync_batchnorm_handle(self._module_copies)
+
     def __getstate__(self):
         self._check_default_group()
         attrs = copy.copy(self.__dict__)
@@ -348,8 +352,8 @@ class DistributedDataParallel(Module):
             if not self.all_buckets_reduced:
                 raise RuntimeError("Not all gradients have been reduced from "
                                    "the backward of the previous iteration. "
-                                   "This is unexpected and fatal error. Please "
-                                   "check and ensure that the model's "
+                                   "This is an unexpected and fatal error. "
+                                   "Please check and ensure that the model's "
                                    "parameters are not changed after you wrap "
                                    "up the model with DistributedDataParallel.")
         self.all_buckets_reduced = False
@@ -406,6 +410,12 @@ class DistributedDataParallel(Module):
                     for tensors, module_buffers_data in zip(result[1:], self.modules_buffers_data[1:]):
                         for tensor, buffer_data in zip(tensors, module_buffers_data):
                             buffer_data.set_(tensor)
+
+    def _passing_sync_batchnorm_handle(self, module_copies):
+        for dev_idx, module in enumerate(module_copies):
+            for layer in module.modules():
+                if isinstance(layer, torch.nn.modules.SyncBatchNorm):
+                    layer._specify_ddp_gpu_num(len(self.device_ids))
 
     def _register_grad_hooks(self):
         self._grad_accs = []  # need to keep them in scope

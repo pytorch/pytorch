@@ -53,7 +53,9 @@ TYPE_MAP = {
     'std::vector<Tensor>': 'Tensor[]',
     'IntArrayRef': 'int[]',
     'Layout': 'Layout',
+    'Layout?': 'Layout?',
     'Device': 'Device',
+    'Device?': 'Device?',
     'ScalarType': 'ScalarType',
     'ScalarType?': 'ScalarType?',
     'int64_t': 'int',
@@ -92,8 +94,10 @@ def jit_type_of(arg):
 # that type
 FROM_IVALUE = {
     'Device': '{}.toDevice()',
+    'Device?': '{}.toOptional<c10::Device>()',
     'IntArrayRef': '{}.toIntList()->elements()',
     'Layout': '{}.toLayout()',
+    'Layout?': '{}.toOptional<c10::Layout>()',
     'Scalar': '{}.toScalar()',
     'Scalar?': '{}.toOptional<Scalar>()',
     'ScalarType': '{}.toScalarType()',
@@ -338,19 +342,33 @@ def gen_jit_dispatch(declarations, out, template_path):
             return [arg]
         assert decl.get('tensor_options_arg_index') != i
         decl['tensor_options_arg_index'] = i
-        return [
+        tensor_options_expansion = [
             # XXX - until we actually have first-class interpreter types for these
             # concepts, the default values to be encoded in Tensors
             # If you change this, you also need to update [TensorOptions in script]
             # in the tracer code.
             # dtype is specified as an int64_t of at::ScalarType
-            {'name': 'dtype', 'simple_type': 'ScalarType', 'default': 'float', 'kwarg_only': True},
+            {'name': 'dtype', 'simple_type': 'ScalarType'},
             # layout is specified as an int64_t of at::Layout
-            {'name': 'layout', 'simple_type': 'Layout', 'default': 'strided', 'kwarg_only': True},
+            {'name': 'layout', 'simple_type': 'Layout'},
             # device is specified as an IntArrayRef of { at::Device::Type, device_id }
-            {'name': 'device', 'simple_type': 'Device', 'kwarg_only': True,
-                'default': '\\"cpu\\"'},
+            {'name': 'device', 'simple_type': 'Device'},
         ]
+        # TODO: Don't repack this into TensorOptions. Needs various changes in downstream code.
+        if 'default' in arg:
+            tensor_options_expansion[0]['simple_type'] += '?'
+            tensor_options_expansion[1]['simple_type'] += '?'
+            tensor_options_expansion[2]['simple_type'] += '?'
+            tensor_options_expansion[0]['default'] = 'None'
+            tensor_options_expansion[1]['default'] = 'None'
+            tensor_options_expansion[2]['default'] = 'None'
+        if 'default' in arg and arg['default'] == 'at::kLong':
+            tensor_options_expansion[0]['default'] = 'long'
+        if 'kwarg_only' in arg and arg['kwarg_only']:
+            tensor_options_expansion[0]['kwarg_only'] = True
+            tensor_options_expansion[1]['kwarg_only'] = True
+            tensor_options_expansion[2]['kwarg_only'] = True
+        return tensor_options_expansion
 
     additional_jit_decls = []
 
@@ -454,7 +472,11 @@ def signature(decl, should_match_schema=True):
         decl = '{} {}'.format(typ, name)
         if 'default' in arg:
             # clean up initializer lists {{true, true}} -> [true, true]
-            default = str(arg['default']) \
+            default = arg['default']
+            # NOTE: str(float) in python2 truncates, which makes JIT signatures not match native_functions
+            # signatures.  repr(float) doesn't seem to truncate in these cases.
+            default = str(default) if not isinstance(default, float) else repr(default)
+            default = default \
                 .replace('{{', '[') \
                 .replace('}}', ']') \
                 .replace('true', 'True') \
@@ -481,6 +503,9 @@ def signature(decl, should_match_schema=True):
     arg_list = ', '.join(args)
     if len(decl['returns']) == 1:
         ret_list = jit_type_of(decl['returns'][0])
+        # Adding output name if it exists
+        if decl['returns'][0].get('field_name'):
+            ret_list += ' ' + decl['returns'][0]['field_name']
     else:
         def type_maybe_field(r):
             return '{} {}'.format(jit_type_of(r), r['field_name']) if 'field_name' in r else jit_type_of(r)

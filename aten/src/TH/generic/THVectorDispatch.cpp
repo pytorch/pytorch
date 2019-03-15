@@ -38,6 +38,8 @@ void THVector_(fill)(scalar_t *x, const scalar_t c, const ptrdiff_t n) {
   THVector_(fill_DISPATCHPTR)(x, c, n);
 }
 
+#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
+
 static void (*THVector_(cadd_DISPATCHPTR))(scalar_t *, const scalar_t *, const scalar_t *, const scalar_t, const ptrdiff_t) = &THVector_(cadd_DEFAULT);
 static FunctionDescription THVector_(cadd_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
@@ -236,5 +238,7 @@ struct THVector_(startup) {
 
 // Declare a global instance to force static initialization
 static THVector_(startup) THVector_(g_startup);
+
+#endif /* non bool only part */
 
 #endif
