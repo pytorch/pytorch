@@ -44,7 +44,7 @@ def set_training(model, mode):
 
 def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
-           operator_export_type=None, opset_version=None, retain_param_name=False):
+           operator_export_type=None, opset_version=None, retain_param_name=True):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -96,7 +96,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             opset version. Right now, supported stable opset version is 9.
             The opset_version must be _onnx_master_opset or in _onnx_stable_opsets
             which are defined in torch/onnx/symbolic.py
-        retain_param_name (bool, default is False): retain the names of the parameter
+        retain_param_name (bool, default is True): retain the names of the parameter
             in the state dict during export
     """
     if aten or export_raw_ir:
@@ -243,10 +243,9 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
             graph_inputs = list(graph.inputs())
             user_input_num = len(graph_inputs) - len(state_dict)
             param_names = list(state_dict.keys())
-            for i in range(len(graph_inputs)):
+            for i, inp in enumerate(graph_inputs):
                 if i >= user_input_num:
-                    graph_inputs[i].setUniqueName(
-                        param_names[i - user_input_num])
+                    inp.setUniqueName(param_names[i - user_input_num])
 
     graph = _optimize_graph(graph, operator_export_type)
 
@@ -268,7 +267,7 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
                             input_names=None, output_names=None, aten=False, export_raw_ir=False,
                             operator_export_type=None, export_type=ExportTypes.PROTOBUF_FILE,
                             example_outputs=None, propagate=False, google_printer=False,
-                            opset_version=None, retain_param_name=False):
+                            opset_version=None, retain_param_name=True):
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
