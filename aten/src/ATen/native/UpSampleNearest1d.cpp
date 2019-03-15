@@ -115,7 +115,7 @@ static void upsample_nearest1d_out_cpu_template(
 
   AT_ASSERT(input_width > 0 && output_width > 0);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "upsample_nearest1d", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest1d", [&] {
     auto* idata = input.data<scalar_t>();
     auto* odata = output.data<scalar_t>();
 
@@ -154,7 +154,7 @@ static void upsample_nearest1d_backward_out_cpu_template(
   grad_input.zero_();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      grad_output.type(), "upsample_nearest1d_backward", [&] {
+      grad_output.scalar_type(), "upsample_nearest1d_backward", [&] {
         scalar_t* idata = grad_input.data<scalar_t>();
         scalar_t* odata = grad_output.data<scalar_t>();
 
