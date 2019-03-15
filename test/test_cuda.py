@@ -1297,6 +1297,7 @@ class TestCuda(TestCase):
     def test_gather(self):
         self._test_gather(0)
 
+    @skipIfRocm
     def test_gather_dim(self):
         self._test_gather(1)
 
