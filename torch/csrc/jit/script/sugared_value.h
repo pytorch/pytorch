@@ -188,6 +188,11 @@ struct TORCH_API ClassValue : public SugaredValue {
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override;
 
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Method& m,
+      const std::string& field) override;
+
   std::string kind() const override {
     return type_->str();
   }
@@ -296,6 +301,35 @@ struct TORCH_API IsInstanceValue : SugaredValue {
   std::string kind() const override {
     return "isinstance";
   }
+};
+
+// This represents the "__new__" method on classes, which can't be a MethodValue
+// because it takes a ClassValue as input.
+// So if we see:
+//   Foo.__new__(Foo)
+// Foo is a ClassValue, calling `attr("__new__")` will return a ClassNewMethod.
+struct TORCH_API ClassNewMethod : public SugaredValue {
+  ClassNewMethod(ClassTypePtr type) : type_(type) {}
+  std::string kind() const override {
+    return "class.__new__";
+  }
+
+  std::shared_ptr<SugaredValue> createObject(
+      const SourceRange& loc,
+      Method& m,
+      const std::string& classname) {
+    if (classname != type_->name()) {
+      throw ErrorReport(loc)
+          << "Argument to __new__() must match the class "
+          << "you are calling __new__() on. "
+          << "Got: " << classname << ", expected: " << type_->name();
+    }
+    auto& g = *m.graph();
+    auto createNode = g.insertNode(g.createObject(type_));
+    return std::make_shared<SimpleValue>(createNode->output());
+  }
+
+  ClassTypePtr type_;
 };
 
 static inline std::vector<Value*> toValues(

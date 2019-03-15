@@ -60,6 +60,13 @@ message ModuleDef {
   optional bool optimize = 8;
 }
 
+// Represents all non-module code that the model depends on.
+// Right now it's just a straight list of classes, defined in dependency order
+// (i.e. dependencies appear before their dependers)
+message LibDef {
+  optional RecordRef torchscript_arena = 1;
+}
+
 enum ProtoVersion {
   PROTO_VERSION_NEWEST = 0x0000000000000001;
 }
@@ -83,4 +90,8 @@ message ModelDef {
   // the table contains all the tensor information
   // the tensor id is defined as TensorProto.name
   repeated TensorDef tensors = 5;
+
+  // TorchScript code that this module hierarchy depends on
+  // Libs will be loaded in before the main module is compiled.
+  optional LibDef libs = 9;
 }
