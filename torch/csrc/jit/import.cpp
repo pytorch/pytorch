@@ -4,7 +4,7 @@
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/import_method.h>
+#include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/pickler.h>
@@ -59,6 +59,7 @@ class ScriptModuleDeserializer final {
 
   void loadTensorTable(torch::ModelDef* model_def);
   void loadAttributeTable();
+  void loadLibs(torch::ModelDef* model_def);
 
   caffe2::serialize::PyTorchStreamReader reader_;
   // this is a hack to make sure the script module created in C++ is the
@@ -131,7 +132,7 @@ void ScriptModuleDeserializer::deserialize(
 
   loadTensorTable(&model_def);
   loadAttributeTable();
-
+  loadLibs(&model_def);
   // TODO: this can be simplified when C++/Python interop lands,
   // and the submodules would be created as the same in either C++ or Python
   convertModule(module_def);
@@ -151,6 +152,17 @@ void ScriptModuleDeserializer::loadAttributeTable() {
       reader_.getRecord("attributes.pkl");
   Unpickler unpickler(attributes_ptr.get(), attributes_size, &tensor_table_);
   attribute_table_ = unpickler.parse_ivalue_list();
+}
+
+void ScriptModuleDeserializer::loadLibs(torch::ModelDef* model_def) {
+  const auto lib_def = model_def->libs();
+  if (lib_def.has_torchscript_arena()) {
+    at::DataPtr data;
+    size_t size;
+    std::tie(data, size) = reader_.getRecord(lib_def.torchscript_arena().key());
+    std::string data_str(static_cast<const char*>(data.get()), size);
+    script::import_libs(data_str, tensor_table_);
+  }
 }
 
 at::Tensor ScriptModuleDeserializer::loadTensor(
@@ -262,7 +274,7 @@ void ScriptModuleDeserializer::convertModule(
     std::tie(data, size) =
         reader_.getRecord(module_def.torchscript_arena().key());
     std::string data_str(static_cast<const char*>(data.get()), size);
-    import_methods(module, data_str, tensor_table_);
+    script::import_methods(module, data_str, tensor_table_);
   }
 }
 

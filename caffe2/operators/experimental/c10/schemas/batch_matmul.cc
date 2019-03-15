@@ -22,43 +22,9 @@ C10_DEFINE_OP_SCHEMA(BatchMatmul, FunctionSchema(
 }
 }
 
-namespace {
-struct TransAParameter final {
-  using type = int;
-  static constexpr const char* name() {
-    return "trans_a";
-  }
-  static constexpr int default_value() {
-    return 0;
-  }
-};
-struct TransBParameter final {
-  using type = int;
-  static constexpr const char* name() {
-    return "trans_b";
-  }
-  static constexpr int default_value() {
-    return 0;
-  }
-};
-struct BroadcastParameter final {
-  using type = int;
-  static constexpr const char* name() {
-    return "broadcast";
-  }
-  static constexpr int default_value() {
-    return 0;
-  }
-};
-} // namespace
-
 namespace caffe2 {
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
-    ops::BatchMatmul,
-    C10BatchMatMul_DontUseThisOpYet,
-    1,
-    ParameterHelper<TransAParameter>,
-    ParameterHelper<TransBParameter>,
-    ParameterHelper<BroadcastParameter>)
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
+    ops::BatchMatmul(),
+    C10BatchMatMul_DontUseThisOpYet)
 }

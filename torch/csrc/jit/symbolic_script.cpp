@@ -154,6 +154,13 @@ const std::vector<std::string> functions = {
 
             return torch.var(self, dim, unbiased, keepdim), backward
 
+        def tanh(self):
+            output = torch.tanh(self)
+            def backward(grad_output):
+                return grad_output * (1 - output * output)
+
+            return output, backward
+
         def AD_index_select_backward(grad,
                                      dim: int,
                                      indices,
@@ -652,11 +659,11 @@ const std::vector<std::string> functions = {
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
                        eps : float,
-                       cudnn_enabled : bool):
+                       cudnn_enable : bool):
 
             bn_out, save1, save2, impl_idx = torch._batch_norm_impl_index(
                 input, weight, bias, None, None, True,
-                0.0, eps, cudnn_enabled)
+                0.0, eps, cudnn_enable)
             has_weight = weight is not None
             has_bias = bias is not None
 
