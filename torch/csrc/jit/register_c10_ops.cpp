@@ -124,7 +124,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
         int i = 0;
         for (auto iter = stack.end() - output_size; iter != stack.end();
              ++iter, ++i) {
-          auto type = op.schema().returns()[i].type();
+          const auto& type = op.schema().returns()[i].type();
           if (type->isSubclass(TypeKind::TensorType)) {
             AT_ASSERT(iter->isTensor());
             tracer::addOutput(node, iter->toTensor());
