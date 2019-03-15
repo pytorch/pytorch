@@ -4146,6 +4146,30 @@ a")
 
         self.assertEqual(foo(), [1, 2, 3, 4])
 
+    def test_mutable_list_reverse_empty(self):
+        def test_reverse_empty():
+            a = []
+            a.reverse()
+
+            return a == []
+        self.checkScript(test_reverse_empty, ())
+
+    def test_mutable_list_reverse(self):
+        def test_reverse():
+            a = [1, 2, 3, 4]
+            a.reverse()
+
+            return a == [4, 3, 2, 1]
+        self.checkScript(test_reverse, ())
+
+    def test_mutable_tensor_list_reverse(self):
+        def test_tensor_reverse():
+            a = [torch.tensor(1), torch.tensor(2)]
+            a.reverse()
+
+            return a == [torch.tensor(2), torch.tensor(1)]
+        self.checkScript(test_tensor_reverse, ())
+
     def test_mutable_list_pop_empty(self):
         @torch.jit.script
         def test_pop_empty():

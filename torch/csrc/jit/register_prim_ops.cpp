@@ -991,6 +991,17 @@ int listAppend(Stack& stack) {
 }
 
 template <typename TList>
+int listReverse(Stack& stack) {
+  TList a;
+  pop(stack, a);
+
+  auto& elements = a->elements();
+  std::reverse(elements.begin(), elements.end());
+
+  return 0;
+}
+
+template <typename TList>
 int listPop(Stack& stack) {
   TList list;
   int64_t idx;
@@ -1440,6 +1451,9 @@ RegisterOperators reg2({
           "(c) el) -> " decl_type "[](a!)",                                 \
           listAppend<Shared<c_type>, c_type::ElemType>),                    \
       Operator(                                                             \
+          "aten::reverse( " decl_type "[](a!) self) -> ()",                 \
+          listReverse<Shared<c_type>>),                                     \
+      Operator(                                                             \
           "aten::extend(" decl_type "[](a!) self, " decl_type               \
           " [] other) -> ()",                                               \
           listExtend<Shared<c_type>>),                                      \
@@ -1481,6 +1495,9 @@ RegisterOperators reg2({
           "aten::append(" decl_type "[](a!) self, " decl_type          \
           " el) -> " decl_type "[](a!)",                               \
           listAppend<Shared<c_type>, c_type::ElemType>),               \
+      Operator(                                                        \
+          "aten::reverse(" decl_type "[](a!) self) -> ()",             \
+          listReverse<Shared<c_type>>),                                \
       Operator(                                                        \
           "aten::extend(" decl_type "[](a!) self, " decl_type          \
           " [] other) -> ()",                                          \
@@ -1524,7 +1541,7 @@ RegisterOperators reg2({
 #undef CREATE_MUTABLE_LIST_OPS
 
 #define CREATE_LIST_OPS(decl_type, c_type)                                          \
-  Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),         \
+      Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),     \
       Operator(                                                                     \
           "aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type           \
           "[]",                                                                     \
