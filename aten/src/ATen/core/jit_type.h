@@ -1186,7 +1186,7 @@ struct CAFFE2_API ClassType : public Type {
     attributeTypes_.push_back(type);
   }
 
-  at::ArrayRef<TypePtr> containedTypes() const {
+  at::ArrayRef<TypePtr> containedTypes() const override {
     return attributeTypes_;
   }
 
