@@ -30,6 +30,9 @@ namespace jit {
 namespace fuser {
 
 // nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
+// The specific limit is a function of constant memory size, amount available
+// to pass arguments, and some implementation dependence. Select a safe
+// limit here.
 constexpr size_t fusion_kernel_args_limit = 128;
 
 std::mutex fusion_backends_lock_;
