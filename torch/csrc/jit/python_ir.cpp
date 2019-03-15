@@ -14,7 +14,6 @@
 
 #include <iostream>
 #include <sstream>
-#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -222,7 +221,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "_export_onnx",
           [](const std::shared_ptr<Graph> g,
-             const std::map<std::string, at::Tensor>& initializers,
+             const std::vector<at::Tensor>& initializers,
              int64_t onnx_opset_version,
              bool defer_weight_export,
              ::torch::onnx::OperatorExportTypes operator_export_type) {
@@ -256,7 +255,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "_pretty_print_onnx",
           [](const std::shared_ptr<Graph> g,
-             const std::map<std::string, at::Tensor>& initializers,
+             const std::vector<at::Tensor>& initializers,
              int64_t onnx_opset_version,
              bool defer_weight_export,
              ::torch::onnx::OperatorExportTypes operator_export_type,
@@ -386,7 +385,8 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .VS(copyMetadata)
       .VS(isTensor)
-      .def("toIValue", [](Value& n) { return toIValue(&n); });
+      .def("toIValue", [](Value& n) { return toIValue(&n); })
+      .def("type", [](Value& v) { return v.type(); });
 #undef VS
 
   py::class_<Block, std::unique_ptr<Block, py::nodelete>>(m, "Block")
@@ -410,7 +410,27 @@ void initPythonIRBindings(PyObject* module_) {
           },
           "Find all nodes",
           py::arg("kind"),
-          py::arg("recurse") = true);
+          py::arg("recurse") = true)
+      .def(
+          "inputs",
+          [](Block& b) {
+            return py::make_iterator(b.inputs().begin(), b.inputs().end());
+          })
+      .def(
+          "outputs",
+          [](Block& b) {
+            return py::make_iterator(b.outputs().begin(), b.outputs().end());
+          })
+      .def(
+          "returnNode",
+          [](Block& b) {
+            return b.return_node();
+          })
+      .def(
+          "paramNode",
+          [](Block& b) {
+            return b.param_node();
+          });
 
 #define NS(name) def(#name, &Node ::name)
   py::class_<Node, std::unique_ptr<Node, py::nodelete>>(m, "Node")

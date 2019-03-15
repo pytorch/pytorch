@@ -22,33 +22,9 @@ C10_DEFINE_OP_SCHEMA(FullyConnected, FunctionSchema(
 }
 }
 
-namespace {
-struct AxisParameter final {
-  using type = int32_t;
-  static constexpr const char* name() {
-    return "axis";
-  }
-  static constexpr int32_t default_value() {
-    return 1;
-  }
-};
-struct AxisWParameter final {
-  using type = int32_t;
-  static constexpr const char* name() {
-    return "axis_w";
-  }
-  static constexpr int32_t default_value() {
-    return 1;
-  }
-};
-} // namespace
-
 namespace caffe2 {
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
-    ops::FullyConnected,
-    C10FC_DontUseThisOpYet,
-    1,
-    ParameterHelper<AxisParameter>,
-    ParameterHelper<AxisWParameter>)
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
+    ops::FullyConnected(),
+    C10FC_DontUseThisOpYet)
 }

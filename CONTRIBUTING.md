@@ -283,9 +283,13 @@ Even when dependencies are tracked with file modification,
 there are many situations where files get rebuilt when a previous
 compilation was exactly the same.
 
-Using ccache in a situation like this is a real time-saver. However, by
-default, ccache does not properly support CUDA stuff, so here are the
-instructions for installing a custom ccache fork that has CUDA support:
+Using ccache in a situation like this is a real time-saver. The ccache manual
+describes [two ways to use ccache](https://ccache.samba.org/manual/latest.html#_run_modes).
+In the PyTorch project, currently only the latter method of masquerading as
+the compiler via symlinks works for CUDA compilation.
+
+Here are the instructions for installing ccache from source (tested at commit
+`7abac8f` of the `ccache` repo):
 
 ```bash
 # install and export ccache
@@ -297,7 +301,7 @@ then
     mkdir -p ~/ccache
     pushd /tmp
     rm -rf ccache
-    git clone https://github.com/colesbury/ccache -b ccbin
+    git clone https://github.com/ccache/ccache.git
     pushd ccache
     ./autogen.sh
     ./configure
@@ -319,6 +323,14 @@ fi
 export PATH=~/ccache/lib:$PATH
 export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
 ```
+
+Alternatively, `ccache` provided by newer Linux distributions (e.g. Debian/sid)
+also works, but the `nvcc` symlink to `ccache` as described above is still required.
+
+Note that the original `nvcc` binary (typically at `/usr/local/cuda/bin`) must
+be on your `PATH`, otherwise `ccache` will emit the following error:
+
+    ccache: error: Could not find compiler "nvcc" in PATH
 
 ## CUDA Development tips
 

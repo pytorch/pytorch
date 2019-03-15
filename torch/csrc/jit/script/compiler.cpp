@@ -507,7 +507,7 @@ struct to_ir {
   to_ir(
       const Def& def,
       Resolver resolver_,
-      const SugaredValuePtr& self,
+      const c10::optional<Self>& self,
       Method& method) // method being constructed
       : method(method),
         graph(method.graph()),
@@ -565,7 +565,7 @@ struct to_ir {
 
   FunctionSchema emitDef(
       const Def& def,
-      const SugaredValuePtr& self,
+      const c10::optional<Self>& self,
       Block* block) {
     auto schema = extractSchemaFromDef(def, self);
     // TODO need guards on init returning none
@@ -612,7 +612,7 @@ struct to_ir {
         blank_decl,
         List<Stmt>::create(r, {ret}));
     auto m = std::make_shared<Module>();
-    defineMethodsInModule(m, {def}, {resolver}, nullptr);
+    defineMethodsInModule(m, {def}, {resolver}, c10::nullopt);
     Stack stack;
     m->get_method("defaults").run(stack);
     return stack.at(0).toTuple()->elements();
@@ -620,7 +620,7 @@ struct to_ir {
 
   std::vector<Argument> parseArgsFromDecl(
       const Decl& decl,
-      const SugaredValuePtr& self) {
+      const c10::optional<Self>& self) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
     if (self) {
@@ -693,7 +693,7 @@ struct to_ir {
   }
   FunctionSchema extractSchemaFromDef(
       const Def& def,
-      const SugaredValuePtr& self) {
+      const c10::optional<Self>& self) {
     const auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
     std::vector<Argument> returns = parseReturnFromDecl(def.decl());
@@ -703,7 +703,7 @@ struct to_ir {
 
   std::vector<Argument> emitFormalArguments(
       const Def& def,
-      const SugaredValuePtr& self,
+      const c10::optional<Self>& self,
       const FunctionSchema& schema,
       Block* block) {
     std::vector<Argument> arguments; // for schema
@@ -725,14 +725,13 @@ struct to_ir {
     if (self) {
       AT_ASSERT(it != end);
       const auto& name = (*it).ident().name();
-      if (auto classType = dynamic_cast<ClassValue*>(self.get())) {
-        const auto type = classType->type_;
+      if (auto type = self->asFirstClass()) {
         Value* new_input =
             block->addInput()->setUniqueName(name)->setType(type);
         environment_stack->setVar((*it).ident().range(), name, new_input);
         arguments.emplace_back(name, type);
       } else {
-        environment_stack->setSugaredVar(def.range(), name, self);
+        environment_stack->setSugaredVar(def.range(), name, self->asSugared());
       }
       ++it;
     }
@@ -819,7 +818,7 @@ struct to_ir {
       pushFrame(block, /*starts_def=*/true);
       emitDef(
           def,
-          nullptr,
+          c10::nullopt,
           block); // ignore schema return, we just wont use it for now since we
                   // never create a Method for the closure
       popFrame(/*ends_def=*/true);
@@ -1830,10 +1829,7 @@ struct to_ir {
     const auto rhsValue =
         emitSugaredExpr(stmt.rhs(), 1)->asValue(stmt.rhs().range(), method);
     auto userObject = environment_stack->getSugaredVar(basename);
-    const bool shouldDefine =
-        method.name() == "__init__" && basename.name() == "self";
-    userObject->setAttr(
-        stmt.range(), method, lhs.selector().name(), rhsValue, shouldDefine);
+    userObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -2651,7 +2647,7 @@ void defineMethodsInModule(
     const std::shared_ptr<Module>& m,
     const std::vector<Def>& definitions,
     const std::vector<Resolver>& resolvers,
-    const SugaredValuePtr& self) {
+    const c10::optional<Self>& self) {
   AT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
@@ -2693,7 +2689,7 @@ void defineMethodsInModule(
     const std::shared_ptr<Module>& m,
     const std::string& source,
     const Resolver& resolver,
-    const SugaredValuePtr& self) {
+    const c10::optional<Self>& self) {
   Parser p(source);
   std::vector<Def> definitions;
   std::vector<Resolver> resolvers;

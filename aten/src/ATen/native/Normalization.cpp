@@ -486,7 +486,7 @@ Tensor group_norm(const Tensor& input, int64_t num_groups,
 
 std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
         const Tensor& self, const Tensor& running_mean, const Tensor& running_var, double momentum) {
-  return AT_DISPATCH_FLOATING_TYPES(self.type(), "batch_norm_update_stats", [&] {
+  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm_update_stats_cpu", [&] {
       return batch_norm_cpu_update_stats_template<scalar_t, Var>(self, running_mean, running_var, momentum, 0);
     });
 }
@@ -496,7 +496,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const Tens
                                                   bool train, double momentum, double eps) {
   checkBackend("batch_norm_cpu", {self, weight, bias, running_mean, running_var}, Backend::CPU);
 
-  return AT_DISPATCH_FLOATING_TYPES(self.type(), "batch_norm", [&] {
+  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm", [&] {
       if (!train) {
         return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, {}, {}, running_mean, running_var, train, eps);
       } else {
@@ -509,7 +509,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const Tens
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu(const Tensor& grad_out, const Tensor& self, const Tensor& weight,
                                                            const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_invstd,
                                                            bool train, double eps, std::array<bool,3> grad_input_mask) {
-  return AT_DISPATCH_FLOATING_TYPES(self.type(), "batch_norm_backward", [&] {
+  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm_backward_cpu", [&] {
       return batch_norm_backward_cpu_template<scalar_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, eps, grad_input_mask);
     });
 }

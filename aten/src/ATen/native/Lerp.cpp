@@ -38,9 +38,9 @@ Tensor& lerp_cpu_tensor_out(Tensor& result, const Tensor& self,
   Tensor b_self, b_end, b_weight;
   AT_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
            "weight should be of dimension max(self.dim(), end.dim()) or lesser");
-  std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_out");
+  std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_out_cpu");
   result.resize_as_(b_self);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "lerp_out", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lerp_out_cpu", [&]{
     lerp_cpu<scalar_t>(result, b_self, b_end, b_weight);
   });
   return result;
@@ -49,9 +49,9 @@ Tensor& lerp_cpu_tensor_out(Tensor& result, const Tensor& self,
 Tensor& lerp_cpu_scalar_out(Tensor& result, const Tensor& self,
                             const Tensor& end, Scalar weight) {
   Tensor b_self, b_end;
-  std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_out");
+  std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_out_cpu");
   result.resize_as_(b_self);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "lerp_out", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lerp_out_cpu", [&]{
     lerp_cpu<scalar_t>(result, b_self, b_end, weight.to<scalar_t>());
   });
   return result;
@@ -59,13 +59,13 @@ Tensor& lerp_cpu_scalar_out(Tensor& result, const Tensor& self,
 
 Tensor& lerp_cpu_tensor_(Tensor& self, const Tensor& end, const Tensor& weight) {
   Tensor b_self, b_end, b_weight;
-  std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_");
+  std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp__cpu");
   AT_CHECK(b_self.sizes() == self.sizes(),
            "output with shape ", self.sizes(),
            " doesn't match the broadcast shape ", b_self.sizes());
   AT_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
            "weight should be of dimension max(self.dim(), end.dim()) or lesser");
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "lerp_", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lerp__cpu", [&]{
     lerp_cpu<scalar_t>(self, b_self, b_end, b_weight);
   });
   return self;
@@ -73,11 +73,11 @@ Tensor& lerp_cpu_tensor_(Tensor& self, const Tensor& end, const Tensor& weight) 
 
 Tensor& lerp_cpu_scalar_(Tensor& self, const Tensor& end, Scalar weight) {
   Tensor b_self, b_end;
-  std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_");
+  std::tie(b_self, b_end) = expand_outplace(self, end, "lerp__cpu");
   AT_CHECK(b_self.sizes() == self.sizes(),
            "output with shape ", self.sizes(),
            " doesn't match the broadcast shape ", b_self.sizes());
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "lerp_", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lerp__cpu", [&]{
     lerp_cpu<scalar_t>(self, b_self, b_end, weight.to<scalar_t>());
   });
   return self;
@@ -87,9 +87,9 @@ Tensor lerp_cpu_tensor(const Tensor& self, const Tensor& end, const Tensor& weig
   Tensor b_self, b_end, b_weight;
   AT_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
            "weight should be of dimension max(self.dim(), end.dim()) or lesser");
-  std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp");
+  std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_cpu");
   Tensor result = at::empty_like(b_self);
-  AT_DISPATCH_FLOATING_TYPES(result.type(), "lerp", [&]{
+  AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "lerp_cpu", [&]{
     lerp_cpu<scalar_t>(result, b_self, b_end, b_weight);
   });
   return result;
@@ -97,9 +97,9 @@ Tensor lerp_cpu_tensor(const Tensor& self, const Tensor& end, const Tensor& weig
 
 Tensor lerp_cpu_scalar(const Tensor& self, const Tensor& end, Scalar weight) {
   Tensor b_self, b_end;
-  std::tie(b_self, b_end) = expand_outplace(self, end, "lerp");
+  std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_cpu");
   Tensor result = at::empty_like(b_self);
-  AT_DISPATCH_FLOATING_TYPES(result.type(), "lerp", [&]{
+  AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "lerp_cpu", [&]{
     lerp_cpu<scalar_t>(result, b_self, b_end, weight.to<scalar_t>());
   });
   return result;
