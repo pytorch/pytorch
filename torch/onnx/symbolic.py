@@ -1677,6 +1677,13 @@ def nonzero(g, input):
     return t(g, g.op('NonZero', input))
 
 
+@parse_args('v')
+def isnan(g, input):
+    output = g.op('IsNaN', input)
+    output = _cast_func_template(cast_pytorch_to_onnx['Byte'], g, output, None)
+    return output
+
+
 @parse_args('v', 'i', 'i', 'i')
 def narrow(g, input, dim, start, length):
     return g.op("Slice", input, axes_i=[dim], starts_i=[start], ends_i=[start + length])
