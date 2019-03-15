@@ -11861,12 +11861,22 @@ class TestFuser(JitTestCase):
     def test_lerp_cuda(self):
         start = torch.randn(4, 1, dtype=torch.float, device='cuda')
         end = torch.randn(1, 4, dtype=torch.float, device='cuda')
+        weight = torch.tensor(0.5, dtype=torch.float, device='cuda')
 
-        def foo(start, end):
+        # scalar weight overload
+        def foo_weight_scalar(start, end):
             return torch.lerp(start + 1, end, 0.5)
 
-        ge = self.checkTrace(foo, (start, end))
-        graph = ge.graph_for(start, end)
+        # tensor weight overload
+        def foo_weight_tensor(start, end):
+            return torch.lerp(start + 1, end, weight)
+
+        ge_weight_scalar = self.checkTrace(foo_weight_scalar, (start, end))
+        graph = ge_weight_scalar.graph_for(start, end)
+        self.assertAllFused(graph)
+
+        ge_weight_tensor = self.checkTrace(foo_weight_tensor, (start, end))
+        graph = ge_weight_tensor.graph_for(start, end)
         self.assertAllFused(graph)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")

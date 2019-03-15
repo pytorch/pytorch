@@ -450,9 +450,18 @@ const std::vector<std::string> functions = {
 
             return torch.full_like(self, fill_value), backward
 
-        def lerp(self,
-                 end,
-                 weight: float):
+        def lerp_0(self,
+                   end,
+                   weight: float):
+            def backward(grad_output):
+                grad_self = (grad_output * (1 - weight))._grad_sum_to_size(self.size())
+                grad_end = (grad_output * weight)._grad_sum_to_size(end.size())
+                return grad_self, grad_end, None
+            return torch.lerp(self, end, weight), backward
+
+        def lerp_1(self,
+                   end,
+                   weight):
             def backward(grad_output):
                 grad_self = (grad_output * (1 - weight))._grad_sum_to_size(self.size())
                 grad_end = (grad_output * weight)._grad_sum_to_size(end.size())
