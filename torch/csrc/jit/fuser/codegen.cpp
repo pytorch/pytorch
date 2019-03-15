@@ -300,7 +300,7 @@ static void emitIndexingFor(
 std::string generateKernel(
     const std::string& name,
     const Graph& graph,
-    const std::vector<std::pair<const Value*, const TensorDesc>>& inputs,
+    const std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>>& inputs,
     const std::vector<std::pair<const Value*, const TensorDesc>>& outputs,
     const bool use_cuda) {
   TemplateEnv env;
@@ -316,29 +316,54 @@ std::string generateKernel(
 
   // Lambda for writing arguments
   auto emitFormal = [&](const Value* n, const TensorDesc& desc) {
-    std::string tensor =
-        "t" +
-        std::to_string(
-            formals.size()); // can't be unique() because Param may be an output
-    const auto nDim = desc.nDim();
-    emitIndexingFor(tensorOffsets, tensor, nDim, desc.lastIsContiguous());
-    env.s("tensor", tensor);
     env.d(
         "formal_index",
         formals.size() +
             1); // + 1 because the first argument is the linearIndex
-    env.d("nDim", nDim);
-    env.s("scalar_type", scalarTypeName(desc.scalar_type));
-    formals.push_back(
-        format("TensorInfo<${scalar_type},${nDim}> ${tensor}", env));
-    argument_loads.push_back(format(
-        "*static_cast<TensorInfo<${scalar_type},${nDim}>*>(args[${formal_index}])",
-        env));
+      std::string tensor =
+          "t" +
+          std::to_string(
+              formals.size()); // can't be unique() because Param may be an output
+      const auto nDim = desc.nDim();
+      emitIndexingFor(tensorOffsets, tensor, nDim, desc.lastIsContiguous());
+      env.s("tensor", tensor);
+      env.d("nDim", nDim);
+      env.s("scalar_type", scalarTypeName(desc.scalar_type));
+      formals.push_back(
+          format("TensorInfo<${scalar_type},${nDim}> ${tensor}", env));
+      argument_loads.push_back(format(
+          "*static_cast<TensorInfo<${scalar_type},${nDim}>*>(args[${formal_index}])",
+          env));
   };
+
+  auto emitScalarFormal = [&](const Value* n){
+    env.d(
+        "formal_index",
+        formals.size() +
+            1); // + 1 because the first argument is the linearIndex
+    std::string scalar =
+        "s" +
+        std::to_string(
+            formals.size()); // can't be unique() because Param may be an output
+    env.d(
+        "formal_index",
+        formals.size() +
+            1); // + 1 because the first argument is the linearIndex
+    env.s("scalar", scalar);
+    env.s("scalar_type", variableType(n->type()));
+    formals.push_back(format("${scalar_type} ${scalar}", env));
+    argument_loads.push_back(format(
+    "*static_cast<${scalar_type}*>(args[${formal_index}])", env));
+  };
+
 
   // Writes input parameters
   for (const auto& input : inputs) {
-    emitFormal(input.first, input.second);
+    if (input.second.has_value()){
+      emitFormal(input.first, *input.second);
+    } else {
+      emitScalarFormal(input.first);
+    }
   }
 
   // Writes output parameters
@@ -358,18 +383,22 @@ std::string generateKernel(
     // Note: conversion from half is only supported for CUDA kernels.
     //  The conversion immediately converts fp16 inputs to float.
     //  Access for other types is common to CUDA and CPU kernels.
-    const auto is_half = (input.second.scalar_type == at::ScalarType::Half);
-    if (is_half) {
-      AT_ASSERT(use_cuda);
-      env.s(
-          "access",
-          format("__half2float(t${formal}.data[t${formal}_offset])", env));
-      has_half_tensor = true;
+    if (input.second.has_value()) {
+      const auto is_half = input.second.has_value() && ((*input.second).scalar_type == at::ScalarType::Half);
+      if (is_half) {
+        AT_ASSERT(use_cuda);
+        env.s(
+            "access",
+            format("__half2float(t${formal}.data[t${formal}_offset])", env));
+        has_half_tensor = true;
+      } else {
+        env.s("access", format("t${formal}.data[t${formal}_offset]", env));
+      }
+      env.s("lhs_type", calcScalarTypeName(input.second.value().scalar_type));
     } else {
-      env.s("access", format("t${formal}.data[t${formal}_offset]", env));
+      env.s("access", format("s${formal}", env));
+      env.s("lhs_type", variableType(input.first->type()));
     }
-    env.s("lhs_type", calcScalarTypeName(input.second.scalar_type));
-
     body << format("${lhs_type} ${node} = ${access};\n", env);
   }
 
