@@ -28,9 +28,17 @@ static std::vector<int64_t> infer_size(IntArrayRef shape, int64_t numel) {
 
   if (numel == newsize || (infer_dim && newsize > 0 && numel % newsize == 0)) {
     if (infer_dim) {
-      // we have a degree of freedom here to select the dimension size; follow NumPy semantics
-      // and just bail.
-      AT_CHECK(newsize != 0, "cannot reshape tensor of 0 elements into shape ", shape);
+      // We have a degree of freedom here to select the dimension size; follow
+      // NumPy semantics and just bail.  However, a nice error message is needed
+      // because users often use `view` as a way to flatten & unflatten
+      // dimensions and will otherwise be confused why
+      //   empty_tensor.view( 0, 0)
+      // works yet
+      //   empty_tensor.view(-1, 0)
+      // doesn't.
+      AT_CHECK(newsize != 0, "cannot reshape tensor of 0 elements into shape ",
+               shape, " because the unspecified dimension size -1 can be any "
+               "value and is ambiguous");
       res[*infer_dim] = numel / newsize;
     }
     return res;

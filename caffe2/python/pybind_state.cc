@@ -13,6 +13,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/stats.h"
 #include "caffe2/core/transform.h"
+#include "caffe2/observers/profile_observer.h"
 #include "caffe2/observers/runcnt_observer.h"
 #include "caffe2/observers/time_observer.h"
 #include "caffe2/onnx/backend.h"
@@ -24,12 +25,12 @@
 #include "caffe2/opt/onnxifi_transformer.h"
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/passes.h"
-#include "caffe2/opt/sink.h"
 #include "caffe2/predictor/predictor.h"
 #include "caffe2/python/pybind_state_registry.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/proto_convert.h"
 #include "caffe2/utils/string_utils.h"
+#include "torch/csrc/autograd/variable.h"
 
 namespace caffe2 {
 namespace python {
@@ -332,6 +333,19 @@ void addObjectMethods(py::module& m) {
                 blob.meta().name());
             return fetcher->Fetch(blob);
           })
+      .def("is_tensor", [](Blob* blob) { return blob->IsType<Tensor>(); })
+      // return any device Tensor
+      .def(
+          "as_tensor",
+          [](Blob* blob) {
+            CAFFE_ENFORCE(
+                blob->IsType<Tensor>(),
+                "Passed in blob doesn't contain Tensor and instead has ",
+                blob->meta());
+            return py::cast(&blob->Get<Tensor>());
+          },
+          py::return_value_policy::reference_internal)
+      // legacy API that resets tensor to CPUTensor if it's not already
       .def(
           "tensor",
           [](Blob* blob) { return py::cast(BlobGetMutableTensor(blob, CPU)); },
@@ -370,7 +384,14 @@ void addObjectMethods(py::module& m) {
           },
           "Feed an input array or string, with the (optional) DeviceOption",
           py::arg("arg"),
-          py::arg("device_option") = py::none());
+          py::arg("device_option") = py::none())
+      .def("_wrap_tensor_impl", [](Blob* blob, void* ptr) {
+        auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::
+            unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
+        AT_CHECK(p.defined(), "Can't wrap undefined tensor");
+        auto at_tensor = at::Tensor::wrap_tensor_impl(std::move(p));
+        BlobSetTensor(blob, Tensor(std::move(at_tensor)));
+      });
 
   py::class_<DLPackWrapper<CPUContext>>(m, "DLPackTensorCPU")
       .def_property_readonly(
@@ -458,6 +479,15 @@ void addObjectMethods(py::module& m) {
           },
           "Initialize this tensor to given shape and data type. "
           "Fail if the given data type cannot be accessed from python.")
+      .def(
+        "_tensor_impl_raw_handle",
+        [](TensorCPU* t) -> void* {
+          auto p = t->getIntrusivePtr();
+          // We return a raw non-owning pointer here, we rely on surrounding
+          // code to keep the original tensor alive
+          return p.get();
+        }
+      )
       .def_property_readonly(
           "_shape", [](const TensorCPU& t) { return t.sizes().vec(); })
       .def("_reshape", [](TensorCPU* t, std::vector<int64_t> dims) {
@@ -1136,6 +1166,7 @@ void addGlobalMethods(py::module& m) {
     }                                                         \
   }
 
+        REGISTER_PYTHON_EXPOSED_OBSERVER(ProfileObserver);
         REGISTER_PYTHON_EXPOSED_OBSERVER(TimeObserver);
 #undef REGISTER_PYTHON_EXPOSED_OBSERVER
 
@@ -1706,19 +1737,6 @@ void addGlobalMethods(py::module& m) {
 
     auto nn = caffe2::convertToNNModule(proto);
     opt::fuseNNPACKConvRelu(&nn);
-    auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
-
-    std::string out;
-    new_proto.SerializeToString(&out);
-    return py::bytes(out);
-  });
-
-  m.def("transform_sinkMaxPool", [](py::bytes def) {
-    caffe2::NetDef proto;
-    CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
-
-    auto nn = caffe2::convertToNNModule(proto);
-    opt::sinkMaxPool(&nn);
     auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
 
     std::string out;

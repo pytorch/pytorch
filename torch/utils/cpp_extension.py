@@ -318,10 +318,10 @@ class BuildExtension(build_ext, object):
                             '/wd4819', '-Xcompiler', '/MD'
                         ] + include_list + cflags
                     elif isinstance(self.cflags, dict):
-                        cflags = self.cflags['cxx']
+                        cflags = self.cflags['cxx'] + ['/MD']
                         cmd += cflags
                     elif isinstance(self.cflags, list):
-                        cflags = self.cflags
+                        cflags = self.cflags + ['/MD']
                         cmd += cflags
 
                 return original_spawn(cmd)

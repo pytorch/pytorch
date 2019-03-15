@@ -178,7 +178,7 @@ void fractional_max_pool2d_out_cpu_template(
     indices.resize_({numBatch, numPlanes, outputH, outputW});
   }
 
-  AT_DISPATCH_FLOATING_TYPES(input.type(),
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
   "fractional_max_pool2d_out_frame", [&] {
     auto input_data = input.data<scalar_t>();
     auto output_data = output.data<scalar_t>();
@@ -295,7 +295,7 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
 
   /* backprop */
   AT_DISPATCH_FLOATING_TYPES(
-    input.type(), "fractional_max_pool2d_backward_out_frame", [&] {
+    input.scalar_type(), "fractional_max_pool2d_backward_out_frame", [&] {
       auto gradInput_data = gradInput.data<scalar_t>();
       auto gradOutput_data = gradOutput.data<scalar_t>();
       auto indices_data = indices.data<int64_t>();

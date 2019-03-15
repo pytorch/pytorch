@@ -27,12 +27,16 @@ void wrapDim(int64_t& dim, const std::vector<int64_t>& sizes) {
   }
 }
 
+// need_trim_grad_ops contains functions that return multiple outputs in
+// forward, but only the first one requires grad.
+// Example:
 // kthvalue returns (kthvalue, index of kthvalue), currently autodiff only
 // supports at most one output that requires grad. Thus we need to remove
 // the grad for index that doesn't require grad.
 bool needTrimGrad(Node* n) {
   static OperatorSet need_trim_grad_ops = {
       "aten::kthvalue(Tensor self, int k, int dim, bool keepdim) -> (Tensor, Tensor)",
+      "aten::topk(Tensor self, int k, int dim, bool largest, bool sorted) -> (Tensor, Tensor)",
   };
   if (need_trim_grad_ops.find(n)) {
     return true;
@@ -96,6 +100,7 @@ bool isDifferentiable(Node* n) {
       "aten::log10(Tensor self) -> Tensor",
       "aten::log1p(Tensor self) -> Tensor",
       "aten::log2(Tensor self) -> Tensor",
+      "aten::rand_like(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::remainder(Tensor self, Scalar other) -> Tensor",
       "aten::round(Tensor self) -> Tensor",
@@ -117,12 +122,16 @@ bool isDifferentiable(Node* n) {
   // perf "aten::atan2(Tensor self) -> Tensor", "aten::max(Tensor self) ->
   // Tensor", "aten::min(Tensor self) -> Tensor"
 
-  if (n->kind() == prim::Constant || n->kind() == prim::Undefined ||
-      n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk ||
-      n->kind() == prim::None)
+  if (n->kind() == prim::Constant || n->kind() == prim::AutogradZero ||
+      n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk)
     return true;
   if (differentiable_ops.find(n))
     return true;
+
+  if (n->matches(
+          "aten::dropout(Tensor input, float p, bool train) -> Tensor", attr::train)) {
+    return n->get<bool>(attr::train).value();
+  }
 
   auto schema = n->maybeSchema();
   if (schema && hasGradientInfoForSchema(*schema)) {
@@ -142,7 +151,7 @@ bool isDifferentiable(Node* n) {
   if (n->matches(
           "aten::nll_loss(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> Tensor")) {
     // TODO(asuhan): support weight
-    return n->namedInput(attr::weight)->node()->kind() == prim::None;
+    return n->namedInput(attr::weight)->node()->mustBeNone();
   }
 
   // linear blocks may appear as inputs to graph executors, but they are removed
@@ -283,10 +292,10 @@ class GradientHelper {
 
     if (node->matches(
             "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
-      return {
-          gradSumToSizeOf(grads.at(0), attr::self),
-          gradSumToSizeOf(grads.at(0) * node->namedInput(attr::alpha), attr::other),
-          nullptr};
+      return {gradSumToSizeOf(grads.at(0), attr::self),
+              gradSumToSizeOf(
+                  grads.at(0) * node->namedInput(attr::alpha), attr::other),
+              nullptr};
 
     } else if (
         node->matches(
@@ -378,12 +387,12 @@ class GradientHelper {
             "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor")) {
       // handle the case that min/max is None
       Value* min = inputs.at(1);
-      bool min_must_be_none = min->node()->kind() == prim::None;
+      bool min_must_be_none = min->mustBeNone();
       Value* max = inputs.at(2);
-      bool max_must_be_none = max->node()->kind() == prim::None;
-      // XXX - this formula is wrong when min or max are not stricly prim::None
-      // but may be None dynamically. In this case an internal compiler error
-      // will get thrown when trying to generate expressions involving the
+      bool max_must_be_none = max->mustBeNone();
+      // XXX - this formula is wrong when min or max are not stricly a constant
+      // None but may be None dynamically. In this case an internal compiler
+      // error will get thrown when trying to generate expressions involving the
       // values of min/max
       if (!min_must_be_none && !max_must_be_none) {
         return {grads.at(0) *
@@ -533,6 +542,9 @@ class GradientHelper {
                    "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
       return {grads.at(0).type_as(inputs.at(0)), nullptr};
 
+    } else if (node->matches("aten::rand_like(Tensor self) -> Tensor")) {
+      return {nullptr};
+
     } else if (node->matches(
                    "aten::unsqueeze(Tensor self, int dim) -> Tensor")) {
       return {grads.at(0).squeeze(node->namedInput(attr::dim)), nullptr};
@@ -540,12 +552,12 @@ class GradientHelper {
     } else if (
         node->matches(
             "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor")) {
-      return {
-          gradSumToSizeOf(grads.at(0) * node->namedInput(attr::beta), attr::self),
-          grads.at(0).mm(inputs.at(2).t()) * node->namedInput(attr::alpha),
-          inputs.at(1).t().mm(grads.at(0)) * node->namedInput(attr::alpha),
-          nullptr,
-          nullptr};
+      return {gradSumToSizeOf(
+                  grads.at(0) * node->namedInput(attr::beta), attr::self),
+              grads.at(0).mm(inputs.at(2).t()) * node->namedInput(attr::alpha),
+              inputs.at(1).t().mm(grads.at(0)) * node->namedInput(attr::alpha),
+              nullptr,
+              nullptr};
 
     } else if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
       return {grads.at(0).mm(inputs.at(1).t()),
@@ -705,7 +717,7 @@ class GradientHelper {
         node->matches(
             "aten::nll_loss(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> Tensor")) {
       auto graph = node->owningGraph();
-      auto total_weight = graph->insertNode(graph->createUndefined());
+      auto total_weight = graph->insertNode(graph->createAutogradZero());
       auto weight = graph->insertNode(graph->createNone(TensorType::get()));
       auto backward_value = graph->insert(
           aten::nll_loss_backward,
@@ -735,8 +747,7 @@ class GradientHelper {
       return {backward_value->node()->output(0), nullptr};
 
     } else if (
-        node->kind() == prim::Constant || node->kind() == prim::Undefined ||
-        node->kind() == prim::None) {
+        node->kind() == prim::Constant || node->kind() == prim::AutogradZero) {
       return {};
     }
     throw std::runtime_error(
@@ -822,7 +833,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
   const auto get_grad = [&](Value* v) -> Value* {
     auto it = grad_map.find(v);
     if (it == grad_map.end()) {
-      auto undef = graph.insertNode(graph.createUndefined());
+      auto undef = graph.insertNode(graph.createAutogradZero());
       std::tie(it, std::ignore) = grad_map.emplace(v, undef->output());
     }
     return it->second;
@@ -935,7 +946,7 @@ static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
     AT_ASSERT(
         top_node->kind() == prim::GradOf ||
         top_node->kind() == prim::AutogradAdd ||
-        top_node->kind() == prim::Undefined);
+        top_node->kind() == prim::AutogradZero);
     if (top_node->kind() != prim::GradOf)
       continue;
     Block* grad_body = top_node->blocks().at(0);

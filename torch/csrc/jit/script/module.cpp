@@ -48,10 +48,11 @@ Value* try_emit_call_to(
 
   // parameters to callee method (which become parameters to _this_ method
   // if they were not already)
-  for (at::Tensor* member : callee.params()) {
+  for (auto member : callee.initial_ivalues()) {
     if (!caller) {
       throw ErrorReport(loc)
-          << " attempting to call a method with parameters from a raw graph. File a bug report";
+          << " attempting to call a method with parameters/attributes"
+             " from a raw graph. File a bug report";
     }
     matched_schema->inputs.push_back(caller->get_or_add_parameter(member));
   }
@@ -123,7 +124,7 @@ void Module::to_impl(
   // Then convert every of our parameters.
   for (auto& parameter : parameters) {
     // Need to access the `at::Tensor` as a `Variable` here.
-    autograd::Variable variable = *parameter->slot();
+    autograd::Variable variable = parameter.value().slot()->toTensor();
     at::Tensor data = variable.data();
     // Use the data's original device or dtype if not supplied here.
     auto new_data = data.to(
