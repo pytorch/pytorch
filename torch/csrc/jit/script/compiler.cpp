@@ -586,7 +586,7 @@ struct to_ir {
     auto stmts_list = moveAllReturnsToEnd(def.statements());
     emitStatements(stmts_list.begin(), stmts_list.end());
     std::vector<Argument> returns = {emitOutput(def.range(), schema, block)};
-    return {def.name().name(), std::move(arguments), std::move(returns)};
+    return {def.name().name(), "", std::move(arguments), std::move(returns)};
   }
 
   std::vector<IValue> evaluateDefaults(
@@ -705,7 +705,7 @@ struct to_ir {
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
     std::vector<Argument> returns = parseReturnFromDecl(def.decl());
     return FunctionSchema(
-        name, std::move(args), std::move(returns), false, false);
+        name, "", std::move(args), std::move(returns), false, false);
   }
 
   std::vector<Argument> emitFormalArguments(
