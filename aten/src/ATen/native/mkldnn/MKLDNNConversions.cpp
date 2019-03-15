@@ -5,6 +5,12 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <ideep.hpp>
+#include <caffe2/core/macros.h>
+#ifndef CAFFE2_USE_MKLDNN
+// Define IDEEP singletons here when IDEEP is not built with CAFFE2
+#include <ideep_pin_singletons.hpp>
+#endif
+
 #endif
 
 namespace at { namespace native {
