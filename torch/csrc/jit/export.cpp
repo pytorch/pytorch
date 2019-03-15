@@ -646,7 +646,7 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
 }
 
 void ScriptModuleSerializer::writeAttributeTable() {
-  Pickler pickler(tensor_table_);
+  Pickler pickler(&tensor_table_);
   pickler.start();
   for (const IValue& ivalue : attribute_table_) {
     pickler.addIValue(ivalue);

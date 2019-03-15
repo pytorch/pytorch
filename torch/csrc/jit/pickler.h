@@ -2,6 +2,8 @@
 #include <vector>
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/ArrayRef.h>
+#include <torch/csrc/utils/disallow_copy.h>
 
 namespace torch {
 namespace jit {
@@ -81,15 +83,15 @@ enum class OpCode : char {
   FRAME = '\x95'
 };
 
-enum PicklerClass : uint8_t {
-  TENSOR = 0,
-  INTLIST = 1
-};
+enum PicklerClass : uint8_t { TENSOR = 0, INTLIST = 1 };
 
 using ::c10::IValue;
 
-struct Pickler {
-  Pickler(std::vector<at::Tensor>& tensor_table)
+class Pickler {
+  TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
+
+ public:
+  Pickler(std::vector<at::Tensor>* tensor_table)
       : tensor_table_(tensor_table) {}
 
   const std::vector<char>& stack();
@@ -99,7 +101,7 @@ struct Pickler {
 
  private:
   void pushBinGet(uint32_t memo_id);
-  void pushString(const IValue& ivalue);
+  void pushMemoizedString(const IValue& ivalue);
   void pushString(const std::string& string);
   void pushTensor(const IValue& ivalue);
   void pushDouble(const IValue& ivalue);
@@ -125,23 +127,26 @@ struct Pickler {
   std::unordered_map<const void*, uint32_t> memo_;
 
   // External table of tensors to serialize
-  std::vector<at::Tensor>& tensor_table_;
+  std::vector<at::Tensor>* tensor_table_;
 
   // TODO: only use this if necessary (add a pass to find all shared ivalues,
   // and only memoize those)
   uint32_t memo_id = 0;
 };
 
-struct Unpickler {
+class Unpickler {
+  TH_DISALLOW_COPY_AND_ASSIGN(Unpickler);
+
+ public:
   Unpickler(
       void* data,
       size_t size,
-      const std::vector<at::Tensor>& tensor_table)
+      const std::vector<at::Tensor>* tensor_table)
       : bytes_(static_cast<const uint8_t*>(data)),
         end_ptr_(bytes_ + size),
         tensor_table_(tensor_table) {}
 
-  std::vector<IValue> get_ivalue_list();
+  std::vector<IValue> parse_ivalue_list();
 
  private:
   // No arguments ensures that a template arugment must be specified
@@ -168,7 +173,7 @@ struct Unpickler {
   std::vector<size_t> marks_;
   const uint8_t* bytes_;
   const uint8_t* end_ptr_;
-  const std::vector<at::Tensor>& tensor_table_;
+  const std::vector<at::Tensor>* tensor_table_;
   OpCode last_opcode_;
 };
 

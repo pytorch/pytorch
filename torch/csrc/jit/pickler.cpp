@@ -5,13 +5,13 @@ namespace jit {
 
 using ::c10::IValue;
 
-PicklerClass getClass(const std::string& string) {
-  if (string == "TensorID") {
+PicklerClass getClass(const std::string& str) {
+  if (str == "TensorID") {
     return PicklerClass::TENSOR;
-  } else if (string == "IntList") {
+  } else if (str == "IntList") {
     return PicklerClass::INTLIST;
   }
-  AT_ERROR("Unknown class name for unpickler");
+  AT_ERROR("Unknown class name for unpickler: ", str);
 }
 
 const std::string& getClassName(PicklerClass cls) {
@@ -81,7 +81,7 @@ void Pickler::addIValue(const IValue& ivalue) {
       pushOpCode(OpCode::NEWFALSE);
     }
   } else if (ivalue.isString()) {
-    pushString(ivalue);
+    pushMemoizedString(ivalue);
   } else if (ivalue.isGenericList()) {
     pushList(ivalue);
   } else if (ivalue.isGenericDict()) {
@@ -91,7 +91,7 @@ void Pickler::addIValue(const IValue& ivalue) {
   } else if (ivalue.isIntList()) {
     pushIntList(ivalue);
   } else {
-    AT_ERROR("Unknown IValue type for pickling");
+    AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
 }
 
@@ -122,7 +122,7 @@ void Pickler::pushBinGet(uint32_t memo_id) {
   }
 }
 
-void Pickler::pushString(const IValue& ivalue) {
+void Pickler::pushMemoizedString(const IValue& ivalue) {
   const auto& string = ivalue.toStringRef();
 
   pushOpCode(OpCode::BINUNICODE);
@@ -157,8 +157,8 @@ void Pickler::pushClass(PicklerClass cls) {
 void Pickler::pushTensor(const IValue& ivalue) {
   pushClass(PicklerClass::TENSOR);
 
-  tensor_table_.push_back(ivalue.toTensor());
-  auto tensor_id = tensor_table_.size() - 1;
+  tensor_table_->push_back(ivalue.toTensor());
+  auto tensor_id = tensor_table_->size() - 1;
   pushOpCode(OpCode::BININT);
   pushUint32(tensor_id);
 
@@ -193,7 +193,7 @@ void Pickler::pushDouble(const IValue& ivalue) {
 
 using ivalue_pair = std::pair<IValue, IValue>;
 
-struct IValueComparator {
+struct IValuePairComparator {
   bool operator()(const ivalue_pair& lhs, const ivalue_pair& rhs) const {
     if (lhs.first.isString()) {
       return lhs.first.toStringRef() < rhs.first.toStringRef();
@@ -217,8 +217,8 @@ void Pickler::pushDict(const IValue& ivalue) {
   pushOpCode(OpCode::MARK);
 
   // Sort the dict for deterministic keys
-  std::multiset<std::pair<IValue, IValue>, IValueComparator> dict_items(
-      dict.begin(), dict.end());
+  std::vector<std::pair<IValue, IValue>> dict_items(dict.begin(), dict.end());
+  std::sort(dict_items.begin(), dict_items.end(), IValuePairComparator());
 
   for (const auto& pair : dict_items) {
     addIValue(pair.first);
@@ -294,7 +294,7 @@ void Pickler::pushInt32(int32_t value) {
   stack_.insert(stack_.end(), begin, begin + sizeof(int32_t));
 }
 
-std::vector<IValue> Unpickler::get_ivalue_list() {
+std::vector<IValue> Unpickler::parse_ivalue_list() {
   run();
   AT_ASSERT(stack_.size() == 1);
   return stack_[0].toGenericListRef();
@@ -426,7 +426,7 @@ OpCode Unpickler::readInstruction() {
 
       switch (class_name) {
         case PicklerClass::TENSOR:
-        stack_.emplace_back(tensor_table_.at(setitem_data.toInt()));
+        stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
           break;
         case PicklerClass::INTLIST:
           stack_.push_back(setitem_data);
