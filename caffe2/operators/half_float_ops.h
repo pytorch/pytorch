@@ -26,8 +26,9 @@ class HalfToFloatOp : public Operator<Context> {
 
 class Float16ConstantFillOp : public Operator<CPUContext> {
  public:
-  Float16ConstantFillOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
+  template <class... Args>
+  explicit Float16ConstantFillOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
         shape_(this->template GetRepeatedArgument<int64_t>("shape")) {}
 
   USE_OPERATOR_FUNCTIONS(CPUContext);
@@ -41,8 +42,9 @@ class Float16ConstantFillOp : public Operator<CPUContext> {
 
 class Float16UniformFillOp : public Operator<CPUContext> {
  public:
-  Float16UniformFillOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
+  template <class... Args>
+  explicit Float16UniformFillOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
         shape_(this->template GetRepeatedArgument<int64_t>("shape")),
         min_(this->template GetSingleArgument<float>("min", 0)),
         max_(this->template GetSingleArgument<float>("max", 1)) {

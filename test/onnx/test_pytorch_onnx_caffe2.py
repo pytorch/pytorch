@@ -664,6 +664,22 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.MaxPool2d(5, padding=2)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
+    def test_maxpool1d_ceil(self):
+        model = nn.MaxPool1d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_maxpool2d_ceil(self):
+        model = nn.MaxPool2d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_maxpool3d_ceil(self):
+        model = nn.MaxPool3d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 44, 31, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    @unittest.skip("C2 and PyTorch have small difference in padding implementation")
     def test_avgpool2d(self):
         model = nn.AvgPool2d(5, padding=(2))
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
@@ -679,6 +695,51 @@ class TestCaffe2Backend(unittest.TestCase):
     def test_avgpool2d_no_padding(self):
         model = nn.AvgPool2d(5)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
+
+    def test_avg_pool1D_ceil(self):
+        model = torch.nn.AvgPool1d(3, 2, ceil_mode=True)
+        x = torch.randn(1, 1, 7, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_avg_pool2D_ceil(self):
+        model = torch.nn.AvgPool2d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_avg_pool3D_ceil(self):
+        model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 44, 31, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_avg_pool1D(self):
+        model = torch.nn.AdaptiveAvgPool1d((5))
+        x = torch.randn(20, 16, 50, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_avg_pool2D(self):
+        model = torch.nn.AdaptiveAvgPool2d((5, 4))
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_avg_pool3D(self):
+        model = torch.nn.AdaptiveAvgPool3d((5, 4, 3))
+        x = torch.randn(20, 16, 50, 44, 30, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_max_pool1D(self):
+        model = torch.nn.AdaptiveMaxPool1d((5))
+        x = torch.randn(20, 16, 50, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_max_pool2D(self):
+        model = torch.nn.AdaptiveMaxPool2d((5, 4))
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_max_pool3D(self):
+        model = torch.nn.AdaptiveMaxPool3d((5, 4, 3))
+        x = torch.randn(20, 16, 50, 44, 30, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_weight_norm(self):
         model = nn.utils.weight_norm(nn.Conv1d(1, 1, 3))
@@ -778,6 +839,7 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(4, 3, 2, 1, requires_grad=True)
         self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
+    @unittest.skip("Temporary - waiting for https://github.com/onnx/onnx/pull/1773.")
     def test_upsample(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         model = nn.Upsample(scale_factor=2, mode='nearest')
@@ -1043,6 +1105,22 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_model_test(FlattenModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    def test_argmax(self):
+        class ArgmaxModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.argmax(input, dim=1)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(ArgmaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_argmin(self):
+        class ArgminModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.argmin(input, dim=1)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(ArgminModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
     def test_reshape(self):
         class ReshapeModel(torch.nn.Module):
             def forward(self, input):
@@ -1059,6 +1137,14 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(2, 3, requires_grad=True)
         self.run_model_test(ReshapeAsModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_narrow(self):
+        class NarrowModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.narrow(input, 0, 0, 2)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        self.run_model_test(NarrowModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
 # a bit of metaprogramming to set up all the rnn tests
 

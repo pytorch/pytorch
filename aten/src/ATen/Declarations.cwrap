@@ -3,6 +3,7 @@
   cname: set
   variants: function
   cpu_half: True
+  cpu_bool: True
   device_guard: False
   return: argument 0
   options:
@@ -38,6 +39,8 @@
   return: self
   cname: fill
   variants: function
+  cpu_half: True
+  cpu_bool: True
   options:
     - arguments:
       - THTensor* self
@@ -53,6 +56,7 @@
   variants:
     - function
   cpu_half: True
+  cpu_bool: True
   device_guard: False
   return: bool
   arguments:
@@ -119,6 +123,7 @@
   variants:
     - function
   cpu_half: True
+  cpu_bool: True
   arguments:
     - THTensor* self
 ]]
@@ -237,6 +242,7 @@
   variants:
     - function
   cpu_half: True
+  cpu_bool: True
   device_guard: False
   return: argument 0
   arguments:
@@ -798,27 +804,6 @@
           wrap_dim: self
         - arg: bool keepdim
           default: "false"
-]]
-[[
-  name: _th_kthvalue
-  backends:
-    - CPU
-  variants: function
-  cname: kthvalue
-  return: argument 0,1
-  scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
-  arguments:
-    - arg: THTensor* values
-      output: True
-    - arg: THIndexTensor* indices
-      output: True
-    - THTensor* self
-    - long k
-    - arg: long dim
-      wrap_dim: self
-      default: __last_dim
-    - arg: bool keepdim
-      default: "false"
 ]]
 [[
   name: _th_mode
@@ -1687,42 +1672,6 @@
         - THTensor* exponent
 ]]
 [[
-  name: _th_lerp
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  cname: lerp
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THTensor* self
-      broadcast: end fallback
-    - THTensor* end
-    - real weight
-]]
-[[
-  name: _th_lerp_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  return: self
-  cname: lerp
-  variants: function
-  arguments:
-    - THTensor* self
-    - arg: THTensor* self
-      broadcast: end fallback inplace
-    - THTensor* end
-    - real weight
-]]
-[[
   name: _th_histc
   cname: histc
   types:
@@ -1748,6 +1697,8 @@
   name: _th_zero_
   cname: zero
   return: self
+  cpu_half: True
+  cpu_bool: True
   variants:
     - function
   arguments:
@@ -2549,51 +2500,6 @@
       default: N
 ]]
 [[
-  name: _th_btrifact
-  cname: btrifact
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0,1
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THIntegerTensor* pivots
-      output: True
-    - CONSTANT NULL
-    - arg: bool pivot
-      kwarg_only: True
-      default: "true"
-    - THTensor* self
-]]
-[[
-  name: _th_btrifact_with_info
-  cname: btrifact
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0,1,2
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THIntegerTensor* pivots
-      output: True
-    - arg: THIntegerTensor* info
-      output: True
-    - arg: bool pivot
-      kwarg_only: True
-      default: "true"
-    - THTensor* self
-]]
-[[
   name: _th_btrisolve
   cname: btrisolve
   types:
@@ -2617,6 +2523,7 @@
     - CPU
     - CUDA
   return: self
+  cpu_bool: True
   variants: function
   options:
     - cname: random
@@ -2841,6 +2748,7 @@
   name: _th_alias
   return: THTensor*
   cpu_half: True
+  cpu_bool: True
   variants:
     - function
   options:

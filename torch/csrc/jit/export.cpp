@@ -87,8 +87,7 @@ void validateBlock(
       bool is_aten_enabled = operator_export_type ==
               onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
           operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
-      if (!node->kind().is_onnx() && !is_aten_enabled &&
-          node->kind() != prim::None) {
+      if (!node->kind().is_onnx() && !is_aten_enabled && !node->mustBeNone()) {
         FAIL_EXPORT(
             "Couldn't export operator " + node->kind().toDisplayString() +
             "\n\nDefined at:\n" + getNodeStackTraceString(node));
@@ -182,7 +181,8 @@ EncoderBase::EncoderBase(
       strip_doc_(strip_doc) {
   model_proto_.set_producer_name("pytorch");
   model_proto_.set_ir_version(onnx::IR_VERSION);
-  model_proto_.set_producer_version("0.4");
+  // TODO: set the producer version using appropriate function call
+  model_proto_.set_producer_version("1.1");
 }
 
 void EncoderBase::EncodeValueInfo(
@@ -236,7 +236,7 @@ void EncoderBase::EncodeBlock(
   for (auto node : block->nodes()) {
     bool is_raw_export =
         operator_export_type_ == onnx_torch::OperatorExportTypes::RAW;
-    if (node->kind() == prim::None && !is_raw_export) {
+    if (node->mustBeNone() && !is_raw_export) {
       // None nodes are used to implement optional inputs. One
       // way to "not provide" an optional input is to create an
       // Undefined node, and pass its output as that input.
@@ -249,7 +249,7 @@ void EncoderBase::EncodeBlock(
       p_n->set_doc_string(ss.str());
     }
     for (auto input : node->inputs()) {
-      if (input->node()->kind() == prim::None && !is_raw_export) {
+      if (input->node()->mustBeNone() && !is_raw_export) {
         p_n->add_input("");
       } else {
         p_n->add_input(input->uniqueName());
@@ -431,7 +431,7 @@ void GraphEncoder::EncodeTensor(
   for (auto d : tensor.sizes()) {
     tensor_proto->add_dims(d);
   }
-  tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.type().scalarType()));
+  tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.scalar_type()));
   // CPU's HalfTensor doesn't have contiguous(), so first calling contiguous()
   auto t = tensor.contiguous().cpu();
   // Add a buffer to the raw_data_export_map for the caller to dump into an
@@ -499,8 +499,9 @@ class ScriptModuleSerializer final {
       torch::ModuleDef* module_def);
 
   void convertParameter(
-      const script::NamedParameter& param,
-      torch::ParameterDef* param_def);
+      const script::NamedIValue& param,
+      torch::ParameterDef* param_def,
+      bool is_parameter);
 
   std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
@@ -581,7 +582,7 @@ void ScriptModuleSerializer::convertAndWriteTensor(
     tensor_proto->add_strides(s);
   }
   tensor_proto->set_data_type(caffe2::TypeMetaToDataType(
-      at::scalarTypeToTypeMeta(tensor.type().scalarType())));
+      at::scalarTypeToTypeMeta(tensor.scalar_type())));
   tensor_proto->set_offset(tensor.storage_offset());
 
   tensor_proto->set_requires_grad(tensor.requires_grad());
@@ -643,7 +644,13 @@ void ScriptModuleSerializer::convertModule(
   module_def->set_optimize(module.is_optimized());
   for (const auto& elem : module.get_parameters()) {
     torch::ParameterDef* param_def = module_def->add_parameters();
-    convertParameter(elem.value(), param_def);
+    convertParameter(elem.value(), param_def, /*is_buffer=*/false);
+  }
+  for (const auto& elem : module.get_attributes()) {
+    if (elem.value().type->isSubtypeOf(TensorType::get())) {
+      torch::ParameterDef* param_def = module_def->add_parameters();
+      convertParameter(elem.value(), param_def, /*is_buffer=*/true);
+    }
   }
 
   std::stringstream module_name;
@@ -672,11 +679,12 @@ void ScriptModuleSerializer::convertModule(
 }
 
 void ScriptModuleSerializer::convertParameter(
-    const script::NamedParameter& param,
-    torch::ParameterDef* param_def) {
-  param_def->set_name(param.name);
-  param_def->set_is_buffer(param.is_buffer);
-  param_def->set_tensor_id(addTensor(*param.slot()));
+    const script::NamedIValue& param,
+    torch::ParameterDef* param_def,
+    bool is_parameter) {
+  param_def->set_name(param.name_);
+  param_def->set_is_buffer(is_parameter);
+  param_def->set_tensor_id(addTensor(param.slot()->toTensor()));
 }
 
 // Pretty printing for ONNX

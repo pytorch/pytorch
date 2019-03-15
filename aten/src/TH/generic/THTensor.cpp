@@ -34,14 +34,14 @@ int THTensor_(nDimensionLegacyAll)(const THTensor *self)
 int64_t THTensor_(size)(const THTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->dim()), 2, "dimension %d out of range of %dD tensor",
-      dim+TH_INDEX_BASE, THTensor_(nDimensionLegacyNoScalars)(self));
+      dim, THTensor_(nDimensionLegacyNoScalars)(self));
   return self->size(dim);
 }
 
 int64_t THTensor_(stride)(const THTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->dim()), 2, "dimension %d out of range of %dD tensor",
-      dim+TH_INDEX_BASE, THTensor_(nDimensionLegacyNoScalars)(self));
+      dim, THTensor_(nDimensionLegacyNoScalars)(self));
   return self->stride(dim);
 }
 
@@ -467,12 +467,20 @@ void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
 
   if(src->size(dimension) == 1)
   {
+    std::vector<int64_t> newSize(self->dim() - 1);
+    std::vector<int64_t> newStride(self->dim() - 1);
+    for (d = 0; d < dimension; d++)
+    {
+      newSize[d] = self->size(d);
+      newStride[d] = self->stride(d);
+    }
+
     for(d = dimension; d < self->dim()-1; d++)
     {
-      self->set_size(d, self->size(d+1));
-      self->set_stride(d, self->stride(d+1));
+      newSize[d] = self->size(d+1);
+      newStride[d] = self->stride(d+1);
     }
-    self->resize_dim((unsigned int)(self->dim() - 1));
+    self->set_sizes_and_strides(newSize, newStride);
   }
 }
 

@@ -65,9 +65,7 @@ bool isSimpleMap(Node* node) {
       "aten::neg(Tensor self) -> Tensor",
       "aten::pow(Tensor self, Tensor exponent) -> Tensor",
       "aten::pow(Tensor self, Scalar exponent) -> Tensor",
-      // See https://github.com/pytorch/pytorch/issues/14674 and make sure you
-      // won't make the same mistake before you reenable this.
-      //"aten::rand_like(Tensor self) -> Tensor",
+      "aten::rand_like(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
@@ -138,8 +136,7 @@ c10::optional<bool> isDefined(Value* tensor) {
   if (tensor->type()->isSubtypeOf(TensorType::get())) {
     return true;
   }
-  if (tensor->node()->kind() == prim::None ||
-      tensor->node()->kind() == prim::Undefined) {
+  if (tensor->node()->mustBeNone()) {
     return false;
   }
   return {};
@@ -265,7 +262,7 @@ struct GraphFuser {
       )SCRIPT";
           auto module = std::make_shared<script::Module>();
           defineMethodsInModule(
-              module, source, script::nativeResolver, /*self=*/nullptr);
+              module, source, script::nativeResolver, /*self=*/c10::nullopt);
           *graph_ptr = module->get_method("batch_norm").graph();
         },
         &bn_graph);

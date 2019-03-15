@@ -58,7 +58,7 @@
 
 
 #include "caffe2/core/context_gpu.h"
-#include "upsample_nearest_op.h"
+#include "modules/detectron/upsample_nearest_op.h"
 
 namespace caffe2 {
 

@@ -14,25 +14,22 @@ class ReadAdapterInterface;
 namespace torch {
 namespace jit {
 
-using ModuleLookup = std::function<std::shared_ptr<script::Module>(
-    const std::vector<std::string>&)>;
-
 static script::ExtraFilesMap default_extra_files;
 
 TORCH_API void import_ir_module(
-    ModuleLookup module_lookup,
+    script::ModuleLookup module_lookup,
     const std::string& filename,
     c10::optional<c10::Device> device = c10::nullopt,
     script::ExtraFilesMap& extra_files = default_extra_files);
 
 TORCH_API void import_ir_module(
-    ModuleLookup module_lookup,
+    script::ModuleLookup module_lookup,
     std::istream& in,
     c10::optional<c10::Device> device = c10::nullopt,
     script::ExtraFilesMap& extra_files = default_extra_files);
 
 TORCH_API void import_ir_module(
-    ModuleLookup module_lookup,
+    script::ModuleLookup module_lookup,
     std::unique_ptr<caffe2::serialize::ReadAdapterInterface> rai,
     c10::optional<c10::Device> device = c10::nullopt,
     script::ExtraFilesMap& extra_files = default_extra_files);

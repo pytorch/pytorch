@@ -1,6 +1,7 @@
 #ifndef CAFFE2_CORE_NET_ASYNC_BASE_H_
 #define CAFFE2_CORE_NET_ASYNC_BASE_H_
 
+#include "c10/core/thread_pool.h"
 #include "c10/util/Registry.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
@@ -12,7 +13,6 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/proto/prof_dag.pb.h"
 #include "caffe2/utils/proto_utils.h"
-#include "caffe2/utils/thread_pool.h"
 
 C10_DECLARE_int(caffe2_streams_per_gpu);
 C10_DECLARE_int(caffe2_net_async_max_gpus);
@@ -106,7 +106,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
       int task_id,
       int stream_id,
       const std::vector<int>& wait_task_ids) const;
-  bool run(int task_id, int stream_id);
+  bool run(int task_id, int stream_id) noexcept;
   int stream(int task_id);
   TaskThreadPoolBase* pool(const DeviceOption& device_option);
   TaskThreadPoolBase* pool();
@@ -144,7 +144,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
       int task_id,
       OperatorBase* op,
       const char* err_msg,
-      bool save_exception = false);
+      bool save_exception = false) noexcept;
   std::atomic<bool> success_;
 
   // Tracing
@@ -166,13 +166,6 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   friend class AsyncNetExecutorHelper;
   friend class tracing::Tracer;
 };
-
-C10_DECLARE_SHARED_REGISTRY(
-    ThreadPoolRegistry,
-    TaskThreadPoolBase,
-    int,
-    int,
-    bool);
 
 class AsyncNetExecutorHelper : public ExecutorHelper {
  public:
