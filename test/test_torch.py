@@ -2375,8 +2375,8 @@ class _TestTorchMixin(object):
         self.assertEqual(res1, res2)
 
     def test_cross_with_and_without_dim(self):
-        x = torch.rand(100, 3, 100)
-        y = torch.rand(100, 3, 100)
+        x = torch.rand(100, 3)
+        y = torch.rand(100, 3)
         res1 = torch.cross(x, y, dim = 1)
         res2 = torch.cross(x, y, dim = -1)
         res3 = torch.cross(x, y)
