@@ -199,6 +199,11 @@ class PackedSequence(PackedSequence_):
             return type(self)(data, self.batch_sizes,
                               sorted_indices, unsorted_indices)
 
+    @property
+    def is_cuda(self):
+        r"""Returns true if `self.data` stored on a gpu"""
+        return self.data.is_cuda
+
     def is_pinned(self):
         r"""Returns true if `self.data` stored on in pinned memory"""
         return self.data.is_pinned()
