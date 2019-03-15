@@ -744,7 +744,7 @@ class TestJit(JitTestCase):
         self.assertEqual(fn(x, y), fn_traced(x, y))
 
     def test_disabled(self):
-        torch.jit._enabled = False
+        torch._jit_internal._enabled = False
         try:
             def f(x, y):
                 return x + y
@@ -763,7 +763,7 @@ class TestJit(JitTestCase):
             # We need to or those two conditions to make it work with all versions of Python
             self.assertTrue(inspect.ismethod(MyModule.method) or inspect.isfunction(MyModule.method))
         finally:
-            torch.jit._enabled = True
+            torch._jit_internal._enabled = True
 
     def test_train_eval(self):
         class Sub(nn.Module):
@@ -8571,19 +8571,18 @@ a")
                 .run(str(traced_fn.graph))
 
     def test_weak_script_fn_from_tracing_fn(self):
-        with self.disableModuleHook():
-            @torch._jit_internal.weak_script
-            def weak_script_fn(x):
-                y = x.clone()
-                for i in range(int(x)):
-                    y += (i + 1)
-                return y
+        @torch._jit_internal.weak_script
+        def weak_script_fn(x):
+            y = x.clone()
+            for i in range(int(x)):
+                y += (i + 1)
+            return y
 
-            def traced_fn(x):
-                return weak_script_fn(x)
+        def traced_fn(x):
+            return weak_script_fn(x)
 
-            graph = torch.jit.trace(traced_fn, (torch.tensor(5),), compile_weak_script=True).graph
-            FileCheck().check("prim::Loop").run(str(graph))
+        graph = torch.jit.trace(traced_fn, (torch.tensor(5),), compile_weak_script=True).graph
+        FileCheck().check("prim::Loop").run(str(graph))
 
     def test_weak_script_fn_from_traced_module(self):
         with self.disableModuleHook():

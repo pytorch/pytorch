@@ -9,7 +9,7 @@ from torch._six import string_classes
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
-from torch._jit_internal import ignore, _enabled, script, script_method, ScriptModule, \
+from torch._jit_internal import ignore, _get_enabled, script, script_method, ScriptModule, \
     _try_get_weak_module, _try_compile_weak_script, _try_get_dispatched_fn, \
     _try_get_overloaded_fn, _try_get_ignored_op, CompilationUnit, ScriptClass, \
     _ConstModuleList, Attribute
@@ -632,7 +632,7 @@ def trace(func,
        >>> traced_f = torch.jit.trace(f, torch.rand(1))
 
     """
-    if not _enabled:
+    if not _get_enabled():
         return func
     executor_options = {'optimize': bool(optimize)}
     # Special case for common case of passing a single Tensor
@@ -663,7 +663,7 @@ def trace(func,
 
 def batch(batch_size=1, optimize=True, _frames_up=0):
     def decorator(fn):
-        if not _enabled:
+        if not _get_enabled():
             return fn
         import torch.jit.batchop
         mod = script(fn, optimize, _frames_up)

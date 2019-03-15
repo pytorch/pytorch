@@ -106,6 +106,9 @@ def weak_script(fn, _frames_up=0):
     compiled and inlined in the graph. Otherwise, the weak script annotation
     has no effect.
     """
+    if not _get_enabled():
+        return fn
+
     compiled_weak_fns[fn] = {
         "status": COMPILATION_PENDING,
         "compiled_fn": None,
@@ -125,6 +128,9 @@ def weak_script(fn, _frames_up=0):
 
 
 def weak_module(cls):
+    if not _get_enabled():
+        return cls
+
     weak_types[cls] = {
         "method_stubs": None
     }
@@ -132,6 +138,9 @@ def weak_module(cls):
 
 
 def weak_script_method(fn):
+    if not _get_enabled():
+        return fn
+
     def wrap_fn(*args, **kwargs):
         tracing_state = _get_tracing_state()
         if tracing_state and tracing_state.compile_weak_script():
@@ -316,6 +325,10 @@ def _parse_env(name, default, true_message, false_message):
 _enabled = _parse_env('PYTORCH_JIT', True, "> Using PyTorch JIT", "> PyTorch JIT DISABLED")
 
 
+def _get_enabled():
+    return _enabled
+
+
 class CompilationUnit(object):
     def __init__(self, lang=None, optimize=True, _frames_up=0):
         self.module = torch._C.ScriptModule()
@@ -367,7 +380,7 @@ def _try_compile_weak_script(fn):
 
 
 def script(obj, optimize=True, _frames_up=0, _rcb=None):
-    if not _enabled:
+    if not _get_enabled():
         return obj
     if _rcb is None:
         _rcb = createResolutionCallback(_frames_up + 1)
@@ -388,7 +401,7 @@ ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_'
 
 
 def script_method(fn, _rcb=None):
-    if not _enabled:
+    if not _get_enabled():
         return fn
     # NOTE: we need to traverse two frames here because the meta-class frame
     # for ScriptModule will be present, as opposed to invoking @script on a
@@ -622,7 +635,7 @@ class ScriptMeta(type(torch._C.ScriptModule)):  # noqa T484
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
-if _enabled:
+if _get_enabled():
     class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule, Module)):  # noqa T484
         r"""
         The core data structure in TorchScript is the ``ScriptModule``. It is an
