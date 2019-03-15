@@ -327,7 +327,7 @@ static Tensor reshape_indexer(const Tensor& index, int64_t dims_before, int64_t 
 
 AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
 {
-  int64_t element_size_bytes = src.type().elementSizeInBytes();
+  int64_t element_size_bytes = src.element_size();
   int64_t dims_before = 0, dims_after = 0, dims_indexed = 0;
   IntArrayRef replacement_shape;
   for (size_t dim = 0; dim < indices_list.size(); dim++) {

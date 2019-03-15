@@ -17,8 +17,8 @@ inline void assertSameSizeAndType(
     const at::Tensor& tensor1,
     const at::Tensor& tensor2,
     std::string prefix = std::string()) {
-  bool equal = tensor1.type().elementSizeInBytes() ==
-          tensor2.type().elementSizeInBytes() &&
+  bool equal = tensor1.element_size() ==
+          tensor2.element_size() &&
       tensor1.numel() == tensor2.numel() && tensor1.type() == tensor2.type();
 
   if (!prefix.empty())

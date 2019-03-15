@@ -183,7 +183,7 @@ void TensorIterator::allocate_outputs() {
     auto& op = operands_[i];
     if (!op.tensor.defined()) {
       AT_ASSERTM(op.type, "no type for operand", i);
-      int element_size = op.type->elementSizeInBytes();
+      int element_size = op.type->typeMeta().itemsize();
       op.stride_bytes = compatible_stride(element_size);
 
       auto tensor_shape = invert_perm(shape_);
@@ -548,7 +548,7 @@ static DimVector compute_stride(const Tensor& tensor, IntArrayRef shape) {
   int ndim = shape.size();
   auto original_shape = tensor.sizes();
   auto original_stride = tensor.strides();
-  auto element_size_in_bytes = tensor.type().elementSizeInBytes();
+  auto element_size_in_bytes = tensor.element_size();
 
   auto stride = DimVector(ndim, 0);
   auto offset = ndim - original_shape.size();
