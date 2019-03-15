@@ -165,7 +165,7 @@ void copy_from_cpu(Tensor& dst, const Tensor& src) {
   AT_CUDA_CHECK(cudaMemcpyAsync(
       dst_contig.data_ptr(),
       src_contig.data_ptr(),
-      src.numel() * src.dtype().itemsize(),
+      src.numel() * src.element_size(),
       cudaMemcpyHostToDevice,
       stream));
   AT_CUDA_CHECK(cudaStreamSynchronize(stream));
@@ -184,7 +184,7 @@ void copy_to_cpu(Tensor& dst, const Tensor& src) {
   AT_CUDA_CHECK(cudaMemcpyAsync(
       dst_contig.data_ptr(),
       src_contig.data_ptr(),
-      src.numel() * src.dtype().itemsize(),
+      src.numel() * src.element_size(),
       cudaMemcpyDeviceToHost,
       stream));
   AT_CUDA_CHECK(cudaStreamSynchronize(stream));
