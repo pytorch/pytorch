@@ -45,41 +45,67 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
           // TODO we need to refactor graph APIs (e.g., addInputs)
           // appropriately; after that, we can get rid of the giant if-else
           // block we will clean this tech debt together in the following PRs
-          if (iter->isTensor()) {
+          auto type = args[i].type();
+          if (type->kind() == TypeKind::OptionalType) {
+            if (iter->isNone()) {
+              Value* none =
+                  graph
+                      ->insertNode(graph->createNone(
+                          reinterpret_cast<OptionalType*>(args[i].type().get())
+                              ->getElementType()))
+                      ->output();
+              node->addInput(none);
+              continue;
+            } else {
+              type =
+                  reinterpret_cast<OptionalType*>(type.get())->getElementType();
+            }
+          }
+          if (type->isSubclass(TypeKind::TensorType)) {
+            AT_ASSERT(iter->isTensor());
             tracer::addInputs(node, args[i].name().c_str(), iter->toTensor());
-          } else if (iter->isDouble()) {
+          } else if (type->kind() == TypeKind::FloatType) {
+            AT_ASSERT(iter->isDouble());
             tracer::addInputs(node, args[i].name().c_str(), iter->toDouble());
-          } else if (iter->isInt()) {
+          } else if (type->kind() == TypeKind::IntType) {
+            AT_ASSERT(iter->isInt());
             tracer::addInputs(node, args[i].name().c_str(), iter->toInt());
-          } else if (iter->isBool()) {
+          } else if (type->kind() == TypeKind::BoolType) {
+            AT_ASSERT(iter->isBool());
             tracer::addInputs(node, args[i].name().c_str(), iter->toBool());
-          } else if (iter->isString()) {
+          } else if (type->kind() == TypeKind::StringType) {
+            AT_ASSERT(iter->isString());
             tracer::addInputs(
                 node, args[i].name().c_str(), iter->toStringRef());
-          } else if (iter->isDoubleList()) {
-            tracer::addInputs(
-                node, args[i].name().c_str(), iter->toDoubleList()->elements());
-          } else if (iter->isIntList()) {
-            tracer::addInputs(
-                node, args[i].name().c_str(), iter->toIntList()->elements());
-          } else if (iter->isBoolList()) {
-            tracer::addInputs(
-                node, args[i].name().c_str(), iter->toBoolList()->elements());
-          } else if (iter->isTensorList()) {
-            tracer::addInputs(
-                node, args[i].name().c_str(), iter->toTensorList()->elements());
-          } else if (iter->isNone()) {
-            AT_ASSERT(args[i].type()->kind() == TypeKind::OptionalType);
-            // create the none node with the right element type
-            Value* none =
-                graph
-                    ->insertNode(graph->createNone(
-                        reinterpret_cast<OptionalType*>(args[i].type().get())
-                            ->getElementType()))
-                    ->output();
-            node->addInput(none);
+          } else if (type->kind() == TypeKind::ListType) {
+            const auto& elem_type =
+                reinterpret_cast<ListType*>(type.get())->getElementType();
+            if (elem_type->isSubclass(TypeKind::TensorType)) {
+              AT_ASSERT(iter->isTensorList());
+              tracer::addInputs(
+                  node,
+                  args[i].name().c_str(),
+                  iter->toTensorList()->elements());
+            } else if (elem_type->kind() == TypeKind::FloatType) {
+              AT_ASSERT(iter->isDoubleList());
+              tracer::addInputs(
+                  node,
+                  args[i].name().c_str(),
+                  iter->toDoubleList()->elements());
+            } else if (elem_type->kind() == TypeKind::IntType) {
+              AT_ASSERT(iter->isIntList());
+              tracer::addInputs(
+                  node, args[i].name().c_str(), iter->toIntList()->elements());
+            } else if (elem_type->kind() == TypeKind::BoolType) {
+              AT_ASSERT(iter->isBoolList());
+              tracer::addInputs(
+                  node, args[i].name().c_str(), iter->toBoolList()->elements());
+            } else {
+              throw std::runtime_error(
+                  "unsupported input list type: " + elem_type->str());
+            }
           } else {
-            throw std::runtime_error("unsupported input type.");
+            throw std::runtime_error("unsupported input type: " + type->str());
           }
         }
         graph->insertNode(node);
@@ -98,12 +124,22 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
         int i = 0;
         for (auto iter = stack.end() - output_size; iter != stack.end();
              ++iter, ++i) {
-          if (iter->isTensor()) {
+          auto type = op.schema().returns()[i].type();
+          if (type->isSubclass(TypeKind::TensorType)) {
+            AT_ASSERT(iter->isTensor());
             tracer::addOutput(node, iter->toTensor());
-          } else if (iter->isTensorList()) {
-            tracer::addOutput(node, iter->toTensorList()->elements());
+          } else if (type->kind() == TypeKind::ListType) {
+            const auto& elem_type =
+                reinterpret_cast<ListType*>(type.get())->getElementType();
+            if (elem_type->isSubclass(TypeKind::TensorType)) {
+              AT_ASSERT(iter->isTensorList());
+              tracer::addOutput(node, iter->toTensorList()->elements());
+            } else {
+              throw std::runtime_error(
+                  "unsupported ouptut list type: " + elem_type->str());
+            }
           } else {
-            throw std::runtime_error("unsupported output type.");
+            throw std::runtime_error("unsupported output type: " + type->str());
           }
         }
       }
