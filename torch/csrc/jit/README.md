@@ -64,10 +64,10 @@ Sections start with a reference to the source file where the code related to the
     + [`model.json`](#-modeljson-)
     + [`code`](#-code-)
     + [`tensors/`](#-tensors--)
-    + [`attributes`](#-attributes-)
-      - [Pickling and Unpickling](#pickling-and-unpickling)
+    + [`attributes.pkl`](#-attributespkl-)
     + [Implementation Details](#implementation-details)
 - [Python Bindings](#python-bindings)
+
 
 # Core Program Representation
 
@@ -572,14 +572,14 @@ TorchScript is executed using a interpreter attached to a JIT-optimizer and comp
 TorchScript programs implement a very small subset of Python of that is necessary to run models.
 
 TorchScript includes immutable value types:
-* int
-* float
-* Tuple[T0, T1, ...]
+* `int`
+* `float`
+* `Tuple[T0, T1, ...]`
 
 As well as mutable reference types:
-* Tensor
-* List[T]
-* Dict[K, V]
+* `Tensor`
+* `List[T]`
+* `Dict[K, V]`
 
 A value of a reference type points to an underlying memory location where the data for the reference type is stored, and variable assignment for a reference type can cause multiple values to point to the same underlying data. This is similar to Python's class model.
 
@@ -1177,7 +1177,7 @@ The `.pt` file is a zip archive (which can be opened with tools such as `unzip`)
   * code - the Python printed graph of a module
   * `model.json` - a JSON file of a model Protobuf def (defined in [torch.proto](caffe2/proto/torch.proto))
   * `tensors/` - each of the tensors of the model, with their tensor storage stored directly in a file
-  * `attributes` - a Python `pickle` archive of the attributes of a module
+  * `attributes.pkl` - a Python `pickle` archive of the attributes of a module
 
 ### `model.json`
 The `model.json` contains the structure information of the model. Each model must contain one main Module, and each module may contain multiple submodules, and each module contains a bunch of parameters (tensors). We serialize the metadata for each tensor inline in `model.json` (e.g., dims, strides, record name, etc).
@@ -1190,9 +1190,9 @@ TODO
 
 TODO
 
-### `attributes`
+### `attributes.pkl`
 
-Attributes are all module properties that are not parameters or constants. Attributes are saved in a list in the order they were defined on the module. The list is stored as a Python `pickle` archive in the top level of the model file in `attributes.pkl`. `pickle`'s format was chosen due to:
+Attributes are all module properties that are not parameters or constants. Attributes are saved in a list in the order they were defined on the module. The list is stored as a Python `pickle` archive. `pickle`'s format was chosen due to:
 * **user friendliness** - the attributes file can be loaded in Python with `pickle` without having PyTorch installed
 * **size limits** - formats such as Protobuf empose size limits on total message size, whereas pickle limits are on individual values (e.g. strings cannot be longer than 4 GB)
 * **standard format** - `pickle` is a standard Python module with a reasonably simple format. The format is a program to be consumed by a stack machine that is detailed in Python's [`pickletools.py`](https://svn.python.org/projects/python/trunk/Lib/pickletools.py)
@@ -1201,9 +1201,9 @@ Attributes are all module properties that are not parameters or constants. Attri
 * **eager mode save** - `torch.save()` already produces a `pickle` archive, so doing the same with attributes may ease unification of these formats in the future
 
 A given module may have many attributes of different types and many submodules, each with their own attributes. Attributes are recorded in `model.json`:
-* type - the full type of the attribute (in [Mypy syntax](https://mypy.readthedocs.io/en/latest/cheat_sheet_py3.html))
-* name - the attribute's name
-* id - the offset into the saved list of all model attributes
+* `type` - the full type of the attribute (in [Mypy syntax](https://mypy.readthedocs.io/en/latest/cheat_sheet_py3.html))
+* `name` - the attribute's name
+* `id` - the offset into the saved list of all model attributes
 
 ```json
 {
