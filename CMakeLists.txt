@@ -221,6 +221,11 @@ include(cmake/MiscCheck.cmake)
 include(ExternalProject)
 
 # ---[ Dependencies
+# ---[ FBGEMM doesn't work on x86 32bit and CMAKE_SYSTEM_PROCESSOR thinks its 64bit
+if(USE_FBGEMM AND ((CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR CMAKE_SYSTEM_PROCESSOR STREQUAL "x86"))
+  set(USE_FBGEMM OFF)
+endif()
+
 include(cmake/Dependencies.cmake)
 
 if(USE_FBGEMM)

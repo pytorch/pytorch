@@ -12,7 +12,7 @@
 
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
-#include <torch/csrc/jit/import_method.h>
+#include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/passes/to_batch.h>
 #include <torch/csrc/jit/pybind_utils.h>
@@ -268,7 +268,6 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
  private:
   std::shared_ptr<Module> module_;
 };
-
 
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
@@ -774,8 +773,7 @@ void initJitScriptBindings(PyObject* module) {
               auto& p = parameters[i];
               py::tuple r(2);
               result[i] = std::make_tuple(
-                  p.key(),
-                  autograd::as_variable_ref(p->slot()->toTensor()));
+                  p.key(), autograd::as_variable_ref(p->slot()->toTensor()));
             }
             return result;
           })
@@ -789,9 +787,7 @@ void initJitScriptBindings(PyObject* module) {
               py::tuple r(3);
               IValue v = *buffer->slot();
               result[i] = std::make_tuple(
-                  buffer.key(),
-                  buffer->type,
-                  toPyObject(std::move(v)));
+                  buffer.key(), buffer->type, toPyObject(std::move(v)));
             }
             return result;
           })
@@ -913,7 +909,8 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            PythonPrint(ss, self, tensors, true);
+            std::vector<ClassTypePtr> classes;
+            PythonPrint(ss, self, tensors, classes, true);
             return std::make_pair(ss.str(), tensors);
           })
       .def_property_readonly(
@@ -921,7 +918,8 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            PythonPrint(ss, self, tensors, false);
+            std::vector<ClassTypePtr> classes;
+            PythonPrint(ss, self, tensors, classes, false);
             return ss.str();
           })
       .def("apply", &Module::apply)
@@ -935,8 +933,7 @@ void initJitScriptBindings(PyObject* module) {
              std::shared_ptr<Module> orig) {
             std::vector<IValue*> member_inputs;
             for (auto& p : params) {
-              NamedIValue* np =
-                  std::get<0>(p)->find_parameter(std::get<1>(p));
+              NamedIValue* np = std::get<0>(p)->find_parameter(std::get<1>(p));
               if (np == nullptr) {
                 np = std::get<0>(p)->find_buffer(std::get<1>(p));
               }
@@ -945,8 +942,7 @@ void initJitScriptBindings(PyObject* module) {
             }
 
             Method* orig_method = orig->find_method(name);
-            m->create_method(
-                name, orig_method->graph()->copy(), member_inputs);
+            m->create_method(name, orig_method->graph()->copy(), member_inputs);
           });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
@@ -981,7 +977,8 @@ void initJitScriptBindings(PyObject* module) {
       .def("python_print", [](Method& m) {
         std::ostringstream oss;
         std::vector<at::Tensor> constants;
-        PythonPrint(oss, m, constants, true);
+        std::vector<ClassTypePtr> classes;
+        PythonPrint(oss, m, constants, classes, true);
         return std::make_pair(oss.str(), std::move(constants));
       });
 
@@ -1054,6 +1051,7 @@ void initJitScriptBindings(PyObject* module) {
       });
   m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
+  m.def("_jit_clear_class_registry", ClassType::clearRegistry);
 
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())
@@ -1074,7 +1072,14 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("str"),
           py::arg("count"),
           py::arg("exactly") = false)
-      .def("run", &testing::FileCheck::run);
+      .def(
+          "run",
+          [](testing::FileCheck& f, const std::string& str) {
+            return f.run(str);
+          })
+      .def("run", [](testing::FileCheck& f, const Graph& g) {
+        return f.run(g);
+      });
 }
 } // namespace script
 } // namespace jit

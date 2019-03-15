@@ -50,9 +50,6 @@ std::unique_ptr<Generator> VariableType::generator() const {
 const char * VariableType::toString() const {
   return str.c_str();
 }
-size_t VariableType::elementSizeInBytes() const {
-  return baseType->elementSizeInBytes();
-}
 Type & VariableType::toBackend(Backend b) const {
   return *getVariableTypeFromBaseType(baseType->toBackend(b));
 }

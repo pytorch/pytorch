@@ -39,14 +39,6 @@ class TypeProperties {
     return backend_ != Backend::Undefined && scalar_type_ != ScalarType::Undefined;
   }
 
-  TypeProperties toBackend(Backend b) const {
-    return TypeProperties(b, scalarType());
-  }
-
-  TypeProperties toScalarType(ScalarType t) const {
-    return TypeProperties(backend(), t);
-  }
-
   TypeProperties& operator=(const TypeProperties& other) {
     if (this != &other) {
       backend_ = other.backend();

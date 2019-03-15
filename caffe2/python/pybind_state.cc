@@ -25,7 +25,6 @@
 #include "caffe2/opt/onnxifi_transformer.h"
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/passes.h"
-#include "caffe2/opt/sink.h"
 #include "caffe2/predictor/predictor.h"
 #include "caffe2/python/pybind_state_registry.h"
 #include "caffe2/utils/cpuid.h"
@@ -1738,19 +1737,6 @@ void addGlobalMethods(py::module& m) {
 
     auto nn = caffe2::convertToNNModule(proto);
     opt::fuseNNPACKConvRelu(&nn);
-    auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
-
-    std::string out;
-    new_proto.SerializeToString(&out);
-    return py::bytes(out);
-  });
-
-  m.def("transform_sinkMaxPool", [](py::bytes def) {
-    caffe2::NetDef proto;
-    CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
-
-    auto nn = caffe2::convertToNNModule(proto);
-    opt::sinkMaxPool(&nn);
     auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
 
     std::string out;

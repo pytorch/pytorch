@@ -240,83 +240,6 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   }
 }
 
-void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
-{
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
-      dimension);
-
-  THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
-  dim[dimension] = 1;
-  THTensor_(resize)(r_, dim, {});
-
-  int serial_path = 0;
-#ifdef _OPENMP
-  int inOMP = omp_in_parallel();
-  if (inOMP) {
-    serial_path = 1;
-  } else {
-    int r_Contig = THTensor_(isContiguous)(r_);
-    scalar_t *tp = t->data<scalar_t>();
-    scalar_t *rp = r_->data<scalar_t>();
-    if(r_Contig && (tp != rp)){
-      ptrdiff_t iter = 0;
-      ptrdiff_t r_Size = THTensor_(nElement)(r_);
-      int r_Dim = THTensor_nDimensionLegacyAll(r_);
-      #pragma omp parallel for if ( r_Size > HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-      for (iter = 0; iter < r_Size; iter++) {
-        int j;
-        int64_t quot;
-        int64_t rem = iter;
-        ptrdiff_t tBasicIndex = 0;
-
-        for(j = 0; j < r_Dim; ++j) {
-          if(j != dimension){
-            quot = rem/r_->stride(j);
-            rem = rem%r_->stride(j);
-            tBasicIndex += quot*t->stride(j);
-          }
-        }
-        scalar_t *t_data = tp+tBasicIndex;
-        scalar_t *r__data = rp+iter;
-        *r__data = 0;
-        for(j=0; j < THTensor_sizeLegacyNoScalars(t, dimension); ++j) {
-          *r__data += *(t_data + j*THTensor_strideLegacyNoScalars(t, dimension));
-        }
-      }
-    } else {
-      serial_path = 1;
-    }
-  }
-#else
-  serial_path = 1;
-#endif
-  if (serial_path) {
-    // two implementations optimized for data locality
-    if (THTensor_strideLegacyNoScalars(t, dimension) == 1) {
-      TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
-                           accreal sum = 0;
-                           int64_t i;
-                           for(i = 0; i < t_size; i++)
-                             sum += t_data[i*t_stride];
-                           *r__data = (scalar_t)sum;);
-    } else {
-      THTensor_(zero)(r_);
-      THTensor *temp_ = THTensor_(newWithTensor)(r_);
-      // r_.expand_as(t)
-      temp_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
-      temp_->set_stride(dimension, 0);
-
-      TH_TENSOR_APPLY2(scalar_t, temp_, scalar_t, t, *temp__data = *temp__data + *t_data;);
-      c10::raw::intrusive_ptr::decref(temp_);
-    }
-  }
-
-  if (!keepdim) {
-    THTensor_(squeeze1d)(r_, r_, dimension);
-  }
-}
-
 void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
@@ -1365,34 +1288,16 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,)
 #define TH_MATH_NAME(fn) fn
 #endif
 
-LAB_IMPLEMENT_BASIC_FUNCTION(log,TH_MATH_NAME(log))
 LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
-LAB_IMPLEMENT_BASIC_FUNCTION(log10,TH_MATH_NAME(log10))
-LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p))
-LAB_IMPLEMENT_BASIC_FUNCTION(log2,TH_MATH_NAME(log2))
-LAB_IMPLEMENT_BASIC_FUNCTION(erf,TH_MATH_NAME(erf))
-LAB_IMPLEMENT_BASIC_FUNCTION(erfc,TH_MATH_NAME(erfc))
 LAB_IMPLEMENT_BASIC_FUNCTION(erfinv,TH_erfinv)
-LAB_IMPLEMENT_BASIC_FUNCTION(ceil,TH_MATH_NAME(ceil))
-LAB_IMPLEMENT_BASIC_FUNCTION(floor,TH_MATH_NAME(floor))
-LAB_IMPLEMENT_BASIC_FUNCTION(round,TH_MATH_NAME(nearbyint))
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
-LAB_IMPLEMENT_BASIC_FUNCTION(trunc,TH_MATH_NAME(trunc))
 LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
 LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 
-LAB_IMPLEMENT_BASIC_FUNCTION(exp,TH_MATH_NAME(exp),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(expm1,TH_MATH_NAME(expm1),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(cos,TH_MATH_NAME(cos),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(acos,TH_MATH_NAME(acos),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(cosh,TH_MATH_NAME(cosh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(sin,TH_MATH_NAME(sin),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(asin,TH_MATH_NAME(asin),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(sinh,TH_MATH_NAME(sinh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(tan,TH_MATH_NAME(tan),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(atan,TH_MATH_NAME(atan),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(sqrt,TH_MATH_NAME(sqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)

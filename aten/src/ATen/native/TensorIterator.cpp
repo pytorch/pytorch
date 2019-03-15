@@ -183,7 +183,7 @@ void TensorIterator::allocate_outputs() {
     auto& op = operands_[i];
     if (!op.tensor.defined()) {
       AT_ASSERTM(op.type, "no type for operand", i);
-      int element_size = op.type->elementSizeInBytes();
+      int element_size = op.type->typeMeta().itemsize();
       op.stride_bytes = compatible_stride(element_size);
 
       auto tensor_shape = invert_perm(shape_);

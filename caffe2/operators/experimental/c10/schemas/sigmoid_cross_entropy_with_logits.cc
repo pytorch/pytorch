@@ -21,32 +21,8 @@ C10_DEFINE_OP_SCHEMA(SigmoidCrossEntropyWithLogits, FunctionSchema(
 }
 }
 
-namespace {
-struct LogDTrickParameter final {
-  using type = bool;
-  static constexpr const char* name() {
-    return "log_D_trick";
-  }
-  static constexpr bool default_value() {
-    return false;
-  }
-};
-struct UnjoinedLRLossParameter final {
-  using type = bool;
-  static constexpr const char* name() {
-    return "unjoined_lr_loss";
-  }
-  static constexpr bool default_value() {
-    return false;
-  }
-};
-} // namespace
-
 namespace caffe2 {
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS(
-    ops::SigmoidCrossEntropyWithLogits,
-    C10SigmoidCrossEntropyWithLogits_DontUseThisOpYet,
-    1,
-    ParameterHelper<LogDTrickParameter>,
-    ParameterHelper<UnjoinedLRLossParameter>)
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
+    ops::SigmoidCrossEntropyWithLogits(),
+    C10SigmoidCrossEntropyWithLogits_DontUseThisOpYet)
 }

@@ -183,7 +183,7 @@ class leak_checker(object):
 
     def _has_shm_files(self):
         gc.collect()
-        names = list('torch_' + str(pid) for pid in self.checked_pids)
+        names = ['torch_' + str(pid) for pid in self.checked_pids]
         for filename in os.listdir('/dev/shm'):
             for name in names:
                 if filename.startswith(name):
@@ -245,7 +245,7 @@ class TestMultiprocessing(TestCase):
                 self.assertEqual(t.storage()._cdata, storage_cdata)
 
         with leak_checker(self):
-            for i in range(repeat):
+            for _ in range(repeat):
                 do_test()
 
     def _test_pool(self, ctx=mp, repeat=1):
@@ -266,7 +266,7 @@ class TestMultiprocessing(TestCase):
             p.join()
 
         with leak_checker(self) as lc:
-            for i in range(repeat):
+            for _ in range(repeat):
                 do_test()
 
     @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on macOS")
@@ -346,11 +346,11 @@ class TestMultiprocessing(TestCase):
         p.start()
 
         results = []
-        for i in range(5):
+        for _ in range(5):
             results.append(outq.get())
         p.join()
 
-        for i, tensor in enumerate(tensors):
+        for i, _tensor in enumerate(tensors):
             v, device, tensor_size, storage_size = results[i]
             self.assertEqual(v, torch.arange(i * 5., (i + 1) * 5).sum())
             self.assertEqual(device, i % 2)
