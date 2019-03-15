@@ -9,7 +9,7 @@ namespace torch { namespace autograd {
 // This legacy function squashes a tensor's Device into an integer
 // index which identifies which autograd thread it refers to.
 inline int assign_tensor_to_autograd_thread(const at::Tensor& tensor) {
-  if (tensor.is_cpu()) {
+  if (tensor.device().type() == at::DeviceType::CPU) {
     return -1;
   } else {
     return tensor.device().index();
