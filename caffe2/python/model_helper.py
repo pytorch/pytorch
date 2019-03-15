@@ -288,11 +288,6 @@ class ModelHelper(object):
 
         if namescope == '':
             return self.params[:]
-        elif top_scope:
-            return [
-                p for p in self.params
-                if p.GetNameScope().startswith(namescope)
-            ]
         else:
             return [p for p in self.params if
                     p.GetNameScope().startswith(namescope)]
