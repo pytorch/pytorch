@@ -430,12 +430,22 @@ if (NOT NO_API)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
+#    ${Caffe2_PROTO_HEADERS}
   )
 endif()
 
 add_library(torch OBJECT ${TORCH_SRCS})
 
+
+# Forces caffe2.pb.h to be generated before its dependents are compiled.
+# Normally one should be able to add the generated header file
+# to the ${TORCH_SRCS} list, and CMake would infer that it needs to be
+# generated before they are compiled but this is broken for some
+# reason.
+add_dependencies(torch Caffe2_PROTO)
+
 target_compile_definitions(torch PUBLIC _THP_CORE)
+
 
 # until they can be unified, keep these lists synced with setup.py
 if(MSVC)
