@@ -218,11 +218,17 @@ inline IValue toIValue(
       }
       return toIValue(obj, type->expect<OptionalType>()->getElementType());
     }
+    case TypeKind::ClassType: {
+      auto classType = type->expect<ClassType>();
+      // create a bare ivalue and copy the contained types
+      const auto name = Symbol::user(classType->name());
+      const size_t numAttrs = classType->numAttributes();
+      auto userObj = c10::ivalue::Object::create(name, numAttrs);
+    }
     case TypeKind::NumberType:
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
-    case TypeKind::ClassType:
       break;
   }
   AT_ERROR(

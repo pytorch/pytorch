@@ -733,6 +733,7 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         mod = ScriptClass(obj.__name__)
         ast = get_jit_class_def(obj)
         _jit_script_class_compile(mod, ast, _rcb)
+        return obj
     else:
         mod = ScriptModule()
         ast = get_jit_def(obj)
