@@ -14,7 +14,7 @@ def _init_script_module():
 
 def _is_jit_enabled():
     import torch.jit
-    return torch.jit._enabled
+    return torch.jit._get_enabled()
 
 
 # Check if we can safely replicate the module.
