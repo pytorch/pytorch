@@ -184,7 +184,7 @@ struct GlooCache {
   }
 
   static void memcpy_input(value_type& info, at::Tensor& t) {
-    uint64_t tensor_bytes = t.type().elementSizeInBytes() * t.numel();
+    uint64_t tensor_bytes = t.element_size() * t.numel();
     auto t_dev = getDeviceType(t);
     auto input_buffer = GlooCache::input_buffer(info).get();
 
@@ -206,7 +206,7 @@ struct GlooCache {
   }
 
   static void memcpy_output(value_type& info, at::Tensor& t) {
-    uint64_t tensor_bytes = t.type().elementSizeInBytes() * t.numel();
+    uint64_t tensor_bytes = t.element_size() * t.numel();
     auto t_dev = getDeviceType(t);
     auto output_buffer = GlooCache::output_buffer(info).get();
 
