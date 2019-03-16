@@ -283,7 +283,7 @@ void launchFusion(
     }
   }
   // Adds scalar arguments
-  for (float s: scalar_inputs){
+  for (float &s: scalar_inputs){
     arguments.push_back(&s);
   }
 
