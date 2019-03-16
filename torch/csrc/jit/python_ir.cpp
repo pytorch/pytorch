@@ -237,7 +237,7 @@ void initPythonIRBindings(PyObject* module_) {
                 python_serialized_export_map;
             for (auto& kv : export_map) {
               auto t = kv.second;
-              size_t copy_bytes = t.type().elementSizeInBytes() * t.numel();
+              size_t copy_bytes = t.element_size() * t.numel();
               // TODO: this is an unecessary copy. In theory we can directly
               // return the map from identifier to Tensor, but we need some API
               // in Python to get raw `bytes` containing the raw tensor data.

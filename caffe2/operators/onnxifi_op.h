@@ -230,7 +230,8 @@ class OnnxifiOp final : public Operator<Context> {
       const onnxTensorDescriptorV1*,
       uint32_t,
       const onnxTensorDescriptorV1*,
-      onnxMemoryFenceV1*);
+      onnxMemoryFenceV1*,
+      onnxTraceEventList*);
 #endif
 
   // We bind the op input/output by position while ONNXIFI binds input/output by
