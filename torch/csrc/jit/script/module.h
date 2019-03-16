@@ -256,7 +256,7 @@ struct Method {
     for (size_t i = 0; i < g.outputs().size(); ++i) {
       returns.emplace_back("", unshapedType(g.outputs()[i]->type()));
     }
-    return {method.name(), std::move(args), std::move(returns)};
+    return {method.name(), "", std::move(args), std::move(returns)};
   }
 
   GraphExecutor& get_executor() {

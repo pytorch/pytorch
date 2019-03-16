@@ -918,6 +918,7 @@ void loadModule(const std::shared_ptr<script::Module>& module) {
     const FunctionSchema& loaded_schema = method->getSchema();
     FunctionSchema actual_schema(
         Symbol::aten(loaded_schema.name()),
+        loaded_schema.overload_name(),
         loaded_schema.arguments(),
         {originalReturnType(new_tuple->type()->expect<TupleType>())});
 
