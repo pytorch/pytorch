@@ -12075,6 +12075,51 @@ class TestFuser(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
+    def test_fusedconcat_sumtosize_cuda(self):
+        def fn(gates, cx):
+            ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+            ingate = torch.sigmoid(ingate)
+            forgetgate = torch.sigmoid(forgetgate)
+            cellgate = torch.tanh(cellgate)
+            outgate = torch.sigmoid(outgate)
+            cy = (forgetgate * cx) + (ingate * cellgate)
+            hy = outgate * torch.tanh(cy)
+            return hy + cy
+
+        for gates_shape, cx_shape in [
+                # "tandard case
+                ((5, 8), (5, 2)),
+                # the first input will be split into 2,2,2,1-sized tensors
+                ((5, 7), (5, 2)),
+                ((1, 8), (5, 2)),
+                ((1, 7), (5, 2)),
+                # these last two currently cause the fuser to quit, but nonetheless
+                ((5, 8), (1, 5, 2)),
+                ((5, 7), (1, 5, 2)),
+        ]:
+
+            inputs = [torch.randn(gates_shape, requires_grad=True, device='cuda'),
+                      torch.randn(cx_shape, requires_grad=True, device='cuda')]
+            module = self.checkScript(fn, inputs)
+            forward_graph = module.graph_for(*inputs)
+            res = module(*inputs)
+            res.sum().backward()
+            backward = backward_graph(module)
+
+            # check fusion of backward
+            self.assertAllFused(backward, except_for={'aten::size',
+                                                      'aten::_grad_sum_to_size'})
+
+            # check that gradients match with non-fused
+            inputs2 = [i.detach().requires_grad_() for i in inputs]
+            res2 = fn(*inputs2)
+            res2.sum().backward()
+            for i, i2 in zip(inputs, inputs2):
+                torch.testing.assert_allclose(i.grad, i2.grad)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_lstm_cuda(self):
         inputs = get_lstm_inputs('cuda', training=True)
         module = self.checkScript(LSTMCellS, inputs)
@@ -12089,8 +12134,12 @@ class TestFuser(JitTestCase):
         hy, cy = module(*inputs)
         (hy + cy).sum().backward()
         backward = backward_graph(module)
-        FileCheck().check("FusionGroup_0").check_next("FusionGroup_1") \
-            .check_not("FusionGroup_2").run(str(backward))
+        FileCheck().check("FusionGroup_0").check_not("FusionGroup_1") \
+            .run(str(backward))
+        self.assertAllFused(backward, except_for={'aten::size',
+                                                  'aten::_grad_sum_to_size',
+                                                  'aten::t',
+                                                  'aten::mm'})
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")

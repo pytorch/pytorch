@@ -1060,13 +1060,11 @@ struct GraphFuser {
       return false;
     }
     // Fusion groups can be merged with concat's group if and only if
-    // - the value they produce isn't already coming from a concat and
-    // - the fusion group does not contain GradSumToSize
+    // the value they produce isn't already coming from a concat
     if (producer->node()->kind() == prim::FusionGroup) {
       auto subgraph = producer->node()->g(attr::Subgraph);
       auto* node = subgraph->outputs().at(producer->offset())->node();
-      return node->kind() != prim::FusedConcat &&
-          !containsGradSumToSize(producer->node());
+      return node->kind() != prim::FusedConcat;
     }
     return true;
   }
@@ -1251,7 +1249,7 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 // This takes a _grad_sum_to_size output and tracks it to the return
 // statements that depend on it, checking that it only hits nodes
 // that commute with _grad_sum_to_size on its path.
-// If a non-nullptr vector pointer outputGradSumToSizes is passed, the sizes
+// If a non-nullptr pointer outputGradSumToSizes is passed, the sizes
 // will be recorded as target sizes for the outputs as applicable.
 // In the graph_fuser pass we only need to check that we can go to the
 // outputs while in the fuser's compiler we want to record the sizes.
@@ -1260,7 +1258,7 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 // it in reverse order when recording and removing outputs.
 bool trackSingleGradSumToSizeToOutputs(
     Value* gradSumToSizeOutput,
-    std::vector<int64_t>* outputGradSumToSizes) {
+    std::vector<std::vector<int64_t>>* outputGradSumToSizes) {
   static OperatorSet commutes_with_SumToSize{{
       "aten::mul(Tensor self, Tensor other) -> Tensor",
       "aten::div(Tensor self, Tensor other) -> Tensor",
@@ -1269,8 +1267,8 @@ bool trackSingleGradSumToSizeToOutputs(
       "aten::div(Tensor self, Scalar other) -> Tensor",
       "aten::neg(Tensor self) -> Tensor",
       "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+      // add: this used to be prim::AutogradAdd, so non-broadcasting
       "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
-      // add this used to be prim::AutogradAdd
   }};
 
   std::queue<Use> uses_to_process{};
@@ -1295,6 +1293,18 @@ bool trackSingleGradSumToSizeToOutputs(
       }
     } else if (commutes_with_SumToSize.find(user)) {
       add_to_uses(user->output()->uses());
+    } else if (user->kind() == prim::FusedConcat) {
+      const auto& concat_uses = user->output()->uses();
+      // we know concat is at the end
+      assert(
+          concat_uses.size() == 1 &&
+          concat_uses[0].user->kind() == prim::Return);
+      auto concat_offset = concat_uses[0].offset;
+      if (outputGradSumToSizes &&
+          (*outputGradSumToSizes)[concat_offset][offset] == -1) {
+        (*outputGradSumToSizes)[concat_offset][offset] =
+            gradSumToSizeOutput->node()->inputs()[1]->offset();
+      }
     } else if (user->kind() == prim::Return) {
       // During compilation and only if we don't already have a
       // _grad_sum_to_size for this output we record the size to sum the output
@@ -1304,11 +1314,11 @@ bool trackSingleGradSumToSizeToOutputs(
       // _grad_sumtosizes "in parallel" (from auto-diff added AutogradAdd as the
       // backward of using an input in multiple places) they are the same. This
       // is because AutogradAdd does not broadcast.
-      if (outputGradSumToSizes && (*outputGradSumToSizes)[offset] == -1) {
+      if (outputGradSumToSizes && (*outputGradSumToSizes)[offset].empty()) {
         // note: we make the assumption that the sizes are inputs to the
         // fusion group (rather than something calculated).
-        (*outputGradSumToSizes)[offset] =
-            gradSumToSizeOutput->node()->inputs()[1]->offset();
+        (*outputGradSumToSizes)[offset].push_back(
+            gradSumToSizeOutput->node()->inputs()[1]->offset());
       }
     } else if (user->kind() == aten::_grad_sum_to_size) {
       // do nothing
@@ -1323,7 +1333,7 @@ bool trackSingleGradSumToSizeToOutputs(
     }
   }
   return true;
-}
+} // namespace jit
 
 void FuseGraph(std::shared_ptr<Graph>& graph) {
   if (canFuseOnCPU() || canFuseOnGPU()) {

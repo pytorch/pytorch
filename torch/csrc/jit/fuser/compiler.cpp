@@ -170,10 +170,20 @@ static void setInputBroadcastGroups(KernelSpec& spec) {
 // group outputs when several outputs had the same calculation except
 // for the final _grad_sum_to_size. This is also the reason why
 // we need to deduplicate kernel outputs at the end of this function.
+// For FusedConcats we actually need to record the SumtoSize per concat-input.
+// (which is why for each output we have a vector of indices).
+// we use that FusedConcats come directly before the results.
 void processGradSumToSize(KernelSpec& spec) {
   auto graph = spec.graph();
 
-  std::vector<int64_t> outputGradSumToSizes(graph->outputs().size(), -1);
+  std::vector<std::vector<int64_t>> outputGradSumToSizes(
+      graph->outputs().size());
+  for (size_t i = 0; i < graph->outputs().size(); i++) {
+    Node* n = graph->outputs()[i]->node();
+    if (n->kind() == prim::FusedConcat) {
+      outputGradSumToSizes[i].resize(n->inputs().size(), -1);
+    }
+  }
 
   // these are expressions that might occur during autotdiff operating
   // on the gradient (matmul would likely be, too but we don't fuse it)

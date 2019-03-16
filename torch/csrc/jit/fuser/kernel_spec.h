@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/core/stack.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/fuser/arg_spec.h>
@@ -8,7 +10,6 @@
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
-#include <ATen/core/stack.h>
 
 #include <cstdint>
 #include <memory>
@@ -45,26 +46,35 @@ struct TORCH_API PartitionInfo {
 // for each fusion group output, it records the corresponding
 // kernel output offset (in offset) and the fusion group input
 // to that is to be applied with sumtosize on the output (if any).
-// This mapping is necessar as a single kernel output might be
+// This mapping is necessary as a single kernel output might be
 // summed to different sizes.
 // These mappings are created during compilation in processGradSumToSize.
+// For "normal" outputs, the vector of sizeInputs will be of size 0 or 1.
+// For FusedConcat outputs, the vector contains one element per FusedConcat
+// input. It can be -1 to signify "no sumtosize".
 struct TORCH_API OutputMapAndSize {
-  OutputMapAndSize(const int64_t _offset, const int64_t _sizeInput)
-      : offset_{_offset}, sizeInput_{_sizeInput} {};
+  OutputMapAndSize(const int64_t _offset, c10::IntArrayRef _sizeInput)
+      : offset_{_offset}, sizeInputs_(_sizeInput.begin(), _sizeInput.end()){};
 
   int64_t offset() const {
     return offset_;
   }
   int64_t sizeInput() const {
-    return sizeInput_;
+    AT_ASSERT(sizeInputs_.size() == 1);
+    return sizeInputs_[0];
+  }
+  c10::IntArrayRef sizeInputs() const {
+    return sizeInputs_;
   }
   bool needsSumToSize() const {
-    return sizeInput_ != -1;
+    return std::any_of(sizeInputs_.begin(), sizeInputs_.end(), [](int64_t i) {
+      return i != -1;
+    });
   }
 
  private:
   int64_t offset_;
-  int64_t sizeInput_;
+  std::vector<int64_t> sizeInputs_;
 };
 
 // "Kernel Specification." - Contains device-independent fusion information.

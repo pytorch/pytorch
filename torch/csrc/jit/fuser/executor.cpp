@@ -100,7 +100,8 @@ static c10::optional<std::vector<int64_t>> canRunKernel(
 static bool expandArgs(
     const KernelSpec& spec,
     std::vector<at::Tensor>& args,
-    std::vector<int64_t>& map_size, bool dry_run) {
+    std::vector<int64_t>& map_size,
+    bool dry_run) {
   bool has_broadcast = false;
   for (size_t i = 0; i < args.size(); ++i) {
     auto& arg = args[i];
@@ -133,7 +134,7 @@ static bool expandArgs(
 static bool shouldExpandArgs(
     const KernelSpec& spec,
     std::vector<at::Tensor>& args,
-    std::vector<int64_t>& map_size) {  
+    std::vector<int64_t>& map_size) {
   return expandArgs(spec, args, map_size, /*dry_run=*/true);
 }
 
@@ -346,9 +347,27 @@ bool runFusion(const int64_t key, Stack& stack) {
   if (!maybe_map_size)
     return false;
   if (spec.hasRandom()) {
-      bool hasBroadcast = shouldExpandArgs(spec,inputs, *maybe_map_size);
-      if (hasBroadcast) return false;
+    bool hasBroadcast = shouldExpandArgs(spec, inputs, *maybe_map_size);
+    if (hasBroadcast)
+      return false;
   }
+  // For FusedConcat outputs we are in trouble if SumToSize
+  // changes the number of dimensions, because then the concat
+  // dimension would need to be adjusted. That however, seems
+  // to not work with the setup, in particular the contiguity
+  // computations (and we'd need to juggle the offset around).
+
+  for (const auto& omap : spec.outputMapAndSizes()) {
+    auto ooffset = omap.offset();
+    auto size_inputs = omap.sizeInputs();
+    if (size_inputs.size() > 0 && size_inputs[0] != -1) {
+      int64_t dims_to_go = maybe_map_size->size() -
+          all_inputs[size_inputs[0]].toIntListRef().size();
+      if (dims_to_go != 0)
+        return false;
+    }
+  }
+
   expandArgs(spec, inputs, *maybe_map_size, /*dry_run=*/false);
 
   // Retrieves the kernel, compiling (and caching) if necessary
@@ -361,19 +380,172 @@ bool runFusion(const int64_t key, Stack& stack) {
   maybe_kernel = spec.findKernel(arg_spec);
   AT_ASSERT(maybe_kernel);
 
-  // Launches fusion
   std::vector<at::Tensor> raw_outputs;
-  launchFusion(*(*maybe_kernel), device, inputs, raw_outputs);
+  // Launches fusion
+  auto& fusion = *(*maybe_kernel);
+  launchFusion(fusion, device, inputs, raw_outputs);
 
-  auto outputs = fmap(spec.outputMapAndSizes(), [&](const OutputMapAndSize& omap) {
-    if (omap.needsSumToSize()) {
-      return at::sum_to(
-          raw_outputs[omap.offset()],
-          all_inputs[omap.sizeInput()].toIntList()->elements());
-    } else {
-      return raw_outputs[omap.offset()];
-    }
-  });
+  // now we need to do all the sum to size.
+  auto outputs =
+      fmap(spec.outputMapAndSizes(), [&](const OutputMapAndSize& omap) {
+        auto ooffset = omap.offset();
+        const auto& c = fusion.concatDesc()[ooffset];
+        if (c.isNoop() && omap.needsSumToSize()) {
+          // the easy case: a single output
+          return at::sum_to(
+              raw_outputs[ooffset],
+              all_inputs[omap.sizeInput()].toIntList()->elements());
+        } else if (omap.needsSumToSize()) {
+          // FusedConcat output that potentially needs sum_to, but possibly also
+          // on the concatenation axis and differently for the members.
+          // If it were not for chunk returning differently-sized tensors
+          // when the number of chunks does not divide the size, we would
+          // just restrict this to the "regular case". However, we can construct
+          // example where that is not the case, see the tests.
+          // Keep in mind that we undo broadcasting in all its beauty (singleton
+          // dimensions but also leading dimensions) but we require that the
+          // concat members are compatible.
+
+          auto size_inputs = omap.sizeInputs(); // get the size inputs
+          int64_t concat_dim = c.dim();
+          AT_ASSERT(c.nSubTensors() > 0);
+
+          // size_to_sum_to will be the size we sum to. Initially we assume that
+          // it is that we don't sum.
+          auto size_to_sum_to = raw_outputs[ooffset].sizes().vec();
+          // In the concat dimension, the tensors may have different sizes.
+          // Again our base hypothesis is that we don't sum.
+          std::vector<int64_t> sizes_concat_dim(
+              size_inputs.size(), size_to_sum_to[concat_dim] / c.nSubTensors());
+
+          // we need to treat the concat dimension separately from the others
+          // so this records our workload
+          bool needs_sumtosize_other_dim = false;
+          bool needs_sumtosize_concat_dim = false;
+          // how many leading dimensions do we need to remove
+          int64_t dims_to_go = 0;
+          // we get our expectation for the non-concatenated dimensions from
+          // the first tensor
+          if (size_inputs[0] != -1) {
+            auto target_size = all_inputs[size_inputs[0]].toIntListRef();
+            if (target_size.size() != size_to_sum_to.size()) {
+              // we have dimensions to delete...
+              needs_sumtosize_other_dim = true;
+              dims_to_go = size_to_sum_to.size() - target_size.size();
+              AT_ASSERTM(dims_to_go > 0, "inconsistent concat sizes in fusion");
+              concat_dim +=
+                  dims_to_go; // the original concat was after the sumtosizes
+              for (size_t d = 0; d < dims_to_go; d++) {
+                size_to_sum_to[d] = 1;
+              }
+            }
+            for (size_t d = 0; d < target_size.size(); d++) {
+              if (d != c.dim()) { // note: original concat dimension
+                needs_sumtosize_other_dim |=
+                    (size_to_sum_to[d + dims_to_go] != target_size[d]);
+                size_to_sum_to[d + dims_to_go] = target_size[d];
+              } else {
+                needs_sumtosize_concat_dim |=
+                    (sizes_concat_dim[0] != target_size[d]);
+                sizes_concat_dim[0] = target_size[d];
+              }
+            }
+          }
+
+          // check the others for compatibility in other dimensions
+          // and scan the target sizes of the concat dimension
+          for (size_t i = 1; i < size_inputs.size(); i++) {
+            if (size_inputs[i] == -1) {
+              AT_ASSERTM(
+                  !needs_sumtosize_other_dim,
+                  "inconsistent concat sizes in fusion");
+            } else {
+              auto target_size = all_inputs[size_inputs[i]].toIntListRef();
+              AT_ASSERTM(
+                  target_size.size() + dims_to_go == size_to_sum_to.size(),
+                  "inconsistent concat sizes in fusion");
+              for (size_t d = 0; d < target_size.size(); d++) {
+                if (d == c.dim()) { // this is without shift on purpose
+                  needs_sumtosize_concat_dim |=
+                      (sizes_concat_dim[i] != target_size[d]);
+                  sizes_concat_dim[i] = target_size[d];
+                } else {
+                  // other dimensions must match first tensors example
+                  AT_ASSERTM(
+                      size_to_sum_to[d + dims_to_go] == target_size[d],
+                      "inconsistent concat sizes in fusion");
+                }
+              }
+            }
+          }
+          // now we do the actual summation
+          if (!needs_sumtosize_concat_dim && !needs_sumtosize_other_dim) {
+            // nothing to do
+            return raw_outputs[ooffset];
+          } else if (!needs_sumtosize_concat_dim) {
+            // If we don't need to change the concat dim, we can
+            // insert a dimensions so that each tensor has
+            // one index in the new dimension.
+            // Then we can use one sum_to call to do the sum_to_size
+            const auto& ro = raw_outputs[ooffset];
+            size_to_sum_to.erase(
+                size_to_sum_to.begin(), size_to_sum_to.begin() + dims_to_go);
+            return at::sum_to(ro, size_to_sum_to);
+          } else {
+            // If the tensors differ in the concat dim, we need to
+            // work tensor by tensor. This can happen because e.g. chunk(4)
+            // will work on a size 7 tensor and return outputs
+            // of sizes 2 2 2 1.
+            // As we don't have sum_to_size_out, we spell out
+            // the summation dimensions and use sum_out
+            const auto& ro = raw_outputs[ooffset];
+            auto ro_size_d = ro.size(concat_dim) / c.nSubTensors();
+            // calculate output size and reserve output vecotr
+            size_to_sum_to[concat_dim] = 0;
+            for (int64_t s : sizes_concat_dim)
+              size_to_sum_to[concat_dim] += s;
+            auto output = at::empty(size_to_sum_to, ro.options());
+
+            // now find the summation dimensions, except the concat dimension
+            std::vector<int64_t> summation_dims;
+            for (int64_t d = 0; d < size_to_sum_to.size(); d++) {
+              if (size_to_sum_to[d] == 1 && ro.size(d) != 1 &&
+                  d != concat_dim) {
+                summation_dims.push_back(d);
+              }
+            }
+            // now along the concat dimension, it can be that we have
+            // to sum some tensors but not others. that's why we keep
+            // adding it back as needed
+            int64_t output_offset = 0;
+            for (int64_t i = 0; i < sizes_concat_dim.size(); i++) {
+              auto out_chunk =
+                  output.narrow(concat_dim, output_offset, sizes_concat_dim[i]);
+              auto raw_chunk = ro.narrow(concat_dim, i * ro_size_d, ro_size_d);
+              if (sizes_concat_dim[i] == 1) {
+                summation_dims.push_back(concat_dim);
+                at::sum_out(
+                    out_chunk, raw_chunk, summation_dims, /*keepdim*/ true);
+                summation_dims.pop_back();
+              } else if (!summation_dims.empty()) {
+                at::sum_out(
+                    out_chunk, raw_chunk, summation_dims, /*keepdim*/ true);
+              } else {
+                // note: passing the empty list of dims to sum_out does not work
+                // as expected here (sums over all dims?)
+                out_chunk.copy_(raw_chunk);
+              }
+              output_offset += sizes_concat_dim[i];
+            }
+            // remove the leading dimensions we don't want
+            size_to_sum_to.erase(
+                size_to_sum_to.begin(), size_to_sum_to.begin() + dims_to_go);
+            return output.view(size_to_sum_to);
+          }
+        } else {
+          return raw_outputs[ooffset];
+        }
+      });
 
   // Updates stack
   drop(stack, spec.nInputs());
