@@ -423,6 +423,7 @@ void THBlas_(gemm)(
       int64_t i;
       // #pragma omp parallel for if(m > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       // #pragma omp parallel for private(i)
+      #pragma omp parallel for shared(c, a, b)
       for(i = 0; i < m; i++)
       {
         scalar_t *b_ = b;
