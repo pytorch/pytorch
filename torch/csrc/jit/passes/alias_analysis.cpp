@@ -709,6 +709,13 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     return;
   }
 
+  // Special case: if `from` is an optional, `to` could be a None. Don't
+  // create a pointer in that case
+  if (from->type()->kind() == TypeKind::OptionalType &&
+      to->type()->kind() == TypeKind::NoneType) {
+    return;
+  }
+
   // If either value is a wildcard, don't insert anything into the graph;
   // wildcards are tracked separately since they have different aliasing rules.
   if (isWildcard(to) || isWildcard(from)) {
