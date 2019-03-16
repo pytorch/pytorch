@@ -536,6 +536,9 @@ class Module(object):
         raise AttributeError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
+    def __getitem__(self, name):
+        return getattr(self, name)
+
     def __setattr__(self, name, value):
         def remove_from(*dicts):
             for d in dicts:
