@@ -10,8 +10,6 @@ from itertools import product
 import math
 import warnings
 
-_DEPRECATED_METHODS = ['potrf', 'pstrf', 'potrs', 'gesv']
-
 __all__ = [
     'argmax',
     'argmin',
@@ -24,12 +22,16 @@ __all__ = [
     'isnan',
     'norm',
     'meshgrid',
+    'potrf',
+    'pstrf',
+    'potrs',
+    'gesv',
     'split',
     'stft',
     'tensordot',
     'unique',
     'cartesian_prod',
-] + _DEPRECATED_METHODS
+]
 
 
 def broadcast_tensors(*tensors):
