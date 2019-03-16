@@ -400,7 +400,7 @@ void THBlas_(gemm)(
       // #pragma omp parallel for
       int64_t l;
       // #pragma omp parallel for if(k > TH_OMP_OVERHEAD_THRESHOLD) private(l)
-      // #pragma omp parallel for private(l)
+      #pragma omp parallel for private(l)
       for (l = 0; l < k; l++) {
         for (int64_t j = 0; j < n; j++) {
           scalar_t val = b[l + j * ldb] * alpha;
