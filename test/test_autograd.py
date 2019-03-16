@@ -284,7 +284,7 @@ class TestAutograd(TestCase):
         def fn(x):
             return x ** 2 + y * x + y ** 2
 
-        for i in range(5):
+        for _ in range(5):
             grad_x, = torch.autograd.grad(
                 fn(x), x, grad_outputs=grad_output, create_graph=True)
 
@@ -753,7 +753,7 @@ class TestAutograd(TestCase):
             y = x.clone()
 
             # build a "chain" computation graph
-            for i in range(depth):
+            for _ in range(depth):
                 y = y + y * 0.000001
 
             # graph deletion occurs when the above locals go out of scope.
@@ -774,7 +774,7 @@ class TestAutograd(TestCase):
             prev_values = [None, None]
 
             # Build a "chain with skip connections" graph
-            for i in range(depth):
+            for _ in range(depth):
                 prev_tensors = [tensor for tensor in prev_values[:-1]
                                 if tensor is not None]
                 prev_values.append(y)
@@ -809,7 +809,7 @@ class TestAutograd(TestCase):
             y = x.clone()
 
             # build deeply nested computation graph
-            for i in range(depth):
+            for _ in range(depth):
                 y = MyOp.apply(y, y)
 
             # graph deletion occurs when the above locals go out of scope.
@@ -1609,7 +1609,7 @@ class TestAutograd(TestCase):
             def __del__(self):
                 gc.collect()
 
-        for i in range(10):
+        for _ in range(10):
             Variable(torch.randn(10, 10), _grad_fn=CollectOnDelete())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
@@ -1965,7 +1965,7 @@ class TestAutograd(TestCase):
         add1 = a + b
         add2 = add1 + c
         # Simulate a long branch, so grad_output will get buffered.
-        for i in range(4):
+        for _ in range(4):
             a = a * 2
             b = b * 2
             c = c * 2

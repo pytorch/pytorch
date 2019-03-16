@@ -167,6 +167,8 @@ CHECK_CXX_SOURCE_COMPILES(
        a = _mm256_set1_epi8 (1);
        b = a;
        _mm256_add_epi8 (a,a);
+       __m256 x;
+       _mm256_extract_epi64(x, 0); // we rely on this in our AVX2 code
        return 0;
      }" CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
 if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)

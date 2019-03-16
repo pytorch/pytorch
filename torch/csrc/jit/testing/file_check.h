@@ -5,6 +5,9 @@
 
 namespace torch {
 namespace jit {
+
+struct Graph;
+
 namespace testing {
 
 struct FileCheckImpl;
@@ -16,6 +19,9 @@ struct FileCheck {
 
   // Run FileCheck against test string
   TORCH_API void run(const std::string& test_string);
+
+  // Run FileCheck against dump of graph IR
+  TORCH_API void run(const Graph& graph);
 
   // Checks that the string occurs, starting at the end of the most recent match
   TORCH_API FileCheck* check(const std::string& str);

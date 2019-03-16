@@ -1,9 +1,9 @@
+#include <torch/csrc/jit/script/module.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/error_report.h>
-#include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 
 namespace torch {
@@ -30,7 +30,8 @@ Value* try_emit_call_to(
   } catch (RecursiveMethodCallError&) {
     throw ErrorReport(loc)
         << " method '" << callee.name()
-        << "' is called recursively involving this call site. Recursive calls are not supported";
+        << "' is called recursively involving this call site. "
+        << "Recursive calls are not supported";
   }
   auto fn = callee.graph();
 

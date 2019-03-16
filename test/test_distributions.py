@@ -796,7 +796,7 @@ class TestDistributions(TestCase):
         self.assertIsNotNone(cov.grad)
 
     def test_has_examples(self):
-        distributions_with_examples = set(e.Dist for e in EXAMPLES)
+        distributions_with_examples = {e.Dist for e in EXAMPLES}
         for Dist in globals().values():
             if isinstance(Dist, type) and issubclass(Dist, Distribution) \
                     and Dist is not Distribution and Dist is not ExponentialFamily:
@@ -2210,7 +2210,7 @@ class TestDistributions(TestCase):
 
     def test_independent_shape(self):
         for Dist, params in EXAMPLES:
-            for i, param in enumerate(params):
+            for param in params:
                 base_dist = Dist(**param)
                 x = base_dist.sample()
                 base_log_prob_shape = base_dist.log_prob(x).shape
@@ -4149,7 +4149,7 @@ class TestValidation(TestCase):
 
     def test_valid(self):
         for Dist, params in EXAMPLES:
-            for i, param in enumerate(params):
+            for param in params:
                 Dist(validate_args=True, **param)
 
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")

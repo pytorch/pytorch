@@ -65,7 +65,7 @@ class FilelikeMock(object):
             # This is used to test that.
             setattr(self, 'fileno', self.fileno_opt)
 
-        self.calls = set([])
+        self.calls = set()
         self.bytesio = io.BytesIO(data)
 
         def trace(fn, name):
@@ -1081,7 +1081,7 @@ class _TestTorchMixin(object):
             # check 1-d behavior
             x = cast(torch.randn(1))
             dim = 0
-            self.assertEqual(fn(x, dim).shape, tuple())
+            self.assertEqual(fn(x, dim).shape, ())
             self.assertEqual(fn(x, dim, keepdim=True).shape, (1,))
 
             # check reducing of a singleton dimension
@@ -1671,60 +1671,82 @@ class _TestTorchMixin(object):
         self._test_remainder_overflow(self, dtype=torch.int64, device='cpu')
 
     def test_mm(self):
-        # helper function
-        def matrixmultiply(mat1, mat2):
-            n = mat1.size(0)
-            m = mat1.size(1)
-            p = mat2.size(1)
-            res = torch.zeros(n, p)
-            for i, j in iter_indices(res):
-                res[i, j] = sum(mat1[i, k] * mat2[k, j] for k in range(m))
-            return res
+        def _test_mm(n, m, p, dtype, genf):
+            # helper function
+            def matrixmultiply(mat1, mat2):
+                n = mat1.size(0)
+                m = mat1.size(1)
+                p = mat2.size(1)
+                res = torch.zeros(n, p, dtype=dtype)
+                for i, j in iter_indices(res):
+                    res[i, j] = sum(mat1[i, k] * mat2[k, j] for k in range(m))
+                return res
 
-        # contiguous case
-        n, m, p = 10, 10, 5
-        mat1 = torch.randn(n, m)
-        mat2 = torch.randn(m, p)
-        res = torch.mm(mat1, mat2)
+            # contiguous case
+            mat1 = genf(n, m)
+            mat2 = genf(m, p)
+            res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1, mat2)
-        self.assertEqual(res, res2)
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
 
-        # non contiguous case 1
-        n, m, p = 10, 10, 5
-        mat1 = torch.randn(n, m)
-        mat2 = torch.randn(p, m).t()
-        res = torch.mm(mat1, mat2)
+            # non contiguous case 1
+            mat1 = genf(n, m)
+            mat2 = genf(p, m).t()
+            res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1, mat2)
-        self.assertEqual(res, res2)
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
 
-        # non contiguous case 2
-        n, m, p = 10, 10, 5
-        mat1 = torch.randn(m, n).t()
-        mat2 = torch.randn(m, p)
-        res = torch.mm(mat1, mat2)
+            # non contiguous case 2
+            mat1 = genf(m, n).t()
+            mat2 = genf(m, p)
+            res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1, mat2)
-        self.assertEqual(res, res2)
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
 
-        # non contiguous case 3
-        n, m, p = 10, 10, 5
-        mat1 = torch.randn(m, n).t()
-        mat2 = torch.randn(p, m).t()
-        res = torch.mm(mat1, mat2)
+            # non contiguous case 3
+            mat1 = genf(m, n).t()
+            mat2 = genf(p, m).t()
+            res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1, mat2)
-        self.assertEqual(res, res2)
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
 
-        # test with zero stride
-        n, m, p = 10, 10, 5
-        mat1 = torch.randn(n, m)
-        mat2 = torch.randn(m, 1).expand(m, p)
-        res = torch.mm(mat1, mat2)
+            # test with zero stride
+            mat1 = genf(n, m)
+            mat2 = genf(m, 1).expand(m, p)
+            res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1, mat2)
-        self.assertEqual(res, res2)
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
+
+            # explicitly exercise the _out variant in torch.mm().
+            # contiguous case
+            mat1 = genf(n, m)
+            mat2 = genf(m, p)
+            res = genf(n, p)
+            torch.mm(mat1, mat2, out=res)
+
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
+
+            # explicitly exercise the _out variant in torch.mm().
+            # non contiguous case 3
+            mat1 = genf(m, n).t()
+            mat2 = genf(p, m).t()
+            res = genf(n, p)
+            torch.mm(mat1, mat2, out=res)
+
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
+
+        for (n, m, p) in [(20, 10, 5), (15, 5, 10), (5, 18, 10)]:
+            _test_mm(n, m, p, torch.float32, lambda x, y: torch.randn(x, y, dtype=torch.float32))
+            _test_mm(n, m, p, torch.float64, lambda x, y: torch.randn(x, y, dtype=torch.float64))
+            _test_mm(n, m, p, torch.int32, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int32))
+            _test_mm(n, m, p, torch.int64, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int64))
 
     @staticmethod
     def _test_btrifact(self, cast):
@@ -4048,9 +4070,10 @@ class _TestTorchMixin(object):
         self.assertEqual(top1, top2)
         self.assertEqual(idx1, idx2)
 
-    def test_kthvalue(self):
+    @staticmethod
+    def _test_kthvalue(self, device='cpu'):
         SIZE = 50
-        x = torch.rand(SIZE, SIZE, SIZE)
+        x = torch.rand(SIZE, SIZE, SIZE, device=device)
         x0 = x.clone()
 
         k = random.randint(1, SIZE)
@@ -4061,8 +4084,8 @@ class _TestTorchMixin(object):
         self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], 0)
         # test use of result tensors
         k = random.randint(1, SIZE)
-        res1val = torch.Tensor()
-        res1ind = torch.LongTensor()
+        res1val = torch.tensor([], device=device)
+        res1ind = torch.tensor([], dtype=torch.long, device=device)
         torch.kthvalue(x, k, keepdim=False, out=(res1val, res1ind))
         res2val, res2ind = torch.sort(x)
         self.assertEqual(res1val[:, :], res2val[:, :, k - 1], 0)
@@ -4088,9 +4111,23 @@ class _TestTorchMixin(object):
         self.assertEqual(x, x0, 0)
 
         # simple test case (with repetitions)
-        y = torch.Tensor((3, 5, 4, 1, 1, 5))
+        y = torch.tensor((3., 5, 4, 1, 1, 5), device=device)
         self.assertEqual(torch.kthvalue(y, 3)[0], 3, 0)
         self.assertEqual(torch.kthvalue(y, 2)[0], 1, 0)
+
+        # simple test case (with NaN)
+        SIZE = 50
+        x = torch.rand(SIZE, SIZE, SIZE, device=device)
+        x[torch.arange(SIZE), :, torch.randint(50, (50,))] = nan
+        ks = [random.randint(1, SIZE), 1, SIZE, SIZE - 1]
+        res2val, res2ind = torch.sort(x)
+        for k in ks:
+            res1val, res1ind = torch.kthvalue(x, k, keepdim=False)
+            self.assertEqual(res1val[:, :], res2val[:, :, k - 1], 0)
+            self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], 0)
+
+    def test_kthvalue(self):
+        self._test_kthvalue(self)
 
     def test_median(self):
         for size in (155, 156):
@@ -4429,25 +4466,26 @@ class _TestTorchMixin(object):
                 self.assertEqual(x.select(dim, i), res[i])
                 self.assertEqual(x.select(dim, i), res2[i])
 
+    @skipIfRocm
     def test_linspace(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
             _from = random.random()
             to = _from + random.random()
-            res1 = torch.linspace(_from, to, 137)
-            res2 = torch.Tensor()
+            res1 = torch.linspace(_from, to, 137, device=device)
+            res2 = torch.tensor((), device=device)
             torch.linspace(_from, to, 137, out=res2)
             self.assertEqual(res1, res2, 0)
-            self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1))
-            self.assertEqual(torch.linspace(0, 1, 1), torch.zeros(1), 0)
+            self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1, device=device))
+            self.assertEqual(torch.linspace(0, 1, 1, device=device), torch.zeros(1, device=device), 0)
 
             # Check linspace for generating with start > end.
-            self.assertEqual(torch.linspace(2, 0, 3), torch.Tensor((2, 1, 0)), 0)
+            self.assertEqual(torch.linspace(2, 0, 3, device=device), torch.tensor((2, 1, 0), device=device), 0)
 
             # Check linspace for non-contiguous tensors.
-            x = torch.zeros(2, 3)
+            x = torch.zeros(2, 3, device=device)
             y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2))
-            self.assertEqual(x, torch.Tensor(((0, 0, 1), (0, 2, 3))), 0)
+            self.assertEqual(x, torch.tensor(((0, 0, 1), (0, 2, 3)), device=device), 0)
 
     def test_logspace(self):
         _from = random.random()
@@ -4591,8 +4629,8 @@ class _TestTorchMixin(object):
         A = cast(random_fullrank_matrix_distinct_singular_value(5, 4))
         b = cast(torch.randn(4, 5, 10))
 
-        x_exp_list = list()
-        LU_exp_list = list()
+        x_exp_list = []
+        LU_exp_list = []
         for i in range(4):
             x_exp, LU_exp = torch.gesv(b[i], A[i])
             x_exp_list.append(x_exp)
@@ -5999,7 +6037,7 @@ class _TestTorchMixin(object):
 
             # test against cholesky_solve in a loop: four batches with both choices of upper
             A, L, b = cholesky_solve_test_helper((5, 4), (4, 5, 10), cast, upper)
-            x_exp_list = list()
+            x_exp_list = []
             for i in range(4):
                 x_exp = torch.cholesky_solve(b[i], L[i], upper=upper)
                 x_exp_list.append(x_exp)
@@ -7178,7 +7216,7 @@ class _TestTorchMixin(object):
 
     def test_abs(self):
         def _test_abs(tensors_dict):
-            for category, tensors in tensors_dict.items():
+            for _category, tensors in tensors_dict.items():
                 for data in tensors:
                     _test_abs_single(data)
 
@@ -8976,7 +9014,7 @@ class _TestTorchMixin(object):
         filemock = FilelikeMock(b'', has_readinto=False)
         tensor = torch.randn(3, 5)
         torch.save(tensor, filemock)
-        expected_superset = set(['write', 'flush'])
+        expected_superset = {'write', 'flush'}
         self.assertTrue(expected_superset.issuperset(filemock.calls))
 
         # Reset between save and load
@@ -8984,7 +9022,7 @@ class _TestTorchMixin(object):
         filemock.calls.clear()
 
         _ = torch.load(filemock)
-        expected_superset = set(['read', 'readline', 'seek', 'tell'])
+        expected_superset = {'read', 'readline', 'seek', 'tell'}
         self.assertTrue(expected_superset.issuperset(filemock.calls))
 
     def _test_serialization_filelike(self, tensor, mock, desc):
@@ -9425,7 +9463,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(x.new(np.array((3, 4))).tolist(), [3, 4])
         self.assertEqual(x.new([z[2], z[0] + 3]).tolist(), [3, 4])
         self.assertEqual(x.new(size=(3, 4)).shape, [3, 4])
-        self.assertEqual(x.new(tuple()).shape, [0])
+        self.assertEqual(x.new(()).shape, [0])
         self.assertEqual(x.new(y.storage()).data_ptr(), y.data_ptr())
         self.assertEqual(x.new(y).data_ptr(), y.data_ptr())
         self.assertIsNot(x.new(y), y)
@@ -10348,6 +10386,65 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         expected = torch.empty(0, 2, dtype=a.dtype)
         self.assertEqual(c1, expected)
         self.assertEqual(c2, expected)
+
+    def test_has_internal_overlap(self):
+        OVERLAP_NO = 0
+        OVERLAP_YES = 1
+        OVERLAP_TOO_HARD = 2
+
+        # Check for contiguous tensors
+        a = torch.randn(3, 3)
+        self.assertEqual(torch._debug_has_internal_overlap(a), OVERLAP_NO)
+
+        # Checks for zero strides
+        b = torch.randn(1, 3)
+        b_expanded = b.expand(4, 3)
+        self.assertEqual(torch._debug_has_internal_overlap(b_expanded), OVERLAP_YES)
+
+    @staticmethod
+    def unary_check_mem_overlap(self, inplace_op, value=-0.5, device='cpu'):
+        tensor = torch.tensor(value, device=device).expand(3, 3)
+        with self.assertRaisesRegex(RuntimeError, 'single memory location'):
+            inplace_op(tensor)
+
+    @staticmethod
+    def _test_inplace_unary_mem_overlap(self, device='cpu'):
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.acos_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.asin_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.atan_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.ceil_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.cos_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.erf_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.erfc_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.exp_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.expm1_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.floor_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.log_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.log10_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.log1p_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.log2_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.round_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.rsqrt_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.sin_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.sqrt_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.tan_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.tanh_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.trunc_(), device=device)
+
+    def test_inplace_unary_mem_overlap(self):
+        return self._test_inplace_unary_mem_overlap(self)
+
+    @unittest.expectedFailure
+    def test_abs_unary_mem_overlap(self):
+        self.unary_check_mem_overlap(lambda t: t.abs_())
+
+    @unittest.expectedFailure
+    def test_sinh_unary_mem_overlap(self):
+        self.unary_check_mem_overlap(lambda t: t.sinh_())
+
+    @unittest.expectedFailure
+    def test_cosh_unary_mem_overlap(self):
+        self.unary_check_mem_overlap(lambda t: t.cosh_())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
     def test_reverse_binary_ops_multiple_device(self):

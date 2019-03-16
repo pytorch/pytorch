@@ -46,7 +46,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   explicit OperatorBase(
       const c10::FunctionSchema& schema,
       std::vector<c10::IValue> inputs,
-      std::vector<c10::IValue*> outputs);
+      std::vector<at::Tensor> outputs);
 
   virtual ~OperatorBase() noexcept {}
 
@@ -83,7 +83,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     }
     auto index = getFunctionSchema().argumentIndexWithName(name);
     CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
-    const auto& value = ivalue_inputs_[index.value()];
+    const auto& value = newstyle_inputs_[index.value()];
     return value.template to<T>();
   }
 
@@ -109,7 +109,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     }
     auto index = getFunctionSchema().argumentIndexWithName(name);
     CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
-    const auto& value = ivalue_inputs_[index.value()];
+    const auto& value = newstyle_inputs_[index.value()];
     return GetVectorFromIValueList<T>(value);
   }
 
@@ -158,19 +158,19 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         throw enf;
       }
     }
-    DCHECK_LT(0, ivalue_inputs_.size());
+    DCHECK_LT(0, newstyle_inputs_.size());
     IValue ival;
-    if (ivalue_inputs_[0].isTensorList()) {
+    if (newstyle_inputs_[0].isTensorList()) {
       // if the first input is a tensor list, we get input tensors by indexing into that list.
       // currently, this means that only tensors from that list are accessible as inputs.
       // any hypothetical input tensors that come after the list are not accessible.
-      const auto& tensorList = ivalue_inputs_[0].toTensorListRef();
+      const auto& tensorList = newstyle_inputs_[0].toTensorListRef();
       DCHECK_LT(idx, tensorList.size());
       ival = tensorList[idx];
     } else {
       // if the first input is not a tensor list, we get input tensors by indexing into the inputs.
-      DCHECK_LT(idx, ivalue_inputs_.size());
-      ival = ivalue_inputs_[idx];
+      DCHECK_LT(idx, newstyle_inputs_.size());
+      ival = newstyle_inputs_[idx];
     }
     CAFFE_ENFORCE(
         ival.isTensor(),
@@ -200,18 +200,14 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       // When you get a Tensor here it is not fully initialized
       return BlobGetMutableTensor(outputs_.at(idx), type);
     }
-    auto* ival = ivalue_outputs_[idx];
-    CAFFE_ENFORCE(
-        ival->isTensor(),
-        "Output(int, DeviceType) is only available for IValues that store Tensors");
-    Tensor tensor = caffe2::Tensor(ival->toTensor());
+    auto& output = newstyle_outputs_[idx];
+    Tensor tensor = caffe2::Tensor(output);
     if (!tensor.defined() || tensor.GetDeviceType() != type) {
       // Fix tensor type
       tensor = Tensor(type);
-      auto at_tensor = at::Tensor(std::move(tensor.getIntrusivePtr()));
-      *ival = IValue(at_tensor);
+      output = at::Tensor(std::move(tensor.getIntrusivePtr()));
     }
-    output_tensors_[idx] = caffe2::Tensor(ival->toTensor());
+    output_tensors_[idx] = caffe2::Tensor(output);
     return &output_tensors_[idx];
   }
 
@@ -228,17 +224,22 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   void SetOutputTensor(int idx, Tensor tensor) {
-    // also update the tensor in the hack
     if (!isLegacyOperator()) {
-      output_tensors_[idx] = tensor.UnsafeSharedInstance();
-    }
+      newstyle_outputs_[idx] = at::Tensor(tensor);
 
-    // update the tensor in the workspace
-    BlobSetTensor(outputs_.at(idx), std::move(tensor));
+      // also update the tensor in the hack
+      output_tensors_[idx] = std::move(tensor);
+    } else {
+      // update the tensor in the workspace
+      BlobSetTensor(outputs_.at(idx), std::move(tensor));
+    }
   }
 
   Tensor OutputTensorOrUndefined(int idx) {
-    return BlobGetTensorOrUndefined(*outputs_.at(idx));
+    if (isLegacyOperator()) {
+      return BlobGetTensorOrUndefined(*outputs_.at(idx));
+    }
+    return output_tensors_[idx].UnsafeSharedInstance();
   }
 
   inline Tensor*
@@ -249,17 +250,13 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
           "device must be provided in options.");
       return BlobGetMutableTensor(outputs_.at(idx), dims, options);
     }
-    auto* ival = ivalue_outputs_[idx];
-    CAFFE_ENFORCE(
-        ival->isTensor(),
-        "Output(int, DeviceType) is only available for IValues that store Tensors");
-    Tensor tensor = GetSizedTensorWithOptions(
-        caffe2::Tensor(ival->toTensor()), dims, options);
+    auto& output = newstyle_outputs_[idx];
+    Tensor tensor =
+        GetSizedTensorWithOptions(caffe2::Tensor(output), dims, options);
     // assign it back in case it changed
-    auto at_tensor = at::Tensor(std::move(tensor.getIntrusivePtr()));
-    *ival = IValue(at_tensor);
+    output = at::Tensor(std::move(tensor.getIntrusivePtr()));
 
-    output_tensors_[idx] = caffe2::Tensor(ival->toTensor());
+    output_tensors_[idx] = caffe2::Tensor(output);
     return &output_tensors_[idx];
   }
 
@@ -345,7 +342,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     if (isLegacyOperator()) {
       return outputs_.size();
     }
-    return ivalue_outputs_.size();
+    return newstyle_outputs_.size();
   }
   inline const vector<const Blob*>& Inputs() const { return inputs_; }
   inline const vector<Blob*>& Outputs() { return outputs_; }
@@ -536,6 +533,10 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return helper_;
   }
 
+  std::vector<at::Tensor> move_newstyle_outputs() && {
+    return std::move(newstyle_outputs_);
+  }
+
  public:
   static const int kNoNetPositionSet = -1;
 
@@ -549,8 +550,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   vector<Blob*> outputs_;
   // Preferrably use c10::optional, but nvcc doesn't work
   std::unique_ptr<const c10::FunctionSchema> fn_schema_ = nullptr;
-  vector<c10::IValue> ivalue_inputs_;
-  vector<c10::IValue*> ivalue_outputs_;
+  vector<c10::IValue> newstyle_inputs_;
+  vector<at::Tensor> newstyle_outputs_;
   // HACK
   // We preserve the fact that Output() returns Tensor*
   // by storing Tensor in a vector owned by the
@@ -681,8 +682,8 @@ class Operator : public OperatorBase {
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
       std::vector<c10::IValue> inputs,
-      std::vector<c10::IValue*> outputs)
-      : OperatorBase(fn_schema, inputs, outputs) {
+      std::vector<at::Tensor> outputs)
+      : OperatorBase(fn_schema, std::move(inputs), std::move(outputs)) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
     context_.SwitchToDevice();

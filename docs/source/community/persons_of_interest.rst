@@ -104,7 +104,7 @@ AMD/ROCm/HIP
 ~~~~~~~~~~~~
 
 -  Junjie Bai (`bddppq <https://github.com/bddppq>`__)
--  Johannes M. Dietrich (`iotamudelta <https://github.com/iotamudelta>`__)
+-  Johannes M. Dieterich (`iotamudelta <https://github.com/iotamudelta>`__)
 
 Windows
 ~~~~~~~

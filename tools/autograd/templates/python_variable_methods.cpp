@@ -347,8 +347,7 @@ static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  size_t element_size = self_.type().elementSizeInBytes();
-  return THPUtils_packInt64(element_size);
+  return THPUtils_packInt64(self_.element_size());
   END_HANDLE_TH_ERRORS
 }
 
