@@ -71,7 +71,9 @@ void Pickler::addIValue(const IValue& ivalue) {
     pushDouble(ivalue);
   } else if (ivalue.isInt()) {
     // TODO: use BININT1/BININT2/LONG if possible/necessary
-    AT_ASSERT(ivalue.toInt() <= std::numeric_limits<int32_t>::max());
+    AT_ASSERT(
+        ivalue.toInt() <= std::numeric_limits<int32_t>::max() &&
+        ivalue.toInt() >= std::numeric_limits<int32_t>::min());
     pushOpCode(OpCode::BININT);
     pushInt32(ivalue.toInt());
   } else if (ivalue.isBool()) {
@@ -372,6 +374,7 @@ OpCode Unpickler::readInstruction() {
     case OpCode::BINUNICODE: {
       uint32_t length = read<uint32_t>();
       const char* characters = reinterpret_cast<const char*>(bytes_);
+      AT_ASSERT(bytes_ + length < end_ptr_);
       bytes_ += length;
       stack_.emplace_back(std::string(characters, /*n=*/length));
     } break;
