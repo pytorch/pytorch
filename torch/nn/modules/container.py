@@ -87,6 +87,9 @@ class Sequential(Module):
     def __len__(self):
         return len(self._modules)
 
+    def __iter__(self):
+        return iter([self[idx] for idx in range(len(self))])
+
     def __dir__(self):
         keys = super(Sequential, self).__dir__()
         keys = [key for key in keys if not key.isdigit()]

@@ -539,6 +539,10 @@ class Module(object):
     def __getitem__(self, name):
         return getattr(self, name)
 
+    def __iter__(self):
+        raise TypeError("'{}' object is not iterable".format(
+            type(self).__name__))
+
     def __setattr__(self, name, value):
         def remove_from(*dicts):
             for d in dicts:
