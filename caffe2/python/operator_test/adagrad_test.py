@@ -134,10 +134,9 @@ class TestAdagrad(serial.SerializedTestCase):
         epsilon=st.floats(
             min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
         ),
-        data_strategy=st.data(),
         **hu.gcs
     )
-    def test_sparse_adagrad_empty(self, inputs, lr, epsilon, data_strategy, gc, dc):
+    def test_sparse_adagrad_empty(self, inputs, lr, epsilon, gc, dc):
         param, momentum = inputs
         grad = np.empty(shape=(0,) + param.shape[1:], dtype=np.float32)
 
@@ -176,10 +175,9 @@ class TestAdagrad(serial.SerializedTestCase):
         epsilon=st.floats(
             min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
         ),
-        data_strategy=st.data(),
         **hu.gcs
     )
-    def test_row_wise_sparse_adagrad(self, inputs, lr, epsilon, data_strategy, gc, dc):
+    def test_row_wise_sparse_adagrad(self, inputs, lr, epsilon, gc, dc):
         adagrad_sparse_test_helper(
             self,
             inputs,
@@ -200,11 +198,10 @@ class TestAdagrad(serial.SerializedTestCase):
         epsilon=st.floats(
             min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
         ),
-        data_strategy=st.data(),
         **hu.gcs
     )
     def test_row_wise_sparse_adagrad_empty(
-        self, inputs, lr, epsilon, data_strategy, gc, dc
+        self, inputs, lr, epsilon, gc, dc
     ):
         param, momentum = inputs
         grad = np.empty(shape=(0,) + param.shape[1:], dtype=np.float32)
