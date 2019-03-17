@@ -305,8 +305,9 @@ void THCTensor_(multinomial)(struct THCState *state,
 void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCudaLongTensor *_J, THCTensor *_q){
   THAssert(THCTensor_(isContiguous)(state, _q));
   THAssert(THCudaLongTensor_isContiguous(state, _J));
-  THAssert(THCTensor_(isContiguous)(state, _probs));
-  int64_t inputsize = THCTensor_(nElement)(state, _probs);
+  THCTensor *probs = THCTensor_(newContiguous)(state, _probs);
+  THAssert(THCTensor_(isContiguous)(state, probs));
+  int64_t inputsize = THCTensor_(nElement)(state, probs);
   THCudaLongTensor *smaller = THCudaLongTensor_newWithSize1d(state, inputsize);
   THCudaLongTensor *larger = THCudaLongTensor_newWithSize1d(state, inputsize);
   THCudaLongTensor *smaller_short = THCudaLongTensor_newWithSize1d(state, inputsize);
@@ -320,7 +321,7 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
   aliasMultinomialFilter
     <<<inputBlockDim, BLOCK_SIZE, 0, THCState_getCurrentStream(state) >>>(
                      THCTensor_(data)(state, _q),
-                     THCTensor_(data)(state, _probs),
+                     THCTensor_(data)(state, probs),
                      THCudaLongTensor_data(state, smaller),
                      THCudaLongTensor_data(state, larger),
                      THCudaLongTensor_data(state, _J),
@@ -355,9 +356,11 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
   THCudaLongTensor_free(state, larger);
   THCudaLongTensor_free(state, smaller_short);
   THCudaLongTensor_free(state, larger_short);
+  THCTensor_free(state, probs);
 }
 
 void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, THCudaLongTensor *_J, THCTensor *_q, int n_sample){
+  THArgCheck(n_sample > 0, 3, "cannot sample <= 0 samples");
   THAssert(THCTensor_(isContiguous)(state, _q));
   THAssert(THCudaLongTensor_isContiguous(state, _J));
   THCGenerator* gen = THCRandom_getGenerator(state);
@@ -381,6 +384,8 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, T
           THCTensor_(data)(state, uniform),
           THCTensor_(data)(state, bernoulli)
           );
+  THCTensor_(free)(state, uniform);
+  THCTensor_(free)(state, bernoulli);
 }
 
 #endif
