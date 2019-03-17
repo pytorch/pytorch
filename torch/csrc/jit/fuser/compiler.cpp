@@ -273,7 +273,8 @@ std::shared_ptr<FusedKernel> compileKernel(
     const KernelSpec& spec,
     const ArgSpec& arg_spec,
     const std::vector<int64_t>& map_size,
-    const at::Device device) {
+    const at::Device device,
+    const at::ArrayRef<IValue> all_inputs) {
   const std::vector<TensorDesc>& input_desc = arg_spec.descs();
 
   auto graph = spec.graph()->copy();
@@ -311,15 +312,29 @@ std::shared_ptr<FusedKernel> compileKernel(
     }
   }
 
+  // if SumToSize changes the number of dimensions of FusedConcat
+  // inputs, we need to adjust the concat dimension.
+  // here we compute the needed dimension.
+  std::vector<int64_t> dims_to_go(graph->outputs().size(), 0);
+  for (const auto& omap : spec.outputMapAndSizes()) {
+    auto size_inputs = omap.sizeInputs();
+    if (size_inputs.size() > 0 && size_inputs[0] != -1) {
+      dims_to_go[omap.offset()] =
+          map_size.size() - all_inputs[size_inputs[0]].toIntListRef().size();
+    }
+  }
+
   // Creates output, concat, and flattened output descriptions
   std::vector<TensorDesc> output_desc;
   std::vector<PartitionDesc> concat_desc;
   std::vector<std::pair<const Value*, const TensorDesc>> flat_outputs;
-  for (const Value* o : graph->outputs()) {
+  for (size_t i = 0; i < graph->outputs().size(); i++) {
     // Creates output description
+    const Value* o = graph->outputs()[i];
     std::vector<int64_t> sizes = map_size;
     if (o->node()->kind() == prim::FusedConcat) {
-      sizes.at(o->node()->i(attr::dim)) *= o->node()->inputs().size();
+      sizes.at(o->node()->i(attr::dim) + dims_to_go[i]) *=
+          o->node()->inputs().size();
     }
     auto scalar_type = o->type()->expect<c10::DimensionedTensorType const>()->scalarType();
     auto type = CompleteTensorType::create(scalar_type, device, sizes);
@@ -332,7 +347,8 @@ std::shared_ptr<FusedKernel> compileKernel(
       flat_outputs.emplace_back(o, desc);
     } else {
       const auto cat = o->node();
-      concat_desc.emplace_back(desc, cat->inputs().size(), cat->i(attr::dim));
+      concat_desc.emplace_back(
+          desc, cat->inputs().size(), cat->i(attr::dim) + dims_to_go[i]);
       for (const auto& c : cat->inputs()) {
         flat_outputs.emplace_back(c, *concat_desc.back().subTensorDesc());
       }

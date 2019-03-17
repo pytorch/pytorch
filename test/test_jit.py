@@ -12225,11 +12225,17 @@ class TestFuser(JitTestCase):
                 ((5, 8), (5, 2)),
                 # the first input will be split into 2,2,2,1-sized tensors
                 ((5, 7), (5, 2)),
+                ((5, 4), (5, 2)),
                 ((1, 8), (5, 2)),
                 ((1, 7), (5, 2)),
-                # these last two currently cause the fuser to quit, but nonetheless
+                ((5, 8), (2, 5, 2)),
+                ((5, 7), (2, 5, 2)),
                 ((5, 8), (1, 5, 2)),
                 ((5, 7), (1, 5, 2)),
+                ((1, 8), (1, 5, 2)),
+                ((1, 7), (1, 5, 2)),
+                ((5, 8), (1, 1, 2)),
+                ((5, 7), (1, 1, 2)),
         ]:
 
             inputs = [torch.randn(gates_shape, requires_grad=True, device='cuda'),

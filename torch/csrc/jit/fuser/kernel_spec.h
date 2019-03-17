@@ -150,6 +150,10 @@ struct TORCH_API KernelSpec {
     return outputMapAndSizes_;
   }
 
+  const std::vector<OutputMapAndSize>& outputMapAndSizes() const {
+    return outputMapAndSizes_;
+  }
+
   bool hasRandom() const {
     return has_random_;
   }
