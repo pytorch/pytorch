@@ -29,7 +29,7 @@ class Errors(object):
     >>>     ...
     """
 
-    def __init__(self, msg, rtol=1e-3, atol=1e-7):
+    def __init__(self, msg, rtol=1e-3, atol=1e-5):
         self.msg = msg
         self.errors = []
         self.context = []

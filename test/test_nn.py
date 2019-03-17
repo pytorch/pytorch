@@ -805,6 +805,20 @@ class TestNN(NNTestCase):
             self.assertFalse(output2.requires_grad)
             self.assertRaises(RuntimeError, lambda: output2.backward(torch.ones(1, 5, 10, 10)))
 
+    def test_invalid_conv1d(self):
+        module = nn.Conv1d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True)
+        input = torch.randn(1, 3, 4)
+        with self.assertRaisesRegex(RuntimeError,
+                                    r'Calculated padded input size per channel: \(4\). ' +
+                                    r'Kernel size: \(10\). Kernel size can\'t be greater than actual input size'):
+            module(input)
+
+        # Negative stride check
+        module = nn.Conv1d(in_channels=3, out_channels=6, kernel_size=3, stride=-1, bias=True)
+        input = torch.randn(1, 3, 4)
+        with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
+            module(input)
+
     def test_invalid_conv2d(self):
         module = torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2)
         input = torch.empty(1, 1, 4, 4)
@@ -817,10 +831,22 @@ class TestNN(NNTestCase):
                                     r'Kernel size: \(10 x 10\). Kernel size can\'t be greater than actual input size'):
             module(input)
 
+        # Negative stride check
+        module = nn.Conv2d(in_channels=3, out_channels=6, kernel_size=4, stride=-1, bias=True)
+        input = torch.randn(1, 3, 4, 4)
+        with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
+            module(input)
+
     def test_invalid_conv3d(self):
         module = torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2)
         input = torch.empty(1, 1, 4, 4, 4)
         self.assertRaises(RuntimeError, lambda: module(input))
+
+        # Negative stride check
+        module = torch.nn.Conv3d(1, 1, kernel_size=3, stride=-2)
+        input = torch.empty(1, 1, 4, 4, 4)
+        with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
+            module(input)
 
     def _test_dropout(self, cls, cuda, input):
         p = 0.2
@@ -1860,7 +1886,7 @@ class TestNN(NNTestCase):
                 self.assertEqual(wrapped_m(input), pre_remove_out)
 
                 m = torch.nn.utils.spectral_norm(m)
-                for i in range(3):
+                for _ in range(3):
                     pre_remove_out = wrapped_m(input)
                 m = torch.nn.utils.remove_spectral_norm(m)
                 self.assertEqual(wrapped_m(input), pre_remove_out)
@@ -2140,6 +2166,29 @@ class TestNN(NNTestCase):
         # should be bitwise equal
         self.assertEqual(input.grad, inputf.grad.to(dtype), prec=0)
 
+    def _test_softmax_backward(self, device):
+        if device.type == 'cuda':
+            dtypes = [torch.float, torch.half]
+        else:
+            dtypes = [torch.float]
+        # FIXME: add (10, 0) after https://github.com/pytorch/pytorch/issues/17262 is fixed
+        sizes = [(0, 10), (32, 20)]
+        for fn in [F.softmax, F.log_softmax]:
+            for dtype in dtypes:
+                for size in sizes:
+                    input = torch.rand(size, device=device, dtype=dtype, requires_grad=True)
+                    output = fn(input, dtype=torch.float, dim=1).sum()
+                    grad_input, = torch.autograd.grad(output, input, create_graph=True)
+                    grad_input.sum().backward()
+
+    def test_softmax_backward(self):
+        self._test_softmax_backward(torch.device('cpu'))
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
+    def test_softmax_backward_cuda(self):
+        self._test_softmax_backward(torch.device('cuda'))
+
     def _test_gumbel_softmax_st_shapes(self, cuda, dtype, shape, dim, count_expected):
         logits = torch.randn(shape, dtype=torch.float)
         logits = logits.to(dtype)
@@ -2166,7 +2215,7 @@ class TestNN(NNTestCase):
         probs = logits.softmax(dim=-1)
 
         counts = torch.zeros_like(logits)
-        for draw in range(num_draws):
+        for _ in range(num_draws):
             y_draw = F.gumbel_softmax(logits, hard=True)
             counts = counts + y_draw
 
@@ -3260,6 +3309,29 @@ class TestNN(NNTestCase):
             self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, 'buffer on wrong device')
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_data_parallel_buffers_requiring_grad(self):
+        class TestModule(nn.Module):
+            def __init__(self, t):
+                super(TestModule, self).__init__()
+                self.register_buffer('t_rg', t)
+                self.register_buffer('t_not_rg', t.clone().detach())
+
+            def forward(self, x):
+                return x * self.t_rg + self.t_not_rg
+
+        m = TestModule(torch.randn(100, device='cuda', requires_grad=True))
+        self.assertTrue(m.t_rg.requires_grad)
+
+        dpm = nn.DataParallel(m, [0, 1])
+        inp = torch.randn(2, 100, device='cuda')
+
+        def fn(t):
+            return dpm(inp)
+
+        torch.autograd.gradcheck(fn, (m.t_rg,))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parallel_apply(self):
         l1 = nn.Linear(10, 5).to("cuda:0", torch.float)
         l2 = nn.Linear(10, 5).to("cuda:1", torch.float)
@@ -3354,39 +3426,76 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @skipIfRocm
     def test_data_parallel_model_device(self):
+        r"""Test device[0] check at forward time.
+        """
         l = nn.Linear(2, 2)
-        error_msg = "module must have its parameters and buffers on device %d "
-        self.assertRaisesRegex(
-            RuntimeError, error_msg % (0), lambda: nn.DataParallel(l))
-        self.assertRaisesRegex(
-            RuntimeError, error_msg % (0), lambda: nn.DataParallel(l.cuda(1)))
-        self.assertRaisesRegex(
-            RuntimeError, error_msg % (1),
-            lambda: nn.DataParallel(l.cuda(), device_ids=[1, 0]))
+        inp = torch.randn(2, 2)
+        inp_cuda0 = inp.cuda(0)
+        inp_cuda1 = inp.cuda(1)
 
-        nn.DataParallel(l.cuda())
-        nn.DataParallel(l.cuda(1), device_ids=[1, 0])
+        error_msg = "module must have its parameters and buffers on device {}"
+
+        @contextlib.contextmanager
+        def dummy_ctx_manager():
+            yield
+
+        def test(inner_m, dp_device, inp, device_ids, should_fail):
+            if device_ids is None:
+                device_ids = list(range(torch.cuda.device_count()))
+
+            if isinstance(device_ids[0], torch.device):
+                expect_device = device_ids[0]
+            else:
+                expect_device = torch.device("cuda:{}".format(device_ids[0]))
+
+            if should_fail:
+                def assert_correct():
+                    return self.assertRaisesRegex(RuntimeError, error_msg.format(expect_device))
+            else:
+                assert_correct = dummy_ctx_manager
+
+            # test DataParallel module
+            dpm = nn.DataParallel(inner_m, device_ids)
+            if dp_device is not None:
+                dpm = dpm.to(dp_device)
+
+            with assert_correct():
+                dpm(inp)
+
+            # test functional
+            with assert_correct():
+                nn.parallel.data_parallel(inner_m.to(dp_device), inp, device_ids)
+
+        test(l.to('cpu'), None, inp, None, should_fail=True)
+        test(l.cuda(1), None, inp_cuda0, None, should_fail=True)
+        test(l.cuda(), None, inp_cuda0, [1, 0], should_fail=True)
+
+        test(l.cuda(), None, inp_cuda0, None, should_fail=False)
+        test(l.cpu(), 'cuda', inp_cuda0, None, should_fail=False)
+        test(l.cuda(1), None, inp_cuda1, [1, 0], should_fail=False)
+        test(l.cpu(), 'cuda:1', inp_cuda1, [1, 0], should_fail=False)
 
         s = nn.Sequential(l.cpu())
-        self.assertRaisesRegex(
-            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s))
+        test(s, None, inp, None, should_fail=True)
+        test(s, None, inp, [0, 1], should_fail=True)
+        test(s, None, inp, [1, 0], should_fail=True)
 
-        s = nn.Sequential(deepcopy(l), l.cuda())
-        self.assertRaisesRegex(
-            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s))
+        s = nn.Sequential(deepcopy(l).cpu(), l.cuda())
+        test(s, None, inp, None, should_fail=True)
+        test(s, None, inp, [0, 1], should_fail=True)
+        test(s, None, inp, [1, 0], should_fail=True)
 
         s = nn.Sequential(l.cuda(), deepcopy(l).cuda(1))
-        self.assertRaisesRegex(
-            RuntimeError, error_msg % (0), lambda: nn.DataParallel(s))
-        self.assertRaisesRegex(
-            RuntimeError, error_msg % (1),
-            lambda: nn.DataParallel(s, device_ids=[1, 0]))
+        test(s, None, inp, None, should_fail=True)
+        test(s, None, inp, [0, 1], should_fail=True)
+        test(s, None, inp, [1, 0], should_fail=True)
 
         s = nn.Sequential(l.cuda(), deepcopy(l).cuda())
-        nn.DataParallel(s)
-
-        s = nn.Sequential(l.cuda(1), deepcopy(l).cuda(1))
-        nn.DataParallel(s, device_ids=[1, 0])
+        test(s, None, inp, None, should_fail=False)
+        test(s, None, inp, [0, 1], should_fail=False)
+        test(s, None, inp, [1, 0], should_fail=True)
+        test(s.cpu(), None, inp, [1, 0], should_fail=True)
+        test(s.cuda(1), None, inp, [1, 0], should_fail=False)
 
     @unittest.skipIf(not TEST_MULTIGPU or not PY3, "multi-GPU not supported")
     @skipIfRocm
@@ -3913,7 +4022,7 @@ class TestNN(NNTestCase):
                 my_stream = torch.cuda.Stream()
                 results[t] = input
                 with torch.cuda.stream(my_stream):
-                    for i in range(test_iters):
+                    for _ in range(test_iters):
                         # If all threads are sharing the same cudnn handle,
                         # the following sequence may occur:
                         # thread 0 calls setCuDNNStreamToCurrent()
@@ -3926,7 +4035,7 @@ class TestNN(NNTestCase):
                         results[t].div_(4.0)
                 torch.cuda.current_stream().wait_stream(my_stream)
 
-            for trial in range(trials):
+            for _ in range(trials):
                 for t in range(num_threads):
                     results[t] = torch.ones((1, 1, 2048, 2048), device='cuda')
 
@@ -4211,7 +4320,7 @@ class TestNN(NNTestCase):
                 input = torch.randn(3, 10)
                 hx = torch.randn(3, 20)
                 cell = module(10, 20, bias=bias)
-                for i in range(6):
+                for _ in range(6):
                     hx = cell(input, hx)
 
                 hx.sum().backward()
@@ -4228,18 +4337,37 @@ class TestNN(NNTestCase):
 
         input = Variable(cast(torch.randn(3, 5)))
         target = Variable(cast(torch.randn(5, 3)))
-        for name, fn in losses.items():
+        for _name, fn in losses.items():
             self.assertRaises(Exception, lambda: fn(input, target))
 
     def test_loss_equal_input_target_shape(self):
         self._test_loss_equal_input_target_shape(lambda x: x)
 
-    def test_NLLLoss_mismatched_batch(self):
+    def test_nll_loss_mismatched_batch(self):
         x = torch.randn((10, 3), requires_grad=True)
         # t should have size (10,)
         t = torch.zeros((3,), dtype=torch.int64)
         with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
             F.nll_loss(x, t)
+
+    def test_nll_loss_out_of_bounds_ignore_index(self):
+        x = torch.randn(6, 3, requires_grad=True)
+        t = torch.tensor([0, 1, 255, 0, 1, 2], dtype=torch.int64)
+        for reduction in ['mean', 'none']:
+            F.nll_loss(x, t, ignore_index=255, reduction=reduction).sum().backward()
+
+    def test_poisson_nll_loss_reduction_modes(self):
+        input = torch.tensor([0.5, 1.5, 2.5])
+        target = torch.tensor([1., 2., 3.])
+        component_wise_loss = torch.exp(input) - target * input
+        self.assertEqual(component_wise_loss,
+                         F.poisson_nll_loss(input, target, reduction='none'))
+        self.assertEqual(torch.sum(component_wise_loss),
+                         F.poisson_nll_loss(input, target, reduction='sum'))
+        self.assertEqual(torch.mean(component_wise_loss),
+                         F.poisson_nll_loss(input, target, reduction='mean'))
+        with self.assertRaisesRegex(ValueError, 'is not valid'):
+            F.poisson_nll_loss(input, target, reduction='total')
 
     def test_KLDivLoss_batch_mean(self):
         input_shape = (2, 5)
@@ -4595,9 +4723,10 @@ class TestNN(NNTestCase):
             unpacked, unpacked_len = rnn_utils.pad_packed_sequence(packed_out)
 
             # Check forward
-            self.assertEqual(packed_hidden, seq_hidden)
-            self.assertEqual(unpacked, seq_out)
-            self.assertEqual(unpacked_len, lengths)
+            prec = dtype2prec[dtype]
+            self.assertEqual(packed_hidden, seq_hidden, prec)
+            self.assertEqual(unpacked, seq_out, prec)
+            self.assertEqual(unpacked_len, lengths, prec)
 
             # Check backward
             seq_out.sum().backward()
@@ -4641,7 +4770,7 @@ class TestNN(NNTestCase):
             hx = torch.randn(3, 20)
             cx = torch.randn(3, 20)
             lstm = nn.LSTMCell(10, 20, bias=bias)
-            for i in range(6):
+            for _ in range(6):
                 hx, cx = lstm(input, (hx, cx))
 
             (hx + cx).sum().backward()
@@ -4686,7 +4815,7 @@ class TestNN(NNTestCase):
             with torch.no_grad():
                 weight.set_(weight_data)
 
-            for i in range(2):
+            for _ in range(2):
                 with warnings.catch_warnings(record=True) as w:
                     output_noncontig = rnn(input, hx)
                 if first_warn:
@@ -4928,7 +5057,7 @@ class TestNN(NNTestCase):
             output = rnn(input)
             output[0].sum().backward(retain_graph=True)
             grads = [input.grad.data.clone()] + [p.grad.data.clone() for p in rnn.parameters()]
-            for i in range(4):
+            for _ in range(4):
                 rnn.zero_grad()
                 input.grad.data.zero_()
                 output[0].sum().backward(retain_graph=True)
@@ -5499,6 +5628,13 @@ class TestNN(NNTestCase):
             self.assertEqual(cudnn_output, thnn_output)
             self.assertAlmostEqual(cudnn_input_grad, thnn_input_grad, delta=1e-3)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @repeat_test_for_types([torch.float, torch.half])
+    def test_batchnorm_large_batch(self, dtype=torch.float):
+        bn = nn.BatchNorm1d(1).to('cuda', dtype)
+        data = torch.rand(131072, 1, device="cuda", dtype=dtype)
+        out = bn(data).sum().backward()
+
     def _test_batchnorm_update_stats(self, device="cpu", dtype=torch.float):
         module = nn.BatchNorm1d(3).to(device, dtype)
 
@@ -5796,7 +5932,7 @@ class TestNN(NNTestCase):
         }
 
         input = torch.randn(2, 1, requires_grad=True)
-        for name, fn in losses.items():
+        for _name, fn in losses.items():
             for requires_grad in [True, False]:
                 # When target.requires_grad=True, its impl is in Python, while the other is in TH.
                 target = torch.randn(2, 10, requires_grad=requires_grad)
@@ -6400,11 +6536,12 @@ class TestNN(NNTestCase):
     def test_upsamplingNearest1d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2)
-        out_t = m(Variable(in_t))
+        with warnings.catch_warnings(record=True) as w:
+            out_t = m(in_t)
         self.assertEqual(torch.ones(1, 1, 4), out_t.data)
 
         input = torch.randn(1, 1, 2, requires_grad=True)
-        gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
+        gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
 
     def test_upsamplingLinear1d(self):
         for align_corners in [True, False]:
@@ -6415,32 +6552,35 @@ class TestNN(NNTestCase):
                 m = nn.Upsample(scale_factor=scale_factor, **kwargs)
                 in_t = torch.ones(1, 1, 2)
                 out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                out_t = m(in_t)
+                with warnings.catch_warnings(record=True) as w:
+                    out_t = m(in_t)
                 self.assertEqual(torch.ones(1, 1, out_size), out_t.data)
 
                 input = torch.randn(1, 1, 2, requires_grad=True)
-                gradcheck(lambda x: F.upsample(x, out_size, **kwargs), (input,))
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), (input,))
 
     def test_upsamplingLinear1d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='linear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9)
         in_t_9[:, :, :4].normal_()
-        out_t_9 = m(in_t_9)
-        out_t_5 = m(in_t_9[:, :, :5])
+        with warnings.catch_warnings(record=True) as w:
+            out_t_9 = m(in_t_9)
+            out_t_5 = m(in_t_9[:, :, :5])
         self.assertEqual(out_t_9[:, :, :15], out_t_5)
 
     def test_upsamplingNearest2d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2, 2)
-        out_t = m(Variable(in_t))
+        with warnings.catch_warnings(record=True) as w:
+            out_t = m(Variable(in_t))
         self.assertEqual(torch.ones(1, 1, 4, 4), out_t.data)
 
         input = torch.randn(1, 1, 2, 2, requires_grad=True)
         self.assertEqual(
-            F.upsample(input, 4, mode='nearest'),
-            F.upsample(input, scale_factor=2, mode='nearest'))
-        gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
-        gradgradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
+            F.interpolate(input, 4, mode='nearest'),
+            F.interpolate(input, scale_factor=2, mode='nearest'))
+        gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
+        gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
 
     def test_upsamplingBilinear2d(self):
         for align_corners in [True, False]:
@@ -6451,11 +6591,12 @@ class TestNN(NNTestCase):
                 m = nn.Upsample(scale_factor=scale_factor, **kwargs)
                 in_t = torch.ones(1, 1, 2, 2)
                 out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                out_t = m(in_t)
+                with warnings.catch_warnings(record=True) as w:
+                    out_t = m(in_t)
                 self.assertEqual(torch.ones(1, 1, out_size, out_size), out_t.data)
 
                 input = torch.randn(1, 1, 2, 2, requires_grad=True)
-                gradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     def test_upsamplingBicubic2d(self):
         # test output against known input
@@ -6486,18 +6627,20 @@ class TestNN(NNTestCase):
         m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9, 9)
         in_t_9[:, :, :4, :4].normal_()
-        out_t_9 = m(in_t_9)
-        out_t_5 = m(in_t_9[:, :, :5, :5])
+        with warnings.catch_warnings(record=True) as w:
+            out_t_9 = m(in_t_9)
+            out_t_5 = m(in_t_9[:, :, :5, :5])
         self.assertEqual(out_t_9[:, :, :15, :15], out_t_5)
 
     def test_upsamplingNearest3d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2, 2, 2)
-        out_t = m(Variable(in_t))
+        with warnings.catch_warnings(record=True) as w:
+            out_t = m(Variable(in_t))
         self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t.data)
 
         input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
-        gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
+        gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
 
     def test_upsamplingTrilinear3d(self):
         for align_corners in [True, False]:
@@ -6508,22 +6651,24 @@ class TestNN(NNTestCase):
                 m = nn.Upsample(scale_factor=scale_factor, **kwargs)
                 in_t = torch.ones(1, 1, 2, 2, 2)
                 out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                out_t = m(in_t)
+                with warnings.catch_warnings(record=True) as w:
+                    out_t = m(in_t)
                 self.assertEqual(torch.ones(1, 1, out_size, out_size, out_size), out_t.data)
 
                 input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
                 self.assertEqual(
-                    F.upsample(input, (out_size, out_size, out_size), **kwargs),
-                    F.upsample(input, scale_factor=scale_factor, **kwargs))
-                gradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
-                gradgradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
+                    F.interpolate(input, (out_size, out_size, out_size), **kwargs),
+                    F.interpolate(input, scale_factor=scale_factor, **kwargs))
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     def test_upsamplingTrilinear3d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='trilinear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9, 9, 9)
         in_t_9[:, :, :4, :4, :4].normal_()
-        out_t_9 = m(in_t_9)
-        out_t_5 = m(in_t_9[:, :, :5, :5, :5])
+        with warnings.catch_warnings(record=True) as w:
+            out_t_9 = m(in_t_9)
+            out_t_5 = m(in_t_9[:, :, :5, :5, :5])
         self.assertEqual(out_t_9[:, :, :15, :15, :15], out_t_5)
 
     def test_interpolate(self):
@@ -6531,7 +6676,8 @@ class TestNN(NNTestCase):
             out_size = int(math.floor(in_t.shape[-1] * scale_factor))
             dim = len(in_t.shape) - 2
             out_shape = [1, 1] + [out_size] * dim
-            out_t = m(in_t)
+            with warnings.catch_warnings(record=True) as w:
+                out_t = m(in_t)
             self.assertEqual(torch.ones(out_shape), out_t)
 
             self.assertEqual(

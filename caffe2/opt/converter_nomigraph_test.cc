@@ -13,7 +13,7 @@ TEST(Converter, Basic) {
           .addArgument("kernel", 3)
           .addArgument("stride", 1)
           .addArgument("pad", 0)
-          .addArgument("order", string("NCHW"))
+          .addArgument("order", std::string("NCHW"))
           .setDeviceOptionName("conv_runner");
     } else {
       NetMutator(&net)

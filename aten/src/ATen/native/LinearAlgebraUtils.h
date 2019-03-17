@@ -111,6 +111,23 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
 }
 
 /*
+ * This is an overloaded case of the previous function for a tensor of infos.
+ */
+static inline void batchCheckErrors(const Tensor& infos, const char* name) {
+  auto batch_size = infos.numel();
+  auto infos_cpu = infos.to(at::kCPU);
+  auto infos_data = infos_cpu.data<int>();
+  for (size_t i = 0; i < batch_size; i++) {
+    auto info = infos_data[i];
+    if (info < 0) {
+      AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
+    } else if (info > 0) {
+      AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
+    }
+  }
+}
+
+/*
  * Given a info int, obtained after a single operation, this function check if the computation
  * has been successful (info = 0) or not, and report in case of the latter.
  */

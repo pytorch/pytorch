@@ -11,8 +11,9 @@ namespace caffe2 {
 template <typename T, class Context>
 class SpatialSoftmaxWithLossOp final : public Operator<Context> {
  public:
-  SpatialSoftmaxWithLossOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SpatialSoftmaxWithLossOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         scale_(this->template GetSingleArgument<float>("scale", 1.)),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))) {
@@ -39,8 +40,9 @@ class SpatialSoftmaxWithLossOp final : public Operator<Context> {
 template <typename T, class Context>
 class SpatialSoftmaxWithLossGradientOp final : public Operator<Context> {
  public:
-  SpatialSoftmaxWithLossGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit SpatialSoftmaxWithLossGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         scale_(this->template GetSingleArgument<float>("scale", 1.)),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))),

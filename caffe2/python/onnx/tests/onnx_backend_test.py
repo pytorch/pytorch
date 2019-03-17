@@ -53,6 +53,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_constantofshape_int.*'  # Needs implementation
                      '|test_where.*'  # Needs implementation
                      '|test_shrink.*'  # Needs implementation
+                     '|test_strnorm.*'  # Needs implementation
                      '|test_nonzero.*'  # Needs implementation
                      '|test_tfidfvectorizer.*'  # Needs implementation
                      ')')

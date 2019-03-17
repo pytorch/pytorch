@@ -4,7 +4,7 @@
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/import_method.h>
+#include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 
@@ -44,7 +44,7 @@ class ScriptModuleDeserializer final {
   ScriptModuleDeserializer(std::istream* is);
   explicit ScriptModuleDeserializer(std::unique_ptr<ReadAdapterInterface> rai);
   void deserialize(
-      ModuleLookup module_lookup,
+      script::ModuleLookup module_lookup,
       c10::optional<at::Device> device,
       script::ExtraFilesMap& extra_files);
 
@@ -56,11 +56,12 @@ class ScriptModuleDeserializer final {
   void convertModule(const torch::ModuleDef& module_def);
 
   void loadTensorTable(torch::ModelDef* model_def);
+  void loadLibs(torch::ModelDef* model_def);
 
   caffe2::serialize::PyTorchStreamReader reader_;
   // this is a hack to make sure the script module created in C++ is the
   // same as created in Python
-  ModuleLookup moduleLookup_;
+  script::ModuleLookup moduleLookup_;
   c10::optional<at::Device> device_;
   std::vector<std::string> moduleStack_;
 
@@ -80,7 +81,7 @@ ScriptModuleDeserializer::ScriptModuleDeserializer(
     : reader_(std::move(rai)) {}
 
 void ScriptModuleDeserializer::deserialize(
-    ModuleLookup module_lookup,
+    script::ModuleLookup module_lookup,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
   torch::ModelDef model_def;
@@ -126,6 +127,7 @@ void ScriptModuleDeserializer::deserialize(
   }
 
   loadTensorTable(&model_def);
+  loadLibs(&model_def);
   // TODO: this can be simplified when C++/Python interop lands,
   // and the submodules would be created as the same in either C++ or Python
   convertModule(module_def);
@@ -135,6 +137,17 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
   std::unordered_map<std::string, at::Storage> storageMap;
   for (const torch::TensorDef& tensor : model_def->tensors()) {
     tensor_table_.emplace_back(loadTensor(tensor, storageMap));
+  }
+}
+
+void ScriptModuleDeserializer::loadLibs(torch::ModelDef* model_def) {
+  const auto lib_def = model_def->libs();
+  if (lib_def.has_torchscript_arena()) {
+    at::DataPtr data;
+    size_t size;
+    std::tie(data, size) = reader_.getRecord(lib_def.torchscript_arena().key());
+    std::string data_str(static_cast<const char*>(data.get()), size);
+    script::import_libs(data_str, tensor_table_);
   }
 }
 
@@ -222,7 +235,11 @@ void ScriptModuleDeserializer::convertModule(
   for (int i = 0; i < module_def.parameters_size(); ++i) {
     const torch::ParameterDef& param_def = module_def.parameters(i);
     at::Tensor tensor = tensor_table_.at(param_def.tensor_id());
-    module->register_parameter(param_def.name(), tensor, param_def.is_buffer());
+    if (param_def.is_buffer()) {
+      module->register_buffer(param_def.name(), tensor);
+    } else {
+      module->register_parameter(param_def.name(), tensor, /*is_buffer=*/false);
+    }
   }
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;
@@ -230,14 +247,14 @@ void ScriptModuleDeserializer::convertModule(
     std::tie(data, size) =
         reader_.getRecord(module_def.torchscript_arena().key());
     std::string data_str(static_cast<const char*>(data.get()), size);
-    import_methods(module, data_str, tensor_table_);
+    script::import_methods(module, data_str, tensor_table_);
   }
 }
 
 } // namespace
 
 void import_ir_module(
-    ModuleLookup module_lookup,
+    script::ModuleLookup module_lookup,
     std::istream& in,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
@@ -246,7 +263,7 @@ void import_ir_module(
 }
 
 void import_ir_module(
-    ModuleLookup module_lookup,
+    script::ModuleLookup module_lookup,
     const std::string& filename,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
@@ -255,7 +272,7 @@ void import_ir_module(
 }
 
 void import_ir_module(
-    ModuleLookup module_lookup,
+    script::ModuleLookup module_lookup,
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {

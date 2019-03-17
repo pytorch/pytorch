@@ -71,6 +71,7 @@ signature.
 - `int`. Think about this like a Python int. This is translated into a C++ argument of type `int64_t`.
 - `float`. Think about this like a Python `float`. It is translated into a C++ argument of type `double`.
 - `bool`
+- `str`
 - `Scalar`. `Scalar` supports binding to any numerical types from Python, including integral types,
   floating point types, and zero dimensional tensors. `int` and `float` bind to the corresponding Python
   numerical types. However, you probably don't want to use `Scalar`. It's really used for binding
@@ -110,6 +111,12 @@ factory while another is not.
 argument name you provide, and a rename of an argument name is considered a BC-breaking
 change (e.g., you will probably need to update `tools/autograd/derivatives.yaml` at
 least). For more details please see the section on `variants`.
+
+As a convention we use 'out' to indicate an output argument. This aligns with the
+Python bindings. Even if a function might not be used in the Python bindings, we
+still advise to follow this convention. Check the generated code when making a change
+to make sure you're not breaking the API when renaming an argument name of an
+existing function.
 
 TODO: Do argument names affect Python keyword arguments?
 

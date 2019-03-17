@@ -46,13 +46,12 @@ class BackendTransformerBase {
   std::unordered_map<std::string, TensorShape> ssaRewriteAndMapNames(
       Workspace* ws,
       NetDef* pred_net,
-      const std::unordered_set<std::string>& weights,
       const std::unordered_map<std::string, TensorShape>& input_shape_hints);
 
   // Wrap TensorShape into TensorProto
   TensorProto wrapShapeInfoIntoTensorProto(
       const std::string& name,
-      const ShapeInfo& shape_info);
+      const ShapeInfo& shape_info) const;
 
   // Do bound shape inference and collect shape infos
   ShapeInfoMap inferShapes(

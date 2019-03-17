@@ -21,6 +21,18 @@ CAFFE2_API inline bool StartsWith(const std::string& str, const std::string& pre
       prefix.end();
 }
 
+CAFFE2_API inline bool EndsWith(
+    const std::string& full,
+    const std::string& ending) {
+  if (full.length() >= ending.length()) {
+    return (
+        0 ==
+        full.compare(full.length() - ending.length(), ending.length(), ending));
+  } else {
+    return false;
+  }
+}
+
 CAFFE2_API int32_t editDistanceHelper(const char* s1,
   size_t s1_len,
   const char* s2,

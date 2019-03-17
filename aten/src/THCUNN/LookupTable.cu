@@ -39,7 +39,7 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature
     // Entire block cooperates to load a batch of 1024 indices to process
     int tid = threadIdx.x + threadIdx.y*blockDim.x;
     if(batch_start + tid < n)
-      indices_batch[tid] = (int)(indices[batch_start + tid] - TH_INDEX_BASE);
+      indices_batch[tid] = (int)(indices[batch_start + tid]);
 
     // Loop over the batch of <= 1024 loaded indices in chunks of blockDim.y = 32
     for(int chunk_start = batch_start; chunk_start < n; chunk_start += blockDim.y)
@@ -54,7 +54,7 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature
       int dst_row = indices_batch[src_row - batch_start]; // This warp's target row in grad_weight
 
       // All warps load their smem segments with incoming grad data
-      if(src_row < n && f < s && dst_row != padding_idx - TH_INDEX_BASE)
+      if(src_row < n && f < s && dst_row != padding_idx)
         my_s[threadIdx.x] =  ScalarConvert<Dtype, Acctype>::to(scale*grad[src_row*stride + f]);
 
       __syncthreads();
@@ -64,7 +64,7 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature
       // If so, we elect the first warp in each matching group as the leader.
       // Each leader warp serializes the accumulates targeting dst_row in shared memory,
       // then finishes by adding the accumulated buffer to dst_row in grad_weight.
-      if(dst_row != padding_idx - TH_INDEX_BASE && src_row < n) // Per-warp exit condition
+      if(dst_row != padding_idx && src_row < n) // Per-warp exit condition
       {
         int match_found_this_thread =
           (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
@@ -125,8 +125,8 @@ __global__ void cunn_LookupTable_accGradParametersKernel(
       && input[idx] != paddingValue) {
     do {
       const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
-      const int weightRow = ((int) input[idx] - TH_INDEX_BASE) * stride;
-      const int gradOutputRow = ((int) indices[idx] - TH_INDEX_BASE) * stride;
+      const int weightRow = ((int) input[idx]) * stride;
+      const int gradOutputRow = ((int) indices[idx]) * stride;
       const Acctype scale = count ? ScalarConvert<Dtype, Acctype>::to(defaultScale) / count[idx] : ScalarConvert<Dtype, Acctype>::to(defaultScale);
 
       Acctype gradient[SZ];
@@ -208,7 +208,7 @@ void calculate_norms_and_renorm(DType *weights,
   AccType *sdata = reinterpret_cast<AccType *>(smem);
 
   IndexType tid = threadIdx.x;
-  IndexType baseIndex = (indices[blockIdx.x] - TH_INDEX_BASE) * dim;
+  IndexType baseIndex = (indices[blockIdx.x]) * dim;
 
   AccType accZero = ScalarConvert<int, AccType>::to(0);
   AccType v = accZero;

@@ -134,8 +134,8 @@ inline IValue toIValue(
     c10::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType:
+    case TypeKind::AutogradZeroTensorType:
     case TypeKind::DimensionedTensorType:
-    case TypeKind::UndefinedTensorType:
     case TypeKind::CompleteTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
@@ -222,6 +222,7 @@ inline IValue toIValue(
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
+    case TypeKind::ClassType:
       break;
   }
   AT_ERROR(
@@ -303,7 +304,7 @@ inline py::object toPyObject(IValue&& ivalue) {
     for (size_t i = 0; i < elements.size(); ++i) {
       t[i] = toPyObject(IValue{elements[i]});
     }
-    return t;
+    return std::move(t);
   } else if (ivalue.isTuple()) {
     auto tuple = ivalue.toTuple();
     const auto& elements = tuple->elements();
@@ -311,7 +312,7 @@ inline py::object toPyObject(IValue&& ivalue) {
     for (size_t i = 0; i < elements.size(); ++i) {
       t[i] = toPyObject(IValue{elements[i]});
     }
-    return t;
+    return std::move(t);
   } else if (ivalue.isDevice()) {
     return py::cast<py::object>(THPDevice_New(ivalue.toDevice()));
   } else if (ivalue.isGenericDict()) {
@@ -321,8 +322,7 @@ inline py::object toPyObject(IValue&& ivalue) {
     for (auto pair : elements) {
       py_dict[toPyObject(IValue{pair.first})] = toPyObject(IValue{pair.second});
     }
-    return py_dict;
-
+    return std::move(py_dict);
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }
@@ -422,7 +422,7 @@ inline py::object createPyObjectForStack(Stack&& stack) {
     return_values[ret] = toPyObject(std::move(stack[ret]));
   }
 
-  return return_values;
+  return std::move(return_values);
 }
 
 // TODO: Remove once we clean up the GraphExecutor usage.

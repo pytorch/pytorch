@@ -129,71 +129,46 @@ NodeProto AddShapeNode(const std::string& input, const std::string& output) {
 
 std::unordered_map<std::string, std::string> SsaRewrite(
     caffe2::NetDef* init_net,
-    caffe2::NetDef* pred_net,
-    const std::unordered_set<string>& exceptions) {
+    caffe2::NetDef* pred_net) {
   std::unordered_map<std::string, std::string> input_mapping;
   std::unordered_map<std::string, int> blob_versions;
 
-#define REWRITE_EXTERNAL_IO(net, name)                 \
-  for (auto& name : *net->mutable_external_##name()) { \
-    if (exceptions.count(name)) {                      \
-      continue;                                        \
-    }                                                  \
-    auto version = blob_versions.at(name);             \
-    auto new_##name = SsaName(name, version);          \
-    name##_mapping.emplace(new_##name, name);          \
-    name = new_##name;                                 \
-  }
-
   if (init_net) {
-    for (auto& op : *init_net->mutable_op()) {
-      CAFFE_ENFORCE_EQ(op.type().find("GivenTensor"), 0);
-      CAFFE_ENFORCE_EQ(op.type().rfind("Fill"), op.type().size() - 4);
-      CAFFE_ENFORCE_EQ(op.output_size(), 1);
-      const auto& output = op.output(0);
-      op.set_output(0, SsaName(output, 0));
+    // No ssa rewrite is done for init net. The reason being that the output
+    // blobs of init net are what becomes the input blobs of pred_net. Since
+    // inputs of pred_net are not renamed we are not renaming the output of
+    // init_net. Furthermore, the assumption made is that init_net is simple net
+    // with each operator producing the one output and thus not renaming
+    // translates to not renaming the outputs of the init_net. Create identical
+    // mapping for now. This shall be removed eventually.
+    for (const auto& name : init_net->external_input()) {
+      input_mapping.emplace(name, name);
     }
-    for (const auto& input : init_net->external_input()) {
-      if (exceptions.count(input)) {
-        continue;
-      }
-      blob_versions.emplace(input, 0);
-    }
-    for (const auto& output : init_net->external_output()) {
-      if (exceptions.count(output)) {
-        continue;
-      }
-      blob_versions.emplace(output, 0);
-    }
-    REWRITE_EXTERNAL_IO(init_net, input);
     blob_versions.clear();
   }
 
   if (pred_net) {
+    std::unordered_set<std::string> external_outputs;
     for (const auto& input : pred_net->external_input()) {
-      if (exceptions.count(input)) {
-        continue;
-      }
-      blob_versions.emplace(input, 0);
+      // Create identical mapping for now. This shall be removed eventually.
+      input_mapping.emplace(input, input);
     }
-    REWRITE_EXTERNAL_IO(pred_net, input);
+    for (const auto& output : pred_net->external_output()) {
+      external_outputs.emplace(output);
+    }
     for (auto& op : *pred_net->mutable_op()) {
       for (auto& input : *op.mutable_input()) {
-        if (exceptions.count(input)) {
-          continue;
-        }
         const auto it = blob_versions.find(input);
         if (it != blob_versions.end()) {
           input = SsaName(input, it->second);
         } else {
-          blob_versions.emplace(input, 0);
-          input = SsaName(input, 0);
+          // Input blob is not versioned yet.
+          // If it is not versioned yet, it is assumed to be primary input,
+          // Thus skip renaming it.
+          continue;
         }
       }
       for (auto& output : *op.mutable_output()) {
-        if (exceptions.count(output)) {
-          continue;
-        }
         auto it = blob_versions.find(output);
         if (it != blob_versions.end()) {
           it->second += 1;
@@ -205,31 +180,34 @@ std::unordered_map<std::string, std::string> SsaRewrite(
       }
     }
 
-    // Fix the external output name back to original
-    std::unordered_set<std::string> external_outputs;
-    for (const auto& output : pred_net->external_output()) {
-      external_outputs.emplace(output);
+    // For all the renamed blobs find if the blob is one of the external
+    // output. If so add a mapping from it's latest renamed version to its
+    // original name.
+    std::unordered_map<std::string, std::string> renamed_external_outputs;
+    for (const auto it : blob_versions) {
+      if (external_outputs.count(it.first)) {
+        renamed_external_outputs.emplace(
+            SsaName(it.first, it.second), it.first);
+      }
     }
+
+    // Use the mapping to find if the input or output of an op was a renamed
+    // external output. If so replace it with its original name.
     for (auto& op : *pred_net->mutable_op()) {
+      for (auto& input : *op.mutable_input()) {
+        const auto it = renamed_external_outputs.find(input);
+        if (it != renamed_external_outputs.end()) {
+          input = it->second;
+        }
+      }
       for (auto& output : *op.mutable_output()) {
-        if (exceptions.count(output)) {
-          continue;
-        }
-        auto pos = output.find_last_of('_');
-        CAFFE_ENFORCE_NE(pos, 0);
-        auto basename = output.substr(0, pos);
-        if (!external_outputs.count(basename)) {
-          continue;
-        }
-        auto it = blob_versions.find(basename);
-        if (it != blob_versions.end() &&
-            SsaName(basename, it->second) == output) {
-          output = basename;
+        const auto it = renamed_external_outputs.find(output);
+        if (it != renamed_external_outputs.end()) {
+          output = it->second;
         }
       }
     }
   }
-#undef REWRITE_EXTERNAL_IO
 
   return input_mapping;
 }
@@ -292,6 +270,7 @@ OnnxExporter::get_special_operators() const {
           {"Greater", &OnnxExporter::CreateBinaryElementwiseOpNodes},
           {"Less", &OnnxExporter::CreateBinaryElementwiseOpNodes},
           {"Cast", &OnnxExporter::CreateCastNodes},
+          {"ElementwiseLinear", &OnnxExporter::CreateElementwiseLinearNodes},
           {"Conv", &OnnxExporter::CreateConvPoolNodes},
           {"ConvTranspose", &OnnxExporter::CreateConvPoolNodes},
           {"MaxPool", &OnnxExporter::CreateConvPoolNodes},
@@ -566,6 +545,61 @@ ConvertedResult OnnxExporter::CreateCastNodes(
         "' dtype is not supported");
   }
   attr->set_i(onnx_dtype);
+  return result;
+}
+
+ConvertedResult OnnxExporter::CreateElementwiseLinearNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+  CAFFE_ENFORCE_EQ(def.input_size(), 3);
+  CAFFE_ENFORCE_GE(def.output_size(), 1);
+  const auto& x = def.input(0);
+  const auto& w = def.input(1);
+  const auto& b = def.input(2);
+  const auto& y = def.output(0);
+  CAFFE_ENFORCE_EQ(shapes.at(w).dims().size(), 1);
+  CAFFE_ENFORCE_EQ(shapes.at(b).dims().size(), 1);
+
+  ConvertedResult result;
+  auto& nodes = result.first;
+  auto& const_tensors = result.second;
+  std::unordered_map<std::string, const caffe2::Argument*> args;
+  for (const auto& a : def.arg()) {
+    args.emplace(a.name(), &a);
+  }
+
+  const auto& x_shape = shapes.at(x);
+  const auto it = args.find("axis");
+  const int64_t axis = it == args.end() ? 1 : it->second->i();
+  const bool need_reshape = axis + 1 != x_shape.dims().size();
+
+  auto fma_x_input = x;
+  if (need_reshape) {
+    const auto inner = DimProd(x_shape, axis, x_shape.dims().size());
+    CAFFE_ENFORCE_EQ(shapes.at(w).dims(0), inner);
+    CAFFE_ENFORCE_EQ(shapes.at(b).dims(0), inner);
+
+    fma_x_input = dummy_->NewDummyName();
+    const_tensors.emplace_back(CreateOnnxShapeTensor(
+        dummy_, std::vector<int64_t>{-1, shapes.at(w).dims(0)}));
+    nodes.emplace_back(
+        MakeNode("Reshape", {x, const_tensors.back().name()}, {fma_x_input}));
+  }
+
+  const auto& mul_output = dummy_->NewDummyName();
+  nodes.emplace_back(
+      MakeNode("Mul", {fma_x_input, w}, {mul_output}, def.name()));
+
+  const auto& fma_y_output = need_reshape ? dummy_->NewDummyName() : y;
+  nodes.emplace_back(
+      MakeNode("Add", {mul_output, b}, {fma_y_output}, def.name()));
+
+  if (need_reshape) {
+    const auto shape = dummy_->NewDummyName();
+    nodes.emplace_back(MakeNode("Shape", {x}, {shape}));
+    nodes.emplace_back(MakeNode("Reshape", {fma_y_output, shape}, {y}));
+  }
+
   return result;
 }
 
@@ -1120,7 +1154,7 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
                 std::vector<AttributeProto>{
                     MakeAttribute("axis", static_cast<int64_t>(0)),
                 }));
- 
+
     nodes.emplace_back(MakeNode("Reshape",
                 { gemm_y_output, y_shape },
                 { y }));

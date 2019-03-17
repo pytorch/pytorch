@@ -15,9 +15,8 @@ namespace int8 {
 
 class Int8ChannelShuffleOp final : public ConvPoolOpBase<CPUContext> {
  public:
-  Int8ChannelShuffleOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws),
-        ws_(ws) {
+  explicit Int8ChannelShuffleOp(const OperatorDef& operator_def, Workspace* ws)
+      : ConvPoolOpBase<CPUContext>(operator_def, ws), ws_(ws) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NHWC,
         "Int8ChannelShuffleOp only supports NHWC order");

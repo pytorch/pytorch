@@ -17,7 +17,7 @@ template <class Context>
 class ConvTransposeUnpoolBase : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ConvTransposeUnpoolBase(const OperatorDef& operator_def, Workspace* ws)
+  explicit ConvTransposeUnpoolBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         legacy_pad_(
             static_cast<LegacyPadding>(this->template GetSingleArgument<int>(

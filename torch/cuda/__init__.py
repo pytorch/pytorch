@@ -321,12 +321,21 @@ def stream(stream):
     if stream is None:
         yield
         return
-    prev_stream = current_stream()
+    src_prev_stream = current_stream()
+
+    if src_prev_stream.device != stream.device:
+        # The given stream is on a different device; have to restore the
+        # current_stream on that device on exit as well
+        with device(stream.device):
+            dst_prev_stream = current_stream()
+
     torch._C._cuda_setStream(stream._cdata)
     try:
         yield
     finally:
-        torch._C._cuda_setStream(prev_stream._cdata)
+        if src_prev_stream.device != stream.device:
+            torch._C._cuda_setStream(dst_prev_stream._cdata)
+        torch._C._cuda_setStream(src_prev_stream._cdata)
 
 
 def device_count():
@@ -551,7 +560,7 @@ def _dummy_type(name):
 
 if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     # Define dummy base classes
-    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half']:
+    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half', 'Bool']:
         storage_name = 'Cuda{0}StorageBase'.format(t)
         tensor_name = 'Cuda{0}TensorBase'.format(t)
 
@@ -613,6 +622,9 @@ class HalfStorage(_CudaBase, torch._C.CudaHalfStorageBase, _StorageBase):
     pass
 
 
+class BoolStorage(_CudaBase, torch._C.CudaBoolStorageBase, _StorageBase):
+    pass
+
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
 torch._storage_classes.add(LongStorage)
@@ -621,6 +633,7 @@ torch._storage_classes.add(ShortStorage)
 torch._storage_classes.add(CharStorage)
 torch._storage_classes.add(ByteStorage)
 torch._storage_classes.add(HalfStorage)
+torch._storage_classes.add(BoolStorage)
 
 from . import sparse
 from . import profiler

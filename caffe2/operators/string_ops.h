@@ -41,8 +41,9 @@ class StringJoinOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  StringJoinOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit StringJoinOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         delimiter_(
             this->template GetSingleArgument<std::string>("delimiter", ",")),
         axis_(this->template GetSingleArgument<int>("axis", 0)) {

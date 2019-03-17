@@ -36,6 +36,7 @@ kinds of data should be done with care.
 Here is an example program which handles these requirements correctly:
 
 ::
+
     import torch
     import torch.multiprocessing as mp
 

@@ -14,7 +14,7 @@ constexpr char kSummaryzeOpExtension[] = ".summary";
 template <typename T, class Context>
 class SummarizeOp final : public Operator<Context> {
  public:
-  SummarizeOp(const OperatorDef& def, Workspace* ws)
+  explicit SummarizeOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
         to_file_(this->template GetSingleArgument<int>("to_file", 0)) {
     if (to_file_) {

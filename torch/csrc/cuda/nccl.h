@@ -45,7 +45,7 @@ void _check_inputs(
     at::TensorList outputs,
     int input_multiplier,
     int output_multiplier);
-ncclDataType_t _get_data_type(const at::Type& type);
+ncclDataType_t _get_data_type(const at::Tensor& t);
 
 } // namespace detail
 

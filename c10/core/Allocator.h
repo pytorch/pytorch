@@ -169,7 +169,16 @@ struct C10_API Allocator {
   }
 };
 
-// Question: is this still needed?
+// This context is used to generate DataPtr which have arbitrary
+// std::function deleters associated with them.  In some user facing
+// functions, we give a (user-friendly) interface for constructing
+// tensors from external data which take an arbitrary std::function
+// deleter.  Grep for InefficientStdFunctionContext to find these
+// occurrences.
+//
+// This context is inefficient because we have to do a dynamic
+// allocation InefficientStdFunctionContext, on top of the dynamic
+// allocation which is implied by std::function itself.
 struct C10_API InefficientStdFunctionContext {
   std::unique_ptr<void, std::function<void(void*)>> ptr_;
   InefficientStdFunctionContext(
@@ -187,7 +196,7 @@ struct C10_API InefficientStdFunctionContext {
  *  to an allocator of a particular device from being invalidated when
  *  SetAllocator is called.)
  *
- *  Also note that this is not thraed-safe, and we assume this function will
+ *  Also note that this is not thread-safe, and we assume this function will
  *  only be called during initialization.
  */
 C10_API void SetAllocator(DeviceType t, Allocator* alloc);

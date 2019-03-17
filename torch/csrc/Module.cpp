@@ -112,6 +112,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   THPShortStorage_postInit(module);
   THPCharStorage_postInit(module);
   THPByteStorage_postInit(module);
+  THPBoolStorage_postInit(module);
   THPAutograd_initFunctions();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -460,6 +461,7 @@ bool THCPIntStorage_init(PyObject *module);
 bool THCPShortStorage_init(PyObject *module);
 bool THCPCharStorage_init(PyObject *module);
 bool THCPByteStorage_init(PyObject *module);
+bool THCPBoolStorage_init(PyObject *module);
 
 void THCPStream_init(PyObject *module);
 void THCPEvent_init(PyObject *module);
@@ -490,6 +492,7 @@ bool THDPIntStorage_init(PyObject *module);
 bool THDPShortStorage_init(PyObject *module);
 bool THDPCharStorage_init(PyObject *module);
 bool THDPByteStorage_init(PyObject *module);
+bool THDPBoolStorage_init(PyObject *module);
 
 static std::vector<PyMethodDef> methods;
 
@@ -593,6 +596,7 @@ PyObject* initModule() {
   ASSERT_TRUE(THPShortStorage_init(module));
   ASSERT_TRUE(THPCharStorage_init(module));
   ASSERT_TRUE(THPByteStorage_init(module));
+  ASSERT_TRUE(THPBoolStorage_init(module));
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
@@ -607,6 +611,7 @@ PyObject* initModule() {
   ASSERT_TRUE(THCPShortStorage_init(module));
   ASSERT_TRUE(THCPCharStorage_init(module));
   ASSERT_TRUE(THCPByteStorage_init(module));
+  ASSERT_TRUE(THCPBoolStorage_init(module));
 
   THCPStream_init(module);
   THCPEvent_init(module);

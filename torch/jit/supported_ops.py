@@ -73,7 +73,7 @@ def _list_supported_ops():
         self = schema.arguments[0]
         if self.name != 'self':
             return False
-        if not self.type.isSubtypeOf(torch._C.DynamicType.get()):
+        if not self.type.isSubtypeOf(torch._C.TensorType.get()):
             return False
         return True
 

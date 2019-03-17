@@ -352,65 +352,6 @@ TH_API void THNN_(IndexLinear_updateParameters)(
           accreal weightDecay,
           accreal learningRate);
 
-TH_API void THNN_(SparseLinear_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias);
-TH_API void THNN_(SparseLinear_accGradParameters)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradWeight,
-          THTensor *gradBias,
-          THTensor *weight,
-          THTensor *bias,
-          accreal weightDecay,
-          accreal scale);
-TH_API void THNN_(SparseLinear_zeroGradParameters)(
-          THNNState *state,
-          THTensor *gradWeight,
-          THTensor *gradBias,
-          THTensor *lastInput);
-TH_API void THNN_(SparseLinear_updateParameters)(
-          THNNState *state,
-          THTensor *weight,
-          THTensor *bias,
-          THTensor *gradWeight,
-          THTensor *gradBias,
-          THTensor *lastInput,
-          accreal learningRate);
-TH_API void THNN_(SparseLinear_legacyUpdateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias);
-TH_API void THNN_(SparseLinear_legacyAccGradParameters)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradWeight,
-          THTensor *gradBias,
-          THTensor *weight,
-          THTensor *bias,
-          accreal weightDecay,
-          accreal scale);
-TH_API void THNN_(SparseLinear_legacyZeroGradParameters)(
-          THNNState *state,
-          THTensor *gradWeight,
-          THTensor *gradBias,
-          THTensor *lastInput);
-TH_API void THNN_(SparseLinear_legacyUpdateParameters)(
-          THNNState *state,
-          THTensor *weight,
-          THTensor *bias,
-          THTensor *gradWeight,
-          THTensor *gradBias,
-          THTensor *lastInput,
-          accreal learningRate);
-
 TH_API void THNN_(TemporalRowConvolution_updateOutput)(
           THNNState *state,
           THTensor *input,

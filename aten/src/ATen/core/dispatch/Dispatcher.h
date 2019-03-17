@@ -20,7 +20,9 @@ class CAFFE2_API OperatorHandle;
  * that is used by some kernels to get better performance when they're called
  * multiple times (mostly Caffe2 kernels do that).
  *
- * OpKernel is not threadsafe.
+ * OpKernel is only threadsafe if the kernel is threadsafe. There are no mutexes
+ * protecting the kernel cache, so if the kernel uses the cache and doesn't have
+ * mutexes for it, it will likely not be threadsafe.
  */
 class CAFFE2_API OpKernel final {
 public:
@@ -33,22 +35,16 @@ public:
    * Call the operator kernel with the given arguments.
    */
   void call(Stack* stack) const {
-    if (cache_.get() == nullptr) {
-      AT_ASSERT(cache_creator_ != nullptr);
-      cache_ = (*cache_creator_)();
-    }
     return (*kernel_)(stack, cache_.get());
   }
 
 private:
   explicit OpKernel(KernelFunction* kernel, KernelCacheCreatorFunction* cache_creator)
-  : kernel_(kernel), cache_creator_(cache_creator) {}
+  : kernel_(kernel), cache_((*cache_creator)()) {}
   friend class Dispatcher;
 
   KernelFunction* kernel_;
-
-  KernelCacheCreatorFunction* cache_creator_;
-  mutable std::unique_ptr<c10::KernelCache> cache_;
+  std::unique_ptr<c10::KernelCache> cache_;
 };
 
 /**

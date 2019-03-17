@@ -31,7 +31,4 @@ void py_set_default_dtype(PyObject* dtype_obj);
 // returned value will be a VariableType instance.
 at::Type& get_default_tensor_type();
 
-// Gets the torch::Device object of a given at::Tensor
-c10::Device getDevice(const at::Tensor& tensor);
-
 }} // namespace torch::tensors

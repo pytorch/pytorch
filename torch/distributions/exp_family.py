@@ -9,7 +9,7 @@ class ExponentialFamily(Distribution):
 
     .. math::
 
-        p_{F}(x; \theta) = \exp(\langle t(x), \theta\rangle) - F(\theta) + k(x))
+        p_{F}(x; \theta) = \exp(\langle t(x), \theta\rangle - F(\theta) + k(x))
 
     where :math:`\theta` denotes the natural parameters, :math:`t(x)` denotes the sufficient statistic,
     :math:`F(\theta)` is the log normalizer function for a given family and :math:`k(x)` is the carrier
