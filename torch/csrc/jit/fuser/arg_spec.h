@@ -18,9 +18,16 @@ namespace fuser {
 // Note: the device to run on is included in the arg spec because kernels
 //  are compiled per-device.
 struct TORCH_API ArgSpec {
-  ArgSpec(at::TensorList inputs, const int _device)
+  ArgSpec(
+      at::TensorList inputs,
+      const int _device,
+      const std::vector<int64_t> list_input_lengths)
       : descs_{c10::fmap<TensorDesc>(inputs)},
-        hash_code_{torch::get_hash(_device, inputs.size(), descs_)},
+        hash_code_{torch::get_hash(
+            _device,
+            inputs.size(),
+            descs_,
+            list_input_lengths)},
         device_{_device} {}
 
   // (Common) hash function

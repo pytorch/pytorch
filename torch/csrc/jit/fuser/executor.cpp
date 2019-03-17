@@ -325,6 +325,17 @@ bool runFusion(const int64_t key, Stack& stack) {
     inputs.emplace_back(all_inputs[i].toTensor());
   }
 
+  // If the length of the SumToSize of FusedConcat outputs change, the
+  // concat dimension changes, too. Thus the specifications won't be
+  // compatible.
+  std::vector<int64_t> list_input_lengths;
+  list_input_lengths.reserve(all_inputs.size() - spec.nTensorInputs());
+  for (int64_t i = spec.nTensorInputs(); i < all_inputs.size(); i++) {
+    if (all_inputs[i].isIntList()) {
+      list_input_lengths.push_back(all_inputs[i].toIntListRef().size());
+    }
+  }
+
   // Determines device to dispatch to. If there's a device mismatch in the
   // inputs, we use the fallback (which should give a nice error message).
   at::Device device = inputs.at(0).device();
@@ -355,7 +366,7 @@ bool runFusion(const int64_t key, Stack& stack) {
   expandArgs(spec, inputs, *maybe_map_size, /*dry_run=*/false);
 
   // Retrieves the kernel, compiling (and caching) if necessary
-  ArgSpec arg_spec{inputs, device.index()};
+  ArgSpec arg_spec{inputs, device.index(), list_input_lengths};
   auto maybe_kernel = spec.findKernel(arg_spec);
   if (!maybe_kernel) {
     const auto kernel =
