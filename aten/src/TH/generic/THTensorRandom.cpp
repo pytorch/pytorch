@@ -27,9 +27,11 @@ void THTensor_(random)(THTensor *self, at::Generator *_generator)
 #elif defined(TH_REAL_IS_LONG)
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (uint64_t)(gen->random64() % (LONG_MAX + 1ULL)););
 #elif defined(TH_REAL_IS_FLOAT)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (float)(gen->random() % ((1ULL << FLT_MANT_DIG) + 1)););
+  at::uniform_real_distribution<float> uniform(0.0f, 1.0f);
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (float)(uniform(gen)););
 #elif defined(TH_REAL_IS_DOUBLE)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (double)(gen->random64() % ((1ULL << DBL_MANT_DIG) + 1)););
+  at::uniform_real_distribution<double> uniform(0.0, 1.0);
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (double)(uniform(gen)););
 #elif defined(TH_REAL_IS_BOOL)
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (bool)(gen->random() % 2););
 #else

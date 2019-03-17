@@ -1,7 +1,15 @@
 #pragma once
 
+// define constants like M_PI and C keywords for MSVC
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <math.h>
+#endif
+
 #include <ATen/CPUGenerator.h>
 #include <type_traits>
+#include <limits>
+#include <cmath>
 
 // Distributions kernel adapted from THRandom.cpp
 // The kernels try to follow std::random distributions signature
@@ -23,6 +31,10 @@
 //       Philox4_32_10 and manage its state. Hence, for CUDA, operator() takes
 //       the Philox4_32_10 object directly and CPU take CPUGenerator object directly.
 namespace at {
+
+// Constants for uniform distribution
+constexpr float POW_2_32_INV = 1.0f/std::numeric_limits<uint32_t>::max();
+constexpr double POW_2_64_INV = 1.0/std::numeric_limits<uint64_t>::max();
 
 /**
  * Samples a uniform distribution in the range [0,1) of type T
@@ -47,7 +59,10 @@ struct uniform_real_distribution {
   template<typename U = T> 
   C10_HOST inline typename std::enable_if<std::is_same<U, double>::value, double>::type
   operator()(at::CPUGenerator* generator){
-    double x = (generator->random64() & ((1ULL << 53) - 1)) * ::ldexp(1.0, -53);
+    double x = generator->random64() * POW_2_64_INV;
+    if (x == 1.0) {
+      x = std::nextafter(1.0, 0.0);
+    }
     return (x * (b - a) + a);
 
   }
@@ -56,7 +71,10 @@ struct uniform_real_distribution {
   C10_HOST inline typename std::enable_if<std::is_same<U, float>::value
                                           || std::is_same<U, at::Half>::value, float>::type
   operator()(at::CPUGenerator* generator){
-    float x = (generator->random() & ((1 << 24) - 1)) * ::ldexp(1.0, -24);
+    float x = generator->random() * POW_2_32_INV;
+    if (x == 1.0f) {
+      x = std::nextafter(1.0f, 0.0f);
+    }
     return (x * (b - a) + a);
   }
 
@@ -93,10 +111,10 @@ struct normal_distribution {
     double u2 = uniform(generator);
     double u1 = uniform(generator);
     // extra pre-caution to make sure log never gets zero
-    if (u1 == 0.0) {
+    if (1.0-u1 == 0.0) {
       u1 = std::numeric_limits<double>::min();
     }
-    double r = ::sqrt(-2.0 * ::log(u1));
+    double r = ::sqrt(-2.0 * ::log(1.0-u1));
     result[0] = r * ::cos(2.0 * M_PI * u2) * stdv + mean;
     result[1] = r * ::sin(2.0 * M_PI * u2) * stdv + mean;
     return result;
@@ -111,10 +129,10 @@ struct normal_distribution {
     float u2 = uniform(generator);
     float u1 = uniform(generator);
     // extra pre-caution to make sure log never gets zero
-    if (u1 == 0.0f) {
+    if (1.0-u1 == 0.0f) {
       u1 = std::numeric_limits<float>::min();
     }
-    float r = ::sqrt(-2.0 * ::log(u1));
+    float r = ::sqrt(-2.0 * ::log(1.0-u1));
     result[0] = r * ::cos(2.0 * M_PI * u2) * stdv + mean;
     result[1] = r * ::sin(2.0 * M_PI * u2) * stdv + mean;
     return result;
@@ -172,10 +190,10 @@ struct geometric_distribution {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     auto sample = uniform(generator);
     // extra pre-caution to make sure log never gets zero
-    if (sample == static_cast<T>(0.0)) {
+    if (1-sample == static_cast<T>(0.0)) {
       sample = std::numeric_limits<T>::min();
     }
-    return static_cast<int>(::log(sample) / ::log(p)) + 1;
+    return static_cast<int>(::log(1-sample) / ::log(p)) + 1;
   }
 
   private:
@@ -196,10 +214,10 @@ struct exponential_distribution {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     auto sample = uniform(generator);
     // extra pre-caution to make sure log never gets zero
-    if (sample == static_cast<T>(0.0)) {
+    if (1-sample == static_cast<T>(0.0)) {
       sample = std::numeric_limits<T>::min();
     }
-    return -1. / lambda * ::log(sample);
+    return -1. / lambda * ::log(1-sample);
   }
 
   private:
