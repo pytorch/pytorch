@@ -1147,7 +1147,7 @@ class TripletMarginLoss(_Loss):
     Args:
         margin (float, optional): Default: `1`.
         p (int, optional): The norm degree for pairwise distance. Default: `2`.
-        swap (float, optional): The distance swap is described in detail in the paper
+        swap (bool, optional): The distance swap is described in detail in the paper
             `Learning shallow convolutional feature descriptors with triplet losses` by
             V. Balntas, E. Riba et al. Default: ``False``.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
