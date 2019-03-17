@@ -111,10 +111,11 @@ struct normal_distribution {
     double u2 = uniform(generator);
     double u1 = uniform(generator);
     // extra pre-caution to make sure log never gets zero
-    if (1.0-u1 == 0.0) {
-      u1 = std::numeric_limits<double>::min();
+    double log_val = 1.0 - u1;
+    if (log_val == 0.0) {
+      log_val = std::numeric_limits<double>::min();
     }
-    double r = ::sqrt(-2.0 * ::log(1.0-u1));
+    double r = ::sqrt(-2.0 * ::log(log_val));
     result[0] = r * ::cos(2.0 * M_PI * u2) * stdv + mean;
     result[1] = r * ::sin(2.0 * M_PI * u2) * stdv + mean;
     return result;
@@ -129,10 +130,11 @@ struct normal_distribution {
     float u2 = uniform(generator);
     float u1 = uniform(generator);
     // extra pre-caution to make sure log never gets zero
-    if (1.0-u1 == 0.0f) {
-      u1 = std::numeric_limits<float>::min();
+    float log_val = 1.0 - u1;
+    if (log_val == 0.0f) {
+      log_val = std::numeric_limits<float>::min();
     }
-    float r = ::sqrt(-2.0 * ::log(1.0-u1));
+    float r = ::sqrt(-2.0 * ::log(log_val));
     result[0] = r * ::cos(2.0 * M_PI * u2) * stdv + mean;
     result[1] = r * ::sin(2.0 * M_PI * u2) * stdv + mean;
     return result;
@@ -188,12 +190,12 @@ struct geometric_distribution {
 
   C10_HOST inline int operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
-    auto sample = uniform(generator);
+    auto sample = 1 - uniform(generator);
     // extra pre-caution to make sure log never gets zero
-    if (1-sample == static_cast<T>(0.0)) {
+    if (sample == static_cast<T>(0.0)) {
       sample = std::numeric_limits<T>::min();
     }
-    return static_cast<int>(::log(1-sample) / ::log(p)) + 1;
+    return static_cast<int>(::log(sample) / ::log(p)) + 1;
   }
 
   private:
@@ -212,12 +214,12 @@ struct exponential_distribution {
 
   C10_HOST inline T operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
-    auto sample = uniform(generator);
+    auto sample = 1 - uniform(generator);
     // extra pre-caution to make sure log never gets zero
-    if (1-sample == static_cast<T>(0.0)) {
+    if (sample == static_cast<T>(0.0)) {
       sample = std::numeric_limits<T>::min();
     }
-    return -1. / lambda * ::log(1-sample);
+    return -1. / lambda * ::log(sample);
   }
 
   private:
