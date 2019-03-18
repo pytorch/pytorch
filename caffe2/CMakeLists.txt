@@ -243,12 +243,6 @@ configure_file("${TORCH_SRC_DIR}/_utils_internal.py"
                COPYONLY)
 
 
-
-
-
-
-     
-
 set(GENERATED_CXX_TORCH
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
@@ -285,15 +279,21 @@ set(GENERATED_H_PYTHON
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
 )
 
-# Dependency on ATEN_CPU_FILES_GEN_TARGET is added for Declarations.yaml
-add_custom_command(
-  OUTPUT
+
+set(TORCH_GENERATED_CODE
   ${GENERATED_CXX_TORCH}
   ${GENERATED_H_TORCH}
   ${GENERATED_THNN_CXX}
   ${GENERATED_THNN_CXX_CUDA}
   ${GENERATED_CXX_PYTHON}
   ${GENERATED_H_PYTHON}
+  )
+
+
+# ???? Dependency on ATEN_CPU_FILES_GEN_TARGET is added for Declarations.yaml
+add_custom_command(
+  OUTPUT
+  ${TORCH_GENERATED_CODE}
   COMMAND
   "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
     --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
@@ -327,9 +327,11 @@ add_custom_command(
   "${TOOLS_PATH}/autograd/utils.py"
   "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
   "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
-  ATEN_CPU_FILES_GEN_TARGET
   WORKING_DIRECTORY "${TORCH_ROOT}")
 
+add_custom_target(torch-generated-code DEPENDS ${TORCH_GENERATED_CODE})
+
+add_dependencies(torch-generated-code ATEN_CPU_FILES_GEN_TARGET)
 
 
 
@@ -476,7 +478,6 @@ if (NOT NO_API)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
-#    ${Caffe2_PROTO_HEADERS}
   )
 endif()
 
@@ -858,11 +859,11 @@ if(USE_CUDA)
 
   target_link_libraries(caffe2_gpu PUBLIC ${TORCH_CUDA_LIBRARIES})
 
-  # FIXME This is probably not desirable
-  target_link_libraries(caffe2_gpu PUBLIC thnvrtc)
-
-  # TODO What to do with this line?
-#  set_target_properties(torch PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
+  # Linking statically to thnvrtc is not desirable, so we have to tell the linker
+  # not to fail when encountering undefined symbols
+   # TODO FIXME kostmo
+   target_link_libraries(caffe2_gpu PUBLIC thnvrtc)
+#  set_target_properties(caffe2_gpu PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
 
   
   
