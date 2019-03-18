@@ -319,8 +319,12 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// pack has only one type, in which case the template would be preferred,
   /// even if the other `push_back` functions are better fits (e.g. `unique_ptr`
   /// -> `shared_ptr` overload).
+  /// NOTE: We explicitly avoid matching this template with `push_back(std::string("name"), module)`
+  /// or `push_back("name", module)`, since they should be handled by their respective
+  /// `push_back` functions.
   template <typename First, typename Second, typename... Rest,
-    typename = torch::disable_if_t<std::is_same<First, std::basic_string<char>>::value || std::is_same<typename std::decay<First>::type, std::decay<const char (&)[]>::type>::value>>
+    typename = torch::disable_if_t<std::is_same<First, std::string>::value ||
+      std::is_same<typename std::decay<First>::type, std::decay<const char (&)[]>::type>::value>>
   void push_back(First&& first, Second&& second, Rest&&... rest) {
     push_back(std::forward<First>(first));
     // Recursively calls this method, until the parameter pack only thas this
