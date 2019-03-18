@@ -10817,14 +10817,9 @@ a")
 
         with TemporaryFileName() as fname:
             M().save(fname)
+            archive_name = os.path.basename(os.path.normpath(fname))
             archive = zipfile.ZipFile(fname, 'r')
-
-            # Finding the file name doesn't work the same on all systems...
-            names = list(filter(lambda x: 'attributes.pkl' in x, archive.namelist()))
-            if len(names) != 1:
-                raise RuntimeError("Incorrect number of pickle files")
-
-            pickled_data = archive.read(names[0])
+            pickled_data = archive.read(os.path.join(archive_name, 'attributes.pkl'))
             JitUnpickler(io.BytesIO(pickled_data)).load()
 
     def test_submodule_attribute_serialization(self):
