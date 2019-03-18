@@ -1264,7 +1264,7 @@ class TestJit(JitTestCase):
             def forward(self, d):
                 return d['x'] + d['y']
 
-        inputs = {'x': torch.rand(3,4), 'y': torch.rand(3,4)}
+        inputs = {'x': torch.rand(3, 4), 'y': torch.rand(3, 4)}
         module = torch.jit.trace(Test(), inputs)
         kinds = [node.kind() for node in module.graph.nodes()]
         self.assertEqual(kinds[0], 'aten::values')
@@ -1273,10 +1273,10 @@ class TestJit(JitTestCase):
     def test_input_dict_flattens_recursive(self):
         class Test(torch.nn.Module):
             def forward(self, d):
-                a,b = d['x']
+                a, b = d['x']
                 return a + b
 
-        inputs = {'x': (torch.rand(2,2), torch.rand(2,2)) }
+        inputs = {'x': (torch.rand(2, 2), torch.rand(2, 2))}
         module = torch.jit.trace(Test(), inputs)
         kinds = [node.kind() for node in module.graph.nodes()]
         self.assertEqual(kinds[0], 'aten::values')

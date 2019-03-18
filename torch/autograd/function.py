@@ -256,7 +256,7 @@ def _nested_map(condition, fn, condition_msg=None):
         elif isinstance(obj, (list, tuple)):
             return type(obj)(_map(x) for x in obj)
         elif isinstance(obj, dict):
-            return { x : _map(obj[x]) for x in obj }
+            return {x : _map(obj[x]) for x in obj}
         else:
             raise ValueError("Auto nesting doesn't know how to process "
                              "an input object of type " + torch.typename(obj) +
