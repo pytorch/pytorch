@@ -565,7 +565,7 @@ class TestOperators(TestCase):
                 return self.fc2(self.fc1(x))
 
         x = torch.randn(3, 4).float()
-        self.assertONNX(MyModule(), (x,), retain_param_name=True)
+        self.assertONNX(MyModule(), (x,), _retain_param_name=True)
 
 
 if __name__ == '__main__':
