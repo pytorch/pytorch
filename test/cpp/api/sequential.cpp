@@ -42,7 +42,7 @@ TEST_F(SequentialTest, ConstructsFromSharedPointer) {
 }
 
 TEST_F(SequentialTest, ConstructsFromConcreteType) {
-  int copy_count;
+  static int copy_count;
 
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
