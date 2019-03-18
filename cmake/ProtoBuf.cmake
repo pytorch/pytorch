@@ -184,8 +184,6 @@ function(caffe2_protobuf_generate_cpp_py srcs_var hdrs_var python_var)
                "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h"
                "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}_pb2.py"
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        COMMAND echo "KARL AAAA"
-	COMMAND sleep 60
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}"
         COMMAND ${CAFFE2_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --cpp_out=${DLLEXPORT_STR}${PROJECT_BINARY_DIR} ${abs_fil}
         COMMAND ${CAFFE2_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --python_out "${PROJECT_BINARY_DIR}" ${abs_fil}
@@ -202,7 +200,7 @@ function(caffe2_protobuf_generate_cpp_py srcs_var hdrs_var python_var)
                "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h"
                "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}_pb2.py"
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-	COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}"
         COMMAND ${CAFFE2_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --cpp_out=${DLLEXPORT_STR}${PROJECT_BINARY_DIR} ${abs_fil}
         COMMAND ${CAFFE2_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --python_out "${PROJECT_BINARY_DIR}" ${abs_fil}
         DEPENDS ${CAFFE2_PROTOC_EXECUTABLE} ${abs_fil}

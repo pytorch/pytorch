@@ -247,24 +247,7 @@ configure_file("${TORCH_SRC_DIR}/_utils_internal.py"
 
 
 
-add_custom_target(torch_python_stubs DEPENDS "${TORCH_SRC_DIR}/__init__.pyi")
-# For Declarations.yaml dependency
-add_dependencies(torch_python_stubs ATEN_CPU_FILES_GEN_TARGET)
-add_custom_command(
-    OUTPUT
-    "${TORCH_SRC_DIR}/__init__.pyi"
-    COMMAND
-    "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
-      --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
-    DEPENDS
-    "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
-    "${TORCH_SRC_DIR}/__init__.pyi.in"
-    WORKING_DIRECTORY
-    "${TORCH_ROOT}"
-    )
-
-
-	     
+     
 
 set(GENERATED_CXX_TORCH
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
@@ -302,6 +285,7 @@ set(GENERATED_H_PYTHON
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
 )
 
+# Dependency on ATEN_CPU_FILES_GEN_TARGET is added for Declarations.yaml
 add_custom_command(
   OUTPUT
   ${GENERATED_CXX_TORCH}
@@ -343,6 +327,7 @@ add_custom_command(
   "${TOOLS_PATH}/autograd/utils.py"
   "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
   "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
+  ATEN_CPU_FILES_GEN_TARGET
   WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
@@ -499,10 +484,9 @@ add_library(torch OBJECT ${TORCH_SRCS})
 
 
 # Forces caffe2.pb.h to be generated before its dependents are compiled.
-# Normally one should be able to add the generated header file
-# to the ${TORCH_SRCS} list, and CMake would infer that it needs to be
-# generated before they are compiled but this is broken for some
-# reason.
+# Adding the generated header file to the ${TORCH_SRCS} list is not sufficient
+# to establish the dependency, since the generation procedure is declared in a different CMake file.
+# See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
 add_dependencies(torch Caffe2_PROTO)
 
 target_compile_definitions(torch PUBLIC _THP_CORE)

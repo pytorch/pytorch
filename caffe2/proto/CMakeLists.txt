@@ -15,7 +15,5 @@ else()
 endif()
 target_compile_definitions(
     Caffe2_PROTO PRIVATE ${Caffe2_API_DEFINE})
-
-set(Caffe2_PROTO_HEADERS ${Caffe2_PROTO_HEADERS} PARENT_SCOPE)
-  
+ 
 install(FILES ${Caffe2_PROTO_HEADERS} DESTINATION include/caffe2/proto)
