@@ -464,6 +464,7 @@ void THBlas_(gemm)(
       #pragma omp parallel for shared(c, a, b, alpha, lda, ldb, ldc, m, n, k) private(l, j, i_m, i_i, i)
       for (l = 0; l < k; l++) {
         for (j = 0; j < n; j++) {
+          i_m = m / 4;
 //           int64_t i_m = m / 4;
 //           int64_t i_i;
 // 	      #pragma omp parallel for shared(c, a, b, alpha, lda, ldb, ldc, m, j, l, i_m) private(i_i)
