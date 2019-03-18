@@ -236,7 +236,7 @@ class ShapePropagator {
   }
 
   OperatorSet cannot_propagate_shape_by_running_it = {
-      "aten::gesv(Tensor self, Tensor A) -> (Tensor, Tensor)",
+      "aten::solve(Tensor self, Tensor A) -> (Tensor, Tensor)",
       "aten::inverse(Tensor self) -> Tensor",
   };
 
