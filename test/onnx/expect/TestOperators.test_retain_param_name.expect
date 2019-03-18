@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "1.1"
 graph {
   node {
-    input: "fc1.weight"
+    input: "1"
     output: "3"
     op_type: "Transpose"
     attribute {
@@ -20,7 +20,7 @@ graph {
     op_type: "MatMul"
   }
   node {
-    input: "fc2.weight"
+    input: "2"
     output: "5"
     op_type: "Transpose"
     attribute {
@@ -41,14 +41,14 @@ graph {
     dims: 5
     dims: 4
     data_type: 1
-    name: "fc1.weight"
+    name: "1"
     raw_data: "\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@"
   }
   initializer {
     dims: 6
     dims: 5
     data_type: 1
-    name: "fc2.weight"
+    name: "2"
     raw_data: "\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@"
   }
   input {
@@ -68,7 +68,7 @@ graph {
     }
   }
   input {
-    name: "fc1.weight"
+    name: "1"
     type {
       tensor_type {
         elem_type: 1
@@ -84,7 +84,7 @@ graph {
     }
   }
   input {
-    name: "fc2.weight"
+    name: "2"
     type {
       tensor_type {
         elem_type: 1
