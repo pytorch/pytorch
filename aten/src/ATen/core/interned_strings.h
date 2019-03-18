@@ -56,7 +56,6 @@ namespace c10 {
   _(prim, ListUnpack)              \
   _(prim, DictConstruct)           \
   _(prim, DictIndex)               \
-  _(prim, DictUnpackValues)        \
   _(prim, NumToTensor)             \
   _(prim, ImplicitTensorToNum)     \
   _(prim, Bool)                    \

@@ -1231,16 +1231,6 @@ Node* Graph::createTupleUnpack(Value* v) {
   return n;
 }
 
-Node* Graph::createDictUnpackValues(Value* v, size_t size) {
-  DictTypePtr dt = v->type()->expect<DictType>();
-  auto n = create(prim::DictUnpackValues, {v}, size);
-  auto outputs = n->outputs();
-  for (auto i = 0; i < size; i++) {
-    outputs[i]->setType(dt->getValueType());
-  }
-  return n;
-}
-
 Node* Graph::createTupleIndex(Value* tup, int64_t index) {
   auto n = create(prim::TupleIndex, {tup});
   n->i_(attr::index, index);

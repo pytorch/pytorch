@@ -608,26 +608,6 @@ RegisterOperators reg(
            };
          }),
      Operator(
-         prim::DictUnpackValues,
-         [](const Node* node) {
-           size_t num_elems = node->outputs().size();
-           return [=](Stack& stack) {
-             auto d = pop(stack).toGenericDict();
-             const auto& pairs = d->elements();
-             if (pairs.size() != num_elems) {
-               AT_ERROR(
-                   "Expected a dictionary of ",
-                   num_elems,
-                   " entries, but got ",
-                   pairs.size());
-             }
-             for (auto pair : pairs) {
-               push(stack, pair.second);
-             }
-             return 0;
-           };
-         }),
-     Operator(
          prim::TupleSlice,
          [](const Node* node) {
            int64_t beg_ind = node->i(attr::beg);
@@ -1481,15 +1461,27 @@ int dictKeys(Stack& stack) {
   return 0;
 }
 
-int dictValues(Stack& stack) {
-  auto dict = pop(stack).toGenericDictRef();
-  std::vector<IValue> values;
+template <typename Elem>
+std::vector<Elem> makeListForDictValues(const c10::ivalue::UnorderedMap& dict) {
+  std::vector<Elem> values;
   values.reserve(dict.size());
   for (auto item : dict) {
-    values.push_back(item.second);
+    values.push_back(item.second.to<Elem>());
   }
-  push(stack, IValue(values));
-  return 0;
+  return values;
+}
+
+Operation dictValues(const Node* n) {
+  auto outputType = n->output()->type()->expect<ListType>();
+  return [=](Stack& stack) -> int {
+    auto dict = pop(stack).toGenericDictRef();
+    if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
+      push(stack, makeListForDictValues<at::Tensor>(dict));
+    } else {
+      push(stack, makeListForDictValues<IValue>(dict));
+    }
+    return 0;
+  };
 }
 
 int dictIndex(Stack& stack) {

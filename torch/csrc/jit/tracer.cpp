@@ -229,7 +229,8 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
       return Tuple::create(std::move(elems));
     } else if (auto dict_type = type->cast<DictType>()) {
       auto elem_pairs = input.toGenericDict()->elements();
-      auto unpack_node = state->graph->insertNode(state->graph->createDictUnpackValues(value, elem_pairs.size()));
+      auto unpack_to_list = state->graph->insert(aten::values, {value});
+      auto unpack_node = state->graph->insertNode(state->graph->createListUnpack(unpack_to_list, elem_pairs.size()));
       auto elem_values = unpack_node->outputs();
 
       AT_ASSERT(elem_pairs.size() == elem_values.size());

@@ -708,7 +708,6 @@ struct PythonPrintPass {
         break;
       case prim::TupleUnpack:
       case prim::ListUnpack:
-      case prim::DictUnpackValues:
         assignValuesToTheirUniqueNames(node->outputs());
         indent();
         // TupleUnpack(unpacked) turns into an assignment op that forces
@@ -718,12 +717,7 @@ struct PythonPrintPass {
         if (node->outputs().size() > 0) {
           printValueList(out, node->outputs(), "", ", = ");
         }
-        if (node->kind() == prim::DictUnpackValues) {
-          // insert a "synthetic torch.values call here to simulate the op.
-          out << "torch.values(" << useOf(node->input()) << ")\n";
-        } else {
-          out << useOf(node->input()) << "\n";
-        }
+        out << useOf(node->input()) << "\n";
         break;
       case prim::SetAttr: {
         const auto obj = node->inputs().at(0);
@@ -1224,7 +1218,6 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
       prim::ListConstruct,
       prim::DictConstruct,
       prim::ListUnpack,
-      prim::DictUnpackValues,
       prim::Print,
       prim::PythonOp,
       prim::TupleConstruct,
