@@ -12,7 +12,7 @@
 #include <cuda.h>
 #endif
 
-#include <ATen/cuda/Array.h>
+#include <ATen/core/Array.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
@@ -23,10 +23,10 @@ namespace at {
 // typedefs for holding vector data
 namespace {
 
-typedef at::cuda::Array<uint32_t, 4> UINT4;
-typedef at::cuda::Array<uint32_t, 2> UINT2;
-typedef at::cuda::Array<double, 2> DOUBLE2;
-typedef at::cuda::Array<float, 2> FLOAT2;
+typedef at::detail::Array<uint32_t, 4> UINT4;
+typedef at::detail::Array<uint32_t, 2> UINT2;
+typedef at::detail::Array<double, 2> DOUBLE2;
+typedef at::detail::Array<float, 2> FLOAT2;
 
 } // anonymous namespace
 
