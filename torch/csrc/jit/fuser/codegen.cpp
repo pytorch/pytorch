@@ -216,7 +216,7 @@ static std::string encodeRHS(const Node* n) {
       {aten::gt, "${0} > ${1}"},
       {aten::le, "(${0} <= ${1})"},
       {aten::lt, "${0} < ${1}"},
-      {aten::lerp, "${0} + ${2} * (${1} - ${0})"},
+      {aten::lerp, "${cast_0} + ${cast_2} * (${cast_1} - ${cast_0})"},
       {aten::type_as, "(${cast_0})"},
       {aten::mul, "${cast_0} * ${cast_1}"},
       {aten::ne, "${0} != ${1}"},

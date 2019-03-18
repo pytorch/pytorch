@@ -389,8 +389,9 @@ const std::vector<std::string> functions = {
                     *,
                     value: float = 1.0):
             def backward(grad_output):
-                grad_tensor1 = (grad_output * tensor2 * value)._grad_sum_to_size(tensor1.size())
-                grad_tensor2 = (grad_output * tensor1 * value)._grad_sum_to_size(tensor2.size())
+                grad = grad_output * value
+                grad_tensor1 = (grad * tensor2)._grad_sum_to_size(tensor1.size())
+                grad_tensor2 = (grad * tensor1)._grad_sum_to_size(tensor2.size())
                 return grad_output._grad_sum_to_size(self.size()), grad_tensor1, grad_tensor2, None
             return torch.addcmul(self, tensor1, tensor2, value=value), backward
 
