@@ -465,20 +465,21 @@ void THBlas_(gemm)(
 //       #pragma omp parallel for shared(c, a, b) private(i, j, l)
       for (l = 0; l < k; l++) {
         for (j = 0; j < n; j++) {
-          int64_t i_m = m / 4;
-          for (int64_t i_i = 0; i_i < i_m; i_i++) {
-            c[j * ldc + i_i * 4 + 0] += a[i_i * 4 + 0 + l * lda] //
-            					* b[j + l * ldb] * alpha;
-            c[j * ldc + i_i * 4 + 1] += a[i_i * 4 + 1 + l * lda] //
-                        		* b[j + l * ldb] * alpha;
-            c[j * ldc + i_i * 4 + 2] += a[i_i * 4 + 2 + l * lda] //
-                        		* b[j + l * ldb] * alpha;
-            c[j * ldc + i_i * 4 + 3] += a[i_i * 4 + 3 + l * lda] //
-                        		* b[j + l * ldb] * alpha;
-          }
-          int64_t i = i_m * 4;
-          for (; i < m; i++)
-//           #pragma omp parallel for shared(c, a, b) private(i, j, l)
+//           int64_t i_m = m / 4;
+//           for (int64_t i_i = 0; i_i < i_m; i_i++) {
+//             c[j * ldc + i_i * 4 + 0] += a[i_i * 4 + 0 + l * lda] //
+//             					* b[j + l * ldb] * alpha;
+//             c[j * ldc + i_i * 4 + 1] += a[i_i * 4 + 1 + l * lda] //
+//                         		* b[j + l * ldb] * alpha;
+//             c[j * ldc + i_i * 4 + 2] += a[i_i * 4 + 2 + l * lda] //
+//                         		* b[j + l * ldb] * alpha;
+//             c[j * ldc + i_i * 4 + 3] += a[i_i * 4 + 3 + l * lda] //
+//                         		* b[j + l * ldb] * alpha;
+//           }
+//           int64_t i = i_m * 4;
+//           for (; i < m; i++)
+          #pragma omp parallel for shared(c, a, b, alpha, lda, ldb, ldc, m, j, l) private(i)
+          for (i = 0; i < m; i++)
             c[j * ldc + i] += a[i + l * lda] * b[j + l * ldb] * alpha;
         }
       }
