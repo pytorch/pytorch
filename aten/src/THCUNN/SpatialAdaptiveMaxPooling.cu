@@ -75,7 +75,7 @@ __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices,
       }
       // Update output and argmax
       *ptr_output = max;
-      *ptr_ind = argmax + TH_INDEX_BASE;
+      *ptr_ind = argmax;
     }
   }
 }
@@ -119,7 +119,7 @@ __global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, THCIndex_t *in
       THCIndex_t *ptr_ind = indices + oh*osizeW + ow;
       T z = *ptr_gradOutput;
 
-      int argmax = (*ptr_ind) - TH_INDEX_BASE;
+      int argmax = (*ptr_ind);
 
       gradInput[argmax] += z;
     }
@@ -166,7 +166,7 @@ __global__ void atomicadaptivemaxgradinput(
       THCIndex_t *ptr_ind = indices + oh*osizeW + ow;
       T z = *ptr_gradOutput;
 
-      int argmax = (*ptr_ind) - TH_INDEX_BASE;
+      int argmax = (*ptr_ind);
 
       // atomic add since different threads could update same variable
       atomicAdd(&(gradInput[argmax]), z);

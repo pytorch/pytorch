@@ -50,7 +50,7 @@ static void check_out_type_matches(Tensor result,
   if (scalarType_is_none && layout_is_none && device_is_none) {  // common case
     return;
   }
-  auto scalarType_arg = scalarType_is_none ? result.type().scalarType() : scalarType;
+  auto scalarType_arg = scalarType_is_none ? result.scalar_type() : scalarType;
   auto layout_arg = layout_is_none ? *torch::getLayout(result.type().backend()) : layout;
   auto device_type_arg = device_is_none ? torch::getDeviceType(result.type()) : device.type();
   const auto& type = torch::getVariableType(scalarType_arg, layout_arg, device_type_arg);

@@ -51,7 +51,8 @@ class _ContextMethodMixin(object):
         This will mark outputs as not requiring gradients, increasing the
         efficiency of backward computation. You still need to accept a gradient
         for each output in :meth:`~Function.backward`, but it's always going to
-        be ``None``.
+        be a zero tensor with the same shape as the shape of a corresponding
+        output.
 
         This is used e.g. for indices returned from a max :class:`Function`.
         """

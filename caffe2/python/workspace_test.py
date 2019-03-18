@@ -7,6 +7,7 @@ import numpy as np
 import os
 import unittest
 
+import torch
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, test_util, workspace, model_helper, brew
 
@@ -289,6 +290,27 @@ class TestWorkspace(unittest.TestCase):
         for key in workspace.blobs:
             self.assertEqual(key, "testblob")
 
+    def testTorchInterop(self):
+        workspace.RunOperatorOnce(core.CreateOperator(
+            "ConstantFill", [], "foo", shape=(4,), value=2, dtype=10))
+        t = workspace.FetchTorch("foo")
+        t.resize_(5)
+        t[4] = t[2] = 777
+        np.testing.assert_array_equal(t.numpy(), np.array([2,2,777,2,777]))
+        # this doesn't work because of variable / tensor confusion
+        # the underlying data tensor is not properly reshaped :(
+        np.testing.assert_array_equal(
+            workspace.FetchBlob("foo"), np.array([2,2,777,2]))
+
+        z = torch.ones((4,), dtype=torch.int64)
+        workspace.FeedBlob('bar', z)
+        workspace.RunOperatorOnce(
+            core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2)))
+        z[0,1] = 123
+        np.testing.assert_array_equal(
+            workspace.FetchBlob("bar"), np.array([[1,123],[1,1]]))
+        np.testing.assert_array_equal(z, np.array([[1,123],[1,1]]))
+
 
 class TestMultiWorkspaces(unittest.TestCase):
     def setUp(self):
@@ -348,6 +370,43 @@ class TestWorkspaceGPU(test_util.TestCase):
         self.assertEqual(pattern.ndim, 2)
         self.assertEqual(pattern.shape[0], pattern.shape[1])
         self.assertEqual(pattern.shape[0], workspace.NumGpuDevices())
+
+    @unittest.skipIf(not workspace.has_cuda_support,
+                     "Tensor interop doesn't yet work on ROCm")
+    def testTorchInterop(self):
+        # CUDA has convenient mem stats, let's use them to make sure we didn't
+        # leak memory
+        initial_mem = torch.cuda.memory_allocated()
+        workspace.RunOperatorOnce(core.CreateOperator(
+            "ConstantFill", [], "foo", shape=(4,), value=2, dtype=10,
+            device_option=core.DeviceOption(workspace.GpuDeviceType)))
+        t = workspace.FetchTorch("foo")
+        t.resize_(5)
+        self.assertTrue(t.is_cuda)
+        t[4] = t[2] = 777
+        np.testing.assert_array_equal(
+            t.cpu().numpy(), np.array([2,2,777,2,777]))
+        # this doesn't work because of variable / tensor confusion
+        # the underlying data tensor is not properly reshaped :(
+        np.testing.assert_array_equal(
+            workspace.FetchBlob("foo"), np.array([2,2,777,2]))
+
+        z = torch.ones((4,), dtype=torch.int64, device="cuda")
+        workspace.FeedBlob('bar', z)
+        workspace.RunOperatorOnce(
+            core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2),
+            device_option=core.DeviceOption(workspace.GpuDeviceType)))
+        z[0,1] = 123
+        np.testing.assert_array_equal(
+            workspace.FetchBlob("bar"), np.array([[1,123],[1,1]]))
+        np.testing.assert_array_equal(z.cpu(), np.array([[1,123],[1,1]]))
+
+        self.assertGreater(torch.cuda.memory_allocated(), initial_mem)
+        # clean up everything
+        del t
+        del z
+        workspace.ResetWorkspace()
+        self.assertEqual(torch.cuda.memory_allocated(), initial_mem)
 
 
 @unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")

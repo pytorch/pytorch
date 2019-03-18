@@ -188,7 +188,7 @@ void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, doubl
   const dim3 grid(r1*r2);
   const dim3 block(forward_threads);
 
-  AT_DISPATCH_FLOATING_TYPES(x1.type(), "cdist_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(x1.scalar_type(), "cdist_cuda", [&] {
     if (p == 0.0) {
       cdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::zero><<<grid, block>>>(result.data<scalar_t>(), x1.data<scalar_t>(), x2.data<scalar_t>(), p, r1, r2, m);
     } else if (p == 1.0) {
@@ -213,7 +213,7 @@ void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, double p) {
   const double n2 = n - .5;
   const double n2_squared_minus_1 = n2 * n2 - 1;
 
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "pdist_cuda", [&] {
     if (p == 0.0) {
       pdist_kernel_cuda_impl<scalar_t, dists<scalar_t>::zero><<<grid, block>>>(result.data<scalar_t>(), self.data<scalar_t>(), n, m, p, n2, n2_squared_minus_1);
     } else if (p == 1.0) {
@@ -252,7 +252,7 @@ void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   const double n2_squared_minus_1 = n2 * n2 - 1;
 
   Tensor buffer = at::empty({n - 1, result.size(0), result.size(1)}, result.options());
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist_cuda_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "pdist_cuda_backward", [&] {
     if (p == 1.0) {
       pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p, n2, n2_squared_minus_1);
     } else if (p < 2.0) {

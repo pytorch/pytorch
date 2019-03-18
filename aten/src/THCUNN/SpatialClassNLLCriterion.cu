@@ -28,7 +28,7 @@ __global__ void SpatialClassNLLCriterion_updateOutput_no_reduce_kernel(
     const int64_t h = (index / batch_size) % H;
     const int64_t w = (index / (batch_size * H)) % W;
 
-    int64_t cur_target = target[b][h][w] - TH_INDEX_BASE;
+    int64_t cur_target = target[b][h][w];
     if (cur_target == ignore_index) {
       output[b][h][w] = ScalarConvert<int, Dtype>::to(0);
       continue;
@@ -57,7 +57,7 @@ __global__ void SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel(
     const int64_t h = (index / batch_size) % H;
     const int64_t w = (index / (batch_size * H)) % W;
 
-    int64_t cur_target = target[b][h][w] - TH_INDEX_BASE;
+    int64_t cur_target = target[b][h][w];
     if (cur_target == ignore_index) {
       continue;
     }
@@ -98,7 +98,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
   for (i = (blockIdx.x % blocks_per_sample) * blockDim.x + threadIdx.x;
        i < map_nelem;
        i += step) {
-    t = target[toffset + i] - TH_INDEX_BASE;
+    t = target[toffset + i];
     if (t != ignore_index) {
       assert(t >= 0 && t < n_classes);
       cur_weight = weights ? weights[t] : ScalarConvert<int, T>::to(1);
@@ -153,7 +153,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
   for (i = (blockIdx.x % blocks_per_sample) * blockDim.x + threadIdx.x;
        i < map_nelem;
        i += step) {
-    t = (int)target[toffset + i] - TH_INDEX_BASE;
+    t = (int)target[toffset + i];
     if (t != ignore_index) {
       assert(t >= 0 && t < n_classes);
       gradInput[ioffset + i + map_nelem * t] = -(weights ? weights[t] : ScalarConvert<int, T>::to(1)) * norm * gradOutput[0];

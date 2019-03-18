@@ -442,7 +442,6 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
   bool RunOnDeviceWithOrderNCHW() override {
     const Tensor& X = Input(0);
     auto& filter = Input(1);
-    Tensor* Y = Output(0);
     const int N = X.dim32(0), C = X.dim32(1);
     CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
     const int M = filter.dim32(0);
@@ -452,8 +451,8 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
     CAFFE_ENFORCE_EQ(C, this->group_);
     CAFFE_ENFORCE_EQ(M, this->group_);
 
-    ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
-    Y->mutable_data<float>();
+    auto sizes = ConvPoolOpBase<CPUContext>::GetOutputSize(X, filter.dim32(0));
+    Tensor* Y = Output(0, sizes, at::dtype<float>());
 
     DepthwiseArgs args;
     args.batch = X.dim32(0);

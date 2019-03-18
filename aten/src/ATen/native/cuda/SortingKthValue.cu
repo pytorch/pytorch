@@ -27,7 +27,6 @@ namespace native {
 
 namespace {
 
-
 template <typename scalar_t, typename index_t, int Dim>
 __global__ void gatherKthValue(
     cuda::detail::TensorInfo<scalar_t, index_t> input,
@@ -82,7 +81,7 @@ __global__ void gatherKthValue(
     bool inRange = (i < inputSliceSize);
     scalar_t v = inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride])
                          : static_cast<scalar_t>(0);
-    bool isKValue = inRange && (THCNumerics<scalar_t>::eq(v, kValue));
+    bool isKValue = inRange && THCNumerics<scalar_t>::eq_with_nan(v, kValue);
 
     if (isKValue) {
       kValueIndex = i;
@@ -233,14 +232,14 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
     int64_t k,
     int64_t dim,
     bool keepdim) {
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "kthvalue", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "kthvalue_cuda", [&] {
     kthvalue_cuda_template<scalar_t>(values, indices, self, k, dim, keepdim);
   });
   return std::forward_as_tuple(values, indices);
 }
 
 Tensor median_cuda(const Tensor& self) {
-  return AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "median", [&] {
+  return AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), "median", [&] {
     return median_cuda_template<scalar_t>(self);
   });
 }

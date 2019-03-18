@@ -142,7 +142,7 @@ void checkSameType(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
 
 void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType ty) {
   AT_CHECK(
-    t->type().scalarType() == ty,
+    t->scalar_type() == ty,
     "Expected tensor for ", t, " to have scalar type ", toString(ty),
     "; but got ", t->toString(), " instead (while checking arguments for ", c,
     ")");
@@ -150,7 +150,7 @@ void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType ty) {
 
 void checkScalarTypes(CheckedFrom c, const TensorArg& t,
                       at::ArrayRef<ScalarType> l) {
-    if (std::find(l.begin(), l.end(), t->type().scalarType()) == l.end()) {
+    if (std::find(l.begin(), l.end(), t->scalar_type()) == l.end()) {
       std::ostringstream oss;
       oss << "Expected tensor for " << t << " to have one of the following "
           << "scalar types: ";

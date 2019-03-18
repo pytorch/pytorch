@@ -176,6 +176,19 @@ TypePtr attemptToRecoverType(const IValue& ivalue) {
 
 // Checks if input_ivalue is a subvalue of type.
 bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
+  if (ivalue.isTuple()) {
+    const auto& ivalue_elem = ivalue.toTuple()->elements();
+    auto tuple_type = type->cast<TupleType>();
+    if (!tuple_type || tuple_type->elements().size() != ivalue_elem.size()) {
+      return false;
+    }
+    auto type_elem = tuple_type->elements();
+    bool is_subvalue = true;
+    for (size_t i = 0; i < type_elem.size() && is_subvalue; ++i) {
+      is_subvalue = isSubvalueOf(ivalue_elem[i], type_elem[i]);
+    }
+    return is_subvalue;
+  }
   if (ivalue.isGenericList()) {
     auto list_type = type->cast<ListType>();
     if (!list_type) {
@@ -441,6 +454,11 @@ class ClassTypeRegistry {
     return nullptr;
   }
 
+  void clear() {
+    std::lock_guard<std::mutex> g(mutex_);
+    reg_.clear();
+  }
+
  private:
   std::mutex mutex_;
   std::unordered_map<std::string, ClassTypePtr> reg_;
@@ -463,4 +481,9 @@ ClassTypePtr ClassType::create(
 ClassTypePtr ClassType::get(const std::string& name) {
   return getRegistry().getType(name);
 }
+
+void ClassType::clearRegistry() {
+  getRegistry().clear();
+}
+
 } // namespace c10

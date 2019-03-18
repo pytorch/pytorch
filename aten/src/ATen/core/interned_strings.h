@@ -73,7 +73,7 @@ namespace c10 {
   _(prim, MMBatchSide)             \
   _(prim, min)                     \
   _(prim, max)                     \
-  _(prim, range)                   \
+  _(prim, rangelist)               \
   _(aten, _grad_sum_to_size)       \
   _(aten, _ncf_unsqueeze)          \
   _(aten, warn)                    \
@@ -87,6 +87,7 @@ namespace c10 {
   _(prim, SetAttr)                 \
   _(prim, GetAttr)                 \
   _(aten, append)                  \
+  _(aten, item)                    \
   _(aten, format)                  \
   _(aten, __not__)                 \
   _(aten, __is__)                  \

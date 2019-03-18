@@ -195,7 +195,7 @@ void fractional_max_pool2d_out_cuda_template(
             input_.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(),
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
     "fractional_max_pool2d_out_cuda_frame",
     [&] {
       auto devInput = input_.packed_accessor<scalar_t, 4>();
@@ -267,7 +267,7 @@ void fractional_max_pool2d_backward_out_cuda_template(
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
   auto devIndices = indices.packed_accessor<int64_t, 4>();
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(gradOutput.type(),
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(gradOutput.scalar_type(),
     "fractional_max_pool2d_backward_out_cuda_frame",
     [&] {
       auto devGradInput = gradInput_.packed_accessor<scalar_t, 4>();

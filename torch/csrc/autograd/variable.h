@@ -104,11 +104,22 @@ struct TORCH_API Variable : public at::Tensor {
       bool allow_tensor_metadata_change,
       Edge gradient_edge);
 
-  /// Creates a `Variable` from the given `Tensor`. `requires_grad` should be
+  /// Creates a `Variable` from the given `Tensor`, copying its underlying `TensorImpl`.
+  /// `requires_grad` should be
   /// set only for leaves, and determines whether the `Variable` will accumulate
   /// gradients. NOTE: `data` must *not* be a `Variable` already. Its dynamic
   /// type *must* be `Tensor`.
   friend Variable make_variable(
+      at::Tensor data,
+      bool requires_grad,
+      bool allow_tensor_metadata_change);
+
+  /// Creates a `Variable` from the given `Tensor`, consuming its underlying `TensorImpl`.
+  /// This is intended to be used from functions that immediately create a `Tensor`,
+  /// convert it to a `Variable`, and then free it; it has been found to
+  /// decrease the overhead of those operations, in some situations.
+  /// The comments about `requires_grad` and `data` on the above version also apply to this one.
+  friend Variable make_variable_consuming(
       at::Tensor data,
       bool requires_grad,
       bool allow_tensor_metadata_change);
@@ -219,8 +230,11 @@ struct TORCH_API Variable : public at::Tensor {
       bool keep_graph,
       bool create_graph) const;
 
-  /// Sets the type of the Variable.
-  void set_data(Tensor new_data) const;
+  /// Sets the `Tensor` held by this `Variable` to the one supplied.
+  /// It is rarely necessary to call this; it's used, for example, when
+  /// a non-sparse gradient gets added to a sparse gradient, requiring
+  /// the type of the gradient `Variable` to become non-sparse.
+  void set_data(const at::Tensor &new_data);
 
   /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
   /// `Variable`.
@@ -231,7 +245,8 @@ struct TORCH_API Variable : public at::Tensor {
   void set_gradient_edge(Edge edge) noexcept;
 
   /// Returns the input index of the gradient `Function` to which this
-  /// `Variable` is connected.
+  /// `Variable` is connected.  Note: input indexes of the gradient `Function`
+  /// correspond to output indexes of the corresponding forward `Function`.
   uint32_t output_nr() const noexcept;
 
   /// True if this `Variable` is a leaf and thus does not have a `grad_fn`.
@@ -411,7 +426,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   const at::Storage& storage() const override;
   void* slow_data() const override;
 
-  void set_data(Tensor new_data);
+  void set_data(const at::Tensor &new_data);
 
   /// Reset all expensive fields to free up resources
   void release_resources() override;
@@ -576,6 +591,22 @@ inline Variable make_variable(
   return Variable();
 }
 
+inline Variable make_variable_consuming(
+    at::Tensor data,
+    bool requires_grad = false,
+    bool allow_tensor_metadata_change = true) {
+  AT_CHECK(
+      !data.is_variable(),
+      "Must not create a new variable from a variable, use its .data()");
+  if (data.defined()) {
+    AT_ASSERT(data.getIntrusivePtr().use_count() == 1);
+    data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
+    return Variable(c10::make_intrusive<Variable::Impl>(std::move(data), std::move(autograd_meta), requires_grad));
+  }
+  return Variable();
+}
+
 inline Variable make_variable(
     at::Tensor data,
     Edge gradient_edge,
@@ -644,8 +675,8 @@ inline Variable Variable::detach() const {
   return var;
 }
 
-inline void Variable::set_data(Tensor new_data) const {
-  get()->set_data(std::move(new_data));
+inline void Variable::set_data(const at::Tensor &new_data) {
+  get()->set_data(new_data);
 }
 
 inline void Variable::set_gradient_edge(Edge edge) noexcept {

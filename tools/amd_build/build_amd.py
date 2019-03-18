@@ -30,6 +30,12 @@ parser.add_argument(
     help="The Directory to Store the Hipified Project",
     required=False)
 
+# Hipify using HIP-Clang launch.
+parser.add_argument(
+    '--hip-clang-launch',
+    action='store_true',
+    help=argparse.SUPPRESS)
+
 args = parser.parse_args()
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
@@ -57,6 +63,7 @@ includes = [
     "caffe2/utils/*",
     "c10/cuda/*",
     "c10/cuda/test/CMakeLists.txt",
+    "modules/*",
     # PyTorch paths
     # Keep this synchronized with is_pytorch_file in hipify_python.py
     "aten/src/ATen/cuda/*",
@@ -127,4 +134,5 @@ hipify_python.hipify(
     includes=includes,
     ignores=ignores,
     out_of_place_only=args.out_of_place_only,
-    json_settings=json_settings)
+    json_settings=json_settings,
+    hip_clang_launch=args.hip_clang_launch)

@@ -125,7 +125,7 @@ if tqdm is None:
     # fake tqdm if it's not installed
     class tqdm(object):
 
-        def __init__(self, total, disable=False):
+        def __init__(self, total=None, disable=False):
             self.total = total
             self.disable = disable
             self.n = 0

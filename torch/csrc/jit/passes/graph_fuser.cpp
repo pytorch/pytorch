@@ -262,7 +262,7 @@ struct GraphFuser {
       )SCRIPT";
           auto module = std::make_shared<script::Module>();
           defineMethodsInModule(
-              module, source, script::nativeResolver, /*self=*/nullptr);
+              module, source, script::nativeResolver, /*self=*/c10::nullopt);
           *graph_ptr = module->get_method("batch_norm").graph();
         },
         &bn_graph);

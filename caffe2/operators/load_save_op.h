@@ -147,7 +147,13 @@ class LoadOp final : public Operator<Context> {
             : (ws_->RootFolder() + "/" + db_names_[i]);
         std::unique_ptr<DB> in_db(
             caffe2::db::CreateDB(db_type_, full_db_name, caffe2::db::READ));
-        CAFFE_ENFORCE(in_db.get(), "Cannot open db: ", full_db_name);
+        CAFFE_ENFORCE(
+            in_db.get(),
+            "Cannot find db implementation of type ",
+            db_type_,
+            " (while trying to open ",
+            full_db_name,
+            ")");
         std::unique_ptr<Cursor> cursor(in_db->NewCursor());
         extract(i, cursor.get(), &blob_states, &total_loaded_blobs);
       }
@@ -460,7 +466,13 @@ class SaveOp final : public Operator<Context> {
         absolute_path_ ? db_name_ : (ws_->RootFolder() + "/" + db_name_);
     std::unique_ptr<DB> out_db(
         caffe2::db::CreateDB(db_type_, full_db_name, caffe2::db::NEW));
-    CAFFE_ENFORCE(out_db.get(), "Cannot open db for writing: ", full_db_name);
+    CAFFE_ENFORCE(
+        out_db.get(),
+        "Cannot find db implementation of type ",
+        db_type_,
+        " (while trying to open ",
+        full_db_name,
+        ")");
 
     BlobSerializerBase::SerializationAcceptor acceptor = [&](
         const std::string& blobName, const std::string& data) {

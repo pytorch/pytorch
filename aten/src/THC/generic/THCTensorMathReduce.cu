@@ -2,21 +2,6 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathReduce.cu"
 #else
 
-void THCTensor_(sum)(THCState* state, THCTensor *self, THCTensor *src, int dimension, int keepdim) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
-  if (!THC_reduceDim<scalar_t>(state, self, src,
-                           thrust::identity<accreal>{},
-                           ReduceAdd<accreal>{},
-                           thrust::identity<accreal>{},
-                           scalar_cast<accreal>(0),
-                           dimension,
-                           keepdim)) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
 void THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, int dimension, int keepdim) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   if (!THC_reduceDim<scalar_t>(state, self, src,
@@ -25,23 +10,6 @@ void THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, int dime
                            thrust::identity<accreal>{},
                            scalar_cast<accreal>(1),
                            dimension,
-                           keepdim)) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
-void THCTensor_(mean)(THCState *state, THCTensor *self, THCTensor *src, int dim, int keepdim)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
-  const accreal size = scalar_cast<accreal>(THCTensor_(size)(state, src, dim));
-  if (!THC_reduceDim<scalar_t>(state, self, src,
-                           thrust::identity<accreal>{},
-                           ReduceAdd<accreal>{},
-                           ReduceDivide<accreal>{size},
-                           scalar_cast<accreal>(0),
-                           dim,
                            keepdim)) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
   }
@@ -318,21 +286,6 @@ accreal THCTensor_(sumall)(THCState *state, THCTensor *self) {
                            thrust::identity<accreal>{},
                            ReduceAdd<accreal>{},
                            scalar_cast<accreal>(0),
-                           &val, 0)) {
-    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-  return val;
-}
-
-accreal THCTensor_(prodall)(THCState *state, THCTensor *self) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
-  accreal val;
-  if (!THC_reduceAll<scalar_t>(state, self,
-                           thrust::identity<accreal>{},
-                           ReduceMultiply<accreal>{},
-                           scalar_cast<accreal>(1),
                            &val, 0)) {
     THArgCheck(false, 1, CUTORCH_DIM_WARNING);
   }

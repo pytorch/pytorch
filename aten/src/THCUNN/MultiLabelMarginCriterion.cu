@@ -41,7 +41,7 @@ __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output
   // mark targets in istarget
   if (threadIdx.x == 0) {
     for (int dt = 0; dt < dim; dt++) {
-      int target_idx = target_k[dt] - TH_INDEX_BASE;
+      int target_idx = target_k[dt];
       if (target_idx < 0) break;
       istarget_k[target_idx] = ScalarConvert<int, Dtype>::to(1);
     }
@@ -52,7 +52,7 @@ __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output
   Acctype sum = 0;
   for (int dt = 0; dt < dim; dt++) {
     // next target:
-    int target_idx = target_k[dt] - TH_INDEX_BASE;
+    int target_idx = target_k[dt];
     if (target_idx < 0) break;
 
     // current value for target
@@ -121,7 +121,7 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gra
   // iterate over targets
   for (int dt = 0; dt < dim; dt++) {
     // next target:
-    int target_idx = (int)target_k[dt] - TH_INDEX_BASE;
+    int target_idx = (int)target_k[dt];
     if (target_idx < 0) break;
 
     // current value for target

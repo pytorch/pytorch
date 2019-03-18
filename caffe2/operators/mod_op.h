@@ -11,8 +11,9 @@ template <class Context>
 class ModOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ModOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit ModOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     divisor_ = this->template GetSingleArgument<int64_t>("divisor", 0);
     CAFFE_ENFORCE_NE(divisor_, 0, "divisor must not be 0");
     sign_follow_divisor_ =

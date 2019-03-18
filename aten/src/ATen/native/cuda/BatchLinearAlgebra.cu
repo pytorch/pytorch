@@ -43,6 +43,13 @@ void magmaGetrfBatched(
 }
 
 template<class scalar_t>
+void magmaGetrfNoPivBatched(
+    magma_int_t m, magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
+    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
+  AT_ERROR("getrf only takes float or double Tensors");
+}
+
+template<class scalar_t>
 void magmaGetriBatched(
     magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
     magma_int_t** ipiv_array, scalar_t** dinvA_array, magma_int_t lddia,
@@ -122,6 +129,20 @@ void magmaGetrfBatched<float>(
     magma_int_t** ipiv_array, magma_int_t* info_array, magma_int_t batchsize,
     const MAGMAQueue& magma_queue) {
   magma_sgetrf_batched(m, n, dA_array, ldda, ipiv_array, info_array, batchsize, magma_queue.get_queue());
+}
+
+template<>
+void magmaGetrfNoPivBatched<double>(
+    magma_int_t m, magma_int_t n, double** dA_array, magma_int_t ldda,
+    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
+  magma_dgetrf_nopiv_batched(m, n, dA_array, ldda, info_array, batchsize, magma_queue.get_queue());
+}
+
+template<>
+void magmaGetrfNoPivBatched<float>(
+    magma_int_t m, magma_int_t n, float** dA_array, magma_int_t ldda,
+    magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
+  magma_sgetrf_nopiv_batched(m, n, dA_array, ldda, info_array, batchsize, magma_queue.get_queue());
 }
 
 template<>
@@ -260,13 +281,13 @@ std::tuple<Tensor, Tensor> _gesv_helper_cuda(const Tensor& self, const Tensor& A
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
   std::vector<int64_t> infos(batchCount(self), 0);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "gesv_cuda", [&]{
     apply_gesv<scalar_t>(self_working_copy, A_working_copy, infos);
   });
   if (self.dim() > 2) {
-    batchCheckErrors(infos, "gesv");
+    batchCheckErrors(infos, "gesv_cuda");
   } else {
-    singleCheckErrors(infos[0], "gesv");
+    singleCheckErrors(infos[0], "gesv_cuda");
   }
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
@@ -274,7 +295,7 @@ std::tuple<Tensor, Tensor> _gesv_helper_cuda(const Tensor& self, const Tensor& A
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_inverse(Tensor &self, Tensor &self_inv, std::vector<int64_t>& infos) {
+static void apply_inverse(Tensor& self, Tensor& self_inv, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
 AT_ERROR("inverse: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -327,11 +348,11 @@ Tensor _inverse_helper_cuda(const Tensor& self) {
   std::vector<int64_t> infos(batchCount(self), 0);
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto self_inv_working_copy = cloneBatchedColumnMajor(self);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "inverse", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
     apply_inverse<scalar_t>(
       self_working_copy, self_inv_working_copy, infos);
   });
-  batchCheckErrors(infos, "inverse");
+  batchCheckErrors(infos, "inverse_cuda");
   return self_inv_working_copy;
 }
 
@@ -386,7 +407,7 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
   int64_t info = 0;
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "cholesky_solve", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky_solve_cuda", [&]{
     apply_cholesky_solve<scalar_t>(self_working_copy, A_working_copy, upper, info);
   });
   AT_CHECK(info == 0, "MAGMA cholesky_solve : invalid argument: ", -info);
@@ -446,19 +467,91 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
     self_working_copy = cloneBatchedColumnMajor(self);
   }
 
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "cholesky", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky_cuda", [&]{
     apply_cholesky<scalar_t>(self_working_copy, false, infos);
   });
   if (self.dim() > 2) {
-    batchCheckErrors(infos, "cholesky");
+    batchCheckErrors(infos, "cholesky_cuda");
   } else {
-    singleCheckErrors(infos[0], "cholesky");
+    singleCheckErrors(infos[0], "cholesky_cuda");
   }
   if (upper) {
     return self_working_copy.transpose(-1, -2);
   } else {
     return self_working_copy;
   }
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ btrifact ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename scalar_t>
+static void apply_btrifact(Tensor& self, Tensor& pivots, Tensor& infos) {
+#ifndef USE_MAGMA
+AT_ERROR("btrifact: MAGMA library not found in "
+    "compilation. Please rebuild with MAGMA.");
+#else
+  auto self_data = self.data<scalar_t>();
+  auto self_matrix_stride = matrixStride(self);
+  magma_int_t batch_size = magma_int_cast(batchCount(self), "batchCount");
+  magma_int_t n = magma_int_cast(self.size(-1), "n");
+
+  scalar_t** self_array;
+  ALLOCATE_ARRAY(self_array, scalar_t*, batch_size, self);
+
+  // Set up the created arrays
+  for (int64_t i = 0; i < batch_size; i++) {
+    self_array[i] = &self_data[i * self_matrix_stride];
+  }
+
+  MAGMAQueue magma_queue(self.get_device());
+
+  // If `pivots` is defined, then we have to compute them.
+  // We will use the normal getrf function to compute the LU factorization
+  // and the pivots
+  if (pivots.defined()) {
+    auto pivots_data = pivots.data<magma_int_t>();
+    auto pivots_matrix_stride = pivots.size(-1);
+    magma_int_t** pivots_array;
+    ALLOCATE_ARRAY(pivots_array, magma_int_t*, batch_size, pivots);
+    for (int64_t i = 0; i < batch_size; i++) {
+      pivots_array[i] = &pivots_data[i * pivots_matrix_stride];
+    }
+
+    magmaGetrfBatched<scalar_t>(
+      n, n, self_array, n, pivots_array,
+      infos.data<magma_int_t>(), batch_size, magma_queue);
+  } else {
+    magmaGetrfNoPivBatched<scalar_t>(
+      n, n, self_array, n, infos.data<magma_int_t>(),
+      batch_size, magma_queue);
+  }
+#endif
+}
+
+std::tuple<Tensor, Tensor, Tensor> _btrifact_helper_cuda(const Tensor& self, bool pivot) {
+  AT_CHECK(self.dim() > 2,
+           "expected tensor with more than 2 dimensions, got size: ", self.sizes(),
+           " instead");
+  squareCheckInputs(self);
+  auto req_size = self.sizes().vec();
+  req_size.pop_back();
+  Tensor pivots_tensor;
+  if (pivot) {
+    pivots_tensor = at::zeros(req_size, self.options().dtype(kInt));
+  }
+  req_size.pop_back();
+  auto infos_tensor = at::zeros(req_size, self.options().dtype(kInt));
+
+  Tensor self_working_copy;
+  if (self.numel() == 0) {
+    self_working_copy = at::empty_like(self);
+  } else {
+    self_working_copy = cloneBatchedColumnMajor(self);
+    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "btrifact_cuda", [&]{
+      apply_btrifact<scalar_t>(self_working_copy, pivots_tensor, infos_tensor);
+    });
+  }
+  return std::make_tuple(self_working_copy, pivots_tensor, infos_tensor);
 }
 
 template <typename scalar_t, bool upper>
@@ -493,7 +586,7 @@ Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, c
           self_row_stride = self.stride(-2), self_col_stride = self.stride(-1);
   dim3 dim_block = cuda::getApplyBlock();
   dim3 dim_grid((mat_size + dim_block.x - 1) / dim_block.x, n_batches);
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), name, [&]{
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), name, [&]{
     triu_tril_kernel<scalar_t, upper>
       <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
         result.data<scalar_t>(), self.data<scalar_t>(), k, mat_size,
