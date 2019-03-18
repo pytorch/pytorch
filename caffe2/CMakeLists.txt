@@ -244,7 +244,29 @@ configure_file("${TORCH_SRC_DIR}/_utils_internal.py"
 
 
 
-set(GENERATED_CXX
+
+
+
+add_custom_target(torch_python_stubs DEPENDS "${TORCH_SRC_DIR}/__init__.pyi")
+# For Declarations.yaml dependency
+add_dependencies(torch_python_stubs ATEN_CPU_FILES_GEN_TARGET)
+add_custom_command(
+    OUTPUT
+    "${TORCH_SRC_DIR}/__init__.pyi"
+    COMMAND
+    "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
+      --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
+    DEPENDS
+    "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
+    "${TORCH_SRC_DIR}/__init__.pyi.in"
+    WORKING_DIRECTORY
+    "${TORCH_ROOT}"
+    )
+
+
+	     
+
+set(GENERATED_CXX_TORCH
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
@@ -256,23 +278,58 @@ set(GENERATED_CXX
   "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
 )
 
-add_custom_command(
-  OUTPUT
-  ${GENERATED_CXX}
+set(GENERATED_H_TORCH
   "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
+)
+
+set(GENERATED_THNN_CXX_CUDA ${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp)
+set(GENERATED_THNN_CXX ${TORCH_SRC_DIR}/csrc/nn/THNN.cpp)
+
+set(GENERATED_CXX_PYTHON
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
+  )
+
+set(GENERATED_H_PYTHON
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods_dispatch.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_dispatch.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
+)
+
+add_custom_command(
+  OUTPUT
+  ${GENERATED_CXX_TORCH}
+  ${GENERATED_H_TORCH}
+  ${GENERATED_THNN_CXX}
+  ${GENERATED_THNN_CXX_CUDA}
+  ${GENERATED_CXX_PYTHON}
+  ${GENERATED_H_PYTHON}
   COMMAND
   "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
     --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     --nn-path "aten/src"
-    --subset libtorch
   DEPENDS
   "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
+  "${CMAKE_CURRENT_LIST_DIR}/../aten/src/THNN/generic/THNN.h"
   "${TOOLS_PATH}/autograd/templates/VariableType.h"
   "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
   "${TOOLS_PATH}/autograd/templates/Functions.h"
   "${TOOLS_PATH}/autograd/templates/Functions.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_functions.h"
+  "${TOOLS_PATH}/autograd/templates/python_functions.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_variable_methods.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_variable_methods_dispatch.h"
+  "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_torch_functions_dispatch.h"
+  "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
+  "${TOOLS_PATH}/autograd/templates/python_nn_functions.h"
+  "${TOOLS_PATH}/autograd/templates/python_nn_functions_dispatch.h"
   "${TOOLS_PATH}/autograd/templates/variable_factories.h"
   "${TOOLS_PATH}/autograd/deprecated.yaml"
   "${TOOLS_PATH}/autograd/derivatives.yaml"
@@ -288,8 +345,12 @@ add_custom_command(
   "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
   WORKING_DIRECTORY "${TORCH_ROOT}")
 
+
+
+
 set(TORCH_SRCS
-  ${GENERATED_CXX}
+  ${GENERATED_CXX_TORCH}
+  ${GENERATED_H_TORCH}
   ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/function.cpp

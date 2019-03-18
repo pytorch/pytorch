@@ -33,61 +33,10 @@ add_subdirectory(${LIBSHM_SRCDIR})
 # Generate files
 set(TOOLS_PATH "${TORCH_ROOT}/tools")
 
-set(GENERATED_THNN_CXX_CUDA ${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp)
-set(GENERATED_THNN_CXX ${TORCH_SRC_DIR}/csrc/nn/THNN.cpp)
-
-set(GENERATED_PYTHON_CXX_FILES
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions.cpp"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
-  )
-
-add_custom_command(
-  OUTPUT
-  "${GENERATED_THNN_CXX}"
-  "${GENERATED_THNN_CXX_CUDA}"
-  ${GENERATED_PYTHON_CXX_FILES}
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods_dispatch.h"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_dispatch.h"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.h"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
-  COMMAND
-  "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
-    --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
-    --nn-path "aten/src"
-    --subset pybindings
-  DEPENDS
-  "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
-  "${TORCH_ROOT}/aten/src/THNN/generic/THNN.h"
-  "${TOOLS_PATH}/autograd/templates/python_functions.h"
-  "${TOOLS_PATH}/autograd/templates/python_functions.cpp"
-  "${TOOLS_PATH}/autograd/templates/python_variable_methods.cpp"
-  "${TOOLS_PATH}/autograd/templates/python_variable_methods_dispatch.h"
-  "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
-  "${TOOLS_PATH}/autograd/templates/python_torch_functions_dispatch.h"
-  "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
-  "${TOOLS_PATH}/autograd/templates/python_nn_functions.h"
-  "${TOOLS_PATH}/autograd/templates/python_nn_functions_dispatch.h"
-  "${TOOLS_PATH}/autograd/deprecated.yaml"
-  "${TOOLS_PATH}/autograd/derivatives.yaml"
-  "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
-  "${TOOLS_PATH}/autograd/gen_autograd.py"
-  "${TOOLS_PATH}/autograd/gen_python_functions.py"
-  "${TOOLS_PATH}/autograd/gen_variable_factories.py"
-  "${TOOLS_PATH}/autograd/gen_variable_type.py"
-  "${TOOLS_PATH}/autograd/load_derivatives.py"
-  "${TOOLS_PATH}/autograd/nested_dict.py"
-  "${TOOLS_PATH}/autograd/utils.py"
-  "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
-  "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
-  WORKING_DIRECTORY "${TORCH_ROOT}")
-
 
 set(TORCH_PYTHON_SRCS
     ${GENERATED_THNN_CXX}
-    ${GENERATED_PYTHON_CXX_FILES}
+    ${GENERATED_CXX_PYTHON}
     ${TORCH_SRC_DIR}/csrc/DataLoader.cpp
     ${TORCH_SRC_DIR}/csrc/Device.cpp
     ${TORCH_SRC_DIR}/csrc/Dtype.cpp
@@ -289,21 +238,10 @@ if (USE_NCCL)
     endif()
 endif()
 
-add_custom_target(torch_python_stubs DEPENDS "${TORCH_SRC_DIR}/__init__.pyi")
-# For Declarations.yaml dependency
-add_dependencies(torch_python_stubs ATEN_CPU_FILES_GEN_TARGET)
-add_custom_command(
-    OUTPUT
-    "${TORCH_SRC_DIR}/__init__.pyi"
-    COMMAND
-    "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
-      --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
-    DEPENDS
-    "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
-    "${TORCH_SRC_DIR}/__init__.pyi.in"
-    WORKING_DIRECTORY
-    "${TORCH_ROOT}"
-    )
+
+
+
+
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 target_compile_definitions(torch_python PUBLIC _THP_CORE)
