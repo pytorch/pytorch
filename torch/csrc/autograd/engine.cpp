@@ -660,10 +660,10 @@ auto Engine::ready_queue(int device) -> ReadyQueue& {
 
 auto Engine::start_threads() -> void {
   // See Note [Allocating GPUs to autograd threads]
-  int num_devices = 0;
+  c10::DeviceIndex num_devices = 0;
   for (auto device_type : {at::DeviceType::CUDA, at::DeviceType::HIP, at::DeviceType::XLA}) {
     if (c10::impl::hasDeviceGuardImpl(device_type)) {
-      num_devices = std::max(num_devices, getDeviceGuardImpl(device_type)->deviceCount());
+      num_devices = std::max(num_devices, c10::impl::getDeviceGuardImpl(device_type)->deviceCount());
     }
   }
   // One for CPU, plus one for every GPU device (but colocate GPUs of different
