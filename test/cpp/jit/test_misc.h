@@ -79,7 +79,7 @@ std::ostream& operator<<(std::ostream& out, const std::vector<T>& list) {
   out << "}";
   return out;
 }
-auto ct = CodeTemplate(R"(
+static const auto ct = CodeTemplate(R"(
 int foo($args) {
 
     $bar
@@ -89,7 +89,7 @@ int foo($args) {
 int commatest(int a${,stuff})
 int notest(int a${,empty,})
 )");
-auto ct_expect = R"(
+static const auto ct_expect = R"(
 int foo(hi, 8) {
 
     what
@@ -475,7 +475,7 @@ void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
   ASSERT_EQ(second_key, expected_key);
 }
 
-const auto cf_examples = R"JIT(
+static const auto cf_examples = R"JIT(
   def if_test(a, b):
       # FIXME: use 0 instead of a.
       # c = 0
