@@ -24,7 +24,7 @@ using namespace torch::optim;
 
 template <typename OptimizerClass, typename Options>
 bool test_optimizer_xor(Options options) {
-  torch::manual_seed(0);
+  torch::manual_seed(1);
 
   Sequential model(
       Linear(2, 8),

@@ -2035,6 +2035,7 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_int_pow(self, cast):
+        torch.manual_seed(1)
         if not TEST_NUMPY:
             return
         import numpy as np

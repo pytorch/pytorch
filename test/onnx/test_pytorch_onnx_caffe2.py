@@ -230,6 +230,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def _elman_rnn_test(self, layers, nonlinearity, bidirectional,
                         initial_state, packed_sequence, dropout):
+        self.setUp()
         model = nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE,
                        layers,
                        nonlinearity=nonlinearity,
@@ -242,7 +243,7 @@ class TestCaffe2Backend(unittest.TestCase):
             model = RnnModelWithPackedSequence(model, True)
 
         def make_input(batch_size):
-            seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
+            seq_lengths = torch.randint(1, RNN_SEQUENCE_LENGTH + 1, (batch_size,))
             seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs)
