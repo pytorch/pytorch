@@ -4579,7 +4579,7 @@ class _TestTorchMixin(object):
         self.assertEqual(torch.cuda.HalfTensor(10).is_signed(), True)
 
     @staticmethod
-    def _test_gesv(self, cast):
+    def _test_solve(self, cast):
         a = cast(torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                                (-6.05, -3.30, 5.36, -4.44, 1.08),
                                (-0.45, 2.58, -2.70, 0.27, 9.04),
@@ -4589,63 +4589,63 @@ class _TestTorchMixin(object):
                                (-1.56, 4.00, -8.67, 1.75, 2.86),
                                (9.81, -4.09, -4.57, -8.61, 8.99)))).t()
 
-        res1 = torch.gesv(b, a)[0]
+        res1 = torch.solve(b, a)[0]
         self.assertLessEqual(b.dist(torch.mm(a, res1)), 1e-12)
 
         ta = cast(torch.Tensor())
         tb = cast(torch.Tensor())
-        res2 = torch.gesv(b, a, out=(tb, ta))[0]
-        res3 = torch.gesv(b, a, out=(b, a))[0]
+        res2 = torch.solve(b, a, out=(tb, ta))[0]
+        res3 = torch.solve(b, a, out=(b, a))[0]
         self.assertEqual(res1, tb)
         self.assertEqual(res1, b)
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
 
         # test reuse
-        res1 = torch.gesv(b, a)[0]
+        res1 = torch.solve(b, a)[0]
         ta = cast(torch.Tensor())
         tb = cast(torch.Tensor())
-        torch.gesv(b, a, out=(tb, ta))[0]
+        torch.solve(b, a, out=(tb, ta))[0]
         self.assertEqual(res1, tb)
-        torch.gesv(b, a, out=(tb, ta))[0]
+        torch.solve(b, a, out=(tb, ta))[0]
         self.assertEqual(res1, tb)
 
     @skipIfNoLapack
-    def test_gesv(self):
-        self._test_gesv(self, lambda t: t)
+    def test_solve(self):
+        self._test_solve(self, lambda t: t)
 
     @staticmethod
-    def _test_gesv_batched(self, cast):
+    def _test_solve_batched(self, cast):
         from common_utils import random_fullrank_matrix_distinct_singular_value
-        # test against gesv: one batch
+        # test against solve: one batch
         A = cast(random_fullrank_matrix_distinct_singular_value(5, 1))
         b = cast(torch.randn(1, 5, 10))
-        x_exp, LU_exp = torch.gesv(b.squeeze(0), A.squeeze(0))
-        x, LU = torch.gesv(b, A)
+        x_exp, LU_exp = torch.solve(b.squeeze(0), A.squeeze(0))
+        x, LU = torch.solve(b, A)
         self.assertEqual(x, x_exp.unsqueeze(0))
         self.assertEqual(LU, LU_exp.unsqueeze(0))
 
-        # test against gesv in a loop: four batches
+        # test against solve in a loop: four batches
         A = cast(random_fullrank_matrix_distinct_singular_value(5, 4))
         b = cast(torch.randn(4, 5, 10))
 
         x_exp_list = []
         LU_exp_list = []
         for i in range(4):
-            x_exp, LU_exp = torch.gesv(b[i], A[i])
+            x_exp, LU_exp = torch.solve(b[i], A[i])
             x_exp_list.append(x_exp)
             LU_exp_list.append(LU_exp)
         x_exp = torch.stack(x_exp_list)
         LU_exp = torch.stack(LU_exp_list)
 
-        x, LU = torch.gesv(b, A)
+        x, LU = torch.solve(b, A)
         self.assertEqual(x, x_exp)
         self.assertEqual(LU, LU_exp)
 
         # basic correctness test
         A = cast(random_fullrank_matrix_distinct_singular_value(5, 3))
         b = cast(torch.randn(3, 5, 10))
-        x, LU = torch.gesv(b, A)
+        x, LU = torch.solve(b, A)
         self.assertEqual(torch.matmul(A, x), b)
 
         # Test non-contiguous inputs.
@@ -4655,16 +4655,16 @@ class _TestTorchMixin(object):
         from numpy.linalg import solve
         A = cast(random_fullrank_matrix_distinct_singular_value(2, 2)).permute(1, 0, 2)
         b = cast(torch.randn(2, 2, 2)).permute(2, 1, 0)
-        x, _ = torch.gesv(b, A)
+        x, _ = torch.solve(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
         self.assertEqual(x.data, cast(x_exp))
 
     @skipIfNoLapack
-    def test_gesv_batched(self):
-        self._test_gesv_batched(self, lambda t: t)
+    def test_solve_batched(self):
+        self._test_solve_batched(self, lambda t: t)
 
     @staticmethod
-    def _test_gesv_batched_dims(self, cast):
+    def _test_solve_batched_dims(self, cast):
         if not TEST_NUMPY:
             return
 
@@ -4673,7 +4673,7 @@ class _TestTorchMixin(object):
         # test against numpy.linalg.solve
         A = cast(random_fullrank_matrix_distinct_singular_value(4, 2, 1, 3))
         b = cast(torch.randn(2, 1, 3, 4, 6))
-        x, _ = torch.gesv(b, A)
+        x, _ = torch.solve(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
         self.assertEqual(x.data, cast(x_exp))
 
@@ -4682,34 +4682,34 @@ class _TestTorchMixin(object):
         b = cast(torch.randn(2, 1, 3, 6, 4)).transpose(-2, -1)
         assert not A.is_contiguous()
         assert not b.is_contiguous()
-        x, _ = torch.gesv(b, A)
+        x, _ = torch.solve(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
         self.assertEqual(x.data, cast(x_exp))
 
         # broadcasting b
         A = cast(random_fullrank_matrix_distinct_singular_value(4, 2, 1, 3))
         b = cast(torch.randn(4, 6))
-        x, _ = torch.gesv(b, A)
+        x, _ = torch.solve(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
         self.assertEqual(x.data, cast(x_exp))
 
         # broadcasting A
         A = cast(random_fullrank_matrix_distinct_singular_value(4))
         b = cast(torch.randn(2, 1, 3, 4, 2))
-        x, _ = torch.gesv(b, A)
+        x, _ = torch.solve(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
         self.assertEqual(x.data, cast(x_exp))
 
         # broadcasting both A & b
         A = cast(random_fullrank_matrix_distinct_singular_value(4, 1, 3, 1))
         b = cast(torch.randn(2, 1, 3, 4, 5))
-        x, _ = torch.gesv(b, A)
+        x, _ = torch.solve(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
         self.assertEqual(x.data, cast(x_exp))
 
     @skipIfNoLapack
-    def test_gesv_batched_dims(self):
-        self._test_gesv_batched_dims(self, lambda t: t)
+    def test_solve_batched_dims(self):
+        self._test_solve_batched_dims(self, lambda t: t)
 
     @skipIfNoLapack
     def test_qr(self):
