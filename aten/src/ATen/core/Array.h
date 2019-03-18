@@ -18,6 +18,10 @@ struct alignas(16) Array {
     return data[i];
   }
 
+  Array() = default;
+  Array(const Array&) = default;
+  Array& operator=(const Array&) = default;
+
   // Fill the array with x.
   C10_HOST_DEVICE Array(T x) {
     for (int i = 0; i < size; i++) {
