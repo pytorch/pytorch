@@ -338,7 +338,7 @@ class TestCppExtension(common.TestCase):
 
         torch::Tensor half_test(torch::Tensor input) {
             auto output = torch::empty(1, input.options().dtype(torch::kFloat));
-            AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "half_test", [&] {
+            AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "half_test", [&] {
                 half_test_kernel<scalar_t><<<1, 1>>>(
                     input.data<scalar_t>(),
                     output.data<float>());
@@ -639,6 +639,7 @@ class TestMSNPUTensor(common.TestCase):
         self.assertEqual(a.sum(), 0)
 
         b = torch.zeros(5, 5, device='msnpu')
+        self.assertEqual(b.device, torch.device('msnpu', 1))
         self.assertEqual(msnpu_extension.get_test_int(), 0)
         self.assertEqual(torch.get_default_dtype(), b.dtype)
 

@@ -81,8 +81,8 @@ struct const_value_list_with_types {
   std::string delim;
   const_value_list_with_types(
       ArrayRef<const Value*> values,
-      const std::string& delim = ", ")
-      : values(values), delim(delim) {}
+      std::string delim_ = ", ")
+      : values(values), delim(std::move(delim_)) {}
 };
 
 std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
@@ -290,13 +290,15 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
 
 std::ostream& Graph::prettyPrint(std::ostream& out) {
   std::vector<at::Tensor> tensor_table;
-  PythonPrint(out, *this, tensor_table);
+  std::vector<ClassTypePtr> class_table;
+  PythonPrint(out, *this, tensor_table, class_table);
   return out;
 }
 
 void Graph::dumpPretty() {
   std::vector<at::Tensor> tensor_table;
-  PythonPrint(std::cout, *this, tensor_table);
+  std::vector<ClassTypePtr> class_table;
+  PythonPrint(std::cout, *this, tensor_table, class_table);
 }
 
 static void checkSameDevice(const Node* node) {
@@ -805,19 +807,19 @@ bool Node::isNondeterministic() const {
       "aten::poisson(Tensor self, Generator? generator) -> Tensor",
       "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
-      "aten::rand(int[] size, *, int dtype, int layout, Device device) -> Tensor",
+      "aten::rand(int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
       "aten::rand_like(Tensor self) -> Tensor",
       "aten::rand_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
-      "aten::randint(int high, int[] size, *, int dtype, int layout, Device device) -> Tensor",
-      "aten::randint(int low, int high, int[] size, *, int dtype, int layout, Device device) -> Tensor",
+      "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
+      "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
       "aten::randint_like(Tensor self, int high) -> Tensor",
       "aten::randint_like(Tensor self, int low, int high) -> Tensor",
       "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device) -> Tensor",
       "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device) -> Tensor",
-      "aten::randn(int[] size, *, int dtype, int layout, Device device) -> Tensor",
+      "aten::randn(int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
       "aten::randn_like(Tensor self) -> Tensor",
       "aten::randn_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
-      "aten::randperm(int n, *, int dtype, int layout, Device device) -> Tensor"};
+      "aten::randperm(int n, *, int? dtype, int? layout, Device? device) -> Tensor"};
 
   if (nondeterministic_ops.find(this) == nullptr) {
     return false;
@@ -836,6 +838,7 @@ bool Node::hasSideEffects() const {
     case prim::IgnoredPythonOp:
     case prim::Print:
     case prim::RaiseException:
+    case prim::SetAttr:
     case aten::warn:
       return true;
   }
@@ -1193,8 +1196,8 @@ Node* Graph::create(
   return n;
 }
 
-Node* Graph::createUndefined() {
-  return create(prim::Undefined);
+Node* Graph::createAutogradZero() {
+  return create(prim::AutogradZero);
 }
 
 Node* Graph::createNone(TypePtr typ) {
@@ -1306,6 +1309,32 @@ Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
   auto* result = create(prim::ImplicitTensorToNum, {value});
   result->output()->setType(type);
   return result;
+}
+
+Node* Graph::createObject(const ClassTypePtr& type) {
+  auto result = create(prim::CreateObject);
+  result->output()->setType(type);
+  return result;
+}
+
+Node* Graph::createSetAttr(
+    Value* obj,
+    const std::string& field,
+    Value* newValue) {
+  auto n = create(prim::SetAttr, {obj, newValue}, /*num_outputs=*/0);
+  n->s_(attr::name, field);
+  return n;
+}
+
+Node* Graph::createGetAttr(Value* obj, const std::string& field) {
+  const auto classType = obj->type()->expect<ClassType>();
+
+  auto n = create(prim::GetAttr, {obj}, /*num_outputs=*/1);
+  n->s_(attr::name, field);
+
+  const auto outputType = classType->getAttribute(field);
+  n->output()->setType(outputType);
+  return n;
 }
 
 Node* Graph::createClone(

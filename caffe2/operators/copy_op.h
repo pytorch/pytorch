@@ -29,8 +29,9 @@ class CopyOp : public Operator<Context> {
 template <class Context, class DstContext, class SrcContext>
 class CopyOnDeviceLikeOp : public CopyOp<Context, DstContext, SrcContext> {
  public:
-  CopyOnDeviceLikeOp(const OperatorDef& operator_def, Workspace* ws)
-      : CopyOp<Context, DstContext, SrcContext>(operator_def, ws) {}
+  template <class... Args>
+  explicit CopyOnDeviceLikeOp(Args&&... args)
+      : CopyOp<Context, DstContext, SrcContext>(std::forward<Args>(args)...) {}
 };
 
 } // namespace caffe2

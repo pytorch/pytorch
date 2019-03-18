@@ -18,8 +18,9 @@ class GroupNormOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  GroupNormOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit GroupNormOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "group", group_, 32),
         OP_SINGLE_ARG(float, "epsilon", epsilon_, 1e-5),
         order_(StringToStorageOrder(
@@ -195,8 +196,9 @@ class GroupNormGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  GroupNormGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit GroupNormGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "group", group_, 32),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<std::string>("order", "NCHW"))) {

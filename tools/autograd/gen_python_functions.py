@@ -27,7 +27,7 @@ SKIP_PYTHON_BINDINGS = [
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
     'arange.*', 'range.*', '_gesv.*', '_getri.*', '_inverse.*',
-    '_potrs.*', '_cholesky.*',
+    '_potrs.*', '_cholesky.*', '_btrifact.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense',
     'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to',
@@ -127,6 +127,7 @@ static PyTypeObject type${namedtuple_type_index};
 static bool namedtuple_type_initialized${namedtuple_type_index} = false;
 if (!namedtuple_type_initialized${namedtuple_type_index}) {
   PyStructSequence_InitType(&type${namedtuple_type_index}, &desc${namedtuple_type_index});
+  type${namedtuple_type_index}.tp_repr = (reprfunc)torch::utils::returned_structseq_repr;
   namedtuple_type_initialized${namedtuple_type_index} = true;
 }
 """)
@@ -891,7 +892,14 @@ def get_python_signature(declaration, include_out):
             typename = 'TensorList[{}]'.format(len(typenames))
         else:
             typename = typenames[0]
-        py_formal_args.append(typename + ' out=None')
+        if len(output_args) == 1:
+            # The nn module bindings are often not exposed to the user directly
+            # but via torch.nn modules and functionals.
+            py_formal_args.append(typename + ' ' + output_args[0]['name'] + '=None')
+        else:
+            # NB: For more than 1 output args the type name is a TensorList
+            # and as such we don't (yet) need to consider the naming.
+            py_formal_args.append(typename + ' out=None')
 
     # we could put this in the loop above but we want to ensure both type dispatched args
     # and python binding arguments are after the out argument; this matches the case

@@ -51,7 +51,7 @@ struct function_traits<Result (Args...)> {
 
 template <typename Functor>
 struct infer_function_traits {
-  using type = function_traits<detail::strip_class_t<decltype(&Functor::operator())>>;
+  using type = function_traits<c10::guts::detail::strip_class_t<decltype(&Functor::operator())>>;
 };
 
 template <typename Result, typename... Args>

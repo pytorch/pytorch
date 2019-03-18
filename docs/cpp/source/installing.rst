@@ -124,6 +124,11 @@ should now merrily print the tensor (exact output subject to randomness):
   0.2063  0.6593  0.0866
   0.0796  0.5841  0.1569
   [ Variable[CPUFloatType]{2,3} ]
+  
+.. tip::
+  On Windows, debug and release builds are not ABI-compatible. If you plan to
+  build your project in debug mode, we recommend
+  `building PyTorch from source <https://github.com/pytorch/pytorch#from-source>`_.
 
 Support
 -------

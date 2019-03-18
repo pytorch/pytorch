@@ -93,7 +93,7 @@ std::vector<::ONNX_NAMESPACE::ValueInfoProto> convertToValueInfo(
 // conversion \param initialization_list [out] weights that needs to be offload
 // to backend \param total_inputs_vec [out] total #inputs of the net that
 // doesn't have a producer
-void GetWeightsAndInputs(
+void getWeightsAndInputs(
     const NetDef& net,
     const std::unordered_set<std::string>& weights_in_ws,
     const std::vector<std::string>& extra_weights,
@@ -134,7 +134,32 @@ void GetWeightsAndInputs(
   }
 }
 
-void FillModelInfo(::ONNX_NAMESPACE::ModelProto* model) {
+void unrollIfOps(NetDef* net) {
+  NetDef clone(*net);
+  clone.clear_op();
+  for (const auto& op : net->op()) {
+    if (op.type() == "If") {
+      ArgumentHelper helper(op);
+      if (helper.HasSingleArgumentOfType<NetDef>("then_net")) {
+        auto then_net = helper.GetSingleArgument<NetDef>("then_net", NetDef());
+        for (const auto& nested_op : then_net.op()) {
+          clone.add_op()->CopyFrom(nested_op);
+        }
+      }
+      if (helper.HasSingleArgumentOfType<NetDef>("else_net")) {
+        auto else_net = helper.GetSingleArgument<NetDef>("else_net", NetDef());
+        for (const auto& nested_op : else_net.op()) {
+          clone.add_op()->CopyFrom(nested_op);
+        }
+      }
+    } else {
+      clone.add_op()->CopyFrom(op);
+    }
+  }
+  net->Swap(&clone);
+}
+
+void fillModelInfo(::ONNX_NAMESPACE::ModelProto* model) {
   model->set_ir_version(::ONNX_NAMESPACE::Version::IR_VERSION);
   model->set_producer_name("caffe2");
   auto* opset_id = model->add_opset_import();
@@ -357,7 +382,6 @@ OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
   initializers_arg->set_name("initializers");
   for (const auto& s : initialization_list) {
     initializers_arg->add_strings(s);
-    initializers_arg->add_strings(input_mapping_.at(s));
   }
 
   // Add the input/output
@@ -410,6 +434,14 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
     const caffe2::NetDef& net,
     const std::unordered_set<std::string>& weights_in_ws,
     const ShapeInfoMap& shape_hints) {
+  int onnxifi_op_id = onnxifi_op_id_;
+  if (opts_.debug) {
+    WriteProtoToTextFile(
+        net, "debug_original_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt");
+  }
+  if (opts_.min_ops > net.op_size()) {
+    return net;
+  }
   // We already have all the ops and external inputs and outputs!
   NetDef onnxifi_net(net);
 
@@ -438,13 +470,16 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   // names for external_inputs/outputs and input_shape_info for the onnxifi_net.
   vector<OperatorDef> input_ops;
   vector<OperatorDef> output_ops;
-  auto renaming_map =
-      AddAdjustBatchOps(shape_hints, &onnxifi_net, &input_ops, &output_ops);
+  std::unordered_map<std::string, std::string> renaming_map;
+  if (opts_.add_adjust_batch_ops) {
+    renaming_map =
+        AddAdjustBatchOps(shape_hints, &onnxifi_net, &input_ops, &output_ops);
+  }
 
   // Figure out weights and add it to external_inputs too
   std::unordered_set<std::string> initialization_list;
   std::vector<std::string> total_inputs_vec;
-  GetWeightsAndInputs(
+  getWeightsAndInputs(
       net,
       weights_in_ws,
       std::vector<std::string>(),
@@ -499,14 +534,11 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   // Debugging stuff
   if (opts_.debug) {
     WriteProtoToTextFile(
-        net,
-        "debug_original_net_" + c10::to_string(onnxifi_op_id_) + ".pb_txt");
-    WriteProtoToTextFile(
         onnxifi_net,
-        "debug_onnxifi_net_" + c10::to_string(onnxifi_op_id_) + ".pb_txt");
+        "debug_onnxifi_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt");
     WriteProtoToTextFile(
         net_opt,
-        "debug_optimized_net_" + c10::to_string(onnxifi_op_id_) + ".pb_txt");
+        "debug_optimized_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt");
   }
   return net_opt;
 }
@@ -517,8 +549,11 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
     Workspace* ws,
     onnx::OnnxExporter* exporter,
     ShapeInfoMap* shape_hints) {
+  if (opts_.min_ops > net.op_size()) {
+    return net;
+  }
   ::ONNX_NAMESPACE::ModelProto onnx_model;
-  FillModelInfo(&onnx_model);
+  fillModelInfo(&onnx_model);
 
   caffe2::NetDef onnxifi_net(net);
   vector<OperatorDef> input_ops;
@@ -576,9 +611,6 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
 
       // Add mappings
       extra_weights.emplace_back(t.name());
-      CAFFE_ENFORCE(
-          input_mapping_.emplace(t.name(), t.name()).second,
-          c10::str("Tensor ", t.name(), " already exists in the workspace"));
     }
   }
 
@@ -611,7 +643,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
   // Convert inputs and figure out weights
   std::unordered_set<std::string> initialization_list;
   std::vector<std::string> onnxifi_net_inputs;
-  GetWeightsAndInputs(
+  getWeightsAndInputs(
       net,
       weights_in_ws,
       extra_weights,
@@ -672,7 +704,7 @@ bool OnnxifiTransformer::supportOpOnnx(
     }
 
     ::ONNX_NAMESPACE::ModelProto onnx_model;
-    FillModelInfo(&onnx_model);
+    fillModelInfo(&onnx_model);
     auto results = exporter->Caffe2OpToOnnxNodes(op, shape_hints_onnx_);
     std::unordered_set<std::string> used_inputs;
     std::unordered_set<std::string> used_outputs;
@@ -943,19 +975,40 @@ void OnnxifiTransformer::transform(
   model_id_ = getModelId(*pred_net);
   onnxifi_op_id_ = 0;
 
+  // Unroll If ops
+  unrollIfOps(pred_net);
+
   std::unordered_set<std::string> weights(
       weight_names.begin(), weight_names.end());
 
   // SSA Rewrite the net
   auto shape_hints_mapped =
-      ssaRewriteAndMapNames(ws, pred_net, weights, input_shape_hints);
+      ssaRewriteAndMapNames(ws, pred_net, input_shape_hints);
 
   // Populate shape info
+  // TODO(yingz): We should not need to create mapped_ws since we did not change
+  // any input mappings during ssarewrite. However this is here for the
+  // following reason: BlackBoxPredictor calls RunNetOnce before onnxifi to
+  // populate dimension info. However during this, it was observed, that new
+  // blob for output is created. This causes problem if inferShape uses original
+  // ws since it does not expect the output blob to be present.
   Workspace mapped_ws(ws, input_mapping_);
   ShapeInfoMap shape_hints = inferShapes(
       &mapped_ws, pred_net, shape_hints_mapped, opts_.bound_shape_spec);
   if (opts_.use_onnx) {
     shape_hints_onnx_ = stripShapeInfoMap(shape_hints);
+  }
+
+  if (opts_.debug) {
+    NetDef shape_net(*pred_net);
+    auto* shape_arg = shape_net.add_arg();
+    shape_arg->set_name("shape_info");
+    for (const auto& kv : shape_hints) {
+      auto t = wrapShapeInfoIntoTensorProto(kv.first, kv.second);
+      t.add_int32_data(static_cast<int32_t>(kv.second.dim_type));
+      shape_arg->mutable_tensors()->Add()->CopyFrom(t);
+    }
+    WriteProtoToTextFile(shape_net, "debug_ssa_net.pb_txt");
   }
 
   // Get backend id
@@ -976,7 +1029,6 @@ void OnnxifiTransformer::transform(
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());
 
   if (opts_.debug) {
-    WriteProtoToTextFile(*pred_net, "debug_full_pred_net.pb_txt");
     WriteProtoToTextFile(net_opt, "debug_full_opt_net.pb_txt");
   }
   pred_net->Swap(&net_opt);

@@ -13,15 +13,6 @@
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 
-namespace c10 {
-
-#if defined(__CUDACC__) || defined(__HIP_PLATFORM_HCC__)
-template <>
-struct CTypeToScalarType<__half> : public CTypeToScalarType<Half> {};
-#endif
-
-}
-
 THC_API THCStorage* THCStorage_new(THCState* state, caffe2::TypeMeta);
 
 THC_API void THCStorage_retain(THCState *state, THCStorage *storage);

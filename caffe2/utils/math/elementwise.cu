@@ -34,7 +34,7 @@ __global__ void SinCosCUDAKernel(const int N, const T* X, T* S, T* C) {
 #define CAFFE2_SPECIALIZED_CUDA_SET(T)                                    \
   template <>                                                             \
   CAFFE2_CUDA_EXPORT void Set<T, CUDAContext>(                            \
-      const int N, const T alpha, T* Y, CUDAContext* context) {           \
+      const std::int64_t N, const T alpha, T* Y, CUDAContext* context) {  \
     if (N == 0) {                                                         \
       return;                                                             \
     }                                                                     \

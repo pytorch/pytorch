@@ -100,12 +100,18 @@ class SubsetRandomSampler(Sampler):
 class WeightedRandomSampler(Sampler):
     r"""Samples elements from [0,..,len(weights)-1] with given probabilities (weights).
 
-    Arguments:
+    Args:
         weights (sequence)   : a sequence of weights, not necessary summing up to one
         num_samples (int): number of samples to draw
         replacement (bool): if ``True``, samples are drawn with replacement.
             If not, they are drawn without replacement, which means that when a
             sample index is drawn for a row, it cannot be drawn again for that row.
+
+    Example:
+        >>> list(WeightedRandomSampler([0.1, 0.9, 0.4, 0.7, 3.0, 0.6], 5, replacement=True))
+        [0, 0, 0, 1, 0]
+        >>> list(WeightedRandomSampler([0.9, 0.4, 0.05, 0.2, 0.3, 0.1], 5, replacement=False))
+        [0, 1, 4, 3, 2]
     """
 
     def __init__(self, weights, num_samples, replacement=True):

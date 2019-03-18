@@ -289,6 +289,7 @@ class TestSparse(TestCase):
         a_coalesced = a.coalesce()
         self.assertTrue(a_coalesced.is_coalesced())
         self.assertEqual(self.value_tensor(12.3), a.to_dense())
+        self.assertEqual(a, a.to_dense().to_sparse())
 
         # tensor with multiple values
         a = self.sparse_tensor(self.index_tensor([]).unsqueeze(1).expand(0, 2), [12.3, 12.3], [])
@@ -297,6 +298,7 @@ class TestSparse(TestCase):
         a_coalesced = a.coalesce()
         self.assertTrue(a_coalesced.is_coalesced())
         self.assertEqual(self.value_tensor(12.3 * 2), a.to_dense())
+        self.assertEqual(a, a.to_dense().to_sparse())
 
         # tensor without value
         a = self.sparse_empty(())
@@ -305,6 +307,7 @@ class TestSparse(TestCase):
         a_coalesced = a.coalesce()
         self.assertTrue(a_coalesced.is_coalesced())
         self.assertEqual(self.value_tensor(0), a.to_dense())
+        self.assertEqual(a, a.to_dense().to_sparse())
 
     def test_shared(self):
         i = self.index_tensor([[2]])
@@ -758,7 +761,7 @@ class TestSparse(TestCase):
         def test_shape(sparse_dims, nnz, sizes, unsqueeze_dim, fail_message=None):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
             if fail_message:
-                with self.assertRaisesRegex(RuntimeError, fail_message):
+                with self.assertRaisesRegex(IndexError, fail_message):
                     torch.unsqueeze(x, unsqueeze_dim)
             else:
                 result = torch.unsqueeze(x, unsqueeze_dim)
@@ -1033,8 +1036,10 @@ class TestSparse(TestCase):
         S = self._gen_sparse(sparse_dims, nnz, with_size)[0]
         self.assertRaises(RuntimeError, lambda: S.sum())
 
-        # raise for incorrect input dims
-        self.assertRaises(RuntimeError, lambda: torch.sparse.sum(S, 5))
+        # dim out of range
+        self.assertRaises(IndexError, lambda: torch.sparse.sum(S, 5))
+
+        # dim 0 appears multiple times in the list of dims
         self.assertRaises(RuntimeError, lambda: torch.sparse.sum(S, [0, 0]))
 
         # sum an empty tensor

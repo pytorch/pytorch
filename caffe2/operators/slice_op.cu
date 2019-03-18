@@ -235,8 +235,8 @@ template<>
 class SliceOp<CUDAContext> : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  SliceOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws),
+  template<class... Args> explicit SliceOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...),
         starts_(this->template GetRepeatedArgument<int64_t>("starts")),
         ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
@@ -296,8 +296,8 @@ template <>
 class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  SliceGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws),
+  template<class... Args> explicit SliceGradientOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...),
         starts_(this->template GetRepeatedArgument<int64_t>("starts")),
         ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}

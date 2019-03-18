@@ -15,7 +15,7 @@ template <typename T>
 class EigenConvOp final : public ConvPoolOpBase<CPUContext> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(CPUContext);
-  EigenConvOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit EigenConvOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext>(operator_def, ws) {
     OPERATOR_NEEDS_FEATURE(group_ == 1, "Group convolution not supported yet.");
   }
