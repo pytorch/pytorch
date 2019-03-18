@@ -397,15 +397,9 @@ void THBlas_(gemm)(
           }
         }
       }
-      // #pragma omp parallel for
       int64_t l;
-      // #pragma omp parallel for if(k > TH_OMP_OVERHEAD_THRESHOLD) private(l)
-//       #pragma omp parallel for private(l)
-//       #pragma omp parallel for shared(c, a, b)
-
       for (l = 0; l < k; l++) {
         for (int64_t j = 0; j < n; j++) {
-//           scalar_t val = b[l + j * ldb] * alpha;
           int64_t i_m = m / 4;
           int64_t i_i;
 	      #pragma omp parallel for shared(c, a, b, alpha, lda, ldb, ldc, m, j, l, i_m) private(i_i)
@@ -428,10 +422,7 @@ void THBlas_(gemm)(
     }
     else if(transa_ && !transb_)
     {
-      // #pragma omp parallel for
       int64_t i;
-      // #pragma omp parallel for if(m > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-      // #pragma omp parallel for private(i)
       #pragma omp parallel for shared(c, a, b)
       for(i = 0; i < m; i++)
       {
@@ -465,11 +456,7 @@ void THBlas_(gemm)(
           }
         }
       }
-      // #pragma omp parallel for
       int64_t i, j, l;
-      // #pragma omp parallel for if(k > TH_OMP_OVERHEAD_THRESHOLD) private(l)
-      // #pragma omp parallel for private(l)
-//       #pragma omp parallel for shared(c, a, b) private(i, j, l)
       for (l = 0; l < k; l++) {
         for (j = 0; j < n; j++) {
           int64_t i_m = m / 4;
@@ -487,9 +474,6 @@ void THBlas_(gemm)(
           }
           int64_t i = i_m * 4;
           for (; i < m; i++)
-
-//           #pragma omp parallel for shared(c, a, b, alpha, lda, ldb, ldc, m, j, l) private(i)
-//           for (i = 0; i < m; i++)
             c[j * ldc + i] += a[i + l * lda] * b[j + l * ldb] * alpha;
         }
       }
@@ -504,9 +488,7 @@ void THBlas_(gemm)(
             c[j * ldc + i] *= beta;
         }
       }
-      // #pragma omp parallel for
       int64_t i;
-      // #pragma omp parallel for if(m > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       #pragma omp parallel for shared(c, a, b)
       for (i = 0; i < m; i++) {
         for (int64_t j = 0; j < n; j++) {
