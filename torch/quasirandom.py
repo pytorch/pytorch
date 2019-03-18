@@ -46,28 +46,23 @@ class SobolEngine(object):
         self.dimension = dimension
         self.device = device
 
-        self.sobolstate = torch.zeros(dimension, self.MAXBIT).to(dtype=torch.long, device=self.device)
-        self.sobolstate = torch._sobol_engine_initialize_state(self.sobolstate, self.dimension)
+        self.sobolstate = torch.zeros(dimension, self.MAXBIT, dtype=torch.long, device=self.device)
+        torch._sobol_engine_initialize_state_(self.sobolstate, self.dimension)
 
         if self.scramble:
             g = torch.Generator()
             if self.seed is not None:
                 g.manual_seed(self.seed)
 
-            self.shift = torch.mv(torch.randint(2, (self.dimension, self.MAXBIT), dtype=torch.float, generator=g),
-                                  torch.pow(2, torch.arange(0, self.MAXBIT, dtype=torch.float)))
-            self.shift = self.shift.to(dtype=torch.long, device=self.device)
+            self.shift = torch.mv(torch.randint(2, (self.dimension, self.MAXBIT), device=self.device, generator=g),
+                                  torch.pow(2, torch.arange(0, self.MAXBIT, device=self.device)))
 
-            # TODO: can be replaced with torch.tril(torch.randint(2, (dimension, MAXBIT, MAXBIT)))
-            #       once a batched version is introduced
             ltm = torch.randint(2, (self.dimension, self.MAXBIT, self.MAXBIT),
-                                generator=g).to(device=self.device)
-            tril_mask = torch.ones(self.MAXBIT, self.MAXBIT).byte().triu(1).expand_as(ltm)
-            ltm.masked_fill_(tril_mask, 0)
+                                generator=g, device=self.device).tril()
 
-            self.sobolstate = torch._sobol_engine_scramble(self.sobolstate, ltm, self.dimension)
+            torch._sobol_engine_scramble_(self.sobolstate, ltm, self.dimension)
         else:
-            self.shift = torch.zeros(self.dimension).to(dtype=torch.long, device=self.device)
+            self.shift = torch.zeros(self.dimension, dtype=torch.long, device=self.device)
 
         self.quasi = self.shift.clone()
         self.num_generated = 0
@@ -101,7 +96,7 @@ class SobolEngine(object):
         Args:
             n (Int): The number of steps to fast-forward by.
         """
-        self.quasi = torch._sobol_engine_ff(self.quasi, n, self.sobolstate, self.dimension, self.num_generated)
+        torch._sobol_engine_ff_(self.quasi, n, self.sobolstate, self.dimension, self.num_generated)
         self.num_generated += n
         return self
 

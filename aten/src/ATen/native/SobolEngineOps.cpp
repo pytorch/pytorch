@@ -41,7 +41,7 @@ std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, co
 /// its state variables (`sobolstate` and `quasi`). `dimension` can be
 /// inferred from `sobolstate`, but is passed as an argument for the same reasons
 /// specified above.
-Tensor _sobol_engine_ff(const Tensor& quasi, int64_t n, const Tensor& sobolstate,
+Tensor& _sobol_engine_ff_(Tensor& quasi, int64_t n, const Tensor& sobolstate,
                         int64_t dimension, int64_t num_generated) {
   AT_CHECK(sobolstate.dtype() == at::kLong,
            "sobolstate needs to be of type ", at::kLong);
@@ -51,28 +51,25 @@ Tensor _sobol_engine_ff(const Tensor& quasi, int64_t n, const Tensor& sobolstate
   /// Performing one `unbind` operation and caching the result to prevent `n`
   /// `select` operations.
   std::vector<Tensor> sobolstate_unbind = at::native::unbind(sobolstate, 1);
-  Tensor wquasi = quasi.clone();
 
   for (int64_t i = 0; i < n; ++i) {
     int64_t l = rightmost_zero(num_generated);
-    wquasi.__ixor__(sobolstate_unbind[l]);
+    quasi.__ixor__(sobolstate_unbind[l]);
     num_generated++;
   }
-  return wquasi;
+  return quasi;
 }
 
 /// This is an implicit function used for randomizing the state variables of the.
 /// `SobolEngine`. Arguments are a randomized `sobolstate` state variables
 /// and a list of random lower triangular matrices consisting of 0s and 1s. `dimension` is
 /// passed explicitly again.
-Tensor _sobol_engine_scramble(const Tensor& sobolstate, const Tensor& ltm, int64_t dimension) {
+Tensor& _sobol_engine_scramble_(Tensor& sobolstate, const Tensor& ltm, int64_t dimension) {
   AT_CHECK(sobolstate.dtype() == at::kLong,
            "sobolstate needs to be of type ", at::kLong);
 
-  Tensor wsobolstate = sobolstate.clone();
-
   /// Require a tensor accessor for `sobolstate`
-  auto ss_a = wsobolstate.accessor<int64_t, 2>();
+  auto ss_a = sobolstate.accessor<int64_t, 2>();
 
   /// For every tensor in the list of tensors, the diagonals are made 1
   /// Require a dot product of every row with a specific vector of each of the matrices in `ltm`.
@@ -101,22 +98,20 @@ Tensor _sobol_engine_scramble(const Tensor& sobolstate, const Tensor& ltm, int64
       ss_a[d][j] = t2;
     }
   }
-  return wsobolstate;
+  return sobolstate;
 }
 
 /// This is a core function to initialize the main state variable of a `SobolEngine`.
 /// `dimension` is passed explicitly as well (see why above)
-Tensor _sobol_engine_initialize_state(const Tensor& sobolstate, int64_t dimension) {
+Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
   AT_CHECK(sobolstate.dtype() == at::kLong,
            "sobolstate needs to be of type ", at::kLong);
 
-  Tensor wsobolstate = sobolstate.clone();
-
   /// First row of `sobolstate` is 1
-  wsobolstate.select(0, 0).fill_(1);
+  sobolstate.select(0, 0).fill_(1);
 
   /// Use a tensor accessor for `sobolstate`
-  auto ss_a = wsobolstate.accessor<int64_t, 2>();
+  auto ss_a = sobolstate.accessor<int64_t, 2>();
   for (int64_t d = 0; d < dimension; ++d) {
     int p = poly[d];
     int m = bit_length(p) - 1;
@@ -138,9 +133,9 @@ Tensor _sobol_engine_initialize_state(const Tensor& sobolstate, int64_t dimensio
     }
   }
 
-  Tensor pow2s = at::pow(2, at::native::arange((MAXBIT - 1), -1, -1, wsobolstate.options()));
-  wsobolstate.mul_(pow2s);
-  return wsobolstate;
+  Tensor pow2s = at::pow(2, at::native::arange((MAXBIT - 1), -1, -1, sobolstate.options()));
+  sobolstate.mul_(pow2s);
+  return sobolstate;
 }
 
 } // namespace native
