@@ -328,13 +328,6 @@ struct C10_API TensorOptions {
     return at::tensorTypeIdToBackend(computeTensorTypeId());
   }
 
-  // This is intended to be a centralized location by which we can determine
-  // what an appropriate TensorTypeId for a tensor is.
-  //
-  // This takes a TensorOptions, rather than just a DeviceType and Layout, because
-  // we reserve the right to change dispatch based on *any* aspect of
-  // TensorOptions.  WARNING: If you do this, you need to fix the calls
-  // to computeTensorTypeId in caffe2/tensor.h
   inline TensorTypeId computeTensorTypeId() const {
     switch (layout()) {
       case Layout::Strided:
