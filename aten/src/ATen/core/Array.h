@@ -5,7 +5,7 @@
 
 #include <c10/macros/Macros.h>
 
-namespace at { namespace cuda {
+namespace at { namespace detail {
 
 template <typename T, int size>
 struct alignas(16) Array {
