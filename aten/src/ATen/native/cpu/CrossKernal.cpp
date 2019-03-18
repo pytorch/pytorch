@@ -32,9 +32,9 @@ static void apply_cross(Tensor& result, const Tensor& a, const Tensor& b, const 
     }
 
     while (s < e) {
-      r_ptr[start] = a_ptr[start+a_stride]*b_ptr[start+2*b_stride] - a_ptr[start+2*a_stride]*b_ptr[start+b_stride];
-      r_ptr[start+r_stride] = a_ptr[start+2*a_stride]*b_ptr[start] - a_ptr[start]*b_ptr[start+2*b_stride];
-      r_ptr[start+2*r_stride] = a_ptr[start]*b_ptr[start+b_stride] - a_ptr[start+a_stride]*b_ptr[start];
+      r_ptr[start+0*r_stride] = a_ptr[start+1*a_stride]*b_ptr[start+2*b_stride] - a_ptr[start+2*a_stride]*b_ptr[start+1*b_stride];
+      r_ptr[start+1*r_stride] = a_ptr[start+2*a_stride]*b_ptr[start+0*b_stride] - a_ptr[start+0*a_stride]*b_ptr[start+2*b_stride];
+      r_ptr[start+2*r_stride] = a_ptr[start+0*a_stride]*b_ptr[start+1*b_stride] - a_ptr[start+1*a_stride]*b_ptr[start+0*b_stride];
       s++;
 
       for (int i = 0; i < a.dim(); i++) {

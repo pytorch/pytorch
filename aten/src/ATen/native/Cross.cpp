@@ -58,7 +58,7 @@ Tensor & cross_out(Tensor & out, const Tensor & input, const Tensor & other, con
   AT_CHECK(dim >= 0 && dim < input.dim(), "dimension ", dim, " out of range");
   AT_CHECK(input.size(dim) == 3, "dimension ", dim, " does not have size 3");
 
-  cross_stub(device1, out, input, other, dim);
+  cross_stub(device1, out, input.contiguous(), other.contiguous(), dim);
   return out;
 }
 
