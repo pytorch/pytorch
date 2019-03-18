@@ -406,9 +406,9 @@ void THBlas_(gemm)(
       for (l = 0; l < k; l++) {
         for (int64_t j = 0; j < n; j++) {
           scalar_t val = b[l + j * ldb] * alpha;
-          int64_t i_m = m / 4;
+          int64_t i_i;
 	      #pragma omp parallel for shared(c, a, b, alpha, lda, ldb, ldc, m, j, l, i_m) private(i_i)
-          for (int64_t i_i = 0; i_i < i_m; i_i++) {
+          for (i_i = 0; i_i < i_m; i_i++) {
               c[j * ldc + i_i * 4 + 0] += a[i_i * 4 + 0 + l * lda] * val;
               c[j * ldc + i_i * 4 + 1] += a[i_i * 4 + 1 + l * lda] * val;
               c[j * ldc + i_i * 4 + 2] += a[i_i * 4 + 2 + l * lda] * val;
