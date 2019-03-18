@@ -19,6 +19,9 @@
 #include "caffe2/core/hip/miopen_wrapper.h"
 #include "caffe2/operators/conv_op.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/core/operator.h"
+#include "caffe2/core/tensor.h"
+#include "caffe2/core/types.h"
 
 namespace caffe2 {
 
