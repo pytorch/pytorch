@@ -1671,60 +1671,82 @@ class _TestTorchMixin(object):
         self._test_remainder_overflow(self, dtype=torch.int64, device='cpu')
 
     def test_mm(self):
-        # helper function
-        def matrixmultiply(mat1, mat2):
-            n = mat1.size(0)
-            m = mat1.size(1)
-            p = mat2.size(1)
-            res = torch.zeros(n, p)
-            for i, j in iter_indices(res):
-                res[i, j] = sum(mat1[i, k] * mat2[k, j] for k in range(m))
-            return res
+        def _test_mm(n, m, p, dtype, genf):
+            # helper function
+            def matrixmultiply(mat1, mat2):
+                n = mat1.size(0)
+                m = mat1.size(1)
+                p = mat2.size(1)
+                res = torch.zeros(n, p, dtype=dtype)
+                for i, j in iter_indices(res):
+                    res[i, j] = sum(mat1[i, k] * mat2[k, j] for k in range(m))
+                return res
 
-        # contiguous case
-        n, m, p = 10, 10, 5
-        mat1 = torch.randn(n, m)
-        mat2 = torch.randn(m, p)
-        res = torch.mm(mat1, mat2)
+            # contiguous case
+            mat1 = genf(n, m)
+            mat2 = genf(m, p)
+            res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1, mat2)
-        self.assertEqual(res, res2)
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
 
-        # non contiguous case 1
-        n, m, p = 10, 10, 5
-        mat1 = torch.randn(n, m)
-        mat2 = torch.randn(p, m).t()
-        res = torch.mm(mat1, mat2)
+            # non contiguous case 1
+            mat1 = genf(n, m)
+            mat2 = genf(p, m).t()
+            res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1, mat2)
-        self.assertEqual(res, res2)
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
 
-        # non contiguous case 2
-        n, m, p = 10, 10, 5
-        mat1 = torch.randn(m, n).t()
-        mat2 = torch.randn(m, p)
-        res = torch.mm(mat1, mat2)
+            # non contiguous case 2
+            mat1 = genf(m, n).t()
+            mat2 = genf(m, p)
+            res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1, mat2)
-        self.assertEqual(res, res2)
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
 
-        # non contiguous case 3
-        n, m, p = 10, 10, 5
-        mat1 = torch.randn(m, n).t()
-        mat2 = torch.randn(p, m).t()
-        res = torch.mm(mat1, mat2)
+            # non contiguous case 3
+            mat1 = genf(m, n).t()
+            mat2 = genf(p, m).t()
+            res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1, mat2)
-        self.assertEqual(res, res2)
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
 
-        # test with zero stride
-        n, m, p = 10, 10, 5
-        mat1 = torch.randn(n, m)
-        mat2 = torch.randn(m, 1).expand(m, p)
-        res = torch.mm(mat1, mat2)
+            # test with zero stride
+            mat1 = genf(n, m)
+            mat2 = genf(m, 1).expand(m, p)
+            res = torch.mm(mat1, mat2)
 
-        res2 = matrixmultiply(mat1, mat2)
-        self.assertEqual(res, res2)
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
+
+            # explicitly exercise the _out variant in torch.mm().
+            # contiguous case
+            mat1 = genf(n, m)
+            mat2 = genf(m, p)
+            res = genf(n, p)
+            torch.mm(mat1, mat2, out=res)
+
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
+
+            # explicitly exercise the _out variant in torch.mm().
+            # non contiguous case 3
+            mat1 = genf(m, n).t()
+            mat2 = genf(p, m).t()
+            res = genf(n, p)
+            torch.mm(mat1, mat2, out=res)
+
+            res2 = matrixmultiply(mat1, mat2)
+            self.assertEqual(res, res2)
+
+        for (n, m, p) in [(20, 10, 5), (15, 5, 10), (5, 18, 10)]:
+            _test_mm(n, m, p, torch.float32, lambda x, y: torch.randn(x, y, dtype=torch.float32))
+            _test_mm(n, m, p, torch.float64, lambda x, y: torch.randn(x, y, dtype=torch.float64))
+            _test_mm(n, m, p, torch.int32, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int32))
+            _test_mm(n, m, p, torch.int64, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int64))
 
     @staticmethod
     def _test_btrifact(self, cast):
@@ -4444,6 +4466,7 @@ class _TestTorchMixin(object):
                 self.assertEqual(x.select(dim, i), res[i])
                 self.assertEqual(x.select(dim, i), res2[i])
 
+    @skipIfRocm
     def test_linspace(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -10438,6 +10461,65 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         expected = torch.empty(0, 2, dtype=a.dtype)
         self.assertEqual(c1, expected)
         self.assertEqual(c2, expected)
+
+    def test_has_internal_overlap(self):
+        OVERLAP_NO = 0
+        OVERLAP_YES = 1
+        OVERLAP_TOO_HARD = 2
+
+        # Check for contiguous tensors
+        a = torch.randn(3, 3)
+        self.assertEqual(torch._debug_has_internal_overlap(a), OVERLAP_NO)
+
+        # Checks for zero strides
+        b = torch.randn(1, 3)
+        b_expanded = b.expand(4, 3)
+        self.assertEqual(torch._debug_has_internal_overlap(b_expanded), OVERLAP_YES)
+
+    @staticmethod
+    def unary_check_mem_overlap(self, inplace_op, value=-0.5, device='cpu'):
+        tensor = torch.tensor(value, device=device).expand(3, 3)
+        with self.assertRaisesRegex(RuntimeError, 'single memory location'):
+            inplace_op(tensor)
+
+    @staticmethod
+    def _test_inplace_unary_mem_overlap(self, device='cpu'):
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.acos_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.asin_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.atan_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.ceil_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.cos_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.erf_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.erfc_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.exp_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.expm1_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.floor_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.log_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.log10_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.log1p_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.log2_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.round_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.rsqrt_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.sin_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.sqrt_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.tan_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.tanh_(), device=device)
+        TestTorch.unary_check_mem_overlap(self, lambda t: t.trunc_(), device=device)
+
+    def test_inplace_unary_mem_overlap(self):
+        return self._test_inplace_unary_mem_overlap(self)
+
+    @unittest.expectedFailure
+    def test_abs_unary_mem_overlap(self):
+        self.unary_check_mem_overlap(lambda t: t.abs_())
+
+    @unittest.expectedFailure
+    def test_sinh_unary_mem_overlap(self):
+        self.unary_check_mem_overlap(lambda t: t.sinh_())
+
+    @unittest.expectedFailure
+    def test_cosh_unary_mem_overlap(self):
+        self.unary_check_mem_overlap(lambda t: t.cosh_())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
     def test_reverse_binary_ops_multiple_device(self):

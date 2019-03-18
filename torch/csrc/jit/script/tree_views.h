@@ -109,6 +109,9 @@ struct TreeView {
   int kind() const {
     return tree_->kind();
   }
+  void dump() const {
+    std::cout << tree_;
+  }
 
  protected:
   const TreeRef& subtree(size_t i) const {

@@ -81,7 +81,7 @@ FunctionSchema createFunctionSchemaFromTraits(const std::string& name) {
       typename MakeIndices<FunctionTraits::number_of_parameters>::indices{});
   auto returns = createReturns(static_cast<ReturnType*>(nullptr));
 
-  return {name, arguments, returns};
+  return {name, "", arguments, returns};
 }
 
 /// Adds the elements of the `tuple` as input nodes to the traced graph.

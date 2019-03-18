@@ -51,18 +51,22 @@ struct CAFFE2_API List : c10::intrusive_ptr_target {
   static c10::intrusive_ptr<List<Elem>> create(std::vector<Elem> elements_) {
     return c10::make_intrusive<List<Elem>>(std::move(elements_));
   }
-  const std::vector<Elem>& elements() const {
+  const std::vector<Elem>& elements() const & {
     return elements_;
   }
   operator const std::vector<Elem>&() const {
     return elements();
   }
 
-  std::vector<Elem>& elements() {
+  std::vector<Elem>& elements() & {
     return elements_;
   }
   operator std::vector<Elem>&() {
     return elements();
+  }
+
+  std::vector<Elem>&& elements() && {
+    return std::move(elements_);
   }
 };
 

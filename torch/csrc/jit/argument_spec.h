@@ -77,7 +77,7 @@ struct ArgumentSpec {
     for (const auto& i : inputs) {
       addInput(i, offset, with_grad);
     }
-    AT_ASSERT(offset == num_flat_inputs);
+    AT_ASSERT(offset <= num_flat_inputs);
   }
 
   void addInput(const IValue& input, size_t& offset, bool with_grad) {

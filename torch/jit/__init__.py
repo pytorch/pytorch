@@ -540,7 +540,8 @@ def _check_trace(check_inputs, func, executor_options, module, check_tolerance, 
             has_warned[0] = True
             nondeterm_ops = [op for op in module.graph.nodes() if op.isNondeterministic()]
             if len(nondeterm_ops) > 0:
-                nondeterministic_ops_warning = "Trace had nondeterministic nodes. Nodes:\n"
+                nondeterministic_ops_warning = "Trace had nondeterministic nodes. "
+                nondeterministic_ops_warning += "Did you forget call .eval() on your model? Nodes:\n"
                 nondeterministic_ops_warning += "\n".join([indent(str(op)) for op in nondeterm_ops][:20])
                 nondeterministic_ops_warning += "\nThis may cause errors in trace checking. To disable trace checking,"\
                                                 " pass check_trace=False to torch.jit.trace()"
