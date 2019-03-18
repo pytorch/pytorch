@@ -131,8 +131,11 @@ void ScriptModuleDeserializer::deserialize(
   }
 
   loadTensorTable(&model_def);
-  loadAttributeTable();
-  loadLibs(&model_def);
+  if (model_def.proto_version() >= 2) {
+    loadAttributeTable();
+    loadLibs(&model_def);
+  }
+
   // TODO: this can be simplified when C++/Python interop lands,
   // and the submodules would be created as the same in either C++ or Python
   convertModule(module_def);
