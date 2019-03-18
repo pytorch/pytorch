@@ -36,7 +36,6 @@ struct CAFFE2_API ${Type} : public TypeDefault {
   Device getDeviceFromPtr(void * data) const override;
   std::unique_ptr<Generator> generator() const override;
   virtual Backend backend() const override;
-  virtual size_t elementSizeInBytes() const override;
 
   ${type_method_declarations}
 };
