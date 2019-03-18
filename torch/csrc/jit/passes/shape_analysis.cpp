@@ -49,15 +49,14 @@ bool isValidReturnForRunning(Value* v) {
 }
 
 bool containsTensorType(const TypePtr& t) {
-  if (t->isSubtypeOf(TensorType::get())) {
-    return true;
-  } else if (t->kind() == TypeKind::ListType) {
-    return containsTensorType(t->cast<ListType>()->getElementType());
-  } else if (t->kind() == TypeKind::TupleType) {
-    auto types = t->cast<TupleType>()->elements();
-    return std::any_of(types.begin(),
-                       types.end(),
-                       containsTensorType);
+  auto n_contained = t->containedTypes().size();
+  if (n_contained == 1) {
+    return t->containedTypes().at(0)->isSubtypeOf(TensorType::get());
+  } else if (n_contained > 1) {
+    return std::any_of(
+        t->containedTypes().begin(),
+        t->containedTypes().end(),
+        containsTensorType);
   }
   return false;
 }
@@ -316,7 +315,7 @@ class ShapePropagator {
   // we don't need to propagate shape.
   bool DoesntRefineOutputs(Node* node) {
     auto outputs = node->outputs();
-    for (auto& out: outputs) {
+    for (auto& out : outputs) {
       if (containsTensorType(out->type())) {
         return false;
       }
@@ -1104,26 +1103,25 @@ class ShapePropagator {
       at::optional<IValue> maybe_layout_option = node->get(attr::layout);
       if (!maybe_layout_option)
         return {};
-      auto layout = (maybe_layout_option->isNone()
-          ? at::kStrided
-          : maybe_layout_option->toLayout());
+      auto layout =
+          (maybe_layout_option->isNone() ? at::kStrided
+                                         : maybe_layout_option->toLayout());
 
       at::optional<IValue> maybe_device_option = node->get(attr::device);
       if (!maybe_device_option)
         return {};
-      auto device = (maybe_device_option->isNone()
-          ? at::kCPU
-          : maybe_device_option->toDevice());
+      auto device =
+          (maybe_device_option->isNone() ? at::kCPU
+                                         : maybe_device_option->toDevice());
 
       at::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
       if (!maybe_dtype_option)
         return {};
-      auto dtype = (maybe_dtype_option->isNone()
-          ? at::kFloat
-          : maybe_dtype_option->toScalarType());
+      auto dtype =
+          (maybe_dtype_option->isNone() ? at::kFloat
+                                        : maybe_dtype_option->toScalarType());
 
-      return {DimensionedTensorType::create(
-          dtype, device, dim)};
+      return {DimensionedTensorType::create(dtype, device, dim)};
     };
 
     // Requirements:
