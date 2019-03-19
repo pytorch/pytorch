@@ -123,7 +123,7 @@ class TestModels(TestCase):
     def test_inception(self):
         x = Variable(
             torch.randn(BATCH_SIZE, 3, 299, 299) + 3.)
-        self.exportTest(toC(inception_v3()), toC(x))
+        self.exportTest(toC(inception_v3()), toC(x), rtol=5e-2, atol=1e-6)
 
     def test_squeezenet(self):
         # SqueezeNet: AlexNet-level accuracy with 50x fewer parameters and
