@@ -12,7 +12,7 @@ from itertools import product, chain
 import torch.jit.frontend
 from torch.autograd import Variable, Function
 from torch.nn import Module
-from torch.autograd.function import traceable
+from torch.autograd.function import traceable, _nested_map
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2, builtins
@@ -21,7 +21,7 @@ from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     freeze_rng_state, set_rng_seed
 from common_nn import module_tests, new_module_tests, criterion_tests
 from textwrap import dedent
-from functools import wraps
+from functools import wraps, reduce
 import os
 import io
 import itertools
@@ -467,9 +467,21 @@ class JitTestCase(TestCase):
 
         nograd_inputs = reference_tensors
         if inputs_require_grads:
-            recording_inputs = [t.clone().requires_grad_() for t in reference_tensors]
+            recording_inputs = _nested_map(lambda t: isinstance(t, torch.Tensor),
+                                           lambda t: t.clone().requires_grad_())(reference_tensors)
         else:
             recording_inputs = reference_tensors
+
+        if inputs_require_grads:
+            def input_reduce(input, fn, acc):
+                if isinstance(input, torch.Tensor):
+                    fn(input, acc)
+                elif isinstance(input, dict):
+                    reduce(lambda acc, key: input_reduce(input[key], fn, acc), input, acc)
+                else:
+                    reduce(lambda acc, val: input_reduce(val, fn, acc), input, acc)
+                return acc
+            flattened_recording_inputs = tuple(input_reduce(recording_inputs, lambda t, acc: acc.append(t), []))
 
         if isinstance(func, torch._C.Graph):
             ge = torch._C.GraphExecutor(func, optimize)
@@ -491,12 +503,12 @@ class JitTestCase(TestCase):
         # test single grad case
         outputs = func(*recording_inputs)
         if inputs_require_grads:
-            grads = torch.autograd.grad(allSum(outputs), recording_inputs,
+            grads = torch.autograd.grad(allSum(outputs), flattened_recording_inputs,
                                         allow_unused=allow_unused)
 
         outputs_ge = ge(*recording_inputs)
         if inputs_require_grads:
-            grads_ge = torch.autograd.grad(allSum(outputs_ge), recording_inputs,
+            grads_ge = torch.autograd.grad(allSum(outputs_ge), flattened_recording_inputs,
                                            allow_unused=allow_unused)
         self.assertEqual(outputs, outputs_ge)
         if inputs_require_grads:
@@ -507,25 +519,25 @@ class JitTestCase(TestCase):
         outputs = func(*recording_inputs)
         l1 = allSum(outputs)
         if inputs_require_grads:
-            grads = torch.autograd.grad(l1, recording_inputs, create_graph=True,
+            grads = torch.autograd.grad(l1, flattened_recording_inputs, create_graph=True,
                                         allow_unused=allow_unused)
         if inputs_require_grads:
             l2 = (allSum(grads) * l1)
-            grads2 = torch.autograd.grad(l2, recording_inputs, allow_unused=allow_unused)
+            grads2 = torch.autograd.grad(l2, flattened_recording_inputs, allow_unused=allow_unused)
 
         if inputs_require_grads:
-            recording_inputs = [Variable(t, requires_grad=True)
-                                for t in reference_tensors]
+            recording_inputs = _nested_map(lambda t: isinstance(t, torch.Tensor), lambda t: Variable(t, requires_grad=True))(reference_tensors)
+            flattened_recording_inputs = tuple(input_reduce(recording_inputs, lambda t, acc: acc.append(t), []))
 
         outputs_ge = ge(*recording_inputs)
         l1_ge = allSum(outputs_ge)
         if inputs_require_grads:
             grads_ge = torch.autograd.grad(
-                l1_ge, recording_inputs, create_graph=True, allow_unused=allow_unused)
+                l1_ge, flattened_recording_inputs, create_graph=True, allow_unused=allow_unused)
 
         if inputs_require_grads:
             l2_ge = (allSum(grads_ge) * l1_ge)
-            grads2_ge = torch.autograd.grad(l2_ge, recording_inputs, allow_unused=allow_unused)
+            grads2_ge = torch.autograd.grad(l2_ge, flattened_recording_inputs, allow_unused=allow_unused)
 
         self.assertEqual(outputs, outputs_ge)
         if inputs_require_grads:
@@ -1247,8 +1259,6 @@ class TestJit(JitTestCase):
 
         self.checkTrace(fn, (torch.randn(2, 2),))
 
-    # TODO: implement
-    @unittest.expectedFailure
     def test_input_flatten(self):
         """Check that inputs to traced functions are flattened"""
 
@@ -1282,6 +1292,20 @@ class TestJit(JitTestCase):
         self.assertEqual(kinds[0], 'aten::values')
         self.assertEqual(kinds[1], 'prim::ListUnpack')
         self.assertEqual(kinds[2], 'prim::TupleUnpack')
+
+    def test_input_dict_checkTrace(self):
+        def test(d):
+            return d['x'] + d['y']
+
+        inputs = {'x': torch.rand(3, 4), 'y': torch.rand(3, 4)}
+        self.checkTrace(test, (inputs,))
+
+    def test_input_dict_checkTrace_mut(self):
+        def test(d):
+            d['x'].tanh_()
+            return d['x']
+        inputs = {'x': torch.rand(3, 4), 'y': torch.rand(3, 4)}
+        self.checkTrace(test, (inputs,), inputs_require_grads=False)
 
     # TODO: adapt to a GraphExecutor test
     @unittest.skip("Need to instrument GraphExecutors a bit more")
