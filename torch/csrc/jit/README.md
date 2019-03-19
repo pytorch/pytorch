@@ -1235,13 +1235,40 @@ The `.pt` file is a zip archive (which can be opened with tools such as `unzip`)
 ### `model.json`
 The `model.json` contains the structure information of the model. Each model must contain one main Module, and each module may contain multiple submodules, and each module contains a bunch of parameters (tensors). We serialize the metadata for each tensor inline in `model.json` (e.g., dims, strides, record name, etc).
 
-### `code`
+### `code/`
 
-TODO
+The `code` directory contains the Python Printed `Graph`s of the main module and its submodules.
 
 ### `tensors/`
 
-TODO
+During export a list of all the tensors in a model is created. Tensors can come from either module parameters or Tensor type attributes. Metadata about each tensor is stored in `model.json` with an index into this list. The `data` field refers to the file which contains the tensor storage data. Tensors are saved by directly writing the Tensor storage to a file.
+
+`model.json`
+```json
+{
+  ...
+  "tensors": [
+    {
+      "dims": [
+        "40",
+        "800"
+      ],
+      "offset": "0",
+      "strides": [
+        "800",
+        "1"
+      ],
+      "requiresGrad": true,
+      "dataType": "FLOAT",
+      "data": {
+        "key": "tensors/0"
+      },
+      "device": "cpu"
+    }
+  ],
+  ...
+}
+```
 
 ### `attributes.pkl`
 
@@ -1258,6 +1285,7 @@ A given module may have many attributes of different types and many submodules, 
 * `name` - the attribute's name
 * `id` - the offset into the saved list of all model attributes
 
+`model.json`
 ```json
 {
   "mainModule": {
