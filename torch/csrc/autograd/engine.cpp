@@ -231,21 +231,17 @@ auto Engine::thread_init(int device) -> void {
   // NB: These are not OptionalCUDAGuard/etc because engine.cpp
   // is built as part of the CPU-only library; so we need to
   // dynamic dispatch.
-  at::OptionalDeviceGuard cuda_guard;
-  at::OptionalDeviceGuard hip_guard;
-  at::OptionalDeviceGuard xla_guard;
+  // NB: We need an array here since neither DeviceGuard nor OptionalDeviceGuard
+  // are movable.
+  std::array<c10::OptionalDeviceGuard,
+             static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
+      guards;  // Guards! Guards!
   if (device != -1) {
-    if (c10::impl::hasDeviceGuardImpl(at::DeviceType::CUDA)) {
-      // NB: This is secretly setting *HIP* device as well for
-      // Torch builds where HIP is masquerading as CUDA.  In that
-      // case, the hip_guard below will lie fallow.
-      cuda_guard.reset_device(at::Device(at::DeviceType::CUDA, device));
-    }
-    if (c10::impl::hasDeviceGuardImpl(at::DeviceType::HIP)) {
-      hip_guard.reset_device(at::Device(at::DeviceType::HIP, device));
-    }
-    if (c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA)) {
-      xla_guard.reset_device(at::Device(at::DeviceType::XLA, device));
+    for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
+      auto* impl = c10::impl::device_guard_impl_registry[i].load();
+      if (impl && device < impl->deviceCount()) {
+        guards[i].reset_device(at::Device(static_cast<c10::DeviceType>(i), device));
+      }
     }
   }
   worker_device = device;
@@ -661,11 +657,13 @@ auto Engine::ready_queue(int device) -> ReadyQueue& {
 auto Engine::start_threads() -> void {
   // See Note [Allocating GPUs to autograd threads]
   c10::DeviceIndex num_devices = 0;
-  for (auto device_type : {at::DeviceType::CUDA, at::DeviceType::HIP, at::DeviceType::XLA}) {
-    if (c10::impl::hasDeviceGuardImpl(device_type)) {
-      num_devices = std::max(num_devices, c10::impl::getDeviceGuardImpl(device_type)->deviceCount());
+  for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
+    auto* impl = c10::impl::device_guard_impl_registry[i].load();
+    if (impl) {
+      num_devices = std::max(num_devices, impl->deviceCount());
     }
   }
+
   // One for CPU, plus one for every GPU device (but colocate GPUs of different
   // types)
   int num_threads = num_devices + 1;
