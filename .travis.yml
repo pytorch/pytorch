@@ -23,7 +23,7 @@ matrix:
         script: cd .circleci && ./ensure-consistency.py
       - name: "Python 2.7 Lint"
         python: "2.7"
-        install: pip install flake8 flake8-bugbear
+        install: pip install flake8
         script: flake8
       - name: "Python 3.7 Lint"
         python: "3.7"
