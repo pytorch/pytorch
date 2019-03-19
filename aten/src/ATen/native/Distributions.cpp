@@ -240,18 +240,21 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, Generator *gen) {
   Tensor ret = at::zeros(alpha.sizes(), alpha.options());
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "dirichlet", [&] {
     Tensor gamma = at::zeros(alpha.sizes(), alpha.options().dtype(ScalarType::Double));
-    THGenerator* generator = get_generator(gen);
-    std::lock_guard<std::mutex> lock(generator->mutex);
+    CPUGenerator* generator = check_generator_with_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator().get());
+    // See Note [Thread-safety and Generators]
+    std::lock_guard<std::mutex> lock(generator->mutex_);
     /* Generate gamma sample by casting alpha to double to prevent underflow. */
     CPU_tensor_apply2<double, scalar_t>(gamma, alpha,
       [generator](double& ret_val, const scalar_t& alpha){
         auto uniform_lambda = [generator] () {
-          return THRandom_standard_uniform(generator);
+          at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
+          return standard_uniform(generator);
         };
         BaseSampler<double, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
 
         auto normal_lambda = [generator] () {
-          return THRandom_normal(generator, 0.0, 1.0);
+          at::normal_distribution<double> normal(0.0, 1.0);
+          return normal(generator)[0]; //TODO: normal returns two samples at a time. utilize the second element.
         };
         BaseSampler<double, decltype(normal_lambda)> standard_normal(normal_lambda);
         auto sample = sample_gamma<double, double, decltype(uniform_lambda), decltype(normal_lambda)>
