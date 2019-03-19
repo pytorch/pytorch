@@ -2061,8 +2061,8 @@ class TestNN(NNTestCase):
         embedding.zero_grad()
         embedding(torch.LongTensor([7, 1, 3])).sum().backward()
         embedding(torch.LongTensor([7, 1, 3])).sum().backward()
-        self.assertEqual(embedding.weight.grad._indices(), torch.LongTensor([[7, 1, 3]]))
-        self.assertEqual(embedding.weight.grad._values(), torch.tensor(2.).expand(3, 3))
+        self.assertEqual(embedding.weight.grad._indices(), torch.LongTensor([[7, 1, 3, 7, 1, 3]]))
+        self.assertEqual(embedding.weight.grad._values(), torch.tensor(1.).expand(6, 3))
 
         embedding.zero_grad()
         embedding(torch.LongTensor([7, 1, 3])).sum().backward()
