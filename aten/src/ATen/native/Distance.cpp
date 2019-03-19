@@ -84,9 +84,10 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
 
 Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double eps) {
   Tensor w12 = at::sum(x1 * x2, dim);
-  Tensor w1 = at::norm(x1, 2, dim);
-  Tensor w2 = at::norm(x2, 2, dim);
-  return w12.div_((w1 * w2).clamp_min_(eps));
+  Tensor w1 = at::sum(x1 * x1, dim);
+  Tensor w2 = at::sum(x2 * x2, dim);
+  Tensor n12 = (w1 * w2).sqrt_().clamp_min(eps);
+  return w12.div_(n12);
 }
 
 }}  // namespace at::native
