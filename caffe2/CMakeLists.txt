@@ -213,6 +213,7 @@ endif()
 # formerly-libtorch
 # ==========================================================
 
+if (NOT BUILD_ATEN_MOBILE)
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../torch")
 set(TORCH_ROOT "${TORCH_SRC_DIR}/..")
@@ -289,8 +290,8 @@ set(TORCH_GENERATED_CODE
   ${GENERATED_H_PYTHON}
   )
 
+if (NOT BUILD_ATEN_MOBILE)
 
-# ???? Dependency on ATEN_CPU_FILES_GEN_TARGET is added for Declarations.yaml
 add_custom_command(
   OUTPUT
   ${TORCH_GENERATED_CODE}
@@ -329,9 +330,7 @@ add_custom_command(
   "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
   WORKING_DIRECTORY "${TORCH_ROOT}")
 
-add_custom_target(torch-generated-code DEPENDS ${TORCH_GENERATED_CODE})
-
-add_dependencies(torch-generated-code ATEN_CPU_FILES_GEN_TARGET)
+endif()
 
 
 
@@ -480,6 +479,10 @@ if (NOT NO_API)
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
   )
 endif()
+
+
+
+
 
 add_library(torch OBJECT ${TORCH_SRCS})
 
@@ -679,11 +682,11 @@ endif()
 # END formerly-libtorch
 # ==========================================================
 
-
+  list(APPEND Caffe2_CPU_SRCS $<TARGET_OBJECTS:torch>)
+endif()
 
 # Compile exposed libraries.
-add_library(caffe2 ${Caffe2_CPU_SRCS} $<TARGET_OBJECTS:torch>)
-
+add_library(caffe2 ${Caffe2_CPU_SRCS})
 
 
 if (NOT NO_API)
