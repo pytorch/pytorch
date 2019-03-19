@@ -725,8 +725,7 @@ void fusePreConvertOp(repr::NNModule* nn) {
       }
 
       if (!isOpType(opNode, "NCHW2NHWC") && !isOpType(opNode, "NHWC2NCHW") &&
-          !isOpType(opNode, "Int8Quantize") &&
-          !isOpType(opNode, "Int8Dequantize")) {
+          !isOpType(opNode, "Int8Quantize") && !isOpType(opNode, "Int8Dequantize")) {
         continue;
       }
 
@@ -761,6 +760,15 @@ void fusePreConvertOp(repr::NNModule* nn) {
       }
 
       auto input = repr::nn::getInputs(opNode).front();
+      if (isOpType(opNode, "Int8Dequantize") && repr::nn::hasSingleOutputAndConsumer(opNode)) {
+        auto preNode = repr::nn::getProducer(input);
+        if (isOpType(preNode, "Int8FC") || isOpType(preNode, "Int8Conv")) {
+          auto predOp = repr::nn::get<repr::NeuralNetOperator>(preNode);
+          removeArg(*predOp, "Y_scale");
+          removeArg(*predOp, "Y_zero_point");
+        }
+      }
+
       nn->dataFlow.replaceNode(output, input);
 
       nn->dataFlow.deleteNode(opNode);
