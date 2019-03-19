@@ -996,7 +996,20 @@ class TestJit(JitTestCase):
         pass
 
     def test_expand_insert_observers(self):
-        pass
+        x = torch.tensor([0.4, 0.3], requires_grad=True)
+        y = torch.tensor([0.7, 0.5], requires_grad=True)
+
+        def fn(x, y):
+            p = x + y
+            z = p * y
+            return z
+
+        trace, _ = torch.jit.get_trace_graph(fn, (x, y))
+        self.run_pass('insert_observers', trace)
+        FileCheck().check_count("add", 1).check_next("observer") \
+                   .check_next("mul").check_next("observer")     \
+                   .check_next("return")                         \
+                   .run(str(trace))
 
     def test_expand_insert_fakequant(self):
         pass
