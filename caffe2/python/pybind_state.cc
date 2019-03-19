@@ -1663,6 +1663,9 @@ void addGlobalMethods(py::module& m) {
         auto weight_names = curr_ws->Blobs();
         ts.transform(
             curr_ws, &pred_net, weight_names, tensor_shapes, blacklist_set);
+        if (opts.debug) {
+          WriteProtoToTextFile(pred_net, "debug_transformed_net.pb_txt");
+        }
         std::string pred_net_str2;
         pred_net.SerializeToString(&pred_net_str2);
         return py::bytes(pred_net_str2);
