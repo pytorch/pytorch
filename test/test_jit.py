@@ -14014,11 +14014,18 @@ class TestLogging(JitTestCase):
                     torch.jit._logging.bump_counter('positive', 1.0)
                 else:
                     torch.jit._logging.bump_counter('negative', 1.0)
-                return torch.jit._logging.get_counters()
+                # TODO: make this work outside script
+                counters = torch.jit._logging.get_counters()
+                return x, counters
 
         mtl = ModuleThatLogs()
-        out = mtl(torch.rand(3, 4, 5))
-        self.assertDictEqual(out, {'positive': 1.0, 'foo': 3.0})
+        for i in range(5):
+            _, counters = mtl(torch.rand(3, 4, 5))
+
+        self.assertEqual(counters['foo'], 15.0)
+        self.assertEqual(counters['positive'], 5.0)
+
+        print(counters)
 
 
 for test in autograd_method_tests():
