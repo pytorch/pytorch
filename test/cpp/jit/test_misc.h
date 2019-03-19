@@ -351,7 +351,7 @@ static const auto cf_examples = R"JIT(
   def if_test(a, b):
       # FIXME: use 0 instead of a.
       # c = 0
-        c = a
+      c = a
       if bool(a < b):
         c = b
       else:
