@@ -114,8 +114,8 @@ class NLLLoss(_WeightedLoss):
     layer.
 
     The `target` that this loss expects is a class index in the range :math:`[0, C-1]`
-    (except in the case of `ignore_index`, which is used to specify
-    a target value that can be ignored) where `C = number of classes`.
+    where `C = number of classes`. Additionally to that range of values,
+    any integer specified by `ignore_index` is also allowed in `target`.
 
     The unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
 
@@ -853,8 +853,9 @@ class CrossEntropyLoss(_WeightedLoss):
     with :math:`K \geq 1` for the `K`-dimensional case (described later).
 
     This criterion expects a class index in the range :math:`[0, C-1]` as the
-    `target` (except in the case of `ignore_index`, which is used to specify
-    a target value that can be ignored) for each value of a 1D tensor of size `minibatch`.
+    `target`for each value of a 1D tensor of size `minibatch`.
+    Additionally to that range of values, any integer specified by
+    `ignore_index` is also allowed in `target`.
 
     The loss can be described as:
 
