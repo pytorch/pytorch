@@ -25,6 +25,11 @@ C10_DEFINE_bool(
     false,
     "If set, disable implicit engine preferences. This is useful for unit "
     "testing and debugging cases.");
+C10_DEFINE_bool(
+    caffe2_operator_throw_if_fp_exceptions,
+    false,
+    "If set, throws if floating point exceptions (FE_DIVBYZERO, FE_INVALID, "
+    "FE_OVERFLOW) are detected when running any operator.");
 
 namespace caffe2 {
 

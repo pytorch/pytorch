@@ -454,6 +454,11 @@ class ClassTypeRegistry {
     return nullptr;
   }
 
+  void clear() {
+    std::lock_guard<std::mutex> g(mutex_);
+    reg_.clear();
+  }
+
  private:
   std::mutex mutex_;
   std::unordered_map<std::string, ClassTypePtr> reg_;
@@ -476,4 +481,9 @@ ClassTypePtr ClassType::create(
 ClassTypePtr ClassType::get(const std::string& name) {
   return getRegistry().getType(name);
 }
+
+void ClassType::clearRegistry() {
+  getRegistry().clear();
+}
+
 } // namespace c10

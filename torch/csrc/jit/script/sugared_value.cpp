@@ -237,6 +237,16 @@ std::shared_ptr<SugaredValue> ClassValue::call(
 
   return self;
 }
+
+std::shared_ptr<SugaredValue> ClassValue::attr(
+    const SourceRange& loc,
+    Method& m,
+    const std::string& field) {
+  if (field != "__new__") {
+    throw ErrorReport(loc) << "Tried to lookup unknown attribute on class";
+  }
+  return std::make_shared<ClassNewMethod>(type_);
+}
 } // namespace script
 } // namespace jit
 } // namespace torch
