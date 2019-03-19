@@ -17,7 +17,7 @@ class AveragedLoss final : public SumElementsOp<T, Context> {
  public:
   template <class... Args>
   explicit AveragedLoss(Args&&... args)
-      : SumElementsOp<T, Context>(std::forward<Args>(args)...) {}
+      : SumElementsOp<T, Context>(std::forward<Args>(args)..., true) {}
   ~AveragedLoss() {}
 };
 
@@ -26,7 +26,7 @@ class AveragedLossGradient final : public SumElementsGradientOp<T, Context> {
  public:
   template <class... Args>
   explicit AveragedLossGradient(Args&&... args)
-      : SumElementsGradientOp<T, Context>(std::forward<Args>(args)...) {}
+      : SumElementsGradientOp<T, Context>(std::forward<Args>(args)..., true) {}
   ~AveragedLossGradient() {}
 };
 

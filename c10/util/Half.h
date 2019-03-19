@@ -325,7 +325,9 @@ struct alignas(2) Half {
   unsigned short x;
 
   struct from_bits_t {};
-  static constexpr from_bits_t from_bits = from_bits_t();
+  static constexpr from_bits_t from_bits() {
+    return from_bits_t();
+  }
 
   // HIP wants __host__ __device__ tag, CUDA does not
 #ifdef __HIP_PLATFORM_HCC__
@@ -417,10 +419,12 @@ struct Converter<
 
 // In some versions of MSVC, there will be a compiler error when building.
 // C4146: unary minus operator applied to unsigned type, result still unsigned
+// C4804: unsafe use of type 'bool' in operation
 // It can be addressed by disabling the following warning. 
 #ifdef _MSC_VER
 #pragma warning( push )
 #pragma warning( disable : 4146 )
+#pragma warning( disable : 4804 )
 #endif
 
 // skip isnan and isinf check for integral types
@@ -439,10 +443,6 @@ typename std::enable_if<std::is_integral<From>::value, bool>::type overflows(
   }
 }
 
-#ifdef _MSC_VER
-#pragma warning( pop )
-#endif
-
 template <typename To, typename From>
 typename std::enable_if<std::is_floating_point<From>::value, bool>::type
 overflows(From f) {
@@ -455,6 +455,10 @@ overflows(From f) {
   }
   return f < limit::lowest() || f > limit::max();
 }
+
+#ifdef _MSC_VER
+#pragma warning( pop )
+#endif
 
 template <typename To, typename From>
 typename std::enable_if<is_complex_t<From>::value, bool>::type overflows(

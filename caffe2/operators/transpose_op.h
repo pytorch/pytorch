@@ -16,8 +16,9 @@ class TransposeOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_DISPATCH_HELPER;
 
-  TransposeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit TransposeOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         axes_(this->template GetRepeatedArgument<int>("axes")) {
     // We will check the legality of axes_: it should be from 0 to axes_.size().
     std::vector<int> axes_sorted = axes_;

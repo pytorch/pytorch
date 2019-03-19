@@ -50,9 +50,6 @@ std::unique_ptr<Generator> VariableType::generator() const {
 const char * VariableType::toString() const {
   return str.c_str();
 }
-size_t VariableType::elementSizeInBytes() const {
-  return baseType->elementSizeInBytes();
-}
 Type & VariableType::toBackend(Backend b) const {
   return *getVariableTypeFromBaseType(baseType->toBackend(b));
 }
@@ -265,7 +262,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
-  requires_grad &= isFloatingPoint(self.type().scalarType());
+  requires_grad &= isFloatingPoint(self.scalar_type());
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));

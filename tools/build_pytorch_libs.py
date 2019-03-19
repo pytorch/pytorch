@@ -211,7 +211,11 @@ def run_cmake(version,
                       CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper),
                       CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
     pprint(cmake_args)
-    pprint(my_env)
+    for env_var_name in my_env:
+        if env_var_name.startswith('gh'):
+            # github env vars use utf-8, on windows, non-ascii code may
+            # cause problem, so encode first
+            my_env[env_var_name] = str(my_env[env_var_name].encode("utf-8"))
     check_call(cmake_args, cwd=build_dir, env=my_env)
 
 

@@ -248,7 +248,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
   dim3 grid(THCCeilDiv(numel, (ptrdiff_t)4), THCCeilDiv(stride, (int64_t)128));
   dim3 block(32, 4);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      grad.type(), "embedding_bag_backward_cuda_sum_avg_kernel", [&] {
+      grad.scalar_type(), "embedding_bag_backward_cuda_sum_avg_kernel", [&] {
         EmbeddingBag_accGradParametersKernel_sum_avg<
             scalar_t><<<grid, block, 0, stream>>>(
             sorted_indices.data<int64_t>(), orig_indices.data<int64_t>(),
@@ -304,7 +304,7 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
   int grid = 1024;
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      grad.type(), "embedding_bag_backward_cuda_max", [&] {
+      grad.scalar_type(), "embedding_bag_backward_cuda_max", [&] {
         EmbeddingBag_accGradParametersKernel_max<
             scalar_t><<<grid, block, 0, stream>>>(
             max_indices.data<int64_t>(), grad.data<scalar_t>(),
@@ -353,7 +353,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
 
   dim3 block = dim3(32, 8);
   int grid = 1024;
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(weight.type(), "embedding_bag_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(weight.scalar_type(), "embedding_bag_cuda", [&] {
     EmbeddingBag_updateOutputKernel<scalar_t><<<grid, block, 0, stream>>>(
         indices.data<int64_t>(), offsets.data<int64_t>(),
         weight.data<scalar_t>(), output.data<scalar_t>(),

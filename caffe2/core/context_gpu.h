@@ -103,7 +103,7 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   }
 
   cublasHandle_t GetHandle(c10::cuda::CUDAStream cuda_stream) {
-    DeviceGuard guard(cuda_stream.device_index());
+    CUDAGuard guard(cuda_stream.device_index());
     // Default construct in the map if it doesn't exist, and return a mutable
     // refernce to it.
     auto& r = cublas_handles_[cuda_stream];
@@ -127,7 +127,7 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   }
 
   cudnnHandle_t GetCudnnHandle(c10::cuda::CUDAStream cuda_stream) {
-    DeviceGuard guard(cuda_stream.device_index());
+    CUDAGuard guard(cuda_stream.device_index());
     auto& r = cudnn_handles_[cuda_stream];
     if (r == nullptr) {
       CUDNN_ENFORCE(cudnnCreate(&r));
@@ -234,7 +234,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
 
   curandGenerator_t& curand_generator() {
     if (!curand_generator_) {
-      DeviceGuard guard(gpu_id_);
+      CUDAGuard guard(gpu_id_);
       CURAND_ENFORCE(
           curandCreateGenerator(&curand_generator_, CURAND_RNG_PSEUDO_DEFAULT));
       CURAND_ENFORCE(

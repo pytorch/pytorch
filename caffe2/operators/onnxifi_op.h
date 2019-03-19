@@ -56,7 +56,7 @@ class OnnxifiOp final : public Operator<Context> {
       if (!output_shape_hint.empty()) {
         TensorInfo info;
         info.onnxifi_type = output_shape_hint.front();
-        for (int i = 1; i < output_shape_hint.size(); ++i) {
+        for (size_t i = 1; i < output_shape_hint.size(); ++i) {
           info.dims.push_back(output_shape_hint[i]);
         }
         output_shape_hints_.emplace(output_idx, std::move(info));
@@ -75,20 +75,15 @@ class OnnxifiOp final : public Operator<Context> {
     // map the weight names
     auto initializers =
         this->template GetRepeatedArgument<std::string>("initializers");
-    CAFFE_ENFORCE_EQ(
-        initializers.size() % 2, 0, "initializers should come in pairs");
     std::unordered_set<std::string> initializer_set;
-    std::unordered_map<std::string, std::string> input_mapping;
     for (auto it = initializers.begin(); it != initializers.end(); ++it) {
-      auto key = *it++;
-      input_mapping.emplace(key, *it);
+      auto key = *it;
       initializer_set.emplace(key);
     }
-    Workspace mapped_ws(ws, input_mapping);
     std::vector<std::string> weight_names;
     std::vector<std::vector<uint64_t>> weight_shapes;
     auto weight_descs = buildInitializationList(
-        &mapped_ws, &initializer_set, &weight_names, &weight_shapes);
+        ws, &initializer_set, &weight_names, &weight_shapes);
 
     BuildBackendAndGraph(property_pointers, onnx_model_str, weight_descs);
   }
@@ -235,7 +230,8 @@ class OnnxifiOp final : public Operator<Context> {
       const onnxTensorDescriptorV1*,
       uint32_t,
       const onnxTensorDescriptorV1*,
-      onnxMemoryFenceV1*);
+      onnxMemoryFenceV1*,
+      onnxTraceEventList*);
 #endif
 
   // We bind the op input/output by position while ONNXIFI binds input/output by

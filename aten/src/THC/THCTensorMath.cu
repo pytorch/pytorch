@@ -92,7 +92,7 @@ struct idx_functor
 
   __host__ __device__
   int64_t operator()(int64_t val) {
-    return (val / div) % size + TH_INDEX_BASE;
+    return (val / div) % size;
   }
 };
 
