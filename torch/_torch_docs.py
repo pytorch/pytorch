@@ -2018,9 +2018,9 @@ Example::
             [  4.,   8.,  12.]])
 """)
 
-add_docstr(torch.gesv,
+add_docstr(torch.solve,
            r"""
-torch.gesv(B, A, out=None) -> (Tensor, Tensor)
+torch.solve(B, A, out=None) -> (Tensor, Tensor)
 
 This function returns the solution to the system of linear
 equations represented by :math:`AX = B` and the LU factorization of
@@ -2028,14 +2028,9 @@ A, in order as a tuple `X, LU`.
 
 `LU` contains `L` and `U` factors for LU factorization of `A`.
 
-`torch.gesv(B, A)` can take in 2D inputs `B, A` or inputs that are
+`torch.solve(B, A)` can take in 2D inputs `B, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X, LU`.
-
-.. note::
-
-    The :attr:`out` keyword only supports 2D matrix inputs, that is,
-    `B, A` must be 2D matrices.
 
 .. note::
 
@@ -2061,7 +2056,7 @@ Example::
     >>> B = torch.tensor([[4.02,  6.19, -8.22, -7.57, -3.03],
                           [-1.56,  4.00, -8.67,  1.75,  2.86],
                           [9.81, -4.09, -4.57, -8.61,  8.99]]).t()
-    >>> X, LU = torch.gesv(B, A)
+    >>> X, LU = torch.solve(B, A)
     >>> torch.dist(B, torch.mm(A, X))
     tensor(1.00000e-06 *
            7.0977)
@@ -2069,7 +2064,7 @@ Example::
     >>> # Batched solver example
     >>> A = torch.randn(2, 3, 1, 4, 4)
     >>> B = torch.randn(2, 3, 1, 4, 6)
-    >>> X, LU = torch.gesv(B, A)
+    >>> X, LU = torch.solve(B, A)
     >>> torch.dist(B, A.matmul(X))
     tensor(1.00000e-06 *
        3.6386)

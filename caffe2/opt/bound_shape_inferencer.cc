@@ -62,9 +62,13 @@ void BoundShapeInferencer::InferBoundShapeAndType(
     } else if (op.type() == "LengthsRangeFill") {
       InferLengthsRangeFill(op);
     } else if (
-        caffe2::StartsWith(op.type(), "GivenTensor") &&
-        caffe2::EndsWith(op.type(), "Fill")) {
+        (caffe2::StartsWith(op.type(), "GivenTensor") &&
+         caffe2::EndsWith(op.type(), "Fill")) ||
+        op.type() == "ConstantFill" || op.type() == "Int8GivenTensorFill" ||
+        op.type() == "Int8GivenIntTensorFill") {
       InferGivenTensorFill(op);
+    } else if (op.type() == "Shape") {
+      InferShape(op);
     } else {
       InferCommonOp(op);
     }
@@ -213,6 +217,14 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
       ShapeInfo::DimType::BATCH,
       {spec_.max_batch_size, output_dim1},
       TensorProto_DataType_FLOAT);
+}
+
+void BoundShapeInferencer::InferShape(const OperatorDef& op) {
+  InferCommonOp(op);
+  // old_shape should be a constant
+  if (op.output_size() > 0 && shape_info_.count(op.output(0))) {
+    shape_info_[op.output(0)].dim_type = ShapeInfo::DimType::CONSTANT;
+  }
 }
 
 void BoundShapeInferencer::InferReshape(const OperatorDef& op) {
