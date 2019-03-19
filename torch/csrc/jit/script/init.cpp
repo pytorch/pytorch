@@ -260,7 +260,6 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
       auto param = module_->get_parameters().find(py::cast<std::string>(name));
       AT_ASSERT(param != nullptr);
       params.push_back(caller.get_or_add_parameter(param->slot()));
-      std::cout << py::cast<std::string>(name) << ": " << param->slot()->toTensor() << "\n";
     }
     auto list = caller.graph()->createList(TensorType::get(), params);
     caller.graph()->insertNode(list);
