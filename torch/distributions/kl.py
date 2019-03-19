@@ -17,6 +17,7 @@ from .gamma import Gamma
 from .geometric import Geometric
 from .gumbel import Gumbel
 from .half_normal import HalfNormal
+from .independent import Independent
 from .laplace import Laplace
 from .logistic_normal import LogisticNormal
 from .lowrank_multivariate_normal import (LowRankMultivariateNormal, _batch_lowrank_logdet,
@@ -730,3 +731,11 @@ def _kl_uniform_pareto(p, q):
     result = t2 * (q.alpha + 1) - t1
     result[p.low < q.support.lower_bound] = inf
     return result
+
+
+@register_kl(Independent, Independent)
+def _kl_independent_independent(p, q):
+    if p.reinterpreted_batch_ndims != q.reinterpreted_batch_ndims:
+        raise NotImplementedError
+    result = kl_divergence(p.base_dist, q.base_dist)
+    return _sum_rightmost(result, p.reinterpreted_batch_ndims)

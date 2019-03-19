@@ -62,7 +62,24 @@ class Net(nn.Module):
         return F.softmax(x, dim=1)
 
 
+class BatchNormNet(nn.Module):
+
+    def __init__(self):
+        super(BatchNormNet, self).__init__()
+        self.fc1 = nn.Linear(2, 40, bias=False)
+        self.bn = nn.BatchNorm1d(4)
+        self.fc2 = nn.Linear(40, 4, bias=False)
+
+    def forward(self, x):
+        x = torch.reshape(self.fc1(x), (-1, 4, 10))
+        x = self.bn(x)
+        x = torch.reshape(x, (-1, 40))
+        x = self.fc2(x)
+        return F.softmax(x, dim=1)
+
+
 DDP_NET = Net()
+BN_NET = BatchNormNet()
 
 
 def get_timeout(test_id):
@@ -1356,6 +1373,65 @@ class _DistTestBase(object):
         # test device_ids
         gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
         self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+
+    def _test_DistributedDataParallel_SyncBatchNorm(self, gpu_subset, rank, output_device=None):
+        # Run a simple end to end DDP model, use result of single node model
+        # as baseline
+
+        # cpu training setup
+        model = BN_NET
+
+        # single gpu training setup
+        model_gpu = copy.deepcopy(model)
+        model_gpu.cuda(gpu_subset[0])
+
+        # DDP training setup
+        model_DDP = nn.utils.convert_sync_batchnorm(copy.deepcopy(model))
+        model_DDP.cuda(gpu_subset[0])
+        model_DDP = nn.parallel.DistributedDataParallel(
+            model_DDP, device_ids=gpu_subset
+        )
+
+        # test serializable/unserializable
+        if INIT_METHOD.startswith("file://"):
+            _, filename = tempfile.mkstemp(prefix=FOLDER)
+            torch.save(model_DDP, filename)
+            model_DDP = torch.load(filename)
+
+        # dummy data initialization
+        local_bs = len(gpu_subset)
+        global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
+
+        # check two model parameters over 5 iterations
+        self._test_DDP_5iter(
+            model_gpu,
+            model_DDP,
+            input_cpu.cuda(gpu_subset[0]),
+            target.cuda(gpu_subset[0]),
+            loss,
+            local_bs,
+            rank,
+            global_bs,
+            True
+        )
+        self._barrier()
+
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
+    def test_DistributedDataParallel_SyncBatchNorm(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        gpus = list(rank_to_GPU[rank])
+        self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank)
+
+        # test output_device
+        self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+
+        # test device_ids
+        gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
+        self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
 
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]

@@ -40,8 +40,8 @@ namespace native {
 // Define the per-batch functions to be used in the main implementation of the batched
 // linear algebra operations
 template<class scalar_t>
-void lapackGesv(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info) {
-  AT_ERROR("gesv only takes float or double Tensors");
+void lapackSolve(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info) {
+  AT_ERROR("solve only takes float or double Tensors");
 }
 
 template<class scalar_t>
@@ -65,11 +65,11 @@ void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info) {
 }
 
 #ifdef USE_LAPACK
-template<> void lapackGesv<double>(int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
+template<> void lapackSolve<double>(int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
   dgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
 
-template<> void lapackGesv<float>(int n, int nrhs, float *a, int lda, int *ipiv, float *b, int ldb, int *info) {
+template<> void lapackSolve<float>(int n, int nrhs, float *a, int lda, int *ipiv, float *b, int ldb, int *info) {
   sgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
 
@@ -109,12 +109,12 @@ template<> void lapackCholesky<float>(char uplo, int n, float *a, int lda, int *
 // Below of the definitions of the functions operating on a batch that are going to be dispatched
 // in the main helper functions for the linear algebra operations
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ gesv ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
-static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
+static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
-  AT_ERROR("gesv: LAPACK library not found in compilation");
+  AT_ERROR("solve: LAPACK library not found in compilation");
 #else
   auto A_data = A.data<scalar_t>();
   auto b_data = b.data<scalar_t>();
@@ -125,7 +125,7 @@ static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 
   int info;
   if (b.dim() == 2) {
-    lapackGesv<scalar_t>(n, nrhs, A_data, n, ipiv.data<int>(), b_data, n, &info);
+    lapackSolve<scalar_t>(n, nrhs, A_data, n, ipiv.data<int>(), b_data, n, &info);
     infos[0] = info;
   } else {
     auto A_mat_stride = matrixStride(A);
@@ -135,7 +135,7 @@ static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
     for (int64_t i = 0; i < batch_size; i++) {
       scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
       scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-      lapackGesv<scalar_t>(n, nrhs, A_working_ptr, n, ipiv.data<int>(), b_working_ptr, n, &info);
+      lapackSolve<scalar_t>(n, nrhs, A_working_ptr, n, ipiv.data<int>(), b_working_ptr, n, &info);
       infos[i] = info;
       if (info != 0) {
         return;
@@ -145,38 +145,35 @@ static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #endif
 }
 
-std::tuple<Tensor, Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) {
+std::tuple<Tensor, Tensor> _solve_helper_cpu(const Tensor& self, const Tensor& A) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
   std::vector<int64_t> infos(batchCount(self), 0);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
-    apply_gesv<scalar_t>(self_working_copy, A_working_copy, infos);
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "solve_cpu", [&]{
+    apply_solve<scalar_t>(self_working_copy, A_working_copy, infos);
   });
   if (self.dim() > 2) {
-    batchCheckErrors(infos, "gesv");
+    batchCheckErrors(infos, "solve_cpu");
   } else {
-    singleCheckErrors(infos[0], "gesv");
+    singleCheckErrors(infos[0], "solve_cpu");
   }
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
 
 // Supports arbitrary batch dimensions for self and A
-std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
+std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
   AT_CHECK(self.dim() >= 2,
            "B should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   AT_CHECK(A.dim() >= 2,
            "A should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
   Tensor self_broadcasted, A_broadcasted;
   std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A);
-  return at::_gesv_helper(self_broadcasted, A_broadcasted);
+  return at::_solve_helper(self_broadcasted, A_broadcasted);
 }
 
-std::tuple<Tensor&,Tensor&> gesv_out(Tensor& solution, Tensor& lu, const Tensor& self, const Tensor& A) {
-  AT_CHECK(self.dim() == 2 && A.dim() == 2, 
-           "torch.gesv() with the `out` keyword does not support batching. "
-           "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
+std::tuple<Tensor&,Tensor&> solve_out(Tensor& solution, Tensor& lu, const Tensor& self, const Tensor& A) {
   Tensor solution_tmp, lu_tmp;
-  std::tie(solution_tmp, lu_tmp) = at::_gesv_helper(self, A);
+  std::tie(solution_tmp, lu_tmp) = at::_solve_helper(self, A);
   solution.resize_as_(solution_tmp).copy_(solution_tmp);
   lu.resize_as_(lu_tmp).copy_(lu_tmp);
   return std::tuple<Tensor&, Tensor&>(solution, lu);
@@ -229,10 +226,10 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
 Tensor _inverse_helper_cpu(const Tensor& self) {
   std::vector<int64_t> infos(batchCount(self), 0);
   auto self_working_copy = cloneBatchedColumnMajor(self);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "inverse", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cpu", [&]{
     apply_inverse<scalar_t>(self_working_copy, infos);
   });
-  batchCheckErrors(infos, "inverse");
+  batchCheckErrors(infos, "inverse_cpu");
   return self_working_copy;
 }
 
@@ -294,13 +291,13 @@ Tensor _cholesky_solve_helper_cpu(const Tensor& self, const Tensor& A, bool uppe
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
   std::vector<int64_t> infos(batchCount(self), 0);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "cholesky_solve", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky_solve_cpu", [&]{
     apply_cholesky_solve<scalar_t>(self_working_copy, A_working_copy, upper, infos);
   });
   if (self.dim() > 2) {
-    batchCheckErrors(infos, "cholesky_solve");
+    batchCheckErrors(infos, "cholesky_solve_cpu");
   } else {
-    singleCheckErrors(infos[0], "cholesky_solve");
+    singleCheckErrors(infos[0], "cholesky_solve_cpu");
   }
   return self_working_copy;
 }
@@ -358,13 +355,13 @@ static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos
 Tensor _cholesky_helper_cpu(const Tensor& self, bool upper) {
   std::vector<int64_t> infos(batchCount(self), 0);
   auto self_working_copy = cloneBatchedColumnMajor(self);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "cholesky", [&]{
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cholesky_cpu", [&]{
     apply_cholesky<scalar_t>(self_working_copy, upper, infos);
   });
   if (self.dim() > 2) {
-    batchCheckErrors(infos, "cholesky");
+    batchCheckErrors(infos, "cholesky_cpu");
   } else {
-    singleCheckErrors(infos[0], "cholesky");
+    singleCheckErrors(infos[0], "cholesky_cpu");
   }
   return self_working_copy;
 }
@@ -389,6 +386,98 @@ Tensor& cholesky_out(Tensor &result, const Tensor &self, bool upper) {
   }
   result.copy_(native::cholesky(self, upper));
   return result;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ btrifact ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template<typename scalar_t>
+static void apply_btrifact(Tensor& self, Tensor& pivots, Tensor& infos) {
+#ifndef USE_LAPACK
+  AT_ERROR("btrifact: LAPACK library not found in compilation");
+#else
+  auto self_data = self.data<scalar_t>();
+  auto self_matrix_stride = matrixStride(self);
+  auto batch_size = batchCount(self);
+
+  auto pivots_data = pivots.data<int>();
+  auto pivots_matrix_stride = pivots.size(-1);
+  auto infos_data = infos.data<int>();
+
+  auto n = self.size(-1);
+
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    int* pivots_working_ptr = &pivots_data[i * pivots_matrix_stride];
+    int* infos_working_ptr = &infos_data[i];
+    lapackGetrf<scalar_t>(n, n, self_working_ptr, n, pivots_working_ptr, infos_working_ptr);
+  }
+#endif
+}
+
+std::tuple<Tensor, Tensor, Tensor> _btrifact_helper_cpu(const Tensor& self, bool pivot) {
+  AT_CHECK(pivot, "btrifact without pivoting is not implemented on the CPU");
+  AT_CHECK(self.dim() > 2,
+           "expected tensor with more than 2 dimensions, got size: ", self.sizes(),
+           " instead");
+  squareCheckInputs(self);
+  auto req_size = self.sizes().vec();
+  req_size.pop_back();
+  auto pivots_tensor = at::zeros(req_size, self.options().dtype(kInt));
+  req_size.pop_back();
+  auto infos_tensor = at::zeros(req_size, self.options().dtype(kInt));
+
+  Tensor self_working_copy;
+  if (self.numel() == 0) {
+    self_working_copy = at::empty_like(self);
+  } else {
+    self_working_copy = cloneBatchedColumnMajor(self);
+    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "btrifact_cpu", [&]{
+      apply_btrifact<scalar_t>(self_working_copy, pivots_tensor, infos_tensor);
+    });
+  }
+  return std::make_tuple(self_working_copy, pivots_tensor, infos_tensor);
+}
+
+std::tuple<Tensor, Tensor> btrifact(const Tensor& self, bool pivot) {
+  Tensor LU_fact, pivots, infos;
+  std::tie(LU_fact, pivots, infos) = at::_btrifact_helper(self, pivot);
+  batchCheckErrors(infos, "btrifact");
+  return std::make_tuple(LU_fact, pivots);
+}
+
+std::tuple<Tensor&, Tensor&> btrifact_out(
+    Tensor& A_LU,
+    Tensor& pivots,
+    const Tensor& self,
+    bool pivot) {
+  Tensor infos, A_LU_tmp, pivots_tmp;
+  std::tie(A_LU_tmp, pivots_tmp, infos) = at::_btrifact_helper(self, pivot);
+  batchCheckErrors(infos, "btrifact");
+  A_LU.resize_as_(A_LU_tmp).copy_(A_LU_tmp);
+  pivots.resize_as_(pivots_tmp).copy_(pivots_tmp);
+  return std::tuple<Tensor&, Tensor&>(A_LU, pivots);
+}
+
+std::tuple<Tensor, Tensor, Tensor> btrifact_with_info(
+    const Tensor& self,
+    bool pivot) {
+  Tensor LU_fact, pivots, infos;
+  std::tie(LU_fact, pivots, infos) = at::_btrifact_helper(self, pivot);
+  return std::make_tuple(LU_fact, pivots, infos);
+}
+
+std::tuple<Tensor&, Tensor&, Tensor&> btrifact_with_info_out(
+    Tensor& A_LU,
+    Tensor& pivots,
+    Tensor& info,
+    const Tensor& self,
+    bool pivot) {
+  Tensor info_tmp, A_LU_tmp, pivots_tmp;
+  std::tie(A_LU_tmp, pivots_tmp, info_tmp) = at::_btrifact_helper(self, pivot);
+  A_LU.resize_as_(A_LU_tmp).copy_(A_LU_tmp);
+  pivots.resize_as_(pivots_tmp).copy_(pivots_tmp);
+  info.resize_as_(info_tmp).copy_(info_tmp);
+  return std::tuple<Tensor&, Tensor&, Tensor&>(A_LU, pivots, info);
 }
 
 template <typename scalar_t, bool upper>
@@ -474,7 +563,7 @@ Tensor& tril_cpu_(Tensor &self, int64_t k) {
   bool inplace = checkTrilTriuBatchContiguous(self);
   Tensor self_c = inplace ? self : self.contiguous();
   Tensor result = inplace ? self : at::empty_like(self);
-  AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&]{
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "tril", [&]{
     apply_triu_tril<scalar_t, false>(result, self_c, inplace, k);
   });
   if (!inplace) self.copy_(result);
@@ -489,7 +578,7 @@ Tensor& tril_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
     return result;
   }
   Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
-  AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&]{
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "tril", [&]{
     apply_triu_tril<scalar_t, false>(result, self_c, false, k);
   });
   return result;
@@ -508,7 +597,7 @@ Tensor& triu_cpu_(Tensor &self, int64_t k) {
   bool inplace = checkTrilTriuBatchContiguous(self);
   Tensor self_c = inplace ? self : self.contiguous();
   Tensor result = inplace ? self : at::empty_like(self);
-  AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&]{
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "triu", [&]{
     apply_triu_tril<scalar_t, true>(result, self_c, inplace, k);
   });
   if (!inplace) self.copy_(result);
@@ -523,7 +612,7 @@ Tensor& triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
     return result;
   }
   Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
-  AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&]{
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "triu", [&]{
     apply_triu_tril<scalar_t, true>(result, self_c, false, k);
   });
   return result;

@@ -40,7 +40,8 @@ _(at::Half,Half,d) \
 _(float,Float,d)   \
 _(double,Double,d) \
 _(std::complex<float>,ComplexFloat,z) \
-_(std::complex<double>,ComplexDouble,z)
+_(std::complex<double>,ComplexDouble,z) \
+_(bool,Bool,i)
 
 #define AT_FORALL_SCALAR_TYPES(_) \
 _(uint8_t,Byte,i)  \
@@ -69,19 +70,6 @@ enum class ScalarType : int8_t {
   Undefined,
   NumOptions
 };
-
-static inline at::DataType scalarTypeToDataType(ScalarType scalar_type) {
-#define DEFINE_CASE(ctype, name, _) \
-  case ScalarType::name:            \
-    return caffe2::TypeIdentifier::Get<ctype>();
-
-  switch(scalar_type) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
-    case ScalarType::Undefined: return at::DataType::uninitialized();
-    default: AT_ERROR("Unrecognized Scalartype ", scalar_type, " (please report this error)");
-  }
-#undef DEFINE_CASE
-}
 
 static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
 #define DEFINE_CASE(ctype,name,_) \

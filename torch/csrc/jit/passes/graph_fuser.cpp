@@ -136,8 +136,7 @@ c10::optional<bool> isDefined(Value* tensor) {
   if (tensor->type()->isSubtypeOf(TensorType::get())) {
     return true;
   }
-  if (tensor->node()->mustBeNone() ||
-      tensor->node()->kind() == prim::Undefined) {
+  if (tensor->node()->mustBeNone()) {
     return false;
   }
   return {};
@@ -263,7 +262,7 @@ struct GraphFuser {
       )SCRIPT";
           auto module = std::make_shared<script::Module>();
           defineMethodsInModule(
-              module, source, script::nativeResolver, /*self=*/nullptr);
+              module, source, script::nativeResolver, /*self=*/c10::nullopt);
           *graph_ptr = module->get_method("batch_norm").graph();
         },
         &bn_graph);

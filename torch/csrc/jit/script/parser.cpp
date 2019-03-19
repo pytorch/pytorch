@@ -549,6 +549,23 @@ struct ParserImpl {
         paramlist.range(), List<Param>(paramlist), return_annotation);
   }
 
+  TreeRef parseClass() {
+    L.expect(TK_CLASS_DEF);
+    const auto name = parseIdent();
+    // TODO no inheritance or () allowed right now
+    L.expect(':');
+
+    L.expect(TK_INDENT);
+    std::vector<Def> methods;
+    while (L.cur().kind != TK_DEDENT) {
+      methods.push_back(Def(parseFunction(/*is_method=*/true)));
+    }
+    L.expect(TK_DEDENT);
+
+    return ClassDef::create(
+        name.range(), name, List<Def>::create(name.range(), methods));
+  }
+
   TreeRef parseFunction(bool is_method) {
     L.expect(TK_DEF);
     auto name = parseIdent();
@@ -590,11 +607,17 @@ Parser::~Parser() = default;
 TreeRef Parser::parseFunction(bool is_method) {
   return pImpl->parseFunction(is_method);
 }
+TreeRef Parser::parseClass() {
+  return pImpl->parseClass();
+}
 Lexer& Parser::lexer() {
   return pImpl->lexer();
 }
 Decl Parser::parseTypeComment() {
   return pImpl->parseTypeComment();
+}
+Expr Parser::parseExp() {
+  return pImpl->parseExp();
 }
 
 } // namespace script

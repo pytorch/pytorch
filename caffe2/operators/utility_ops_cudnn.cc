@@ -12,8 +12,10 @@ class CuDNNWeightedSumOp : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
 
-  CuDNNWeightedSumOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws), cudnn_wrapper_(&context_) {
+  template <class... Args>
+  explicit CuDNNWeightedSumOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...),
+        cudnn_wrapper_(&context_) {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&data_desc_));
     CUDNN_ENFORCE(cudnnCreateOpTensorDescriptor(&add_desc_));
     // Both float and at::Half require opTensorCompType to be CUDNN_DATA_FLOAT.

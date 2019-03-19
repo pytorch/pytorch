@@ -265,7 +265,7 @@ void launchFusion(
       addTensorInfo(fusion.inputDesc()[i], tensor);
     } else {
       size_t chunk_offset = map_size[chunk.dim()] * tensor.stride(chunk.dim()) *
-          elementSize(tensor.type().scalarType());
+          elementSize(tensor.scalar_type());
       char* data_ptr = reinterpret_cast<char*>(tensor.data_ptr());
       for (size_t chunks = 0; chunks < chunk.nSubTensors(); ++chunks) {
         addTensorInfoRaw(

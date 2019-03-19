@@ -10,8 +10,9 @@ namespace caffe2 {
 template <typename T, class Context>
 class SquaredL2DistanceOp : public Operator<Context> {
  public:
-  SquaredL2DistanceOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit SquaredL2DistanceOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -23,8 +24,9 @@ class SquaredL2DistanceOp : public Operator<Context> {
 template <typename T, class Context>
 class SquaredL2DistanceGradientOp final : public Operator<Context> {
  public:
-  SquaredL2DistanceGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit SquaredL2DistanceGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
@@ -73,8 +75,9 @@ class SquaredL2DistanceGradientOp final : public Operator<Context> {
 template <typename T, class Context>
 class L1DistanceOp : public Operator<Context> {
  public:
-  L1DistanceOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit L1DistanceOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -86,8 +89,9 @@ class L1DistanceOp : public Operator<Context> {
 template <typename T, class Context>
 class L1DistanceGradientOp : public Operator<Context> {
  public:
-  L1DistanceGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit L1DistanceGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -99,8 +103,9 @@ class L1DistanceGradientOp : public Operator<Context> {
 template <typename T, class Context>
 class DotProductOp : public Operator<Context> {
  public:
-  DotProductOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit DotProductOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -113,8 +118,9 @@ class DotProductOp : public Operator<Context> {
 template <typename T, class Context>
 class DotProductGradientOp final : public Operator<Context> {
  public:
-  DotProductGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit DotProductGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -127,10 +133,12 @@ class DotProductGradientOp final : public Operator<Context> {
 template <typename T, class Context>
 class DotProductWithPaddingOp : public Operator<Context> {
  public:
-  DotProductWithPaddingOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit DotProductWithPaddingOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         pad_value_(this->template GetSingleArgument<float>("pad_value", 0.0)),
-        replicate_(this->template GetSingleArgument<bool>("replicate", false)) {}
+        replicate_(this->template GetSingleArgument<bool>("replicate", false)) {
+  }
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -145,8 +153,9 @@ class DotProductWithPaddingOp : public Operator<Context> {
 template <typename T, class Context>
 class CosineSimilarityOp : public Operator<Context> {
  public:
-  CosineSimilarityOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit CosineSimilarityOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -162,8 +171,9 @@ class CosineSimilarityOp : public Operator<Context> {
 template <typename T, class Context>
 class CosineSimilarityGradientOp final : public Operator<Context> {
  public:
-  CosineSimilarityGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws) {}
+  template <class... Args>
+  explicit CosineSimilarityGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -179,10 +189,12 @@ class CosineSimilarityGradientOp final : public Operator<Context> {
 template <typename T, class Context>
 class DotProductWithPaddingGradientOp final : public Operator<Context> {
  public:
-  DotProductWithPaddingGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit DotProductWithPaddingGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         pad_value_(this->template GetSingleArgument<float>("pad_value", 0.0)),
-        replicate_(this->template GetSingleArgument<bool>("replicate", false)) {}
+        replicate_(this->template GetSingleArgument<bool>("replicate", false)) {
+  }
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {

@@ -75,7 +75,7 @@ static inline double _get_epsilon(const ScalarType& sc_type) {
   }
 }
 
-// Validates input shapes for linear solve methods (gesv, cholesky_solve)
+// Validates input shapes for linear solve methods (solve, cholesky_solve)
 static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A) {
   AT_CHECK(A.size(-1) == A.size(-2),
            "A must be batches of square matrices, "
@@ -102,6 +102,23 @@ static inline void squareCheckInputs(const Tensor& self) {
 static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* name) {
   for (size_t i = 0; i < infos.size(); i++) {
     auto info = infos[i];
+    if (info < 0) {
+      AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
+    } else if (info > 0) {
+      AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
+    }
+  }
+}
+
+/*
+ * This is an overloaded case of the previous function for a tensor of infos.
+ */
+static inline void batchCheckErrors(const Tensor& infos, const char* name) {
+  auto batch_size = infos.numel();
+  auto infos_cpu = infos.to(at::kCPU);
+  auto infos_data = infos_cpu.data<int>();
+  for (size_t i = 0; i < batch_size; i++) {
+    auto info = infos_data[i];
     if (info < 0) {
       AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
     } else if (info > 0) {
