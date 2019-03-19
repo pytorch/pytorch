@@ -133,11 +133,6 @@ struct C10_API TensorOptions {
    /* implicit */ TensorOptions(Args&&... args)
     : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
-  /// Constructs a `TensorOptions` object from a backend, forwarded to the
-  /// `Device` constructor.
-  /* implicit */ TensorOptions(Backend backend)
-      : TensorOptions(Device(backendToDeviceType(backend))) {}
-
   /// Constructs a `TensorOptions` object with the given dtype.
   /* implicit */ TensorOptions(caffe2::TypeMeta dtype) : TensorOptions() {
     this->set_dtype(dtype);
