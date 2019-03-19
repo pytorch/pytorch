@@ -4711,6 +4711,23 @@ class _TestTorchMixin(object):
     def test_solve_batched_dims(self):
         self._test_solve_batched_dims(self, lambda t: t)
 
+    def test_solve_methods_arg_device(self):
+        if not torch.cuda.is_available():
+            return
+
+        for b_device, A_device in product(['cpu', 'cuda'], repeat=2):
+            if b_device == A_device:
+                continue
+
+            b = torch.randn(3, 1, device=b_device)
+            A = torch.randn(3, 3, device=A_device)
+            err_str = "Expected b and A to be on the same device"
+            with self.assertRaisesRegex(RuntimeError, err_str):
+                torch.gesv(b, A)
+
+            with self.assertRaisesRegex(RuntimeError, err_str):
+                torch.cholesky_solve(b, A)
+
     @skipIfNoLapack
     def test_qr(self):
 
