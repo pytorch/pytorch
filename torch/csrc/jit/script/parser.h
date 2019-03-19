@@ -1,6 +1,7 @@
 #pragma once
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/script/tree.h>
+#include <torch/csrc/jit/script/tree_views.h>
 #include <memory>
 
 namespace torch {
@@ -21,6 +22,7 @@ struct TORCH_API Parser {
   TreeRef parseFunction(bool is_method);
   TreeRef parseClass();
   Decl parseTypeComment();
+  Expr parseExp();
   Lexer& lexer();
   ~Parser();
 
