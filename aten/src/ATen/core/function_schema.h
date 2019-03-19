@@ -170,6 +170,10 @@ inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {
       && lhs.is_varret() == rhs.is_varret();
 }
 
+inline bool operator!=(const FunctionSchema& lhs, const FunctionSchema& rhs) {
+  return !(lhs == rhs);
+}
+
 // for debugging, make sure we can describe the call site
 inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   return out << arg.type()->str() << " " << arg.name() << (arg.default_value() ? "=<default>" : "");
