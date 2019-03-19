@@ -268,6 +268,7 @@ class JitTestCase(TestCase):
         # needs to be cleared because python might be unloaded before
         # the callback gets destucted
         torch._C._jit_set_emit_module_hook(None)
+        torch._C._jit_clear_class_registry()
 
     @contextmanager
     def disableModuleHook(self):
@@ -1322,9 +1323,7 @@ class TestJit(JitTestCase):
     def test_cpp_cuda(self):
         from cpp.jit import tests_setup
         tests_setup.setup()
-        # rather than rebuild assertExpected in cpp,
-        # just glob all the cpp outputs into one file for now
-        self.assertExpected(torch._C._jit_run_cpp_tests())
+        torch._C._jit_run_cpp_tests()
         tests_setup.shutdown()
 
     def test_batchnorm(self):
@@ -1405,6 +1404,33 @@ class TestJit(JitTestCase):
         self.run_pass('dce', trace)
         self.assertEqual(len(list(trace.graph().inputs())), 2)
         FileCheck().check("mul").check("add").run(str(trace))
+
+    def test_trace_c10_ops(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, scores, bbox_deltas, im_info, anchors):
+                a, b = torch.ops._caffe2.GenerateProposals(
+                    (scores), (bbox_deltas), (im_info), (anchors),
+                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0,
+                )
+                return a, b
+        model = MyModel()
+        A = 4
+        H = 10
+        W = 8
+        img_count = 3
+        scores = torch.ones(img_count, A, H, W, dtype=torch.float32)
+        bbox_deltas = torch.linspace(0, 10, steps=img_count * 4 * A * H * W,
+                                     dtype=torch.float32)
+        bbox_deltas = bbox_deltas.view(img_count, 4 * A, H, W)
+        im_info = torch.ones(img_count, 3, dtype=torch.float32)
+        anchors = torch.ones(A, 4, dtype=torch.float32)
+        inputs = (scores, bbox_deltas, im_info, anchors)
+        traced_model = torch.jit.trace(model, inputs)
+        self.assertEqual(traced_model(*inputs), model(*inputs))
+        self.assertExportImport(traced_model.graph, (scores, bbox_deltas, im_info, anchors))
 
     def test_nested_inplace(self):
         x = torch.randn(2, 2)
@@ -2336,6 +2362,45 @@ class TestJit(JitTestCase):
         self.assertEqual(len(warns), 1)
         self.assertEqual(warns[0], "new_zeros is a legacy constructor and is not supported in the JIT.")
 
+    def test_python_bindings(self):
+        lstm_cell = torch.jit.script(LSTMCellS)
+
+        def lstm(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
+            for i in range(x.size(0)):
+                hx, cx = lstm_cell(x[i], hx, cx, w_ih, w_hh, b_ih, b_hh)
+            return hx
+
+        slstm = torch.jit.script(lstm)
+
+        inputs = get_lstm_inputs('cpu', training=True, seq_length=10)
+        slstm(*inputs).sum().backward()
+        global fw_graph
+        fw_graph = slstm.graph_for(*inputs)
+        nodes = [n for n in fw_graph.nodes()]
+        tested_blocks = False
+        for node in nodes:
+            for output in [o for o in node.outputs()]:
+                self.assertTrue(hasattr(output, 'type'))
+                self.assertTrue(output.type() is not None)
+            for input in [i for i in node.inputs()]:
+                self.assertTrue(hasattr(input, 'type'))
+                self.assertTrue(input.type() is not None)
+            for block in [b for b in node.blocks()]:
+                tested_blocks = True
+                self.assertTrue(hasattr(block, 'inputs'))
+                self.assertTrue(hasattr(block, 'outputs'))
+                for output in [o for o in block.outputs()]:
+                    self.assertTrue(hasattr(output, 'type'))
+                    self.assertTrue(output.type() is not None)
+                for input in [i for i in block.inputs()]:
+                    self.assertTrue(hasattr(input, 'type'))
+                    self.assertTrue(input.type() is not None)
+                self.assertTrue(hasattr(block, 'returnNode'))
+                self.assertTrue(type(block.returnNode()) == torch._C.Node)
+                self.assertTrue(hasattr(block, 'paramNode'))
+                self.assertTrue(type(block.paramNode()) == torch._C.Node)
+        self.assertTrue(tested_blocks)
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
@@ -3255,7 +3320,7 @@ class TestScript(JitTestCase):
 a")
                 return a
         ''')
-        self.assertExpected(str(cu.foo.graph))
+        FileCheck().check("aa").check("a\\n\\tb\\n").run(str(cu.foo.graph))
 
     def test_string_ops(self):
         def foo():
@@ -3484,6 +3549,31 @@ a")
         check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
         check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
 
+    def test_tensor_item(self):
+        def test_scalar_to_float_coercion(x):
+            return x.item() == 1
+
+        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1.0),))
+        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1),))
+
+        def test_scalar_cast(x):
+            scalar = x.item()
+            return int(scalar), float(scalar)
+
+        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1.0),))
+        self.checkScript(test_scalar_to_float_coercion, (torch.tensor(1),))
+
+        expected_str = r"Use int\(tensor\) or float\(tensor\) to retrieve"
+        with self.assertRaisesRegex(RuntimeError, expected_str):
+            @torch.jit.script
+            def int_fn(a):
+                # type: (int) -> int
+                return a
+
+            @torch.jit.script
+            def test_error_msg(x):
+                return int_fn(x.item())
+
     def test_method_on_number(self):
         def func():
             c = 1
@@ -3645,33 +3735,6 @@ a")
         y = func(x)
         y2 = torch.sum(x, dim=0)
         self.assertEqual(y, y2)
-
-    def test_constant_pooling(self):
-        def func(cond):
-            a = 1
-            b = 4
-            c = 0
-            d = "abc"
-            e = "bcd"
-            f = "abc"
-            x = torch.ones([2])
-            y = x * 4
-            z = torch.ones([2])
-            if bool(cond):
-                c = b - a
-            else:
-                y = torch.rand(0)
-                if bool(cond):
-                    y = torch.rand(1)
-                print(d, e, f, x, y, z)
-            b = b - a
-            return a, b, c, x, y
-
-        self.checkScript(func, torch.tensor([1]))
-        graph = torch.jit.script(func).graph
-        self.run_pass('constant_propagation', graph)
-        self.run_pass('constant_pooling', graph)
-        self.assertExpectedGraph(graph)
 
     def test_constant_pooling_none(self):
         @torch.jit.script
@@ -4084,6 +4147,30 @@ a")
 
         self.assertEqual(foo(), [1, 2, 3, 4])
 
+    def test_mutable_list_reverse_empty(self):
+        def test_reverse_empty():
+            a = []
+            a.reverse()
+
+            return a == []
+        self.checkScript(test_reverse_empty, ())
+
+    def test_mutable_list_reverse(self):
+        def test_reverse():
+            a = [1, 2, 3, 4]
+            a.reverse()
+
+            return a == [4, 3, 2, 1]
+        self.checkScript(test_reverse, ())
+
+    def test_mutable_tensor_list_reverse(self):
+        def test_tensor_reverse():
+            a = [torch.tensor(1), torch.tensor(2)]
+            a.reverse()
+
+            return a == [torch.tensor(2), torch.tensor(1)]
+        self.checkScript(test_tensor_reverse, ())
+
     def test_mutable_list_pop_empty(self):
         @torch.jit.script
         def test_pop_empty():
@@ -4227,6 +4314,76 @@ a")
 
             return a == [1, 2, 4]
         self.checkScript(test_list_remove, ())
+
+    def test_list_index_not_existing(self):
+        @torch.jit.script
+        def list_index_not_existing():
+            a = [4, 1, 3, 2]
+            i = a.index(5)
+
+            return i
+
+        with self.assertRaisesRegex(RuntimeError, "'5' is not in list"):
+            list_index_not_existing()
+
+    def test_list_index(self):
+        def list_index():
+            a = [4, 1, 3, 2]
+            i = a.index(3)
+
+            return i == 2
+        self.checkScript(list_index, ())
+
+    def test_tensor_list_index(self):
+        def tensor_list_index():
+            a = [torch.tensor(4), torch.tensor(1), torch.tensor(3), torch.tensor(2)]
+            i = a.index(torch.tensor(3))
+
+            return i == 2
+        self.checkScript(tensor_list_index, ())
+
+    def test_tensor_list_index_not_existing(self):
+        @torch.jit.script
+        def tensor_list_index_not_existing():
+            a = [torch.tensor(4), torch.tensor(1), torch.tensor(3), torch.tensor(2)]
+            i = a.index(torch.tensor(5))
+
+            return i
+
+        with self.assertRaisesRegex(RuntimeError, "is not in list"):
+            tensor_list_index_not_existing()
+
+    def test_list_count(self):
+        def list_count():
+            a = [4, 1, 4, 2, 4]
+            i = a.count(4)
+
+            return i == 3
+        self.checkScript(list_count, ())
+
+    def test_list_count_not_existing(self):
+        def list_count_not_existing():
+            a = [4, 1, 4, 2, 4]
+            i = a.count(5)
+
+            return i == 0
+        self.checkScript(list_count_not_existing, ())
+
+    def test_tensor_list_count(self):
+        def tensor_list_count():
+            a = [torch.tensor(4), torch.tensor(1), torch.tensor(4), torch.tensor(4)]
+            i = a.count(torch.tensor(4))
+
+            return i == 3
+        self.checkScript(tensor_list_count, ())
+
+    def test_tensor_list_count_not_existing(self):
+        def tensor_list_count_not_existing():
+            a = [torch.tensor(4), torch.tensor(1), torch.tensor(4), torch.tensor(4)]
+            i = a.count(torch.tensor(5))
+
+            return i == 0
+        self.checkScript(tensor_list_count_not_existing, ())
 
     def test_mutable_list_remove_tensor(self):
         def test_list_remove_tensor():
@@ -8558,7 +8715,7 @@ a")
                 return self.ssm.bar() + x
 
         orig = TraceMe()
-        traced = torch.jit.trace(orig, (torch.rand(4, 3, dtype=torch.float),))
+        traced = torch.jit.trace(orig, (torch.rand(4, 3),))
         # for each of these checks, check that *BOTH* the underlying
         # _C.ScriptModule object has the expected method/param, as well as the
         # Python object that wraps it.
@@ -9015,7 +9172,7 @@ a")
         slices = tuple_graph.findAllNodes("prim::TupleSlice")
         num_outputs = set(map(lambda x: len(x.output().type().elements()), slices))
         # one tuple slice should have an output with 2 elements, other 4
-        self.assertTrue(num_outputs == set([2, 4]))
+        self.assertTrue(num_outputs == {2, 4})
         self.run_pass('lower_all_tuples', tuple_graph)
         self.assertTrue('Tuple' not in str(tuple_graph))
         tuple_comp = torch.jit.script(tuple_slice)
@@ -10601,6 +10758,117 @@ a")
         m._create_method_from_graph("forward", foo.graph)
         self.getExportImportCopy(m)
 
+    def test_attribute_serialization(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.table = torch.jit.Attribute({"I": "am", "a test": "test"}, Dict[str, str])
+                self.float = torch.jit.Attribute(2.3, float)
+                self.int = torch.jit.Attribute(99, int)
+                self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
+                self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
+                self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
+                self.int_list = torch.jit.Attribute([1, 2, 3, 4], List[int])
+
+            @torch.jit.script_method
+            def forward(self):
+                return (self.table, self.float, self.int, self.tuple, self.list, self.int_list)
+
+        m = M()
+        imported_m = self.getExportImportCopy(m)
+        self.assertEqual(m(), imported_m())
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    def test_attribute_unpickling(self):
+        import zipfile
+
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.table = torch.jit.Attribute({"I": "am", "a test": "test"}, Dict[str, str])
+                self.float = torch.jit.Attribute(2.3, float)
+                self.int = torch.jit.Attribute(99, int)
+                self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
+                self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
+                self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
+                self.int_list = torch.jit.Attribute([1, 2, 3, 4], List[int])
+
+            @torch.jit.script_method
+            def forward(self):
+                return (self.table, self.float, self.int, self.tuple, self.list, self.int_list)
+
+        class TensorID(object):
+            def __setstate__(self, id):
+                self.id = id
+
+        class IntList(object):
+            def __setstate__(self, data):
+                self.data = data
+
+        class JitUnpickler(pickle.Unpickler):
+            def find_class(self, module, name):
+                if not module == '__main__':
+                    return None
+
+                if name == 'TensorID':
+                    return TensorID
+                elif name == 'IntList':
+                    return IntList
+
+        with TemporaryFileName() as fname:
+            M().save(fname)
+            archive_name = os.path.basename(os.path.normpath(fname))
+            archive = zipfile.ZipFile(fname, 'r')
+            pickled_data = archive.read(os.path.join(archive_name, 'attributes.pkl'))
+            JitUnpickler(io.BytesIO(pickled_data)).load()
+
+    def test_submodule_attribute_serialization(self):
+        class S(torch.jit.ScriptModule):
+            def __init__(self, list_data):
+                super(S, self).__init__()
+                self.table = torch.jit.Attribute({"I": "am", "a test": "test"}, Dict[str, str])
+                self.list = torch.jit.Attribute(list_data, List[Tuple[int, int]])
+
+            @torch.jit.script_method
+            def forward(self):
+                return (self.table, self.list)
+
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.table = torch.jit.Attribute({"this": "is", "a different": "dict"}, Dict[str, str])
+                self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
+                self.s1 = S([(1, 2)])
+                self.s2 = S([(4, 5)])
+
+            @torch.jit.script_method
+            def forward(self):
+                return (self.table, self.tensor, self.s1.table, self.s2.list, self.s1.list)
+
+        m = M()
+        imported_m = self.getExportImportCopy(m)
+        self.assertEqual(m(), imported_m())
+
+    def test_optional_tuple(self):
+        def fn(x=None):
+            # type: (Optional[Tuple[int, int]]) -> Tuple[int, int]
+            if x is None:
+                new_x = (1, 2)
+            else:
+                new_x = x
+            return new_x
+
+        self.checkScript(fn, ((3, 4),))
+        self.checkScript(fn, ())
+
+    def test_split(self):
+        def split_two(tensor):
+            a, b, c = torch.split(tensor, 2, dim=1)
+            return a, b, c
+        x = torch.randn(3, 6)
+        y = torch.randn(3, 6)
+        self.checkScript(split_two, [(x + y)])
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -11211,9 +11479,6 @@ class TestPytorchExportModes(JitTestCase):
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
-    'test_split_dim',
-    'test_split_dim_neg0',
-
     # The following fail due to #12024.
     # A prim::ListConstruct is involved and the indices get traced as TensorType,
     # which always require_grad. This causes a crash in autodiff.
@@ -13616,142 +13881,214 @@ class TestDataParallel(JitTestCase):
 
 class TestClassType(JitTestCase):
     def test_get_with_method(self):
-        # Remove this when import/export is implemented for classes
-        with self.disableModuleHook():
-            @torch.jit.script
-            class FooTest:
-                def __init__(self, x):
-                    self.foo = x
+        @torch.jit.script
+        class FooTest:
+            def __init__(self, x):
+                self.foo = x
 
-                def getFooTest(self):
-                    return self.foo
+            def getFooTest(self):
+                return self.foo
 
-            @torch.jit.script
-            def fn(x):
-                foo = FooTest(x)
-                return foo.getFooTest()
+        @torch.jit.script
+        def fn(x):
+            foo = FooTest(x)
+            return foo.getFooTest()
 
-            input = torch.ones(2, 3)
-            self.assertEqual(fn(input), input)
+        input = torch.ones(2, 3)
+        self.assertEqual(fn(input), input)
 
     def test_get_attr(self):
-        # Remove this when import/export is implemented for classes
-        with self.disableModuleHook():
-            @torch.jit.script
-            class FooTest:
-                def __init__(self, x):
-                    self.foo = x
+        @torch.jit.script
+        class FooTest:
+            def __init__(self, x):
+                self.foo = x
 
-            @torch.jit.script
-            def fn(x):
-                foo = FooTest(x)
-                return foo.foo
+        @torch.jit.script
+        def fn(x):
+            foo = FooTest(x)
+            return foo.foo
 
-            input = torch.ones(2, 3)
-            self.assertEqual(fn(input), input)
+        input = torch.ones(2, 3)
+        self.assertEqual(fn(input), input)
 
     def test_set_attr_in_method(self):
-        # Remove this when import/export is implemented for classes
-        with self.disableModuleHook():
+        @torch.jit.script
+        class FooTest:
+            def __init__(self, x):
+                # type: (int) -> None
+                self.foo = x
+
+            def incFooTest(self, y):
+                # type: (int) -> None
+                self.foo = self.foo + y
+
+        @torch.jit.script
+        def fn(x):
+            # type: (int) -> int
+            foo = FooTest(x)
+            foo.incFooTest(2)
+            return foo.foo
+
+        self.assertEqual(fn(1), 3)
+
+    def test_set_attr_type_mismatch(self):
+        with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):
             @torch.jit.script
             class FooTest:
                 def __init__(self, x):
-                    # type: (int) -> None
+                    self.foo = x
+                    self.foo = 10  # should error since int != Tensor
+
+    def test_get_attr_not_initialized(self):
+        with self.assertRaisesRegex(RuntimeError, "Tried to access to nonexistent attribute"):
+            @torch.jit.script
+            class FooTest:
+                def __init__(self, x):
                     self.foo = x
 
-                def incFooTest(self, y):
-                    # type: (int) -> None
-                    self.foo = self.foo + y
+                def get_non_initialized(self):
+                    return self.asdf  # asdf isn't an attr
+
+    def test_set_attr_non_initialized(self):
+        with self.assertRaisesRegex(RuntimeError, "Tried to set nonexistent attribute"):
+            @torch.jit.script
+            class FooTest:
+                def __init__(self, x):
+                    self.foo = x
+
+                def set_non_initialized(self, y):
+                    self.bar = y  # can't assign to non-initialized attr
+
+    def test_type_annotations(self):
+        with self.assertRaisesRegex(RuntimeError, "expected a value of type bool"):
+            @torch.jit.script
+            class FooTest:
+                def __init__(self, x):
+                    # type: (bool) -> None
+                    self.foo = x
 
             @torch.jit.script
             def fn(x):
-                # type: (int) -> int
-                foo = FooTest(x)
-                foo.incFooTest(2)
-                return foo.foo
+                FooTest(x)
 
-            self.assertEqual(fn(1), 3)
-
-    def test_set_attr_type_mismatch(self):
-        # Remove this when import/export is implemented for classes
-        with self.disableModuleHook():
-            with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):
-                @torch.jit.script
-                class FooTest:
-                    def __init__(self, x):
-                        self.foo = x
-                        self.foo = 10  # should error since int != Tensor
-
-    def test_get_attr_not_initialized(self):
-        # Remove this when import/export is implemented for classes
-        with self.disableModuleHook():
-            with self.assertRaisesRegex(RuntimeError, "Tried to access to nonexistent attribute"):
-                @torch.jit.script
-                class FooTest:
-                    def __init__(self, x):
-                        self.foo = x
-
-                    def get_non_initialized(self):
-                        return self.asdf  # asdf isn't an attr
-
-    def test_set_attr_non_initialized(self):
-        # Remove this when import/export is implemented for classes
-        with self.disableModuleHook():
-            with self.assertRaisesRegex(RuntimeError, "Tried to set nonexistent attribute"):
-                @torch.jit.script
-                class FooTest:
-                    def __init__(self, x):
-                        self.foo = x
-
-                    def set_non_initialized(self, y):
-                        self.bar = y  # can't assign to non-initialized attr
-
-    def test_type_annotations(self):
-        # Remove this when import/export is implemented for classes
-        with self.disableModuleHook():
-            with self.assertRaisesRegex(RuntimeError, "expected a value of type bool"):
-                @torch.jit.script
-                class FooTest:
-                    def __init__(self, x):
-                        # type: (bool) -> None
-                        self.foo = x
-
-                @torch.jit.script
-                def fn(x):
-                    FooTest(x)
-
-                fn(2)
+            fn(2)
 
     def test_conditional_set_attr(self):
-        # Remove this when import/export is implemented for classes
-        with self.disableModuleHook():
-            with self.assertRaisesRegex(RuntimeError, "assignment cannot be in a control-flow block"):
-                @torch.jit.script
-                class FooTest:
-                    def __init__(self, x):
-                        if True:
-                            self.attr = x
-
-    def test_class_type_as_param(self):
-        # Remove this when import/export is implemented for classes
-        with self.disableModuleHook():
+        with self.assertRaisesRegex(RuntimeError, "assignment cannot be in a control-flow block"):
             @torch.jit.script
             class FooTest:
                 def __init__(self, x):
-                    self.attr = x
+                    if True:
+                        self.attr = x
 
-            @torch.jit.script
-            def fn(foo):
-                # type: (FooTest) -> Tensor
-                return foo.attr
+    def test_class_type_as_param(self):
+        @torch.jit.script
+        class FooTest:
+            def __init__(self, x):
+                self.attr = x
 
-            @torch.jit.script
-            def fn2(x):
-                foo = FooTest(x)
-                return fn(foo)
+        @torch.jit.script
+        def fn(foo):
+            # type: (FooTest) -> Tensor
+            return foo.attr
 
-            input = torch.ones(1)
-            self.assertEqual(fn2(input), input)
+        @torch.jit.script
+        def fn2(x):
+            foo = FooTest(x)
+            return fn(foo)
+
+        input = torch.ones(1)
+        self.assertEqual(fn2(input), input)
+
+    def test_out_of_order_methods(self):
+        @torch.jit.script
+        class FooTest:
+            def __init__(self, x):
+                self.x = x
+                self.x = self.get_stuff(x)
+
+            def get_stuff(self, y):
+                return self.x + y
+
+        @torch.jit.script
+        def fn(x):
+            f = FooTest(x)
+            return f.x
+
+        input = torch.ones(1)
+        self.assertEqual(fn(input), input + input)
+
+    def test_save_load_with_classes(self):
+        @torch.jit.script
+        class FooTest:
+            def __init__(self, x):
+                self.x = x
+
+            def get_x(self):
+                return self.x
+
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                foo = FooTest(a)
+                return foo.get_x()
+
+        m = MyMod()
+
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+
+        # classes are globally registered for now, so we need to clear the JIT
+        # registry to simulate loading a new model
+        torch._C._jit_clear_class_registry()
+
+        buffer.seek(0)
+        m_loaded = torch.jit.load(buffer)
+
+        input = torch.rand(2, 3)
+        output = m_loaded(input)
+        self.assertEqual(input, output)
+
+    def test_save_load_with_classes_nested(self):
+        @torch.jit.script
+        class FooNestedTest:
+            def __init__(self, y):
+                self.y = y
+
+        @torch.jit.script
+        class FooNestedTest2:
+            def __init__(self, y):
+                self.y = y
+                self.nested = FooNestedTest(y)
+
+        @torch.jit.script
+        class FooTest:
+            def __init__(self, x):
+                self.class_attr = FooNestedTest(x)
+                self.class_attr2 = FooNestedTest2(x)
+                self.x = self.class_attr.y + self.class_attr2.y
+
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                foo = FooTest(a)
+                return foo.x
+
+        m = MyMod()
+
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+
+        # classes are globally registered for now, so we need to clear the JIT
+        # registry to simulate loading a new model
+        torch._C._jit_clear_class_registry()
+
+        buffer.seek(0)
+        m_loaded = torch.jit.load(buffer)
+
+        input = torch.rand(2, 3)
+        output = m_loaded(input)
+        self.assertEqual(2 * input, output)
 
 
 for test in autograd_method_tests():

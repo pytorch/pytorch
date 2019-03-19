@@ -80,11 +80,11 @@ bool loadPythonClasses() {
 } // anonymous namespace
 
 #if defined(_WIN32)
-std::string runJITCPPTests() {
+void runJITCPPTests() {
   AT_ERROR("JIT tests not yet supported on Windows");
 }
 #else
-std::string runJITCPPTests();
+void runJITCPPTests();
 #endif
 
 void initJITBindings(PyObject* module) {
@@ -351,6 +351,8 @@ void initJITBindings(PyObject* module) {
   py::class_<FunctionSchema>(m, "FunctionSchema")
       .def_property_readonly(
           "name", [](FunctionSchema& self) { return self.name(); })
+      .def_property_readonly(
+          "overload_name", [](FunctionSchema& self) { return self.overload_name(); })
       .def_property_readonly(
           "arguments", [](FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(

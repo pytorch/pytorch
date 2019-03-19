@@ -67,10 +67,10 @@ void ThreadPool::waitWorkComplete() {
 void ThreadPool::main_loop(std::size_t index) {
   init_thread();
 
+  std::unique_lock<std::mutex> lock(mutex_);
   while (running_) {
     // Wait on condition variable while the task is empty and
     // the pool is still running.
-    std::unique_lock<std::mutex> lock(mutex_);
     while (tasks_.empty() && running_) {
       condition_.wait(lock);
     }
@@ -112,6 +112,10 @@ void ThreadPool::main_loop(std::size_t index) {
         complete_ = true;
         completed_.notify_one();
       }
+
+      // Deliberately hold the lock on the backedge, so this thread has an
+      // opportunity to acquire a new task before another thread acquires
+      // the lock.
     }
   } // while running_
 }

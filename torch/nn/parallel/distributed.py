@@ -44,7 +44,7 @@ class DistributedDataParallel(Module):
     this way, you can simply construct the model as the following:
 
         >>> torch.distributed.init_process_group(backend="nccl")
-        >>> model = DistributedDataParallel(model) # device_ids will include all GPU devices be default
+        >>> model = DistributedDataParallel(model) # device_ids will include all GPU devices by default
 
     (2) Multi-Process Single-GPU
 
@@ -102,9 +102,9 @@ class DistributedDataParallel(Module):
         This module assumes all parameters are registered in the model of each
         distributed processes are in the same order. The module itself will
         conduct gradient all-reduction following the reverse order of the
-        registered parameters of the model. In other wise, it is users'
+        registered parameters of the model. In other words, it is users'
         responsibility to ensure that each distributed process has the exact
-        same model and thus the exact parameter registeration order.
+        same model and thus the exact same parameter registration order.
 
     .. warning::
         This module assumes all buffers and gradients are dense.
@@ -169,7 +169,7 @@ class DistributedDataParallel(Module):
                          You normally don't need this option enabled unless you
                          are observing weird behaviors such as different ranks
                          are getting different gradients, which should not
-                         happen if DistributedDataParallel is corrected used.
+                         happen if DistributedDataParallel is correctly used.
                          (default: ``False``)
 
     Attributes:
@@ -352,8 +352,8 @@ class DistributedDataParallel(Module):
             if not self.all_buckets_reduced:
                 raise RuntimeError("Not all gradients have been reduced from "
                                    "the backward of the previous iteration. "
-                                   "This is unexpected and fatal error. Please "
-                                   "check and ensure that the model's "
+                                   "This is an unexpected and fatal error. "
+                                   "Please check and ensure that the model's "
                                    "parameters are not changed after you wrap "
                                    "up the model with DistributedDataParallel.")
         self.all_buckets_reduced = False

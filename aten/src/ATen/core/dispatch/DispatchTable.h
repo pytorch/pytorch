@@ -122,8 +122,8 @@ class DispatchTable final {
   , dispatch_strategy_(get_dispatch_strategy_(schema))
   , operator_name_(schema.name()) {}
 
-  DispatchTable(DispatchTable&&) = default;
-  DispatchTable& operator=(DispatchTable&&) = default;
+  DispatchTable(DispatchTable&&) = delete;
+  DispatchTable& operator=(DispatchTable&&) = delete;
   DispatchTable(const DispatchTable&) = delete;
   DispatchTable& operator=(const DispatchTable&) = delete;
 

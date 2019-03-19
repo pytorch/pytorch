@@ -175,6 +175,27 @@ class CAFFE2_API Tensor {
   bool is_contiguous() const {
     return impl_->is_contiguous();
   }
+
+  // Total bytes consumed by the "view" of elements of the array.  Does not
+  // include size of metadata.  The number reported here does not necessarily
+  // correspond to the true physical memory consumed by a tensor; instead,
+  // it reports the memory the tensor would take *if* it were contiguous.
+  // Defined to be numel() * itemsize()
+  size_t nbytes() const {
+    return impl_->numel() * impl_->itemsize();
+  }
+
+  // Length of one array element in bytes.  This is the traditional
+  // Numpy naming.
+  size_t itemsize() const {
+    return impl_->itemsize();
+  }
+
+  // Same as itemsize().  This is the PyTorch naming.
+  size_t element_size() const {
+    return impl_->itemsize();
+  }
+
   Type & type() const {
     return legacyTensorType(*impl_);
   }
@@ -385,7 +406,6 @@ class CAFFE2_API Tensor {
   Tensor floor() const;
   Tensor & floor_();
   Tensor ger(const Tensor & vec2) const;
-  std::tuple<Tensor,Tensor> gesv(const Tensor & A) const;
   Tensor fft(int64_t signal_ndim, bool normalized=false) const;
   Tensor ifft(int64_t signal_ndim, bool normalized=false) const;
   Tensor rfft(int64_t signal_ndim, bool normalized=false, bool onesided=true) const;
@@ -675,6 +695,7 @@ class CAFFE2_API Tensor {
   std::tuple<Tensor,Tensor,Tensor> svd(bool some=true, bool compute_uv=true) const;
   Tensor cholesky(bool upper=false) const;
   Tensor cholesky_solve(const Tensor & input2, bool upper=false) const;
+  std::tuple<Tensor,Tensor> solve(const Tensor & A) const;
   Tensor potri(bool upper=true) const;
   std::tuple<Tensor,Tensor> pstrf(bool upper=true, Scalar tol=-1) const;
   std::tuple<Tensor,Tensor> qr() const;

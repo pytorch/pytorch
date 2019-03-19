@@ -67,7 +67,7 @@ Tensor logdet(const Tensor& self) {
   if (det.sign().item<double>() <= 0) {
     return det.log_();  // in order to get proper -inf (det=0) or nan (det<0)
   } else {
-    return diag_U.abs().log().sum();
+    return diag_U.abs_().log_().sum();
   }
 }
 
@@ -81,11 +81,12 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
   int info;
   std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
   if (info > 0) {
-    det = at::zeros({}, self.type());
+    return std::make_tuple(at::zeros({}, self.options()),
+                           at::empty({}, self.options()).fill_(-INFINITY));
   } else {
     det = diag_U.prod().mul_(det_P);
+    return std::make_tuple(det.sign(), diag_U.abs_().log_().sum());
   }
-  return std::make_tuple(det.sign(), diag_U.abs_().log_().sum());
 }
 
 Tensor pinverse(const Tensor& self, double rcond) {
