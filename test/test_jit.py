@@ -10758,6 +10758,97 @@ a")
         m._create_method_from_graph("forward", foo.graph)
         self.getExportImportCopy(m)
 
+    def test_attribute_serialization(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.table = torch.jit.Attribute({"I": "am", "a test": "test"}, Dict[str, str])
+                self.float = torch.jit.Attribute(2.3, float)
+                self.int = torch.jit.Attribute(99, int)
+                self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
+                self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
+                self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
+                self.int_list = torch.jit.Attribute([1, 2, 3, 4], List[int])
+
+            @torch.jit.script_method
+            def forward(self):
+                return (self.table, self.float, self.int, self.tuple, self.list, self.int_list)
+
+        m = M()
+        imported_m = self.getExportImportCopy(m)
+        self.assertEqual(m(), imported_m())
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    def test_attribute_unpickling(self):
+        import zipfile
+
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.table = torch.jit.Attribute({"I": "am", "a test": "test"}, Dict[str, str])
+                self.float = torch.jit.Attribute(2.3, float)
+                self.int = torch.jit.Attribute(99, int)
+                self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
+                self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
+                self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
+                self.int_list = torch.jit.Attribute([1, 2, 3, 4], List[int])
+
+            @torch.jit.script_method
+            def forward(self):
+                return (self.table, self.float, self.int, self.tuple, self.list, self.int_list)
+
+        class TensorID(object):
+            def __setstate__(self, id):
+                self.id = id
+
+        class IntList(object):
+            def __setstate__(self, data):
+                self.data = data
+
+        class JitUnpickler(pickle.Unpickler):
+            def find_class(self, module, name):
+                if not module == '__main__':
+                    return None
+
+                if name == 'TensorID':
+                    return TensorID
+                elif name == 'IntList':
+                    return IntList
+
+        with TemporaryFileName() as fname:
+            M().save(fname)
+            archive_name = os.path.basename(os.path.normpath(fname))
+            archive = zipfile.ZipFile(fname, 'r')
+            pickled_data = archive.read(os.path.join(archive_name, 'attributes.pkl'))
+            JitUnpickler(io.BytesIO(pickled_data)).load()
+
+    def test_submodule_attribute_serialization(self):
+        class S(torch.jit.ScriptModule):
+            def __init__(self, list_data):
+                super(S, self).__init__()
+                self.table = torch.jit.Attribute({"I": "am", "a test": "test"}, Dict[str, str])
+                self.list = torch.jit.Attribute(list_data, List[Tuple[int, int]])
+
+            @torch.jit.script_method
+            def forward(self):
+                return (self.table, self.list)
+
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.table = torch.jit.Attribute({"this": "is", "a different": "dict"}, Dict[str, str])
+                self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
+                self.s1 = S([(1, 2)])
+                self.s2 = S([(4, 5)])
+
+            @torch.jit.script_method
+            def forward(self):
+                return (self.table, self.tensor, self.s1.table, self.s2.list, self.s1.list)
+
+        m = M()
+        imported_m = self.getExportImportCopy(m)
+        self.assertEqual(m(), imported_m())
+
     def test_optional_tuple(self):
         def fn(x=None):
             # type: (Optional[Tuple[int, int]]) -> Tuple[int, int]
