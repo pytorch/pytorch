@@ -184,6 +184,20 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     throw ErrorReport(loc) << ss.str();
   }
 
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Method& m,
+      const std::string& field) override {
+    const std::string type_str = typeString(self);
+    std::stringstream ss;
+    ss << "attribute lookup is not defined on " << kind();
+    auto nn = py::module::import("torch.nn");
+    if (py::isinstance(self, nn.attr("Module"))) {
+      ss << ". Did you forget to add it to __constants__? ";
+    }
+    throw ErrorReport(loc) << ss.str();
+  }
+
  protected:
   py::object getattr(const SourceRange& loc, const std::string& name) {
     try {
