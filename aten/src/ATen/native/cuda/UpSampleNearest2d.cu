@@ -9,7 +9,7 @@ Tensor& upsample_nearest2d_out_cuda(
     Tensor& output,
     const Tensor& input,
     IntArrayRef output_size) {
-    return at::legacy::th::_thnn_upsample_nearest2d(
+    return at::legacy::th::_thnn_upsample_nearest2d_forward_out(
         output, input, output_size);
 }
 
@@ -17,7 +17,7 @@ Tensor upsample_nearest2d_cuda(
     const Tensor& input,
     IntArrayRef output_size) {
     auto output = at::empty({0}, input.options());
-    return at::legacy::th::_thnn_upsample_nearest2d(
+    return at::legacy::th::_thnn_upsample_nearest2d_forward(
         output, input, output_size);
 }
 
@@ -26,7 +26,7 @@ Tensor& upsample_nearest2d_backward_out_cuda(
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size) {
-    return at::legacy::th::_thnn_upsample_nearest2d(
+    return at::legacy::th::_thnn_upsample_nearest2d_backward_out(
         grad_input, grad_output, output_size, input_size);
 }
 
@@ -35,7 +35,7 @@ Tensor upsample_nearest2d_backward_cuda(
     IntArrayRef output_size,
     IntArrayRef input_size) {
     auto grad_input = at::zeros_like(grad_output);
-    return at::legacy::th::_thnn_upsample_nearest2d(
+    return at::legacy::th::_thnn_upsample_nearest2d_backward(
         grad_input, grad_output, output_size, input_size);
 }
 
