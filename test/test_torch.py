@@ -2926,34 +2926,6 @@ class _TestTorchMixin(object):
         self.assertEqual(expectedShape, test.shape)
         self.assertEqual(torch.bool, test.dtype)
 
-    # This is a temporary test for a boolean tensors on CPU. Once the CUDA part
-    # will be done, these test cases will be moved down to test_tensor_factories_empty test
-    def test_tensor_factories_bool(self):
-        expectedShape = (1, 2)
-        test = torch.empty(expectedShape, dtype=torch.bool)
-        self.assertEqual(expectedShape, test.shape)
-
-        test2 = torch.empty_like(test, dtype=torch.bool)
-        self.assertEqual(test.shape, test2.shape)
-
-        test = torch.full(expectedShape, True, dtype=torch.bool)
-        self.assertEqual(test, torch.tensor([[True, True]], dtype=torch.bool))
-
-        test2 = torch.full_like(test, True, dtype=torch.bool)
-        self.assertEqual(test, test2)
-
-        test = torch.zeros(expectedShape, dtype=torch.bool)
-        self.assertEqual(test, torch.tensor([[False, False]], dtype=torch.bool))
-
-        test2 = torch.zeros_like(test, dtype=torch.bool)
-        self.assertEqual(test, test2)
-
-        test = torch.ones(expectedShape, dtype=torch.bool)
-        self.assertEqual(test, torch.tensor([[True, True]], dtype=torch.bool))
-
-        test2 = torch.ones_like(test, dtype=torch.bool)
-        self.assertEqual(test, test2)
-
     def test_tensor_factories_empty(self):
         # ensure we can create empty tensors from each factory function
         shapes = [(5, 0, 1), (0,), (0, 0, 1, 0, 2, 0, 0)]
@@ -2965,7 +2937,7 @@ class _TestTorchMixin(object):
             for shape in shapes:
                 for dt in dtypes:
                     self.assertEqual(shape, torch.zeros(shape, device=device, dtype=dt).shape)
-                    self.assertEqual(shape, torch.zeros_like(torch.zeros(shape, device=device)).shape)
+                    self.assertEqual(shape, torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                     self.assertEqual(shape, torch.full(shape, 3, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.full_like(torch.zeros(shape, device=device, dtype=dt), 3).shape)
                     self.assertEqual(shape, torch.ones(shape, device=device, dtype=dt).shape)
