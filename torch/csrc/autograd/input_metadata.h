@@ -52,13 +52,14 @@ struct InputMetadata {
 private:
   const at::Type* type_ = nullptr;
   at::DimVector shape_;
-  // NB: This looks like a "device" but it actually is an assignment to
-  // an autograd thread; e.g., both CUDA device 1 and XLA device 1 live
-  // on the same thread.  We should change this to *actually* be a Device
-  // but we have to fix all of the sites to adjust this way.  (Why is
-  // it this way?  In the old days we only had CUDA devices, and so
-  // we could just say -1 was CPU and everything else was CUDA.  This clearly
-  // doesn't hold anymore.)
+  // This should be a 'Device'.  However, it is not for hysterical raisins,
+  // when we only had CPU and CUDA device (so we let -1 be CPU and other
+  // numbers be CUDA).  We haven't had time to refactor this properly,
+  // but we needed to support other devices like XLA, so what this really
+  // is, is an approximation of the Device, but with the device type dropped.
+  // This is good enough for us to assign this to autograd threads, but
+  // it's not good enough for us to do completely correct checks that device
+  // lines up.  When we fix this to be 'Device', you can delete this comment.
   const int64_t device_ = -1;
 };
 
