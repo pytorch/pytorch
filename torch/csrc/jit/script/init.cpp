@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/logging.h>
+#include <torch/csrc/jit/tracer.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -1088,6 +1089,16 @@ void initJitScriptBindings(PyObject* module) {
       });
 
   m.def("_logging_add_stat_value", [](std::string name, float val) {
+    // TODO: dynamic val (and maybe name?). Had too much trouble with pybind
+    // and decided to just leave it like this.
+    if (jit::tracer::isTracing()) {
+      auto tracer_state = jit::tracer::getTracingState();
+      auto node = tracer_state->graph->create(prim::BumpCounter, /*num_outputs=*/0);
+      jit::tracer::recordSourceLocation(node);
+      jit::tracer::addInputs(node, "name", name);
+      jit::tracer::addInputs(node, "val", val);
+      tracer_state->graph->insertNode(node);
+    }
     logging::getLogger()->addStatValue(name, val);
   });
   m.def("_logging_get_counters", []() {

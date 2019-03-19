@@ -14033,7 +14033,11 @@ class TestLogging(JitTestCase):
             return x + 1.0
 
         traced = torch.jit.trace(foo, torch.rand(3, 4))
-        print(traced.code)
+        torch.jit._logging.set_locking_logger()
+        traced(torch.rand(3, 4))
+
+        counters = torch.jit._logging.get_counters()
+        self.assertEqual(counters['foo'], 1.0)
 
 for test in autograd_method_tests():
     add_autograd_test(*test)
