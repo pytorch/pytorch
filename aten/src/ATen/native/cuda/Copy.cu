@@ -18,23 +18,23 @@ template <typename dst_T, typename src_T>
 struct CopyOp {
   static void apply(Tensor& dst, const Tensor& src) {
     CUDA_tensor_apply2<dst_T, src_T>(
-      dst, src, [] __device__(dst_T & dst_val, const src_T& src_val) {
-#if __CUDA_ARCH__ >= 350 && dst_T != bool
-      dst_val = static_cast<dst_T>(
-        static_cast<native::inter_copy_type_t<dst_T>>(__ldg(&src_val)));
+        dst, src, [] __device__(dst_T & dst_val, const src_T& src_val) {
+#if __CUDA_ARCH__ >= 350
+        dst_val = static_cast<dst_T>(
+            static_cast<native::inter_copy_type_t<dst_T>>(__ldg(&src_val)));
 #else
-      dst_val = static_cast<dst_T>(static_cast<native::inter_copy_type_t<dst_T>>(src_val));
+        dst_val = static_cast<dst_T>(static_cast<native::inter_copy_type_t<dst_T>>(src_val));
 #endif
       });
   }
 };
 
-template<>
-struct CopyOp<bool, bool> {
+template<typename dst_T>
+struct CopyOp<dst_T, bool> {
   static void apply(Tensor& dst, const Tensor& src) {
-    CUDA_tensor_apply2<bool, bool>(
-      dst, src, [] __device__(bool & dst_val, const bool& src_val) {
-        dst_val = static_cast<bool>(static_cast<native::inter_copy_type_t<bool>>(src_val));
+    CUDA_tensor_apply2<dst_T, bool>(
+      dst, src, [] __device__(dst_T & dst_val, const bool& src_val) {
+        dst_val = static_cast<dst_T>(static_cast<native::inter_copy_type_t<dst_T>>(src_val));
       });
   }
 };
