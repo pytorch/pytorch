@@ -1558,10 +1558,7 @@ def annotate(the_type, the_value):
     return the_value
 
 
-class Attribute(object):
-    def __init__(self, value, the_type):
-        self.value = value
-        self.type = the_type
+Attribute = collections.namedtuple('Attribute', ['value', 'the_type'])
 
 
 if not torch._C._jit_init():
