@@ -13999,6 +13999,31 @@ class TestClassType(JitTestCase):
         output = m_loaded(input)
         self.assertEqual(2 * input, output)
 
+    def test_python_interop(self):
+        @torch.jit.script
+        class Foo:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        @torch.jit.script
+        def use_foo(foo: Foo):
+            return foo
+
+        # create from python
+        x = torch.ones(2, 3);
+        y = torch.zeros(2, 3)
+        f = Foo(x, y)
+
+        self.assertEqual(x, f.x)
+        self.assertEqual(y, f.y)
+
+        # pass in and out of script
+        f2 = use_foo(f)
+
+        self.assertEqual(x, f2.x)
+        self.assertEqual(y, f2.y)
+
 
 for test in autograd_method_tests():
     add_autograd_test(*test)
