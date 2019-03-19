@@ -35,6 +35,8 @@ void THCTensor_(zero)(THCState *state, THCTensor *self_)
   THCudaCheck(cudaGetLastError());
 }
 
+#if !defined(THC_REAL_IS_BOOL) /* non bool only part */
+
 void THCTensor_(zerosLike)(THCState *state, THCTensor *r_, THCTensor *input)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
@@ -399,5 +401,7 @@ accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
   THCTensor_(free)(state, diag);
   return trace;
 }
+
+#endif
 
 #endif

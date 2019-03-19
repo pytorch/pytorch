@@ -491,7 +491,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'with_gil': bool,
     'cpu_half': bool,
     'deprecated': bool,
-    'cpu_bool': bool,
+    'enable_for_bool': bool,
     # See Note [field_name versus name]
     'field_name': str,
     'formals_list': List[AtFormal],
