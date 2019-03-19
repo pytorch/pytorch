@@ -14,6 +14,7 @@
 #include <type_traits>
 #include <sstream>
 #include <unordered_map>
+#include <functional>
 
 namespace c10 {
 
@@ -23,7 +24,7 @@ namespace c10 {
  * so we can create a new cache instance when a kernel is looked up
  * from the dispatch table.
  */
-using KernelCacheCreatorFunction = std::unique_ptr<c10::KernelCache> ();
+using KernelCacheCreatorFunction = std::function<std::unique_ptr<c10::KernelCache> ()>;
 /**
  * The dispatch table stores a pointer to a kernel function and a pointer
  * to a function initializing a cache for the kernel. If the kernel wants
@@ -34,7 +35,7 @@ using KernelCacheCreatorFunction = std::unique_ptr<c10::KernelCache> ();
  */
 struct DispatchTableEntry final {
   /*not-nullable*/ KernelFunction* kernel_func;
-  /*not-nullable*/ KernelCacheCreatorFunction* cache_creator_func;
+  /*not-nullable*/ KernelCacheCreatorFunction cache_creator_func;
 };
 
 namespace detail {

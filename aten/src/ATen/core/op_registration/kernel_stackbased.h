@@ -27,19 +27,20 @@ namespace detail {
     return nullptr;
   }
 
+  // TODO If this was templated on KernelCacheCreatorFunction, it (and c10::kernel()) could be constexpr
   struct KernelRegistrationConfigParameter final {
-    explicit constexpr KernelRegistrationConfigParameter(KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator_func)
+    explicit KernelRegistrationConfigParameter(KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func)
     : kernel_func_(kernel_func), cache_creator_func_(std::move(cache_creator_func)) {
     }
 
     void apply(KernelRegistrationConfig* registration) && {
       registration->kernel_func = kernel_func_;
-      registration->cache_creator_func = cache_creator_func_;
+      registration->cache_creator_func = std::move(cache_creator_func_);
     }
 
   private:
     KernelFunction* kernel_func_;
-    KernelCacheCreatorFunction* cache_creator_func_;
+    KernelCacheCreatorFunction cache_creator_func_;
   };
 }
 
@@ -58,7 +59,7 @@ namespace detail {
  * >         c10::kernel(my_kernel_cpu),
  * >         c10::dispatchKey(CPUTensorId()));
  */
-inline constexpr detail::KernelRegistrationConfigParameter kernel(KernelFunction* kernel_func) {
+inline detail::KernelRegistrationConfigParameter kernel(KernelFunction* kernel_func) {
   return detail::KernelRegistrationConfigParameter(kernel_func, &detail::cacheCreator<void>);
 }
 

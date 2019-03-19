@@ -8,6 +8,8 @@
 #include <ATen/core/op_registration/base.h>
 #include <ATen/core/op_registration/dispatch_key.h>
 #include <ATen/core/op_registration/kernel_stackbased.h>
+#include <ATen/core/op_registration/kernel_functor.h>
+#include <ATen/core/op_registration/kernel_function.h>
 
 /**
  * An instance of this class handles the registration for one or more operators.
