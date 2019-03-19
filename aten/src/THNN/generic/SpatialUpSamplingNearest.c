@@ -1,0 +1,27 @@
+#ifndef TH_GENERIC_FILE
+#define TH_GENERIC_FILE "THNN/generic/SpatialUpSamplingNearest.c"
+#else
+
+void THNN_(SpatialUpSamplingNearest_updateOutput)(
+    THNNState* state,
+    THTensor* input,
+    THTensor* output,
+    int outputHeight,
+    int outputWidth) {
+  return;
+}
+
+void THNN_(SpatialUpSamplingNearest_updateGradInput)(
+    THNNState* state,
+    THTensor* gradOutput,
+    THTensor* gradInput,
+    int nbatch,
+    int channels,
+    int inputHeight,
+    int inputWidth,
+    int outputHeight,
+    int outputWidth) {
+  return;
+}
+
+#endif
