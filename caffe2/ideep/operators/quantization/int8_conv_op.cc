@@ -65,7 +65,7 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
       auto expected_descriptor =
           ideep::convolution_forward::expected_weights_descriptor(
               filter_in.get_dims(), idtype::s8, stride_, pad_tl(), pad_br(),
-              dilation_, group_, algo_, iprop::forward_inference, X_dt);
+              dilation_, group_, algo_, iprop::forward_inference, X_dt, X.get_dims());
       if (filter_in.get_descriptor() != expected_descriptor) {
         filter_.init(expected_descriptor);
         filter_.set_scale(filter_scale);
