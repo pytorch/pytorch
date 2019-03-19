@@ -14001,7 +14001,7 @@ class TestClassType(JitTestCase):
 
     def test_python_interop(self):
         @torch.jit.script
-        class Foo:
+        class Foo(object):
             def __init__(self, x, y):
                 self.x = x
                 self.y = y
