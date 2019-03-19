@@ -1,8 +1,7 @@
 #pragma once
 
 /**
- * This file sets up the basics for operator registration like the
- * c10::RegisterOperators() class.
+ * This file sets up the basics for operator registration.
  *
  * You probably don't want to include this file directly but include
  * op_registration.h instead since that adds more functionality you'll

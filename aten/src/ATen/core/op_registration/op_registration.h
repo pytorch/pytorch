@@ -10,6 +10,10 @@
 #include <ATen/core/op_registration/kernel_stackbased.h>
 #include <ATen/core/op_registration/kernel_functor.h>
 #include <ATen/core/op_registration/kernel_function.h>
+#include <ATen/core/op_registration/kernel_function_legacy.h>
+
+
+namespace c10 {
 
 /**
  * An instance of this class handles the registration for one or more operators.
@@ -59,13 +63,27 @@ public:
   template<class... ConfigParameters>
   RegisterOperators op(FunctionSchema schema, ConfigParameters&&... configParameters) && {
     detail::KernelRegistrationConfig config = make_registration_config(configParameters...);
-    registrars_.emplace_back(std::move(schema), config.dispatch_key, config.kernel_func, config.cache_creator_func);
+    registrars_.emplace_back(std::move(schema), config.dispatch_key, config.kernel_func, std::move(config.cache_creator_func));
     return std::move(*this);
   }
 
+  // TODO allow input schema to be just the operator name + overload name, in that case use schema generated from kernel function
+  // TODO if schema is fully specified, still generate schema from kernel function and make sure it's correct
+
   // TODO error if dispatch key is not specified
-  // TODO Add functor, function and lambda based kernel APIs
+
+  // Deprecated. For backwards compatibility only.
+  // Don't use this, it introduces a performance overhead on each kernel call
+  // due to the kernel being stored in the wrapper as a runtime function pointer.
+  template<class KernelFunc>
+  RegisterOperators op(FunctionSchema schema, KernelFunc* func) && {
+    return op(std::move(schema), kernel<detail::WrapKernelFunctionRuntime>(func));
+  }
+
+  // TODO Add deprecated lambda-based API
 
 private:
   std::vector<c10::detail::OperatorRegistrar> registrars_;
 };
+
+}
