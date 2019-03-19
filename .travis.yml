@@ -48,3 +48,4 @@ matrix:
 branches:
   only:
   - master
+  - /gh\/.*\/base/
