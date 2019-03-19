@@ -240,8 +240,8 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
 
 // Represents all the parameters of a module as a List[Tensor]
 struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
-  ConstantParameterList(std::shared_ptr<Module> module)
-      : module_(std::move(module)) {}
+  ConstantParameterList(std::shared_ptr<Module> module, py::list params)
+      : module_(std::move(module)), params_(std::move(params)) {}
 
   std::string kind() const override {
     return "constant parameter list";
@@ -255,10 +255,12 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
       size_t n_binders) override {
     // Add all module parameters as inputs to the graph
     std::vector<Value*> params;
-    const auto& param_list = module_->get_parameters().items();
-    for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
-      auto& param = *it;
+
+    for (auto name : params_) {
+      auto param = module_->get_parameters().find(py::cast<std::string>(name));
+      AT_ASSERT(param != nullptr);
       params.push_back(caller.get_or_add_parameter(param->slot()));
+      std::cout << py::cast<std::string>(name) << ": " << param->slot()->toTensor() << "\n";
     }
     auto list = caller.graph()->createList(TensorType::get(), params);
     caller.graph()->insertNode(list);
@@ -267,6 +269,7 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
 
  private:
   std::shared_ptr<Module> module_;
+  py::list params_;
 };
 
 // defines how modules/methods behave inside the script subset.
@@ -324,7 +327,10 @@ struct ModuleValue : public SugaredValue {
       if (py::isinstance<py::function>(attr) &&
           py::hasattr(attr, "_is_parameter_list") &&
           py::cast<bool>(py::getattr(attr, "_is_parameter_list"))) {
-        return std::make_shared<ConstantParameterList>(module);
+        std::string weight_names = field + "_names";
+        auto namer = py::getattr(py_module, weight_names.c_str(), py::none());
+        AT_ASSERT(!namer.is_none());
+        return std::make_shared<ConstantParameterList>(module, namer());
       }
       if (py::isinstance<py::function>(attr) ||
           py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
