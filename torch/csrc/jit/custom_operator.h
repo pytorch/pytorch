@@ -2,7 +2,7 @@
 
 #include <torch/csrc/jit/operator.h>
 #include <ATen/core/stack.h>
-#include <ATen/core/dispatch/InferSchema.h>
+#include <ATen/core/op_registration/infer_schema.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 
