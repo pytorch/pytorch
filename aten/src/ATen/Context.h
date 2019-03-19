@@ -171,10 +171,6 @@ static inline TypeExtendedInterface& getNonVariableType(Backend p, ScalarType s)
   return globalContext().getNonVariableType(p, s);
 }
 
-static inline TypeExtendedInterface& getNonVariableType(DeviceType p, ScalarType s) {
-  return globalContext().getNonVariableType(deviceTypeToBackend(p), s);
-}
-
 CAFFE2_API TypeExtendedInterface& getType(TensorOptions options);
 CAFFE2_API TypeExtendedInterface& getType(const TensorImpl*);
 CAFFE2_API TypeExtendedInterface& getType(const Tensor&);
