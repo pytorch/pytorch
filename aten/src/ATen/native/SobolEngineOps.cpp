@@ -20,22 +20,22 @@ std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, co
   AT_CHECK(quasi.dtype() == at::kLong,
            "quasi needs to be of type ", at::kLong);
 
-  /// Performing one `unbind` operation and caching the result to prevent `n`
-  /// `select` operations.
-  std::vector<Tensor> sobolstate_unbind = at::native::unbind(sobolstate, 1);
-
-  /// Considering a vector of `n` Tensors to store the results in.
-  std::vector<Tensor> result(n);
   Tensor wquasi = quasi.clone();
+  Tensor result = at::empty({n, dimension}, sobolstate.options().dtype(at::kFloat));
 
   int64_t l;
-  for (int64_t i = 0; i < n; ++i) {
+  auto wquasi_accessor = wquasi.accessor<int64_t, 1>();
+  auto sobolstate_accessor = sobolstate.accessor<int64_t, 2>();
+  auto result_accessor = result.accessor<float, 2>();
+  for (int64_t i = 0; i < n; i++, num_generated++) {
     l = rightmost_zero(num_generated);
-    result[i] = wquasi.__ixor__(sobolstate_unbind[l]).clone();
-    num_generated++;
+    for (int64_t j = 0; j < dimension; j++) {
+      wquasi_accessor[j] ^= sobolstate_accessor[j][l];
+    }
+    result.select(0, i).copy_(wquasi);
   }
-
-  return std::make_tuple(at::native::stack(result, 0).to(at::kFloat).mul_(RECIPD), wquasi);
+  result.mul_(RECIPD);
+  return std::tuple<Tensor, Tensor>(result, wquasi);
 }
 
 /// This is the core function to fast-forward a `SobolEngine` given
@@ -52,12 +52,11 @@ Tensor& _sobol_engine_ff_(Tensor& quasi, int64_t n, const Tensor& sobolstate,
   int64_t l;
   auto sobolstate_accessor = sobolstate.accessor<int64_t, 2>();
   auto quasi_accessor = quasi.accessor<int64_t, 1>();
-  for (int64_t i = 0; i < n; i++) {
+  for (int64_t i = 0; i < n; i++, num_generated++) {
     l = rightmost_zero(num_generated);
     for (int64_t j = 0; j < dimension; j++) {
       quasi_accessor[j] ^= sobolstate_accessor[j][l];
     }
-    num_generated++;
   }
   return quasi;
 }

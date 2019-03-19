@@ -19,7 +19,7 @@ static inline int64_t rightmost_zero(const int64_t n) {
 
 /// Function to get a subsequence of bits in the representation of an integer starting from
 /// `pos` and of length `length`
-static inline int64_t bitsubseq(const int64_t n, const int pos, const int length) {
+static inline int64_t bitsubseq(const int64_t n, const int64_t pos, const int64_t length) {
   return (n >> pos) & ((1 << length) - 1);
 }
 
