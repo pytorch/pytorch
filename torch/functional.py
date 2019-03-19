@@ -23,8 +23,9 @@ __all__ = [
     'norm',
     'meshgrid',
     'potrf',
-    'potrs',
     'pstrf',
+    'potrs',
+    'gesv',
     'split',
     'stft',
     'tensordot',
@@ -739,7 +740,7 @@ def potrf(a, upper=True, out=None):
     r"""Computes the Cholesky decomposition of a symmetric positive-definite
     matrix :math:`A`.
 
-    For more information, regarding :func:`torch.potrf`, please check :func:`torch.cholesky`.
+    For more information regarding :func:`torch.potrf`, please check :func:`torch.cholesky`.
 
     .. warning::
         :func:`torch.potrf` is deprecated in favour of :func:`torch.cholesky` and will be removed
@@ -801,7 +802,7 @@ def potrs(b, u, upper=True, out=None):
     r"""Solves a linear system of equations with a positive semidefinite
     matrix to be inverted given its Cholesky factor matrix :attr:`u`.
 
-    For more information, regarding :func:`torch.potrs`, please check :func:`torch.cholesky_solve`.
+    For more information regarding :func:`torch.potrs`, please check :func:`torch.cholesky_solve`.
 
     .. warning::
         :func:`torch.potrs` is deprecated in favour of :func:`torch.cholesky_solve` and will be
@@ -812,3 +813,18 @@ def potrs(b, u, upper=True, out=None):
                   "in the next release. Please use torch.cholesky instead and note that the "
                   ":attr:`upper` argument in torch.cholesky_solve defaults to ``False``.", stacklevel=2)
     return torch.cholesky_solve(b, u, upper=upper, out=out)
+
+
+def gesv(b, A, out=None):
+    r"""This function returns the solution to the system of linear equations represented
+    by :math:`AX = B` and the LU factorization of A, in order as a tuple `X, LU`.
+
+    For more information regarding :func:`torch.gesv`, please check :func:`torch.solve`.
+
+    .. warning::
+        :func:`torch.gesv` is deprecated in favour of :func:`torch.solve` and will be removed in the
+        next release. Please use :func:`torch.solve` instead.
+    """
+    warnings.warn("torch.gesv is deprecated in favour of torch.solve and will be removed in the "
+                  "next release. Please use torch.solve instead.", stacklevel=2)
+    return torch.solve(b, A, out=out)
