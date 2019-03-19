@@ -215,7 +215,11 @@ def run_cmake(version,
         if env_var_name.startswith('gh'):
             # github env vars use utf-8, on windows, non-ascii code may
             # cause problem, so encode first
-            my_env[env_var_name] = str(my_env[env_var_name].encode("utf-8"))
+            try:
+                my_env[env_var_name] = str(my_env[env_var_name].encode("utf-8"))
+            except UnicodeDecodeError as e:
+                shex = ':'.join('{:02x}'.format(ord(c)) for c in my_env[env_var_name])
+                sys.stderr.write('Invalid ENV[{}] = {}\n'.format(env_var_name, shex))
     check_call(cmake_args, cwd=build_dir, env=my_env)
 
 
