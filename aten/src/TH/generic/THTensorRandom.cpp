@@ -61,14 +61,7 @@ void THTensor_(geometric)(THTensor *self, THGenerator *_generator, double p)
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)THRandom_geometric(_generator, p););
 }
 
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-
-#if defined(TH_REAL_IS_FLOAT)
-#define TH_REAL_MIN FLT_MIN
-#elif defined(TH_REAL_IS_DOUBLE)
-#define TH_REAL_MIN DBL_MIN
-#endif
-
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_BOOL)
 void THTensor_(uniform)(THTensor *self, THGenerator *_generator, double a, double b)
 {
   std::lock_guard<std::mutex> lock(_generator->mutex);
@@ -80,6 +73,15 @@ void THTensor_(uniform)(THTensor *self, THGenerator *_generator, double a, doubl
     (scalar_t)THRandom_uniform(_generator, a, b););
   #endif
 }
+#endif
+
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+
+#if defined(TH_REAL_IS_FLOAT)
+#define TH_REAL_MIN FLT_MIN
+#elif defined(TH_REAL_IS_DOUBLE)
+#define TH_REAL_MIN DBL_MIN
+#endif
 
 void THTensor_(normal)(THTensor *self, THGenerator *_generator, double mean, double stddev)
 {
