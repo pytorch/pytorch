@@ -3,16 +3,16 @@
 #include <ATen/ATen.h>
 
 /// Function to return the minimum of number of bits to represent the integer `n`
-static inline int bit_length(const int64_t n) {
-  int nbits, nloc;
+static inline int64_t bit_length(const int64_t n) {
+  int64_t nbits, nloc;
   for (nloc = n, nbits = 0; nloc > 0; nloc /= 2, nbits++);
   return nbits;
 }
 
 /// Function to get the position of the rightmost zero in the bit representation of an integer
 /// This value is the zero-indexed position
-static inline int rightmost_zero(const int64_t n) {
-  int z, i;
+static inline int64_t rightmost_zero(const int64_t n) {
+  int64_t z, i;
   for (z = n, i = 0; z % 2 == 1; z /= 2, i++);
   return i;
 }
@@ -33,11 +33,11 @@ static inline at::Tensor cdot_pow2(const at::Tensor& bmat) {
 /// All definitions below this point are data. These are constant, and should not be modified
 /// without notice
 
-static constexpr int MAXBIT = 30;
-static constexpr int LARGEST_NUMBER = 1 << 30;
+static constexpr int64_t MAXBIT = 30;
+static constexpr int64_t LARGEST_NUMBER = 1 << 30;
 static constexpr float RECIPD = 1.0 / LARGEST_NUMBER;
 
-static constexpr int poly[1111] = {
+static constexpr int64_t poly[1111] = {
   1, 3, 7, 11, 13, 19, 25, 37, 59, 47, 61, 55, 41, 67, 97, 91, 109,
   103, 115, 131, 193, 137, 145, 143, 241, 157, 185, 167, 229, 171,
   213, 191, 253, 203, 211, 239, 247, 285, 369, 299, 301, 333, 351,
@@ -150,7 +150,7 @@ static constexpr int poly[1111] = {
   16375, 16381
 };
 
-static constexpr int initsobolstate[1111][13] = {
+static constexpr int64_t initsobolstate[1111][13] = {
   {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
   {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
   {1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},

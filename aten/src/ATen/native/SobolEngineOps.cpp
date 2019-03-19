@@ -25,12 +25,13 @@ std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, co
   std::vector<Tensor> sobolstate_unbind = at::native::unbind(sobolstate, 1);
 
   /// Considering a vector of `n` Tensors to store the results in.
-  std::vector<Tensor> result;
+  std::vector<Tensor> result(n);
   Tensor wquasi = quasi.clone();
 
+  int64_t l;
   for (int64_t i = 0; i < n; ++i) {
-    int64_t l = rightmost_zero(num_generated);
-    result.emplace_back(wquasi.__ixor__(sobolstate_unbind[l]).clone());
+    l = rightmost_zero(num_generated);
+    result[i] = wquasi.__ixor__(sobolstate_unbind[l]).clone();
     num_generated++;
   }
 
@@ -48,13 +49,14 @@ Tensor& _sobol_engine_ff_(Tensor& quasi, int64_t n, const Tensor& sobolstate,
   AT_CHECK(quasi.dtype() == at::kLong,
            "quasi needs to be of type ", at::kLong);
 
-  /// Performing one `unbind` operation and caching the result to prevent `n`
-  /// `select` operations.
-  std::vector<Tensor> sobolstate_unbind = at::native::unbind(sobolstate, 1);
-
-  for (int64_t i = 0; i < n; ++i) {
-    int64_t l = rightmost_zero(num_generated);
-    quasi.__ixor__(sobolstate_unbind[l]);
+  int64_t l;
+  auto sobolstate_accessor = sobolstate.accessor<int64_t, 2>();
+  auto quasi_accessor = quasi.accessor<int64_t, 1>();
+  for (int64_t i = 0; i < n; i++) {
+    l = rightmost_zero(num_generated);
+    for (int64_t j = 0; j < dimension; j++) {
+      quasi_accessor[j] ^= sobolstate_accessor[j][l];
+    }
     num_generated++;
   }
   return quasi;
@@ -113,17 +115,17 @@ Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
   /// Use a tensor accessor for `sobolstate`
   auto ss_a = sobolstate.accessor<int64_t, 2>();
   for (int64_t d = 0; d < dimension; ++d) {
-    int p = poly[d];
-    int m = bit_length(p) - 1;
+    int64_t p = poly[d];
+    int64_t m = bit_length(p) - 1;
 
-    for (int i = 0; i < m; ++i) {
+    for (int64_t i = 0; i < m; ++i) {
       ss_a[d][i] = initsobolstate[d][i];
     }
 
-    for (int j = m; j < MAXBIT; ++j) {
-      int newv = ss_a[d][j - m];
-      int pow2 = 1;
-      for (int k = 0; k < m; ++k) {
+    for (int64_t j = m; j < MAXBIT; ++j) {
+      int64_t newv = ss_a[d][j - m];
+      int64_t pow2 = 1;
+      for (int64_t k = 0; k < m; ++k) {
         pow2 <<= 1;
         if ((p >> (m - 1 - k)) & 1) {
           newv = newv ^ (pow2 * ss_a[d][j - k - 1]);
