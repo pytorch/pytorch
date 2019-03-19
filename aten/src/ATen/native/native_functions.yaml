@@ -2455,6 +2455,13 @@
     CPU: _s_gamma_cpu
     CUDA: _s_gamma_cuda
 
+- func: _sample_dirichlet(Tensor self, Generator? generator=None) -> Tensor
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: _s_dirichlet_cpu
+    CUDA: _s_dirichlet_cuda
+
 - func: poisson(Tensor self, Generator? generator=None) -> Tensor
   matches_jit_signature: True
   dispatch:
