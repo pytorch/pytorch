@@ -6,7 +6,7 @@
 
 #define NUM_BLOCKS min((int)THCCeilDiv(size, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
 
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BOOL)
 
 void THCTensor_(uniform)(THCState* state, THCTensor *self_, double a, double b)
 {
@@ -22,6 +22,10 @@ void THCTensor_(uniform)(THCState* state, THCTensor *self_, double a, double b)
 
   THCTensor_(freeCopyTo)(state, self, self_);
 };
+
+#endif
+
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
 void THCTensor_(normal)(THCState* state, THCTensor *self_, double mean, double stdv)
 {

@@ -62,15 +62,15 @@ def process_types_and_backends(option):
         if arg['type'] == 'THSTensor*':
             pairs.discard(('CUDA', 'Half'))
 
-    # special case remove Half and Bool for cpu unless it is explicitly enabled,
+    # special case remove Half and Bool for cpu unless it is explicitly enabled
     if not option.get('cpu_half', False):
         pairs.discard(('CPU', 'Half'))
 
-    if not option.get('cpu_bool', False):
+    if not option.get('enable_for_bool', False):
         pairs.discard(('CPU', 'Bool'))
 
-    # TODO: remove this hack once support for a bool tensor for CUDA is enabled
-    pairs.discard(('CUDA', 'Bool'))
+    if not option.get('enable_for_bool', False):
+        pairs.discard(('CUDA', 'Bool'))
 
     # sort the result for easy reading
     option['backend_type_pairs'] = sorted([p for p in pairs])

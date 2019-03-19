@@ -151,6 +151,7 @@ __global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1, ARG2) 
 GENERATE_KERNEL2(generate_uniform, float, float a, float b, float, curand_uniform, reverse_bounds(x) * (b-a) + a)
 GENERATE_KERNEL2(generate_uniform, float, double a, double b, float, curand_uniform, reverse_bounds(x) * (b-a) + a)
 GENERATE_KERNEL2(generate_uniform, double, double a, double b, double, curand_uniform_double, reverse_bounds(x) * (b-a) + a)
+GENERATE_KERNEL2(generate_uniform, bool, double a, double b, double, curand_uniform_double, false)
 
 GENERATE_KERNEL2(generate_normal, float, double mean, double stdv, float, curand_normal, (x * stdv) + mean)
 GENERATE_KERNEL2(generate_normal, double, double mean, double stdv, double, curand_normal_double, (x * stdv) + mean)
@@ -168,6 +169,9 @@ GENERATE_KERNEL2(generate_cauchy, at::Half, double median, double sigma, float, 
 
 #include <THC/generic/THCTensorRandom.cu>
 #include <THC/THCGenerateAllTypes.h>
+
+#include <THC/generic/THCTensorRandom.cu>
+#include <THC/THCGenerateBoolType.h>
 
 #undef GENERATE_KERNEL1
 #undef GENERATE_KERNEL2
