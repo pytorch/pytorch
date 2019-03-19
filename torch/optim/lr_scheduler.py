@@ -681,22 +681,16 @@ class SGDR(_LRScheduler):
     """
 
     def __init__(self, optimizer, T_0, T_mult=1, eta_min=0, last_epoch=-1):
-        if T_0 < 0:
+        T_0 = int(T_0)
+        if T_0 <= 0:
             raise ValueError("Expected positive T_0, but got {}".format(T_0))
-        if T_mult < 0:
-            raise ValueError("Expected positive T_mul, but got {}".format(T_mul))
-        self.T_0 = int(T_0)
-        self.T_i = int(T_0)
+        if T_mult < 1:
+            raise ValueError("Expected T_mul >= 1, but got {}".format(T_mul))
+        self.T_0 = T_0
+        self.T_i = T_0
         self.T_mult = T_mult
         self.eta_min = eta_min
         super(SGDR, self).__init__(optimizer, last_epoch)
-        for i, group in enumerate(optimizer.param_groups):
-            if 'initial_lr' not in group:
-                raise KeyError("param 'initial_lr' is not specified "
-                               "in param_groups[{}] when resuming an optimizer".format(i))
-            if group['initial_lr'] < eta_min:
-                raise ValueError("Initial_lr should be larger than eta_min, \
-                        but got initial_lr: {}, eta_min: {}".format(group['initial_lr'], eta_min))
         self.T_cur = last_epoch
 
     def get_lr(self):
@@ -720,8 +714,8 @@ class SGDR(_LRScheduler):
             epoch = self.last_epoch + 1
             self.T_cur = self.T_cur + 1
             if self.T_cur >= self.T_i:
-                self.T_cur = 0
-                self.T_i = int(self.T_i * self.T_mult)
+                self.T_cur = self.T_cur - self.T_i
+                self.T_i = self.T_i * self.T_mult
         else:
             if epoch >= self.T_0:
                 if self.T_mult == 1:

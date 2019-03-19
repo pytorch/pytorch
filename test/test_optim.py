@@ -1062,38 +1062,58 @@ class TestLRScheduler(TestCase):
     def test_sgdr_lr1(self):
         iters = 100
         eta_min = 1e-10
-        T_mults = [1, 2]
+        T_mults = [1, 2, 2.5]
         for T_mult in T_mults:
-            T = 10
+            T_i = 10
             T_cur = 0
             targets = [[0.05], [0.5]]
-            scheduler = SGDR(self.opt, T_0=T, T_mult=T_mult, eta_min=eta_min)
+            scheduler = SGDR(self.opt, T_0=T_i, T_mult=T_mult, eta_min=eta_min)
             for _ in range(1, iters, 1):
                 T_cur += 1
-                if T_cur == T:
-                    T_cur = 0
-                    T *= T_mult
-                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
-                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
+                if T_cur >= T_i:
+                    T_cur = T_cur - T_i
+                    T_i = T_mult * T_i
+                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
             self._test(scheduler, targets, iters)
 
     def test_sgdr_lr2(self):
         iters = 30
         eta_min = 1e-10
-        T_mults = [1, 2]
+        T_mults = [1, 2, 1.5]
         for T_mult in T_mults:
-            T = 10
+            T_i = 10
             T_cur = 0
             targets = [[0.05], [0.5]]
-            scheduler = SGDR(self.opt, T_0=T, T_mult=T_mult, eta_min=eta_min)
+            scheduler = SGDR(self.opt, T_0=T_i, T_mult=T_mult, eta_min=eta_min)
             for _ in torch.arange(0.1, iters, 0.1):
                 T_cur = round(T_cur + 0.1, 1)
-                if T_cur == T:
-                    T_cur = 0
-                    T *= T_mult
-                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
-                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T)) / 2]
+                if T_cur >= T_i:
+                    T_cur = T_cur - T_i
+                    T_i = T_mult * T_i
+                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
             self._test_sgdr(scheduler, targets, iters)
+
+    def test_sgdr_lr3(self):
+        epochs_for_T_mults = [[0, 1, 2, 3, 4, 5, 12, 27, 3, 4, 5, 6, 13],
+                              [0, 1, 2, 3, 4, 5, 25, 32, 33, 34, 80, 81, 3],
+                              [0, 0.1, 0.2, 0.3, 1.3, 2.3, 17.5, 18.5, 19.5, 29.5, 30.5, 31.5, 50]]
+        T_curs_for_T_mults = [[1, 2, 3, 4, 5, 2, 7, 3, 4, 5, 6, 3],
+                              [1, 2, 3, 4, 5, 15, 2, 3, 4, 10, 11, 3],
+                              [0.1, 0.2, 0.3, 1.3, 2.3, 7.5, 8.5, 9.5, 4.5, 5.5, 6.5, 2.5]]
+        T_is_for_T_mults = [[10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10],
+                            [10, 10, 10, 10, 10, 20, 40, 40, 40, 80, 80, 10],
+                            [10, 10, 10, 10, 10, 15, 15, 15, 22.5, 22.5, 22.5, 33.75]]
+        eta_min = 1e-10
+        T_mults = [1, 2, 1.5]
+        for epochs, T_mult, T_curs, T_is in zip(epochs_for_T_mults, T_mults, T_curs_for_T_mults, T_is_for_T_mults):
+            targets = [[0.05], [0.5]]
+            scheduler = SGDR(self.opt, T_0=10, T_mult=T_mult, eta_min=eta_min)
+            for T_cur, T_i in zip(T_curs, T_is):
+                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+            self._test_interleaved_sgdr(scheduler, targets, epochs)
 
     def test_step_lr_state_dict(self):
         self._check_scheduler_state_dict(
@@ -1179,6 +1199,14 @@ class TestLRScheduler(TestCase):
     def _test_sgdr(self, scheduler, targets, epochs=10):
         for index, epoch in enumerate(torch.arange(0, epochs, 0.1)):
             epoch = round(epoch.item(), 1)
+            scheduler.step(epoch)
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertAlmostEqual(target[index], param_group['lr'],
+                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                           epoch, target[index], param_group['lr']), delta=1e-5)
+
+    def _test_interleaved_sgdr(self, scheduler, targets, epochs):
+        for index, epoch in enumerate(epochs):
             scheduler.step(epoch)
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertAlmostEqual(target[index], param_group['lr'],
