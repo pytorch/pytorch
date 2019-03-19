@@ -1221,6 +1221,8 @@ def forward(self,
 [export.cpp](export.cpp)
 [pickler.cpp](pickler.cpp)
 [import.cpp](import.cpp)
+[caffe2/proto/torch.proto](../../../caffe2/proto/torch.proto)
+
 
 TorchScript programs are serialized with a call to `torch.jit.save()`. The resulting file (ending in `.pt` by convention) can be loaded/executed in C++ and Python.
 
@@ -1355,6 +1357,72 @@ class JitUnpickler(pickle.Unpickler):
 
 JitUnpickler(open("my_model/attributes.pkl", "rb")).load()
 ```
+
+#### Binary Format
+
+Running the following snippet produces a `ScriptModule` with several attributes.
+
+```python
+class M(torch.jit.ScriptModule):
+    def __init__(self):
+        super(M, self).__init__()
+        self.float = torch.jit.Attribute(2.3, float)
+        self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
+        self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
+        self.int_list = torch.jit.Attribute([1, 2, 3, 4], List[int])
+
+    @torch.jit.script_method
+    def forward(self):
+        return (self.float, self.tuple, self.tensor, self.int_list)
+
+M().save("out.pt")
+```
+
+In a terminal, Python's `pickletools` module can be used to decode the binary blob of `attributes.pkl` into a human readable format.
+
+```bash
+unzip -o out.pt
+python -m pickletools out/attributes.pkl
+```
+
+The output of the above commands demonstrates the concepts described earlier. Attributes are wrapped in with `2: EMPTY_LIST` and appear in the order they are defined on the module. Classes for certain special types (`List[int]`, `Tensor`) can be seen at `37: GLOBAL` and `66: GLOBAL`, followed by data specific to that type, then finally by an instruction to build the object at `65: BUILD` and `113: BUILD` respectively.
+```
+    0: \x80 PROTO      2
+    2: ]    EMPTY_LIST
+    3: (    MARK
+    4: G        BINFLOAT   2.3
+   13: (        MARK
+   14: J            BININT     1
+   19: J            BININT     2
+   24: J            BININT     3
+   29: J            BININT     4
+   34: t            TUPLE      (MARK at 13)
+   35: q        BINPUT     0
+   37: c        GLOBAL     '__main__ TensorID'
+   56: q        BINPUT     1
+   58: )        EMPTY_TUPLE
+   59: \x81     NEWOBJ
+   60: J        BININT     0
+   65: b        BUILD
+   66: c        GLOBAL     '__main__ IntList'
+   84: q        BINPUT     2
+   86: )        EMPTY_TUPLE
+   87: \x81     NEWOBJ
+   88: ]        EMPTY_LIST
+   89: q        BINPUT     3
+   91: (        MARK
+   92: J            BININT     1
+   97: J            BININT     2
+  102: J            BININT     3
+  107: J            BININT     4
+  112: e            APPENDS    (MARK at 91)
+  113: b        BUILD
+  114: e        APPENDS    (MARK at 3)
+  115: .    STOP
+highest protocol among opcodes = 2
+```
+
+
 
 ### Implementation Details
 
