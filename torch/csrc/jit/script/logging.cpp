@@ -5,17 +5,28 @@
 
 namespace torch { namespace jit { namespace logging {
 
-std::mutex m;
-std::unordered_map<std::string, float> counters;
-
-void bumpCounter(std::string counter, float val) {
+void LockingLogger::addStatValue(std::string stat_name, float val) {
   std::unique_lock<std::mutex> lk(m);
-  counters[counter] += val;
+  counters[stat_name] += val;
 }
 
-std::unordered_map<std::string, float> getCounters() {
+std::unordered_map<std::string, float> LockingLogger::getCounters() const {
   std::unique_lock<std::mutex> lk(m);
   return counters;
+}
+
+// TODO: SLOW
+std::mutex m;
+std::shared_ptr<LoggerBase> global_logger = std::make_shared<NoopLogger>();
+
+std::shared_ptr<LoggerBase> getLogger() {
+  std::unique_lock<std::mutex> lk(m);
+  return global_logger;
+}
+
+void setLogger(std::shared_ptr<LoggerBase> logger) {
+  std::unique_lock<std::mutex> lk(m);
+  global_logger = std::move(logger);
 }
 
 }}}

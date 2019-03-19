@@ -18,6 +18,7 @@
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/script/parser.h>
+#include <torch/csrc/jit/script/logging.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -543,7 +544,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return std::make_shared<AnnotateValue>();
-  } else if (obj.ptr() == py::module::import("torch.jit._logging").attr("bump_counter").ptr()) {
+  } else if (obj.ptr() == py::module::import("torch.jit._logging").attr("add_stat_value").ptr()) {
     return std::make_shared<BuiltinFunction>(prim::BumpCounter, c10::nullopt);
   } else if (obj.ptr() == py::module::import("torch.jit._logging").attr("get_counters").ptr()) {
     return std::make_shared<BuiltinFunction>(prim::GetCounters, c10::nullopt);
@@ -1085,6 +1086,16 @@ void initJitScriptBindings(PyObject* module) {
       .def("run", [](testing::FileCheck& f, const Graph& g) {
         return f.run(g);
       });
+
+  m.def("_logging_add_stat_value", [](std::string name, float val) {
+    logging::getLogger()->addStatValue(name, val);
+  });
+  m.def("_logging_get_counters", []() {
+    return logging::getLogger()->getCounters();
+  });
+  m.def("_logging_set_locking_logger", []() {
+    logging::setLogger(std::make_shared<logging::LockingLogger>());
+  });
 }
 } // namespace script
 } // namespace jit

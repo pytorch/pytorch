@@ -14008,25 +14008,24 @@ class TestLogging(JitTestCase):
             def forward(self, x):
                 for i in range(x.size(0)):
                     x += 1.0
-                    torch.jit._logging.bump_counter('foo', 1.0)
+                    torch.jit._logging.add_stat_value('foo', 1.0)
 
                 if bool(x.sum() > 0.0):
-                    torch.jit._logging.bump_counter('positive', 1.0)
+                    torch.jit._logging.add_stat_value('positive', 1.0)
                 else:
-                    torch.jit._logging.bump_counter('negative', 1.0)
-                # TODO: make this work outside script
-                counters = torch.jit._logging.get_counters()
-                return x, counters
+                    torch.jit._logging.add_stat_value('negative', 1.0)
+                return x
+
+        torch.jit._logging.set_locking_logger()
 
         mtl = ModuleThatLogs()
         for i in range(5):
-            _, counters = mtl(torch.rand(3, 4, 5))
+            mtl(torch.rand(3, 4, 5))
+
+        counters = torch.jit._logging.get_counters()
 
         self.assertEqual(counters['foo'], 15.0)
         self.assertEqual(counters['positive'], 5.0)
-
-        print(counters)
-
 
 for test in autograd_method_tests():
     add_autograd_test(*test)

@@ -367,7 +367,7 @@ struct GraphExecutorImpl {
         num_inputs(this->graph->inputs().size()),
         num_flat_inputs(countFlatInputs(graph)),
         num_outputs(this->graph->outputs().size()) {
-      logging::bumpCounter("pytorch_runtime.graph_executors_constructed", 1.0);
+      logging::getLogger()->addStatValue("pytorch_runtime.graph_executors_constructed", 1.0);
     }
 
   // entry point where execution begins
@@ -379,7 +379,7 @@ struct GraphExecutorImpl {
         " inputs, but got only ",
         stack.size());
 
-    logging::bumpCounter("pytorch_runtime.graph_executor_invocations", 1.0);
+    logging::getLogger()->addStatValue("pytorch_runtime.graph_executor_invocations", 1.0);
 
     if (tracer::isTracing()) {
       return runTraced(stack);
@@ -450,12 +450,12 @@ struct GraphExecutorImpl {
       std::lock_guard<std::mutex> lock(compile_mutex);
       auto it = plan_cache.find(spec);
       if (it != plan_cache.end()) {
-        logging::bumpCounter("pytorch_runtime.execution_plan_cache_hit", 1.0);
+        logging::getLogger()->addStatValue("pytorch_runtime.execution_plan_cache_hit", 1.0);
         return it->second;
       }
       auto plan = compileSpec(spec);
       auto r = plan_cache.emplace(std::move(spec), std::move(plan));
-      logging::bumpCounter("pytorch_runtime.execution_plan_cache_miss", 1.0);
+      logging::getLogger()->addStatValue("pytorch_runtime.execution_plan_cache_miss", 1.0);
       return r.first->second;
     }
   }

@@ -716,7 +716,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           // std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
         }
         pc = new_pc;
-        logging::bumpCounter("pytorch_runtime.executed_operators", 1.0);
+        logging::getLogger()->addStatValue("pytorch_runtime.executed_operators", 1.0);
       } catch (Suspend& e) {
         // wait() expects a single input
         AT_ASSERT(inst.inputs.values.size == 1);
@@ -737,7 +737,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               autograd::GradMode::is_enabled()));
         });
 
-        logging::bumpCounter("pytorch_runtime.task_suspends", 1.0);
+        logging::getLogger()->addStatValue("pytorch_runtime.task_suspends", 1.0);
 
         return true;
       } catch (Future::FutureError& e) {
@@ -756,7 +756,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         } else {
           handleError(e.what(), is_jit_exception);
         }
-        logging::bumpCounter("pytorch_runtime.local_exceptions", 1.0);
+        logging::getLogger()->addStatValue("pytorch_runtime.local_exceptions", 1.0);
         return false;
       }
     }
@@ -768,7 +768,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         future->markCompleted(
             Tuple::create(jit::last(stack, num_outputs).vec()));
       }
-      logging::bumpCounter("pytorch_runtime.futures_completed", 1.0);
+      logging::getLogger()->addStatValue("pytorch_runtime.futures_completed", 1.0);
     }
 
     return false;

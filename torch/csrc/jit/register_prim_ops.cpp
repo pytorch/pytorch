@@ -893,13 +893,13 @@ RegisterOperators reg(
        return [](Stack& stack) {
          auto val = pop(stack).toDouble();
          auto name = pop(stack).toString();
-         torch::jit::logging::bumpCounter(*name, val);
+         torch::jit::logging::getLogger()->addStatValue(*name, val);
          return 0;
        };
      }),
      Operator("prim::GetCounters() -> Dict(str, float)", [](const Node* node) {
        return [](Stack& stack) {
-         auto counters = torch::jit::logging::getCounters();
+         auto counters = torch::jit::logging::getLogger()->getCounters();
          auto counters_generic_dict = c10::ivalue::UnorderedMap();
          for (auto &kv : counters) {
            counters_generic_dict[kv.first] = kv.second;

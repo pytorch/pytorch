@@ -1,11 +1,43 @@
 #pragma once
 
 #include <string>
+#include <mutex>
 #include <unordered_map>
 
 namespace torch { namespace jit { namespace logging {
 
-void bumpCounter(std::string counter, float val);
-std::unordered_map<std::string, float> getCounters();
+class LoggerBase {
+ public:
+  virtual void addStatValue(std::string stat_name, float val) = 0;
+  virtual std::unordered_map<std::string, float> getCounters() const = 0;
+  virtual ~LoggerBase() {}
+};
+
+std::shared_ptr<LoggerBase> getLogger();
+void setLogger(std::shared_ptr<LoggerBase> logger);
+
+// No-op logger. This is the default and is meant to incur almost no runtime
+// overhead.
+
+class NoopLogger : public LoggerBase {
+ public:
+  void addStatValue(std::string stat_name, float val) override {}
+  std::unordered_map<std::string, float> getCounters() const override {
+    return {};
+  }
+  ~NoopLogger() {}
+};
+
+// Trivial locking logger. Pass in an instance of this to setLogger() to use it.
+// This keeps track of the sum of all statistics.
+class LockingLogger : public LoggerBase {
+ public:
+  void addStatValue(std::string stat_name, float val) override;
+  std::unordered_map<std::string, float> getCounters() const override;
+  ~LockingLogger() {}
+ private:
+  mutable std::mutex m;
+  std::unordered_map<std::string, float> counters;
+};
 
 }}}
