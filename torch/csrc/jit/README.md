@@ -1163,11 +1163,64 @@ TODO: fusion, operators
 # Saving Programs
 
 
-## PythonPrint
+## Python Printer
 
-TODO: python_print
+[python_print.cpp](python_print.cpp)
+[import_source.cpp](import_source.cpp)
+
+The Python Printer takes a `Graph` and produces Python-like code that represents the same graph. Using some special values in [import_source.cpp](import_source.cpp), this code can be read back in by the compiler to produce the same `Graph`. In Python a `ScriptModule`'s `code` property shows the Python Printed graph.
+
+The table below shows the graph and code for this small `ScriptModule`:
+```python
+class M(torch.jit.ScriptModule):
+    @torch.jit.script_method
+    def forward(self, x, y, z):
+        # type: (Tensor, int, float) -> Tensor
+        if y > 2:
+            x = x + z
+        else:
+            x = x + y
+        return x
+
+m = M()
+```
+
+`m.graph`
+```
+graph(%x.1 : Tensor,
+      %y : int,
+      %z : float):
+  %5 : int = prim::Constant[value=1]()
+  %3 : int = prim::Constant[value=2]()
+  %4 : bool = aten::gt(%y, %3)
+  %x : Tensor = prim::If(%4)
+    block0():
+      %x.2 : Tensor = aten::add(%x.1, %z, %5)
+      -> (%x.2)
+    block1():
+      %x.3 : Tensor = aten::add(%x.1, %y, %5)
+      -> (%x.3)
+  return (%x)
+```
+
+`m.code`
+```python
+def forward(self,
+    x: Tensor,
+    y: int,
+    z: float) -> Tensor:
+  if torch.gt(y, 2):
+    x0 = torch.add(x, z, 1)
+  else:
+    x0 = torch.add(x, y, 1)
+  return x0
+```
 
 ## Serialization
+
+[export.cpp](export.cpp)
+[pickler.cpp](pickler.cpp)
+[import.cpp](import.cpp)
 
 TorchScript programs are serialized with a call to `torch.jit.save()`. The resulting file (ending in `.pt` by convention) can be loaded/executed in C++ and Python.
 
