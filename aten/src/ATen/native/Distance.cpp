@@ -83,6 +83,8 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
 }
 
 Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double eps) {
+  // Follow scipy impl to improve numerical precision
+  // Use x / sqrt(x * x) instead of x / (sqrt(x) * sqrt(x))
   Tensor w12 = at::sum(x1 * x2, dim);
   Tensor w1 = at::sum(x1 * x1, dim);
   Tensor w2 = at::sum(x2 * x2, dim);
