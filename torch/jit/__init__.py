@@ -723,11 +723,13 @@ def _try_compile_weak_script(fn):
     else:
         return entry["compiled_fn"]
 
+
 # ScriptClasses must be new-style classes because we construct them using their
 # __new__ method.
 def _is_new_style_class(cls):
     if hasattr(cls, '__class__'):
         return ('__dict__' in dir(cls) or hasattr(cls, '__slots__'))
+
 
 def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
@@ -1550,9 +1552,11 @@ _register_builtin(_wait, 'aten::wait')
 
 _script_classes = {}
 
+
 def _add_script_class(cls, name):
     global _script_classes
     _script_classes[name] = cls
+
 
 def _get_script_class(name):
     global _script_classes
