@@ -289,9 +289,6 @@ inline Tensor & Tensor::floor_() {
 inline Tensor Tensor::ger(const Tensor & vec2) const {
     return type().ger(*this, vec2);
 }
-inline std::tuple<Tensor,Tensor> Tensor::gesv(const Tensor & A) const {
-    return type().gesv(*this, A);
-}
 inline Tensor Tensor::fft(int64_t signal_ndim, bool normalized) const {
     return type().fft(*this, signal_ndim, normalized);
 }
@@ -1158,6 +1155,9 @@ inline Tensor Tensor::cholesky(bool upper) const {
 }
 inline Tensor Tensor::cholesky_solve(const Tensor & input2, bool upper) const {
     return type().cholesky_solve(*this, input2, upper);
+}
+inline std::tuple<Tensor,Tensor> Tensor::solve(const Tensor & A) const {
+    return type().solve(*this, A);
 }
 inline Tensor Tensor::potri(bool upper) const {
     return type().potri(*this, upper);

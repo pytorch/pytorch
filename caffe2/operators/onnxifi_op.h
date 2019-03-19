@@ -56,7 +56,7 @@ class OnnxifiOp final : public Operator<Context> {
       if (!output_shape_hint.empty()) {
         TensorInfo info;
         info.onnxifi_type = output_shape_hint.front();
-        for (int i = 1; i < output_shape_hint.size(); ++i) {
+        for (size_t i = 1; i < output_shape_hint.size(); ++i) {
           info.dims.push_back(output_shape_hint[i]);
         }
         output_shape_hints_.emplace(output_idx, std::move(info));
