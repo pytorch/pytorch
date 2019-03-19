@@ -86,6 +86,8 @@ namespace c10 {
   _(prim, CreateObject)            \
   _(prim, SetAttr)                 \
   _(prim, GetAttr)                 \
+  _(prim, BumpCounter)             \
+  _(prim, GetCounters)             \
   _(aten, append)                  \
   _(aten, item)                    \
   _(aten, format)                  \

@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 
@@ -887,7 +888,27 @@ RegisterOperators reg(
          userObj->setSlot(slot, std::move(v));
          return 0;
        };
-     })});
+     }),
+     Operator("prim::BumpCounter(str key, float val) -> ()", [](const Node* node) {
+       return [](Stack& stack) {
+         auto val = pop(stack).toDouble();
+         auto name = pop(stack).toString();
+         torch::jit::logging::bumpCounter(*name, val);
+         return 0;
+       };
+     }),
+     Operator("prim::GetCounters() -> Dict(str, float)", [](const Node* node) {
+       return [](Stack& stack) {
+         auto counters = torch::jit::logging::getCounters();
+         auto counters_generic_dict = c10::ivalue::UnorderedMap();
+         for (auto &kv : counters) {
+           counters_generic_dict[kv.first] = kv.second;
+         }
+         push(stack, std::move(counters_generic_dict));
+         return 0;
+       };
+     })
+     });
 
 // define implementations for primitive number ops
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \

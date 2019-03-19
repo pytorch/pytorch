@@ -543,6 +543,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return std::make_shared<AnnotateValue>();
+  } else if (obj.ptr() == py::module::import("torch.jit._logging").attr("bump_counter").ptr()) {
+    return std::make_shared<BuiltinFunction>(prim::BumpCounter, c10::nullopt);
+  } else if (obj.ptr() == py::module::import("torch.jit._logging").attr("get_counters").ptr()) {
+    return std::make_shared<BuiltinFunction>(prim::GetCounters, c10::nullopt);
   }
 
   py::object builtin_name =

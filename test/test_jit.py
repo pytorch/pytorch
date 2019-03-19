@@ -1,6 +1,7 @@
 from __future__ import division
 import torch
 import torch.jit
+import torch.jit._logging
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.parallel as dp
@@ -13998,6 +13999,26 @@ class TestClassType(JitTestCase):
         input = torch.rand(2, 3)
         output = m_loaded(input)
         self.assertEqual(2 * input, output)
+
+
+class TestLogging(JitTestCase):
+    def test_bump_numeric_counter(self):
+        class ModuleThatLogs(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                for i in range(x.size(0)):
+                    x += 1.0
+                    torch.jit._logging.bump_counter('foo', 1.0)
+
+                if bool(x.sum() > 0.0):
+                    torch.jit._logging.bump_counter('positive', 1.0)
+                else:
+                    torch.jit._logging.bump_counter('negative', 1.0)
+                return torch.jit._logging.get_counters()
+
+        mtl = ModuleThatLogs()
+        out = mtl(torch.rand(3, 4, 5))
+        self.assertDictEqual(out, {'positive': 1.0, 'foo': 3.0})
 
 
 for test in autograd_method_tests():
