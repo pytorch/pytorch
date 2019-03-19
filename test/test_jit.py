@@ -14007,7 +14007,8 @@ class TestClassType(JitTestCase):
                 self.y = y
 
         @torch.jit.script
-        def use_foo(foo: Foo):
+        def use_foo(foo):
+            # type: (Foo) -> Foo
             return foo
 
         # create from python
