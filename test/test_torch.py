@@ -1006,8 +1006,7 @@ class _TestTorchMixin(object):
             torch.sum(x, 0, out=y)
             self.assertEqual(x.sum(0), y)
 
-        # Mean not supported for Int types
-        for dtype in types[:2]:
+        for dtype in types:
             x = cast(torch.tensor(example, dtype=dtype))
             self.assertEqual(x.mean().item(), 16.0 / 6)
             self.assertEqual(x.mean(0), torch.FloatTensor([2.0, 2.5, 7.0 / 2]))
@@ -2252,8 +2251,7 @@ class _TestTorchMixin(object):
     def test_mean_dim(self):
         self._test_dim_ops(
             lambda t, d: t.mean(d),
-            lambda n, d: n.mean(d),
-            use_integral=False)
+            lambda n, d: n.mean(d))
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_std_dim(self):

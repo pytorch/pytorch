@@ -4,7 +4,6 @@ torch.ByteTensor.dist
 torch.ByteTensor.dot
 torch.ByteTensor.lerp
 torch.ByteTensor.lerp_
-torch.ByteTensor.mean
 torch.ByteTensor.norm
 torch.ByteTensor.renorm
 torch.ByteTensor.renorm_
@@ -14,7 +13,6 @@ torch.CharTensor.dist
 torch.CharTensor.dot
 torch.CharTensor.lerp
 torch.CharTensor.lerp_
-torch.CharTensor.mean
 torch.CharTensor.norm
 torch.CharTensor.renorm
 torch.CharTensor.renorm_
@@ -84,7 +82,6 @@ torch.IntTensor.dist
 torch.IntTensor.dot
 torch.IntTensor.lerp
 torch.IntTensor.lerp_
-torch.IntTensor.mean
 torch.IntTensor.norm
 torch.IntTensor.renorm
 torch.IntTensor.renorm_
@@ -94,7 +91,6 @@ torch.LongTensor.dist
 torch.LongTensor.dot
 torch.LongTensor.lerp
 torch.LongTensor.lerp_
-torch.LongTensor.mean
 torch.LongTensor.norm
 torch.LongTensor.renorm
 torch.LongTensor.renorm_
@@ -104,7 +100,6 @@ torch.ShortTensor.dist
 torch.ShortTensor.dot
 torch.ShortTensor.lerp
 torch.ShortTensor.lerp_
-torch.ShortTensor.mean
 torch.ShortTensor.norm
 torch.ShortTensor.renorm
 torch.ShortTensor.renorm_
