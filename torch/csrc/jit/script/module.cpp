@@ -55,6 +55,7 @@ Value* try_emit_call_to(
           << " attempting to call a method with parameters/attributes"
              " from a raw graph. File a bug report";
     }
+    // TODO: preserve the type information so we don't have to infer it here
     auto type = incompleteInferTypeFrom(*member);
     matched_schema->inputs.push_back(
         caller->get_or_add_attribute(type, member));
