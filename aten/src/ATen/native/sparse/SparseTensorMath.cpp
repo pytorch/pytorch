@@ -217,6 +217,10 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
   get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
 
   int64_t blockSize = r_values.stride(0);
+  int64_t s_values_stride0 = s_values.stride(0);
+  int64_t s_values_stride1 = s_values.stride(1);
+  int64_t t_values_stride0 = t_values.stride(0);
+  int64_t t_values_stride1 = t_values.stride(1);
   int64_t cmp, d;
   int64_t r_i = 0, t_i = 0, s_i = 0;
 
@@ -255,7 +259,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
             }
             if (t_values.numel() > 0) {  // We add all elements from t_values to r_values only if t_values is not an empty tensor
               THBlas_axpy<scalar_t>(blockSize, 1,
-                t_values_ptr + t_i * blockSize, 1,
+                t_values_ptr + t_i * t_values_stride0, t_values_stride1,
                 r_values_ptr + r_i * blockSize, 1);
             }
             t_i++;
@@ -266,7 +270,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
             }
             if (s_values.numel() > 0) {  // We add all elements from s_values to r_values only if s_values is not an empty tensor
               THBlas_axpy<scalar_t>(blockSize, cast_value,
-                s_values_ptr + s_i * blockSize, 1,
+                s_values_ptr + s_i * s_values_stride0, s_values_stride1,
                 r_values_ptr + r_i * blockSize, 1);
             }
             s_i++;
