@@ -14027,6 +14027,14 @@ class TestLogging(JitTestCase):
         self.assertEqual(counters['foo'], 15.0)
         self.assertEqual(counters['positive'], 5.0)
 
+    def test_trace_numeric_counter(self):
+        def foo(x):
+            torch.jit._logging.add_stat_value('foo', 1.0)
+            return x + 1.0
+
+        traced = torch.jit.trace(foo, torch.rand(3, 4))
+        print(traced.code)
+
 for test in autograd_method_tests():
     add_autograd_test(*test)
 

@@ -2,6 +2,7 @@
 
 #include <string>
 #include <mutex>
+#include <memory>
 #include <unordered_map>
 
 namespace torch { namespace jit { namespace logging {
@@ -30,6 +31,9 @@ class NoopLogger : public LoggerBase {
 
 // Trivial locking logger. Pass in an instance of this to setLogger() to use it.
 // This keeps track of the sum of all statistics.
+//
+// NOTE: this is not written in a scalable way and should probably only be used
+// in the single-threaded case or for testing.
 class LockingLogger : public LoggerBase {
  public:
   void addStatValue(std::string stat_name, float val) override;
