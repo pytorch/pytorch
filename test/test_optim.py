@@ -181,6 +181,7 @@ class TestOptim(TestCase):
 
     def _test_basic_cases(self, constructor, scheduler_constructors=None,
                           ignore_multidevice=False):
+        torch.manual_seed(123)
         if scheduler_constructors is None:
             scheduler_constructors = []
         self._test_state_dict(
