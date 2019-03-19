@@ -257,12 +257,11 @@ Tensor prod(const Tensor &self) {
 static inline Tensor &mean_out(Tensor &result, const Tensor &self, IntArrayRef dim,
                  bool keepdim, optional<ScalarType> opt_dtype) {
   ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
-  AT_CHECK(
-      at::isFloatingType(scalarType),
-      "Can only calculate the mean of floating types. Got ",
-      toString(scalarType),
-      " instead.");
   ScalarType dtype = get_dtype(result, self, opt_dtype, true);
+
+  if (at::isIntegralType(scalarType) && !opt_dtype.has_value()){
+    dtype = ScalarType::Double;
+  }
   // TODO: the TensorIterator reduction implementation of mean
   // (mean_kernel_impl()) is unvectorized and leads to very poor performance
   // for production workloads. Once that's fixed, the following code can be used
