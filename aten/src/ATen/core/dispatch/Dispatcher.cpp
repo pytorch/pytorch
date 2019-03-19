@@ -1,4 +1,5 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <sstream>
 
 namespace c10 {
 
@@ -54,7 +55,11 @@ c10::optional<OperatorHandle> Dispatcher::findSchema(const char* operator_name, 
 OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema) {
   const auto found = findSchema(schema.name().c_str(), schema.overload_name().c_str());
   if (found != c10::nullopt) {
-    AT_ASSERTM(found->schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas.");
+    if (found->schema() != schema) {
+      std::ostringstream str;
+      str << schema << " vs " << found->schema();
+      AT_ERROR("Tried to register multiple operators with the same name and the same overload name but different schemas: ", str.str());
+    }
     return *found;
   }
 
@@ -86,7 +91,9 @@ void Dispatcher::deregisterSchema(const OperatorHandle& op) {
   --op.operatorDefIterator_->refcount;
   if (0 == op.operatorDefIterator_->refcount) {
     if (!op.operatorDefIterator_->dispatchTable.isEmpty()) {
-      AT_ERROR("Tried to deregister op schema that still has kernels registered");
+      std::ostringstream str;
+      str << op.schema();
+      AT_ERROR("Tried to deregister op schema for an operator that still has kernels registered. The operator schema is ", str.str());
     }
 
     // note: call listeners *before* operator is removed, i.e. dispatcher is still valid for removed op
