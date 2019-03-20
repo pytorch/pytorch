@@ -227,7 +227,7 @@ void Reducer::initialize_buckets(std::vector<std::vector<size_t>> indices) {
   // This shouldn't be called if we're expecting autograd hooks to fire.
   AT_ASSERTM(
       !expect_autograd_hooks_,
-      "initialize_buckets must be called during autograd execution.");
+      "`initialize_buckets` must NOT be called during autograd execution.");
 
   // Clear current bucket assignment.
   buckets_.clear();
