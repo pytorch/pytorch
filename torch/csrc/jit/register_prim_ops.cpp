@@ -1859,7 +1859,7 @@ RegisterOperators reg2({
           dictIndex),                                                        \
       Operator(                                                              \
           "aten::get(Dict(" key_type ", t) self, " key_type                  \
-          " key) -> t(*)",                                                   \
+          " key) -> t(*)?",                                                   \
           dictGet),                                                          \
       Operator(                                                              \
           "aten::get(Dict(" key_type ", t) self, " key_type                  \

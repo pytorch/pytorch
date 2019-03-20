@@ -10745,6 +10745,20 @@ a")
         self.checkScript(fn, (d, 3))
         self.checkScript(fn, (d, 2))
 
+        def optional(x, y):
+            # type: (Dict[int, int], int) -> bool
+            res = x.get(y)
+            return res is None
+
+        self.checkScript(fn, (d, 3))
+        self.checkScript(fn, (d, 2))
+
+        with self.assertRaisesRegex(RuntimeError, "is actually of type Optional"):
+            @torch.jit.script
+            def bad_types(x, y):
+                # type: (Dict[int, int], int) -> int
+                return x.get(y)
+
     def dict_to_python(self):
         def python_lookup(my_dict, keys):
             # type: (Dict[str, int], List[str]) -> List[int]
