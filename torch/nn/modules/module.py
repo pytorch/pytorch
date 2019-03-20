@@ -671,9 +671,9 @@ class Module(object):
             strict (bool): whether to strictly enforce that the keys in
                 :attr:`state_dict` with :attr:`prefix` match the names of
                 parameters and buffers in this module
-            missing_keys (list of str): if ``strict=False``, add missing keys to
+            missing_keys (list of str): if ``strict=True``, add missing keys to
                 this list
-            unexpected_keys (list of str): if ``strict=False``, add unexpected
+            unexpected_keys (list of str): if ``strict=True``, add unexpected
                 keys to this list
             error_msgs (list of str): error messages should be added to this
                 list, and will be reported together in
@@ -715,7 +715,7 @@ class Module(object):
                 missing_keys.append(key)
 
         if strict:
-            for key, input_param in state_dict.items():
+            for key in state_dict.keys():
                 if key.startswith(prefix):
                     input_name = key[len(prefix):]
                     input_name = input_name.split('.', 1)[0]  # get the name of param/buffer/child
@@ -927,11 +927,11 @@ class Module(object):
             >>> for idx, m in enumerate(net.modules()):
                     print(idx, '->', m)
 
-            0 -> Sequential (
-              (0): Linear (2 -> 2)
-              (1): Linear (2 -> 2)
+            0 -> Sequential(
+              (0): Linear(in_features=2, out_features=2, bias=True)
+              (1): Linear(in_features=2, out_features=2, bias=True)
             )
-            1 -> Linear (2 -> 2)
+            1 -> Linear(in_features=2, out_features=2, bias=True)
 
         """
         for name, module in self.named_modules():
@@ -955,11 +955,11 @@ class Module(object):
             >>> for idx, m in enumerate(net.named_modules()):
                     print(idx, '->', m)
 
-            0 -> ('', Sequential (
-              (0): Linear (2 -> 2)
-              (1): Linear (2 -> 2)
+            0 -> ('', Sequential(
+              (0): Linear(in_features=2, out_features=2, bias=True)
+              (1): Linear(in_features=2, out_features=2, bias=True)
             ))
-            1 -> ('0', Linear (2 -> 2))
+            1 -> ('0', Linear(in_features=2, out_features=2, bias=True))
 
         """
 

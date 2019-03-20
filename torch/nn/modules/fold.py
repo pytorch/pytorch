@@ -46,7 +46,7 @@ class Fold(Module):
 
     Args:
         output_size (int or tuple): the shape of the spatial dimensions of the
-                                    output (i.e., ``input.sizes()[2:]``)
+                                    output (i.e., ``output.sizes()[2:]``)
         kernel_size (int or tuple): the size of the sliding blocks
         stride (int or tuple): the stride of the sliding blocks in the input
                                spatial dimensions. Default: 1
@@ -81,9 +81,10 @@ class Fold(Module):
     Examples::
 
         >>> fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 2))
-        >>> input = torch.randn(1, 3 * 2 * 2, 1)
+        >>> input = torch.randn(1, 3 * 2 * 2, 12)
         >>> output = fold(input)
         >>> output.size()
+        torch.Size([1, 3, 4, 5])
 
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md

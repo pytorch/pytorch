@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import brew, core
+from caffe2.python import brew, core, workspace
 from caffe2.python.model_helper import ModelHelper
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
@@ -111,7 +111,8 @@ class TestLayerNormOp(serial.SerializedTestCase):
             outputs_to_check=[0, 1, 2],
         )
 
-    @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)
+    @unittest.skipIf(workspace.has_hip_support, "Operator cross-calling doesn't work with hip yet")
+    @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_op_c10(self, X, gc, dc):
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
@@ -136,7 +137,8 @@ class TestLayerNormOp(serial.SerializedTestCase):
             outputs_to_check=[0, 1, 2],
         )
 
-    @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)
+    @unittest.skipIf(workspace.has_hip_support, "Operator cross-calling doesn't work with hip yet")
+    @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_op_c10_preallocated_outputs(self, X, gc, dc):
         # This test case ensures that it works correctly when output tensors are preallocated.
         axis = np.random.randint(0, len(X.shape))
@@ -169,6 +171,21 @@ class TestLayerNormOp(serial.SerializedTestCase):
         torch.testing.assert_allclose(expected_norm, actual_norm)
         torch.testing.assert_allclose(expected_mean, actual_mean)
         torch.testing.assert_allclose(expected_stdev, actual_stdev)
+
+    # Test case is using workspace.has_cuda_support and not workspace.has_gpu_support
+    # to exclude it from HIP because tensor interop doesn't work for HIP tensors yet
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    @given(X=hu.tensor(min_dim=2))
+    def test_layer_norm_op_pytorch_cuda(self, X):
+        axis = np.random.randint(0, len(X.shape))
+        epsilon = 1e-4
+
+        expected_norm, expected_mean, expected_stdev = _layer_norm_ref(axis, epsilon, X)
+        actual_norm, actual_mean, actual_stdev = torch.ops._caffe2.LayerNorm(torch.tensor(X).cuda(), axis, epsilon)
+
+        torch.testing.assert_allclose(expected_norm, actual_norm.cpu())
+        torch.testing.assert_allclose(expected_mean, actual_mean.cpu())
+        torch.testing.assert_allclose(expected_stdev, actual_stdev.cpu())
 
     @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_op_jit(self, X, gc, dc):

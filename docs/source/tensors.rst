@@ -252,9 +252,13 @@ view of a storage and defines numeric operations on it.
    .. automethod:: half
    .. automethod:: histc
    .. automethod:: index_add_
+   .. automethod:: index_add
    .. automethod:: index_copy_
+   .. automethod:: index_copy
    .. automethod:: index_fill_
+   .. automethod:: index_fill
    .. automethod:: index_put_
+   .. automethod:: index_put
    .. automethod:: index_select
    .. automethod:: int
    .. automethod:: inverse
@@ -285,7 +289,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lt_
    .. automethod:: map_
    .. automethod:: masked_scatter_
+   .. automethod:: masked_scatter
    .. automethod:: masked_fill_
+   .. automethod:: masked_fill
    .. automethod:: masked_select
    .. automethod:: matmul
    .. automethod:: matrix_power
@@ -346,7 +352,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: rsqrt
    .. automethod:: rsqrt_
    .. automethod:: scatter_
+   .. automethod:: scatter
    .. automethod:: scatter_add_
+   .. automethod:: scatter_add
    .. automethod:: select
    .. automethod:: set_
    .. automethod:: share_memory_

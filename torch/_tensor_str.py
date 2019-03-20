@@ -10,6 +10,7 @@ class __PrinterOptions(object):
     threshold = 1000
     edgeitems = 3
     linewidth = 80
+    sci_mode = None
 
 
 PRINT_OPTS = __PrinterOptions()
@@ -22,6 +23,7 @@ def set_printoptions(
         edgeitems=None,
         linewidth=None,
         profile=None,
+        sci_mode=None
 ):
     r"""Set options for printing. Items shamelessly taken from NumPy
 
@@ -37,6 +39,8 @@ def set_printoptions(
             ignore this parameter.
         profile: Sane defaults for pretty printing. Can override with any of
             the above options. (any one of `default`, `short`, `full`)
+        sci_mode: Enable (True) or disable (False) scientific notation. If
+            None (default) is specified, the value is defined by `_Formatter`
     """
     if profile is not None:
         if profile == "default":
@@ -63,6 +67,7 @@ def set_printoptions(
         PRINT_OPTS.edgeitems = edgeitems
     if linewidth is not None:
         PRINT_OPTS.linewidth = linewidth
+    PRINT_OPTS.sci_mode = sci_mode
 
 
 class _Formatter(object):
@@ -122,6 +127,9 @@ class _Formatter(object):
                     for value in nonzero_finite_vals:
                         value_str = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
                         self.max_width = max(self.max_width, len(value_str))
+
+        if PRINT_OPTS.sci_mode is not None:
+            self.sci_mode = PRINT_OPTS.sci_mode
 
     def width(self):
         return self.max_width

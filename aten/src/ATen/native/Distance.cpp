@@ -18,18 +18,18 @@ Tensor pairwise_distance(const Tensor& x1, const Tensor& x2, double p, double ep
 Tensor pdist(const Tensor& self, const double p) {
   AT_CHECK(self.dim() == 2,
       "pdist only supports 2D tensors, got: ", self.dim(), "D");
-  AT_CHECK(at::isFloatingType(self.type().scalarType()), "pdist only supports floating-point dtypes");
+  AT_CHECK(at::isFloatingType(self.scalar_type()), "pdist only supports floating-point dtypes");
   AT_CHECK(p >= 0, "pdist only supports non-negative p values");
   return at::_pdist_forward(self.contiguous(), p);
 }
 
 Tensor cdist(const Tensor& x1, const Tensor& x2, const double p) {
   AT_CHECK(x1.dim() == 2, "cdist only supports 2D tensors, X1 got: ", x1.dim(), "D");
-  AT_CHECK(at::isFloatingType(x1.type().scalarType()), "cdist only supports floating-point dtypes, X1 got: ", x1.type().scalarType());
+  AT_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X1 got: ", x1.scalar_type());
   auto device1 = x1.type().device_type();
   AT_CHECK(device1 == kCPU || device1 == kCUDA, "cdist only supports CPU and CUDA devices, X1 got: ", device1);
   AT_CHECK(x2.dim() == 2, "cdist only supports 2D tensors, X2 got: ", x2.dim(), "D");
-  AT_CHECK(at::isFloatingType(x1.type().scalarType()), "cdist only supports floating-point dtypes, X2 got: ", x2.type().scalarType());
+  AT_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X2 got: ", x2.scalar_type());
   auto device2 = x2.type().device_type();
   AT_CHECK(device2 == kCPU || device2 == kCUDA, "cdist only supports CPU and CUDA devices, X2 got: ", device2);
   AT_CHECK(p >= 0, "cdist only supports non-negative p values");

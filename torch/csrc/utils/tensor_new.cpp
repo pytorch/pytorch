@@ -126,7 +126,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
   }
   if (THPVariable_Check(obj)) {
     auto var = reinterpret_cast<THPVariable*>(obj)->cdata;
-    return var.type().scalarType();
+    return var.scalar_type();
   }
 #ifdef USE_NUMPY
   if (PyArray_Check(obj)) {
@@ -205,7 +205,7 @@ Tensor internal_new_from_data(
     }
     // infer the scalar type and device type; it's not expected to infer the layout since these constructors
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
-    const auto& scalar_type = type_inference ? var.type().scalarType() : type.scalarType();
+    const auto& scalar_type = type_inference ? var.scalar_type() : type.scalarType();
     auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(torch::getDeviceType(type)));
     AutoNoGIL no_gil;
     maybe_initialize_cuda(device);
@@ -215,7 +215,7 @@ Tensor internal_new_from_data(
 #ifdef USE_NUMPY
   if (PyArray_Check(data)) {
     auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
-    const auto& scalar_type = type_inference ? tensor.type().scalarType() : type.scalarType();
+    const auto& scalar_type = type_inference ? tensor.scalar_type() : type.scalarType();
     auto device = device_opt.has_value() ? *device_opt : at::Device(type.device_type());
     AutoNoGIL no_gil;
     maybe_initialize_cuda(device);
@@ -228,7 +228,7 @@ Tensor internal_new_from_data(
   auto tensor = autograd::make_variable(at::empty(sizes, at::initialTensorOptions().dtype(scalar_type)), /*requires_grad=*/false);
   recursive_store(
       (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
-      scalar_type, tensor.type().elementSizeInBytes(), data);
+      scalar_type, tensor.element_size(), data);
   auto device = device_opt.has_value() ? *device_opt : at::Device(torch::getDeviceType(type));
   AutoNoGIL no_gil;
   maybe_initialize_cuda(device);

@@ -166,10 +166,6 @@ Tensor & pow_(Tensor& self, const Tensor & exponent) {
   return at::legacy::th::_th_pow_(self, exponent);
 }
 
-Tensor & lerp_(Tensor& self, const Tensor & end, Scalar weight) {
-  return at::legacy::th::_th_lerp_(self, end, weight);
-}
-
 Tensor & sign_(Tensor& self) {
   return at::legacy::th::_th_sign_(self);
 }
@@ -396,11 +392,11 @@ Tensor nonzero(const Tensor & self) {
   return at::legacy::th::_th_nonzero(self);
 }
 
-Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index) {
+Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   return at::legacy::th::_th_gather_out(result, self, dim, index);
 }
 
-Tensor gather(const Tensor & self, int64_t dim, const Tensor & index) {
+Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   return at::legacy::th::_th_gather(self, dim, index);
 }
 
@@ -485,7 +481,7 @@ std::tuple<Tensor,Tensor> qr(const Tensor & self) {
 }
 
 std::tuple<Tensor &,Tensor &> geqrf_out(Tensor & result0, Tensor & result1, const Tensor & self) {
-  return at::geqrf_out(result0, result1, self);
+  return at::legacy::th::_th_geqrf_out(result0, result1, self);
 }
 
 std::tuple<Tensor,Tensor> geqrf(const Tensor & self) {
@@ -501,27 +497,11 @@ Tensor orgqr(const Tensor & self, const Tensor & input2) {
 }
 
 Tensor & ormqr_out(Tensor & result, const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose) {
-  return at::ormqr_out(result, self, input2, input3, left, transpose);
+  return at::legacy::th::_th_ormqr_out(result, self, input2, input3, left, transpose);
 }
 
 Tensor ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose) {
   return at::legacy::th::_th_ormqr(self, input2, input3, left, transpose);
-}
-
-std::tuple<Tensor &,Tensor &> btrifact_out(Tensor & A_LU, Tensor & pivots, const Tensor & self, bool pivot) {
-  return at::legacy::th::_th_btrifact_out(A_LU, pivots, self, pivot);
-}
-
-std::tuple<Tensor,Tensor> btrifact(const Tensor & self, bool pivot) {
-  return at::legacy::th::_th_btrifact(self, pivot);
-}
-
-std::tuple<Tensor &,Tensor &,Tensor &> btrifact_with_info_out(Tensor & A_LU, Tensor & pivots, Tensor & info, const Tensor & self, bool pivot) {
-  return at::legacy::th::_th_btrifact_with_info_out(A_LU, pivots, info, self, pivot);
-}
-
-std::tuple<Tensor,Tensor,Tensor> btrifact_with_info(const Tensor & self, bool pivot) {
-  return at::legacy::th::_th_btrifact_with_info(self, pivot);
 }
 
 Tensor & btrisolve_out(Tensor & result, const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
@@ -607,14 +587,6 @@ Tensor atan2(const Tensor & self, const Tensor & other) {
   return at::legacy::th::_th_atan2(self, other);
 }
 
-Tensor & lerp_out(Tensor & result, const Tensor & self, const Tensor & end, Scalar weight) {
-  return at::legacy::th::_th_lerp_out(result, self, end, weight);
-}
-
-Tensor lerp(const Tensor & self, const Tensor & end, Scalar weight) {
-  return at::legacy::th::_th_lerp(self, end, weight);
-}
-
 Tensor & _histc_out_cpu(Tensor & result, const Tensor & self, int64_t bins, Scalar min, Scalar max) {
   return at::legacy::th::_th_histc_out(result, self, bins, min, max);
 }
@@ -697,6 +669,11 @@ std::tuple<Tensor &,Tensor &> sort_out(Tensor & values, Tensor & indices, const 
 std::tuple<Tensor,Tensor> sort(const Tensor & self, int64_t dim, bool descending) {
   return at::legacy::th::_th_sort(self, dim, descending);
 }
+
+Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
+  return std::get<1>(at::legacy::th::_th_sort(self, dim, descending));
+}
+
 std::tuple<Tensor &,Tensor &> topk_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
   return at::legacy::th::_th_topk_out(values, indices, self, k, dim, largest, sorted);
 }

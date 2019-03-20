@@ -8,10 +8,6 @@
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
-#ifdef CAFFE2_USE_OPENCV
-#include <opencv2/opencv.hpp>
-#endif // CAFFE2_USE_OPENCV
-
 namespace caffe2 {
 namespace utils {
 

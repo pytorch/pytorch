@@ -28,13 +28,12 @@ Tensor & TypeDefault::copy_(Tensor & self, const Tensor & src, bool non_blocking
 }
 
 Tensor TypeDefault::copy(const Tensor & src, bool non_blocking, optional<Device> to_device) const {
-  OptionalDeviceGuard device_guard(to_device);
   AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   Tensor r;
   if (is_sparse()) {
-    r = at::empty({0}, this->options());
+    r = at::empty({0}, this->options(to_device));
   } else {
-    r = at::empty(src.sizes(), this->options());
+    r = at::empty(src.sizes(), this->options(to_device));
   }
   r.copy_(src, non_blocking);
   return r;
@@ -95,14 +94,17 @@ Tensor TypeDefault::tensorWithAllocator(IntArrayRef sizes, IntArrayRef strides, 
 }
 
 Storage TypeDefault::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
-    return Storage(
+  return Storage(
       typeMeta(),
-      InefficientStdFunctionContext::makeDataPtr(data, deleter, getDeviceFromPtr(data)),
       size,
-      deleter);
+      InefficientStdFunctionContext::makeDataPtr(
+          data, deleter, getDeviceFromPtr(data)),
+      /*allocator=*/nullptr,
+      /*resizable=*/false);
 }
 Storage TypeDefault::storageWithAllocator(int64_t size, Allocator* allocator) const {
-    return Storage(typeMeta(), size, allocator);
+  // Potentially the storage might be marked as resizable too here
+  return Storage(typeMeta(), size, allocator, /*resizable=*/false);
 }
 Tensor TypeDefault::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   auto tensor_impl = c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(static_cast<TensorImpl*>(th_pointer));

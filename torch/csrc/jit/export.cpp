@@ -87,8 +87,7 @@ void validateBlock(
       bool is_aten_enabled = operator_export_type ==
               onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
           operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
-      if (!node->kind().is_onnx() && !is_aten_enabled &&
-          node->kind() != prim::None) {
+      if (!node->kind().is_onnx() && !is_aten_enabled && !node->mustBeNone()) {
         FAIL_EXPORT(
             "Couldn't export operator " + node->kind().toDisplayString() +
             "\n\nDefined at:\n" + getNodeStackTraceString(node));
@@ -182,7 +181,8 @@ EncoderBase::EncoderBase(
       strip_doc_(strip_doc) {
   model_proto_.set_producer_name("pytorch");
   model_proto_.set_ir_version(onnx::IR_VERSION);
-  model_proto_.set_producer_version("0.4");
+  // TODO: set the producer version using appropriate function call
+  model_proto_.set_producer_version("1.1");
 }
 
 void EncoderBase::EncodeValueInfo(
@@ -236,7 +236,7 @@ void EncoderBase::EncodeBlock(
   for (auto node : block->nodes()) {
     bool is_raw_export =
         operator_export_type_ == onnx_torch::OperatorExportTypes::RAW;
-    if (node->kind() == prim::None && !is_raw_export) {
+    if (node->mustBeNone() && !is_raw_export) {
       // None nodes are used to implement optional inputs. One
       // way to "not provide" an optional input is to create an
       // Undefined node, and pass its output as that input.
@@ -249,7 +249,7 @@ void EncoderBase::EncodeBlock(
       p_n->set_doc_string(ss.str());
     }
     for (auto input : node->inputs()) {
-      if (input->node()->kind() == prim::None && !is_raw_export) {
+      if (input->node()->mustBeNone() && !is_raw_export) {
         p_n->add_input("");
       } else {
         p_n->add_input(input->uniqueName());
@@ -431,7 +431,7 @@ void GraphEncoder::EncodeTensor(
   for (auto d : tensor.sizes()) {
     tensor_proto->add_dims(d);
   }
-  tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.type().scalarType()));
+  tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.scalar_type()));
   // CPU's HalfTensor doesn't have contiguous(), so first calling contiguous()
   auto t = tensor.contiguous().cpu();
   // Add a buffer to the raw_data_export_map for the caller to dump into an
@@ -448,7 +448,7 @@ void GraphEncoder::EncodeTensor(
     AT_ASSERT(t.is_contiguous());
     tensor_proto->set_raw_data(std::string(
         static_cast<char*>(t.data_ptr()),
-        t.type().elementSizeInBytes() * t.numel()));
+        t.element_size() * t.numel()));
   }
 }
 
@@ -464,10 +464,15 @@ class ScriptModuleSerializer final {
 
   ScriptModuleSerializer(std::ostream* ofs);
 
-  void serialize(const script::Module& module);
+  void serialize(
+      const script::Module& module,
+      const script::ExtraFilesMap& extra_files = script::ExtraFilesMap());
 
  private:
-  void convertModel(const script::Module& module, torch::ModelDef* model_def);
+  void convertModel(
+      const script::Module& module,
+      torch::ModelDef* model_def,
+      const script::ExtraFilesMap& extra_files);
 
   // add a tensor to the tensorTable
   // returns the offset into the tensor table
@@ -487,6 +492,8 @@ class ScriptModuleSerializer final {
   // to dump the content of a tensor
   void writeTensorTable(torch::ModelDef* model_def);
 
+  void writeLibs(torch::ModelDef* model_def);
+
   void convertModule(
       const script::Module& module,
       const std::string& prefix,
@@ -494,14 +501,22 @@ class ScriptModuleSerializer final {
       torch::ModuleDef* module_def);
 
   void convertParameter(
-      const script::NamedParameter& param,
-      torch::ParameterDef* param_def);
+      const script::NamedIValue& param,
+      torch::ParameterDef* param_def,
+      bool is_parameter);
+
+  void convertClass(const ClassTypePtr& type, torch::ModelDef* model_def);
 
   std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
 
   // all tensors that will be stored
   std::vector<at::Tensor> tensor_table_;
+  // all classes used by this module hierarchy
+  std::vector<ClassTypePtr> class_table_;
+  OrderedDict<ClassTypePtr, std::string> converted_classes_;
+
+  static const size_t op_version_set = 0;
 };
 
 // ScriptModuleSerializer's methods
@@ -513,9 +528,11 @@ ScriptModuleSerializer::ScriptModuleSerializer(const std::string& filename)
 ScriptModuleSerializer::ScriptModuleSerializer(std::ostream* ofs)
     : ofs_(), writer_(ofs) {}
 
-void ScriptModuleSerializer::serialize(const script::Module& module) {
+void ScriptModuleSerializer::serialize(
+    const script::Module& module,
+    const script::ExtraFilesMap& extra_files) {
   torch::ModelDef model_def;
-  convertModel(module, &model_def);
+  convertModel(module, &model_def, extra_files);
   std::string output;
   // NB: cannot use MessageToJsonString, since fbcode's protobuf is too old
   // be consistent with MessageToJsonString
@@ -538,9 +555,62 @@ void ScriptModuleSerializer::serialize(const script::Module& module) {
   writer_.writeEndOfFile();
 }
 
+void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
+  auto lib_def = model_def->mutable_libs();
+  std::ostringstream lib_stream;
+  lib_stream << "op_version_set = " << op_version_set << "\n";
+  // Convert all the classes that
+  for (const auto& class_type : class_table_) {
+    convertClass(class_type, model_def);
+  }
+
+  for (const auto& c : converted_classes_) {
+    lib_stream << *c << "\n";
+  }
+
+  torch::RecordRef* lib_record = lib_def->mutable_torchscript_arena();
+  const auto filename = "libs.py";
+  const auto& lib_str = lib_stream.str();
+  writer_.writeRecord(filename, lib_str.c_str(), lib_str.size());
+  lib_record->set_key(filename);
+}
+
+// python print the class and add to the converted_classes_. Recursively
+// python print all classes that this class depends on.
+void ScriptModuleSerializer::convertClass(
+    const ClassTypePtr& class_type,
+    torch::ModelDef* model_def) {
+  if (converted_classes_.contains(class_type)) {
+    return;
+  }
+
+  std::vector<ClassTypePtr> class_deps;
+  std::ostringstream class_stream;
+  PythonPrint(
+      class_stream,
+      class_type,
+      tensor_table_,
+      class_deps,
+      /*enforce_importable=*/true);
+
+  for (const auto& c : class_deps) {
+    if (c == class_type) {
+      // Don't re-process this class and enter an infinite loop. We need this
+      // because we insert to converted_classes_ post-traversal, so the current
+      // class isn't in there yet.
+      continue;
+    }
+    convertClass(c, model_def);
+  }
+  // Insert *after* we've traversed the dependencies. This ensures that any
+  // given class will appear after its dependencies in the order.
+  converted_classes_.insert(class_type, class_stream.str());
+}
+
 void ScriptModuleSerializer::convertModel(
     const script::Module& module,
-    torch::ModelDef* model_def) {
+    torch::ModelDef* model_def,
+    const script::ExtraFilesMap& extra_files) {
   model_def->set_producer_name("pytorch");
   model_def->set_producer_version("1.0"); // TODO: set the producer version
                                           // using appropriate function call
@@ -548,6 +618,13 @@ void ScriptModuleSerializer::convertModel(
   convertModule(
       module, "", writer_.archiveName(), model_def->mutable_main_module());
   writeTensorTable(model_def);
+  writeLibs(model_def);
+
+  // Write out extra files.
+  for (const auto& kv : extra_files) {
+    const std::string key = "extra/" + kv.first;
+    writer_.writeRecord(key, kv.second.data(), kv.second.size());
+  }
 }
 
 size_t ScriptModuleSerializer::addTensor(const at::Tensor& tensor) {
@@ -567,13 +644,13 @@ void ScriptModuleSerializer::convertAndWriteTensor(
     tensor_proto->add_strides(s);
   }
   tensor_proto->set_data_type(caffe2::TypeMetaToDataType(
-      at::scalarTypeToTypeMeta(tensor.type().scalarType())));
+      at::scalarTypeToTypeMeta(tensor.scalar_type())));
   tensor_proto->set_offset(tensor.storage_offset());
 
   tensor_proto->set_requires_grad(tensor.requires_grad());
 
   uint64_t record_size =
-      tensor.type().elementSizeInBytes() * tensor.storage().size();
+      tensor.element_size() * tensor.storage().size();
   auto* key = tensor.storage().unsafeGetStorageImpl();
 
   auto storage_it = storageMap.find(key);
@@ -593,7 +670,7 @@ void ScriptModuleSerializer::convertAndWriteTensor(
                                /* stride = */ {1})
                            .cpu();
       AT_ASSERT(
-          storage_tensor.type().elementSizeInBytes() *
+          storage_tensor.element_size() *
               storage_tensor.storage().size() ==
           record_size);
     }
@@ -629,7 +706,13 @@ void ScriptModuleSerializer::convertModule(
   module_def->set_optimize(module.is_optimized());
   for (const auto& elem : module.get_parameters()) {
     torch::ParameterDef* param_def = module_def->add_parameters();
-    convertParameter(elem.value(), param_def);
+    convertParameter(elem.value(), param_def, /*is_buffer=*/false);
+  }
+  for (const auto& elem : module.get_attributes()) {
+    if (elem.value().type->isSubtypeOf(TensorType::get())) {
+      torch::ParameterDef* param_def = module_def->add_parameters();
+      convertParameter(elem.value(), param_def, /*is_buffer=*/true);
+    }
   }
 
   std::stringstream module_name;
@@ -639,8 +722,13 @@ void ScriptModuleSerializer::convertModule(
 
   if (module.get_methods().size() > 0) {
     std::ostringstream methods;
-    methods << "op_version_set = 0\n";
-    PythonPrint(methods, module, tensor_table_, /*enforce_importable=*/true);
+    methods << "op_version_set = " << op_version_set << "\n";
+    PythonPrint(
+        methods,
+        module,
+        tensor_table_,
+        class_table_,
+        /*enforce_importable=*/true);
     torch::RecordRef* record = module_def->mutable_torchscript_arena();
 
     std::stringstream filename;
@@ -658,11 +746,12 @@ void ScriptModuleSerializer::convertModule(
 }
 
 void ScriptModuleSerializer::convertParameter(
-    const script::NamedParameter& param,
-    torch::ParameterDef* param_def) {
-  param_def->set_name(param.name);
-  param_def->set_is_buffer(param.is_buffer);
-  param_def->set_tensor_id(addTensor(*param.slot()));
+    const script::NamedIValue& param,
+    torch::ParameterDef* param_def,
+    bool is_parameter) {
+  param_def->set_name(param.name_);
+  param_def->set_is_buffer(is_parameter);
+  param_def->set_tensor_id(addTensor(param.slot()->toTensor()));
 }
 
 // Pretty printing for ONNX
@@ -885,14 +974,20 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       graph_encoder.get_raw_data_export_map());
 }
 
-void ExportModule(const script::Module& module, std::ostream& out) {
+void ExportModule(
+    const script::Module& module,
+    std::ostream& out,
+    const script::ExtraFilesMap& extra_files) {
   ScriptModuleSerializer serializer(&out);
-  serializer.serialize(module);
+  serializer.serialize(module, extra_files);
 }
 
-void ExportModule(const script::Module& module, const std::string& filename) {
+void ExportModule(
+    const script::Module& module,
+    const std::string& filename,
+    const script::ExtraFilesMap& extra_files) {
   ScriptModuleSerializer serializer(filename);
-  serializer.serialize(module);
+  serializer.serialize(module, extra_files);
 }
 
 } // namespace jit

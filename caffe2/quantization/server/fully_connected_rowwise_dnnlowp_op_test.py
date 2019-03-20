@@ -80,6 +80,9 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 W_max,
             )
 
+            if i % 2 == 0:
+                W[i, :] = (W[i, :] - W_min) * 2 + W_min
+
         b = np.random.randn(output_channels).astype(np.float32)
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
@@ -90,7 +93,6 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
             ("FC", "DNNLOWP_ROWWISE"),
             ("FC", "DNNLOWP_ROWWISE_16"),
             ("Int8FC", "DNNLOWP_ROWWISE"),
-            ("Int8FCRowWise", "DNNLOWP"),
         ]
 
         for op_type, engine in op_engine_list:

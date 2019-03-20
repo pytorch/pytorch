@@ -33,7 +33,7 @@ class IDEEPFullyConnectedOp final : public IDEEPOperator {
       : IDEEPOperator(operator_def, ws),
         axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
         axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)) {}
-  virtual ~IDEEPFullyConnectedOp() {}
+  ~IDEEPFullyConnectedOp() override {}
 
   bool RunOnDevice() override {
     const auto& X = Input(INPUT);
@@ -78,7 +78,7 @@ class IDEEPFullyConnectedGradientOp final : public IDEEPOperator {
       : IDEEPOperator(operator_def, ws),
         axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
         axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)) {}
-  virtual ~IDEEPFullyConnectedGradientOp() {}
+  ~IDEEPFullyConnectedGradientOp() override {}
 
   bool RunOnDevice() override {
     const auto& X = Input(INPUT);

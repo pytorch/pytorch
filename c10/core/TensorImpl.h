@@ -292,7 +292,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual int64_t dim() const;
 
   /**
-   * Return the underyling storage of a Tensor.  Multiple tensors may share
+   * True if this tensor has storage. See storage() for details.
+   */
+  virtual bool has_storage() const;
+
+  /**
+   * Return the underlying storage of a Tensor.  Multiple tensors may share
    * a single storage.  A Storage is an impoverished, Tensor-like class
    * which supports far less operations than Tensor.
    *
@@ -1065,7 +1070,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline void FreeMemory() {
     // We'll detach from the old Storage and create a new one
-    storage_ = Storage(storage_.device(), data_type_);
+    storage_ = Storage::create_legacy(storage_.device(), data_type_);
     storage_offset_ = 0;
   }
 
@@ -1130,7 +1135,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     } else {
       int64_t numel = capacity / data_type.itemsize();
       // Create a new Storage
-      storage_ = Storage(data_type, numel, std::move(data_ptr), nullptr, true);
+      storage_ = Storage(
+          data_type,
+          numel,
+          std::move(data_ptr),
+          /*allocator=*/nullptr,
+          /*resizable=*/false);
       data_type_ = data_type;
       storage_offset_ = 0;
     }
@@ -1158,7 +1168,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         storage_.set_dtype(meta);
       } else {
         if (data_type_ != meta) {
-          storage_ = Storage(storage_.device(), meta);
+          storage_ = Storage::create_legacy(storage_.device(), meta);
         }
       }
       data_type_ = meta;
@@ -1173,9 +1183,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         return storage_.data();
       }
       const Allocator* allocator = storage_.allocator();
-      // TODO: Get rid of StaticContext
+      // Storage might have nullptr allocator in rare cases, for example, if
+      // an external memory segment has been wrapped with Tensor and we don't
+      // know how to reallocate it. However, in order to preserve legacy C2
+      // behavior, we allow reallocating the memory using default allocator.
       if (allocator == nullptr) {
-        allocator = caffe2::GetAllocator(storage_.device_type());
+        allocator = GetAllocator(storage_.device_type());
       }
       if (meta.placementNew()) {
         // For types that need placement new, we will call it, as well as

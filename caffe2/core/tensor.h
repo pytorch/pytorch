@@ -71,7 +71,7 @@ class CAFFE2_API Tensor final {
    */
   explicit Tensor(at::Device device)
     : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-        Storage(device),
+        Storage::create_legacy(device, TypeMeta()),
         c10::computeTensorTypeId(at::device(device).layout(at::kStrided)),
         /*is_variable=*/ false
       )) {
@@ -228,7 +228,7 @@ class CAFFE2_API Tensor final {
     if (impl_->dtype() != src.impl_->dtype()) {
       // NB: copy preserves device_type
       // This storage will get initialized by the mutable_data call below.
-      impl_->set_storage(at::Storage(impl_->device_type(), src.impl_->dtype()));
+      impl_->set_storage(at::Storage::create_legacy(impl_->device_type(), src.impl_->dtype()));
     }
     impl_->Resize(src.impl_->sizes());
 

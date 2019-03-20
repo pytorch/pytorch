@@ -33,6 +33,7 @@
 #define THShortStorage THStorage
 #define THIntStorage THStorage
 #define THLongStorage THStorage
+#define THBoolStorage THStorage
 
 TH_API scalar_t* THStorage_(data)(const THStorage*);
 TH_API ptrdiff_t THStorage_(size)(const THStorage*);

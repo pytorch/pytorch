@@ -83,7 +83,7 @@ Via a string and device ordinal:
    >>> torch.randn((2,3), device=cuda1)
 
    >>> # You can substitute the torch.device with a string
-   >>> torch.randn((2,3), 'cuda:1')
+   >>> torch.randn((2,3), device='cuda:1')
 
 .. note::
    For legacy reasons, a device can be constructed via a single device ordinal, which is treated

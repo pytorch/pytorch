@@ -2,13 +2,6 @@
 
 // This file defines assertion macros that work in both gtest and non-gtest
 // builds, and has some common includes.
-//
-// To add a new test file:
-// 1. Add a test_foo.h file in this directory
-// 2. include test_base.h
-// 3. Write your tests as pure functions
-// 4. Include test_foo.h in gtest.cpp and no-gtest.cpp and register the tests
-//    there.
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
 

@@ -15,14 +15,15 @@ constexpr int TOP_GRADIENT_DESC_ID = 2;
 
 class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
  public:
-  explicit CuDNNSoftmaxOp(const OperatorDef& def, Workspace* ws)
-      : Operator<CUDAContext>(def, ws),
+  template <class... Args>
+  explicit CuDNNSoftmaxOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_),
         axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&desc_));
   }
 
-  ~CuDNNSoftmaxOp() {
+  ~CuDNNSoftmaxOp() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(desc_));
   }
 
@@ -77,14 +78,15 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
 
 class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
  public:
-  explicit CuDNNSoftmaxGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<CUDAContext>(def, ws),
+  template <class... Args>
+  explicit CuDNNSoftmaxGradientOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_),
         axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&desc_));
   }
 
-  ~CuDNNSoftmaxGradientOp() {
+  ~CuDNNSoftmaxGradientOp() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(desc_));
   }
 

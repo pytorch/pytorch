@@ -11,8 +11,9 @@ template <typename T, class Context>
 class LpNormOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  LpNormOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit LpNormOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "p", p_, 2),
         OP_SINGLE_ARG(bool, "average", average_, false) {
     CAFFE_ENFORCE(p_ == 1 || p_ == 2, "p should be either 1 or 2.");
@@ -29,8 +30,9 @@ template <typename T, class Context>
 class LpNormGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  LpNormGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit LpNormGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "p", p_, 2),
         OP_SINGLE_ARG(bool, "average", average_, false) {
     CAFFE_ENFORCE(p_ == 1 || p_ == 2, "p should be either 1 or 2.");

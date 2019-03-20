@@ -21,7 +21,7 @@ class IDEEPReluOp final : public IDEEPOperator {
       LOG(FATAL) << "Unsupported Relu method: " << operator_def.type();
     }
   }
-  virtual ~IDEEPReluOp() {}
+  ~IDEEPReluOp() override {}
 
   bool RunOnDevice() override {
     const auto& X = Input(INPUT);
@@ -59,7 +59,7 @@ class IDEEPReluGradientOp final : public IDEEPOperator {
       LOG(FATAL) << "Unsupported Relu method: " << operator_def.type();
     }
   }
-  virtual ~IDEEPReluGradientOp() {}
+  ~IDEEPReluGradientOp() override {}
 
   bool RunOnDevice() override {
     const auto& Y = Input(OUTPUT);

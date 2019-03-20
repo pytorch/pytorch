@@ -72,7 +72,7 @@ py::object cast_sequence(std::vector<py::object> objs) {
   T sequence{num_objs};
   for (size_t i = 0; i < num_objs; ++i)
     sequence[i] = std::move(objs[i]);
-  return sequence;
+  return std::move(sequence);
 }
 
 py::object unflatten_rec(

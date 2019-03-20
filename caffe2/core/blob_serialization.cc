@@ -31,7 +31,7 @@ namespace caffe2 {
 class StringSerializer : public BlobSerializerBase {
  public:
   StringSerializer() {}
-  ~StringSerializer() {}
+  ~StringSerializer() override {}
   /**
    * Serializes a Blob. Note that this blob has to contain Tensor,
    * otherwise this function produces a fatal error.
@@ -223,7 +223,7 @@ void TensorSerializer::Serialize(
   const TensorProto::DataType data_type = TypeMetaToDataType(input.dtype());
   proto.set_data_type(data_type);
   StoreDeviceDetail(input, &proto);
-  // TODO: use DeviceGuard here instead of context and employ explicit sync
+  // TODO: use CUDAGuard here instead of context and employ explicit sync
   // copy
   auto uniq_ptr = CreateContext(input.GetDevice());
   // A lot of copypaste is error prone. Should we create a macro for this?

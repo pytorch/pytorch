@@ -64,13 +64,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
-    function get_exit_code() {
-      set +e
-      "$@"
-      retcode=$?
-      set -e
-      return $retcode
-    }
     (cd test && python -c "import torch")
     echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")

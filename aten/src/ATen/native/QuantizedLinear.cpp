@@ -34,10 +34,8 @@ Tensor fbgemm_linear_int8_weight(
   // fallback path and rather fail loudly if we cannot run FBGEMM.
   AT_ASSERTM(fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
 
-  // We call contiguous on `input` and `weight` here because these APIs all
-  // expect row-major tensor buffers.
-  auto* input_ptr = input.contiguous().data<float>();
-  auto* weight_ptr = weight.contiguous().data<int8_t>();
+  auto input_contig = input.contiguous();
+  auto* input_ptr = input_contig.data<float>();
 
   AT_ASSERT(input.dim() >= 2);
   int64_t M = 1;
@@ -106,6 +104,8 @@ Tensor fbgemm_linear_int8_weight(
   // This is the end of the pipeline, pass the resulting matrix through
   fbgemm::DoNothing<float, float> doNothingObj{};
 
+  auto bias_contig = bias.contiguous();
+
   // After the uint8 * int8 matrix multiplication is performed, this operation
   // does:
   //  1) Add in row and column offsets to the rows and columns, respectively
@@ -119,12 +119,12 @@ Tensor fbgemm_linear_int8_weight(
       /*Bq_zero_point=*/&weight_zero_point_int32,
       /*row_offsets=*/packA.getRowOffsetBuffer(),
       /*col_offsets=*/col_offsets.data<int32_t>(),
-      /*bias=*/bias.contiguous().data<float>(),
+      /*bias=*/bias_contig.data<float>(),
       /*ncol=*/N);
 
   // Allocate output Tensor and a buffer for fbgemmPacked to use
-  auto output = at::zeros_like(bias).to(at::kFloat).expand({M, N}).contiguous();
-  auto buffer = at::zeros_like(output).to(at::kInt).contiguous();
+  auto output = at::zeros({M, N}, bias.options().dtype(at::kFloat));
+  auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
   // Pull out the PackBMatrix instance from the owning tensor
   auto* packB = reinterpret_cast<fbgemm::PackBMatrix<int8_t>*>(
@@ -231,7 +231,8 @@ Tensor fbgemm_pack_quantized_matrix(
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
   AT_ASSERTM(fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
-  auto contiguous_ptr = weight.contiguous().data<int8_t>();
+  auto weight_contig = weight.contiguous();
+  auto contiguous_ptr = weight_contig.data<int8_t>();
   auto* ptr = new fbgemm::PackBMatrix<int8_t>(
       /*trans=*/fbgemm::matrix_op_t::Transpose,
       /*nRow=*/K,

@@ -23,6 +23,12 @@ CAFFE2_API void ComputeBinaryBroadcastBackwardAxes(
     std::vector<int>* A_axes,
     std::vector<int>* B_axes);
 
+CAFFE2_API void ComputeBinaryBroadcastBackwardDims(
+    const std::vector<int>& A_dims,
+    const std::vector<int>& B_dims,
+    std::vector<int>* A_back_dims,
+    std::vector<int>* B_back_dims);
+
 } // namespace elementwise_ops_utils
 } // namespace caffe2
 

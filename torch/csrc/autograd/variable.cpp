@@ -92,6 +92,10 @@ void* Variable::Impl::slow_data() const {
   return data_.unsafeGetTensorImpl()->slow_data();
 }
 
+bool Variable::Impl::has_storage() const {
+  return data_.has_storage();
+}
+
 const at::Storage& Variable::Impl::storage() const {
   return data_.storage();
 }
@@ -153,7 +157,7 @@ void Variable::backward(
   Engine::get_default_engine().execute(edges, inputs, keep_graph, create_graph);
 }
 
-void Variable::Impl::set_data(Tensor new_data) {
+void Variable::Impl::set_data(const at::Tensor &new_data) {
   // Resets gradient accumulator if metadata is out of date
   auto autograd_meta = get_autograd_meta();
   std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
