@@ -2011,7 +2011,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_pareto_sample(self):
-        set_rng_seed(4)  # see Note [Randomized statistical tests]
+        set_rng_seed(24)  # see Note [Randomized statistical tests]
         for scale, alpha in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Pareto(scale, alpha),
                                         scipy.stats.pareto(alpha, scale=scale),
@@ -2098,7 +2098,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_chi2_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
         for df in [0.1, 1.0, 5.0]:
             self._check_sampler_sampler(Chi2(df),
                                         scipy.stats.chi2(df),
@@ -2128,7 +2128,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_studentT_sample(self):
-        set_rng_seed(6)  # see Note [Randomized statistical tests]
+        set_rng_seed(12)  # see Note [Randomized statistical tests]
         for df, loc, scale in product([0.1, 1.0, 5.0, 10.0], [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(StudentT(df=df, loc=loc, scale=scale),
                                         scipy.stats.t(df=df, loc=loc, scale=scale),
@@ -2544,7 +2544,7 @@ class TestRsample(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_dirichlet_on_diagonal(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
         num_samples = 20
         grid = [1e-1, 1e0, 1e1]
         for a0, a1, a2 in product(grid, grid, grid):
@@ -4371,6 +4371,7 @@ class TestJit(TestCase):
                              message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
     def test_variance(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for Dist, keys, values, sample in self._examples():
             if Dist in [Cauchy, HalfCauchy]:
                 continue  # infinite variance

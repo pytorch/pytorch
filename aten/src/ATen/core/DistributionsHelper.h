@@ -11,26 +11,60 @@
 #include <limits>
 #include <cmath>
 
-// Distributions kernel adapted from THRandom.cpp
-// The kernels try to follow std::random distributions signature
-// For instance: in ATen
-//      CPUGenerator* gen = new CPUGenerator();
-//      at::uniform_real_distribution<double> uniform(0, 1);
-//      auto sample = uniform(gen);
-//      
-//      vs std::random
-//
-//      std::mt19937 gen;
-//      std::uniform_real_distribution uniform(0, 1);
-//      auto sample = uniform(gen);
-//
-// Note: Why are operator() signatures different for CUDA and CPU?
-//       This is because, for CUDA, we will be using Philox4_32_10 engine
-//       inside a kernel and the number of random samples we would need is known
-//       before hand. For the CPU side, it's easier to let CPUGenerator encapsulate
-//       Philox4_32_10 and manage its state. Hence, for CUDA, operator() takes
-//       the Philox4_32_10 object directly and CPU take CPUGenerator object directly.
+/** Distributions kernel adapted from THRandom.cpp
+ * The kernels try to follow std::random distributions signature
+ * For instance: in ATen
+ *      auto gen = at::detail::createCPUGenerator();
+ *      at::uniform_real_distribution<double> uniform(0, 1);
+ *      auto sample = uniform(gen.get());
+ *      
+ *      vs std::random
+ * 
+ *      std::mt19937 gen;
+ *      std::uniform_real_distribution uniform(0, 1);
+ *      auto sample = uniform(gen);
+ */
+
+/**
+ * Note [Uniform Distribution Algorithm]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * The following article summarizes all the problems that arises when one tries to get
+ * floats from unsigned integer: 
+ * https://experilous.com/1/blog/post/perfect-fast-random-floating-point-numbers
+ * 
+ * There are two broadly used/debated over methods when mapping unsigned ints
+ * to float:
+ *        method 1: Sample from [1,2) and then subtract 1 from it. This involves 
+ *                  losing entropy so that only ints from [0,2^mantissa) are picked. 
+ *                  This gives [0,1) range of floating point values. Check the 
+ *                  article for more details.
+ *        method 2: Divide by maximum int and get floats in range [0, 1] and then use
+ *                  rejection sampling to get ride of the 1s to make it [0, 1).
+ * 
+ * The article argues that method 1 gives uniformly distributed floats but involves 
+ * loss of absolute precision (e.g. it is very unlike to produce 0.03125). On the 
+ * other hand, method 2 results in non-uniform clumpiness, but can produce small values.
+ * 
+ * In PyTorch, we have selected the uniform distribution algorithm to be method 2 and 
+ * our rational is that it still conforms to definition of uniform (e.g. the number of 
+ * generated numbers on the [x,x+dx] segment is proportional to dx, as long as 
+ * dx >> method granularity. The granularity would be gradually increasing 
+ * from 2^-32 to 2^-25 for method 2, and would stay at 2^-24 for method 1. In addition
+ * to the division, we squash 1.0s to just under 1 and hence, achieve the range [0,1). 
+ */
 namespace at {
+
+// Using VectorType in Box-muller derived distributions to avoid
+// code duplication
+template <typename T>
+struct VectorType {  };
+
+template <> struct VectorType<float> {using type = FLOAT2;};
+template <> struct VectorType<at::Half> {using type = FLOAT2;};
+template <> struct VectorType<double> {using type = DOUBLE2;};
+
+template <typename T>
+using vect_type = typename VectorType<T>::type;
 
 // Constants for uniform distribution
 constexpr float POW_2_32_INV = 1.0f/std::numeric_limits<uint32_t>::max();
@@ -59,6 +93,7 @@ struct uniform_real_distribution {
   template<typename U = T> 
   C10_HOST inline typename std::enable_if<std::is_same<U, double>::value, double>::type
   operator()(at::CPUGenerator* generator){
+    // See Note [Uniform Distribution Algorithm]
     double x = generator->random64() * POW_2_64_INV;
     if (x == 1.0) {
       x = std::nextafter(1.0, 0.0);
@@ -71,6 +106,7 @@ struct uniform_real_distribution {
   C10_HOST inline typename std::enable_if<std::is_same<U, float>::value
                                           || std::is_same<U, at::Half>::value, float>::type
   operator()(at::CPUGenerator* generator){
+    // See Note [Uniform Distribution Algorithm]
     float x = generator->random() * POW_2_32_INV;
     if (x == 1.0f) {
       x = std::nextafter(1.0f, 0.0f);
@@ -103,40 +139,18 @@ struct normal_distribution {
     stdv = stdv_in;
   }
 
-  template<typename U = T> 
-  C10_HOST inline typename std::enable_if<std::is_same<U, double>::value, DOUBLE2>::type
-  operator()(at::CPUGenerator* generator){
-    uniform_real_distribution<double> uniform(0.0, 1.0);
-    DOUBLE2 result;
-    double u2 = uniform(generator);
-    double u1 = uniform(generator);
+  C10_HOST inline vect_type<T> operator()(at::CPUGenerator* generator){
+    uniform_real_distribution<T> uniform(0.0, 1.0);
+    vect_type<T> result;
+    const T u2 = uniform(generator);
+    T u1 = uniform(generator);
     // extra pre-caution to make sure log never gets zero
-    double log_val = 1.0 - u1;
-    if (log_val == 0.0) {
-      log_val = std::numeric_limits<double>::min();
+    if (u1 == static_cast<T>(0.0)) {
+      u1 = std::numeric_limits<T>::min();
     }
-    double r = ::sqrt(-2.0 * ::log(log_val));
-    result[0] = r * ::cos(2.0 * M_PI * u2) * stdv + mean;
-    result[1] = r * ::sin(2.0 * M_PI * u2) * stdv + mean;
-    return result;
-  }
-
-  template<typename U = T> 
-  C10_HOST inline typename std::enable_if<std::is_same<U, float>::value
-                                          || std::is_same<U, at::Half>::value, FLOAT2>::type
-  operator()(at::CPUGenerator* generator){
-    uniform_real_distribution<float> uniform(0.0, 1.0);
-    FLOAT2 result;
-    float u2 = uniform(generator);
-    float u1 = uniform(generator);
-    // extra pre-caution to make sure log never gets zero
-    float log_val = 1.0 - u1;
-    if (log_val == 0.0f) {
-      log_val = std::numeric_limits<float>::min();
-    }
-    float r = ::sqrt(-2.0 * ::log(log_val));
-    result[0] = r * ::cos(2.0 * M_PI * u2) * stdv + mean;
-    result[1] = r * ::sin(2.0 * M_PI * u2) * stdv + mean;
+    T r = ::sqrt(static_cast<T>(-2.0) * ::log(u1));
+    result[0] = r * ::cos(static_cast<T>(2.0) * static_cast<T>(M_PI) * u2) * stdv + mean;
+    result[1] = r * ::sin(static_cast<T>(2.0) * static_cast<T>(M_PI) * u2) * stdv + mean;
     return result;
   }
 
@@ -190,7 +204,7 @@ struct geometric_distribution {
 
   C10_HOST inline int operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
-    auto sample = 1 - uniform(generator);
+    auto sample = uniform(generator);
     // extra pre-caution to make sure log never gets zero
     if (sample == static_cast<T>(0.0)) {
       sample = std::numeric_limits<T>::min();
@@ -214,7 +228,7 @@ struct exponential_distribution {
 
   C10_HOST inline T operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
-    auto sample = 1 - uniform(generator);
+    auto sample = uniform(generator);
     // extra pre-caution to make sure log never gets zero
     if (sample == static_cast<T>(0.0)) {
       sample = std::numeric_limits<T>::min();
@@ -239,7 +253,7 @@ struct cauchy_distribution {
 
   C10_HOST inline T operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
-    return median + sigma * ::tan(M_PI*(uniform(generator)-0.5));
+    return median + sigma * ::tan(static_cast<T>(M_PI) * (uniform(generator)-static_cast<T>(0.5)));
   }
 
   private:
@@ -267,24 +281,10 @@ struct lognormal_distribution {
     stdv = stdv_in;
   }
 
-  template<typename U = T> 
-  C10_HOST inline typename std::enable_if<std::is_same<U, double>::value, DOUBLE2>::type
-  operator()(at::CPUGenerator* generator){
-    normal_distribution<double> normal(mean, stdv);
-    DOUBLE2 result;
-    DOUBLE2 normal_vals = normal(generator);
-    result[0] = ::exp(normal_vals[0]);
-    result[1] = ::exp(normal_vals[1]);
-    return result;
-  }
-
-  template<typename U = T> 
-  C10_HOST inline typename std::enable_if<std::is_same<U, float>::value
-                                          || std::is_same<U, at::Half>::value, FLOAT2>::type
-  operator()(at::CPUGenerator* generator){
-    normal_distribution<float> normal(mean, stdv);
-    FLOAT2 result;
-    FLOAT2 normal_vals = normal(generator);
+  C10_HOST inline vect_type<T> operator()(at::CPUGenerator* generator){
+    normal_distribution<T> normal(mean, stdv);
+    vect_type<T> result;
+    vect_type<T> normal_vals = normal(generator);
     result[0] = ::exp(normal_vals[0]);
     result[1] = ::exp(normal_vals[1]);
     return result;
