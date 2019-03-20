@@ -32,25 +32,27 @@ C10_DECLARE_TENSOR_TYPE(TensorType2);
 C10_DEFINE_TENSOR_TYPE(TensorType2);
 
 struct ErrorKernel final : public OperatorKernel {
-  void operator()(const Tensor&) {
+  int64_t operator()(const Tensor&, int64_t) {
     EXPECT_TRUE(false); // this kernel should never be called
+    return 0;
   }
 };
 
 FunctionSchema errorOpSchema(
     "_test::error",
     "",
-    (std::vector<Argument>{Argument("dummy")}),
-    (std::vector<Argument>{}));
+    (std::vector<Argument>{Argument("dummy"),
+                           Argument("input", IntType::get())}),
+    (std::vector<Argument>{Argument("output", IntType::get())}));
 
 struct IncrementKernel final : OperatorKernel {
-  int operator()(const Tensor& tensor, int input) {
+  int64_t operator()(const Tensor& tensor, int64_t input) {
     return input + 1;
   }
 };
 
 struct DecrementKernel final : OperatorKernel {
-  int operator()(const Tensor& tensor, int input) {
+  int64_t operator()(const Tensor& tensor, int64_t input) {
     return input - 1;
   }
 };
@@ -172,7 +174,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithZeroOutputs_whe
 }
 
 struct KernelWithIntOutput final : OperatorKernel {
-  int operator()(Tensor, int a, int b) {
+  int64_t operator()(Tensor, int64_t a, int64_t b) {
     return a + b;
   }
 };
@@ -257,7 +259,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListOutpu
 }
 
 struct KernelWithIntListOutput final : OperatorKernel {
-  std::vector<int64_t> operator()(const Tensor&, int input1, int input2, int input3) {
+  std::vector<int64_t> operator()(const Tensor&, int64_t input1, int64_t input2, int64_t input3) {
     return {input1, input2, input3};
   }
 };
@@ -424,10 +426,10 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorInputByVa
   EXPECT_EQ(TensorType2(), captured_input.type_id());
 }
 
-int captured_int_input = 0;
+int64_t captured_int_input = 0;
 
 struct KernelWithIntInputWithoutOutput final : OperatorKernel {
-  void operator()(Tensor, int input1) {
+  void operator()(Tensor, int64_t input1) {
     captured_int_input = input1;
   }
 };
@@ -453,7 +455,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntInput_withou
 }
 
 struct KernelWithIntInputWithOutput final : OperatorKernel {
-  int operator()(Tensor, int input1) {
+  int64_t operator()(Tensor, int64_t input1) {
     return input1 + 1;
   }
 };
@@ -477,7 +479,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntInput_withOu
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
-int captured_input_list_size = 0;
+int64_t captured_input_list_size = 0;
 
 struct KernelWithIntListInputWithoutOutput final : OperatorKernel {
   void operator()(Tensor, ArrayRef<int64_t> input1) {
@@ -506,7 +508,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListInput_wi
 }
 
 struct KernelWithIntListInputWithOutput final : OperatorKernel {
-  int operator()(Tensor, ArrayRef<int64_t> input1) {
+  int64_t operator()(Tensor, ArrayRef<int64_t> input1) {
     return input1.size();
   }
 };
@@ -556,7 +558,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListInput
 }
 
 struct KernelWithTensorListInputWithOutput final : OperatorKernel {
-  int operator()(ArrayRef<Tensor> input1) {
+  int64_t operator()(ArrayRef<Tensor> input1) {
     return input1.size();
   }
 };

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/op_registration/kernel_stackbased.h>
+#include <ATen/core/op_registration/infer_schema.h>
 
 namespace c10 {
 /**
@@ -125,6 +126,14 @@ namespace detail {
   private:
     std::tuple<Args...> constructor_parameters_;
   };
+
+  template<class KernelFunctor>
+  class FunctionSchemaInferer final {
+  public:
+    std::unique_ptr<FunctionSchema> operator()() const {
+      return guts::make_unique<FunctionSchema>(inferFunctionSchema<KernelFunctor>("", ""));
+    }
+  };
 }
 
 /**
@@ -164,15 +173,13 @@ namespace detail {
  * >         c10::dispatchKey(CPUTensorId()));
  */
 template<class KernelFunctor, class... ConstructorParameters>
-inline constexpr auto kernel(ConstructorParameters&&... constructorParameters)
--> decltype(kernel( // TODO This decltype is only needed in C++11. Remove once we have C++14.
+inline constexpr detail::KernelRegistrationConfigParameter<detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>, detail::FunctionSchemaInferer<KernelFunctor>>
+kernel(ConstructorParameters&&... constructorParameters) {
+  return {
     &detail::wrap_kernel_functor<KernelFunctor>::call,
-    detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)
-)) {
-  return kernel(
-      &detail::wrap_kernel_functor<KernelFunctor>::call,
-      detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)
-  );
+    detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
+    detail::FunctionSchemaInferer<KernelFunctor>()
+  };
 }
 
 }

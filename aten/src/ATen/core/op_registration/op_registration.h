@@ -10,6 +10,7 @@
 #include <ATen/core/op_registration/kernel_stackbased.h>
 #include <ATen/core/op_registration/kernel_functor.h>
 #include <ATen/core/op_registration/kernel_function.h>
+#include <ATen/core/op_registration/infer_schema.h>
 
 namespace c10 {
 
@@ -61,6 +62,11 @@ public:
   template<class... ConfigParameters>
   RegisterOperators op(FunctionSchema schema, ConfigParameters&&... configParameters) && {
     detail::KernelRegistrationConfig config = make_registration_config(configParameters...);
+
+    if (config.inferred_function_schema.get() != nullptr) {
+      assertSchemasHaveSameSignature(*config.inferred_function_schema, schema);
+    }
+
     registrars_.emplace_back(std::move(schema), config.dispatch_key, config.kernel_func, std::move(config.cache_creator_func));
     return std::move(*this);
   }

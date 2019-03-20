@@ -111,7 +111,7 @@ static auto registry = c10::RegisterOperators().op(
         (std::vector<c10::Argument>{
             c10::Argument("inputs", ListType::ofTensors()),
             c10::Argument("output"),
-            c10::Argument("split_info", FloatType::get()),
+            c10::Argument("split_info"),
             c10::Argument("add", IntType::get()),
             c10::Argument("add_axis", IntType::get())}),
         (std::vector<c10::Argument>{})),

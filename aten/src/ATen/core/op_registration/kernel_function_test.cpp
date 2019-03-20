@@ -30,21 +30,23 @@ C10_DEFINE_TENSOR_TYPE(TensorType1);
 C10_DECLARE_TENSOR_TYPE(TensorType2);
 C10_DEFINE_TENSOR_TYPE(TensorType2);
 
-void errorKernel(const Tensor&) {
+int64_t errorKernel(const Tensor& tensor, int64_t input) {
   EXPECT_TRUE(false); // this kernel should never be called
+  return 0;
 }
 
 FunctionSchema errorOpSchema(
     "_test::error",
     "",
-    (std::vector<Argument>{Argument("dummy")}),
-    (std::vector<Argument>{}));
+    (std::vector<Argument>{Argument("dummy"),
+                           Argument("input", IntType::get())}),
+    (std::vector<Argument>{Argument("output", IntType::get())}));
 
-int incrementKernel(const Tensor& tensor, int input) {
+int64_t incrementKernel(const Tensor& tensor, int64_t input) {
   return input + 1;
 }
 
-int decrementKernel(const Tensor& tensor, int input) {
+int64_t decrementKernel(const Tensor& tensor, int64_t input) {
   return input - 1;
 }
 
@@ -160,7 +162,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithZeroOutputs_wh
   EXPECT_EQ(0, result.size());
 }
 
-int kernelWithIntOutput(Tensor, int a, int b) {
+int64_t kernelWithIntOutput(Tensor, int64_t a, int64_t b) {
   return a + b;
 }
 
@@ -238,7 +240,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorListOutp
   EXPECT_EQ(TensorType1(), result[0].toTensorListRef()[2].type_id());
 }
 
-std::vector<int64_t> kernelWithIntListOutput(const Tensor&, int input1, int input2, int input3) {
+std::vector<int64_t> kernelWithIntListOutput(const Tensor&, int64_t input1, int64_t input2, int64_t input3) {
   return {input1, input2, input3};
 }
 
@@ -394,9 +396,9 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorInputByV
   EXPECT_EQ(TensorType2(), captured_input.type_id());
 }
 
-int captured_int_input = 0;
+int64_t captured_int_input = 0;
 
-void kernelWithIntInputWithoutOutput(Tensor, int input1) {
+void kernelWithIntInputWithoutOutput(Tensor, int64_t input1) {
   captured_int_input = input1;
 }
 
@@ -420,7 +422,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithIntInput_witho
   EXPECT_EQ(3, captured_int_input);
 }
 
-int kernelWithIntInputWithOutput(Tensor, int input1) {
+int64_t kernelWithIntInputWithOutput(Tensor, int64_t input1) {
   return input1 + 1;
 }
 
@@ -443,7 +445,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithIntInput_withO
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
-int captured_input_list_size = 0;
+int64_t captured_input_list_size = 0;
 
 void kernelWithIntListInputWithoutOutput(Tensor, ArrayRef<int64_t> input1) {
   captured_input_list_size = input1.size();
@@ -469,7 +471,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithIntListInput_w
   EXPECT_EQ(3, captured_input_list_size);
 }
 
-int kernelWithIntListInputWithOutput(Tensor, ArrayRef<int64_t> input1) {
+int64_t kernelWithIntListInputWithOutput(Tensor, ArrayRef<int64_t> input1) {
   return input1.size();
 }
 
@@ -515,7 +517,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorListInpu
   EXPECT_EQ(2, captured_input_list_size);
 }
 
-int kernelWithTensorListInputWithOutput(ArrayRef<Tensor> input1) {
+int64_t kernelWithTensorListInputWithOutput(ArrayRef<Tensor> input1) {
   return input1.size();
 }
 
