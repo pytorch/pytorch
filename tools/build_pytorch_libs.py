@@ -123,8 +123,7 @@ def run_cmake(version,
               build_dir,
               my_env):
     cmake_args = [
-        get_cmake_command(),
-        base_dir
+        get_cmake_command()
     ]
     if USE_NINJA:
         cmake_args.append('-GNinja')
@@ -220,6 +219,13 @@ def run_cmake(version,
             except UnicodeDecodeError as e:
                 shex = ':'.join('{:02x}'.format(ord(c)) for c in my_env[env_var_name])
                 sys.stderr.write('Invalid ENV[{}] = {}\n'.format(env_var_name, shex))
+    # According to the CMake manual, we should pass the arguments first,
+    # and put the directory as the last element. Otherwise, these flags
+    # may not be passed correctly.
+    # Reference:
+    # 1. https://cmake.org/cmake/help/latest/manual/cmake.1.html#synopsis
+    # 2. https://stackoverflow.com/a/27169347
+    cmake_args.append(base_dir)
     check_call(cmake_args, cwd=build_dir, env=my_env)
 
 
