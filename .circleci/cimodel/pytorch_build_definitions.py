@@ -150,6 +150,7 @@ def gen_dependent_configs(xenial_parent_config):
         (["multigpu"], "large"),
         (["NO_AVX2"], "medium"),
         (["NO_AVX", "NO_AVX2"], "medium"),
+        (["nogpu"], None),
     ]
 
     configs = []
