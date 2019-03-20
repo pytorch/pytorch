@@ -759,7 +759,7 @@ inline void Variable::set_pyobj(PyObject* pyobj) noexcept {
 }
 
 inline PyObject* Variable::pyobj() const noexcept {
-  return static_cast<PyObject*>(get()->pyobj());
+  return get()->pyobj();
 }
 
 inline Variable::AutogradMeta* Variable::get_autograd_meta() const noexcept {

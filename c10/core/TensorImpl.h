@@ -15,6 +15,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
+#include <c10/util/python_stub.h>
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
@@ -860,11 +861,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return impl;
   }
 
-  inline void set_pyobj(void* pyobj) noexcept {
+  inline void set_pyobj(PyObject* pyobj) noexcept {
     pyobj_ = pyobj;
   }
 
-  inline void* pyobj() const noexcept {
+  inline PyObject* pyobj() const noexcept {
     return pyobj_;
   }
 
@@ -1376,8 +1377,7 @@ protected:
   // at a time).
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
-  // yf225 TODO: add comment on why this is void*
-  void* pyobj_ = nullptr; // weak reference
+  PyObject* pyobj_ = nullptr; // weak reference
 
   // We could save a word or two by combining the SmallVector structs,
   // since their size is redundant, and if we need to overflow the buffer space
