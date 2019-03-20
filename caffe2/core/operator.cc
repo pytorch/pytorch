@@ -25,6 +25,11 @@ C10_DEFINE_bool(
     false,
     "If set, disable implicit engine preferences. This is useful for unit "
     "testing and debugging cases.");
+C10_DEFINE_bool(
+    caffe2_operator_throw_if_fp_exceptions,
+    false,
+    "If set, throws if floating point exceptions (FE_DIVBYZERO, FE_INVALID, "
+    "FE_OVERFLOW) are detected when running any operator.");
 
 namespace caffe2 {
 
@@ -119,7 +124,7 @@ GlobalEnginePrefType& g_global_engine_pref() {
   return *g_global_engine_pref_;
 }
 
-unique_ptr<OperatorBase> TryCreateC2Operator(
+unique_ptr<OperatorBase> TryCreateOperator(
     const string& key,
     const OperatorDef& operator_def,
     Workspace* ws) {
@@ -140,24 +145,6 @@ unique_ptr<OperatorBase> TryCreateC2Operator(
                  << err.what()
                  << ". Proto is: " << ProtoDebugString(operator_def);
     return nullptr;
-  }
-}
-
-unique_ptr<OperatorBase> TryCreateC10Operator(
-    const string& key,
-    const OperatorDef& operator_def,
-    Workspace* ws) {
-  return C10OperatorRegistry()->Create(key, operator_def, ws);
-}
-
-unique_ptr<OperatorBase> TryCreateOperator(
-    const string& key,
-    const OperatorDef& operator_def,
-    Workspace* ws) {
-  if (auto op = TryCreateC10Operator(key, operator_def, ws)) {
-    return op;
-  } else {
-    return TryCreateC2Operator(key, operator_def, ws);
   }
 }
 
@@ -723,11 +710,6 @@ std::set<std::string> GetRegisteredOperators() {
 
   // HIP operators
   for (const auto& name : HIPOperatorRegistry()->Keys()) {
-    all_keys.emplace(name);
-  }
-
-  // C10 operators
-  for (const auto& name : C10OperatorRegistry()->Keys()) {
     all_keys.emplace(name);
   }
 

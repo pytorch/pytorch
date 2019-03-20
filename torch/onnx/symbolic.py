@@ -1606,7 +1606,7 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     if not lengths.type().isSubtypeOf(torch._C.TensorType.get()):
         raise RuntimeError("Lengths must be a Tensor for ONNX export")
     # We know it's a TensorType so this check is now safe.
-    # It's really only necessary beacuse those operators expand to something that
+    # It's really only necessary because those operators expand to something that
     # only works with int32 types in Caffe2...
     if lengths.type().scalarType() != 'Int':
         lengths = _cast_Int(g, lengths, False)
@@ -1675,6 +1675,13 @@ def flatten(g, input, start_dim, end_dim):
 @parse_args('v')
 def nonzero(g, input):
     return t(g, g.op('NonZero', input))
+
+
+@parse_args('v')
+def isnan(g, input):
+    output = g.op('IsNaN', input)
+    output = _cast_func_template(cast_pytorch_to_onnx['Byte'], g, output, None)
+    return output
 
 
 @parse_args('v', 'i', 'i', 'i')

@@ -352,6 +352,8 @@ void initJITBindings(PyObject* module) {
       .def_property_readonly(
           "name", [](FunctionSchema& self) { return self.name(); })
       .def_property_readonly(
+          "overload_name", [](FunctionSchema& self) { return self.overload_name(); })
+      .def_property_readonly(
           "arguments", [](FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(
           "returns", [](FunctionSchema& self) { return self.returns(); });

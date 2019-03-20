@@ -2172,9 +2172,9 @@ class TestAutograd(TestCase):
 
     @skipIfNoLapack
     def test_trtrs(self):
-        def _test_with_size(N, C):
-            A = torch.rand(N, N, requires_grad=True)
-            b = torch.rand(N, C, requires_grad=True)
+        def _test_with_size(A_dims, B_dims):
+            A = torch.rand(*A_dims).requires_grad_()
+            b = torch.rand(*B_dims).requires_grad_()
 
             for upper, transpose, unitriangular in product((True, False), repeat=3):
                 def func(A, b):
@@ -2183,8 +2183,10 @@ class TestAutograd(TestCase):
                 gradcheck(func, [A, b])
                 gradgradcheck(func, [A, b])
 
-        _test_with_size(S, S + 1)
-        _test_with_size(S, S - 1)
+        _test_with_size((3, 3), (3, 4))
+        _test_with_size((3, 3), (3, 2))
+        _test_with_size((2, 3, 3), (2, 3, 4))
+        _test_with_size((2, 3, 3), (2, 3, 2))
 
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_fft_ifft_rfft_irfft(self):
