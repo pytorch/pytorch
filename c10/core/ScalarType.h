@@ -40,7 +40,8 @@ _(at::Half,Half,d) \
 _(float,Float,d)   \
 _(double,Double,d) \
 _(std::complex<float>,ComplexFloat,z) \
-_(std::complex<double>,ComplexDouble,z)
+_(std::complex<double>,ComplexDouble,z) \
+_(bool,Bool,i)
 
 #define AT_FORALL_SCALAR_TYPES(_) \
 _(uint8_t,Byte,i)  \

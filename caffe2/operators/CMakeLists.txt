@@ -60,7 +60,6 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${CMAKE_CURRENT_LIST_DIR}/experimental/c1
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${CMAKE_CURRENT_LIST_DIR}/experimental/c10/cpu/enforce_finite_cpu.cc)
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${CMAKE_CURRENT_LIST_DIR}/experimental/c10/cpu/add_cpu.cc)
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${CMAKE_CURRENT_LIST_DIR}/experimental/c10/schemas/sigmoid.cc)
-set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${CMAKE_CURRENT_LIST_DIR}/experimental/c10/schemas/layer_norm.cc)
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${CMAKE_CURRENT_LIST_DIR}/experimental/c10/schemas/filler.cc)
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${CMAKE_CURRENT_LIST_DIR}/experimental/c10/schemas/expand_dims.cc)
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${CMAKE_CURRENT_LIST_DIR}/experimental/c10/schemas/mul.cc)
