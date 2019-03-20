@@ -735,7 +735,7 @@ endif()
 
 
 if (MSVC)
-  target_link_libraries(caffe2 onnx onnx_library)
+  target_link_libraries(caffe2 PUBLIC onnx onnx_library)
 endif()
 
 
