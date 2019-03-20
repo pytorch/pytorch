@@ -31,7 +31,7 @@ class Reducer {
   // and the user wishes to reduce gradients in the backwards pass.
   // If they don't, and wish to accumulate gradients before reducing them,
   // a call to this function can simply be omitted.
-  void prepare_for_backward(torch::autograd::Variable output);
+  void prepare_for_backward(const torch::autograd::Variable& output);
 
  protected:
   std::mutex mutex_;

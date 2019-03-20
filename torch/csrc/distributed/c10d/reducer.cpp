@@ -315,7 +315,7 @@ void Reducer::initialize_buckets(std::vector<std::vector<size_t>> indices) {
 //
 // Rough copy of torch::autograd::Engine::compute_dependencies.
 //
-void Reducer::prepare_for_backward(torch::autograd::Variable output) {
+void Reducer::prepare_for_backward(const torch::autograd::Variable& output) {
   std::lock_guard<std::mutex> lock(mutex_);
   std::unordered_set<torch::autograd::Function*> seen;
   std::vector<torch::autograd::Function*> queue{output.grad_fn().get()};
