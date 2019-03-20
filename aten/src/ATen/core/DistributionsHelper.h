@@ -11,7 +11,8 @@
 #include <limits>
 #include <cmath>
 
-/** Distributions kernel adapted from THRandom.cpp
+/** 
+ * Distributions kernel adapted from THRandom.cpp
  * The kernels try to follow std::random distributions signature
  * For instance: in ATen
  *      auto gen = at::detail::createCPUGenerator();
@@ -34,23 +35,23 @@
  * 
  * There are two broadly used/debated over methods when mapping unsigned ints
  * to float:
- *        method 1: Sample from [1,2) and then subtract 1 from it. This involves 
+ *        method 1: Sample from [1.0, 2.0) and then subtract 10 from it. This involves 
  *                  losing entropy so that only ints from [0,2^mantissa) are picked. 
- *                  This gives [0,1) range of floating point values. Check the 
+ *                  This gives [0.0, 1.0) range of floating point values. Check the 
  *                  article for more details.
- *        method 2: Divide by maximum int and get floats in range [0, 1] and then use
- *                  rejection sampling to get rid of the 1s to make it [0, 1).
+ *        method 2: Divide by maximum int and get floats in range [0.0, 1.0] and then use
+ *                  rejection sampling to get rid of the 1s to make it [0.0, 1.0).
  * 
  * The article argues that method 1 gives uniformly distributed floats but involves 
- * loss of absolute precision (e.g. it is very unlike to produce 0.03125). On the 
+ * loss of absolute precision (e.g. it is very unlikely to produce 0.03125). On the 
  * other hand, method 2 results in non-uniform clumpiness, but can produce small values.
  * 
  * In PyTorch, we have selected the uniform distribution algorithm to be method 2 and 
- * our rational is that it still conforms to definition of uniform (e.g. the number of 
+ * our rational is that it still conforms to definition of uniform, i.e. the number of 
  * generated numbers on the [x,x+dx] segment is proportional to dx, as long as 
  * dx >> method granularity. The granularity would be gradually increasing 
  * from 2^-32 to 2^-25 for method 2, and would stay at 2^-24 for method 1. In addition
- * to the division, we squash 1.0s to just under 1 and hence, achieve the range [0,1). 
+ * to the division, we squash 1.0s to just under 1 and hence, achieve the range [0.0,1.0). 
  */
 namespace at {
 
