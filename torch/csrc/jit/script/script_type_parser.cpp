@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/parser.h>
+#include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/jit/script/tree_views.h>
 
 namespace torch {
@@ -186,6 +188,11 @@ TypePtr parseTypeFromExpr(const Expr& expr) {
   throw ErrorReport(expr.range())
       << "Expression of type " << kindToString(expr.kind())
       << " cannot be used in a type expression";
+}
+
+TypePtr parseType(const std::string& str) {
+  Parser p(str);
+  return parseTypeFromExpr(p.parseExp());
 }
 } // namespace script
 } // namespace jit

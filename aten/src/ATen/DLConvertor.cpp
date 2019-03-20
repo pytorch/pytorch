@@ -11,7 +11,7 @@ namespace at {
 static DLDataType getDLDataType(const Tensor& t) {
   DLDataType dtype;
   dtype.lanes = 1;
-  dtype.bits = t.dtype().itemsize() * 8;
+  dtype.bits = t.element_size() * 8;
   switch (t.scalar_type()) {
     case ScalarType::Byte:
       dtype.code = DLDataTypeCode::kDLUInt;

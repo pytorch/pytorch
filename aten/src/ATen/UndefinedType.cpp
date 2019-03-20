@@ -47,10 +47,6 @@ TypeID UndefinedType::ID() const {
   return TypeID::Undefined;
 }
 
-size_t UndefinedType::elementSizeInBytes() const {
-  AT_ERROR("elementSizeInBytes not defined for UndefinedType");
-}
-
 Type & UndefinedType::toBackend(Backend b) const {
   if (b == Backend::Undefined) {
     return TypeDefault::toBackend(b);

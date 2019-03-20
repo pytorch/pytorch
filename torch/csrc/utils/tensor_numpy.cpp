@@ -69,7 +69,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   auto sizes = to_numpy_shape(tensor.sizes());
   auto strides = to_numpy_shape(tensor.strides());
   // NumPy strides use bytes. Torch strides use element counts.
-  auto element_size_in_bytes = tensor.type().elementSizeInBytes();
+  auto element_size_in_bytes = tensor.element_size();
   for (auto& stride : strides) {
     stride *= element_size_in_bytes;
   }

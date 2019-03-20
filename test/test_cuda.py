@@ -1049,6 +1049,9 @@ class TestCuda(TestCase):
     def test_isinf(self):
         _TestTorchMixin._test_isinf(self, lambda t: t.cuda())
 
+    def test_inplace_unary_mem_overlap(self):
+        _TestTorchMixin._test_inplace_unary_mem_overlap(self, device='cuda')
+
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_arithmetic_large_tensor(self):
         x = torch.empty(2**30, device='cuda')
@@ -1297,6 +1300,7 @@ class TestCuda(TestCase):
     def test_gather(self):
         self._test_gather(0)
 
+    @skipIfRocm
     def test_gather_dim(self):
         self._test_gather(1)
 
@@ -2137,16 +2141,16 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_det_logdet_slogdet(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_gesv(self):
-        _TestTorchMixin._test_gesv(self, lambda t: t.cuda())
+    def test_solve(self):
+        _TestTorchMixin._test_solve(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_gesv_batched(self):
-        _TestTorchMixin._test_gesv_batched(self, lambda t: t.cuda())
+    def test_solve_batched(self):
+        _TestTorchMixin._test_solve_batched(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_gesv_batched_dims(self):
-        _TestTorchMixin._test_gesv_batched_dims(self, lambda t: t.cuda())
+    def test_solve_batched_dims(self):
+        _TestTorchMixin._test_solve_batched_dims(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky_solve(self):
@@ -2357,14 +2361,17 @@ class TestCuda(TestCase):
         _TestTorchMixin._test_kthvalue(self, device='cuda')
 
     @skipIfRocm
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_btrifact(self):
         _TestTorchMixin._test_btrifact(self, lambda t: t.cuda())
 
     @skipIfRocm
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_btrisolve(self):
         _TestTorchMixin._test_btrisolve(self, lambda t: t.cuda())
 
     @skipIfRocm
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_btriunpack(self):
         _TestTorchMixin._test_btriunpack(self, lambda t: t.cuda())
 
