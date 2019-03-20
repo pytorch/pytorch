@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/util/intrusive_ptr.h>
+
 namespace c10 {
 
 /**
