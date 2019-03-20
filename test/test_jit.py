@@ -10757,7 +10757,7 @@ a")
             @torch.jit.script
             def bad_types(x, y):
                 # type: (Dict[int, int], int) -> int
-                return x.get(y)
+                return x.get(y)  # noqa: T484
 
     def dict_to_python(self):
         def python_lookup(my_dict, keys):
