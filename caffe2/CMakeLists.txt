@@ -483,19 +483,17 @@ if (NOT BUILD_ATEN_MOBILE)
   endif()
 
 
-
-
+  list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
+endif()
 
 # ==========================================================
 # END formerly-libtorch sources
 # ==========================================================
 
-  list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
-endif()
+
 
 # Compile exposed libraries.
 add_library(caffe2 ${Caffe2_CPU_SRCS})
-
 
 
 
@@ -503,199 +501,201 @@ add_library(caffe2 ${Caffe2_CPU_SRCS})
 # formerly-libtorch flags
 # ==========================================================
 
+if (NOT BUILD_ATEN_MOBILE)
 
-# Forces caffe2.pb.h to be generated before its dependents are compiled.
-# Adding the generated header file to the ${TORCH_SRCS} list is not sufficient
-# to establish the dependency, since the generation procedure is declared in a different CMake file.
-# See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
-add_dependencies(caffe2 Caffe2_PROTO)
+  # Forces caffe2.pb.h to be generated before its dependents are compiled.
+  # Adding the generated header file to the ${TORCH_SRCS} list is not sufficient
+  # to establish the dependency, since the generation procedure is declared in a different CMake file.
+  # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
+  add_dependencies(caffe2 Caffe2_PROTO)
 
-target_compile_definitions(caffe2 PUBLIC _THP_CORE)
-
-
-# until they can be unified, keep these lists synced with setup.py
-if(MSVC)
-  if (${CMAKE_BUILD_TYPE} MATCHES "Debug")
-    set (MSVC_RUNTIME_LIBRARY_FLAG "/MDd")
-  else()
-    set (MSVC_RUNTIME_LIBRARY_FLAG "/MD")
-  endif()
-
-  target_compile_options(caffe2 PUBLIC
-    ${MSVC_RUNTIME_LIBRARY_OPTION}
-    /Z7
-    /EHa
-    /DNOMINMAX
-    /wd4267
-    /wd4251
-    /wd4522
-    /wd4522
-    /wd4838
-    /wd4305
-    /wd4244
-    /wd4190
-    /wd4101
-    /wd4996
-    /wd4275
-    /bigobj
-    )
-else()
-  target_compile_options(caffe2 PUBLIC
-#    -std=c++11
-    -Wall
-    -Wextra
-    -Wno-unused-parameter
-    -Wno-missing-field-initializers
-    -Wno-write-strings
-    -Wno-unknown-pragmas
-    # Clang has an unfixed bug leading to spurious missing braces
-    # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
-    -Wno-missing-braces
-    )
-
-  if(NOT APPLE)
-    target_compile_options(caffe2 PRIVATE
-      # Considered to be flaky.  See the discussion at
-      # https://github.com/pytorch/pytorch/pull/9608
-      -Wno-maybe-uninitialized)
-  endif()
-
-endif()
-
-if (MSVC)
-elseif (WERROR)
-  target_compile_options(caffe2 PRIVATE -Werror -Wno-strict-overflow)
-endif()
+  target_compile_definitions(caffe2 PUBLIC _THP_CORE)
 
 
-
-if (NOT NO_API)
-  target_include_directories(caffe2 PUBLIC
-    ${TORCH_SRC_DIR}/csrc/api
-    ${TORCH_SRC_DIR}/csrc/api/include)
-endif()
-
-if(USE_CUDA)
+  # until they can be unified, keep these lists synced with setup.py
   if(MSVC)
-    if (NOT NVTOOLEXT_HOME)
-      set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
+    if (${CMAKE_BUILD_TYPE} MATCHES "Debug")
+      set (MSVC_RUNTIME_LIBRARY_FLAG "/MDd")
+    else()
+      set (MSVC_RUNTIME_LIBRARY_FLAG "/MD")
     endif()
-    if ($ENV{NVTOOLEXT_HOME})
-      set(NVTOOLEXT_HOME $ENV{NVTOOLEXT_HOME})
-    endif()
-    set(TORCH_CUDA_LIBRARIES
-      ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
-      ${CUDA_LIBRARIES})
-    target_include_directories(caffe2 PUBLIC "${NVTOOLEXT_HOME}/include")
-  elseif(APPLE)
-    set(TORCH_CUDA_LIBRARIES
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib/libcudart.dylib
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvrtc.dylib
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib
-      ${CUDA_LIBRARIES})
 
+    target_compile_options(caffe2 PUBLIC
+      ${MSVC_RUNTIME_LIBRARY_OPTION}
+      /Z7
+      /EHa
+      /DNOMINMAX
+      /wd4267
+      /wd4251
+      /wd4522
+      /wd4522
+      /wd4838
+      /wd4305
+      /wd4244
+      /wd4190
+      /wd4101
+      /wd4996
+      /wd4275
+      /bigobj
+      )
   else()
-    find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64/)
-    set(TORCH_CUDA_LIBRARIES
-      ${LIBNVTOOLSEXT}
-      ${CUDA_LIBRARIES})
+    target_compile_options(caffe2 PUBLIC
+      #    -std=c++11
+      -Wall
+      -Wextra
+      -Wno-unused-parameter
+      -Wno-missing-field-initializers
+      -Wno-write-strings
+      -Wno-unknown-pragmas
+      # Clang has an unfixed bug leading to spurious missing braces
+      # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
+      -Wno-missing-braces
+      )
+
+    if(NOT APPLE)
+      target_compile_options(caffe2 PRIVATE
+	# Considered to be flaky.  See the discussion at
+	# https://github.com/pytorch/pytorch/pull/9608
+	-Wno-maybe-uninitialized)
+    endif()
+
   endif()
 
-  target_compile_definitions(caffe2 PRIVATE USE_CUDA)
-endif()
+  if (MSVC)
+  elseif (WERROR)
+    target_compile_options(caffe2 PRIVATE -Werror -Wno-strict-overflow)
+  endif()
 
 
-set(TH_CPU_INCLUDE
-  # dense
-  aten/src/TH
-  ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
-  ${TORCH_ROOT}/aten/src
-  ${CMAKE_CURRENT_BINARY_DIR}/aten/src
-  ${CMAKE_BINARY_DIR}/aten/src)
-target_include_directories(caffe2 PRIVATE ${TH_CPU_INCLUDE})
+  if (NOT NO_API)
+    target_include_directories(caffe2 PUBLIC
+      ${TORCH_SRC_DIR}/csrc/api
+      ${TORCH_SRC_DIR}/csrc/api/include)
+  endif()
 
-set(ATen_CPU_INCLUDE
-  ${TORCH_ROOT}/aten/src
-  ${CMAKE_CURRENT_BINARY_DIR}/../aten/src
-  ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
-  ${CMAKE_BINARY_DIR}/aten/src)
-target_include_directories(caffe2 PUBLIC ${ATen_CPU_INCLUDE})
+  if(USE_CUDA)
+    if(MSVC)
+      if (NOT NVTOOLEXT_HOME)
+	set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
+      endif()
+      if ($ENV{NVTOOLEXT_HOME})
+	set(NVTOOLEXT_HOME $ENV{NVTOOLEXT_HOME})
+      endif()
+      set(TORCH_CUDA_LIBRARIES
+	${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
+	${CUDA_LIBRARIES})
+      target_include_directories(caffe2 PUBLIC "${NVTOOLEXT_HOME}/include")
+    elseif(APPLE)
+      set(TORCH_CUDA_LIBRARIES
+	${CUDA_TOOLKIT_ROOT_DIR}/lib/libcudart.dylib
+	${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvrtc.dylib
+	${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib
+	${CUDA_LIBRARIES})
 
-target_include_directories(caffe2 PUBLIC
-  ${TORCH_SRC_DIR}/csrc)
+    else()
+      find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64/)
+      set(TORCH_CUDA_LIBRARIES
+	${LIBNVTOOLSEXT}
+	${CUDA_LIBRARIES})
+    endif()
 
-target_include_directories(caffe2 PUBLIC
-  ${TORCH_ROOT}/third_party/miniz-2.0.8)
+    target_compile_definitions(caffe2 PRIVATE USE_CUDA)
+  endif()
 
 
-set_property(TARGET caffe2 PROPERTY CXX_STANDARD 11)
+  set(TH_CPU_INCLUDE
+    # dense
+    aten/src/TH
+    ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
+    ${TORCH_ROOT}/aten/src
+    ${CMAKE_CURRENT_BINARY_DIR}/aten/src
+    ${CMAKE_BINARY_DIR}/aten/src)
+  target_include_directories(caffe2 PRIVATE ${TH_CPU_INCLUDE})
+
+  set(ATen_CPU_INCLUDE
+    ${TORCH_ROOT}/aten/src
+    ${CMAKE_CURRENT_BINARY_DIR}/../aten/src
+    ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
+    ${CMAKE_BINARY_DIR}/aten/src)
+  target_include_directories(caffe2 PUBLIC ${ATen_CPU_INCLUDE})
+
+  target_include_directories(caffe2 PUBLIC
+    ${TORCH_SRC_DIR}/csrc)
+
+  target_include_directories(caffe2 PUBLIC
+    ${TORCH_ROOT}/third_party/miniz-2.0.8)
 
 
-# Prevent the unused functions being optimized away
-# Otherwise torch.dll will be linked without caffe2_gpu.dll
-if (MSVC)
-  # TODO What to do with this line?
-  set_target_properties(caffe2 PROPERTIES LINK_FLAGS "/OPT:NOREF")
-endif()
+  set_property(TARGET caffe2 PROPERTY CXX_STANDARD 11)
 
-install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
-        DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
-        FILES_MATCHING PATTERN "*.h")
-install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h"
-        DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
-if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
-  add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
-endif()
+  # Prevent the unused functions being optimized away
+  # Otherwise torch.dll will be linked without caffe2_gpu.dll
+  if (MSVC)
+    # TODO What to do with this line?
+    set_target_properties(caffe2 PROPERTIES LINK_FLAGS "/OPT:NOREF")
+  endif()
 
-if (BUILD_TEST AND NOT NO_API)
-  add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
-endif()
+  install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
+    DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
+    FILES_MATCHING PATTERN "*.h")
+  install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h"
+    DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
-if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-  message(STATUS "${CMAKE_CXX_COMPILER} ${TORCH_SRC_DIR}/abi-check.cpp -o ${CMAKE_BINARY_DIR}/abi-check")
-  execute_process(
-    COMMAND
+  if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+  endif()
+
+  if (BUILD_TEST AND NOT NO_API)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
+  endif()
+
+
+  # XXX This ABI check cannot be run with arm-linux-androideabi-g++
+  if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    message(STATUS "${CMAKE_CXX_COMPILER} ${TORCH_SRC_DIR}/abi-check.cpp -o ${CMAKE_BINARY_DIR}/abi-check")
+    execute_process(
+      COMMAND
       "${CMAKE_CXX_COMPILER}"
       "${TORCH_SRC_DIR}/abi-check.cpp"
       "-o"
       "${CMAKE_BINARY_DIR}/abi-check"
-    RESULT_VARIABLE ABI_CHECK_COMPILE_RESULT)
-  if (ABI_CHECK_COMPILE_RESULT)
-    message(FATAL_ERROR "Could not compile ABI Check: ${ABI_CHECK_COMPILE_RESULT}")
+      RESULT_VARIABLE ABI_CHECK_COMPILE_RESULT)
+    if (ABI_CHECK_COMPILE_RESULT)
+      message(FATAL_ERROR "Could not compile ABI Check: ${ABI_CHECK_COMPILE_RESULT}")
+    endif()
+    execute_process(
+      COMMAND "${CMAKE_BINARY_DIR}/abi-check"
+      RESULT_VARIABLE ABI_CHECK_RESULT
+      OUTPUT_VARIABLE GLIBCXX_USE_CXX11_ABI)
+    if (ABI_CHECK_RESULT)
+      message(WARNING "Could not run ABI Check: ${ABI_CHECK_RESULT}")
+    endif()
+    message(STATUS "Determined _GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
   endif()
-  execute_process(
-    COMMAND "${CMAKE_BINARY_DIR}/abi-check"
-    RESULT_VARIABLE ABI_CHECK_RESULT
-    OUTPUT_VARIABLE GLIBCXX_USE_CXX11_ABI)
-  if (ABI_CHECK_RESULT)
-    message(WARNING "Could not run ABI Check: ${ABI_CHECK_RESULT}")
-  endif()
-  message(STATUS "Determined _GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
-endif()
 
-# CMake config for external projects.
-configure_file(
+  # CMake config for external projects.
+  configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/TorchConfigVersion.cmake.in
     ${PROJECT_BINARY_DIR}/TorchConfigVersion.cmake
     @ONLY)
-configure_file(
+  configure_file(
     ${TORCH_ROOT}/cmake/TorchConfig.cmake.in
     ${PROJECT_BINARY_DIR}/TorchConfig.cmake
     @ONLY)
-install(FILES
+  install(FILES
     ${PROJECT_BINARY_DIR}/TorchConfigVersion.cmake
     ${PROJECT_BINARY_DIR}/TorchConfig.cmake
     DESTINATION share/cmake/Torch)
 
-if (USE_DISTRIBUTED)
-  add_subdirectory(${TORCH_SRC_DIR}/lib/THD lib_THD)
-  if (NOT MSVC AND NOT APPLE)
-    add_subdirectory(${TORCH_SRC_DIR}/lib/c10d lib_c10d)
+  if (USE_DISTRIBUTED)
+    add_subdirectory(${TORCH_SRC_DIR}/lib/THD lib_THD)
+    if (NOT MSVC AND NOT APPLE)
+      add_subdirectory(${TORCH_SRC_DIR}/lib/c10d lib_c10d)
+    endif()
   endif()
+
 endif()
-
-
 # ==========================================================
 # END formerly-libtorch flags
 # ==========================================================
