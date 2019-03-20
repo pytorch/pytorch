@@ -40,7 +40,6 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_maxpool_with_argmax.*'  # MaxPool outputs indices in different format.
                      '|test_convtranspose.*'  # ConvTranspose needs some more complicated translation
                      '|test_mvn.*'  # MeanVarianceNormalization is experimental and not supported.
-                     '|test_dynamic_slice.*'  # MeanVarianceNormalization is experimental and not supported.
                      '|test_eyelike.*'  # Needs implementation
                      '|test_maxunpool.*'  # Needs implementation
                      '|test_acosh.*'  # Needs implementation
@@ -56,6 +55,9 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_strnorm.*'  # Needs implementation
                      '|test_nonzero.*'  # Needs implementation
                      '|test_tfidfvectorizer.*'  # Needs implementation
+                     '|test_resize.*'  # Needs implementation
+                     '|test_slice.*'  # Needs implementation, dynamice slice is not supported yet
+                     '|test_topk.*'  # Needs implementation, dynamice slice is not supported yet
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
