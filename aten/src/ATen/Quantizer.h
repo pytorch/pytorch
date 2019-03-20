@@ -22,7 +22,7 @@ using RealTensor = Tensor;
 struct C10_API Quantizer {
   // QuantizerTypeId type_id_;
   /* used for rounding */
-  int32_t num_bits_;
+  uint8_t num_bits_;
 
   virtual ~Quantizer() {}
 
@@ -87,7 +87,6 @@ struct C10_API PerChannelSymmetricQuantizer: public SymmetricQuantizer {
   }
 
   std::vector<float> scales_;
-  std::vector<int32_t> zero_points_;
 };
 
 template <class T>

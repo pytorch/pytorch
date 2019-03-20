@@ -6,7 +6,7 @@
 
 namespace at {
 
-struct C10_API QTensorImpl : public c10::TensorImpl {
+struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
 public:
   QTensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable, std::shared_ptr<at::Quantizer> quantizer);
 

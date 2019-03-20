@@ -51,15 +51,12 @@ inline QTensor new_qtensor(
   int64_t nelements = at::prod_intlist(sizes);
   // TODO get from options
   auto dtype = at::dtype(at::kQInt8).dtype();
-  std::cout << "nele: " << nelements * dtype.itemsize() << std::endl;
-  std::cout << "alloc: " << allocator->allocate(nelements * dtype.itemsize()) << std::endl;
   auto storage_impl = c10::make_intrusive<StorageImpl>(
     dtype,
     nelements,
     allocator->allocate(nelements * dtype.itemsize()),
     allocator,
     /*resizeable=*/true);
-  std::cout << "storage: " << static_cast<qint8*>(storage_impl->data())[0].val_ << std::endl;
   auto quantizer = make_per_layer_affine_quantizer(scale, zero_point);
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage_impl, at::CPUTensorId(), false, quantizer);
@@ -131,11 +128,6 @@ QTensor PerLayerAffineQuantizer::quantize(RealTensor tensor) {
 
   IntList sizes = tensor.sizes();
   QTensor qv = new_qtensor(sizes, tensor.options(), scale_, zero_point_);
-  std::cout << qv.sizes() << std::endl;
-  std::cout << qv.options() << std::endl;
-  std::cout << qv.device() << std::endl;
-  std::cout << qv.data_ptr() << std::endl;
-  //auto qvd = qv.data<qint8>();
   auto qvd = qv.data<qint8>();
   const float* svd = tensor.data<float>();
   for (int i = 0; i < tensor.numel(); ++i) {

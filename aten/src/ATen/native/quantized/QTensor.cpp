@@ -7,33 +7,6 @@
 namespace at {
 namespace native {
 
-/*
-//QTensor quantize_linear(const RealTensor& self, double scale, int64_t zero_point) {
-QTensor quantize_linear(const RealTensor& self) {
-  auto quantizer = make_per_layer_affine_quantizer(1, 0);
-  return quantizer->quantize(self);
-}
-
-RealTensor dequantize_quantized(const QTensor& self) {
-  return get_qtensorimpl(self)->quantizer()->dequantize(self);
-}
-
-Scalar q_scale_quantized(const QTensor& self) {
-  auto quantizer = get_qtensorimpl(self)->quantizer();
-  // TODO: qscheme?
-  AT_ASSERT(quantizer->name() == "PerLayerAffineQuantizer");
-  return Scalar(static_cast<PerLayerAffineQuantizer*>(quantizer)->scale());
-}
-
-Scalar q_zero_point_quantized(const QTensor& self) {
-  auto quantizer = get_qtensorimpl(self)->quantizer();
-  // TODO: qscheme?
-  AT_ASSERT(quantizer->name() == "PerLayerAffineQuantizer");
-  return Scalar(static_cast<PerLayerAffineQuantizer*>(quantizer)->zero_point());
-}
-
-*/
-
 // This is an internal utility function for getting at the QTensorImpl,
 // You should only use this for writing low level
 // setters/getters for QTensorImpl fields; otherwise, you should use
