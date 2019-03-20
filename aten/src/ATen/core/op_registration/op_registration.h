@@ -9,6 +9,8 @@
 #include <ATen/core/op_registration/dispatch_key.h>
 #include <ATen/core/op_registration/kernel_stackbased.h>
 
+namespace c10 {
+
 /**
  * An instance of this class handles the registration for one or more operators.
  * Make sure you keep the RegisterOperators instance around since it will
@@ -67,3 +69,5 @@ public:
 private:
   std::vector<c10::detail::OperatorRegistrar> registrars_;
 };
+
+}

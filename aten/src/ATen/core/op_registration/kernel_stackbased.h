@@ -16,14 +16,7 @@
 namespace c10 {
 
 namespace detail {
-  template<class Cache>
-  inline std::unique_ptr<c10::KernelCache> cacheCreator() {
-    static_assert(std::is_default_constructible<Cache>::value, "Cache class must be default constructible");
-    return guts::make_unique<Cache>();
-  }
-
-  template<>
-  inline std::unique_ptr<c10::KernelCache> cacheCreator<void>() {
+  inline std::unique_ptr<c10::KernelCache> noCache() {
     return nullptr;
   }
 
@@ -51,16 +44,18 @@ namespace detail {
  *
  * Example:
  *
- * > namespace { void my_kernel_cpu(Stack* stack, KernelCache* cache) {...} }
+ * > namespace {
+ * >   void my_kernel_cpu(Stack* stack, KernelCache* cache) {...}
+ * >   unique_ptr<KernelCache> my_cache_creator() {...}
+ * > }
  * >
  * > static auto registry = c10::RegisterOperators()
  * >     .op("my_op",
- * >         c10::kernel(my_kernel_cpu),
+ * >         c10::kernel(&my_kernel_cpu, &my_cache_creator),
  * >         c10::dispatchKey(CPUTensorId()));
  */
-inline constexpr detail::KernelRegistrationConfigParameter kernel(KernelFunction* kernel_func) {
-  return detail::KernelRegistrationConfigParameter(kernel_func, &detail::cacheCreator<void>);
+inline constexpr detail::KernelRegistrationConfigParameter kernel(KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator = &detail::noCache) {
+  return detail::KernelRegistrationConfigParameter(kernel_func, cache_creator);
 }
-
 
 }
