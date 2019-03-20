@@ -44,4 +44,12 @@ class LockingLogger : public LoggerBase {
   std::unordered_map<std::string, float> counters;
 };
 
+// Make this struct so the timer internals are opaque to the user.
+struct JITTimePoint {
+  std::chrono::time_point<std::chrono::high_resolution_clock> point;
+};
+
+JITTimePoint timePoint();
+void recordDurationSince(std::string name, JITTimePoint tp);
+
 }}}

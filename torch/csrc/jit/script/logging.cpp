@@ -29,4 +29,14 @@ void setLogger(std::shared_ptr<LoggerBase> logger) {
   global_logger = std::move(logger);
 }
 
+JITTimePoint timePoint() {
+  return JITTimePoint{std::chrono::high_resolution_clock::now()};
+}
+
+void recordDurationSince(std::string name, JITTimePoint tp) {
+  auto end = std::chrono::high_resolution_clock::now();
+  auto seconds = std::chrono::duration<double>(end-tp.point).count();
+  logging::getLogger()->addStatValue(name, seconds);
+}
+
 }}}

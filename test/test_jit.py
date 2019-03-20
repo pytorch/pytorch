@@ -14071,7 +14071,6 @@ class TestLogging(JitTestCase):
         self.assertTrue('mytimer' in counters)
 
 
-
 for test in autograd_method_tests():
     add_autograd_test(*test)
 

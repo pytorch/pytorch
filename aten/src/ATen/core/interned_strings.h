@@ -88,6 +88,8 @@ namespace c10 {
   _(prim, GetAttr)                 \
   _(prim, BumpCounter)             \
   _(prim, GetCounters)             \
+  _(prim, TimePoint)               \
+  _(prim, RecordDuration)          \
   _(aten, append)                  \
   _(aten, item)                    \
   _(aten, format)                  \

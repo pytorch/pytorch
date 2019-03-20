@@ -550,6 +550,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<BuiltinFunction>(prim::BumpCounter, c10::nullopt);
   } else if (obj.ptr() == py::module::import("torch.jit._logging").attr("get_counters").ptr()) {
     return std::make_shared<BuiltinFunction>(prim::GetCounters, c10::nullopt);
+  } else if (obj.ptr() == py::module::import("torch.jit._logging").attr("time_point").ptr()) {
+    return std::make_shared<BuiltinFunction>(prim::TimePoint, c10::nullopt);
+  } else if (obj.ptr() == py::module::import("torch.jit._logging").attr("record_duration_since").ptr()) {
+    return std::make_shared<BuiltinFunction>(prim::RecordDuration, c10::nullopt);
   }
 
   py::object builtin_name =
@@ -1108,19 +1112,10 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_logging_set_locking_logger", []() {
     logging::setLogger(std::make_shared<logging::LockingLogger>());
   });
-  // Make this struct so the timer internals are opaque to the user.
-  struct JITTimePoint {
-    std::chrono::time_point<std::chrono::high_resolution_clock> point;
-  };
-  py::class_<JITTimePoint>(m, "JITTimePoint");
-  m.def("_logging_time_point", []() {
-    return JITTimePoint{std::chrono::high_resolution_clock::now()};
-  });
-  m.def("_logging_record_duration_since", [](std::string name, JITTimePoint tp) {
-    auto end = std::chrono::high_resolution_clock::now();
-    auto seconds = std::chrono::duration<double>(end-tp.point).count();
-    logging::getLogger()->addStatValue(name, seconds);
-  });
+  
+  py::class_<logging::JITTimePoint>(m, "JITTimePoint");
+  m.def("_logging_time_point", logging::timePoint);
+  m.def("_logging_record_duration_since", logging::recordDurationSince);
 }
 } // namespace script
 } // namespace jit

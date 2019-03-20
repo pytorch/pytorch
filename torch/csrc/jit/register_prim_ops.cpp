@@ -907,7 +907,37 @@ RegisterOperators reg(
          push(stack, std::move(counters_generic_dict));
          return 0;
        };
-     })
+     }),
+     // HACK alert: stuffing a struct into a ByteTensor
+     Operator("prim::TimePoint() -> Tensor", [](const Node* node) {
+      return [](Stack& stack) {
+        logging::JITTimePoint *ptr = new logging::JITTimePoint(logging::timePoint());
+        at::DataPtr at_ptr(
+            ptr,
+            ptr,
+            [](void* ptr) {
+              logging::JITTimePoint* typed_ptr =
+                  reinterpret_cast<logging::JITTimePoint*>(ptr);
+              delete typed_ptr;
+            },
+            at::kCPU);
+
+        auto retval = at::empty(
+            {sizeof(logging::JITTimePoint)}, at::kByte);
+
+        retval.storage().set_data_ptr(std::move(at_ptr));
+        push(stack, std::move(retval));
+        return 0;
+      };
+     }),
+     Operator("prim::RecordDuration(str name, Tensor tp) -> ()", [](const Node* node) {
+       return [](Stack& stack) {
+         auto tp = pop(stack).toTensor();
+         auto name = pop(stack).toString();
+         logging::recordDurationSince(*name, *reinterpret_cast<logging::JITTimePoint*>(tp.storage().data_ptr().get()));
+         return 0;
+       };
+     }),
      });
 
 // define implementations for primitive number ops
