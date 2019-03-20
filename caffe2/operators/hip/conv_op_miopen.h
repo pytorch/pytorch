@@ -274,8 +274,33 @@ class MIOPENConvOp final : public MIOPENConvOpBase {
     return true;
   }
 
+  template <
+      typename T_X,
+      typename T_W,
+      typename T_B,
+      typename MATH,
+      typename T_Y>
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
+    if (Input(0).IsType<float>()) {
+    return DoRunWithType<
+        float, // X
+        float, // W
+        float, // B
+        float, // Math
+        float>(); // Y
+  } else if (Input(0).IsType<at::Half>()) {
+    return DoRunWithType<
+        at::Half, // X
+        at::Half, // W
+        at::Half, // B
+        at::Half, // Math
+        at::Half>(); // Y
+  } else {
+    LOG(FATAL) << "Only float (32bit) and Half are supported by "
+               << "miopen convolution, but input " << debug_def().input(0)
+               << " has [" << Input(0).meta().name() << "]";
+  }
+  return true;
   };
 
  private:
@@ -579,8 +604,40 @@ class MIOPENConvGradientOp final : public MIOPENConvOpBase {
     return true;
   };
 
+  template <
+      typename T_X,
+      typename T_DY,
+      typename T_W,
+      typename T_B,
+      typename MATH,
+      typename T_DX,
+      typename T_DW,
+      typename T_DB>
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
+    if (Input(0).IsType<float>()) {
+    return DoRunWithType<
+        float, //  X
+        float, // dY
+        float, //  W
+        float, //  b
+        float, // Math
+        float, // dX
+        float, // dW
+        float>(); // db
+  } else if (Input(0).IsType<at::Half>()) {
+    return DoRunWithType<
+        at::Half, //  X
+        at::Half, // dY
+        at::Half, //  W
+        at::Half, //  b
+        at::Half, // Math
+        at::Half, // dX
+        at::Half, // dW
+        at::Half>(); // db
+  } else {
+    LOG(FATAL) << "Unsupported input types";
+  }
+  return true;
   };
 
  private:
