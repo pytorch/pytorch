@@ -932,8 +932,6 @@ class ShapePropagator {
     //   - First input should be the only tensor input
     static const register_formula_for all_reduce_ops{
         {
-            "aten::argmax(Tensor self) -> Tensor",
-            "aten::argmin(Tensor self) -> Tensor",
             "aten::det(Tensor self) -> Tensor",
             "aten::logdet(Tensor self) -> Tensor",
             "aten::max(Tensor self) -> Tensor",
@@ -1000,6 +998,33 @@ class ShapePropagator {
     };
 
     // Requirements:
+    //   dims           : 0 if dim is None, otherwise preserved if keepdim == false or 1 smaller otherwise
+    //   scalar type    : preserved
+    //   device         : preserved
+    //   tensor inputs  : 1
+    //   tensor outputs : 1
+    // Additionally:
+    //   - First input should be the only tensor input
+    //   - Has a bool keepdim argument
+    static const register_formula_for argminmax{
+        {
+            "aten::argmax(Tensor self, int? dim, bool keepdim) -> Tensor",
+            "aten::argmin(Tensor self, int? dim, bool keepdim) -> Tensor",
+        },
+        [](Node* node) -> type_vec_t {
+          if (auto type =
+                  node->input(0)->type()->cast<DimensionedTensorType>()) {
+            if (node->input(1)->type()->kind() == c10::TypeKind::NoneType) {
+              return {type->withDim(0)};
+            } else {
+              return multidim_reduce_with_postprocess(
+                  node, /*num_reduced_dim=*/1, /*upcast_integer=*/false);
+            }
+          }
+          return {};
+        }};
+
+    // Requirements:
     //   dims           : preserved if keepdim == false, 1 smaller otherwise
     //   scalar type    : preserved for first output, byte/uint8 for second
     //   output if exists device         : preserved tensor inputs  : 1 tensor
@@ -1009,8 +1034,6 @@ class ShapePropagator {
     //   - Has a bool keepdim argument
     static const register_formula_for dim_reduce_ops{
         {
-            "aten::argmax(Tensor self, int dim, bool keepdim) -> Tensor",
-            "aten::argmin(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::all(Tensor self, int dim, bool keepdim) -> Tensor",
             "aten::any(Tensor self, int dim, bool keepdim) -> Tensor",
 
