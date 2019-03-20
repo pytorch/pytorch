@@ -1,5 +1,5 @@
 from .setup_helpers.env import (IS_ARM, IS_DARWIN, IS_LINUX, IS_PPC, IS_WINDOWS,
-                                DEBUG, REL_WITH_DEB_INFO, USE_MKLDNN,
+                                DEBUG, REL_WITH_DEB_INFO, USE_MKLDNN, MKLDNN_USE_CBLAS,
                                 check_env_flag, check_negative_env_flag, hotpatch_build_env_vars)
 
 import os
@@ -183,6 +183,7 @@ def run_cmake(version,
         USE_FFMPEG=check_env_flag('USE_FFMPEG'),
         USE_SYSTEM_EIGEN_INSTALL="OFF",
         USE_MKLDNN=USE_MKLDNN,
+        MKLDNN_USE_CBLAS=MKLDNN_USE_CBLAS,
         USE_NCCL=USE_NCCL,
         NCCL_EXTERNAL=USE_NCCL,
         CMAKE_INSTALL_PREFIX=install_dir,

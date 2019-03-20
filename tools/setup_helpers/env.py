@@ -58,3 +58,5 @@ hotpatch_build_env_vars()
 DEBUG = check_env_flag('DEBUG')
 REL_WITH_DEB_INFO = check_env_flag('REL_WITH_DEB_INFO')
 USE_MKLDNN = check_env_flag('USE_MKLDNN', 'OFF' if IS_PPC or IS_ARM else 'ON')
+if USE_MKLDNN:
+    MKLDNN_USE_CBLAS = check_env_flag('MKLDNN_USE_CBLAS')

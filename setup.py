@@ -163,7 +163,7 @@ import importlib
 from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
                                      check_env_flag,
-                                     DEBUG, REL_WITH_DEB_INFO, USE_MKLDNN)
+                                     DEBUG, REL_WITH_DEB_INFO, USE_MKLDNN, MKLDNN_USE_CBLAS)
 from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.cudnn import USE_CUDNN, CUDNN_LIBRARY, CUDNN_INCLUDE_DIR
 from tools.setup_helpers.rocm import USE_ROCM
@@ -336,6 +336,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report('-- Not using CUDA')
         if USE_MKLDNN:
             report('-- Using MKLDNN')
+            if MKLDNN_USE_CBLAS:
+                report('-- Using CBLAS in MKLDNN')
+            else:
+                report('-- Not using CBLAS in MKLDNN')
         else:
             report('-- Not using MKLDNN')
         if USE_NCCL and USE_SYSTEM_NCCL:
