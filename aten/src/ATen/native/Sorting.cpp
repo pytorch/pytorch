@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/SortingUtils.h>
-#include <ATen/NumericUtils.h>
 
 namespace at {
 namespace native {
@@ -172,7 +172,8 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
               tmp_values,
               k - 1,
               [](scalar_t x, scalar_t y) -> bool {
-                return ((_isnan<scalar_t>(x) && !_isnan<scalar_t>(y)) || (x > y));
+                return (
+                    (_isnan<scalar_t>(x) && !_isnan<scalar_t>(y)) || (x > y));
               },
               [&](int64_t i, int64_t j) {
                 std::swap(tmp_values[i], tmp_values[j]);
@@ -234,9 +235,15 @@ Tensor median_cpu(const Tensor& self) {
     // note, quick_select is 0 based while kthvalue is not
     int64_t k = (tmp_values.size(0) - 1) / 2;
     auto val_accessor = tmp_values.accessor<scalar_t, 1>();
-    quick_select_template(val_accessor, k, [&](int64_t i, int64_t j) {
-      std::swap(val_accessor[i], val_accessor[j]);
-    });
+    quick_select_template(
+        val_accessor,
+        k,
+        [](scalar_t x, scalar_t y) -> bool {
+          return ((_isnan<scalar_t>(x) && !_isnan<scalar_t>(y)) || (x > y));
+        },
+        [&](int64_t i, int64_t j) {
+          std::swap(val_accessor[i], val_accessor[j]);
+        });
     result.fill_(tmp_values[k]);
   });
   return result.view({});
