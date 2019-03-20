@@ -1178,7 +1178,11 @@ if _enabled:
                         return
                 if isinstance(value, Attribute):
                     the_type = torch.jit.annotations.ann_to_type(value.type)
-                    self._register_attribute(attr, the_type, value.value)
+                    try:
+                        self._register_attribute(attr, the_type, value.value)
+                    except RuntimeError:
+                        raise RuntimeError("Could not register attribute '{}' of type '{}' for a value of type '{}'"
+                                           .format(attr, value.type, type(value.value)))
                     return
                 return super(ScriptModule, self).__setattr__(attr, value)
 
@@ -1560,6 +1564,9 @@ def _add_script_class(cls, name):
 
 def _get_script_class(name):
     global _script_classes
+    if name not in _script_classes:
+        raise RuntimeError("Unknown reference to ScriptClass '{}'. "
+                "Did you forget to import it?".format(name))
     return _script_classes[name]
 
 # torch.jit.Error

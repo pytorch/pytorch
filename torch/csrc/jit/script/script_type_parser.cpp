@@ -175,6 +175,11 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
       << "Expression of type " << kindToString(expr.kind())
       << " cannot be used in a type expression";
 }
+
+TypePtr ScriptTypeParser::parseType(const std::string& str) {
+  Parser p(str);
+  return parseTypeFromExpr(p.parseExp());
+}
 } // namespace script
 } // namespace jit
 } // namespace torch

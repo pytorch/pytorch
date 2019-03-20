@@ -23,13 +23,13 @@ matrix:
         script: cd .circleci && ./ensure-consistency.py
       - name: "Python 2.7 Lint"
         python: "2.7"
-        install: pip install flake8
+        install: pip install flake8 flake8-bugbear
         script: flake8
       - name: "Python 3.7 Lint"
         python: "3.7"
         dist: xenial    # required for Python 3.7 (travis-ci/travis-ci#9069)
         sudo: required  # required for Python 3.7 (travis-ci/travis-ci#9069)
-        install: pip install flake8-mypy
+        install: pip install flake8-mypy flake8-bugbear
         script: flake8
       - name: "MyPy typecheck"
         python: "3.6"

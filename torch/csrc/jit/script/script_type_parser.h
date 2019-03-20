@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/tree_views.h>
 namespace torch {
 namespace jit {
@@ -20,6 +21,8 @@ class TORCH_API ScriptTypeParser {
 
   c10::optional<std::pair<c10::TypePtr, int32_t>> parseBroadcastList(
       const Expr& expr) const;
+
+  c10::TypePtr parseType(const std::string& str);
 
  private:
   at::TypePtr subscriptToType(
