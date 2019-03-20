@@ -213,8 +213,6 @@ endif()
 # formerly-libtorch
 # ==========================================================
 
-if (NOT BUILD_ATEN_MOBILE)
-
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../torch")
 set(TORCH_ROOT "${TORCH_SRC_DIR}/..")
 
@@ -230,67 +228,72 @@ if(NOT TORCH_INSTALL_LIB_DIR)
   set(TORCH_INSTALL_LIB_DIR lib)
 endif()
 
-set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
-# Generate files
-set(TOOLS_PATH "${TORCH_ROOT}/tools")
-
-configure_file("${TORCH_ROOT}/aten/src/ATen/common_with_cwrap.py"
-               "${TOOLS_PATH}/shared/cwrap_common.py"
-               COPYONLY)
-
-configure_file("${TORCH_SRC_DIR}/_utils_internal.py"
-               "${TOOLS_PATH}/shared/_utils_internal.py"
-               COPYONLY)
-
-
-set(GENERATED_CXX_TORCH
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
-  "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp"
-  "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp"
-  "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
-)
-
-set(GENERATED_H_TORCH
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
-)
-
-set(GENERATED_THNN_CXX_CUDA ${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp)
-set(GENERATED_THNN_CXX ${TORCH_SRC_DIR}/csrc/nn/THNN.cpp)
-
-set(GENERATED_CXX_PYTHON
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions.cpp"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
-  )
-
-set(GENERATED_H_PYTHON
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods_dispatch.h"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_dispatch.h"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.h"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
-)
-
-
-set(TORCH_GENERATED_CODE
-  ${GENERATED_CXX_TORCH}
-  ${GENERATED_H_TORCH}
-  ${GENERATED_THNN_CXX}
-  ${GENERATED_THNN_CXX_CUDA}
-  ${GENERATED_CXX_PYTHON}
-  ${GENERATED_H_PYTHON}
-  )
 
 if (NOT BUILD_ATEN_MOBILE)
+
+
+  set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
+
+  # Generate files
+  set(TOOLS_PATH "${TORCH_ROOT}/tools")
+
+  configure_file("${TORCH_ROOT}/aten/src/ATen/common_with_cwrap.py"
+    "${TOOLS_PATH}/shared/cwrap_common.py"
+    COPYONLY)
+
+  configure_file("${TORCH_SRC_DIR}/_utils_internal.py"
+    "${TOOLS_PATH}/shared/_utils_internal.py"
+    COPYONLY)
+
+
+  set(GENERATED_CXX_TORCH
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
+    "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp"
+    "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp"
+    "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
+    )
+
+  set(GENERATED_H_TORCH
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
+    )
+
+  set(GENERATED_THNN_CXX_CUDA ${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp)
+  set(GENERATED_THNN_CXX ${TORCH_SRC_DIR}/csrc/nn/THNN.cpp)
+
+  set(GENERATED_CXX_PYTHON
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
+    )
+
+  set(GENERATED_H_PYTHON
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods_dispatch.h"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_dispatch.h"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.h"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
+    )
+
+
+  set(TORCH_GENERATED_CODE
+    ${GENERATED_CXX_TORCH}
+    ${GENERATED_H_TORCH}
+    ${GENERATED_THNN_CXX}
+    ${GENERATED_THNN_CXX_CUDA}
+    ${GENERATED_CXX_PYTHON}
+    ${GENERATED_H_PYTHON}
+    )
+
+
 
   add_custom_command(
     OUTPUT
@@ -329,8 +332,6 @@ if (NOT BUILD_ATEN_MOBILE)
     "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
     "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
     WORKING_DIRECTORY "${TORCH_ROOT}")
-
-  endif()
 
 
 
