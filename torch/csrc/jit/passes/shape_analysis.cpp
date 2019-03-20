@@ -1026,7 +1026,7 @@ class ShapePropagator {
           // with ops that have a single output, we will fix up its return right
           // below.
           auto output_types = multidim_reduce_with_postprocess(
-              node, /*num_reduce_dim=*/1, /*integer_upcast=*/false);
+              node, /*num_reduced_dim=*/1, /*upcast_integer=*/false);
           if (!output_types.empty() && node->outputs().size() == 2) {
             output_types.push_back(
                 output_types.back()->toScalarType(at::kLong));
@@ -1072,7 +1072,7 @@ class ShapePropagator {
         [](Node* node) -> type_vec_t {
           if (auto dim = node->get<std::vector<int64_t>>(attr::dim)) {
             return multidim_reduce_with_postprocess(
-                node, /*num_reduce_dim=*/dim->size(), /*integer_upcast=*/false);
+                node, /*num_reduced_dim=*/dim->size(), /*upcast_integer=*/false);
           }
           return {};
         }};
@@ -1093,7 +1093,7 @@ class ShapePropagator {
           if (auto dim = node->get<std::vector<int64_t>>(attr::dim)) {
             // TODO: can dim contain duplicates?
             return multidim_reduce_with_postprocess(
-                node, /*num_reduce_dim=*/dim->size(), /*integer_upcast=*/true);
+                node, /*num_reduced_dim=*/dim->size(), /*upcast_integer=*/true);
           }
           return {};
         }};
