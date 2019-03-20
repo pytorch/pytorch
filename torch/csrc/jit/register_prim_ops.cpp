@@ -1485,6 +1485,33 @@ int dictIndex(Stack& stack) {
   return 0;
 }
 
+int dictGet(Stack& stack) {
+  auto index = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  const auto& elems = dict->elements();
+  auto value = elems.find(index);
+  if (value == elems.end()) {
+    push(stack, IValue());
+  } else {
+    push(stack, value->second);
+  }
+  return 0;
+}
+
+int dictGetDefault(Stack& stack) {
+  auto default_value = pop(stack);
+  auto index = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  const auto& elems = dict->elements();
+  auto value = elems.find(index);
+  if (value == elems.end()) {
+    push(stack, default_value);
+  } else {
+    push(stack, value->second);
+  }
+  return 0;
+}
+
 RegisterOperators reg2({
 
 #define DEFINE_STRING_OP(op_name, string_op, result)                \
@@ -1830,6 +1857,14 @@ RegisterOperators reg2({
           "prim::DictIndex(Dict(" key_type ", t) self, " key_type            \
           " key) -> t(*)",                                                   \
           dictIndex),                                                        \
+      Operator(                                                              \
+          "aten::get(Dict(" key_type ", t) self, " key_type                  \
+          " key) -> t(*)?",                                                   \
+          dictGet),                                                          \
+      Operator(                                                              \
+          "aten::get(Dict(" key_type ", t) self, " key_type                  \
+          " key, t default_value) -> t(*)",                                  \
+          dictGetDefault),                                                   \
       Operator(                                                              \
           "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type           \
           " idx, t v) -> ()",                                                \
