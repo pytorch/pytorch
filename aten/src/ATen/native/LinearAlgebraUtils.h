@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <limits>
+#include <sstream>
 
 namespace at { namespace native {
 
@@ -75,8 +76,29 @@ static inline double _get_epsilon(const ScalarType& sc_type) {
   }
 }
 
-// Validates input shapes for linear solve methods (solve, cholesky_solve)
+// Validates input shapes and devices for linear solve methods (gesv, cholesky_solve)
 static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A) {
+  int64_t self_is_cuda = self.is_cuda();
+  int64_t A_is_cuda = A.is_cuda();
+
+  std::stringstream ss;
+  if (self_is_cuda != A_is_cuda) {
+    ss << "Expected b and A to be on the same device, but found b on ";
+    if (self_is_cuda) {
+      ss << "GPU";
+    } else {
+      ss << "CPU";
+    }
+    ss << " and A on ";
+    if (A_is_cuda) {
+      ss << "GPU";
+    } else {
+      ss << "CPU";
+    }
+    ss << " instead.";
+    AT_ERROR(ss.str());
+  }
+
   AT_CHECK(A.size(-1) == A.size(-2),
            "A must be batches of square matrices, "
            "but they are ", A.size(-1), " by ", A.size(-2), " matrices");
