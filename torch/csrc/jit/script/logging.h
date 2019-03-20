@@ -39,8 +39,8 @@ class NoopLogger : public LoggerBase {
 // in the single-threaded case or for testing.
 class LockingLogger : public LoggerBase {
  public:
-  void addStatValue(const std::string& stat_name, float val) override;
-  std::unordered_map<std::string, float> getCounters() const override;
+  TORCH_API void addStatValue(const std::string& stat_name, float val) override;
+  TORCH_API std::unordered_map<std::string, float> getCounters() const override;
   enum class AggregationType {
     SUM,
     AVG
@@ -59,7 +59,7 @@ struct JITTimePoint {
 };
 
 TORCH_API JITTimePoint timePoint();
-TORCH_API void recordDurationSince(std::string name, JITTimePoint tp);
+TORCH_API void recordDurationSince(const std::string& name, JITTimePoint tp);
 
 namespace runtime_counters {
 constexpr const char* GRAPH_EXECUTORS_CONSTRUCTED = "pytorch_runtime.graph_executors_constructed";

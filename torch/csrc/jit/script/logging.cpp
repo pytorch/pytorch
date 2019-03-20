@@ -56,7 +56,7 @@ JITTimePoint timePoint() {
   return JITTimePoint{std::chrono::high_resolution_clock::now()};
 }
 
-void recordDurationSince(std::string name, JITTimePoint tp) {
+void recordDurationSince(const std::string& name, JITTimePoint tp) {
   auto end = std::chrono::high_resolution_clock::now();
   auto seconds = std::chrono::duration<double>(end-tp.point).count();
   logging::getLogger()->addStatValue(name, seconds);
