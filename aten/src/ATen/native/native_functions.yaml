@@ -244,34 +244,13 @@
 - func: _dim_arange(Tensor like, int dim) -> Tensor
   matches_jit_signature: True
 
-# `argmin` and `argmax` are exposed in C++ but not in Python, where we only
-# expose `_argmin` and `_argmax` (which call the first versions). In Python, we
-# then define our own `argmax` and `argmin` that handle passing `dim=None`,
-# which gets the argmax/argmin of the flattened array.
-
-- func: argmax(Tensor self, int dim, bool keepdim=False) -> Tensor
+- func: argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
-- func: argmax(Tensor self) -> Tensor
+- func: argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
   matches_jit_signature: True
   variants: function, method
-
-- func: _argmax(Tensor self, int dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
-  variants: function
-
-- func: argmin(Tensor self, int dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
-  variants: function, method
-
-- func: argmin(Tensor self) -> Tensor
-  matches_jit_signature: True
-  variants: function, method
-
-- func: _argmin(Tensor self, int dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
-  variants: function
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   matches_jit_signature: True
