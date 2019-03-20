@@ -7,12 +7,33 @@ namespace torch { namespace jit { namespace logging {
 
 void LockingLogger::addStatValue(std::string stat_name, float val) {
   std::unique_lock<std::mutex> lk(m);
-  counters[stat_name] += val;
+  raw_counters[stat_name].push_back(val);
 }
 
 std::unordered_map<std::string, float> LockingLogger::getCounters() const {
+  std::unordered_map<std::string, float> counters;
   std::unique_lock<std::mutex> lk(m);
+  for (auto &kv : raw_counters) {
+    AggregationType type = agg_types.count(kv.first) ? agg_types.at(kv.first) : AggregationType::SUM;
+    switch (type) {
+      case AggregationType::SUM: {
+        float sum = 0;
+        for (auto x : kv.second) sum += x;
+        counters[kv.first] = sum;
+      } break;
+      case AggregationType::AVG: {
+        float avg = 0;
+        for (auto x : kv.second) avg += x;
+        avg /= kv.second.size();
+        counters[kv.first] = avg;
+      } break;
+    }
+  }
   return counters;
+}
+
+void LockingLogger::setAggregationType(std::string stat_name, AggregationType type) {
+  agg_types[stat_name] = type;
 }
 
 // TODO: SLOW

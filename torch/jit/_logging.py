@@ -5,6 +5,7 @@ get_counters = torch._C._logging_get_counters
 
 set_logger = torch._C._logging_set_logger
 LockingLogger = torch._C.LockingLogger
+AggregationType = torch._C.AggregationType
 NoopLogger = torch._C.NoopLogger
 
 time_point = torch._C._logging_time_point

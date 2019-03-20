@@ -1114,11 +1114,16 @@ void initJitScriptBindings(PyObject* module) {
   });
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
       m, "LoggerBase");
+  py::enum_<logging::LockingLogger::AggregationType>(m, "AggregationType")
+    .value("SUM", logging::LockingLogger::AggregationType::SUM)
+    .value("AVG", logging::LockingLogger::AggregationType::AVG)
+    .export_values();
   py::class_<
       logging::LockingLogger,
       logging::LoggerBase,
       std::shared_ptr<logging::LockingLogger>>(m, "LockingLogger")
-      .def(py::init<>());
+      .def(py::init<>())
+      .def("set_aggregation_type", &logging::LockingLogger::setAggregationType);
   py::class_<
       logging::NoopLogger,
       logging::LoggerBase,

@@ -4,6 +4,7 @@
 #include <mutex>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 namespace torch { namespace jit { namespace logging {
 
@@ -38,10 +39,16 @@ class LockingLogger : public LoggerBase {
  public:
   void addStatValue(std::string stat_name, float val) override;
   std::unordered_map<std::string, float> getCounters() const override;
+  enum class AggregationType {
+    SUM,
+    AVG
+  };
+  void setAggregationType(std::string stat_name, AggregationType type);
   ~LockingLogger() {}
  private:
   mutable std::mutex m;
-  std::unordered_map<std::string, float> counters;
+  std::unordered_map<std::string, std::vector<float>> raw_counters;
+  std::unordered_map<std::string, AggregationType> agg_types;
 };
 
 // Make this struct so the timer internals are opaque to the user.

@@ -14077,7 +14077,9 @@ class TestLogging(JitTestCase):
             return x + 1.0
 
         traced = torch.jit.trace(foo, torch.rand(3, 4))
-        torch.jit._logging.set_logger(torch.jit._logging.LockingLogger())
+        logger = torch.jit._logging.LockingLogger()
+        logger.set_aggregation_type('foo', torch.jit._logging.AggregationType.AVG)
+        torch.jit._logging.set_logger(logger)
         traced(torch.rand(3, 4))
 
         counters = torch.jit._logging.get_counters()
