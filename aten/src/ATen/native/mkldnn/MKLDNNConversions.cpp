@@ -37,7 +37,6 @@ ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor) {
 }
 
 Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
-  // TODO: share buffer without copy when MKLDNN tensor is in plain format
   ideep::tensor& stensor = itensor_from_mkldnn(mkldnn_tensor);
   auto dims = stensor.get_dims();
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
@@ -49,7 +48,6 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
 }
 
 Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
-  // TODO: share CPU storage without explicit buffer copy here
   AT_ASSERTM(cpu_tensor.type_id() == CPUTensorId(),
              "dense_to_mkldnn expects dense CPU tensor input");
   AT_ASSERTM(cpu_tensor.scalar_type() == ScalarType::Float,
