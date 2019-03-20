@@ -2313,6 +2313,38 @@ class _TestTorchMixin(object):
         torch.cumprod(x, 1, out=res2)
         self.assertEqual(res1, res2)
 
+    def _test_mean_return_dtype(self, dev):
+        default_dtype = torch.get_default_dtype()
+        all_dtypes = torch.testing.get_all_dtypes()
+
+        def check_mean_return_dtype():
+            for dtype in all_dtypes:
+                if dev == 'cpu' and dtype == torch.float16:
+                    # sum_cpu is not implemented for half
+                    continue
+
+                t = torch.zeros((2, 2), dtype=dtype, device=dev)
+                mean_out = t.mean()
+                if dtype.is_floating_point:
+                    self.assertIs(mean_out.dtype, t.dtype)
+                else:
+                    self.assertIs(mean_out.dtype, torch.get_default_dtype())
+
+        torch.set_default_dtype(torch.float32)
+        check_mean_return_dtype()
+
+        torch.set_default_dtype(torch.float64)
+        check_mean_return_dtype()
+
+        torch.set_default_dtype(default_dtype)
+
+    def test_mean_return_dtype(self):
+        self._test_mean_return_dtype('cpu')
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_mean_return_dtype_cuda(self):
+        self._test_mean_return_dtype('cuda')
+
     def _test_reduce_integer_upcast(self, fn, has_out=True):
         shape = (3, 4, 5)
         reduced_shape = fn(torch.ones(shape)).shape
