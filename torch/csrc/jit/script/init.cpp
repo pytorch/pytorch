@@ -17,8 +17,8 @@
 #include <torch/csrc/jit/passes/to_batch.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_tracer.h>
-#include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/logging.h>
+#include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/tracer.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
@@ -30,8 +30,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
-#include <cstddef>
 #include <chrono>
+#include <cstddef>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -546,14 +546,25 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return std::make_shared<AnnotateValue>();
-  } else if (obj.ptr() == py::module::import("torch.jit._logging").attr("add_stat_value").ptr()) {
+  } else if (
+      obj.ptr() ==
+      py::module::import("torch.jit._logging").attr("add_stat_value").ptr()) {
     return std::make_shared<BuiltinFunction>(prim::BumpCounter, c10::nullopt);
-  } else if (obj.ptr() == py::module::import("torch.jit._logging").attr("get_counters").ptr()) {
+  } else if (
+      obj.ptr() ==
+      py::module::import("torch.jit._logging").attr("get_counters").ptr()) {
     return std::make_shared<BuiltinFunction>(prim::GetCounters, c10::nullopt);
-  } else if (obj.ptr() == py::module::import("torch.jit._logging").attr("time_point").ptr()) {
+  } else if (
+      obj.ptr() ==
+      py::module::import("torch.jit._logging").attr("time_point").ptr()) {
     return std::make_shared<BuiltinFunction>(prim::TimePoint, c10::nullopt);
-  } else if (obj.ptr() == py::module::import("torch.jit._logging").attr("record_duration_since").ptr()) {
-    return std::make_shared<BuiltinFunction>(prim::RecordDuration, c10::nullopt);
+  } else if (
+      obj.ptr() ==
+      py::module::import("torch.jit._logging")
+          .attr("record_duration_since")
+          .ptr()) {
+    return std::make_shared<BuiltinFunction>(
+        prim::RecordDuration, c10::nullopt);
   }
 
   py::object builtin_name =
@@ -1097,8 +1108,9 @@ void initJitScriptBindings(PyObject* module) {
     // TODO: dynamic val (and maybe name?). Had too much trouble with pybind
     // and decided to just leave it like this.
     if (jit::tracer::isTracing()) {
-      const auto &tracer_state = jit::tracer::getTracingState();
-      auto node = tracer_state->graph->create(prim::BumpCounter, /*num_outputs=*/0);
+      const auto& tracer_state = jit::tracer::getTracingState();
+      auto node =
+          tracer_state->graph->create(prim::BumpCounter, /*num_outputs=*/0);
       jit::tracer::recordSourceLocation(node);
       jit::tracer::addInputs(node, "name", name);
       jit::tracer::addInputs(node, "val", val);
@@ -1115,9 +1127,9 @@ void initJitScriptBindings(PyObject* module) {
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
       m, "LoggerBase");
   py::enum_<logging::LockingLogger::AggregationType>(m, "AggregationType")
-    .value("SUM", logging::LockingLogger::AggregationType::SUM)
-    .value("AVG", logging::LockingLogger::AggregationType::AVG)
-    .export_values();
+      .value("SUM", logging::LockingLogger::AggregationType::SUM)
+      .value("AVG", logging::LockingLogger::AggregationType::AVG)
+      .export_values();
   py::class_<
       logging::LockingLogger,
       logging::LoggerBase,

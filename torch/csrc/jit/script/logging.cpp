@@ -3,7 +3,9 @@
 #include <mutex>
 #include <unordered_map>
 
-namespace torch { namespace jit { namespace logging {
+namespace torch {
+namespace jit {
+namespace logging {
 
 // TODO: multi-scale histogram for this thing
 
@@ -15,17 +17,20 @@ void LockingLogger::addStatValue(const std::string& stat_name, float val) {
 std::unordered_map<std::string, float> LockingLogger::getCounters() const {
   std::unordered_map<std::string, float> counters;
   std::unique_lock<std::mutex> lk(m);
-  for (auto &kv : raw_counters) {
-    AggregationType type = agg_types.count(kv.first) ? agg_types.at(kv.first) : AggregationType::SUM;
+  for (auto& kv : raw_counters) {
+    AggregationType type = agg_types.count(kv.first) ? agg_types.at(kv.first)
+                                                     : AggregationType::SUM;
     switch (type) {
       case AggregationType::SUM: {
         float sum = 0;
-        for (auto x : kv.second) sum += x;
+        for (auto x : kv.second)
+          sum += x;
         counters[kv.first] = sum;
       } break;
       case AggregationType::AVG: {
         float avg = 0;
-        for (auto x : kv.second) avg += x;
+        for (auto x : kv.second)
+          avg += x;
         avg /= kv.second.size();
         counters[kv.first] = avg;
       } break;
@@ -34,7 +39,9 @@ std::unordered_map<std::string, float> LockingLogger::getCounters() const {
   return counters;
 }
 
-void LockingLogger::setAggregationType(const std::string& stat_name, AggregationType type) {
+void LockingLogger::setAggregationType(
+    const std::string& stat_name,
+    AggregationType type) {
   agg_types[stat_name] = type;
 }
 
@@ -58,8 +65,10 @@ JITTimePoint timePoint() {
 
 void recordDurationSince(const std::string& name, JITTimePoint tp) {
   auto end = std::chrono::high_resolution_clock::now();
-  auto seconds = std::chrono::duration<double>(end-tp.point).count();
+  auto seconds = std::chrono::duration<double>(end - tp.point).count();
   logging::getLogger()->addStatValue(name, seconds);
 }
 
-}}}
+} // namespace logging
+} // namespace jit
+} // namespace torch

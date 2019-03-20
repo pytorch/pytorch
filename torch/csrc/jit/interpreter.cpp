@@ -1,20 +1,20 @@
 #include <torch/csrc/jit/interpreter.h>
 
+#include <ATen/core/ivalue.h>
+#include <c10/core/thread_pool.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
-#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/logging.h>
-#include <c10/core/thread_pool.h>
 
 #include <exception>
 #include <iostream>
@@ -716,7 +716,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           // std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
         }
         pc = new_pc;
-        logging::getLogger()->addStatValue(logging::runtime_counters::EXECUTED_OPERATORS, 1.0);
+        logging::getLogger()->addStatValue(
+            logging::runtime_counters::EXECUTED_OPERATORS, 1.0);
       } catch (Suspend& e) {
         // wait() expects a single input
         AT_ASSERT(inst.inputs.values.size == 1);
@@ -737,7 +738,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               autograd::GradMode::is_enabled()));
         });
 
-        logging::getLogger()->addStatValue(logging::runtime_counters::TASK_SUSPENDS, 1.0);
+        logging::getLogger()->addStatValue(
+            logging::runtime_counters::TASK_SUSPENDS, 1.0);
 
         return true;
       } catch (Future::FutureError& e) {
@@ -756,7 +758,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         } else {
           handleError(e.what(), is_jit_exception);
         }
-        logging::getLogger()->addStatValue(logging::runtime_counters::LOCAL_EXCEPTIONS, 1.0);
+        logging::getLogger()->addStatValue(
+            logging::runtime_counters::LOCAL_EXCEPTIONS, 1.0);
         return false;
       }
     }
@@ -768,7 +771,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         future->markCompleted(
             Tuple::create(jit::last(stack, num_outputs).vec()));
       }
-      logging::getLogger()->addStatValue(logging::runtime_counters::FUTURES_COMPLETED, 1.0);
+      logging::getLogger()->addStatValue(
+          logging::runtime_counters::FUTURES_COMPLETED, 1.0);
     }
 
     return false;
