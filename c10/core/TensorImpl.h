@@ -860,6 +860,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return impl;
   }
 
+  inline void set_pyobj(void* pyobj) noexcept {
+    pyobj_ = pyobj;
+  }
+
+  inline void* pyobj() const noexcept {
+    return pyobj_;
+  }
+
  private:
   // As an optimization, get_device handles the typical CUDA Tensor case and
   // calls get_device_slow if the tensor stores its device somewhere else
@@ -1368,6 +1376,9 @@ protected:
   // at a time).
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
+  // yf225 TODO: add comment on why this is void*
+  void* pyobj_ = nullptr; // weak reference
+
   // We could save a word or two by combining the SmallVector structs,
   // since their size is redundant, and if we need to overflow the buffer space
   // we could keep the two pointers together. However, that would require
@@ -1461,10 +1472,11 @@ protected:
 //    numel
 //    data type pointer
 //    autograd metadata pointer
+//    PyObject pointer
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 25,
+              sizeof(TensorImpl) == sizeof(int64_t) * 26,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 
