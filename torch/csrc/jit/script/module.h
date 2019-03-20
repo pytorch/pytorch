@@ -52,13 +52,27 @@ struct Module;
 using ModuleLookup = std::function<std::shared_ptr<Module>(
     const std::vector<std::string>&)>;
 
+struct NamedIValue {
+  NamedIValue(std::string name, TypePtr type, IValue ivalue)
+      : name_(name),
+        type(type),
+        ivalue(torch::make_unique<IValue>(std::move(ivalue))) {}
+
+  IValue* slot() const {
+    return ivalue.get();
+  }
+  const std::string name_;
+  const TypePtr type;
+  std::unique_ptr<IValue> ivalue;
+};
+
 struct Method {
   Method(
       Module* owner,
       std::string name,
       bool optimize,
       std::shared_ptr<Graph> graph,
-      std::vector<IValue*> initial_members,
+      std::vector<const NamedIValue*> initial_members,
       std::function<void(Method&)> method_creator)
       : owner_(owner),
         name_(std::move(name)),
@@ -75,7 +89,7 @@ struct Method {
 
   void run(Stack& stack) {
     for (auto input : initial_ivalues_) {
-      push(stack, *input);
+      push(stack, *input->slot());
     }
     get_executor().run(stack);
   }
@@ -92,7 +106,7 @@ struct Method {
 
   std::shared_ptr<Graph> graph_for(Stack inputs) {
     for (auto tp : initial_ivalues_) {
-      inputs.emplace_back(*tp);
+      inputs.emplace_back(*tp->slot());
     }
     return get_executor().graphFor(inputs);
   }
@@ -120,19 +134,15 @@ struct Method {
   size_t num_inputs() const {
     return graph()->inputs().size() - initial_ivalues_.size();
   }
-  TORCH_API Value* get_or_add_parameter(IValue* slot) {
-    AT_ASSERT(slot->isTensor());
-    return get_or_add_attribute(TensorType::get(), slot);
-  }
 
-  TORCH_API Value* get_or_add_attribute(TypePtr type, IValue* slot) {
-    auto it = initial_ivalue_index.find(slot);
+  TORCH_API Value* get_or_add_initial_ivalue(const NamedIValue* value) {
+    auto it = initial_ivalue_index.find(value);
     if (it != initial_ivalue_index.end()) {
       return graph()->inputs().at(it->second);
     }
-    initial_ivalues_.push_back(slot);
-    initial_ivalue_index[slot] = graph()->inputs().size();
-    return graph()->addInput()->setType(type);
+    initial_ivalues_.push_back(value);
+    initial_ivalue_index[value] = graph()->inputs().size();
+    return graph()->addInput()->setType(value->type);
   }
 
   std::shared_ptr<Graph> propagate_shapes(
@@ -144,8 +154,8 @@ struct Method {
     for (at::Tensor& i : inputs) {
       stack.emplace_back(std::move(i));
     }
-    for (IValue* inp : initial_ivalues_) {
-      stack.push_back(*inp);
+    for (auto inp : initial_ivalues_) {
+      stack.push_back(*inp->slot());
     }
     const auto size = stack.size();
     setInputTypes(*retval, ArgumentSpec(with_grad, stack, size));
@@ -160,8 +170,8 @@ struct Method {
       bool propagate = true) {
     auto retval = graph_->copy();
     for (auto inp : initial_ivalues_) {
-      if (inp->isTensor()) {
-        inputs.push_back(inp->toTensor());
+      if (inp->slot()->isTensor()) {
+        inputs.push_back(inp->slot()->toTensor());
       }
     }
     if (propagate) {
@@ -195,7 +205,7 @@ struct Method {
     return retval;
   }
 
-  const std::vector<IValue*>& initial_ivalues() const {
+  const std::vector<const NamedIValue*>& initial_ivalues() const {
     return initial_ivalues_;
   }
 
@@ -324,11 +334,11 @@ struct Method {
   // each is a pointer to a slot in the module that owns this parameter
   // parameters and submodules can only be _added_ to script Modules to ensure
   // these pointers always stay valid
-  std::vector<IValue*> initial_ivalues_;
+  std::vector<const NamedIValue*> initial_ivalues_;
 
-  // map from a IValue* in initial_ivalues to the offset it appears at
+  // map from a const NamedIValue* in initial_ivalues to the offset it appears at
   // in graph. used to accelerate get_or_add_parameter
-  std::unordered_map<IValue*, size_t> initial_ivalue_index;
+  std::unordered_map<const NamedIValue*, size_t> initial_ivalue_index;
 
   // TODO: support that case where we allow _writes_ to parameters from
   // compiled functions.
@@ -356,20 +366,6 @@ struct Module;
 struct NamedModule {
   std::string name;
   std::shared_ptr<Module> module;
-};
-
-struct NamedIValue {
-  NamedIValue(std::string name, TypePtr type, IValue ivalue)
-      : name_(name),
-        type(type),
-        ivalue(torch::make_unique<IValue>(std::move(ivalue))) {}
-
-  IValue* slot() const {
-    return ivalue.get();
-  }
-  const std::string name_;
-  const TypePtr type;
-  std::unique_ptr<IValue> ivalue;
 };
 
 struct Module {
@@ -432,7 +428,7 @@ struct Module {
   Method& create_method(
       const std::string& name,
       std::shared_ptr<Graph> graph,
-      std::vector<IValue*> member_inputs) {
+      std::vector<const NamedIValue*> member_inputs) {
     AT_ASSERT(graph);
     std::unique_ptr<Method> method(new Method(
         this,
@@ -459,6 +455,10 @@ struct Module {
 
   IValue* parameter_slot(const std::string& name) const {
     return parameters[name].slot();
+  }
+
+  const NamedIValue* get_named_parameter(const std::string& name) const {
+    return parameters.find(name);
   }
 
   void set_parameter(const std::string& name, at::Tensor v) {
@@ -604,7 +604,8 @@ struct Module {
       ModuleLookup module_lookup,
       // parameter_remap is needed when a parent module uses a parameter of a
       // submodule
-      std::unordered_map<IValue*, IValue*>& parameter_remap,
+      std::unordered_map<const NamedIValue*, const NamedIValue*>&
+          parameter_remap,
       std::vector<std::string> names = {}) const {
     auto curr = module_lookup(names);
     for (auto& kv : parameters) {
@@ -612,7 +613,7 @@ struct Module {
           kv.key(),
           kv.value().slot()->toTensor(),
           /*is_buffer=*/false);
-      parameter_remap[kv.value().slot()] = curr->parameter_slot(kv.key());
+      parameter_remap[&kv.value()] = curr->get_named_parameter(kv.key());
     }
     for (auto& kv : attributes) {
       if (!kv.value().type->isSubtypeOf(TensorType::get())) {
@@ -621,7 +622,7 @@ struct Module {
       curr->register_buffer(
           kv.key(),
           kv.value().slot()->toTensor());
-      parameter_remap[kv.value().slot()] = curr->find_buffer(kv.key())->slot();
+      parameter_remap[&kv.value()] = curr->find_buffer(kv.key());
     }
     for (auto& kv : modules) {
       names.push_back(kv.key());
@@ -631,7 +632,7 @@ struct Module {
       names.pop_back();
     }
     for (auto& kv : methods) {
-      std::vector<IValue*> initial_ivalues;
+      std::vector<const NamedIValue*> initial_ivalues;
       for (auto& p : kv.value()->initial_ivalues()) {
         initial_ivalues.push_back(parameter_remap.at(p));
       }

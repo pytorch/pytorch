@@ -1123,9 +1123,10 @@ struct PythonPrintPass {
       script::Method& method,
       bool is_class,
       const std::unordered_map<IValue*, QualifiedNamePtr>& extra_ivalue_names) {
-    std::vector<std::string> ivalue_names = fmap(
-        method.initial_ivalues(),
-        [&](IValue* slot) { return extra_ivalue_names.at(slot)->str(); });
+    std::vector<std::string> ivalue_names =
+        fmap(method.initial_ivalues(), [&](const script::NamedIValue* v) {
+          return extra_ivalue_names.at(v->slot())->str();
+        });
     const std::string& name = method.name();
     Graph& graph = *method.graph();
     auto defaults = fmap(

@@ -257,8 +257,8 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
     std::vector<Value*> params;
     const auto& param_list = module_->get_parameters().items();
     for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
-      auto& param = *it;
-      params.push_back(caller.get_or_add_parameter(param->slot()));
+      const auto& param = (*it).value();
+      params.push_back(caller.get_or_add_initial_ivalue(&param));
     }
     auto list = caller.graph()->createList(TensorType::get(), params);
     caller.graph()->insertNode(list);
@@ -301,7 +301,7 @@ struct ModuleValue : public SugaredValue {
         module->register_buffer("training", std::move(t));
         v = module->find_buffer(field);
       }
-      Value* the_tensor = m.get_or_add_parameter(v->slot());
+      Value* the_tensor = m.get_or_add_initial_ivalue(v);
       Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
       return std::make_shared<SimpleValue>(the_bool);
     }
@@ -311,10 +311,10 @@ struct ModuleValue : public SugaredValue {
     } else if (Method* v = module->find_method(field)) {
       return std::make_shared<MethodValue>(shared_from_this(), *v);
     } else if (NamedIValue* v = module->find_parameter(field)) {
-      return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
+      return std::make_shared<SimpleValue>(m.get_or_add_initial_ivalue(v));
     } else if (NamedIValue* v = module->find_attribute(field)) {
       return std::make_shared<SimpleValue>(
-          m.get_or_add_attribute(v->type, v->slot()));
+          m.get_or_add_initial_ivalue(v));
     }
 
     // This can also be a call to a non-script module, or a plain
@@ -594,14 +594,14 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
 }
 
 static void gatherParametersAndBuffers(
-    std::vector<IValue*>& values,
+    std::vector<const NamedIValue*>& values,
     const Module& m) {
   for (auto& param : m.get_parameters()) {
-    values.push_back(param->slot());
+    values.push_back(&param.value());
   }
   for (auto& param : m.get_attributes()) {
     if (param->type->isSubtypeOf(TensorType::get())) {
-      values.push_back(param->slot());
+      values.push_back(&param.value());
     }
   }
   for (const auto& sub : m.get_modules()) {
@@ -838,11 +838,11 @@ void initJitScriptBindings(PyObject* module) {
              bool force_outplace) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
-            std::vector<IValue*> parameters;
+            std::vector<const NamedIValue*> parameters;
             gatherParametersAndBuffers(parameters, *self);
             Stack inputs = toStack(input_tuple);
-            for (IValue* param : parameters) {
-              inputs.emplace_back(*param);
+            for (auto param : parameters) {
+              inputs.emplace_back(*param->slot());
             }
             auto graph = tracer::createGraphByTracing(
                 func,
@@ -932,14 +932,14 @@ void initJitScriptBindings(PyObject* module) {
              std::vector<std::tuple<std::shared_ptr<Module>, std::string>>
                  params,
              std::shared_ptr<Module> orig) {
-            std::vector<IValue*> member_inputs;
+            std::vector<const NamedIValue*> member_inputs;
             for (auto& p : params) {
-              NamedIValue* np = std::get<0>(p)->find_parameter(std::get<1>(p));
+              auto np = std::get<0>(p)->find_parameter(std::get<1>(p));
               if (np == nullptr) {
                 np = std::get<0>(p)->find_buffer(std::get<1>(p));
               }
               AT_ASSERT(np != nullptr);
-              member_inputs.push_back(np->slot());
+              member_inputs.push_back(np);
             }
 
             Method* orig_method = orig->find_method(name);
