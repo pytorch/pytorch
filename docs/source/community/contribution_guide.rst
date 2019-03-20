@@ -78,7 +78,7 @@ here is the basic process.
 
    -  We'll try our best to minimize the number of review roundtrips and
       block PRs only when there are major issues. For the most common
-      issues in pull requests, take a look at `Common Mistakes </docs/community/contribution_guide.html#common-mistakes-to-avoid>`__.
+      issues in pull requests, take a look at `Common Mistakes <#common-mistakes-to-avoid>`__.
    -  Once a pull request is accepted and CI is passing, there is
       nothing else you need to do; we will merge the PR for you.
 
