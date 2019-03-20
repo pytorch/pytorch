@@ -540,7 +540,7 @@ if(MSVC)
     )
 else()
   target_compile_options(caffe2 PUBLIC
-    -std=c++11
+#    -std=c++11
     -Wall
     -Wextra
     -Wno-unused-parameter
@@ -792,9 +792,9 @@ target_include_directories(caffe2 SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 # Set standard properties on the target
 torch_set_target_props(caffe2)
 
-if (NOT MSVC)
-  target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
-endif()
+#if (NOT MSVC)
+#  target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
+#endif()
 
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 if (MSVC AND NOT BUILD_SHARED_LIBS)
