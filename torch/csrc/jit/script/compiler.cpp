@@ -2583,6 +2583,11 @@ struct to_ir {
         ->output();
   }
 
+  Value* emitStringIndex(const SourceRange& loc, Value* string, Value* index) {
+    auto string_type = string->type()->cast<StringType>();
+    return graph->insertNode(graph->createStringIndex(string, index))->output();
+  }
+
   Value* emitTupleSlice(
       const SourceRange& loc,
       const NamedValue& tuple_val,
@@ -2648,12 +2653,20 @@ struct to_ir {
     } else if (auto dict_type = gatherable->type()->cast<DictType>()) {
       auto* idx = emitExpr(subscript_exprs[0]);
       return emitDictIndex(loc, gatherable, idx);
+    } else if (auto string_type = gatherable->type()->cast<StringType>()) {
+      auto* idx = emitExpr(subscript_exprs[0]);
+      return emitStringIndex(loc, gatherable, idx);
     } else {
       throw ErrorReport(loc)
           << "Indexing only supported on lists, dictionaries, "
              "tensors, and tuples, but got type '"
           << gatherable->type()->str() << "'";
     }
+
+    AT_CHECK(
+        false,
+        "Could not desugar [] operator for type ",
+        gatherable->type()->python_str());
   }
 };
 

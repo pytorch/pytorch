@@ -10442,6 +10442,35 @@ a")
         with self.capture_stdout() as captured:
             print(fn(x, scale, shift))
 
+    def test_string_index(self):
+        def fn(x):
+            # type: (str) -> str
+            return x[2]
+
+        self.checkScript(fn, ("abcde",))
+
+    def test_string_slicing(self):
+        def fn1(x):
+            # type: (str) -> str
+            return x[1:3]
+
+        def fn2(x):
+            # type: (str) -> str
+            return x[-1:3]
+
+        def fn3(x):
+            # type: (str) -> str
+            return x[3:1]
+
+        def fn4(x):
+            # type: (str) -> str
+            return x[3:100]
+
+        self.checkScript(fn1, ("abcdefghi",))
+        self.checkScript(fn2, ("abcdefghi",))
+        self.checkScript(fn3, ("abcdefghi",))
+        self.checkScript(fn4, ("abcdefghi",))
+
     def test_non_final_return(self):
 
         def simple(x):

@@ -56,7 +56,7 @@ Value* try_emit_call_to(
              " from a raw graph. File a bug report";
     }
     // TODO: preserve the type information so we don't have to infer it here
-    auto type = incompleteInferTypeFrom(*member);
+    auto type = attemptToRecoverType(*member);
     matched_schema->inputs.push_back(
         caller->get_or_add_attribute(type, member));
   }
