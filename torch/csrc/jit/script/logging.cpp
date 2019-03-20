@@ -5,6 +5,8 @@
 
 namespace torch { namespace jit { namespace logging {
 
+// TODO: multi-scale histogram for this thing
+
 void LockingLogger::addStatValue(std::string stat_name, float val) {
   std::unique_lock<std::mutex> lk(m);
   raw_counters[stat_name].push_back(val);

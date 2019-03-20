@@ -59,4 +59,29 @@ struct JITTimePoint {
 JITTimePoint timePoint();
 void recordDurationSince(std::string name, JITTimePoint tp);
 
+namespace runtime_counters {
+constexpr const char* GRAPH_EXECUTORS_CONSTRUCTED = "pytorch_runtime.graph_executors_constructed";
+constexpr const char* GRAPH_EXECUTOR_INVOCATIONS = "pytorch_runtime.graph_executor_invocations";
+constexpr const char* EXECUTION_PLAN_CACHE_HIT = "pytorch_runtime.execution_plan_cache_hit";
+constexpr const char* EXECUTION_PLAN_CACHE_MISS = "pytorch_runtime.execution_plan_cache_miss";
+constexpr const char* EXECUTED_OPERATORS = "pytorch_runtime.executed_operators";
+constexpr const char* TASK_SUSPENDS = "pytorch_runtime.task_suspends";
+constexpr const char* LOCAL_EXCEPTIONS = "pytorch_runtime.local_exceptions";
+constexpr const char* FUTURES_COMPLETED = "pytorch_runtime.futures_completed";
+
+inline std::vector<const char*> allRuntimeCounters() {
+  return {
+    GRAPH_EXECUTORS_CONSTRUCTED,
+    GRAPH_EXECUTOR_INVOCATIONS,
+    EXECUTION_PLAN_CACHE_HIT,
+    EXECUTION_PLAN_CACHE_MISS,
+    EXECUTED_OPERATORS,
+    TASK_SUSPENDS,
+    LOCAL_EXCEPTIONS,
+    FUTURES_COMPLETED
+  };
+}
+
+}  // namespace runtime_counters
+
 }}}
