@@ -142,7 +142,7 @@ struct normal_distribution {
   C10_HOST inline vect_type<T> operator()(at::CPUGenerator* generator){
     uniform_real_distribution<T> uniform(0.0, 1.0);
     vect_type<T> result;
-    const T theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * uniform(generator);;
+    const T theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * uniform(generator);
     T u1 = uniform(generator);
     // extra pre-caution to make sure log never gets zero
     if (u1 == static_cast<T>(0.0)) {
