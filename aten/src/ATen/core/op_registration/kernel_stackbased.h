@@ -16,21 +16,17 @@
 namespace c10 {
 
 namespace detail {
-  template<class Cache>
-  inline std::unique_ptr<c10::KernelCache> cacheCreator() {
-    static_assert(std::is_default_constructible<Cache>::value, "Cache class must be default constructible");
-    return guts::make_unique<Cache>();
-  }
+  struct NoCache final {
+    std::unique_ptr<c10::KernelCache> operator()() {
+      return nullptr;
+    }
+  };
 
-  template<>
-  inline std::unique_ptr<c10::KernelCache> cacheCreator<void>() {
-    return nullptr;
-  }
-
-  // TODO If this was templated on KernelCacheCreatorFunction, it (and c10::kernel()) could be constexpr
+  template<class KernelCacheCreatorFunction_>
   struct KernelRegistrationConfigParameter final {
-    explicit KernelRegistrationConfigParameter(KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func)
-    : kernel_func_(kernel_func), cache_creator_func_(std::move(cache_creator_func)) {
+    template<class KernelCacheCreatorFunction__>
+    constexpr KernelRegistrationConfigParameter(KernelFunction* kernel_func, KernelCacheCreatorFunction__&& cache_creator_func)
+    : kernel_func_(kernel_func), cache_creator_func_(std::forward<KernelCacheCreatorFunction__>(cache_creator_func)) {
     }
 
     void apply(KernelRegistrationConfig* registration) && {
@@ -40,7 +36,7 @@ namespace detail {
 
   private:
     KernelFunction* kernel_func_;
-    KernelCacheCreatorFunction cache_creator_func_;
+    KernelCacheCreatorFunction_ cache_creator_func_;
   };
 }
 
@@ -52,16 +48,19 @@ namespace detail {
  *
  * Example:
  *
- * > namespace { void my_kernel_cpu(Stack* stack, KernelCache* cache) {...} }
+ * > namespace {
+ * >   void my_kernel_cpu(Stack* stack, KernelCache* cache) {...}
+ * >   unique_ptr<KernelCache> my_cache_creator() {...}
+ * > }
  * >
  * > static auto registry = c10::RegisterOperators()
  * >     .op("my_op",
- * >         c10::kernel(my_kernel_cpu),
+ * >         c10::kernel(&my_kernel_cpu, &my_cache_creator),
  * >         c10::dispatchKey(CPUTensorId()));
  */
-inline detail::KernelRegistrationConfigParameter kernel(KernelFunction* kernel_func) {
-  return detail::KernelRegistrationConfigParameter(kernel_func, &detail::cacheCreator<void>);
+template<class KernelCacheCreatorFunction_ = detail::NoCache>
+inline constexpr detail::KernelRegistrationConfigParameter<guts::decay_t<KernelCacheCreatorFunction_>> kernel(KernelFunction* kernel_func, KernelCacheCreatorFunction_&& cache_creator = detail::NoCache()) {
+  return {kernel_func, std::forward<KernelCacheCreatorFunction_>(cache_creator)};
 }
-
 
 }

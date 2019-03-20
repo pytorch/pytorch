@@ -11,6 +11,8 @@
 #include <ATen/core/op_registration/kernel_functor.h>
 #include <ATen/core/op_registration/kernel_function.h>
 
+namespace c10 {
+
 /**
  * An instance of this class handles the registration for one or more operators.
  * Make sure you keep the RegisterOperators instance around since it will
@@ -59,13 +61,15 @@ public:
   template<class... ConfigParameters>
   RegisterOperators op(FunctionSchema schema, ConfigParameters&&... configParameters) && {
     detail::KernelRegistrationConfig config = make_registration_config(configParameters...);
-    registrars_.emplace_back(std::move(schema), config.dispatch_key, config.kernel_func, config.cache_creator_func);
+    registrars_.emplace_back(std::move(schema), config.dispatch_key, config.kernel_func, std::move(config.cache_creator_func));
     return std::move(*this);
   }
 
   // TODO error if dispatch key is not specified
-  // TODO Add functor, function and lambda based kernel APIs
+  // TODO Add deprecated function and lambda based kernel APIs
 
 private:
-  std::vector<c10::detail::OperatorRegistrar> registrars_;
+  std::vector<detail::OperatorRegistrar> registrars_;
 };
+
+}
