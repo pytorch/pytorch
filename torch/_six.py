@@ -141,7 +141,7 @@ if PY2:
     StringIO = StringIO.StringIO
 elif PY3:
     import io
-    StringIO = StringIO
+    StringIO = io.StringIO
 
 
 # The codes below is not copied from the six package, so the copyright
