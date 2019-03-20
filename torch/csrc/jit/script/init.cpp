@@ -31,6 +31,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
 #include <cstddef>
+#include <chrono>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -1106,6 +1107,19 @@ void initJitScriptBindings(PyObject* module) {
   });
   m.def("_logging_set_locking_logger", []() {
     logging::setLogger(std::make_shared<logging::LockingLogger>());
+  });
+  // Make this struct so the timer internals are opaque to the user.
+  struct JITTimePoint {
+    std::chrono::time_point<std::chrono::high_resolution_clock> point;
+  };
+  py::class_<JITTimePoint>(m, "JITTimePoint");
+  m.def("_logging_time_point", []() {
+    return JITTimePoint{std::chrono::high_resolution_clock::now()};
+  });
+  m.def("_logging_record_duration_since", [](std::string name, JITTimePoint tp) {
+    auto end = std::chrono::high_resolution_clock::now();
+    auto seconds = std::chrono::duration<double>(end-tp.point).count();
+    logging::getLogger()->addStatValue(name, seconds);
   });
 }
 } // namespace script

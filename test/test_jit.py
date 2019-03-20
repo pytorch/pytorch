@@ -14039,6 +14039,39 @@ class TestLogging(JitTestCase):
         counters = torch.jit._logging.get_counters()
         self.assertEqual(counters['foo'], 1.0)
 
+    def test_time_measurement_counter(self):
+        class ModuleThatTimes(torch.jit.ScriptModule):
+            def forward(self, x):
+                tp = torch.jit._logging.time_point()
+                for i in range(30):
+                    x += 1.0
+                torch.jit._logging.record_duration_since('mytimer', tp)
+                return x
+
+        mtm = ModuleThatTimes()
+        torch.jit._logging.set_locking_logger()
+        mtm(torch.rand(3, 4))
+        counters = torch.jit._logging.get_counters()
+        self.assertTrue('mytimer' in counters)
+
+    def test_time_measurement_counter_script(self):
+        class ModuleThatTimes(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                tp = torch.jit._logging.time_point()
+                for i in range(30):
+                    x += 1.0
+                torch.jit._logging.record_duration_since('mytimer', tp)
+                return x
+
+        mtm = ModuleThatTimes()
+        torch.jit._logging.set_locking_logger()
+        mtm(torch.rand(3, 4))
+        counters = torch.jit._logging.get_counters()
+        self.assertTrue('mytimer' in counters)
+
+
+
 for test in autograd_method_tests():
     add_autograd_test(*test)
 
