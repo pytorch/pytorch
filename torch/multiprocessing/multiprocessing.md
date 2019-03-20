@@ -35,45 +35,45 @@ Consumer's side wraps received data into the different structure CudaIPCReceived
 
 1. Release memory ASAP in the consumer.
 
-  ```python
-  ## Good
-  x = queue.get()
-  # do somethings with x
-  del x
+    ```python
+    ## Good
+    x = queue.get()
+    # do somethings with x
+    del x
 
-  ## Bad
-  x = queue.get()
-  # do somethings with x
-  # do everything else (producer have to keep x in memory)
-  ```
+    ## Bad
+    x = queue.get()
+    # do somethings with x
+    # do everything else (producer have to keep x in memory)
+    ```
 
 2. Keep producer process running until all consumers exits.
 
-  ```python
-  ## producer
-  # send tensors, do something
-  event.wait()
+    ```python
+    ## producer
+    # send tensors, do something
+    event.wait()
 
-  ## consumer
-  # receive tensors and use them
-  event.set()
-  ```
+    ## consumer
+    # receive tensors and use them
+    event.set()
+    ```
 
-  This will prevent the situation when the producer process releasing memory which is still in use by the consumer.
+    This will prevent the situation when the producer process releasing memory which is still in use by the consumer.
 
 3. Don't pass received tensors.
 
-  ```python
-  # not going to work
-  x = queue.get()
-  queue_2.put(x)
+    ```python
+    # not going to work
+    x = queue.get()
+    queue_2.put(x)
 
-  # you need to create a process-local copy
-  x = queue.get()
-  x_clone = x.clone()
-  queue_2.put(x_clone)
+    # you need to create a process-local copy
+    x = queue.get()
+    x_clone = x.clone()
+    queue_2.put(x_clone)
 
-  # putting and getting from the same queue in the same process will likely end up with segfault
-  queue.put(tensor)
-  x = queue.get()
-  ```
+    # putting and getting from the same queue in the same process will likely end up with segfault
+    queue.put(tensor)
+    x = queue.get()
+    ```
