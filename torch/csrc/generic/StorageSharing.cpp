@@ -397,6 +397,12 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
         // finished (otherwise another process may reuse memory and corrupt
         // data)
 
+        // Ideally all shared memory reference counting could be replaced by
+        // sending untriggered CUDA event from the producer to consumer and
+        // using this event as the criteria of memory release. However, CUDA (atm 10.1)
+        // does not support the creation of untriggered events and performance
+        // impact of having thousands of shared events is unknown.
+
         // TODO: Instead of cudaStreamSynchronize it is possible to add Stream
         // Callback and release counter inside of it (need to check performance impact)
         cudaStreamSynchronize(c10::cuda::getCurrentCUDAStream(device));

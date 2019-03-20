@@ -39,7 +39,9 @@ struct CudaIPCSentData final {
         device_(device) {
 #ifndef __HIP_PLATFORM_HCC__
     // TODO: More efficient would be to create event inside of main thread (at
-    // the moment of the queue.put)
+    // the moment of the queue.put). The reason this is more efficient is
+    // because the main thread may have queued extra work on the stream, which
+    // this event will consequently wait for (uselessly).
     C10_CUDA_CHECK(cudaEventCreateWithFlags(
         &event_,
         cudaEventDisableTiming | cudaEventInterprocess |
