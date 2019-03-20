@@ -17,9 +17,8 @@ namespace {
 class LambdaPostHook : public torch::autograd::FunctionPostHook {
   using variable_list = std::vector<torch::autograd::Variable>;
 
-public:
-  /* implicit */ LambdaPostHook(std::function<void(void)> fn)
-    : fn_(fn) {}
+ public:
+  /* implicit */ LambdaPostHook(std::function<void(void)> fn) : fn_(fn) {}
 
   variable_list operator()(
       const variable_list& outputs,
@@ -28,7 +27,7 @@ public:
     return outputs;
   }
 
-protected:
+ protected:
   std::function<void(void)> fn_;
 };
 
@@ -37,27 +36,36 @@ protected:
 Reducer::Reducer(
     std::vector<std::vector<torch::autograd::Variable>> inputs,
     std::shared_ptr<c10d::ProcessGroup> process_group)
-  : process_group_(std::move(process_group)),
-    expect_autograd_hooks_(false),
-    has_queued_final_callback_(false) {
+    : process_group_(std::move(process_group)),
+      expect_autograd_hooks_(false),
+      has_queued_final_callback_(false) {
   // Verify that all specified variables require gradients,
   // and that they have the same size across replicas.
   {
     const auto replica_count = inputs.size();
     variables_.resize(replica_count);
-    for (size_t replica_index = 0; replica_index < replica_count; replica_index++) {
+    for (size_t replica_index = 0; replica_index < replica_count;
+         replica_index++) {
       const auto variable_count = inputs[replica_index].size();
       variables_[replica_index].resize(variable_count);
-      AT_ASSERTM(variables_[replica_index].size() == variables_[0].size(),
-        "Model replicas must have an equal number of parameters.");
-      for (size_t variable_index = 0; variable_index < variable_count; variable_index++) {
-        variables_[replica_index][variable_index] = inputs[replica_index][variable_index];
-        AT_ASSERTM(variables_[replica_index][variable_index].requires_grad(),
-          "Variables must require gradients (have `requires_grad` set).");
-        AT_ASSERTM(variables_[replica_index][variable_index].sizes() == variables_[0][variable_index].sizes(),
-          "Variables across model replicas must have identical sizes.");
-        AT_ASSERTM(variables_[replica_index][variable_index].dtype() == variables_[0][variable_index].dtype(),
-          "Variables across model replicas must have identical dtype.");
+      AT_ASSERTM(
+          variables_[replica_index].size() == variables_[0].size(),
+          "Model replicas must have an equal number of parameters.");
+      for (size_t variable_index = 0; variable_index < variable_count;
+           variable_index++) {
+        variables_[replica_index][variable_index] =
+            inputs[replica_index][variable_index];
+        AT_ASSERTM(
+            variables_[replica_index][variable_index].requires_grad(),
+            "Variables must require gradients (have `requires_grad` set).");
+        AT_ASSERTM(
+            variables_[replica_index][variable_index].sizes() ==
+                variables_[0][variable_index].sizes(),
+            "Variables across model replicas must have identical sizes.");
+        AT_ASSERTM(
+            variables_[replica_index][variable_index].dtype() ==
+                variables_[0][variable_index].dtype(),
+            "Variables across model replicas must have identical dtype.");
       }
     }
   }
@@ -70,10 +78,12 @@ Reducer::Reducer(
   {
     const auto replica_count = variables_.size();
     grad_accumulators_.resize(replica_count);
-    for (size_t replica_index = 0; replica_index < replica_count; replica_index++) {
+    for (size_t replica_index = 0; replica_index < replica_count;
+         replica_index++) {
       const auto variable_count = variables_[replica_index].size();
       grad_accumulators_[replica_index].resize(variable_count);
-      for (size_t variable_index = 0; variable_index < variable_count; variable_index++) {
+      for (size_t variable_index = 0; variable_index < variable_count;
+           variable_index++) {
         auto& variable = variables_[replica_index][variable_index];
 
         // The gradient accumulator function is lazily initialized once.
@@ -82,23 +92,22 @@ Reducer::Reducer(
         auto grad_accumulator = variable.grad_accumulator();
 
         // Hook to execute after the gradient accumulator has executed.
-        grad_accumulator->add_post_hook(
-          torch::make_unique<LambdaPostHook>([=] {
-            std::lock_guard<std::mutex> lock(this->mutex_);
-            this->mark_variable_ready(replica_index, variable_index);
-          }));
+        grad_accumulator->add_post_hook(torch::make_unique<LambdaPostHook>([=] {
+          std::lock_guard<std::mutex> lock(this->mutex_);
+          this->mark_variable_ready(replica_index, variable_index);
+        }));
 
         // Map raw function pointer to replica index and parameter index.
         // This is used later on when the autograd graph is traversed
         // to check for parameters for which no gradient is computed.
         func_[grad_accumulator.get()] =
-          std::make_tuple(replica_index, variable_index);
+            std::make_tuple(replica_index, variable_index);
 
         // The gradient accumulator is stored as weak_ptr in the autograd
         // metadata of the variable, so we have to keep it alive here for
         // the raw pointer to be valid.
         grad_accumulators_[replica_index][variable_index] =
-          std::move(grad_accumulator);
+            std::move(grad_accumulator);
       }
     }
   }
@@ -110,10 +119,12 @@ Reducer::Reducer(
   {
     std::vector<size_t> variable_indices;
     const auto variable_count = variables_[0].size();
-    for (size_t variable_index = 0; variable_index < variable_count; variable_index++) {
+    for (size_t variable_index = 0; variable_index < variable_count;
+         variable_index++) {
       variable_indices.push_back(variable_index);
     }
-    initialize_buckets(std::vector<std::vector<size_t>>{std::move(variable_indices)});
+    initialize_buckets(
+        std::vector<std::vector<size_t>>{std::move(variable_indices)});
   }
 }
 
@@ -131,7 +142,8 @@ void Reducer::mark_variable_ready(size_t replica_index, size_t variable_index) {
   }
 
   AT_ASSERTM(replica_index < variables_.size(), "Out of range replica index.");
-  AT_ASSERTM(variable_index < bucket_indices_.size(), "Out of range variable index.");
+  AT_ASSERTM(
+      variable_index < bucket_indices_.size(), "Out of range variable index.");
 
   const auto& bucket_index = bucket_indices_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
@@ -170,9 +182,8 @@ void Reducer::mark_variable_ready(size_t replica_index, size_t variable_index) {
   // Register this reducer's final callback once per backwards pass.
   if (!has_queued_final_callback_) {
     has_queued_final_callback_ = true;
-    torch::autograd::Engine::get_default_engine().queue_callback([=]{
-      this->finalize_backward();
-    });
+    torch::autograd::Engine::get_default_engine().queue_callback(
+        [=] { this->finalize_backward(); });
   }
 }
 
@@ -189,7 +200,8 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
   // Keep going, until we either:
   // - have kicked off reduction for all buckets, or
   // - found a bucket that's not yet ready for reduction.
-  for (; next_bucket_ < buckets_.size() && buckets_[next_bucket_].pending == 0; next_bucket_++) {
+  for (; next_bucket_ < buckets_.size() && buckets_[next_bucket_].pending == 0;
+       next_bucket_++) {
     auto& bucket = buckets_[next_bucket_];
     std::vector<at::Tensor> tensors;
     tensors.reserve(bucket.replicas.size());
@@ -213,8 +225,9 @@ void Reducer::initialize_buckets(std::vector<std::vector<size_t>> indices) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   // This shouldn't be called if we're expecting autograd hooks to fire.
-  AT_ASSERTM(!expect_autograd_hooks_,
-    "initialize_buckets must be called during autograd execution.");
+  AT_ASSERTM(
+      !expect_autograd_hooks_,
+      "initialize_buckets must be called during autograd execution.");
 
   // Clear current bucket assignment.
   buckets_.clear();
@@ -235,27 +248,31 @@ void Reducer::initialize_buckets(std::vector<std::vector<size_t>> indices) {
     AT_ASSERTM(indices[bucket_index].size() > 0, "Empty bucket specified.");
 
     // Iterate over model replicas.
-    for (size_t replica_index = 0; replica_index < replica_count; replica_index++) {
+    for (size_t replica_index = 0; replica_index < replica_count;
+         replica_index++) {
       at::TensorOptions options;
       BucketReplica replica;
       size_t offset = 0;
 
       // Iterate over bucket variables.
       for (const auto variable_index : indices[bucket_index]) {
-        AT_ASSERTM(variable_index < variables_[replica_index].size(),
-          "Out of range variable index specified.");
+        AT_ASSERTM(
+            variable_index < variables_[replica_index].size(),
+            "Out of range variable index specified.");
         const auto& variable = variables_[replica_index][variable_index];
         if (!options.has_device()) {
           options = options.device(variable.device());
         } else {
-          AT_ASSERTM(variable.device() == options.device(),
-            "All parameters in a bucket must be placed on the same device.");
+          AT_ASSERTM(
+              variable.device() == options.device(),
+              "All parameters in a bucket must be placed on the same device.");
         }
         if (!options.has_dtype()) {
           options = options.dtype(variable.dtype());
         } else {
-          AT_ASSERTM(variable.dtype() == options.dtype(),
-            "All parameters in a bucket must have the same dtype.");
+          AT_ASSERTM(
+              variable.dtype() == options.dtype(),
+              "All parameters in a bucket must have the same dtype.");
         }
         const auto length = variable.numel();
         replica.variables.push_back(variable);
@@ -265,7 +282,8 @@ void Reducer::initialize_buckets(std::vector<std::vector<size_t>> indices) {
       }
 
       // Allocate bucket contents tensor.
-      replica.contents = torch::autograd::make_variable_consuming(at::empty({offset}, options));
+      replica.contents = torch::autograd::make_variable_consuming(
+          at::empty({offset}, options));
 
       // Add bucket replica to enclosing bucket.
       bucket.replicas.push_back(std::move(replica));
@@ -275,11 +293,12 @@ void Reducer::initialize_buckets(std::vector<std::vector<size_t>> indices) {
     // This is identical across replicas so we only need to do this once.
     size_t intra_bucket_index = 0;
     for (const auto variable_index : indices[bucket_index]) {
-      AT_ASSERTM(variable_index < bucket_indices_.size(),
-        "Out of range variable index specified.");
+      AT_ASSERTM(
+          variable_index < bucket_indices_.size(),
+          "Out of range variable index specified.");
       bucket_indices_[variable_index] = BucketIndex{
-        .bucket_index = bucket_index,
-        .intra_bucket_index = intra_bucket_index++,
+          .bucket_index = bucket_index,
+          .intra_bucket_index = intra_bucket_index++,
       };
     }
 
@@ -298,7 +317,7 @@ void Reducer::initialize_buckets(std::vector<std::vector<size_t>> indices) {
 void Reducer::prepare_for_backward(torch::autograd::Variable output) {
   std::lock_guard<std::mutex> lock(mutex_);
   std::unordered_set<torch::autograd::Function*> seen;
-  std::vector<torch::autograd::Function*> queue { output.grad_fn().get() };
+  std::vector<torch::autograd::Function*> queue{output.grad_fn().get()};
 
   // Reset accounting.
   has_queued_final_callback_ = false;
@@ -348,19 +367,23 @@ void Reducer::finalize_backward() {
   expect_autograd_hooks_ = false;
 
   // Check that all buckets were completed and had their work kicked off.
-  AT_ASSERTM(next_bucket_ == buckets_.size(),
-    "Expected all buckets to be ready at the end of the backward pass.");
+  AT_ASSERTM(
+      next_bucket_ == buckets_.size(),
+      "Expected all buckets to be ready at the end of the backward pass.");
 
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {
     AT_ASSERT(bucket.work);
     bucket.work->wait();
     for (auto& replica : bucket.replicas) {
-      for (size_t intra_bucket_index = 0; intra_bucket_index < replica.variables.size(); intra_bucket_index++) {
+      for (size_t intra_bucket_index = 0;
+           intra_bucket_index < replica.variables.size();
+           intra_bucket_index++) {
         auto& variable = replica.variables[intra_bucket_index];
         const auto offset = replica.offsets[intra_bucket_index];
         const auto length = replica.lengths[intra_bucket_index];
-        auto bucket_view = replica.contents.narrow(0, offset, length).view(variable.sizes());
+        auto bucket_view =
+            replica.contents.narrow(0, offset, length).view(variable.sizes());
         auto& grad = variable.grad();
         if (grad.defined()) {
           grad.copy_(bucket_view);
@@ -372,4 +395,4 @@ void Reducer::finalize_backward() {
   }
 }
 
-}
+} // namespace c10d

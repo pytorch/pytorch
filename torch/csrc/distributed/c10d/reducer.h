@@ -14,12 +14,12 @@
 namespace c10d {
 
 class Reducer {
-public:
+ public:
   // The constructor takes a vector<Variable> with model parameters for
   // every model replica, hence the vector<vector<>>.
   explicit Reducer(
-    std::vector<std::vector<torch::autograd::Variable>> variables,
-    std::shared_ptr<c10d::ProcessGroup> process_group);
+      std::vector<std::vector<torch::autograd::Variable>> variables,
+      std::shared_ptr<c10d::ProcessGroup> process_group);
 
   // To (re-)initialize bucket assignment, pass a list of buckets, each
   // of which is specified by a list of indices in the variables list.
@@ -33,12 +33,13 @@ public:
   // a call to this function can simply be omitted.
   void prepare_for_backward(torch::autograd::Variable output);
 
-protected:
+ protected:
   std::mutex mutex_;
   std::vector<std::vector<torch::autograd::Variable>> variables_;
   std::shared_ptr<c10d::ProcessGroup> process_group_;
 
-  std::vector<std::vector<std::shared_ptr<torch::autograd::Function>>> grad_accumulators_;
+  std::vector<std::vector<std::shared_ptr<torch::autograd::Function>>>
+      grad_accumulators_;
   std::unordered_map<torch::autograd::Function*, std::tuple<int, int>> func_;
 
   bool expect_autograd_hooks_;
@@ -119,4 +120,4 @@ protected:
   std::vector<BucketIndex> bucket_indices_;
 };
 
-}
+} // namespace c10d
