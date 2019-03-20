@@ -15,7 +15,7 @@ namespace detail {
       return (*kernel_func)(std::forward<Parameters>(args)...);
     }
   };
-  template<class FuncType, FuncType* kernel_func>
+  template<class FuncType, FuncType* kernel_func, class Enable = guts::enable_if_t<guts::is_function_type<FuncType>::value>>
   using WrapKernelFunction = WrapKernelFunction_<
       FuncType,
       kernel_func,
@@ -37,9 +37,8 @@ namespace detail {
  * >         c10::dispatchKey(CPUTensorId()));
  */
 template<class FuncType, FuncType* kernel_func>
-inline detail::KernelRegistrationConfigParameter kernel() {
+inline constexpr auto kernel() -> decltype(kernel<detail::WrapKernelFunction<FuncType, kernel_func>>()) {
   return kernel<detail::WrapKernelFunction<FuncType, kernel_func>>();
 }
-
 
 }

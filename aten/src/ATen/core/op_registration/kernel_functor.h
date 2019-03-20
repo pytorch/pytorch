@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/op_registration/kernel_stackbased.h>
+#include <ATen/core/op_registration/infer_schema.h>
 
 namespace c10 {
 /**
@@ -109,6 +110,30 @@ namespace detail {
       torch::jit::pop(*stack, num_inputs);
     }
   };
+
+  template<class KernelFunctor, class... Args>
+  class KernelFactory final {
+  public:
+    explicit constexpr KernelFactory(Args... args)
+    : constructor_parameters_(std::move(args)...) {}
+
+    std::unique_ptr<KernelCache> operator()() const {
+      return guts::apply(
+        [] (const Args&... params) {return guts::make_unique<KernelFunctor>(params...); },
+        constructor_parameters_);
+    }
+
+  private:
+    std::tuple<Args...> constructor_parameters_;
+  };
+
+  template<class KernelFunctor>
+  class FunctionSchemaInferer final {
+  public:
+    std::unique_ptr<FunctionSchema> operator()() const {
+      return guts::make_unique<FunctionSchema>(inferFunctionSchema<KernelFunctor>("", ""));
+    }
+  };
 }
 
 /**
@@ -148,24 +173,13 @@ namespace detail {
  * >         c10::dispatchKey(CPUTensorId()));
  */
 template<class KernelFunctor, class... ConstructorParameters>
-inline detail::KernelRegistrationConfigParameter kernel(ConstructorParameters&&... constructorParameters) {
-  // TODO We're only doing this make_shared nonsense so we're able to perfectly
-  //      forward the constructorParameters into the lambda below and don't have
-  //      to copy them. Once we have C++14, we should change this to proper
-  //      capture like:
-  //      [parameters = std::make_tuple(std::forward<ConstructorParameters>(constructorParameters)...)]
-  //      With C++20, we could even directly forward-capture the parameter pack
-  //      without converting it into a tuple.
-  auto parameters = std::make_shared<std::tuple<guts::decay_t<ConstructorParameters>...>>(
-      std::forward<ConstructorParameters>(constructorParameters)...);
-  return detail::KernelRegistrationConfigParameter(
-      &detail::wrap_kernel_functor<KernelFunctor>::call,
-      [parameters] {
-        return guts::apply(
-          [] (const ConstructorParameters&... params) {return guts::make_unique<KernelFunctor>(params...); },
-          *parameters);
-      }
-  );
+inline constexpr detail::KernelRegistrationConfigParameter<detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>, detail::FunctionSchemaInferer<KernelFunctor>>
+kernel(ConstructorParameters&&... constructorParameters) {
+  return {
+    &detail::wrap_kernel_functor<KernelFunctor>::call,
+    detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
+    detail::FunctionSchemaInferer<KernelFunctor>()
+  };
 }
 
 }
