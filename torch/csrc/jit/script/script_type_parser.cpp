@@ -45,7 +45,7 @@ TypePtr ScriptTypeParser::subscriptToType(
     auto elem_type = parseTypeFromExpr(*subscript.subscript_exprs().begin());
     return ListType::create(elem_type);
 
-  } else if (typeName == "Optional ") {
+  } else if (typeName == "Optional") {
     if (subscript.subscript_exprs().size() != 1) {
       throw ErrorReport(subscript)
           << " expected exactly one element type but found "
