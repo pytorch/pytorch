@@ -853,9 +853,9 @@ class CrossEntropyLoss(_WeightedLoss):
     with :math:`K \geq 1` for the `K`-dimensional case (described later).
 
     This criterion expects a class index in the range :math:`[0, C-1]` as the
-    `target`for each value of a 1D tensor of size `minibatch`.
-    Additionally to that range of values, any integer specified by
-    `ignore_index` is also allowed in `target`.
+    `target`for each value of a 1D tensor of size `minibatch`; ; if `ignore_index`
+    is specified, this criterion also accepts this class index (this index may not
+    necessarily be in the class range).
 
     The loss can be described as:
 
