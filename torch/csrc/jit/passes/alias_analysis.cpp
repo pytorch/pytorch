@@ -1174,8 +1174,6 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       at::onnx::Shape,
       prim::AutogradAnyNonZero,
       prim::AutogradAdd,
-      // prim::BumpCounter,
-      // prim::GetCounters,
   };
 
   return handled.count(symbol) || purposefully_not_handled.count(symbol);
