@@ -260,7 +260,7 @@ static inline Tensor &mean_out(Tensor &result, const Tensor &self, IntArrayRef d
   ScalarType dtype = get_dtype(result, self, opt_dtype, true);
 
   if (at::isIntegralType(scalarType) && !opt_dtype.has_value()){
-    dtype = ScalarType::Double;
+    dtype = c10::typeMetaToScalarType(c10::getDefaultTensorOptions().dtype());
   }
   // TODO: the TensorIterator reduction implementation of mean
   // (mean_kernel_impl()) is unvectorized and leads to very poor performance

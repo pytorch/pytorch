@@ -21,4 +21,5 @@
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorMethods.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/core/DefaultTensorOptions.h>
 #include <c10/util/Exception.h>
