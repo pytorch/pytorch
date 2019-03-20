@@ -671,8 +671,8 @@ auto Engine::ready_queue_by_index(int device_index) -> ReadyQueue& {
 auto Engine::start_threads() -> void {
   // See Note [Allocating GPUs to autograd threads]
   c10::DeviceIndex num_devices = 0;
-  for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
-    auto* impl = c10::impl::device_guard_impl_registry[i].load();
+  for (const auto& impl_atomic : c10::impl::device_guard_impl_registry) {
+    auto* impl = impl_atomic.load();
     if (impl) {
       num_devices = std::max(num_devices, impl->deviceCount());
     }
