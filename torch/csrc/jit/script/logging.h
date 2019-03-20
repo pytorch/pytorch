@@ -6,26 +6,28 @@
 #include <unordered_map>
 #include <vector>
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 namespace torch { namespace jit { namespace logging {
 
 class LoggerBase {
  public:
-  virtual void addStatValue(std::string stat_name, float val) = 0;
-  virtual std::unordered_map<std::string, float> getCounters() const = 0;
+  TORCH_API virtual void addStatValue(const std::string& stat_name, float val) = 0;
+  TORCH_API virtual std::unordered_map<std::string, float> getCounters() const = 0;
   virtual ~LoggerBase() {}
 };
 
-std::shared_ptr<LoggerBase> getLogger();
-void setLogger(std::shared_ptr<LoggerBase> logger);
+TORCH_API std::shared_ptr<LoggerBase> getLogger();
+TORCH_API void setLogger(std::shared_ptr<LoggerBase> logger);
 
 // No-op logger. This is the default and is meant to incur almost no runtime
 // overhead.
 
 class NoopLogger : public LoggerBase {
  public:
-  void addStatValue(std::string stat_name, float val) override {}
+  void addStatValue(const std::string& stat_name, float val) override {}
   std::unordered_map<std::string, float> getCounters() const override {
-    return {};
+    return std::unordered_map<std::string, float>();
   }
   ~NoopLogger() {}
 };
@@ -37,13 +39,13 @@ class NoopLogger : public LoggerBase {
 // in the single-threaded case or for testing.
 class LockingLogger : public LoggerBase {
  public:
-  void addStatValue(std::string stat_name, float val) override;
+  void addStatValue(const std::string& stat_name, float val) override;
   std::unordered_map<std::string, float> getCounters() const override;
   enum class AggregationType {
     SUM,
     AVG
   };
-  void setAggregationType(std::string stat_name, AggregationType type);
+  TORCH_API void setAggregationType(const std::string& stat_name, AggregationType type);
   ~LockingLogger() {}
  private:
   mutable std::mutex m;
@@ -56,8 +58,8 @@ struct JITTimePoint {
   std::chrono::time_point<std::chrono::high_resolution_clock> point;
 };
 
-JITTimePoint timePoint();
-void recordDurationSince(std::string name, JITTimePoint tp);
+TORCH_API JITTimePoint timePoint();
+TORCH_API void recordDurationSince(std::string name, JITTimePoint tp);
 
 namespace runtime_counters {
 constexpr const char* GRAPH_EXECUTORS_CONSTRUCTED = "pytorch_runtime.graph_executors_constructed";

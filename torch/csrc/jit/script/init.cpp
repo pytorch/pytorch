@@ -1097,7 +1097,7 @@ void initJitScriptBindings(PyObject* module) {
     // TODO: dynamic val (and maybe name?). Had too much trouble with pybind
     // and decided to just leave it like this.
     if (jit::tracer::isTracing()) {
-      auto tracer_state = jit::tracer::getTracingState();
+      const auto &tracer_state = jit::tracer::getTracingState();
       auto node = tracer_state->graph->create(prim::BumpCounter, /*num_outputs=*/0);
       jit::tracer::recordSourceLocation(node);
       jit::tracer::addInputs(node, "name", name);

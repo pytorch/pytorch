@@ -7,7 +7,7 @@ namespace torch { namespace jit { namespace logging {
 
 // TODO: multi-scale histogram for this thing
 
-void LockingLogger::addStatValue(std::string stat_name, float val) {
+void LockingLogger::addStatValue(const std::string& stat_name, float val) {
   std::unique_lock<std::mutex> lk(m);
   raw_counters[stat_name].push_back(val);
 }
@@ -34,7 +34,7 @@ std::unordered_map<std::string, float> LockingLogger::getCounters() const {
   return counters;
 }
 
-void LockingLogger::setAggregationType(std::string stat_name, AggregationType type) {
+void LockingLogger::setAggregationType(const std::string& stat_name, AggregationType type) {
   agg_types[stat_name] = type;
 }
 
