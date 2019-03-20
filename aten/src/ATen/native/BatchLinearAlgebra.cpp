@@ -19,9 +19,11 @@
 extern "C" void dgesv_(int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
 extern "C" void sgesv_(int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info);
 
-// inverse
+// getrf
 extern "C" void dgetrf_(int *m, int *n, double *a, int *lda, int *ipiv, int *info);
 extern "C" void sgetrf_(int *m, int *n, float *a, int *lda, int *ipiv, int *info);
+
+// getri
 extern "C" void dgetri_(int *n, double *a, int *lda, int *ipiv, double *work, int *lwork, int *info);
 extern "C" void sgetri_(int *n, float *a, int *lda, int *ipiv, float *work, int *lwork, int *info);
 
@@ -32,6 +34,10 @@ extern "C" void spotrs_(char *uplo, int *n, int *nrhs, float *a, int *lda, float
 // potrf
 extern "C" void dpotrf_(char *uplo, int *n, double *a, int *lda, int *info);
 extern "C" void spotrf_(char *uplo, int *n, float *a, int *lda, int *info);
+
+// trtrs
+extern "C" void dtrtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
+extern "C" void strtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info);
 #endif
 
 namespace at {
@@ -63,6 +69,11 @@ template<class scalar_t>
 void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info) {
   AT_ERROR("cholesky only takes float or double Tensors");
 }
+
+template<class scalar_t>
+void lapackTrtrs(char uplo, char trans, char diag, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info) {
+  AT_ERROR("trtrs only takes float or double Tensors");
+} 
 
 #ifdef USE_LAPACK
 template<> void lapackSolve<double>(int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
@@ -103,6 +114,14 @@ template<> void lapackCholesky<double>(char uplo, int n, double *a, int lda, int
 
 template<> void lapackCholesky<float>(char uplo, int n, float *a, int lda, int *info) {
   spotrf_(&uplo, &n, a, &lda, info);
+}
+
+template<> void lapackTrtrs<double>(char uplo, char trans, char diag, int n, int nrhs, double *a, int lda, double *b, int ldb, int *info) {
+  dtrtrs_(&uplo, &trans, &diag, &n, &nrhs, a, &lda, b, &ldb, info);
+}
+
+template<> void lapackTrtrs<float>(char uplo, char trans, char diag, int n, int nrhs, float *a, int lda, float *b, int ldb, int *info) {
+  strtrs_(&uplo, &trans, &diag, &n, &nrhs, a, &lda, b, &ldb, info);
 }
 #endif
 
@@ -317,7 +336,9 @@ Tensor& cholesky_solve_out(Tensor& result, const Tensor& self, const Tensor& A, 
   AT_CHECK(self.dim() == 2 && A.dim() == 2,
            "torch.cholesky_solve() with the `out` keyword does not support batching. "
            "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
-  result = at::_cholesky_solve_helper(self, A, upper);
+  Tensor result_tmp;
+  result_tmp = at::_cholesky_solve_helper(self, A, upper);
+  result.resize_as_(result_tmp).copy_(result_tmp);
   return result;
 }
 
@@ -480,6 +501,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> btrifact_with_info_out(
   return std::tuple<Tensor&, Tensor&, Tensor&>(A_LU, pivots, info);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 template <typename scalar_t, bool upper>
 static void apply_triu_tril_single(
     scalar_t* result, scalar_t* self, bool inplace,
@@ -616,6 +639,81 @@ Tensor& triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
     apply_triu_tril<scalar_t, true>(result, self_c, false, k);
   });
   return result;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ trtrs ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template<typename scalar_t>
+static void apply_trtrs(Tensor& b, Tensor& A, bool upper, bool transpose, bool unitriangular, std::vector<int64_t>& infos) {
+#ifndef USE_LAPACK
+  AT_ERROR("trtrs: LAPACK library not found in compilation");
+#else
+  char uplo = upper ? 'U' : 'L';
+  char trans = transpose ? 'T' : 'N';
+  char diag = unitriangular ? 'U' : 'N';
+
+  auto A_data = A.data<scalar_t>();
+  auto b_data = b.data<scalar_t>();
+  auto n = A.size(-2);
+  auto nrhs = b.size(-1);
+
+  int info;
+  if (b.dim() == 2) {
+    lapackTrtrs<scalar_t>(uplo, trans, diag, n, nrhs, A_data, n, b_data, n, &info);
+    infos[0] = info;
+  } else {
+    auto A_mat_stride = matrixStride(A);
+    auto b_mat_stride = matrixStride(b);
+    auto batch_size = batchCount(A);
+    for (int64_t i = 0; i < batch_size; i++) {
+      scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
+      scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
+      lapackTrtrs<scalar_t>(uplo, trans, diag, n, nrhs, A_working_ptr, n, b_working_ptr, n, &info);
+      infos[i] = info;
+      if (info != 0) {
+        return;
+      }
+    }
+  }
+#endif
+}
+
+std::tuple<Tensor, Tensor> _trtrs_helper_cpu(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
+  auto self_working_copy = cloneBatchedColumnMajor(self);
+  auto A_working_copy = cloneBatchedColumnMajor(A);
+  std::vector<int64_t> infos(batchCount(self), 0);
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "trtrs_cpu", [&]{
+    apply_trtrs<scalar_t>(self_working_copy, A_working_copy, upper, transpose, unitriangular, infos);
+  });
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "trtrs_cpu");
+  } else {
+    singleCheckErrors(infos[0], "trtrs_cpu");
+  }
+  return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
+}
+
+// Supports arbitrary batch dimensions for self and A
+std::tuple<Tensor, Tensor> trtrs(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
+  AT_CHECK(self.dim() >= 2,
+           "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  AT_CHECK(A.dim() >= 2,
+           "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
+  Tensor self_broadcasted, A_broadcasted;
+  std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A);
+  return at::_trtrs_helper(self_broadcasted, A_broadcasted, upper, transpose, unitriangular);
+}
+
+std::tuple<Tensor&, Tensor&> trtrs_out(Tensor& result, Tensor& clone_A,
+                                       const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
+  AT_CHECK(self.dim() == 2 && A.dim() == 2,
+           "torch.trtrs() with the `out` keyword does not support batching. "
+           "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
+  Tensor result_tmp, clone_A_tmp;
+  std::tie(result_tmp, clone_A_tmp) = at::_trtrs_helper(self, A, upper, transpose, unitriangular);
+  result.resize_as_(result_tmp).copy_(result_tmp);
+  clone_A.resize_as_(clone_A_tmp).copy_(clone_A_tmp);
+  return std::tuple<Tensor&, Tensor&>(result, clone_A);
 }
 
 }}  // namespace at::native
