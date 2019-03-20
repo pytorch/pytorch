@@ -759,7 +759,9 @@ endif()
 
 
 if (NOT WIN32)
-  target_compile_options(caffe2 PRIVATE "-fvisibility=hidden")
+  # FIXME kostmo - removed to allow the "torch" .cpp files to be linked
+  # properly
+  #  target_compile_options(caffe2 PRIVATE "-fvisibility=hidden")
 endif()
 
 if(NOT BUILD_ATEN_ONLY)
