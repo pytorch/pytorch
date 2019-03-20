@@ -709,7 +709,7 @@ void ScriptModuleSerializer::convertModule(
     convertParameter(elem.value(), param_def, /*is_buffer=*/false);
   }
   for (const auto& elem : module.get_attributes()) {
-    if (elem.value().type->isSubtypeOf(TensorType::get())) {
+    if (elem.value().type()->isSubtypeOf(TensorType::get())) {
       torch::ParameterDef* param_def = module_def->add_parameters();
       convertParameter(elem.value(), param_def, /*is_buffer=*/true);
     }
@@ -749,7 +749,7 @@ void ScriptModuleSerializer::convertParameter(
     const script::NamedIValue& param,
     torch::ParameterDef* param_def,
     bool is_parameter) {
-  param_def->set_name(param.name_);
+  param_def->set_name(param.name());
   param_def->set_is_buffer(is_parameter);
   param_def->set_tensor_id(addTensor(param.slot()->toTensor()));
 }
