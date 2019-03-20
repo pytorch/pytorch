@@ -373,7 +373,8 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
       reinterpret_cast<const cudaIpcEventHandle_t*>(s_ipc_event_handle.c_str());
   cudaEvent_t event;
   cudaIpcOpenEventHandle(&event, *ipc_event_handle);
-  cudaEventSynchronize(event);
+  AT_CUDA_CHECK(
+      cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(device), event, 0));
 #else
   // Already synchronized inside producer stream
 #endif

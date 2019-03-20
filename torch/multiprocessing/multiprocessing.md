@@ -8,7 +8,9 @@ It could be done manually by syncing on an event:
 # Producer
 queue.put(tensor)
 event.wait()
+```
 
+```python
 # Consumer
 tensor = queue.get()
 safe_to_use_tensor = tensor.clone()
@@ -40,7 +42,9 @@ Consumer's side wraps received data into the different structure CudaIPCReceived
     x = queue.get()
     # do somethings with x
     del x
+    ```
 
+    ```python
     ## Bad
     x = queue.get()
     # do somethings with x
@@ -53,7 +57,9 @@ Consumer's side wraps received data into the different structure CudaIPCReceived
     ## producer
     # send tensors, do something
     event.wait()
+    ```
 
+    ```python
     ## consumer
     # receive tensors and use them
     event.set()
@@ -67,12 +73,16 @@ Consumer's side wraps received data into the different structure CudaIPCReceived
     # not going to work
     x = queue.get()
     queue_2.put(x)
+    ```
 
+    ```python
     # you need to create a process-local copy
     x = queue.get()
     x_clone = x.clone()
     queue_2.put(x_clone)
+    ```
 
+    ```python
     # putting and getting from the same queue in the same process will likely end up with segfault
     queue.put(tensor)
     x = queue.get()
