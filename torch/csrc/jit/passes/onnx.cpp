@@ -226,7 +226,86 @@ void BlockToONNX(
 
   // Finally, visit all nodes in the graph
   for (auto node : old_block->nodes()) {
-    if (node->kind() == prim::PythonOp) {
+    if (node->kind().is_caffe2()) {
+      auto new_node = ctx.block->appendNode(
+          ctx.block->owningGraph()->createClone(node, envFn));
+      for (size_t i = 0; i < node->outputs().size(); i++) {
+        env[node->outputs()[i]] = new_node->outputs()[i];
+      }
+      const auto& schema = node->schema();
+      size_t tensor_input_num = 0;
+      size_t input_index = 0;
+      const auto& args = schema.arguments();
+      for (size_t arg_index = 0; arg_index < args.size(); ++arg_index, ++input_index) {
+        auto type = args[arg_index].type();
+        if (type->kind() == TypeKind::OptionalType) {
+          const auto& input_value = node->inputs()[input_index];
+          if (input_value->mustBeNone()) {
+            new_node->removeInput(tensor_input_num);
+            continue;
+          } else {
+            type = reinterpret_cast<OptionalType*>(type.get())->getElementType();
+            // recursive optional type is not supported
+            AT_ASSERT(type->kind() != TypeKind::OptionalType);
+          }
+        }
+        if (type->isSubclass(TypeKind::TensorType)) {
+          AT_ASSERT(input_index == tensor_input_num);
+          ++tensor_input_num;
+          continue;
+        } else if (type->kind() == TypeKind::BoolType || type->kind() == TypeKind::FloatType || type->kind() == TypeKind::IntType) {
+          const auto& constant_node = node->inputs()[input_index]->node();
+          AT_ASSERT(constant_node->kind() == prim::Constant);
+          const auto& tensor = constant_node->t(attr::value);
+          AT_ASSERT(tensor.numel() == 1);
+          if (type->kind() == TypeKind::IntType || type->kind() == TypeKind::BoolType) {
+            new_node->i_(Symbol::attr(args[arg_index].name()), tensor.item().to<int64_t>());
+          } else if (type->kind() == TypeKind::FloatType) {
+            new_node->f_(Symbol::attr(args[arg_index].name()), tensor.item().to<float>());
+          } else {
+            // TODO handle the StringType, no c10 op accept String as argument yet
+            throw std::runtime_error("Unhandled scalar arg: " + args[arg_index].name() + ", type: " + c10::typeKindToString(type->kind()));
+          }
+          new_node->removeInput(tensor_input_num);
+        } else if (type->kind() == TypeKind::ListType) {
+          const auto& constant_node = node->inputs()[input_index]->node();
+          AT_ASSERT(constant_node->kind() == prim::Constant);
+          const auto& tensor = constant_node->t(attr::value);
+          const auto& elem_type = reinterpret_cast<ListType*>(type.get())->getElementType();
+          if (elem_type->isSubclass(TypeKind::TensorType)) {
+            while (input_index < node->inputs().size()) {
+              if (node->inputs()[input_index]->type()->isSubclass(TypeKind::TensorType)) {
+                ++input_index;
+                ++tensor_input_num;
+              } else {
+                break;
+              }
+            }
+            continue;
+          } else if (elem_type->kind() == TypeKind::IntType || elem_type->kind() == TypeKind::BoolType) {
+            std::vector<int64_t> values;
+            int64_t* ptr = tensor.data<int64_t>();
+            for (int vi = 0; vi < tensor.numel(); ++vi) {
+              values.push_back(*(ptr + vi));
+            }
+            new_node->is_(Symbol::attr(args[arg_index].name()), values);
+          } else if (type->kind() == TypeKind::FloatType) {
+            std::vector<double> values;
+            double* ptr = tensor.data<double>();
+            for (int vi = 0; vi < tensor.numel(); ++vi) {
+              values.push_back(*(ptr + vi));
+            }
+            new_node->fs_(Symbol::attr(args[arg_index].name()), values);
+          } else {
+            // TODO handle the StringType, no c10 op accept String as argument yet
+            throw std::runtime_error("Unhandled scalar arg: " + args[arg_index].name() + ", type: " + c10::typeKindToString(type->kind()));
+          }
+          new_node->removeInput(tensor_input_num);
+        } else {
+          throw std::runtime_error("Unsupported input type of arg " + args[arg_index].name() + " in Caffe2 operator: " + c10::typeKindToString(type->kind()));
+        }
+      }
+    } else if (node->kind() == prim::PythonOp) {
       callPySymbolicMethod(static_cast<PythonOp*>(node));
     } else {
       callPySymbolicFunction(node);

@@ -22,22 +22,13 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
 
       Node* node = nullptr;
 
-      // unwrap tensor inputs from variable
-      for (auto iter = stack.end() - input_size; iter != stack.end(); ++iter) {
-        // TODO Remove the .defined() check once we don't have undefined tensors on the stack anymore (@wanchaol is working on this)
-        if (iter->isTensor() && iter->toTensor().defined()) {
-          *iter = unwrap(std::move(*iter).toTensor());
-        } else if (iter->isTensorList()) {
-          for (auto& item : iter->toTensorList()->elements()) {
-            item = unwrap(std::move(item));
-          }
-        }
-      }
-
+      // trace the input before unwrapping, otherwise we may lose
+      // the input information
       if (jit::tracer::isTracing()) {
         auto symbol = Symbol::fromQualString(op.schema().name());
         const auto& graph = tracer::getTracingState()->graph;
         node = graph->create(symbol, 0);
+        tracer::recordSourceLocation(node);
         const auto& args = op.schema().arguments();
         int i = 0;
         for (auto iter = stack.end() - input_size; iter != stack.end();
@@ -109,6 +100,18 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
           }
         }
         graph->insertNode(node);
+      }
+
+      // unwrap tensor inputs from variable
+      for (auto iter = stack.end() - input_size; iter != stack.end(); ++iter) {
+        // TODO Remove the .defined() check once we don't have undefined tensors on the stack anymore (@wanchaol is working on this)
+        if (iter->isTensor() && iter->toTensor().defined()) {
+          *iter = unwrap(std::move(*iter).toTensor());
+        } else if (iter->isTensorList()) {
+          for (auto& item : iter->toTensorList()->elements()) {
+            item = unwrap(std::move(item));
+          }
+        }
       }
 
       c10::Dispatcher::singleton().lookup(op, &stack).call(&stack);
