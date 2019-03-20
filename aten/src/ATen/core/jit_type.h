@@ -246,6 +246,11 @@ struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType,
     return ss.str();
   }
 
+  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
+    AT_ASSERT(contained_types.size() == 1);
+    return create(contained_types[0]);
+  }
+
   // common cast Optional[Tensor] for undefined tensor type
   static OptionalTypePtr ofTensor();
 private:

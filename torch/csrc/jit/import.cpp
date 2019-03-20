@@ -7,6 +7,8 @@
 #include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/script/script_type_parser.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
@@ -56,6 +58,7 @@ class ScriptModuleDeserializer final {
   void convertModule(const torch::ModuleDef& module_def);
 
   void loadTensorTable(torch::ModelDef* model_def);
+  void loadAttributeTable();
   void loadLibs(torch::ModelDef* model_def);
 
   caffe2::serialize::PyTorchStreamReader reader_;
@@ -66,6 +69,7 @@ class ScriptModuleDeserializer final {
   std::vector<std::string> moduleStack_;
 
   std::vector<at::Tensor> tensor_table_;
+  std::vector<IValue> attribute_table_;
 };
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
@@ -127,7 +131,11 @@ void ScriptModuleDeserializer::deserialize(
   }
 
   loadTensorTable(&model_def);
-  loadLibs(&model_def);
+  if (model_def.proto_version() >= 2) {
+    loadAttributeTable();
+    loadLibs(&model_def);
+  }
+
   // TODO: this can be simplified when C++/Python interop lands,
   // and the submodules would be created as the same in either C++ or Python
   convertModule(module_def);
@@ -138,6 +146,15 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
   for (const torch::TensorDef& tensor : model_def->tensors()) {
     tensor_table_.emplace_back(loadTensor(tensor, storageMap));
   }
+}
+
+void ScriptModuleDeserializer::loadAttributeTable() {
+  at::DataPtr attributes_ptr;
+  size_t attributes_size;
+  std::tie(attributes_ptr, attributes_size) =
+      reader_.getRecord("attributes.pkl");
+  Unpickler unpickler(attributes_ptr.get(), attributes_size, &tensor_table_);
+  attribute_table_ = unpickler.parse_ivalue_list();
 }
 
 void ScriptModuleDeserializer::loadLibs(torch::ModelDef* model_def) {
@@ -240,6 +257,19 @@ void ScriptModuleDeserializer::convertModule(
     } else {
       module->register_parameter(param_def.name(), tensor, /*is_buffer=*/false);
     }
+  }
+  for (int i = 0; i < module_def.attributes_size(); ++i) {
+    const torch::AttributeDef& attr_def = module_def.attributes(i);
+    if (module->find_buffer(attr_def.name())) {
+      // TODO: handle this above so this can be removed
+      continue;
+    }
+
+    module->register_attribute(
+      attr_def.name(),
+      script::parseType(attr_def.type()),
+      attribute_table_.at(attr_def.id())
+    );
   }
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;

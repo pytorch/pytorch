@@ -40,8 +40,8 @@ namespace native {
 // Define the per-batch functions to be used in the main implementation of the batched
 // linear algebra operations
 template<class scalar_t>
-void lapackGesv(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info) {
-  AT_ERROR("gesv only takes float or double Tensors");
+void lapackSolve(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info) {
+  AT_ERROR("solve only takes float or double Tensors");
 }
 
 template<class scalar_t>
@@ -65,11 +65,11 @@ void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info) {
 }
 
 #ifdef USE_LAPACK
-template<> void lapackGesv<double>(int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
+template<> void lapackSolve<double>(int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
   dgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
 
-template<> void lapackGesv<float>(int n, int nrhs, float *a, int lda, int *ipiv, float *b, int ldb, int *info) {
+template<> void lapackSolve<float>(int n, int nrhs, float *a, int lda, int *ipiv, float *b, int ldb, int *info) {
   sgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
 
@@ -109,12 +109,12 @@ template<> void lapackCholesky<float>(char uplo, int n, float *a, int lda, int *
 // Below of the definitions of the functions operating on a batch that are going to be dispatched
 // in the main helper functions for the linear algebra operations
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ gesv ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
-static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
+static void apply_solve(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
-  AT_ERROR("gesv: LAPACK library not found in compilation");
+  AT_ERROR("solve: LAPACK library not found in compilation");
 #else
   auto A_data = A.data<scalar_t>();
   auto b_data = b.data<scalar_t>();
@@ -125,7 +125,7 @@ static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 
   int info;
   if (b.dim() == 2) {
-    lapackGesv<scalar_t>(n, nrhs, A_data, n, ipiv.data<int>(), b_data, n, &info);
+    lapackSolve<scalar_t>(n, nrhs, A_data, n, ipiv.data<int>(), b_data, n, &info);
     infos[0] = info;
   } else {
     auto A_mat_stride = matrixStride(A);
@@ -135,7 +135,7 @@ static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
     for (int64_t i = 0; i < batch_size; i++) {
       scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
       scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-      lapackGesv<scalar_t>(n, nrhs, A_working_ptr, n, ipiv.data<int>(), b_working_ptr, n, &info);
+      lapackSolve<scalar_t>(n, nrhs, A_working_ptr, n, ipiv.data<int>(), b_working_ptr, n, &info);
       infos[i] = info;
       if (info != 0) {
         return;
@@ -145,38 +145,35 @@ static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #endif
 }
 
-std::tuple<Tensor, Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) {
+std::tuple<Tensor, Tensor> _solve_helper_cpu(const Tensor& self, const Tensor& A) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
   std::vector<int64_t> infos(batchCount(self), 0);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "gesv_cpu", [&]{
-    apply_gesv<scalar_t>(self_working_copy, A_working_copy, infos);
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "solve_cpu", [&]{
+    apply_solve<scalar_t>(self_working_copy, A_working_copy, infos);
   });
   if (self.dim() > 2) {
-    batchCheckErrors(infos, "gesv_cpu");
+    batchCheckErrors(infos, "solve_cpu");
   } else {
-    singleCheckErrors(infos[0], "gesv_cpu");
+    singleCheckErrors(infos[0], "solve_cpu");
   }
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
 
 // Supports arbitrary batch dimensions for self and A
-std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
+std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
   AT_CHECK(self.dim() >= 2,
            "B should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   AT_CHECK(A.dim() >= 2,
            "A should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
   Tensor self_broadcasted, A_broadcasted;
   std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A);
-  return at::_gesv_helper(self_broadcasted, A_broadcasted);
+  return at::_solve_helper(self_broadcasted, A_broadcasted);
 }
 
-std::tuple<Tensor&,Tensor&> gesv_out(Tensor& solution, Tensor& lu, const Tensor& self, const Tensor& A) {
-  AT_CHECK(self.dim() == 2 && A.dim() == 2,
-           "torch.gesv() with the `out` keyword does not support batching. "
-           "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
+std::tuple<Tensor&,Tensor&> solve_out(Tensor& solution, Tensor& lu, const Tensor& self, const Tensor& A) {
   Tensor solution_tmp, lu_tmp;
-  std::tie(solution_tmp, lu_tmp) = at::_gesv_helper(self, A);
+  std::tie(solution_tmp, lu_tmp) = at::_solve_helper(self, A);
   solution.resize_as_(solution_tmp).copy_(solution_tmp);
   lu.resize_as_(lu_tmp).copy_(lu_tmp);
   return std::tuple<Tensor&, Tensor&>(solution, lu);
