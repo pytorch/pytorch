@@ -2582,8 +2582,8 @@
     - arg: THGenerator* generator
       default: nullptr
       kwarg_only: True
-    - THIndexTensor* J
     - THTensor* q
+    - THIndexTensor* J
     - long num_samples
 ]]
 [[

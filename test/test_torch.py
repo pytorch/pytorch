@@ -3292,7 +3292,7 @@ class _TestTorchMixin(object):
 
         for is_contiguous in [True, False]:
             probs = get_probs(4, is_contiguous)
-            prob_table, alias_table = torch.multinomial_alias_setup(probs)
+            alias_table, prob_table = torch.multinomial_alias_setup(probs)
             for n_samples in [-1, 1, 10]:
                 if n_samples > 0:
                     samples = torch.multinomial_alias_draw(prob_table, alias_table, n_samples)

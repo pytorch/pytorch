@@ -222,7 +222,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
   THLongTensor_free(smaller);
   THLongTensor_free(larger);
 }
-void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator, THLongTensor *J, THTensor *q, int n_sample)
+void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator, THTensor *q, THLongTensor *J, int n_sample)
 {
   std::lock_guard<std::mutex> lock(_generator->mutex);
   THArgCheck(n_sample > 0, 3, "cannot sample <= 0 samples");

@@ -508,8 +508,8 @@ std::tuple<Tensor,Tensor> multinomial_alias_setup(const Tensor & probs) {
   return at::legacy::th::_th_multinomial_alias_setup(probs);
 }
 
-Tensor multinomial_alias_draw(const Tensor & J, const Tensor & q, int64_t num_samples, Generator * generator) {
-  return at::legacy::th::_th_multinomial_alias_draw(J, q, num_samples, generator);
+Tensor multinomial_alias_draw(const Tensor & q, const Tensor & J, int64_t num_samples, Generator * generator) {
+  return at::legacy::th::_th_multinomial_alias_draw(q, J, num_samples, generator);
 }
 
 Tensor & btrisolve_out(Tensor & result, const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
