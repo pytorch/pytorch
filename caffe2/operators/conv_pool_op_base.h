@@ -138,7 +138,7 @@ class ConvPoolOpBase : public Operator<Context> {
     }
 
     if (global_pooling_) {
-      for (int dim = 0; dim < kernel_.size(); ++dim) {
+      for (size_t dim = 0; dim < kernel_.size(); ++dim) {
         CAFFE_ENFORCE(
             pads_[2 * dim] == 0 && pads_[2 * dim + 1] == 0 &&
                 dilation_[dim] == 1 && stride_[dim] == 1,
@@ -151,7 +151,7 @@ class ConvPoolOpBase : public Operator<Context> {
     // need to clean this up.
     if (operator_def.name().find("Conv") == 0 ||
         operator_def.name().find("Pool") != std::string::npos) {
-      for (int dim = 0; dim < kernel_.size(); ++dim) {
+      for (size_t dim = 0; dim < kernel_.size(); ++dim) {
         CAFFE_ENFORCE_GE(pads_[dim], 0);
         CAFFE_ENFORCE_GE(pads_[kernel_.size() + dim], 0);
         CAFFE_ENFORCE(
@@ -161,7 +161,7 @@ class ConvPoolOpBase : public Operator<Context> {
       }
     }
 
-    for (int dim = 0; dim < kernel_.size(); ++dim) {
+    for (size_t dim = 0; dim < kernel_.size(); ++dim) {
       CAFFE_ENFORCE_GE(kernel_[dim], 0);
       CAFFE_ENFORCE_GE(dilation_[dim], 0);
       CAFFE_ENFORCE_GE(stride_[dim], 0);
@@ -408,7 +408,7 @@ class ConvPoolOpBase : public Operator<Context> {
 
   bool RunOnDevice() override {
     if (!global_pooling_) {
-      for (int dim = 0; dim < kernel_.size(); ++dim) {
+      for (size_t dim = 0; dim < kernel_.size(); ++dim) {
         CAFFE_ENFORCE_GT(kernel_[dim], 0);
       }
     }
