@@ -7,7 +7,6 @@
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
-#include <torch/csrc/autograd/variable_version.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -194,8 +193,8 @@ Variable::DifferentiableViewImpl::DifferentiableViewImpl(Variable base, at::Tens
     diff_view_meta->base_ = diff_view_meta->base_.base();
   }
   diff_view_meta->is_view_ = true;
-  diff_view_meta->version_counter_ = diff_view_meta->base_.version_counter();
-  diff_view_meta->attr_version = diff_view_meta->version_counter_.current_version();
+  this->set_version_counter(diff_view_meta->base_.version_counter());
+  diff_view_meta->attr_version = this->version_counter().current_version();
 }
 
 const std::shared_ptr<Function>& Variable::grad_fn() const {
@@ -205,7 +204,7 @@ const std::shared_ptr<Function>& Variable::grad_fn() const {
     if (!diff_view_meta->grad_fn_ && !diff_view_meta->base_.requires_grad()) {
       return diff_view_meta->grad_fn_;
     }
-    auto current_version = diff_view_meta->version_counter_.current_version();
+    auto current_version = this->current_version();
     if (diff_view_meta->attr_version != current_version) {
       AT_ASSERT(diff_view_meta->output_nr_ == 0);
       auto fn = std::make_shared<generated::AsStridedBackward>();

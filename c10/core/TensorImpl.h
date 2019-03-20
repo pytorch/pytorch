@@ -137,6 +137,35 @@ struct C10_API AutogradMetaInterface {
   virtual ~AutogradMetaInterface();
 };
 
+// Every Tensor has a version counter. Version counters are incremented
+// whenever the data or shape of a tensor changes through Variable operations.
+// These are typically in-place operations. Version counters are used to
+// detect modifications to saved variables which would result in incorrect
+// gradient calculations. Version counters may be shared between Variables:
+//
+// 1. A view shares the version counter of the base Variable,
+// 2. Detached variables share the version counter of the source,
+// 3. Unpacked saved variables share the version counter of the source.
+struct C10_API VariableVersion {
+ public:
+  // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
+  // leaves it in a persistently undefined state. See
+  // https://cplusplus.github.io/LWG/issue2334.
+  VariableVersion(uint32_t version = 0)
+      : version_block_(std::make_shared<std::atomic<uint32_t>>(version)) {}
+
+  void bump() noexcept {
+    version_block_->fetch_add(1);
+  }
+
+  uint32_t current_version() const noexcept {
+    return version_block_->load();
+  }
+
+ private:
+  std::shared_ptr<std::atomic<uint32_t>> version_block_;
+};
+
 /**
  * The low-level representation of a tensor, which contains a pointer
  * to a storage (which contains the actual data) and metadata (e.g., sizes and
@@ -860,6 +889,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return impl;
   }
 
+  inline void set_version_counter(
+    const c10::VariableVersion& version_counter) noexcept {
+    version_counter_ = version_counter;
+  }
+
+  inline const c10::VariableVersion& version_counter() const noexcept {
+    return version_counter_;
+  }
+
+  inline void bump_version() noexcept {
+    version_counter_.bump();
+  }
+
  private:
   // As an optimization, get_device handles the typical CUDA Tensor case and
   // calls get_device_slow if the tensor stores its device somewhere else
@@ -1368,6 +1410,8 @@ protected:
   // at a time).
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
+  c10::VariableVersion version_counter_;
+
   // We could save a word or two by combining the SmallVector structs,
   // since their size is redundant, and if we need to overflow the buffer space
   // we could keep the two pointers together. However, that would require
@@ -1461,10 +1505,11 @@ protected:
 //    numel
 //    data type pointer
 //    autograd metadata pointer
+//    version counter
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 25,
+              sizeof(TensorImpl) == sizeof(int64_t) * 27,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 
