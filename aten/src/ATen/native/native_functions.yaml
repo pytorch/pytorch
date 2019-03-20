@@ -3713,6 +3713,13 @@
   matches_jit_signature: True
   variants: method, function
 
+- func: _trtrs_helper(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular) -> (Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: _trtrs_helper_cpu
+    CUDA: _trsm_helper_cuda
+
 - func: symeig(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   matches_jit_signature: True
 

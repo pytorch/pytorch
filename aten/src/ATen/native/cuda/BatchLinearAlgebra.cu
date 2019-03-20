@@ -85,20 +85,19 @@ void magmaCholeskyBatched(
   AT_ERROR("cholesky only takes float or double Tensors");
 }
 
-template<>
-void magmaSolveBatched<double>(
-    magma_int_t n, magma_int_t nrhs, double** dA_array, magma_int_t ldda,
-    magma_int_t** dipiv_array, double** dB_array, magma_int_t lddb,
-    magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
-  magma_dgesv_batched(n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, dinfo_array, batch_count, magma_queue.get_queue());
+template<class scalar_t>
+void magmaTrsm(
+    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
+    scalar_t* dA, magma_int_t ldda, scalar_t* dB, magma_int_t lddb) {
+  AT_ERROR("trtrs only takes float or double Tensors");
 }
 
-template<>
-void magmaSolveBatched<float>(
-    magma_int_t n, magma_int_t nrhs, float** dA_array, magma_int_t ldda,
-    magma_int_t** dipiv_array, float** dB_array, magma_int_t lddb,
-    magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
-  magma_sgesv_batched(n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, dinfo_array, batch_count, magma_queue.get_queue());
+template<class scalar_t>
+void magmaTrsmBatched(
+    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
+    scalar_t** dA_array, magma_int_t ldda, scalar_t** dB_array, magma_int_t lddb, magma_int_t batchsize,
+    const MAGMAQueue& magma_queue) {
+  AT_ERROR("trtrs only takes float or double Tensors");
 }
 
 template<>
@@ -113,6 +112,22 @@ void magmaSolve<float>(
     magma_int_t n, magma_int_t nrhs, float* dA, magma_int_t ldda,
     magma_int_t* ipiv, float* dB, magma_int_t lddb, magma_int_t* info) {
   magma_sgesv_gpu(n, nrhs, dA, ldda, ipiv, dB, lddb, info);
+}
+
+template<>
+void magmaSolveBatched<double>(
+    magma_int_t n, magma_int_t nrhs, double** dA_array, magma_int_t ldda,
+    magma_int_t** dipiv_array, double** dB_array, magma_int_t lddb,
+    magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
+  magma_dgesv_batched(n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, dinfo_array, batch_count, magma_queue.get_queue());
+}
+
+template<>
+void magmaSolveBatched<float>(
+    magma_int_t n, magma_int_t nrhs, float** dA_array, magma_int_t ldda,
+    magma_int_t** dipiv_array, float** dB_array, magma_int_t lddb,
+    magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
+  magma_sgesv_batched(n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, dinfo_array, batch_count, magma_queue.get_queue());
 }
 
 template<>
@@ -215,6 +230,36 @@ void magmaCholeskyBatched<float>(
     magma_uplo_t uplo, magma_int_t n, float** dA_array, magma_int_t ldda,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   magma_spotrf_batched(uplo, n, dA_array, ldda, info_array, batchsize, magma_queue.get_queue());
+}
+
+template<>
+void magmaTrsm<double>(
+    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
+    double* dA, magma_int_t ldda, double* dB, magma_int_t lddb) {
+  magma_dtrsm(MagmaLeft, uplo, trans, diag, m, n, 1, dA, ldda, dB, lddb);
+}
+
+template<>
+void magmaTrsm<float>(
+    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
+    float* dA, magma_int_t ldda, float* dB, magma_int_t lddb) {
+  magma_strsm(MagmaLeft, uplo, trans, diag, m, n, 1, dA, ldda, dB, lddb);
+}
+
+template<>
+void magmaTrsmBatched<double>(
+    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
+    double** dA_array, magma_int_t ldda, double** dB_array, magma_int_t lddb, magma_int_t batchsize,
+    const MAGMAQueue& magma_queue) {
+  magmablas_dtrsm_batched(MagmaLeft, uplo, trans, diag, m, n, 1, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
+}
+
+template<>
+void magmaTrsmBatched<float>(
+    magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
+    float** dA_array, magma_int_t ldda, float** dB_array, magma_int_t lddb, magma_int_t batchsize,
+    const MAGMAQueue& magma_queue) {
+  magmablas_strsm_batched(MagmaLeft, uplo, trans, diag, m, n, 1, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
 }
 #endif
 
@@ -554,6 +599,8 @@ std::tuple<Tensor, Tensor, Tensor> _btrifact_helper_cuda(const Tensor& self, boo
   return std::make_tuple(self_working_copy, pivots_tensor, infos_tensor);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 template <typename scalar_t, bool upper>
 __global__
 void triu_tril_kernel(
@@ -635,6 +682,59 @@ Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
   }
   Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
   return triu_tril_cuda_template<true>(result, self_c, k, "triu");
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ trsm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename scalar_t>
+static void apply_trsm(Tensor& b, Tensor& A, bool upper, bool transpose, bool unitriangular) {
+#ifndef USE_MAGMA
+AT_ERROR("cholesky_solve: MAGMA library not found in "
+    "compilation. Please rebuild with MAGMA.");
+#else
+  magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
+  magma_trans_t trans = transpose ? MagmaTrans : MagmaNoTrans;
+  magma_diag_t diag = unitriangular ? MagmaUnit : MagmaNonUnit;
+
+  auto A_data = A.data<scalar_t>();
+  auto b_data = b.data<scalar_t>();
+  magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
+  magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
+
+  if (b.dim() == 2) {
+    magmaTrsm<scalar_t>(uplo, trans, diag, n, nrhs, A_data, n, b_data, n);
+  } else {
+    auto A_mat_stride = matrixStride(A);
+    auto b_mat_stride = matrixStride(b);
+    magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
+
+    scalar_t** A_array;
+    scalar_t** b_array;
+
+    ALLOCATE_ARRAY(A_array, scalar_t*, batch_size, b);
+    ALLOCATE_ARRAY(b_array, scalar_t*, batch_size, b);
+
+    // Set up the created arrays
+    for (int64_t i = 0; i < batch_size; i++) {
+      A_array[i] = &A_data[i * A_mat_stride];
+      b_array[i] = &b_data[i * b_mat_stride];
+    }
+
+    MAGMAQueue magma_queue(b.get_device());
+    magmaTrsmBatched<scalar_t>(
+        uplo, trans, diag, n, nrhs, A_array, n,
+        b_array, n, batch_size, magma_queue);
+  }
+#endif
+}
+
+std::tuple<Tensor, Tensor> _trsm_helper_cuda(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
+  auto self_working_copy = cloneBatchedColumnMajor(self);
+  auto A_working_copy = cloneBatchedColumnMajor(A);
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "trsm_cuda", [&]{
+    apply_trsm<scalar_t>(self_working_copy, A_working_copy, upper, transpose, unitriangular);
+  });
+  return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
 
 }}  // namespace at::native
