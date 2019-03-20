@@ -219,18 +219,20 @@ auto Engine::thread_init(int device) -> void {
   //  - We can allocate threads equal to sum(num_cuda_devices, num_xla_devices,
   //    ...) keeping everyone separate.
   //
-  // We don't have any good reason to prefer one or the other, but for
-  // historical reasons we refer to devices by int and not Device, so
-  // the former is more convenient to do, and so that's what we do.
+  // We don't have any good reason to prefer one or the other, so we've
+  // arbitrarily picked to colocate devices.  Maybe the other approach is
+  // better.
   //
   // NB: We MUST NOT construct the guard for device -1,
   // as in some settings we compile with cuda, but
   // have lazy stubs for CUDA functionality (so actually
   // attempting to setup a guard(-1) will cause an
   // error, because it will still query cudaGetDevice).
+  //
   // NB: These are not OptionalCUDAGuard/etc because engine.cpp
   // is built as part of the CPU-only library; so we need to
   // dynamic dispatch.
+  //
   // NB: We need an array here since neither DeviceGuard nor OptionalDeviceGuard
   // are movable.
   std::array<c10::OptionalDeviceGuard,
@@ -299,7 +301,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
         if (--task.base->outstanding_tasks == 0) {
           // Synchronize outstanding_tasks with queue mutex
           std::atomic_thread_fence(std::memory_order_release);
-          ready_queue(base_owner).push(FunctionTask(task.base, nullptr, InputBuffer(0)));
+          ready_queue_by_index(base_owner).push(FunctionTask(task.base, nullptr, InputBuffer(0)));
         }
       }
     }
@@ -375,7 +377,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
       ss << metadata.type() << " but got " << grads[i].type();
       AT_ERROR(format_error(ss.str()));
     }
-    const int output_device = unsound_get_device_idx(output);
+    auto output_device = output.device();
     if (output_device != metadata.device()) {
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected device ";
@@ -580,7 +582,7 @@ auto Engine::execute(const edge_list& roots,
   if (!outputs.empty()) {
     graph_task.init_to_execute(*graph_root, outputs);
   }
-  ready_queue(-1).push(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));
+  ready_queue(at::kCPU).push(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));
 
   // Not a worker
   if (worker_device == NO_DEVICE) {
@@ -650,8 +652,20 @@ bool Engine::is_checkpoint_valid() {
   return checkpoint_valid;
 }
 
-auto Engine::ready_queue(int device) -> ReadyQueue& {
-  return *ready_queues.at(device + 1);
+auto Engine::ready_queue(at::Device device) -> ReadyQueue& {
+  // See Note [Allocating GPUs to autograd threads]
+  if (device.type() == at::kCPU) {
+    return *ready_queues.at(0);
+  } else {
+    return *ready_queues.at(device.index() + 1);
+  }
+}
+
+// See Note [Allocating GPUs to autograd threads]
+// NB: This would become obsolete if we truly allocated a CPU thread
+// per device, rather than colocate.
+auto Engine::ready_queue_by_index(int device_index) -> ReadyQueue& {
+  return *ready_queues.at(device_index + 1);
 }
 
 auto Engine::start_threads() -> void {

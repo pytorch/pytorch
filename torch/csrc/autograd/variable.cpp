@@ -164,10 +164,7 @@ void Variable::Impl::set_data(const at::Tensor &new_data) {
   auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
   if (prior_accumulator) {
     const auto prior_device = prior_accumulator->input_metadata(0).device();
-    // TODO: THIS IS WRONG.  WE WILL FAIL TO DETECT IF A GRAD ACCUMULATOR
-    // MOVES FROM CUDA DEVICE 1 TO XLA DEVICE 1.  When you fix metadata
-    // to store a real Device you will be able to do this check correctly.
-    const auto new_device = unsound_get_device_idx(new_data);
+    const auto new_device = new_data.device();
 
     if (new_data.type() != data_.type() || prior_device != new_device) {
       autograd_meta->grad_accumulator_.reset();
@@ -220,9 +217,7 @@ const std::shared_ptr<Function>& Variable::grad_fn() const {
       fn->add_input_metadata(
         diff_view_meta->base_.type()
       , sizes() // Note: sizes(), not base_.sizes(), is intentional
-      // TODO: stop throwing away useful device information here!
-      // Delay the autograd thread assignment to later.
-      , unsound_get_device_idx(diff_view_meta->base_));
+      , diff_view_meta->base_.device());
       diff_view_meta->grad_fn_ = std::move(fn);
       diff_view_meta->attr_version = current_version;
     }
