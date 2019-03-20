@@ -401,7 +401,8 @@ struct Environment {
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
-          {"rangelist", std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
+          {"rangelist",
+           std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
       };
       auto it = globals.find(ident);
       if (it != globals.end()) {
@@ -991,21 +992,28 @@ struct to_ir {
     const auto first_bool_info = findRefinements(first_expr);
     Value* first_value = emitCond(Expr(first_expr));
 
+    // if the condition is returned, then in an or expression it is false
+    // and in an and expr it is false. inserting constant makes optimization
+    // easier
+    Value* condition_returned;
+
     const Refinements* first_expr_refinements;
     const Refinements* second_expr_refinements;
     // if it's an OR the first expr is emitted in the true branch
     // and the second expr in the false branch, if it's an AND the opposite
     if (is_or) {
+      condition_returned = graph->insertConstant(true, nullptr, loc);
       first_expr_refinements = &first_bool_info.true_refinements_;
       second_expr_refinements = &first_bool_info.false_refinements_;
     } else {
+      condition_returned = graph->insertConstant(false, nullptr, loc);
       first_expr_refinements = &first_bool_info.false_refinements_;
       second_expr_refinements = &first_bool_info.true_refinements_;
     }
 
     auto get_first_expr = [&] {
       insertRefinements(*first_expr_refinements);
-      return first_value;
+      return condition_returned;
     };
 
     auto get_second_expr = [&] {
@@ -2045,7 +2053,8 @@ struct to_ir {
         throw ErrorReport(loc) << "Only one argument to __new__ allowed";
       }
       return classNew->createObject(
-          apply.range(), method, Var(apply.inputs()[0]).name().name());;
+          apply.range(), method, Var(apply.inputs()[0]).name().name());
+      ;
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());

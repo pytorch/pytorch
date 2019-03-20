@@ -1859,6 +1859,106 @@ class TestJit(JitTestCase):
         # testing that 1 // 0 error is not thrownn
         self.run_pass('constant_propagation', constant_prop.graph)
 
+    def test_short_circuit_optimization(self):
+        @torch.jit.script
+        def const_expressions(x):
+            # type: (int) -> Tuple[bool, bool]
+            return x == 1 and False, x == 1 or True
+        self.run_pass('constant_propagation', const_expressions.graph)
+        FileCheck().check_not("prim::If").check_not("aten::eq").run(const_expressions.graph)
+        self.assertEqual(const_expressions(1), (False, True))
+
+        @torch.jit.script
+        def redundant_expressions(x):
+            # type: (int) -> Tuple[bool, bool]
+            return x == 1 and True, x == 1 or False
+
+        self.run_pass('peephole', redundant_expressions.graph)
+        self.assertTrue(redundant_expressions(1), (True, True))
+        self.assertTrue(redundant_expressions(0), (False, False))
+        # and True / or False are removed from graph
+        FileCheck().check("aten::eq").check_not("prim::If").run(redundant_expressions.graph)
+
+    def test_peephole_optimize_shape_ops(self):
+        def test_input(func, input, result):
+            self.assertEqual(func(input), result)
+            gre = func.graph_for(input)
+            FileCheck().check_not("prim::If").run(gre)
+
+        def test_dim():
+            @torch.jit.script
+            def func(x):
+                if x.dim() == 1:
+                    return 1
+                else:
+                    return 2
+
+            test_input(func, torch.tensor([0.5]), 1)
+            test_input(func, torch.tensor([[0.5]]), 2)
+        test_dim()
+
+        def test_dtype():
+            @torch.jit.script
+            def func(x):
+                if x.dtype == torch.float32:
+                    return 1
+                else:
+                    return 2
+
+            test_input(func, torch.tensor(0.5, dtype=torch.float32), 1)
+            test_input(func, torch.tensor(0.5, dtype=torch.int64), 2)
+        test_dtype()
+
+        def test_dtype():
+            @torch.jit.script
+            def func(x):
+                if x.dtype == torch.float32:
+                    return 1
+                else:
+                    return 2
+
+            test_input(func, torch.tensor(0.5, dtype=torch.float32), 1)
+            test_input(func, torch.tensor(0.5, dtype=torch.int64), 2)
+        test_dtype()
+
+        if not RUN_CUDA:
+            return
+
+        def test_device():
+            @torch.jit.script
+            def func(x):
+                if x.dtype == torch.device('cuda:0'):
+                    a = 0
+                else:
+                    a = 1
+                if x.is_cuda():
+                    a += 1
+                else:
+                    a += 2
+
+            test_input(func, torch.tensor(0.5).cuda(), 1)
+            test_input(func, torch.tensor(0.5), 3)
+        test_device()
+
+    def test_unwrap_tensor_peephole_optimize(self):
+        @torch.jit.script
+        def test(x):
+            # type: (Optional[Tensor]) -> int
+            if x is not None:
+                return 1
+            else:
+                return 2
+
+        @torch.jit.script
+        def func(x):
+            return test(x) + 1
+        a = torch.tensor(0.5)
+
+        # TODO - investigate why shape analysis doesn't propagate on optional inputs
+        self.assertEqual(func(torch.tensor(0.5)), 2)
+        gre = func.graph_for(a)
+        FileCheck().check_not("prim::If").run(gre)
+
     def test_trace_records_names(self):
         def foo(bar, baz):
             baz = bar + 3
