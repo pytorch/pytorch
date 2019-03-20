@@ -64,15 +64,6 @@ static inline Backend toDense(Backend b) {
   }
 }
 
-static inline Backend toMkldnn(Backend b) {
-  switch (b) {
-    case Backend::CPU:
-      return Backend::MkldnnCPU;
-    default:
-      throw std::runtime_error("Unknown backend");
-  }
-}
-
 static inline Backend tensorTypeIdToBackend(TensorTypeId t) {
   if (t == CPUTensorId()) {
     return Backend::CPU;
