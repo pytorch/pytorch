@@ -83,10 +83,13 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
 }
 
 Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double eps) {
+  // Follow scipy impl to improve numerical precision
+  // Use x / sqrt(x * x) instead of x / (sqrt(x) * sqrt(x))
   Tensor w12 = at::sum(x1 * x2, dim);
-  Tensor w1 = at::norm(x1, 2, dim);
-  Tensor w2 = at::norm(x2, 2, dim);
-  return w12.div_((w1 * w2).clamp_min_(eps));
+  Tensor w1 = at::sum(x1 * x1, dim);
+  Tensor w2 = at::sum(x2 * x2, dim);
+  Tensor n12 = (w1 * w2).rsqrt_().clamp_max(1.0 / eps);
+  return w12.mul_(n12);
 }
 
 }}  // namespace at::native
