@@ -989,7 +989,7 @@ class ShapePropagator {
               return {type->withDim(0)};
             } else {
               return multidim_reduce_with_postprocess(
-                  node, /*num_reduce_dim=*/1, /*integer_upcast=*/false);
+                  node, /*num_reduced_dim=*/1, /*upcast_integer=*/false);
             }
           }
           return {};
