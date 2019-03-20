@@ -14016,7 +14016,7 @@ class TestLogging(JitTestCase):
                     torch.jit._logging.add_stat_value('negative', 1.0)
                 return x
 
-        torch.jit._logging.set_locking_logger()
+        torch.jit._logging.set_logger(torch.jit._logging.LockingLogger())
 
         mtl = ModuleThatLogs()
         for i in range(5):
@@ -14033,7 +14033,7 @@ class TestLogging(JitTestCase):
             return x + 1.0
 
         traced = torch.jit.trace(foo, torch.rand(3, 4))
-        torch.jit._logging.set_locking_logger()
+        torch.jit._logging.set_logger(torch.jit._logging.LockingLogger())
         traced(torch.rand(3, 4))
 
         counters = torch.jit._logging.get_counters()
@@ -14049,7 +14049,7 @@ class TestLogging(JitTestCase):
                 return x
 
         mtm = ModuleThatTimes()
-        torch.jit._logging.set_locking_logger()
+        torch.jit._logging.set_logger(torch.jit._logging.LockingLogger())
         mtm(torch.rand(3, 4))
         counters = torch.jit._logging.get_counters()
         self.assertTrue('mytimer' in counters)
@@ -14065,10 +14065,23 @@ class TestLogging(JitTestCase):
                 return x
 
         mtm = ModuleThatTimes()
-        torch.jit._logging.set_locking_logger()
+        torch.jit._logging.set_logger(torch.jit._logging.LockingLogger())
         mtm(torch.rand(3, 4))
         counters = torch.jit._logging.get_counters()
         self.assertTrue('mytimer' in counters)
+
+    def test_counter_aggregation(self):
+        def foo(x):
+            for i in range(3):
+                torch.jit._logging.add_stat_value('foo', 1.0)
+            return x + 1.0
+
+        traced = torch.jit.trace(foo, torch.rand(3, 4))
+        torch.jit._logging.set_logger(torch.jit._logging.LockingLogger())
+        traced(torch.rand(3, 4))
+
+        counters = torch.jit._logging.get_counters()
+        self.assertEqual(counters['foo'], 1.0)
 
 
 for test in autograd_method_tests():

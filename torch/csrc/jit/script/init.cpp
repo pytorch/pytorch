@@ -1109,10 +1109,22 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_logging_get_counters", []() {
     return logging::getLogger()->getCounters();
   });
-  m.def("_logging_set_locking_logger", []() {
-    logging::setLogger(std::make_shared<logging::LockingLogger>());
+  m.def("_logging_set_logger", [](std::shared_ptr<logging::LoggerBase> logger) {
+    logging::setLogger(logger);
   });
-  
+  py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
+      m, "LoggerBase");
+  py::class_<
+      logging::LockingLogger,
+      logging::LoggerBase,
+      std::shared_ptr<logging::LockingLogger>>(m, "LockingLogger")
+      .def(py::init<>());
+  py::class_<
+      logging::NoopLogger,
+      logging::LoggerBase,
+      std::shared_ptr<logging::NoopLogger>>(m, "NoopLogger")
+      .def(py::init<>());
+
   py::class_<logging::JITTimePoint>(m, "JITTimePoint");
   m.def("_logging_time_point", logging::timePoint);
   m.def("_logging_record_duration_since", logging::recordDurationSince);
