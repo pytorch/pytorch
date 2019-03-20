@@ -231,7 +231,7 @@ void fractional_max_pool3d_out_cuda_template(
     dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.type(),
+      input.scalar_type(),
       "fractional_max_pool3d_out_frame",
       [&]{
         fractional_max_pool3d_out_frame<scalar_t>
@@ -321,7 +321,7 @@ void fractional_max_pool3d_backward_out_cuda_template(
     dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      gradOutput.type(),
+      gradOutput.scalar_type(),
       "fractional_max_pool3d_backward_out_frame",
       [&] {
         fractional_max_pool3d_backward_out_frame<scalar_t>

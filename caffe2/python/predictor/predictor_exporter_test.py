@@ -100,6 +100,9 @@ class PredictorExporterTest(unittest.TestCase):
 
         extra_init_net = core.Net('extra_init')
         extra_init_net.ConstantFill('data', 'data', value=1.0)
+
+        global_init_net = core.Net('global_init')
+        global_init_net.ConstantFill(None, 'global_init_blob', value=1.0, shape=[1, 5])
         pem = pe.PredictorExportMeta(
             predict_net=self.predictor_export_meta.predict_net,
             parameters=self.predictor_export_meta.parameters,
@@ -107,6 +110,7 @@ class PredictorExporterTest(unittest.TestCase):
             outputs=self.predictor_export_meta.outputs,
             shapes=self.predictor_export_meta.shapes,
             extra_init_net=extra_init_net,
+            global_init_net=global_init_net,
             net_type='dag',
         )
 
@@ -142,10 +146,16 @@ class PredictorExporterTest(unittest.TestCase):
         np.testing.assert_array_equal(
             workspace.FetchBlob("y"), np.zeros(shape=(1, 10)))
 
+        self.assertTrue("global_init_blob" not in workspace.Blobs())
         # Load parameters from DB
         global_init_net = pred_utils.GetNet(meta_net_def,
                                             pc.GLOBAL_INIT_NET_TYPE)
         workspace.RunNetOnce(global_init_net)
+
+        # make sure the extra global_init_net is running
+        self.assertTrue(workspace.HasBlob('global_init_blob'))
+        np.testing.assert_array_equal(
+            workspace.FetchBlob("global_init_blob"), np.ones(shape=(1, 5)))
 
         # Run the net with a reshaped input and verify we are
         # producing good numbers (with our custom implementation)

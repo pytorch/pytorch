@@ -9,7 +9,7 @@ __global__ void MaxUnpoolForward(const int nthreads, const Dtype* bottom_data, c
     int c = (index / iwidth / iheight) % channels;
     int n = index / iwidth / iheight / channels;
     top_data += (n*channels + c)*oheight*owidth;
-    int maxind = bottom_mask[index] - TH_INDEX_BASE;
+    int maxind = bottom_mask[index];
 
     top_data[maxind] = bottom_data[index];
   }
@@ -22,7 +22,7 @@ __global__ void MaxUnpoolBackward(const int nthreads, const Dtype* top_diff, con
     int c = (index / iwidth / iheight) % channels;
     int n = index / iwidth / iheight / channels;
     top_diff += (n*channels + c)*oheight*owidth;
-    int maxind = bottom_mask[index] - TH_INDEX_BASE;
+    int maxind = bottom_mask[index];
 
     bottom_diff[index] = top_diff[maxind];
   }

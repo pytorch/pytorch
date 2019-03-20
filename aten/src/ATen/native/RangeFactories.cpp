@@ -21,7 +21,7 @@ Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
   } else if (steps == 1) {
     r.fill_(start);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(r.type(), "linspace", [&]() {
+    AT_DISPATCH_FLOATING_TYPES(r.scalar_type(), "linspace_cpu", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
       scalar_t *data_ptr = r.data<scalar_t>();
@@ -54,7 +54,7 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
   } else if (steps == 1) {
     r.fill_(std::pow(10.0, start.to<double>()));
   } else {
-    AT_DISPATCH_FLOATING_TYPES(r.type(), "logspace", [&]() {
+    AT_DISPATCH_FLOATING_TYPES(r.scalar_type(), "logspace_cpu", [&]() {
       scalar_t base10 = 10;
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
@@ -76,7 +76,7 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
 }
 
 Tensor& range_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
-  AT_DISPATCH_ALL_TYPES(result.type(), "range", [&]() {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "range_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();
@@ -110,7 +110,7 @@ Tensor& range_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 }
 
 Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
-  AT_DISPATCH_ALL_TYPES(result.type(), "arange", [&]() {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "arange_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();

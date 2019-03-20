@@ -356,18 +356,18 @@ DELEGATE_SCALE(float, double, cblas_dscal)
 // Eigen or via custom code.
 ////////////////////////////////////////////////////////////////////////////////
 
-#define CAFFE2_SPECIALIZED_SET(T)                                    \
-  template <>                                                        \
-  C10_EXPORT void Set<T, CPUContext>(                                \
-      const int N, const T alpha, T* Y, CPUContext* /* context */) { \
-    if (N == 0) {                                                    \
-      return;                                                        \
-    }                                                                \
-    if (alpha == T(0)) {                                             \
-      std::memset(Y, 0, N * sizeof(T));                              \
-    } else {                                                         \
-      EigenVectorArrayMap<T>(Y, N).setConstant(alpha);               \
-    }                                                                \
+#define CAFFE2_SPECIALIZED_SET(T)                                             \
+  template <>                                                                 \
+  C10_EXPORT void Set<T, CPUContext>(                                         \
+      const std::int64_t N, const T alpha, T* Y, CPUContext* /* context */) { \
+    if (N == 0) {                                                             \
+      return;                                                                 \
+    }                                                                         \
+    if (alpha == T(0)) {                                                      \
+      std::memset(Y, 0, N * sizeof(T));                                       \
+    } else {                                                                  \
+      EigenVectorArrayMap<T>(Y, N).setConstant(alpha);                        \
+    }                                                                         \
   }
 CAFFE2_SPECIALIZED_SET(float)
 CAFFE2_SPECIALIZED_SET(double)

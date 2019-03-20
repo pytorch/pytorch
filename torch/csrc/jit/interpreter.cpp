@@ -13,7 +13,7 @@
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/jit_exception.h>
-#include <ATen/core/thread_pool.h>
+#include <c10/core/thread_pool.h>
 
 #include <exception>
 #include <iostream>

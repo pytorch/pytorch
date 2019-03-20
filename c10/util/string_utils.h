@@ -3,8 +3,6 @@
 #include <sstream>
 #include <string>
 
-using std::string;
-
 namespace c10 {
 
 // to_string, stoi and stod implementation for Android related stuff.
@@ -19,7 +17,7 @@ std::string to_string(T value) {
   return os.str();
 }
 
-inline int stoi(const string& str) {
+inline int stoi(const std::string& str) {
   std::stringstream ss;
   int n = 0;
   ss << str;
@@ -27,7 +25,7 @@ inline int stoi(const string& str) {
   return n;
 }
 
-inline uint64_t stoull(const string& str) {
+inline uint64_t stoull(const std::string& str) {
   std::stringstream ss;
   uint64_t n = 0;
   ss << str;
@@ -35,7 +33,7 @@ inline uint64_t stoull(const string& str) {
   return n;
 }
 
-inline double stod(const string& str, std::size_t* pos = 0) {
+inline double stod(const std::string& str, std::size_t* pos = 0) {
   std::stringstream ss;
   ss << str;
   double val = 0;

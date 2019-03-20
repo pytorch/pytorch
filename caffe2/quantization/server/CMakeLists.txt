@@ -3,6 +3,7 @@ set(caffe2_dnnlowp_avx2_ops_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/elementwise_sum_dnnlowp_op_avx2.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/fully_connected_fake_lowp_op_avx2.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/group_norm_dnnlowp_op_avx2.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/pool_dnnlowp_op_avx2.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/relu_dnnlowp_op_avx2.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/transpose.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/norm_minimization_avx2.cc")
@@ -58,7 +59,7 @@ list(APPEND Caffe2_CPU_SRCS
   #"${CMAKE_CURRENT_SOURCE_DIR}/sigmoid_test.cc")
   #"${CMAKE_CURRENT_SOURCE_DIR}/tanh_test.cc")
 
-if (NOT MSVC)
+if (NOT MSVC AND CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   add_library(caffe2_dnnlowp_avx2_ops OBJECT ${caffe2_dnnlowp_avx2_ops_SRCS})
   add_dependencies(caffe2_dnnlowp_avx2_ops fbgemm Caffe2_PROTO c10)
   target_include_directories(caffe2_dnnlowp_avx2_ops BEFORE

@@ -21,8 +21,19 @@ struct OnnxifiTransformerOptions {
 
   // Dump onnx model for debugging
   bool debug{false};
+
   // Pass serialized onnx model if true, otherwise pass serialized c2 model
   bool use_onnx{true};
+
+  // Whether to attach AdjustBatch ops or not. In order to maintain static
+  // shapes to the backend, most of the time, we need to add AdjustBatch ops to
+  // the inputs/outputs of the Onnxifi op. But if backend itself supports max
+  // batch size, we don't need to do it.
+  bool add_adjust_batch_ops{true};
+
+  // Minimum number of ops to create an onnxifi op. If the subgraph is too
+  // small, it doesn't make sense to lower it to backend.
+  size_t min_ops{1};
 
   // Bound shape spec
   BoundShapeSpec bound_shape_spec;
@@ -51,8 +62,7 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const std::unordered_set<std::string>& weights_in_ws,
       Workspace* ws,
       onnx::OnnxExporter* exporter,
-      ShapeInfoMap* shape_hints,
-      std::unordered_map<std::string, TensorShape>* shape_hints_onnx);
+      ShapeInfoMap* shape_hints);
 
   // Convert a cutoff subgraph net to an Onnxifi op
   caffe2::NetDef SubnetToOnnxifiOpViaC2(
@@ -83,6 +93,37 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const std::unordered_set<int>& blacklisted_ops,
       ShapeInfoMap* shape_hints);
 
+  // Query whether an operator is supported by passing C2 protobuf
+  bool supportOpC2(
+      const caffe2::OperatorDef& op,
+      const ShapeInfoMap& shape_hints,
+      const std::unordered_set<int>& blacklisted_ops,
+      onnxBackendID backend_id) const;
+
+  // Query whether an operator is supported by passing ONNX protobuf
+  bool supportOpOnnx(
+      const caffe2::OperatorDef& op,
+      onnx::OnnxExporter* exporter,
+      const std::unordered_set<int>& blacklisted_ops,
+      onnxBackendID backend_id) const;
+
+  // Tie the output of Gather to the scalar weight input of the
+  // SparseLengthsWeighted* op. If the latter is disabled, disable the former
+  // too.
+  void tieGatherAndSparseLengthsWeightedSumOps(
+      const NetDef& net,
+      const ShapeInfoMap& shape_hints,
+      std::unordered_set<int>* blacklisted_ops) const;
+
+  // Rule based filtering
+  void applyFilteringRules(
+      const NetDef& net,
+      const ShapeInfoMap& shape_hints,
+      std::unordered_set<int>* blacklisted_ops) const;
+
+  // Determine backend id
+  void getBackendId();
+
   // Options
   OnnxifiTransformerOptions opts_;
 
@@ -103,5 +144,8 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
 
   // Backned IDs
   std::vector<onnxBackendID> backend_ids_;
+
+  // A cache for ONNX shape hints
+  std::unordered_map<std::string, TensorShape> shape_hints_onnx_;
 };
 } // namespace caffe2

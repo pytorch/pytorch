@@ -34,14 +34,14 @@ int THTensor_(nDimensionLegacyAll)(const THTensor *self)
 int64_t THTensor_(size)(const THTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->dim()), 2, "dimension %d out of range of %dD tensor",
-      dim+TH_INDEX_BASE, THTensor_(nDimensionLegacyNoScalars)(self));
+      dim, THTensor_(nDimensionLegacyNoScalars)(self));
   return self->size(dim);
 }
 
 int64_t THTensor_(stride)(const THTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->dim()), 2, "dimension %d out of range of %dD tensor",
-      dim+TH_INDEX_BASE, THTensor_(nDimensionLegacyNoScalars)(self));
+      dim, THTensor_(nDimensionLegacyNoScalars)(self));
   return self->stride(dim);
 }
 
@@ -430,28 +430,23 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
 /* we have to handle the case where the result is a number */
 void THTensor_(squeeze)(THTensor *self, THTensor *src)
 {
-  int ndim = 0;
-  int d;
-
   if(!src)
     src = self;
 
   THTensor_(set)(self, src);
 
-  for(d = 0; d < src->dim(); d++)
+  std::vector<int64_t> newSize;
+  std::vector<int64_t> newStride;
+  for(int d = 0; d < src->dim(); ++d)
   {
     if(src->size(d) != 1)
     {
-      if(d != ndim)
-      {
-        self->set_size(ndim, src->size(d));
-        self->set_stride(ndim, src->stride(d));
-      }
-      ndim++;
+      newSize.push_back(src->size(d));
+      newStride.push_back(src->stride(d));
     }
   }
 
-  self->resize_dim(ndim);
+  self->set_sizes_and_strides(newSize, newStride);
 }
 
 void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
@@ -467,12 +462,20 @@ void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
 
   if(src->size(dimension) == 1)
   {
+    std::vector<int64_t> newSize(self->dim() - 1);
+    std::vector<int64_t> newStride(self->dim() - 1);
+    for (d = 0; d < dimension; d++)
+    {
+      newSize[d] = self->size(d);
+      newStride[d] = self->stride(d);
+    }
+
     for(d = dimension; d < self->dim()-1; d++)
     {
-      self->set_size(d, self->size(d+1));
-      self->set_stride(d, self->stride(d+1));
+      newSize[d] = self->size(d+1);
+      newStride[d] = self->stride(d+1);
     }
-    self->resize_dim((unsigned int)(self->dim() - 1));
+    self->set_sizes_and_strides(newSize, newStride);
   }
 }
 

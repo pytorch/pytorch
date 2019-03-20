@@ -11,8 +11,9 @@ template <class Context>
 class EnsureCPUOutputOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  EnsureCPUOutputOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit EnsureCPUOutputOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     if (this->InputIsTensorType(0, CPU)) {

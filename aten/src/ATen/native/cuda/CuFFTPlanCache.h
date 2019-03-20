@@ -37,7 +37,7 @@ static inline void setCuFFTParams(CuFFTParams* params,
     bool complex_output, IntArrayRef checked_signal_sizes, bool onesided) {
 
   memset(params, 0, sizeof(CuFFTParams));
-  params->scalar_type_ = input.type().scalarType();
+  params->scalar_type_ = input.scalar_type();
   for (int i = 0; i != input.dim(); ++i) {
     params->input_sizes_[i] = input.size(i);
     if (input.size(i) != 1) {
@@ -106,7 +106,7 @@ public:
     // For half, base strides on the real part of real-to-complex and
     // complex-to-real transforms are not supported. Since our output is always
     // contiguous, only need to check real-to-complex case.
-    if (input.type().scalarType() == ScalarType::Half) {
+    if (input.scalar_type() == ScalarType::Half) {
       // cuFFT on half requires compute capability of at least SM_53
       auto dev_prop = at::cuda::getCurrentDeviceProperties();
       AT_CHECK(dev_prop->major >= 5 && !(dev_prop->major == 5 && dev_prop->minor < 3),
@@ -196,7 +196,7 @@ public:
 #ifdef __HIP_PLATFORM_HCC__
 
     hipfftType exec_type;
-    if (input.type().scalarType() == ScalarType::Float) {
+    if (input.scalar_type() == ScalarType::Float) {
       if (complex_input && complex_output) {
         exec_type = HIPFFT_C2C;
       } else if (complex_input && !complex_output) {
@@ -206,7 +206,7 @@ public:
       } else {
         AT_ERROR("hipFFT doesn't support r2r (float)");
       }
-    } else if (input.type().scalarType() == ScalarType::Double) {
+    } else if (input.scalar_type() == ScalarType::Double) {
       if (complex_input && complex_output) {
         exec_type = HIPFFT_Z2Z;
       } else if (complex_input && !complex_output) {
@@ -219,28 +219,28 @@ public:
     } else {
       std::ostringstream ss;
       ss << "hipFFT doesn't support tensor of type: "
-         << toString(input.type().scalarType());
+         << toString(input.scalar_type());
       AT_ERROR(ss.str());
     }
 
 #else
     cudaDataType itype, otype, exec_type;
-    if (input.type().scalarType() == ScalarType::Float) {
+    if (input.scalar_type() == ScalarType::Float) {
       itype = complex_input ? CUDA_C_32F : CUDA_R_32F;
       otype = complex_output ? CUDA_C_32F : CUDA_R_32F;
       exec_type = CUDA_C_32F;
-    } else if (input.type().scalarType() == ScalarType::Double) {
+    } else if (input.scalar_type() == ScalarType::Double) {
       itype = complex_input ? CUDA_C_64F : CUDA_R_64F;
       otype = complex_output ? CUDA_C_64F : CUDA_R_64F;
       exec_type = CUDA_C_64F;
-    } else if (input.type().scalarType() == ScalarType::Half) {
+    } else if (input.scalar_type() == ScalarType::Half) {
       itype = complex_input ? CUDA_C_16F : CUDA_R_16F;
       otype = complex_output ? CUDA_C_16F : CUDA_R_16F;
       exec_type = CUDA_C_16F;
     } else {
       std::ostringstream ss;
       ss << "cuFFT doesn't support tensor of type: "
-         << toString(input.type().scalarType());
+         << toString(input.scalar_type());
       AT_ERROR(ss.str());
     }
 #endif
