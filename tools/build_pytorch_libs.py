@@ -222,7 +222,7 @@ def run_cmake(version,
     # According to the CMake manual, we should pass the arguments first,
     # and put the directory as the last element. Otherwise, these flags
     # may not be passed correctly.
-    # Reference: 
+    # Reference:
     # 1. https://cmake.org/cmake/help/latest/manual/cmake.1.html#synopsis
     # 2. https://stackoverflow.com/a/27169347
     cmake_args.append(base_dir)
