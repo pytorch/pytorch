@@ -114,6 +114,45 @@ static std::unique_ptr<TensorIterator> make_reduction(
   return TensorIterator::reduce_op(viewed_result, self.to(dtype));
 }
 
+static std::unique_ptr<TensorIterator> make_reduction(
+    const char* name, Tensor& result1, Tensor& result2, const Tensor& self, IntArrayRef dim,
+    bool keepdim, ScalarType dtype)
+{
+  // check that result type and dtype match if provided
+  AT_CHECK(
+      !result1.defined() || result1.type().scalarType() == dtype,
+      name, ": provided dtype must match dtype of result. Got ",
+      toString(result1.type().scalarType()),
+      " and ",
+      toString(dtype),
+      ".");
+
+  AT_CHECK(
+      !result2.defined() || result2.type().scalarType() == dtype,
+      name, ": provided dtype must match dtype of result. Got ",
+      toString(result2.type().scalarType()),
+      " and ",
+      toString(dtype),
+      ".");
+  int64_t ndim = self.dim();
+  auto mask = make_dim_mask(dim, ndim);
+  allocate_reduction_result(result1, self, mask, keepdim, dtype);
+  auto viewed_result1 = review_reduce_result(result1, ndim, mask, keepdim);
+
+  allocate_reduction_result(result2, self, mask, keepdim, dtype);
+  auto viewed_result2 = review_reduce_result(result2, ndim, mask, keepdim);
+
+  // special case for type promotion in mixed precision, improves computational
+  // efficiency.
+  // not generalize this to common mismatched input/output types to avoid cross
+  // product of templated kernel launches.
+  if (self.type().scalarType() == dtype ||
+      (self.is_cuda() && self.type().scalarType() == kHalf && dtype == kFloat)) {
+    return TensorIterator::reduce_op(viewed_result1, viewed_result2, self);
+  }
+  return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype));
+}
+
 static inline int64_t n_dim_size(const Tensor& self, IntArrayRef dim) {
   int64_t numel = 1;
   for (auto d : dim) {
@@ -648,7 +687,8 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
            "std and var only support CPU AND CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "std and var only support floating-point dtypes");
   ScalarType dtype = get_dtype(result, self, {}, true);
-  auto iter = make_reduction("std or var", result, self, dim, keepdim, dtype);
+  Tensor result2 = at::empty({0}, self.options());
+  auto iter = make_reduction2("std or var", result, result2, self, dim, keepdim, dtype);
   if (iter->numel() == 0) {
     result.fill_(NAN);
   } else {

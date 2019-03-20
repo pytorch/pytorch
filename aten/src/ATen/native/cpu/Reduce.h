@@ -82,12 +82,13 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
     std::is_default_constructible<acc_t>::value,
     "the accumulate type must be default-constructible"
   );
+  const auto num_outputs = iter.outputs();
   iter.foreach_reduced_elt([&](TensorIterator &sub_iter) {
     auto reduction_body = [&](acc_t acc, int64_t begin, int64_t end) -> acc_t {
       sub_iter.serial_for_each([&acc, &ops](int ntensors, char** data, const int64_t* strides, int64_t size) {
-        AT_ASSERT(ntensors == 2);
-        char *in = data[1];
-        int64_t stride = strides[1];
+        AT_ASSERT(ntensors - num_outputs == 1);
+        char *in = data[ntensors - 1];
+        int64_t stride = strides[ntensors - 1];
         for (int64_t i = 0; i < size; ++i) {
           acc = ops.reduce(acc, *(data_t*)in);
           in += stride;
@@ -117,8 +118,11 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
         total_acc = ops.combine(total_acc, buffer[i]);
       }
     }
-    char *out = (char *)sub_iter.data_ptr(0);
-    *(data_t*)out = ops.project(total_acc);
+
+    for (int i = 0; i < num_outputs; i++) {
+      char *out = (char *)sub_iter.data_ptr(i);
+      *(data_t*)out = ops.project2(total_acc, i);
+    }
   });
 }
 

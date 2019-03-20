@@ -479,6 +479,19 @@ std::unique_ptr<TensorIterator> TensorIterator::binary_op(Tensor& out, const Ten
   return builder.build();
 }
 
+std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
+  AT_ASSERT(out1.defined());
+  AT_ASSERT(out2.defined());
+  auto builder = TensorIterator::Builder();
+  builder.add_output(out1);
+  builder.add_output(out2);
+  builder.add_input(a);
+  builder.iter_->promote_gpu_output_dtypes_ = true;
+  builder.iter_->resize_outputs_ = false;
+  builder.iter_->is_reduction_ = true;
+  return builder.build();
+}
+
 std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   AT_ASSERT(out.defined());
   auto builder = TensorIterator::Builder();

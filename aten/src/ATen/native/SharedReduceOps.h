@@ -80,6 +80,18 @@ struct WelfordOps {
       : NAN;
     return (scalar_t) ret;
   }
+
+  inline C10_DEVICE scalar_t project2(acc_t acc, int value = 0) const {
+    AT_ASSERT(value == 0 || value == 1);
+    if (value == 1) {
+      return acc.mean;
+    }
+    int64_t divisor = unbiased ? (acc.n - 1) : acc.n;
+    auto ret = (divisor > 0) ?
+               (take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor))
+                             : NAN;
+    return (scalar_t) ret;
+  }
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline __device__ acc_t warp_shfl_down(acc_t acc, int offset) const {
     return {
@@ -110,6 +122,11 @@ struct MeanOps {
     return a * factor;
   }
 
+  inline C10_DEVICE acc_t project2(acc_t a, int value = 0) const {
+    AT_ASSERT(value == 0);
+    return a * factor;
+  }
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
     return WARP_SHFL_DOWN(data, offset);
@@ -135,6 +152,11 @@ struct AbsMinOps {
     return a;
   }
 
+  inline C10_DEVICE acc_t project2(acc_t a, int value = 0) const {
+    AT_ASSERT(value == 0);
+    return a;
+  }
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
     return WARP_SHFL_DOWN(data, offset);
@@ -154,6 +176,11 @@ struct AbsMaxOps {
   }
 
   inline C10_DEVICE acc_t project(acc_t a) const {
+    return a;
+  }
+
+  inline C10_DEVICE acc_t project2(acc_t a, int value = 0) const {
+    AT_ASSERT(value == 0);
     return a;
   }
 
@@ -177,6 +204,11 @@ struct NormOps {
   }
 
   inline C10_DEVICE acc_t project(acc_t a) const {
+    return compat_pow(a, acc_t(1.0)/norm);
+  }
+
+  inline C10_DEVICE acc_t project2(acc_t a, int value = 0) const {
+    AT_ASSERT(value == 0);
     return compat_pow(a, acc_t(1.0)/norm);
   }
 
@@ -204,6 +236,11 @@ struct NormZeroOps {
     return a;
   }
 
+  inline C10_DEVICE acc_t project2(acc_t a, int value = 0) const {
+    AT_ASSERT(value == 0);
+    return a;
+  }
+
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
     return WARP_SHFL_DOWN(data, offset);
@@ -222,6 +259,11 @@ struct NormOneOps {
   }
 
   inline C10_DEVICE acc_t project(acc_t a) const {
+    return a;
+  }
+
+  inline C10_DEVICE acc_t project2(acc_t a, int value = 0) const {
+    AT_ASSERT(value == 0);
     return a;
   }
 

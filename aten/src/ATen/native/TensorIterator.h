@@ -127,11 +127,13 @@ struct CAFFE2_API TensorIterator {
 
   static std::unique_ptr<TensorIterator> binary_op(Tensor& out, const Tensor& a, const Tensor& b);
   static std::unique_ptr<TensorIterator> reduce_op(Tensor& out, const Tensor& a);
+  static std::unique_ptr<TensorIterator> reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 
   int ndim() const { return shape_.size(); }
   IntArrayRef shape() const { return shape_; }
   int64_t numel() const;
   int ntensors() const { return operands_.size(); }
+  int outputs() const { return num_outputs_; }
 
   /// number of elements in the output operand. this is the same as numel() for
   /// operations that are not reductions.
