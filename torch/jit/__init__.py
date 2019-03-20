@@ -995,12 +995,14 @@ class ScriptMeta(type(torch._C.ScriptModule)):
         self._constants_set = set(getattr(self, '__constants__', ())).union(super_constants)
         self._overloads = dict(getattr(self, '__overloads__', {}))
 
+        cls = self
+
         @functools.wraps(original_init)
         def init_then_register(self, *args, **kwargs):
             # ensure even if the user forgets to call super that
             # the pybind object is initialized so it will not segfault
             # run this once, before the most-derived __init__ is called
-            if self is type(self):
+            if cls is type(self):
                 torch._C.ScriptModule.__init__(self)
             original_init(self, *args, **kwargs)
             _create_methods_from_stubs(self, methods)
