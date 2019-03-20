@@ -11,11 +11,10 @@ class TestMkldnn(TestCase):
         self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
         self.assertEqual(mkldnn_tensor.size(), torch.Size([1, 2, 3, 4]))
 
-
     def test_unsupported(self):
         # unsupported types and unsupported types with gpu
-        for dtype in [ torch.double, torch.half, torch.uint8, torch.int8,
-                       torch.short, torch.int, torch.long ]:
+        for dtype in [torch.double, torch.half, torch.uint8, torch.int8,
+                      torch.short, torch.int, torch.long]:
             with self.assertRaises(RuntimeError) as context:
                 torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device('cpu')).to_mkldnn()
             if torch.cuda.is_available():
@@ -26,7 +25,7 @@ class TestMkldnn(TestCase):
             with self.assertRaises(RuntimeError) as context:
                 torch.randn(1, 2, 3, 4, dtype=torch.float, device=torch.device('cuda')).to_mkldnn()
         # some factory functions
-        for creator in [ torch.empty, torch.ones, torch.zeros, torch.randn, torch.rand ]:
+        for creator in [torch.empty, torch.ones, torch.zeros, torch.randn, torch.rand]:
             with self.assertRaises(RuntimeError) as context:
                 creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch.mkldnn)
 
