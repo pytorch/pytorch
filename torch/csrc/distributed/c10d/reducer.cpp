@@ -38,7 +38,8 @@ Reducer::Reducer(
     std::shared_ptr<c10d::ProcessGroup> process_group)
     : process_group_(std::move(process_group)),
       expect_autograd_hooks_(false),
-      has_queued_final_callback_(false) {
+      has_queued_final_callback_(false),
+      next_bucket_(0) {
   // Verify that all specified variables require gradients,
   // and that they have the same size across replicas.
   {
