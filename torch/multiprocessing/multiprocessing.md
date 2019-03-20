@@ -31,7 +31,7 @@ CudaIPCSentDataLimbo is keeping references to data blocks which are not in use b
 
 Consumer's side wraps received data into the different structure CudaIPCReceivedData. On destruction, it takes care of decreasing reference count to the received tensor.
 
-# CUDA IPC best practices.
+# CUDA IPC Best practices
 
 1. Release memory ASAP in the consumer.
 
