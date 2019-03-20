@@ -39,7 +39,7 @@
  *                  This gives [0,1) range of floating point values. Check the 
  *                  article for more details.
  *        method 2: Divide by maximum int and get floats in range [0, 1] and then use
- *                  rejection sampling to get ride of the 1s to make it [0, 1).
+ *                  rejection sampling to get rid of the 1s to make it [0, 1).
  * 
  * The article argues that method 1 gives uniformly distributed floats but involves 
  * loss of absolute precision (e.g. it is very unlike to produce 0.03125). On the 
@@ -142,15 +142,15 @@ struct normal_distribution {
   C10_HOST inline vect_type<T> operator()(at::CPUGenerator* generator){
     uniform_real_distribution<T> uniform(0.0, 1.0);
     vect_type<T> result;
-    const T u2 = uniform(generator);
+    const T theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * uniform(generator);;
     T u1 = uniform(generator);
     // extra pre-caution to make sure log never gets zero
     if (u1 == static_cast<T>(0.0)) {
       u1 = std::numeric_limits<T>::min();
     }
     T r = ::sqrt(static_cast<T>(-2.0) * ::log(u1));
-    result[0] = r * ::cos(static_cast<T>(2.0) * static_cast<T>(M_PI) * u2) * stdv + mean;
-    result[1] = r * ::sin(static_cast<T>(2.0) * static_cast<T>(M_PI) * u2) * stdv + mean;
+    result[0] = r * ::cos(theta) * stdv + mean;
+    result[1] = r * ::sin(theta) * stdv + mean;
     return result;
   }
 
