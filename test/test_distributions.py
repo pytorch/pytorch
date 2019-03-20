@@ -3401,7 +3401,7 @@ class TestKL(TestCase):
                 ]))
 
     def test_entropy_monte_carlo(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(24)  # see Note [Randomized statistical tests]
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
@@ -4371,7 +4371,7 @@ class TestJit(TestCase):
                              message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
     def test_variance(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(24)  # see Note [Randomized statistical tests]
         for Dist, keys, values, sample in self._examples():
             if Dist in [Cauchy, HalfCauchy]:
                 continue  # infinite variance
