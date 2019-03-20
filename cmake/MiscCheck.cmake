@@ -171,7 +171,7 @@ CHECK_CXX_SOURCE_COMPILES(
        _mm256_extract_epi64(x, 0); // we rely on this in our AVX2 code
        return 0;
      }" CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
-if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS AND NOT ANDROID)
+if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   message(STATUS "Current compiler supports avx2 extension. Will build perfkernels.")
   # Also see CMakeLists.txt under caffe2/perfkernels.
   set(CAFFE2_PERF_WITH_AVX 1)

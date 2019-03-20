@@ -1171,11 +1171,7 @@ if (NOT BUILD_ATEN_MOBILE)
     add_compile_options(-DUSE_GCC_GET_CPUID)
   ENDIF()
 
-  if (NOT ANDROID)
-    # android seems to have incomplete AVX2 intrinsics in the headers that it ships,
-    # so we are seeing compiler errors in android X86 mode. Hence, disabling for now.
-    FIND_PACKAGE(AVX) # checks AVX and AVX2
-  endif(NOT ANDROID)
+  FIND_PACKAGE(AVX) # checks AVX and AVX2
 
   # we don't set -mavx and -mavx2 flags globally, but only for specific files
   # however, we want to enable the AVX codepaths, so we still need to

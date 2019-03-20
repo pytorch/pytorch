@@ -8,7 +8,7 @@
 // To explicitly use interned strings as symbols in your code, you must add
 // them to this list.
 
-#if !C10_MOBILE || C10_MOBILE_FULL
+#if !C10_MOBILE || defined(TORCH_MOBILE)
 #define FORALL_ATEN_BASE_SYMBOLS(_) \
 _(aten, __and__) \
 _(aten, __iand__) \

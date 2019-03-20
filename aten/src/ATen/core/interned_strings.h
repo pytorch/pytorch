@@ -10,7 +10,7 @@
 
 namespace c10 {
 
-#if !C10_MOBILE || C10_MOBILE_FULL
+#if !C10_MOBILE || defined(TORCH_MOBILE)
 #define FORALL_NS_SYMBOLS(_)       \
   _(namespaces, prim)              \
   _(namespaces, aten)              \

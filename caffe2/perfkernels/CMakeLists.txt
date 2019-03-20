@@ -13,9 +13,7 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${common_srcs})
 
 # We will only build the perf kernel files if the compiler supports avx2
 # extensions.
-# Android seems to have incomplete AVX2 intrinsics in the headers that it ships,
-# so we are seeing compiler errors in android X86 mode. Hence, disabling for now.
-if (NOT ANDROID AND CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   add_library(Caffe2_perfkernels_avx STATIC ${avx_srcs})
   add_library(Caffe2_perfkernels_avx2 STATIC ${avx2_srcs})
   add_dependencies(Caffe2_perfkernels_avx Caffe2_PROTO)

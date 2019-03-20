@@ -161,7 +161,7 @@ SET(ONNX_NAMESPACE "onnx_c2" CACHE STRING "onnx namespace")
 if (ANDROID OR IOS)
   set(BUILD_ATEN_MOBILE ON)
   if (BUILD_TORCH_MOBILE)
-    set(C10_MOBILE_FULL_ ON)
+    set(TORCH_MOBILE ON)
   endif()
 endif()
 

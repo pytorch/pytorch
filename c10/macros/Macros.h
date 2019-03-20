@@ -170,12 +170,6 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_IOS 1
 #endif // ANDROID / IOS / MACOS
 
-#ifdef C10_MOBILE_FULL_
-#define C10_MOBILE_FULL 1
-#else
-#define C10_MOBILE_FULL 0
-#endif
-
 // Portably determine if a type T is trivially copyable or not.
 #if __GNUG__ && __GNUC__ < 5
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
