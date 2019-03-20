@@ -375,7 +375,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
       ss << metadata.type() << " but got " << grads[i].type();
       AT_ERROR(format_error(ss.str()));
     }
-    const int output_device = assign_tensor_to_autograd_thread(output);
+    const int output_device = unsound_get_device_idx(output);
     if (output_device != metadata.device()) {
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected device ";

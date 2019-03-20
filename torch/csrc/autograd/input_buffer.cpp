@@ -44,7 +44,7 @@ void InputBuffer::add(size_t pos, Variable var) {
 auto InputBuffer::device() const -> int {
   for (auto& var : buffer) {
     if (var.defined()) {
-      int device = assign_tensor_to_autograd_thread(var);
+      int device = unsound_get_device_idx(var);
       if (device >= 0) {
         return device;
       }

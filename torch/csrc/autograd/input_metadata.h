@@ -8,7 +8,7 @@ namespace torch { namespace autograd {
 
 // This legacy function squashes a tensor's Device into an integer
 // index which identifies which autograd thread it refers to.
-inline int assign_tensor_to_autograd_thread(const at::Tensor& tensor) {
+inline int unsound_get_device_idx(const at::Tensor& tensor) {
   if (tensor.device().type() == at::DeviceType::CPU) {
     return -1;
   } else {
@@ -26,7 +26,7 @@ struct InputMetadata {
   : type_{&type} , shape_{shape}, device_{device} { }
 
   InputMetadata(const at::Tensor& t)
-  : InputMetadata(t.type(), t.sizes(), assign_tensor_to_autograd_thread(t)) { }
+  : InputMetadata(t.type(), t.sizes(), unsound_get_device_idx(t)) { }
 
   bool is_valid() const {
     return type_ != nullptr;
