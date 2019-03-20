@@ -36,7 +36,7 @@ def get_predictor_exporter_helper(submodelNetName):
 class PredictorExportMeta(collections.namedtuple(
     'PredictorExportMeta',
         'predict_net, parameters, inputs, outputs, shapes, name, \
-        extra_init_net, global_init_net, net_type, num_workers, trainer_prefix')):
+        extra_init_net, net_type, num_workers, trainer_prefix')):
     """
     Metadata to be used for serializaing a net.
 
@@ -52,13 +52,6 @@ class PredictorExportMeta(collections.namedtuple(
     num_workers specifies for net type 'dag' how many threads should run ops
 
     trainer_prefix specifies the type of trainer.
-
-    extra_init_net gets appended to pred_init_net, useful for thread local init
-
-    global_init_net gets appended to global_init_net, useful for global init
-    on a shared across threads parameter workspace
-    (in a case of multi-threaded inference)
-
     """
     def __new__(
         cls,
@@ -69,7 +62,6 @@ class PredictorExportMeta(collections.namedtuple(
         shapes=None,
         name="",
         extra_init_net=None,
-        global_init_net=None,
         net_type=None,
         num_workers=None,
         trainer_prefix=None,
@@ -93,7 +85,7 @@ class PredictorExportMeta(collections.namedtuple(
         assert isinstance(predict_net, (caffe2_pb2.NetDef, caffe2_pb2.PlanDef))
         return super(PredictorExportMeta, cls).__new__(
             cls, predict_net, parameters, inputs, outputs, shapes, name,
-            extra_init_net, global_init_net, net_type, num_workers, trainer_prefix)
+            extra_init_net, net_type, num_workers, trainer_prefix)
 
     def inputs_name(self):
         return utils.get_comp_name(predictor_constants.INPUTS_BLOB_TYPE,
@@ -161,9 +153,6 @@ def _global_init_net(predictor_export_meta):
         predictor_export_meta.parameters)
     net.Proto().external_input.extend([predictor_constants.PREDICTOR_DBREADER])
     net.Proto().external_output.extend(predictor_export_meta.parameters)
-
-    if predictor_export_meta.global_init_net:
-        net.AppendNet(predictor_export_meta.global_init_net)
 
     # Add the model_id in the predict_net to the global_init_net
     utils.AddModelIdArg(predictor_export_meta, net.Proto())
