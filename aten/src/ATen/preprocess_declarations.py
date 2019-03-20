@@ -15,14 +15,15 @@ type_map = {
         'Short',
         'Int',
         'Long',
-        'Bool'
+        'Bool',
+        'QInt8',
     ],
 }
 
 all_types = type_map['floating_point'] + type_map['integral']
 type_map['all'] = all_types
 
-all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA']
+all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA', 'Quantized']
 default_backends = ['CPU', 'CUDA']
 
 

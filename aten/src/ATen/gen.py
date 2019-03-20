@@ -189,6 +189,7 @@ scalar_types = [
     ('Long', 'int64_t', 'Long', 'int64_t', False),
     ('Short', 'int16_t', 'Long', 'int16_t', False),
     ('Half', 'Half', 'Double', 'at::Half', True),
+    ('QInt8', 'qint8', 'Long', 'qint8', False),
 ]
 
 # shared environment for non-derived base classes Type.h Tensor.h Storage.h
@@ -337,6 +338,10 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
 
     declarations, definitions = function_wrapper.create_derived(
         env, declarations)
+    if env['Type'] == 'CPUQInt8Type':
+        sys.stderr.write("ENV:{} - {}\n".format(env['Backend'], definitions))
+        sys.stderr.write("ENV:{} - {}\n".format(env['ScalarName'], definitions))
+        sys.stderr.write("ENV:{} - {}\n".format(env['Type'], definitions))
     env['type_derived_method_declarations'] = declarations
     env['type_derived_method_definitions'] = definitions
 
@@ -348,6 +353,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         fm.write(env['Type'] + ".cpp", TYPE_DERIVED_CPP, env)
     else:
         fm.write(env['Type'] + ".cpp", SPARSE_TYPE_DERIVED_CPP, env)
+    sys.stderr.write("ENV_TYPE:{}".format(env['Type']))
     fm.write(env['Type'] + ".h", TYPE_DERIVED_H, env)
 
     type_register = TYPE_REGISTER.substitute(backend=env['Backend'], scalar_type=scalar_name, type_name=env['Type'])
@@ -527,6 +533,7 @@ def generate_outputs():
     file_manager.write("Declarations.yaml", format_yaml(output_declarations))
 
     for backend, density, scalar_type in iterate_types():
+        sys.stderr.write("ITERATE_TYPES:{}{}{}\n".format(backend, density, scalar_type))
         generate_storage_type_and_tensor(backend, density, scalar_type, declarations)
     for backend in extension_backends:
         generate_type_extension_backend(backend, declarations)

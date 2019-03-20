@@ -13,6 +13,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/ComplexHooksInterface.h>
+#include <ATen/detail/QIntHooksInterface.h>
 #include <c10/util/Exception.h>
 
 #include <memory>
@@ -102,6 +103,12 @@ class CAFFE2_API Context {
     });
   }
 
+  void lazyInitQInt() {
+    std::call_once(qint_init_, [&] {
+      detail::getQIntHooks().registerQIntTypes(this);
+    });
+  }
+
   THCState* getTHCState() {
     // AT_ASSERT(thc_state);
     return thc_state.get();
@@ -143,9 +150,16 @@ private:
       lazyInitComplex();
     }
   }
+
+  void initQIntIfNeeded(ScalarType s) {
+    if (isQIntType(s)) {
+      lazyInitQInt();
+    }
+  }
   std::once_flag thc_init;
   std::once_flag thh_init;
   std::once_flag complex_init_;
+  std::once_flag qint_init_;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;

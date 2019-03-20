@@ -20,7 +20,7 @@ namespace c10 {
  * would make sense in your use case.  If it doesn't make sense, maybe
  * you want DeviceType.
  */
-enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, Undefined, NumOptions };
+enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, Quantized, Undefined, NumOptions };
 
 static inline Backend toSparse(Backend b) {
   switch (b) {
@@ -81,6 +81,8 @@ static inline Backend tensorTypeIdToBackend(TensorTypeId t) {
     return Backend::SparseCUDA;
   } else if (t == SparseHIPTensorId()) {
     return Backend::SparseHIP;
+  } else if (t == QuantizedTensorId()) {
+    return Backend::Quantized;
   } else if (t == UndefinedTensorId()) {
     return Backend::Undefined;
   } else {
@@ -106,6 +108,8 @@ static inline TensorTypeId backendToTensorTypeId(Backend b) {
       return SparseCUDATensorId();
     case Backend::SparseHIP:
       return SparseHIPTensorId();
+    case Backend::Quantized:
+      return QuantizedTensorId();
     case Backend::Undefined:
       return UndefinedTensorId();
     default:
@@ -205,6 +209,7 @@ constexpr DeviceType kCUDA = DeviceType::CUDA;
 constexpr DeviceType kHIP = DeviceType::HIP;
 constexpr DeviceType kMSNPU = DeviceType::MSNPU;
 constexpr DeviceType kXLA = DeviceType::XLA;
+constexpr DeviceType kQuantized = DeviceType::QUANTIZED;
 
 static inline const char* toString(Backend b) {
   switch (b) {

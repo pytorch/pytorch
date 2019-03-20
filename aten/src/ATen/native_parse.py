@@ -347,6 +347,11 @@ def has_sparse_dispatches(dispatches):
             return True
     return False
 
+def has_quantized_dispatches(dispatches):
+    for dispatch in dispatches:
+        if 'Quantized' in dispatch:
+            return True
+    return False
 
 def parse_native_yaml(path):
     with open(path, 'r') as f:

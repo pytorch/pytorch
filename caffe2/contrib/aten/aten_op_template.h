@@ -47,7 +47,7 @@ private:
       case at::k##aten_name: \
         return TypeMeta::Make<ctype>();
     switch(st) {
-      AT_FORALL_SCALAR_TYPES(DEFINE_CASE)
+      AT_FORALL_SCALAR_TYPES_EXCEPT_QINT(DEFINE_CASE)
       default:
         CAFFE_THROW("Unknown ATen Type");
     }
@@ -123,7 +123,7 @@ private:
           auto value = extract_##native(scalar); \
           assignToValue<ctype>(dst, at::convert<ctype,decltype(value)>(value)); \
         } break;
-      AT_FORALL_SCALAR_TYPES(DEFINE_CASE)
+      AT_FORALL_SCALAR_TYPES_EXCEPT_QINT(DEFINE_CASE)
       #undef DEFINE_CASE
       default:
         CAFFE_THROW("Unknown ATen Type");
