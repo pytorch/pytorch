@@ -258,10 +258,17 @@ add_custom_command(
 
 
 
-
-
-
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+
+# Required workaround for generated sources
+# See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
+add_dependencies(torch_python generate-torch-sources)
+set_source_files_properties(
+    ${GENERATED_THNN_SOURCES}
+    ${GENERATED_CXX_PYTHON}
+    PROPERTIES GENERATED TRUE
+    )
+
 target_compile_definitions(torch_python PUBLIC _THP_CORE)
 
 add_dependencies(torch_python torch_python_stubs)

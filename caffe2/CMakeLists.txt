@@ -54,9 +54,6 @@ else()
   # See cmake/Codegen.cmake for header installation
 endif()
 
-# ---[ Torch python bindings build
-add_subdirectory(../torch torch)
-
 # ---[ Caffe2 build
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
@@ -283,17 +280,18 @@ if (NOT BUILD_ATEN_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
     )
 
+  set(GENERATED_THNN_SOURCES
+    ${GENERATED_THNN_CXX}
+    ${GENERATED_THNN_CXX_CUDA}
+    )
 
   set(TORCH_GENERATED_CODE
     ${GENERATED_CXX_TORCH}
+    ${GENERATED_THNN_SOURCES}
     ${GENERATED_H_TORCH}
-    ${GENERATED_THNN_CXX}
-    ${GENERATED_THNN_CXX_CUDA}
     ${GENERATED_CXX_PYTHON}
     ${GENERATED_H_PYTHON}
     )
-
-
 
   add_custom_command(
     OUTPUT
@@ -334,7 +332,14 @@ if (NOT BUILD_ATEN_MOBILE)
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
+  # Required workaround for libtorch_python.so build
+  # see https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
+  add_custom_target(
+    generate-torch-sources
+    DEPENDS ${TORCH_GENERATED_CODE}
+    )
 
+  
   set(TORCH_SRCS
     ${GENERATED_CXX_TORCH}
     ${GENERATED_H_TORCH}
@@ -695,11 +700,15 @@ if (NOT BUILD_ATEN_MOBILE)
     endif()
   endif()
 
+
+  # ---[ Torch python bindings build
+  add_subdirectory(../torch torch)
+
+  
 endif()
 # ==========================================================
 # END formerly-libtorch flags
 # ==========================================================
-
 
 
 
