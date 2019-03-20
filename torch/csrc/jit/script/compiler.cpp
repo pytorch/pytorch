@@ -992,8 +992,8 @@ struct to_ir {
     const auto first_bool_info = findRefinements(first_expr);
     Value* first_value = emitCond(Expr(first_expr));
 
-    // if the condition is returned, then in an or expression it is false
-    // and in an and expr it is false. inserting constant makes optimization
+    // if the condition is returned, then in an or expression the condition is
+    // true and in an and expr it is false. inserting constant makes optimization
     // easier
     Value* condition_returned;
 
