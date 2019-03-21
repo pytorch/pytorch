@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
@@ -29,6 +30,10 @@ class LambdaPostHook : public torch::autograd::FunctionPostHook {
   std::function<void(void)> fn_;
 };
 
+inline int64_t current_time_in_nanos() {
+  return torch::autograd::profiler::getTime();
+}
+
 } // namespace
 
 Reducer::Reducer(
@@ -37,7 +42,8 @@ Reducer::Reducer(
     : process_group_(std::move(process_group)),
       expect_autograd_hooks_(false),
       has_queued_final_callback_(false),
-      next_bucket_(0) {
+      next_bucket_(0),
+      backward_stats_base_(0) {
   // Verify that all specified variables require gradients,
   // and that they have the same size across replicas.
   {
@@ -125,6 +131,17 @@ Reducer::Reducer(
     initialize_buckets(
         std::vector<std::vector<size_t>>{std::move(variable_indices)});
   }
+
+  // Initialize backward stats vector.
+  {
+    const auto replica_count = inputs.size();
+    backward_stats_.resize(replica_count);
+    for (size_t replica_index = 0; replica_index < replica_count;
+         replica_index++) {
+      const auto variable_count = inputs[replica_index].size();
+      backward_stats_[replica_index].resize(variable_count);
+    }
+  }
 }
 
 // Called when the gradient for the specified variable is ready.
@@ -143,6 +160,8 @@ void Reducer::mark_variable_ready(size_t replica_index, size_t variable_index) {
   AT_ASSERTM(replica_index < variables_.size(), "Out of range replica index.");
   AT_ASSERTM(
       variable_index < bucket_indices_.size(), "Out of range variable index.");
+  backward_stats_[replica_index][variable_index] =
+      current_time_in_nanos() - backward_stats_base_;
 
   const auto& bucket_index = bucket_indices_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
@@ -327,6 +346,7 @@ void Reducer::prepare_for_backward(const torch::autograd::Variable& output) {
   has_queued_final_callback_ = false;
   expect_autograd_hooks_ = true;
   next_bucket_ = 0;
+  backward_stats_base_ = current_time_in_nanos();
   for (auto& bucket : buckets_) {
     for (auto& replica : bucket.replicas) {
       replica.pending = replica.variables.size();

@@ -33,6 +33,11 @@ class Reducer {
   // a call to this function can simply be omitted.
   void prepare_for_backward(const torch::autograd::Variable& output);
 
+  // Returns the relative time in nanoseconds when gradients were ready,
+  // with respect to the time `prepare_for_backward` was called. The outer
+  // vector is for model replicas and the inner vector is for parameters.
+  std::vector<std::vector<int64_t>> get_backward_stats() const;
+
  protected:
   std::mutex mutex_;
   std::vector<std::vector<torch::autograd::Variable>> variables_;
@@ -118,6 +123,12 @@ class Reducer {
   // Maps variable index to bucket indices. Bucketing across replicas is
   // identical so no need to include the replica index here.
   std::vector<BucketIndex> bucket_indices_;
+
+  // We collect the relative timestamp of every gradient being ready
+  // when executing autograd. This can be used to derive a timeline of
+  // the point in time buckets were ready, or ideal bucket assignment/ordering.
+  int64_t backward_stats_base_;
+  std::vector<std::vector<int64_t>> backward_stats_;
 };
 
 } // namespace c10d
