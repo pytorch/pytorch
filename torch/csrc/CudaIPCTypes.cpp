@@ -20,7 +20,7 @@ void warnProducerTerminatedBeforeSharedTensorsReleased() {
   static bool warned = false;
   if (!warned) {
     LOG(WARNING)
-        << "Producer process has been terminated before all shared CUDA tensors released.";
+        << "Producer process has been terminated before all shared CUDA tensors released. See Note [Sharing CUDA tensors]";
     warned = true;
   }
 }

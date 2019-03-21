@@ -248,6 +248,7 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
     _offset_bytes = PyLong_FromSsize_t((Py_ssize_t)offset_bytes);
 
     // Put Storage Data behind new ref counting context
+    // See Note [CUDA IPC Refcounting implementation explained]
     at::DataPtr sent_data_ptr = torch::GetNewRefCountedSentData(storage->data(), storage->device());
     auto old_data_ptr = storage->set_data_ptr(std::move(sent_data_ptr));
     auto sent_data  =  static_cast<torch::CudaIPCSentData*>(storage->data_ptr().get_context());
