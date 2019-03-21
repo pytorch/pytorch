@@ -125,11 +125,11 @@ static inline void upsample_3d_shape_check(
         "Non-empty 5D data tensor expected but got a tensor with sizes ",
         input.sizes());
   } else if (grad_output.defined()) {
-    check_dim_size(grad_ouput, 5, 0, nbatch);
-    check_dim_size(grad_ouput, 5, 1, nchannels);
-    check_dim_size(grad_ouput, 5, 2, output_depth);
-    check_dim_size(grad_ouput, 5, 3, output_height);
-    check_dim_size(grad_ouput, 5, 4, output_width);
+    check_dim_size(grad_output, 5, 0, nbatch);
+    check_dim_size(grad_output, 5, 1, nchannels);
+    check_dim_size(grad_output, 5, 2, output_depth);
+    check_dim_size(grad_output, 5, 3, output_height);
+    check_dim_size(grad_output, 5, 4, output_width);
   }
 }
 
