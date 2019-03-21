@@ -165,7 +165,6 @@ graph {
   }
 }
 opset_import {
-  domain: "ai.onnx"
   version: 9
 }
 opset_import {
