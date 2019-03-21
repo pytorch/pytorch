@@ -11,8 +11,6 @@ import math
 import warnings
 
 __all__ = [
-    'argmax',
-    'argmin',
     'btriunpack',
     'chain_matmul',
     'einsum',
@@ -23,8 +21,9 @@ __all__ = [
     'norm',
     'meshgrid',
     'potrf',
-    'potrs',
     'pstrf',
+    'potrs',
+    'gesv',
     'split',
     'stft',
     'tensordot',
@@ -460,68 +459,6 @@ def unique(input, sorted=True, return_inverse=False, dim=None):
         return output
 
 
-def argmax(input, dim=None, keepdim=False):
-    r"""Returns the indices of the maximum values of a tensor across a dimension.
-
-    This is the second value returned by :meth:`torch.max`. See its
-    documentation for the exact semantics of this method.
-
-    Args:
-        input (Tensor): the input tensor
-        dim (int): the dimension to reduce. If ``None``, the argmax of the
-            flattened input is returned.
-        keepdim (bool): whether the output tensors have :attr:`dim`
-            retained or not. Ignored if ``dim=None``.
-
-    Example::
-
-        >>> a = torch.randn(4, 4)
-        >>> a
-        tensor([[ 1.3398,  0.2663, -0.2686,  0.2450],
-                [-0.7401, -0.8805, -0.3402, -1.1936],
-                [ 0.4907, -1.3948, -1.0691, -0.3132],
-                [-1.6092,  0.5419, -0.2993,  0.3195]])
-
-
-        >>> torch.argmax(a, dim=1)
-        tensor([ 0,  2,  0,  1])
-    """
-    if dim is None:
-        return torch._argmax(input.contiguous().view(-1), dim=0, keepdim=False)
-    return torch._argmax(input, dim, keepdim)
-
-
-def argmin(input, dim=None, keepdim=False):
-    r"""Returns the indices of the minimum values of a tensor across a dimension.
-
-    This is the second value returned by :meth:`torch.min`. See its
-    documentation for the exact semantics of this method.
-
-    Args:
-        input (Tensor): the input tensor
-        dim (int): the dimension to reduce. If ``None``, the argmin of the
-            flattened input is returned.
-        keepdim (bool): whether the output tensors have :attr:`dim`
-            retained or not. Ignored if ``dim=None``.
-
-    Example::
-
-        >>> a = torch.randn(4, 4)
-        >>> a
-        tensor([[ 0.1139,  0.2254, -0.1381,  0.3687],
-                [ 1.0100, -1.1975, -0.0102, -0.4732],
-                [-0.9240,  0.1207, -0.7506, -1.0213],
-                [ 1.7809, -1.2960,  0.9384,  0.1438]])
-
-
-        >>> torch.argmin(a, dim=1)
-        tensor([ 2,  1,  3,  1])
-    """
-    if dim is None:
-        return torch._argmin(input.contiguous().view(-1), dim=0, keepdim=False)
-    return torch._argmin(input, dim, keepdim)
-
-
 def tensordot(a, b, dims=2):
     r"""Returns a contraction of a and b over multiple dimensions.
 
@@ -739,7 +676,7 @@ def potrf(a, upper=True, out=None):
     r"""Computes the Cholesky decomposition of a symmetric positive-definite
     matrix :math:`A`.
 
-    For more information, regarding :func:`torch.potrf`, please check :func:`torch.cholesky`.
+    For more information regarding :func:`torch.potrf`, please check :func:`torch.cholesky`.
 
     .. warning::
         :func:`torch.potrf` is deprecated in favour of :func:`torch.cholesky` and will be removed
@@ -801,7 +738,7 @@ def potrs(b, u, upper=True, out=None):
     r"""Solves a linear system of equations with a positive semidefinite
     matrix to be inverted given its Cholesky factor matrix :attr:`u`.
 
-    For more information, regarding :func:`torch.potrs`, please check :func:`torch.cholesky_solve`.
+    For more information regarding :func:`torch.potrs`, please check :func:`torch.cholesky_solve`.
 
     .. warning::
         :func:`torch.potrs` is deprecated in favour of :func:`torch.cholesky_solve` and will be
@@ -812,3 +749,18 @@ def potrs(b, u, upper=True, out=None):
                   "in the next release. Please use torch.cholesky instead and note that the "
                   ":attr:`upper` argument in torch.cholesky_solve defaults to ``False``.", stacklevel=2)
     return torch.cholesky_solve(b, u, upper=upper, out=out)
+
+
+def gesv(b, A, out=None):
+    r"""This function returns the solution to the system of linear equations represented
+    by :math:`AX = B` and the LU factorization of A, in order as a tuple `X, LU`.
+
+    For more information regarding :func:`torch.gesv`, please check :func:`torch.solve`.
+
+    .. warning::
+        :func:`torch.gesv` is deprecated in favour of :func:`torch.solve` and will be removed in the
+        next release. Please use :func:`torch.solve` instead.
+    """
+    warnings.warn("torch.gesv is deprecated in favour of torch.solve and will be removed in the "
+                  "next release. Please use torch.solve instead.", stacklevel=2)
+    return torch.solve(b, A, out=out)

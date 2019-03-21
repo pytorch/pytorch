@@ -61,7 +61,7 @@ cd %CAFFE2_ROOT%\build
 
 :: Set up cmake. We will skip building the test files right now.
 :: TODO: enable cuda support.
-cmake .. ^
+cmake ^
   -G%CMAKE_GENERATOR% ^
   -DBUILD_TEST=OFF ^
   -DBUILD_BINARY=%BUILD_BINARY% ^
@@ -81,6 +81,7 @@ cmake .. ^
   -DBUILD_SHARED_LIBS=OFF ^
   -DBUILD_PYTHON=OFF^
   -DPYTHON_EXECUTABLE=python^
+  .. ^
   || goto :label_error
 
 :: Actually run the build

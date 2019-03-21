@@ -2,12 +2,12 @@
 
 If you are interested in contributing to PyTorch, your contributions will fall
 into two categories:
-1. You want to propose a new Feature and implement it
+
+1. You want to propose a new feature and implement it.
     - Post about your intended feature, and we shall discuss the design and
     implementation. Once we agree that the plan looks good, go ahead and implement it.
-2. You want to implement a feature or bug-fix for an outstanding issue
-    - Look at the outstanding issues here: https://github.com/pytorch/pytorch/issues
-    - Especially look at the Low Priority and Medium Priority issues.
+2. You want to implement a feature or bug-fix for an outstanding issue.
+    - Search for your issue here: https://github.com/pytorch/pytorch/issues
     - Pick an issue and comment on the task that you want to work on this feature.
     - If you need more context on a particular issue, please ask and we shall provide.
 
@@ -17,7 +17,6 @@ https://github.com/pytorch/pytorch
 If you are not familiar with creating a Pull Request, here are some guides:
 - http://stackoverflow.com/questions/14680711/how-to-do-a-github-pull-request
 - https://help.github.com/articles/creating-a-pull-request/
-
 
 ## Developing PyTorch
 
@@ -54,12 +53,10 @@ with
 python setup.py develop
 ```
 
-This is especially useful if you are only changing Python files.
-
-This mode will symlink the Python files from the current local source tree into the
-Python install.
-
-Hence, if you modify a Python file, you do not need to reinstall PyTorch again and again.
+This mode will symlink the Python files from the current local source
+tree into the Python install.  Hence, if you modify a Python file, you
+do not need to reinstall PyTorch again and again.  This is especially
+useful if you are only changing Python files.
 
 For example:
 - Install local PyTorch in `develop` mode
@@ -225,25 +222,14 @@ will want to keep in mind:
 
 ### Build only what you need.
 
-`python setup.py build` will build everything, but since our build system is
-not very optimized for incremental rebuilds, this will actually be very slow.
-Far better is to only request rebuilds of the parts of the project you are
-working on:
-
-- Working on the Python bindings? Run `python setup.py develop` to rebuild
-  (NB: no `build` here!)
-
-- Working on `torch/csrc` or `aten`? Run `python setup.py rebuild_libtorch` to
-  rebuild and avoid having to rebuild other dependent libraries we
-  depend on.
-
-- Working on one of the other dependent libraries? The other valid
-  targets are listed in `dep_libs` in `setup.py`. prepend `build_` to
-  get a target, and run as e.g. `python setup.py build_gloo`.
+`python setup.py build` will build everything by default, but sometimes you are
+only interested in a specific component.
 
 - Working on a test binary? Run `(cd build && ninja bin/test_binary_name)` to
   rebuild only that test binary (without rerunning cmake). (Replace `ninja` with
   `make` if you don't have ninja installed).
+- Don't need Caffe2?  Pass `BUILD_CAFFE2_OPS=0` to disable build of
+  Caffe2 operators.
 
 On the initial build, you can also speed things up with the environment
 variables `DEBUG` and `NO_CUDA`.
@@ -271,11 +257,12 @@ information for the code in `torch/csrc`. More information at:
 ### Make no-op build fast.
 
 #### Use Ninja
-Python `setuptools` is pretty dumb, and always rebuilds every C file in a
-project. If you install the ninja build system with `pip install ninja`,
-then PyTorch will use it to track dependencies correctly.
-If PyTorch was already built, you will need to run `python setup.py clean` once
-after installing ninja for builds to succeed.
+
+By default, cmake will use its Makefile generator to generate your build
+system.  You can get faster builds if you install the ninja build system
+with `pip install ninja`.  If PyTorch was already built, you will need
+to run `python setup.py clean` once after installing ninja for builds to
+succeed.
 
 #### Use CCache
 

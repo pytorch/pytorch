@@ -54,7 +54,6 @@ static auto registry = c10::RegisterOperators().op(
 
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
     "_c10_experimental::Relu",
-    "",
     C10Relu_DontUseThisOpYet)
 
 } // namespace caffe2

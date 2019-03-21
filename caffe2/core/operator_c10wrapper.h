@@ -226,29 +226,29 @@ createC10OperatorWrapper(const char* op_name, const char* overload_name) {
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(        \
-    OperatorName, OverloadName, Name)                         \
+    OperatorName, Name)                                       \
   REGISTER_CPU_OPERATOR_CREATOR(                              \
       Name,                                                   \
       ::caffe2::detail::createC10OperatorWrapper<CPUContext>( \
-          OperatorName, OverloadName))
+          OperatorName, ""))
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(        \
-    OperatorName, OverloadName, Name)                          \
+    OperatorName, Name)                                        \
   REGISTER_CUDA_OPERATOR_CREATOR(                              \
       Name,                                                    \
       ::caffe2::detail::createC10OperatorWrapper<CUDAContext>( \
-          OperatorName, OverloadName))
+          OperatorName, ""))
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP(        \
-    OperatorName, OverloadName, Name)                         \
+    OperatorName, Name)                                       \
   REGISTER_HIP_OPERATOR_CREATOR(                              \
       Name,                                                   \
       ::caffe2::detail::createC10OperatorWrapper<HIPContext>( \
-          OperatorName, OverloadName))
+          OperatorName, ""))
 #else
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU( \
-    OperatorName, OverloadName, Name)
+    OperatorName, Name)
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA( \
-    OperatorName, OverloadName, Name)
+    OperatorName, Name)
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP( \
-    OperatorName, OverloadName, Name)
+    OperatorName, Name)
 #endif
 } // namespace caffe2

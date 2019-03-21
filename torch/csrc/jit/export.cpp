@@ -9,6 +9,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/python_print.h>
+#include <torch/csrc/jit/pickler.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -492,6 +493,7 @@ class ScriptModuleSerializer final {
   // to dump the content of a tensor
   void writeTensorTable(torch::ModelDef* model_def);
 
+  void writeAttributeTable();
   void writeLibs(torch::ModelDef* model_def);
 
   void convertModule(
@@ -512,6 +514,9 @@ class ScriptModuleSerializer final {
 
   // all tensors that will be stored
   std::vector<at::Tensor> tensor_table_;
+
+  std::vector<IValue> attribute_table_;
+
   // all classes used by this module hierarchy
   std::vector<ClassTypePtr> class_table_;
   OrderedDict<ClassTypePtr, std::string> converted_classes_;
@@ -615,8 +620,13 @@ void ScriptModuleSerializer::convertModel(
   model_def->set_producer_version("1.0"); // TODO: set the producer version
                                           // using appropriate function call
   model_def->set_proto_version(torch::ProtoVersion::PROTO_VERSION_NEWEST);
+
   convertModule(
       module, "", writer_.archiveName(), model_def->mutable_main_module());
+
+  // This may write some attributes to the tensor_table_
+  writeAttributeTable();
+
   writeTensorTable(model_def);
   writeLibs(model_def);
 
@@ -697,6 +707,17 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
   }
 }
 
+void ScriptModuleSerializer::writeAttributeTable() {
+  Pickler pickler(&tensor_table_);
+  pickler.start();
+  for (const IValue& ivalue : attribute_table_) {
+    pickler.addIValue(ivalue);
+  }
+  pickler.finish();
+  writer_.writeRecord(
+        "attributes.pkl", pickler.stack().data(), pickler.stack().size());
+}
+
 void ScriptModuleSerializer::convertModule(
     const script::Module& module,
     const std::string& prefix,
@@ -708,11 +729,16 @@ void ScriptModuleSerializer::convertModule(
     torch::ParameterDef* param_def = module_def->add_parameters();
     convertParameter(elem.value(), param_def, /*is_buffer=*/false);
   }
-  for (const auto& elem : module.get_attributes()) {
-    if (elem.value().type->isSubtypeOf(TensorType::get())) {
-      torch::ParameterDef* param_def = module_def->add_parameters();
-      convertParameter(elem.value(), param_def, /*is_buffer=*/true);
-    }
+
+  for (const auto& item : module.get_attributes()) {
+    auto& attribute = item.value();
+    // Add attribute to ModuleDef
+    torch::AttributeDef* attribute_def = module_def->add_attributes();
+    attribute_def->set_name(attribute.name_);
+    attribute_def->set_type(attribute.type->python_str());
+
+    attribute_table_.push_back(*attribute.slot());
+    attribute_def->set_id(attribute_table_.size() - 1);
   }
 
   std::stringstream module_name;
