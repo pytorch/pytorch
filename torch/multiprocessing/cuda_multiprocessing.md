@@ -1,6 +1,6 @@
 # CUDA IPC Refcounting implementation explained
 
-Since shared CUDA memory belongs to the producer process, we need to take special precocious to make sure that it is stays allocated for entire shared tensor life-span.
+Since shared CUDA memory belongs to the producer process, we need to take special precautions to make sure that it is stays allocated for entire shared tensor life-span.
 
 It could be done manually by syncing on an event:
 

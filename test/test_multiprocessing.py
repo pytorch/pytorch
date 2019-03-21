@@ -1,6 +1,7 @@
 import contextlib
 import gc
 import os
+from parameterized import parameterized
 import sys
 import time
 import unittest
@@ -56,11 +57,27 @@ def send_tensor(queue, event, tp):
     event.wait()
 
 
-def send_and_delete_tensors(queue, event, tp, count):
+def send_and_delete_tensors(queue, event, tp, count, size = 5):
     for i in range(count):
-        t = torch.full([5], i).type(tp)
+        t = torch.full([size], i).type(tp)
         queue.put(t)
         del t
+    event.wait()
+
+
+def receive_and_send_sum(queue, out_queue, event, tp, count, size = 5):
+    s = torch.full([size],0).type(tp)
+    for i in range(count):
+        t = queue.get()
+        s += t
+    out_queue.put(s)
+    event.wait()
+
+
+def receive_and_send(queue, out_queue, event, count):
+    for i in range(count):
+        t = queue.get()
+        out_queue.put(t.clone())
     event.wait()
 
 
@@ -360,6 +377,36 @@ class TestMultiprocessing(TestCase):
         del t
         e.set()
         p.join(1)
+
+    @parameterized.expand([("regular", 5, 100),
+                           ("lots of tensors", 5, 500),
+                           ("big tensors", 5000000, 500)])
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    def test_cuda_send_many(self, name, size=5, count=100):
+        ctx = mp.get_context('spawn')
+        q1 = ctx.Queue()
+        q2 = ctx.Queue()
+        q3 = ctx.Queue()
+        e1 = ctx.Event()
+        e2 = ctx.Event()
+        e3 = ctx.Event()
+        p1 = ctx.Process(target=send_and_delete_tensors, args=(q1, e1, torch.cuda.LongTensor, count, size))
+        p2 = ctx.Process(target=receive_and_send, args=(q1, q2, e2, count))
+        p3 = ctx.Process(target=receive_and_send_sum, args=(q2, q3, e3, torch.cuda.LongTensor, count, size))
+        p1.start()
+        p2.start()
+        p3.start()
+        result = q3.get()
+        self.assertEqual(result[0], int(count*(count-1)/2))
+        del result
+        e1.set()
+        e2.set()
+        e3.set()
+        p1.join(1)
+        p2.join(1)
+        p3.join(1)
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
