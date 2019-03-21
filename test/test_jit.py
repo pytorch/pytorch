@@ -293,7 +293,7 @@ class JitTestCase(TestCase):
         with self.disableModuleHook():
             try:
                 if len(module.code) == 0:
-                    # short-circuit
+                    # short-circuit if this is an empty module
                     return
                 saved_module_buffer = io.BytesIO()
                 torch.jit.save(module, saved_module_buffer)
