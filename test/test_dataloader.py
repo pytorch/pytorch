@@ -683,12 +683,12 @@ class TestDataLoader(TestCase):
         # multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
-        expected = set(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
         dataloader = DataLoader(dataset, num_workers=num_workers)
         dataloader_iter = iter(dataloader)
-        retrieved = set(d.item() for d in dataloader_iter)
+        retrieved = sorted((d.item() for d in dataloader_iter))
         self.assertEqual(retrieved, expected)
 
         workers = dataloader_iter.workers
