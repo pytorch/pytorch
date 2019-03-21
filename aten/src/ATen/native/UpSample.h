@@ -187,8 +187,8 @@ static scalar_t upsample_get_value_bounded(
     int64_t height,
     int64_t x,
     int64_t y) {
-  int64_t access_x = std::max(static_cast<int64_t>(std::min(x, width - 1)), 0LL);
-  int64_t access_y = std::max(static_cast<int64_t>(std::min(y, height - 1)), 0LL);
+  int64_t access_x = std::max(std::min(x, width - 1), static_cast<int64_t>(0));
+  int64_t access_y = std::max(std::min(y, height - 1), static_cast<int64_t>(0));
   return data[access_y * width + access_x];
 }
 
@@ -200,8 +200,8 @@ static void upsample_increment_value_bounded(
     int64_t x,
     int64_t y,
     scalar_t value) {
-  int64_t access_x = std::max(static_cast<int64_t>(std::min(x, width - 1)), 0LL);
-  int64_t access_y = std::max(static_cast<int64_t>(std::min(y, height - 1)), 0LL);
+  int64_t access_x = std::max(std::min(x, width - 1), static_cast<int64_t>(0));
+  int64_t access_y = std::max(std::min(y, height - 1), static_cast<int64_t>(0));
   data[access_y * width + access_x] += value;
 }
 
