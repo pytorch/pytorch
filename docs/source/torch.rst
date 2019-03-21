@@ -112,7 +112,7 @@ Quasi-random sampling
 
 .. autoclass:: torch.quasirandom.SobolEngine
     :members:
-    :exclude-members: MAXBIT
+    :exclude-members: MAXBIT, MAXDIM
     :undoc-members:
 
 Serialization
