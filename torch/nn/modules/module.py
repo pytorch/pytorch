@@ -130,7 +130,7 @@ class Module(object):
         Args:
             name (string): name of the parameter. The parameter can be accessed
                 from this module using the given name
-            parameter (Parameter): parameter to be added to the module.
+            param (Parameter): parameter to be added to the module.
         """
         if '_parameters' not in self.__dict__:
             raise AttributeError(
@@ -169,7 +169,7 @@ class Module(object):
         Args:
             name (string): name of the child module. The child module can be
                 accessed from this module using the given name
-            parameter (Module): child module to be added to the module.
+            module (Module): child module to be added to the module.
         """
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
@@ -666,7 +666,7 @@ class Module(object):
                 persistent buffers.
             prefix (str): the prefix for parameters and buffers used in this
                 module
-            local_metadata (dict): a dict containing the metadata for this moodule.
+            local_metadata (dict): a dict containing the metadata for this module.
                 See
             strict (bool): whether to strictly enforce that the keys in
                 :attr:`state_dict` with :attr:`prefix` match the names of
