@@ -267,6 +267,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
           docker save -o "${DOCKER_IMAGE_BASE_NAME}.tar" "${DOCKER_IMAGE}"
           aws s3 cp "${DOCKER_IMAGE_BASE_NAME}.tar" "s3://ossci-linux-build/pytorch/base/${DOCKER_IMAGE_BASE_NAME}.tar" --acl public-read
           echo "Docker image is uploaded to S3."
+          rm "${DOCKER_IMAGE_BASE_NAME}.tar"
         fi
         echo "Docker image download link: https://s3.amazonaws.com/ossci-linux-build/pytorch/base/${DOCKER_IMAGE_BASE_NAME}.tar"
 
@@ -288,6 +289,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
           COMMIT_DOCKER_IMAGE_BASE_NAME=$(basename "${COMMIT_DOCKER_IMAGE}")
           docker save -o "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" "${COMMIT_DOCKER_IMAGE}"
           aws s3 cp "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" "s3://ossci-linux-build/pytorch/intermediate/${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" --acl public-read
+          rm "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar"
         fi
 
 pytorch_linux_test_defaults: &pytorch_linux_test_defaults
@@ -378,6 +380,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
           docker save -o "${DOCKER_IMAGE_BASE_NAME}.tar" "${DOCKER_IMAGE}"
           aws s3 cp "${DOCKER_IMAGE_BASE_NAME}.tar" "s3://ossci-linux-build/caffe2/base/${DOCKER_IMAGE_BASE_NAME}.tar" --acl public-read
           echo "Docker image is uploaded to S3."
+          rm "${DOCKER_IMAGE_BASE_NAME}.tar"
         fi
         echo "Docker image download link: https://s3.amazonaws.com/ossci-linux-build/caffe2/base/${DOCKER_IMAGE_BASE_NAME}.tar"
 
@@ -400,6 +403,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
           COMMIT_DOCKER_IMAGE_BASE_NAME=$(basename "${COMMIT_DOCKER_IMAGE}")
           docker save -o "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" "${COMMIT_DOCKER_IMAGE}"
           aws s3 cp "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" "s3://ossci-linux-build/caffe2/intermediate/${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" --acl public-read
+          rm "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar"
         fi
 
 caffe2_linux_test_defaults: &caffe2_linux_test_defaults
