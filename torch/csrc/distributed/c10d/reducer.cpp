@@ -172,9 +172,14 @@ void Reducer::mark_variable_ready(size_t replica_index, size_t variable_index) {
   // auto& event = replica.events[bucket_index.intra_bucket_index];
   // event.record();
 
-  // Kick off reduction if all replicas for this bucket are ready.
-  if ((--replica.pending == 0) && (--bucket.pending == 0)) {
-    mark_bucket_ready(bucket_index.bucket_index);
+  // Check if this was the final gradient for this bucket.
+  if (--replica.pending == 0) {
+    // Prescale bucket contents to turn the global sum into the global average.
+    replica.contents.div_(process_group_->getSize());
+    // Kick off reduction if all replicas for this bucket are ready.
+    if (--bucket.pending == 0) {
+      mark_bucket_ready(bucket_index.bucket_index);
+    }
   }
 
   // Autograd callbacks can only be registered while the engine is running.
