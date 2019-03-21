@@ -19,9 +19,9 @@ TEST(TestQTensor, First) {
   ASSERT_EQ(qr.q_scale().to<float>(), scale);
   ASSERT_EQ(qr.q_zero_point().to<int32_t>(), zero_point);
 
-  auto* quantizer = static_cast<PerLayerAffineQuantizer*>(qr.quantizer());
-  ASSERT_EQ(quantizer->scale(), scale);
-  ASSERT_EQ(quantizer->zero_point(), zero_point);
+  // auto* quantizer = static_cast<PerLayerAffineQuantizer*>(qr.quantizer());
+  // ASSERT_EQ(quantizer->scale(), scale);
+  // ASSERT_EQ(quantizer->zero_point(), zero_point);
 
   Tensor rqr = qr.dequantize();
   auto rqr_a = rqr.data<float>();

@@ -457,7 +457,6 @@ struct CAFFE2_API Type {
   virtual Tensor dequantize(const Tensor & self) const = 0;
   virtual Scalar q_scale(const Tensor & self) const = 0;
   virtual Scalar q_zero_point(const Tensor & self) const = 0;
-  virtual Quantizer* quantizer(const Tensor & self) const = 0;
   virtual Tensor to(const Tensor & self, const TensorOptions & options, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
