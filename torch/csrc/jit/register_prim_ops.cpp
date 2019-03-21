@@ -54,8 +54,7 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
         "Cannot input a tensor of dimension other than 0 as a scalar argument");
   }
   if (toInt &&
-      !isIntegralType(
-          autograd::as_variable_ref(t).data().scalar_type())) {
+      !isIntegralType(autograd::as_variable_ref(t).data().scalar_type())) {
     std::stringstream ss;
     ss << "Cannot input a tensor of type " << t.scalar_type()
        << " as an integral argument";
@@ -472,6 +471,7 @@ RegisterOperators reg(
      Operator(
          FunctionSchema(
              "aten::warn",
+             "",
              {Argument("message", StringType::get()),
               Argument("stacklevel", IntType::get(), c10::nullopt, 2, true)},
              {}),
@@ -991,6 +991,17 @@ int listAppend(Stack& stack) {
 }
 
 template <typename TList>
+int listReverse(Stack& stack) {
+  TList a;
+  pop(stack, a);
+
+  auto& elements = a->elements();
+  std::reverse(elements.begin(), elements.end());
+
+  return 0;
+}
+
+template <typename TList>
 int listPop(Stack& stack) {
   TList list;
   int64_t idx;
@@ -1099,6 +1110,76 @@ int listRemove<Shared<TensorList>, at::Tensor>(Stack& stack) {
   } else {
     AT_ERROR("list.remove(x): x not in list");
   }
+
+  return 0;
+}
+
+template <typename TList, typename TElement>
+int listIndex(Stack& stack) {
+  TList list;
+  TElement elem;
+  pop(stack, list, elem);
+
+  auto& elements = list->elements();
+  auto pos = std::find(elements.begin(), elements.end(), elem);
+
+  if (pos != elements.end()) {
+    push(stack, static_cast<int64_t>(std::distance(elements.begin(), pos)));
+  } else {
+    AT_ERROR("'", elem, "' is not in list");
+  }
+
+  return 0;
+}
+
+template <>
+int listIndex<Shared<TensorList>, at::Tensor>(Stack& stack) {
+  Shared<TensorList> list;
+  at::Tensor elem;
+  pop(stack, list, elem);
+
+  auto& elements = list->elements();
+  auto pos = std::find_if(
+      elements.begin(), elements.end(), [elem](const at::Tensor& b) {
+        const auto cmp_result = elem.eq(b);
+        return cmp_result.is_nonzero();
+      });
+
+  if (pos != elements.end()) {
+    push(stack, static_cast<int64_t>(std::distance(elements.begin(), pos)));
+  } else {
+    AT_ERROR("'", elem, "' is not in list");
+  }
+
+  return 0;
+}
+
+template <typename TList, typename TElement>
+int listCount(Stack& stack) {
+  TList list;
+  TElement elem;
+  pop(stack, list, elem);
+
+  auto& elements = list->elements();
+  const int64_t count = std::count(elements.begin(), elements.end(), elem);
+  push(stack, count);
+
+  return 0;
+}
+
+template <>
+int listCount<Shared<TensorList>, at::Tensor>(Stack& stack) {
+  Shared<TensorList> list;
+  at::Tensor elem;
+  pop(stack, list, elem);
+
+  auto& elements = list->elements();
+  const int64_t count = std::count_if(
+      elements.begin(), elements.end(), [elem](const at::Tensor& b) {
+        const auto cmp_result = elem.eq(b);
+        return cmp_result.is_nonzero();
+      });
+  push(stack, count);
 
   return 0;
 }
@@ -1404,6 +1485,33 @@ int dictIndex(Stack& stack) {
   return 0;
 }
 
+int dictGet(Stack& stack) {
+  auto index = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  const auto& elems = dict->elements();
+  auto value = elems.find(index);
+  if (value == elems.end()) {
+    push(stack, IValue());
+  } else {
+    push(stack, value->second);
+  }
+  return 0;
+}
+
+int dictGetDefault(Stack& stack) {
+  auto default_value = pop(stack);
+  auto index = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  const auto& elems = dict->elements();
+  auto value = elems.find(index);
+  if (value == elems.end()) {
+    push(stack, default_value);
+  } else {
+    push(stack, value->second);
+  }
+  return 0;
+}
+
 RegisterOperators reg2({
 
 #define DEFINE_STRING_OP(op_name, string_op, result)                \
@@ -1440,6 +1548,9 @@ RegisterOperators reg2({
           "(c) el) -> " decl_type "[](a!)",                                 \
           listAppend<Shared<c_type>, c_type::ElemType>),                    \
       Operator(                                                             \
+          "aten::reverse( " decl_type "[](a!) self) -> ()",                 \
+          listReverse<Shared<c_type>>),                                     \
+      Operator(                                                             \
           "aten::extend(" decl_type "[](a!) self, " decl_type               \
           " [] other) -> ()",                                               \
           listExtend<Shared<c_type>>),                                      \
@@ -1471,6 +1582,12 @@ RegisterOperators reg2({
     Operator(
         "aten::remove(Tensor[](a!) self, Tensor el) -> ()",
         listRemove<Shared<TensorList>, at::Tensor>),
+    Operator(
+        "aten::index(Tensor[] self, Tensor el) -> int",
+        listIndex<Shared<TensorList>, at::Tensor>),
+    Operator(
+        "aten::count(Tensor[] self, Tensor el) -> int",
+        listCount<Shared<TensorList>, at::Tensor>),
 
 // Mutable ops for lists containing immutable types.
 #define CREATE_IMMUTABLE_LIST_OPS(decl_type, c_type)                   \
@@ -1481,6 +1598,9 @@ RegisterOperators reg2({
           "aten::append(" decl_type "[](a!) self, " decl_type          \
           " el) -> " decl_type "[](a!)",                               \
           listAppend<Shared<c_type>, c_type::ElemType>),               \
+      Operator(                                                        \
+          "aten::reverse(" decl_type "[](a!) self) -> ()",             \
+          listReverse<Shared<c_type>>),                                \
       Operator(                                                        \
           "aten::extend(" decl_type "[](a!) self, " decl_type          \
           " [] other) -> ()",                                          \
@@ -1508,6 +1628,16 @@ RegisterOperators reg2({
           " decl_type " el) -> ()",                                    \
           listRemove<Shared<c_type>, c_type::ElemType>),               \
       Operator(                                                        \
+          "aten::index(" decl_type                                     \
+          "[] self,                           \
+          " decl_type " el) -> int",                                   \
+          listIndex<Shared<c_type>, c_type::ElemType>),                \
+      Operator(                                                        \
+          "aten::count(" decl_type                                     \
+          "[] self,                           \
+          " decl_type " el) -> int",                                   \
+          listCount<Shared<c_type>, c_type::ElemType>),                \
+      Operator(                                                        \
           "aten::pop(" decl_type                                       \
           "[](a!) self, int idx=-1)             \
           -> " decl_type,                                              \
@@ -1524,7 +1654,7 @@ RegisterOperators reg2({
 #undef CREATE_MUTABLE_LIST_OPS
 
 #define CREATE_LIST_OPS(decl_type, c_type)                                          \
-  Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),         \
+      Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),     \
       Operator(                                                                     \
           "aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type           \
           "[]",                                                                     \
@@ -1727,6 +1857,14 @@ RegisterOperators reg2({
           "prim::DictIndex(Dict(" key_type ", t) self, " key_type            \
           " key) -> t(*)",                                                   \
           dictIndex),                                                        \
+      Operator(                                                              \
+          "aten::get(Dict(" key_type ", t) self, " key_type                  \
+          " key) -> t(*)?",                                                   \
+          dictGet),                                                          \
+      Operator(                                                              \
+          "aten::get(Dict(" key_type ", t) self, " key_type                  \
+          " key, t default_value) -> t(*)",                                  \
+          dictGetDefault),                                                   \
       Operator(                                                              \
           "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type           \
           " idx, t v) -> ()",                                                \

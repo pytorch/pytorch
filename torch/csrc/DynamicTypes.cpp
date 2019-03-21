@@ -71,9 +71,11 @@ at::Type* get_type(const std::string& name, bool is_cuda, bool is_sparse) {
 
 PyTypeObject* getPyTypeObject(const at::Storage& storage)
 {
+  at::ScalarType scalarType = at::typeMetaToScalarType(storage.dtype());
+  at::TensorOptions options = at::TensorOptions(storage.device_type()).dtype(scalarType);
   auto attype = at::globalContext().getNonVariableTypeOpt(
-      at::deviceTypeToBackend(storage.device_type()),
-      at::typeMetaToScalarType(storage.dtype()));
+      at::tensorTypeIdToBackend(at::computeTensorTypeId(options)),
+      scalarType);
   auto it = attype_to_py_storage_type.find(attype);
   if (it != attype_to_py_storage_type.end()) {
     return it->second;
