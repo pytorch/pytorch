@@ -424,14 +424,6 @@ std::tuple<Tensor,Tensor> gels(const Tensor & self, const Tensor & A) {
   return at::legacy::th::_th_gels(self, A);
 }
 
-std::tuple<Tensor &,Tensor &> trtrs_out(Tensor & X, Tensor & M, const Tensor & self, const Tensor & A, bool upper, bool transpose, bool unitriangular) {
-  return at::legacy::th::_th_trtrs_out(X, M, self, A, upper, transpose, unitriangular);
-}
-
-std::tuple<Tensor,Tensor> trtrs(const Tensor & self, const Tensor & A, bool upper, bool transpose, bool unitriangular) {
-  return at::legacy::th::_th_trtrs(self, A, upper, transpose, unitriangular);
-}
-
 std::tuple<Tensor &,Tensor &> symeig_out(Tensor & e, Tensor & V, const Tensor & self, bool eigenvectors, bool upper) {
   return at::legacy::th::_th_symeig_out(e, V, self, eigenvectors, upper);
 }

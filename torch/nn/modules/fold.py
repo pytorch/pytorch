@@ -12,9 +12,9 @@ class Fold(Module):
     Consider a batched :attr:`input` tensor containing sliding local blocks,
     e.g., patches of images, of shape :math:`(N, C \times  \prod(\text{kernel\_size}), L)`,
     where :math:`N` is batch dimension, :math:`C \times \prod(\text{kernel\_size})`
-    is the number of values with in a block (a block has :math:`\prod(\text{kernel\_size})`
+    is the number of values within a block (a block has :math:`\prod(\text{kernel\_size})`
     spatial locations each containing a :math:`C`-channeled vector), and
-    :math:`L` is the total number of blocks. (This is exacly the
+    :math:`L` is the total number of blocks. (This is exactly the
     same specification as the output shape of :class:`~torch.nn.Unfold`.) This
     operation combines these local blocks into the large :attr:`output` tensor
     of shape :math:`(N, C, \text{output\_size}[0], \text{output\_size}[1], \dots)`
@@ -124,7 +124,7 @@ class Unfold(Module):
     of :attr:`input` into a column (i.e., last dimension) of a 3-D :attr:`output`
     tensor of shape :math:`(N, C \times \prod(\text{kernel\_size}), L)`, where
     :math:`C \times \prod(\text{kernel\_size})` is the total number of values
-    with in each block (a block has :math:`\prod(\text{kernel\_size})` spatial
+    within each block (a block has :math:`\prod(\text{kernel\_size})` spatial
     locations each containing a :math:`C`-channeled vector), and :math:`L` is
     the total number of such blocks:
 

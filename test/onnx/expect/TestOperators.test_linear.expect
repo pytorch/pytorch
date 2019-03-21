@@ -4,8 +4,8 @@ producer_version: "1.1"
 graph {
   node {
     input: "input"
-    input: "1"
-    input: "2"
+    input: "weight"
+    input: "bias"
     output: "3"
     op_type: "Gemm"
     attribute {
@@ -29,13 +29,13 @@ graph {
     dims: 5
     dims: 4
     data_type: 1
-    name: "1"
+    name: "weight"
     raw_data: "z(\334>Z\272\263\276\204#\226>\230\340\177\275\036\235\234>0\021E>\016\255\312\276\24080\275dj\201>@\244\366\2754\373\001>0\355r\276\340w\206\276\370\214\330>\020\355\177=0\032\233\275:\255H\276X~0\276N\022\357>\303v\324\276"
   }
   initializer {
     dims: 5
     data_type: 1
-    name: "2"
+    name: "bias"
     raw_data: "0l\326=Z\277\360><\017\275>\320\3473\275\t#\202\276"
   }
   input {
@@ -55,7 +55,7 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "weight"
     type {
       tensor_type {
         elem_type: 1
@@ -71,7 +71,7 @@ graph {
     }
   }
   input {
-    name: "2"
+    name: "bias"
     type {
       tensor_type {
         elem_type: 1
