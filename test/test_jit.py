@@ -11592,6 +11592,8 @@ def create_traced_fn(self, fn,
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         traced = torch.jit.trace(fn_tensors, inputs_tensors)
+        import pdb
+        pdb.set_trace()
         self.assertExportImport(traced.graph, inputs_tensors)
         if disable_autodiff_subgraph_inlining:
             traced.debug_disable_autodiff_subgraph_inlining()
@@ -13101,14 +13103,11 @@ def add_autograd_test(
         self_size,
         args,
         variant_name='',
+        check_ad=False,
         dim_args_idx=(),
         skipTestIf=(),
         output_process_fn=lambda x: x,
-        kwargs=None,
-        check_AD=False):
-    # if kwargs is not None:
-        # import pdb
-        # pdb.set_trace()
+        kwargs=None):
     basic_test_name = 'test_' + name
     if variant_name != '':
         basic_test_name += '_' + variant_name
@@ -13122,7 +13121,7 @@ def add_autograd_test(
         # for-loop bodies don't define scopes, so we have to save the variables
         # we want to close over in some way
         def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
-                    output_process_fn=output_process_fn):
+                    check_ad=check_ad, output_process_fn=output_process_fn):
             def check(name):
                 set_rng_seed(2)
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
@@ -13147,18 +13146,26 @@ def add_autograd_test(
                     # to contain DifferentiableGraph nodes whenever possible. This allows us
                     # to test autodiff; we assume that autograd is correct and use autodiff for backprop
                     if test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self,
-                                                create_traced_fn(self, fn,
-                                                                 disable_autodiff_subgraph_inlining=True),
+                        traced_fn = create_traced_fn(self, fn, disable_autodiff_subgraph_inlining=True)
+
+                        import pdb
+                        pdb.set_trace()
+                        check_against_reference(self, traced_fn,
                                                 fn, (self_variable,) + args_variable, kwargs_variable,
                                                 check_types=check_types)
+                        if check_ad:
+                            self.assertGraphContains(traced_fn.last_graph, "prim::DifferentiableGraph")
 
                     if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
-                        check_against_reference(self,
-                                                create_script_fn(self, name, 'method', output_process_fn,
-                                                                 disable_autodiff_subgraph_inlining=True),
+                        script_fn = create_script_fn(self, name, 'method', output_process_fn,
+                                                     disable_autodiff_subgraph_inlining=True)
+                        check_against_reference(self, script_fn,
                                                 fn, (self_variable,) + args_variable, kwargs_variable,
                                                 check_types=check_types)
+                        import pdb
+                        pdb.set_trace()
+                        if check_ad:
+                            self.assertGraphContains(script_fn.last_graph, "prim::DifferentiableGraph")
 
                 # functional interface tests
                 if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:

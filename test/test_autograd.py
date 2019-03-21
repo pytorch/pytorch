@@ -2975,6 +2975,7 @@ def add_test(
         self_size,
         args,
         variant_name='',
+        check_ad=False, # flag used in test_jit, it's not used in autograd tests.
         dim_args_idx=(),
         skipTestIf=(),
         output_process_fn=lambda x: x,
