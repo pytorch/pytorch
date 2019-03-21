@@ -183,7 +183,7 @@ template<typename... Ts> using void_t = typename make_void<Ts...>::type;
 
 template <class F, class Tuple>
 inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
-  return std::apply(forward<F>(f), forward<Tuple>(t));
+  return std::apply(std::forward<F>(f), std::forward<Tuple>(t));
 }
 
 #else
