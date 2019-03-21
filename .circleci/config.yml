@@ -174,17 +174,15 @@ setup_ci_environment: &setup_ci_environment
       docker-ce=18.06.2~ce~3-0~ubuntu \
       nvidia-docker2=2.0.3+docker18.06.2-1 \
       expect-dev \
-      python-dev
+      python3-pip \
+      python3-dev
 
     sudo pkill -SIGHUP dockerd
 
-    sudo python --version
-    sudo python3 --version
-
     # Upgrade SSL module to avoid old SSL warnings
-    sudo pip -q install --upgrade setuptools
-    sudo pip -q install --upgrade pyOpenSSL ndg-httpsclient pyasn1
-    sudo pip -q install awscli==1.16.35
+    sudo pip3 -q install --upgrade setuptools
+    sudo pip3 -q install --upgrade pyOpenSSL ndg-httpsclient pyasn1
+    sudo pip3 -q install awscli==1.16.35
 
     if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
       wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-410.79.run'
