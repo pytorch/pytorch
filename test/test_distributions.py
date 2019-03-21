@@ -91,6 +91,7 @@ def is_all_nan(tensor):
 
 
 # Register all distributions for generic tests.
+torch.manual_seed(1)
 Example = namedtuple('Example', ['Dist', 'params'])
 EXAMPLES = [
     Example(Bernoulli, [
