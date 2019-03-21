@@ -1,14 +1,17 @@
 #include "infer_schema.h"
+#include <sstream>
 
 namespace c10 {
 
-void assertSchemasHaveSameSignature(const FunctionSchema& inferred, const FunctionSchema& specified) {
-  auto serialize_schema = [] (const FunctionSchema& schema) -> std::string {
+namespace {
+  std::string serialize_schema(const FunctionSchema& schema) {
     std::ostringstream str;
     str << schema;
     return str.str();
-  };
+  }
+}
 
+void assertSchemasHaveSameSignature(const FunctionSchema& inferred, const FunctionSchema& specified) {
   if (inferred.arguments().size() != specified.arguments().size()) {
     AT_ERROR("In operator registration: Specified function schema [", serialize_schema(specified), "] ",
              "doesn't match inferred function schema [", serialize_schema(inferred), "]. ",
