@@ -192,19 +192,19 @@ inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
 // TODO This is an incomplete implementation of std::apply, not working for member functions.
 namespace detail {
 template <class F, class Tuple, std::size_t... I>
-constexpr auto apply_impl(F&& f, Tuple&& t, guts::index_sequence<I...>) -> decltype(forward<F>(f)(std::get<I>(forward<Tuple>(t))...))
+constexpr auto apply_impl(F&& f, Tuple&& t, guts::index_sequence<I...>) -> decltype(c10::guts::forward<F>(f)(std::get<I>(c10::guts::forward<Tuple>(t))...))
 {
-    return forward<F>(f)(std::get<I>(forward<Tuple>(t))...);
+    return c10::guts::forward<F>(f)(std::get<I>(c10::guts::forward<Tuple>(t))...);
 }
 }  // namespace detail
 
 template <class F, class Tuple>
 constexpr auto apply(F&& f, Tuple&& t) -> decltype(detail::apply_impl(
-    forward<F>(f), forward<Tuple>(t),
+    c10::guts::forward<F>(f), c10::guts::forward<Tuple>(t),
     guts::make_index_sequence<std::tuple_size<guts::remove_reference_t<Tuple>>::value>{}))
 {
     return detail::apply_impl(
-        forward<F>(f), forward<Tuple>(t),
+        c10::guts::forward<F>(f), c10::guts::forward<Tuple>(t),
         guts::make_index_sequence<std::tuple_size<guts::remove_reference_t<Tuple>>::value>{});
 }
 
