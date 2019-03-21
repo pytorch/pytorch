@@ -23,9 +23,9 @@ tensor(indices=tensor([], size=(0, 2)),
        size=(), nnz=2, dtype=torch.float32, layout=torch.sparse_coo,
        requires_grad=True)
 # after addition
-tensor(indices=tensor([], size=(0, 4)),
-       values=tensor([0., 1., 0., 1.]),
-       size=(), nnz=4, dtype=torch.float32, layout=torch.sparse_coo,
+tensor(indices=tensor([], size=(0, 2)),
+       values=tensor([0., 2.]),
+       size=(), nnz=2, dtype=torch.float32, layout=torch.sparse_coo,
        grad_fn=<AddBackward0>)
 # _indices
 tensor([], size=(0, 2), dtype=torch.int64)
@@ -57,9 +57,9 @@ tensor(indices=tensor([], size=(0, 10)),
        size=(0,), nnz=10, dtype=torch.float32, layout=torch.sparse_coo,
        requires_grad=True)
 # after addition
-tensor(indices=tensor([], size=(0, 20)),
-       values=tensor([], size=(20, 0)),
-       size=(0,), nnz=20, dtype=torch.float32, layout=torch.sparse_coo,
+tensor(indices=tensor([], size=(0, 10)),
+       values=tensor([], size=(10, 0)),
+       size=(0,), nnz=10, dtype=torch.float32, layout=torch.sparse_coo,
        grad_fn=<AddBackward0>)
 # _indices
 tensor([], size=(0, 10), dtype=torch.int64)
@@ -99,14 +99,11 @@ tensor(indices=tensor([], size=(0, 3)),
        size=(2,), nnz=3, dtype=torch.float32, layout=torch.sparse_coo,
        requires_grad=True)
 # after addition
-tensor(indices=tensor([], size=(0, 6)),
-       values=tensor([[0.0000, 0.3333],
-                      [0.6667, 1.0000],
-                      [1.3333, 1.6667],
-                      [0.0000, 0.3333],
-                      [0.6667, 1.0000],
-                      [1.3333, 1.6667]]),
-       size=(2,), nnz=6, dtype=torch.float32, layout=torch.sparse_coo,
+tensor(indices=tensor([], size=(0, 3)),
+       values=tensor([[0.0000, 0.6667],
+                      [1.3333, 2.0000],
+                      [2.6667, 3.3333]]),
+       size=(2,), nnz=3, dtype=torch.float32, layout=torch.sparse_coo,
        grad_fn=<AddBackward0>)
 # _indices
 tensor([], size=(0, 3), dtype=torch.int64)
@@ -148,14 +145,11 @@ tensor(indices=tensor([[0, 1, 0]]),
        size=(100, 3), nnz=3, dtype=torch.float32, layout=torch.sparse_coo,
        requires_grad=True)
 # after addition
-tensor(indices=tensor([[0, 1, 0, 0, 1, 0]]),
-       values=tensor([[0.0000, 0.2222, 0.4444],
-                      [0.6667, 0.8889, 1.1111],
-                      [1.3333, 1.5556, 1.7778],
-                      [0.0000, 0.2222, 0.4444],
-                      [0.6667, 0.8889, 1.1111],
-                      [1.3333, 1.5556, 1.7778]]),
-       size=(100, 3), nnz=6, dtype=torch.float32, layout=torch.sparse_coo,
+tensor(indices=tensor([[0, 1, 0]]),
+       values=tensor([[0.0000, 0.4444, 0.8889],
+                      [1.3333, 1.7778, 2.2222],
+                      [2.6667, 3.1111, 3.5556]]),
+       size=(100, 3), nnz=3, dtype=torch.float32, layout=torch.sparse_coo,
        grad_fn=<AddBackward0>)
 # _indices
 tensor([[0, 1, 0]])
@@ -223,9 +217,9 @@ tensor(indices=tensor([], size=(0, 3)),
        size=(10, 0, 3), nnz=3, dtype=torch.float32, layout=torch.sparse_coo,
        requires_grad=True)
 # after addition
-tensor(indices=tensor([], size=(0, 6)),
-       values=tensor([], size=(6, 10, 0, 3)),
-       size=(10, 0, 3), nnz=6, dtype=torch.float32, layout=torch.sparse_coo,
+tensor(indices=tensor([], size=(0, 3)),
+       values=tensor([], size=(3, 10, 0, 3)),
+       size=(10, 0, 3), nnz=3, dtype=torch.float32, layout=torch.sparse_coo,
        grad_fn=<AddBackward0>)
 # _indices
 tensor([], size=(0, 3), dtype=torch.int64)
