@@ -222,10 +222,8 @@ struct CAFFE2_API Type {
   virtual Tensor all(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual bool allclose(const Tensor & self, const Tensor & other, double rtol, double atol, bool equal_nan) const = 0;
   virtual Tensor any(const Tensor & self, int64_t dim, bool keepdim) const = 0;
-  virtual Tensor argmax(const Tensor & self, int64_t dim, bool keepdim) const = 0;
-  virtual Tensor argmax(const Tensor & self) const = 0;
-  virtual Tensor argmin(const Tensor & self, int64_t dim, bool keepdim) const = 0;
-  virtual Tensor argmin(const Tensor & self) const = 0;
+  virtual Tensor argmax(const Tensor & self, c10::optional<int64_t> dim, bool keepdim) const = 0;
+  virtual Tensor argmin(const Tensor & self, c10::optional<int64_t> dim, bool keepdim) const = 0;
   virtual Tensor as_strided(const Tensor & self, IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset) const = 0;
   virtual Tensor & as_strided_(Tensor & self, IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset) const = 0;
   virtual Tensor asin(const Tensor & self) const = 0;
