@@ -716,8 +716,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           // std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
         }
         pc = new_pc;
-        logging::getLogger()->addStatValue(
-            logging::runtime_counters::EXECUTED_OPERATORS, 1.0);
       } catch (Suspend& e) {
         // wait() expects a single input
         AT_ASSERT(inst.inputs.values.size == 1);
@@ -738,9 +736,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               autograd::GradMode::is_enabled()));
         });
 
-        logging::getLogger()->addStatValue(
-            logging::runtime_counters::TASK_SUSPENDS, 1.0);
-
         return true;
       } catch (Future::FutureError& e) {
         // Error from the forked thread.
@@ -758,8 +753,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         } else {
           handleError(e.what(), is_jit_exception);
         }
-        logging::getLogger()->addStatValue(
-            logging::runtime_counters::LOCAL_EXCEPTIONS, 1.0);
         return false;
       }
     }
@@ -771,8 +764,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         future->markCompleted(
             Tuple::create(jit::last(stack, num_outputs).vec()));
       }
-      logging::getLogger()->addStatValue(
-          logging::runtime_counters::FUTURES_COMPLETED, 1.0);
     }
 
     return false;

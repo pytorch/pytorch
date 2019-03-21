@@ -9,13 +9,13 @@ namespace logging {
 
 // TODO: multi-scale histogram for this thing
 
-void LockingLogger::addStatValue(const std::string& stat_name, float val) {
+void LockingLogger::addStatValue(const std::string& stat_name, int64_t val) {
   std::unique_lock<std::mutex> lk(m);
   raw_counters[stat_name].push_back(val);
 }
 
-std::unordered_map<std::string, float> LockingLogger::getCounters() const {
-  std::unordered_map<std::string, float> counters;
+std::unordered_map<std::string, int64_t> LockingLogger::getCounters() const {
+  std::unordered_map<std::string, int64_t> counters;
   std::unique_lock<std::mutex> lk(m);
   for (auto& kv : raw_counters) {
     AggregationType type = agg_types.count(kv.first) ? agg_types.at(kv.first)
@@ -23,14 +23,16 @@ std::unordered_map<std::string, float> LockingLogger::getCounters() const {
     switch (type) {
       case AggregationType::SUM: {
         float sum = 0;
-        for (auto x : kv.second)
+        for (auto x : kv.second) {
           sum += x;
+        }
         counters[kv.first] = sum;
       } break;
       case AggregationType::AVG: {
         float avg = 0;
-        for (auto x : kv.second)
+        for (auto x : kv.second) {
           avg += x;
+        }
         avg /= kv.second.size();
         counters[kv.first] = avg;
       } break;
@@ -45,18 +47,19 @@ void LockingLogger::setAggregationType(
   agg_types[stat_name] = type;
 }
 
-// TODO: SLOW
-std::mutex m;
-std::shared_ptr<LoggerBase> global_logger = std::make_shared<NoopLogger>();
 
-std::shared_ptr<LoggerBase> getLogger() {
-  std::unique_lock<std::mutex> lk(m);
-  return global_logger;
+std::atomic<LoggerBase*> global_logger{new NoopLogger()};
+
+LoggerBase* getLogger() {
+  return global_logger.load();
 }
 
-void setLogger(std::shared_ptr<LoggerBase> logger) {
-  std::unique_lock<std::mutex> lk(m);
-  global_logger = std::move(logger);
+LoggerBase *setLogger(LoggerBase* logger) {
+  LoggerBase *previous = global_logger.load();
+  while (!global_logger.compare_exchange_strong(previous, logger)) {
+    previous = global_logger.load();
+  }
+  return previous;
 }
 
 JITTimePoint timePoint() {

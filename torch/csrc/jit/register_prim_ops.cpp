@@ -909,6 +909,8 @@ RegisterOperators reg(
        };
      }),
      // HACK alert: stuffing a struct into a ByteTensor
+     // TODO: we should revisit this when C++-bound script classes are
+     // available.
      Operator("prim::TimePoint() -> Tensor", [](const Node* node) {
       return [](Stack& stack) {
         logging::JITTimePoint *ptr = new logging::JITTimePoint(logging::timePoint());

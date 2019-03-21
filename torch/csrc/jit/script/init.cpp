@@ -1121,9 +1121,9 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_logging_get_counters", []() {
     return logging::getLogger()->getCounters();
   });
-  m.def("_logging_set_logger", [](std::shared_ptr<logging::LoggerBase> logger) {
-    logging::setLogger(logger);
-  });
+  m.def("_logging_set_logger", [](logging::LoggerBase* logger) {
+    return logging::setLogger(logger);
+  }, py::return_value_policy::reference);
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
       m, "LoggerBase");
   py::enum_<logging::LockingLogger::AggregationType>(m, "AggregationType")
