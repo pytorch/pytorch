@@ -176,7 +176,7 @@ class Errors(object):
         if self.errors:
             self.fail()
 
-    def recover(parent_self):
+    def recover(self):
         """
         Returns a context manager which can be used to recover in case of
         an error.  Example usage:
@@ -184,6 +184,8 @@ class Errors(object):
         >>> with errs.recover():
         >>>     ...
         """
+        parent_self = self
+
         class Recover(object):
             def __enter__(self):
                 pass
@@ -193,7 +195,7 @@ class Errors(object):
                     return True
         return Recover()
 
-    def addErrCtxt(parent_self, msg):
+    def addErrCtxt(self, msg):
         """
         Returns a context manager which encloses a fragment of code with
         an extra contextual message, e.g., where an error occurred, or a hint
@@ -202,6 +204,8 @@ class Errors(object):
         >>> with errs.addErrCtx("Some text"):
         >>>     ...
         """
+        parent_self = self
+
         class AddContext(object):
             def __enter__(self):
                 parent_self.context.append(msg)
