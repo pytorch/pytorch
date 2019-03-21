@@ -2154,7 +2154,10 @@ class TestAutograd(TestCase):
         for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
             f_args_variable = (torch.randn(S, S, requires_grad=True),
                                torch.randn(S, S, requires_grad=True))
-            f = lambda a, b: torch.cdist(a, b, p)
+
+            def f(a, b):
+                return torch.cdist(a, b, p)
+
             f_args_tensor = deepcopy(unpack_variables(f_args_variable))
             run_functional_checks(self, "test_cdist", "cdist", f,
                                   True, f_args_variable, f_args_tensor)
