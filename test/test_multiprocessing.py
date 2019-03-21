@@ -1,7 +1,6 @@
 import contextlib
 import gc
 import os
-from parameterized import parameterized
 import sys
 import time
 import unittest
@@ -13,7 +12,7 @@ import torch.multiprocessing as mp
 import torch.utils.hooks
 from torch.nn import Parameter
 from common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN,
-                          load_tests)
+                          load_tests, slowTest)
 from multiprocessing.reduction import ForkingPickler
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -378,13 +377,12 @@ class TestMultiprocessing(TestCase):
         e.set()
         p.join(1)
 
-    @parameterized.expand([("regular", 5, 100),
-                           ("lots of tensors", 5, 500),
-                           ("big tensors", 5000000, 500)])
+
+    @slowTest
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
-    def test_cuda_send_many(self, name, size=5, count=100):
+    def test_cuda_send_many(self, name=None, size=5, count=100000):
         ctx = mp.get_context('spawn')
         q1 = ctx.Queue()
         q2 = ctx.Queue()
@@ -494,7 +492,6 @@ class TestMultiprocessing(TestCase):
             self.assertEqual(list(tensor), [4, 4, 4, 4])
         p.join()
 
-    @staticmethod
     def _test_event_multiprocess_child(event, p2c, c2p):
         c2p.put(0)  # notify parent child is ready
         p2c.get()  # wait for record in parent
@@ -550,7 +547,6 @@ class TestMultiprocessing(TestCase):
             # create handle on different device from recorded event
             e1.ipc_handle()
 
-    @staticmethod
     def _test_event_handle_importer_consumer(handle, p2c, c2p):
         e1 = torch.cuda.Event.from_ipc_handle(0, handle)
         c2p.put(0)  # notify parent child is ready
@@ -585,7 +581,6 @@ class TestMultiprocessing(TestCase):
         p2c.put(1)  # notify child that parent is done
         p.join()
 
-    @staticmethod
     def _test_event_handle_exporter_consumer(handle, p2c, c2p):
         stream = torch.cuda.Stream()
         with torch.cuda.stream(stream):
