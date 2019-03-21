@@ -144,6 +144,18 @@ c10::optional<bool> isDefined(Value* tensor) {
   return {};
 }
 
+bool isFusableLayerNorm(Node* layer_norm) {
+  if (!layer_norm->matches(
+          "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor")) {
+    return false;
+  }
+  // If we can't determine if weight and bias is defined statically there's
+  // really no point in decomposing batch norm into simpler ops, since it won't
+  // get fused into a single kernel.
+  return isDefined(layer_norm->namedInput(attr::weight)).has_value() &&
+      isDefined(layer_norm->namedInput(attr::bias)).has_value();
+}
+
 bool isFusableBatchNorm(Node* batch_norm) {
   if (!batch_norm->matches(
           "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor")) {
@@ -187,7 +199,8 @@ struct GraphFuser {
   }
 
   bool isFusable(Node* node) {
-    return isFusableMap(node) || isFusableBatchNorm(node);
+    return isFusableMap(node) || isFusableBatchNorm(node) ||
+        isFusableLayerNorm(node);
   }
 
   bool isFusableMap(Node* node) {
@@ -242,6 +255,54 @@ struct GraphFuser {
   Graph& getSubgraph(Node* n) {
     AT_ASSERT(n->kind() == prim::FusionGroup);
     return *n->g(attr::Subgraph);
+  }
+
+  void decomposeLayerNorm(Node* layer_norm) {
+    static std::shared_ptr<Graph> ln_graph;
+    static std::once_flag flag;
+    std::call_once(
+        flag,
+        [](std::shared_ptr<Graph>* graph_ptr) {
+          static const char* source = R"SCRIPT(
+        def layer_norm(input : Tensor, normalized_shape : List[int], eps : float, cudnn_enable : bool) -> Tensor:
+            input_ndim = input.dim()
+            normalized_ndim = len(normalized_shape)
+            n = 1
+            for i in range(input_ndim - normalized_ndim):
+                n *= input.size(i)
+            input_reshape = input.contiguous().view(1, n, -1)
+            bn_out = torch.batch_norm(input_reshape, None, None, None, None, True, 0.0, eps, cudnn_enable)
+            return bn_out.view(input.size())
+      )SCRIPT";
+          auto module = std::make_shared<script::Module>();
+          defineMethodsInModule(
+              module, source, script::nativeResolver, /*self=*/c10::nullopt);
+          *graph_ptr = module->get_method("layer_norm").graph();
+        },
+        &ln_graph);
+
+    AT_ASSERT(isFusableLayerNorm(layer_norm));
+    WithInsertPoint insert_guard{layer_norm};
+    Value* input = layer_norm->namedInput(attr::input);
+    std::vector<Value*> inputs{input,
+                               layer_norm->namedInput(attr::normalized_shape),
+                               layer_norm->namedInput(attr::eps),
+                               layer_norm->namedInput(attr::cudnn_enable)};
+    Value* new_output =
+        SubgraphUtils::inlineGraph(ln_graph, inputs, layer_norm).at(0);
+    auto weight = layer_norm->namedInput(attr::weight);
+    auto bias = layer_norm->namedInput(attr::bias);
+    auto weight_defined = isDefined(weight).value();
+    auto bias_defined = isDefined(bias).value();
+    if (weight_defined && bias_defined) {
+      new_output = graph_->insert(aten::addcmul, {bias, new_output, weight});
+    } else if (weight_defined) {
+      new_output = graph_->insert(aten::mul, {new_output, weight});
+    } else if (bias_defined) {
+      new_output = graph_->insert(aten::add, {new_output, bias});
+    }
+    layer_norm->output()->replaceAllUsesWith(new_output);
+    layer_norm->destroy();
   }
 
   void decomposeBatchNorm(Node* batch_norm) {
@@ -449,12 +510,6 @@ struct GraphFuser {
     return group;
   }
 
-  // TODO: remove this and use WithInsertPoint instead
-  void insertAt(Node** insertion_point, Node* n) {
-    n->insertAfter(*insertion_point);
-    *insertion_point = n;
-  }
-
   at::optional<Node*> tryFuse(Node* consumer, Value* producer) {
     // this handles cases where producer can be moved _into_ the fusion group of
     // consumer.
@@ -495,10 +550,20 @@ struct GraphFuser {
       group = createSingletonFusionGroup(consumer);
     }
     if (producer->node()->matches(
+            "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor")) {
+      // We don't do any fusions in here, but simply decompose the batch norm
+      // into a kernel that computes the stats + pointwise ops which will be
+      // considered in this fusion next.
+      decomposeLayerNorm(producer->node());
+      return group;
+    }
+
+    if (producer->node()->matches(
             "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor")) {
       // We don't do any fusions in here, but simply decompose the batch norm
       // into a kernel that computes the stats + pointwise ops which will be
       // considered in this fusion next.
+      std::cout << "&&&&&" << std::endl;
       decomposeBatchNorm(producer->node());
       return group;
     }
@@ -1165,9 +1230,13 @@ struct GraphFuser {
       refreshAliasDb();
       for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
         bool changed;
+        std::cout << "**** start " << std::endl;
+        (*it)->dump();
         std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
+        std::cout << "**** end" << any_changed << " " << changed << std::endl;
       }
+      graph_->dump();
     }
     refreshAliasDb();
 
