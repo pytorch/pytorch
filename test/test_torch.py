@@ -1035,6 +1035,7 @@ class _TestTorchMixin(object):
         for dtype in types:
             x = cast(torch.tensor(example, dtype=dtype))
             self.assertEqual(x.argmax().item(), 5)
+            self.assertEqual(x.argmax(dim=None).item(), 5)
             self.assertEqual(x.argmax(dim=0), torch.FloatTensor([1, 1, 1]))
             self.assertEqual(x.argmax(dim=1), torch.FloatTensor([1, 2]))
             self.assertEqual(x.argmax(dim=0, keepdim=True), torch.FloatTensor([[1, 1, 1]]))
@@ -1044,6 +1045,7 @@ class _TestTorchMixin(object):
         for dtype in types:
             x = cast(torch.tensor(example, dtype=dtype))
             self.assertEqual(x.argmin().item(), 0)
+            self.assertEqual(x.argmin(dim=None).item(), 0)
             self.assertEqual(x.argmin(dim=0), torch.FloatTensor([0, 0, 0]))
             self.assertEqual(x.argmin(dim=1), torch.FloatTensor([0, 1]))
             self.assertEqual(x.argmin(dim=1, keepdim=True), torch.FloatTensor([[0], [1]]))
@@ -4711,6 +4713,23 @@ class _TestTorchMixin(object):
     def test_solve_batched_dims(self):
         self._test_solve_batched_dims(self, lambda t: t)
 
+    def test_solve_methods_arg_device(self):
+        if not torch.cuda.is_available():
+            return
+
+        for b_device, A_device in product(['cpu', 'cuda'], repeat=2):
+            if b_device == A_device:
+                continue
+
+            b = torch.randn(3, 1, device=b_device)
+            A = torch.randn(3, 3, device=A_device)
+            err_str = "Expected b and A to be on the same device"
+            with self.assertRaisesRegex(RuntimeError, err_str):
+                torch.gesv(b, A)
+
+            with self.assertRaisesRegex(RuntimeError, err_str):
+                torch.cholesky_solve(b, A)
+
     @skipIfNoLapack
     def test_qr(self):
 
@@ -4918,6 +4937,93 @@ class _TestTorchMixin(object):
     @skipIfNoLapack
     def test_trtrs(self):
         self._test_trtrs(self, lambda t: t)
+
+    @staticmethod
+    def _test_trtrs_batched(self, cast):
+        def trtrs_test_helper(A_dims, b_dims, cast, upper, unitriangular):
+            A = cast(torch.randn(*A_dims))
+            A = A.triu() if upper else A.tril()
+            if unitriangular:
+                A.diagonal(dim1=-2, dim2=-1).fill_(1.)
+            b = cast(torch.randn(*b_dims))
+            return A, b
+
+        for upper, transpose, unitriangular in product([True, False], repeat=3):
+            # test against trtrs: one batch with all possible arguments
+            A, b = trtrs_test_helper((1, 5, 5), (1, 5, 10), cast, upper, unitriangular)
+            x_exp = torch.trtrs(b.squeeze(0), A.squeeze(0),
+                                upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
+            x = torch.trtrs(b, A,
+                            upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
+            self.assertEqual(x, x_exp.unsqueeze(0))
+
+            # test against trtrs in a loop: four batches with all possible arguments
+            A, b = trtrs_test_helper((4, 5, 5), (4, 5, 10), cast, upper, unitriangular)
+            x_exp_list = []
+            for i in range(4):
+                x_exp = torch.trtrs(b[i], A[i],
+                                    upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
+                x_exp_list.append(x_exp)
+            x_exp = torch.stack(x_exp_list)
+
+            x = torch.trtrs(b, A, upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
+            self.assertEqual(x, x_exp)
+
+            # basic correctness test
+            A, b = trtrs_test_helper((3, 5, 5), (3, 5, 10), cast, upper, unitriangular)
+            x = torch.trtrs(b, A, upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
+            if transpose:
+                self.assertLessEqual(b.dist(torch.matmul(A.transpose(-1, -2), x)), 2e-12)
+            else:
+                self.assertLessEqual(b.dist(torch.matmul(A, x)), 2e-12)
+
+    @skipIfNoLapack
+    def test_trtrs_batched(self):
+        _TestTorchMixin._test_trtrs_batched(self, lambda t: t)
+
+    @staticmethod
+    def _test_trtrs_batched_dims(self, cast):
+        if not TEST_SCIPY:
+            return
+
+        from scipy.linalg import solve_triangular as tri_solve
+
+        def scipy_tri_solve_batched(A, B, upper, trans, diag):
+            batch_dims_A, batch_dims_B = A.shape[:-2], B.shape[:-2]
+            single_dim_A, single_dim_B = A.shape[-2:], B.shape[-2:]
+            expand_dims = tuple(torch._C._infer_size(torch.Size(batch_dims_A),
+                                                     torch.Size(batch_dims_B)))
+            expand_A = np.broadcast_to(A, expand_dims + single_dim_A)
+            expand_B = np.broadcast_to(B, expand_dims + single_dim_B)
+            flat_A = expand_A.reshape((-1,) + single_dim_A)
+            flat_B = expand_B.reshape((-1,) + single_dim_B)
+            flat_X = np.vstack([tri_solve(a, b, lower=(not upper), trans=int(trans), unit_diagonal=diag)
+                                for a, b in zip(flat_A, flat_B)])
+            return flat_X.reshape(expand_B.shape)
+
+        def run_test(A_dims, b_dims, cast, upper, transpose, unitriangular):
+            A = torch.randn(*A_dims)
+            A = A.triu() if upper else A.tril()
+            if unitriangular:
+                A.diagonal(dim1=-2, dim2=-1).fill_(1.)
+            b = torch.randn(*b_dims)
+            x_exp = torch.Tensor(scipy_tri_solve_batched(A.numpy(), b.numpy(),
+                                                         upper, transpose, unitriangular))
+            A, b = cast(A), cast(b)
+            x = torch.trtrs(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
+
+            self.assertEqual(x, cast(x_exp))
+
+        for upper, transpose, unitriangular in product([True, False], repeat=3):
+            # test against scipy.linalg.solve_triangular
+            run_test((2, 1, 3, 4, 4), (2, 1, 3, 4, 6), cast, upper, transpose, unitriangular)  # no broadcasting
+            run_test((2, 1, 3, 4, 4), (4, 6), cast, upper, transpose, unitriangular)  # broadcasting b
+            run_test((4, 4), (2, 1, 3, 4, 2), cast, upper, transpose, unitriangular)  # broadcasting A
+            run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5), cast, upper, transpose, unitriangular)  # broadcasting A & b
+
+    @skipIfNoLapack
+    def test_trtrs_batched_dims(self):
+        self._test_trtrs_batched_dims(self, lambda t: t)
 
     @skipIfNoLapack
     def test_gels(self):
