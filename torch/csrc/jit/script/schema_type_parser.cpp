@@ -21,9 +21,17 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
       {"float", FloatType::get()},
       {"int", IntType::get()},
       {"bool", BoolType::get()},
+      {"None", NoneType::get()},
   };
-  auto tok = L.expect(TK_IDENT);
-  auto text = tok.text();
+  auto tok = L.cur();
+  std::string text;
+  if (L.nextIf(TK_NONE)) {
+    text = "None";
+  } else {
+    L.expect(TK_IDENT);
+    text = tok.text();
+  }
+
   auto it = type_map.find(text);
   if (it == type_map.end()) {
     if (text.size() > 0 && islower(text[0])) {

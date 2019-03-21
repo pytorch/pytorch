@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/passes/peephole.h>
-
+#include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/symbolic_variable.h>
 
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -165,6 +165,47 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
           u.user->replaceInput(0, node->inputs().at(0));
         }
       }
+    } else if (node->kind() == prim::If) {
+      WithInsertPoint guard(node);
+      IfView n(node);
+      // this handles redundant short circuits like "x and True" or "x or False"
+      for (size_t i = 0; i < n.outputs().size(); ++i) {
+        if (n.outputs().at(i)->type() != BoolType::get()) {
+          continue;
+        }
+        bool true_val =
+            constant_as<bool>(n.thenOutputs().at(i)).value_or(false);
+        bool false_val =
+            constant_as<bool>(n.elseOutputs().at(i)).value_or(true);
+        // if an if node's output equals its condition replace output with
+        // condition
+        if (true_val && !false_val) {
+          n.outputs().at(i)->replaceAllUsesWith(n.cond());
+        }
+      }
+    } else if (
+        node->kind() == aten::__is__ || node->kind() == aten::__isnot__) {
+      AT_ASSERT(node->inputs().size() == 2);
+      for (size_t check_none_index : {0, 1}) {
+        bool input_must_be_none =
+            node->inputs().at(check_none_index)->mustBeNone();
+        Value* other_input = node->inputs().at(1 - check_none_index);
+        bool other_must_not_be_none = !other_input->mustBeNone() &&
+            !other_input->type()->cast<OptionalType>();
+        if (input_must_be_none && other_must_not_be_none) {
+          auto output = node->owningGraph()->insertConstant(
+              node->kind() == aten::__isnot__);
+          node->output()->replaceAllUsesWith(output);
+        }
+      }
+    } else if (
+        node->kind() == prim::unchecked_unwrap_optional ||
+        node->kind() == aten::_unwrap_optional) {
+      auto input = node->input();
+      if (input->type() != NoneType::get() &&
+          !input->type()->cast<OptionalType>()) {
+        node->output()->replaceAllUsesWith(node->input());
+      }
     }
   }
 }
@@ -180,6 +221,5 @@ void PeepholeOptimize(
     bool addmm_fusion_enabled) {
   PeepholeOptimize(graph->block(), addmm_fusion_enabled);
 }
-
 } // namespace jit
 } // namespace torch
