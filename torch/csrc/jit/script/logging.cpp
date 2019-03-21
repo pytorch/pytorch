@@ -1,5 +1,6 @@
 #include "torch/csrc/jit/script/logging.h"
 
+#include <atomic>
 #include <mutex>
 #include <unordered_map>
 
