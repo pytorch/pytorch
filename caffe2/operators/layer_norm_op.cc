@@ -200,6 +200,5 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
     "_caffe2::LayerNorm",
-    "",
     C10LayerNorm_DontUseThisOpYet);
 }

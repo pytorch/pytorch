@@ -57,7 +57,6 @@ static auto registry = c10::RegisterOperators().op(
 
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
     "_c10_experimental::AveragedLoss",
-    "",
     C10AveragedLoss_DontUseThisOpYet)
 
 } // namespace caffe2
