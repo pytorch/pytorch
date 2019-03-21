@@ -5,7 +5,7 @@ graph {
   node {
     input: "0"
     output: "1"
-    op_type: "ArgMax"
+    op_type: "ArgMin"
     attribute {
       name: "axis"
       i: 1
