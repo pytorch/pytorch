@@ -1675,6 +1675,8 @@
 - func: cdist(Tensor x1, Tensor x2, float p=2) -> Tensor
   matches_jit_signature: True
 
+- func: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
+
 - func: pdist(Tensor self, float p=2) -> Tensor
   matches_jit_signature: True
 
