@@ -364,7 +364,7 @@ Tensor upsample_trilinear3d_backward_cpu(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners) {
-  auto grad_input = at::zeros_like(grad_output);
+  auto grad_input = at::zeros(input_size, grad_output.options());
   upsample_trilinear3d_backward_out_cpu_template(
       grad_input, grad_output, output_size, input_size, align_corners);
   return grad_input;
