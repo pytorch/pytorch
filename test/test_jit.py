@@ -1874,8 +1874,8 @@ class TestJit(JitTestCase):
             return x == 1 and True, x == 1 or False
 
         self.run_pass('peephole', redundant_expressions.graph)
-        self.assertTrue(redundant_expressions(1), (True, True))
-        self.assertTrue(redundant_expressions(0), (False, False))
+        self.assertEqual(redundant_expressions(1), (True, True))
+        self.assertEqual(redundant_expressions(0), (False, False))
         # and True / or False are removed from graph
         FileCheck().check("aten::eq").check_not("prim::If").run(redundant_expressions.graph)
 
