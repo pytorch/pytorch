@@ -3401,7 +3401,7 @@ class TestKL(TestCase):
                 ]))
 
     def test_entropy_monte_carlo(self):
-        set_rng_seed(24)  # see Note [Randomized statistical tests]
+        set_rng_seed(48)  # see Note [Randomized statistical tests]
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
