@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/native/SobolEngineOpsUtils.h>
@@ -14,26 +15,36 @@ namespace native {
 /// an extra operation to obtain the size of the first dimension of
 /// `sobolstate`.
 std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, const Tensor& sobolstate,
-                                              int64_t dimension, int64_t num_generated) {
+                                              int64_t dimension, int64_t num_generated, optional<ScalarType> dtype) {
   AT_CHECK(sobolstate.dtype() == at::kLong,
            "sobolstate needs to be of type ", at::kLong);
   AT_CHECK(quasi.dtype() == at::kLong,
            "quasi needs to be of type ", at::kLong);
 
   Tensor wquasi = quasi.clone();
-  Tensor result = at::empty({n, dimension}, sobolstate.options().dtype(at::kFloat));
+  auto result_dtype = dtype.has_value() ? dtype.value() : at::kFloat;
+  Tensor result = at::empty({n, dimension}, sobolstate.options().dtype(result_dtype));
 
-  int64_t l;
-  auto wquasi_accessor = wquasi.accessor<int64_t, 1>();
-  auto sobolstate_accessor = sobolstate.accessor<int64_t, 2>();
-  auto result_accessor = result.accessor<float, 2>();
-  for (int64_t i = 0; i < n; i++, num_generated++) {
-    l = rightmost_zero(num_generated);
-    for (int64_t j = 0; j < dimension; j++) {
-      wquasi_accessor[j] ^= sobolstate_accessor[j][l];
+  AT_DISPATCH_FLOATING_TYPES(result_dtype, "_sobol_engine_draw", [&]() -> void {
+    // We deal with `data` and `strides` due to performance issues.
+    int64_t l;
+    int64_t* wquasi_data = wquasi.data<int64_t>();
+    int64_t* sobolstate_data = sobolstate.data<int64_t>();
+    scalar_t* result_data = result.data<scalar_t>();
+
+    int64_t wquasi_stride = wquasi.stride(0);
+    int64_t sobolstate_row_stride = sobolstate.stride(0), sobolstate_col_stride = sobolstate.stride(1);
+    int64_t result_row_stride = result.stride(0), result_col_stride = result.stride(1);
+
+    for (int64_t i = 0; i < n; i++, num_generated++) {
+      l = rightmost_zero(num_generated);
+      for (int64_t j = 0; j < dimension; j++) {
+        wquasi_data[j * wquasi_stride] ^= sobolstate_data[j * sobolstate_row_stride + l * sobolstate_col_stride];
+        result_data[i * result_row_stride + j * result_col_stride] = wquasi_data[j * wquasi_stride];
+      }
     }
-    result.select(0, i).copy_(wquasi);
-  }
+  });
+
   result.mul_(RECIPD);
   return std::tuple<Tensor, Tensor>(result, wquasi);
 }
@@ -49,13 +60,18 @@ Tensor& _sobol_engine_ff_(Tensor& quasi, int64_t n, const Tensor& sobolstate,
   AT_CHECK(quasi.dtype() == at::kLong,
            "quasi needs to be of type ", at::kLong);
 
+  // We deal with `data` and `strides` due to performance issues.
   int64_t l;
-  auto sobolstate_accessor = sobolstate.accessor<int64_t, 2>();
-  auto quasi_accessor = quasi.accessor<int64_t, 1>();
+  int64_t* quasi_data = quasi.data<int64_t>();
+  int64_t* sobolstate_data = sobolstate.data<int64_t>();
+
+  int64_t quasi_stride = quasi.stride(0);
+  int64_t sobolstate_row_stride = sobolstate.stride(0), sobolstate_col_stride = sobolstate.stride(1);
+
   for (int64_t i = 0; i < n; i++, num_generated++) {
     l = rightmost_zero(num_generated);
     for (int64_t j = 0; j < dimension; j++) {
-      quasi_accessor[j] ^= sobolstate_accessor[j][l];
+      quasi_data[j * quasi_stride] ^= sobolstate_data[j * sobolstate_row_stride + l * sobolstate_col_stride];
     }
   }
   return quasi;

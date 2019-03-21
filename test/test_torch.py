@@ -8583,6 +8583,12 @@ class _TestTorchMixin(object):
         self.assertEqual(actual_1d.view(-1), expected_1d)
         self.assertEqual(actual_1d.size(), torch.Size([10, 1]))
 
+        # Test out kwarg
+        engine_1d.reset()
+        actual_1d_out = torch.Tensor().float()
+        engine_1d.draw(10, out=actual_1d_out)
+        self.assertEqual(actual_1d.view(-1), expected_1d)
+
         engine_3d = torch.quasirandom.SobolEngine(3)
         expected_3d = torch.tensor([0.5, 0.75, 0.25, 0.625, 0.125, 0.375, 0.875, 0.3125, 0.8125, 0.5625])
         actual_3d = engine_3d.draw(10)

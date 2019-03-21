@@ -2,8 +2,8 @@ import torch
 
 
 class SobolEngine(object):
-    """
-    The ``SobolEngine`` is an engine for generating (scrambled) Sobol sequences.
+    r"""
+    The :class:`torch.quasirandom.SobolEngine` is an engine for generating (scrambled) Sobol sequences.
     Sobol sequences are an example of low discrepancy quasi-random sequences.
 
     This implementation of an engine for Sobol sequences is capable of sampling sequences up to
@@ -63,21 +63,27 @@ class SobolEngine(object):
         self.quasi = self.shift.clone()
         self.num_generated = 0
 
-    def draw(self, n=1):
-        """
+    def draw(self, n=1, out=None, dtype=None):
+        r"""
         Function to draw a sequence of :attr:`n` points from a Sobol sequence. Note that the samples are dependent
         on the previous samples.
 
         Args:
-            n (Int, optional): The length of sequence of points to draw. Default: 1.
+            n (Int, optional): The length of sequence of points to draw. Default: 1
+            out (Tensor, optional): The output tensor
+            dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+                                                    Default: if ``None``, ``torch.float``.
         """
         result, self.quasi = torch._sobol_engine_draw(self.quasi, n, self.sobolstate,
-                                                      self.dimension, self.num_generated)
+                                                      self.dimension, self.num_generated, dtype=dtype)
         self.num_generated += n
+        if out is not None:
+            out.resize_as_(result).copy_(result)
+            return out
         return result
 
     def reset(self):
-        """
+        r"""
         Function to reset the ``SobolEngine`` to base state.
         """
         self.quasi.copy_(self.shift)
@@ -85,7 +91,7 @@ class SobolEngine(object):
         return self
 
     def fast_forward(self, n):
-        """
+        r"""
         Function to fast-forward the state of the ``SobolEngine`` by :attr:`n` steps. This is equivalent to drawing
         :attr:`n` samples without using the samples.
 
