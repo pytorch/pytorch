@@ -752,7 +752,7 @@ endif()
 
 
 if(USE_ROCM)
-  target_link_libraries(caffe2 caffe2_hip_library)
+  target_link_libraries(caffe2 PUBLIC caffe2_hip_library)
   target_compile_definitions(caffe2 PRIVATE
     USE_ROCM
     __HIP_PLATFORM_HCC__
