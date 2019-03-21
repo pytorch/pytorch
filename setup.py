@@ -260,7 +260,7 @@ def build_deps():
         # this would claim to be a release build when it's not.)
         f.write("debug = {}\n".format(repr(DEBUG)))
         f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
-        f.write("git_version = {}\n".format(sha))
+        f.write("git_version = {}\n".format(repr(sha)))
 
     def check_file(f):
         if not os.path.exists(f):
