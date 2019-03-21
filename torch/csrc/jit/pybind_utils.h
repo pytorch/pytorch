@@ -109,26 +109,10 @@ inline IValue toIValue(py::handle input) {
     at::ivalue::UnorderedMap elems;
     elems.reserve(py::len(dict));
 
-    TypePtr keyType = nullptr;
-    TypePtr valueType = nullptr;
+    // NB: This may not create a well-typed dict. Creators are expected to
+    //     verify any typing claims they wish to make.
     for (auto entry : dict) {
-      auto keyIVal = toDictKeyIValue(entry.first);
-      auto valIVal = toIValue(entry.second);
-
-      if (!keyType) {
-        AT_ASSERT(!valueType);
-        keyType = incompleteInferTypeFrom(keyIVal);
-        valueType = attemptToRecoverType(valIVal);
-      } else {
-        if (*keyType != *incompleteInferTypeFrom(keyIVal) ||
-            *valueType != *attemptToRecoverType(valIVal))
-        {
-          AT_ERROR(
-              "Dictionary inputs to traced functions must have consistent "
-              "key and value types");
-        }
-      }
-      elems.insert(std::make_pair(keyIVal, valIVal));
+      elems.insert(std::make_pair(toDictKeyIValue(entry.first), toIValue(entry.second)));
     }
     return at::ivalue::GenericDict::create(std::move(elems));
   } else {

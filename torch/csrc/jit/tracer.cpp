@@ -191,6 +191,42 @@ Value* getNestedOutputTrace(
   }
 }
 
+inline TypePtr typeForTraceInput(const IValue& input) {
+  if (input.isGenericDict()) {
+    auto dict = input.toGenericDict();
+    TypePtr keyType = nullptr;
+    TypePtr valueType = nullptr;
+    for (auto entry : dict->elements()) {
+      auto thisKeyType = typeForTraceInput(entry.first);
+      auto thisValueType = typeForTraceInput(entry.second);
+      if (!keyType) {
+        AT_ASSERT(!valueType);
+        keyType = thisKeyType;
+        valueType = thisValueType;
+      } else {
+        bool isWellTyped = *keyType == *thisKeyType;
+        if (isWellTyped && !thisValueType->isSubtypeOf(valueType)) {
+          if (valueType->isSubtypeOf(thisValueType)) {
+            valueType = thisValueType;
+          } else if (valueType->isSubtypeOf(TensorType::get()) &&
+                     thisValueType->isSubtypeOf(TensorType::get())) {
+            valueType = TensorType::get();
+          } else {
+            isWellTyped = false;
+          }
+        }
+        if (!isWellTyped) {
+          AT_ERROR(
+              "Dictionary inputs to traced functions must have consistent "
+              "key and value types");
+        }
+      }
+    }
+    return DictType::create(keyType, valueType);
+  } else {
+    return incompleteInferTypeFrom(input);
+  }
+}
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
@@ -230,7 +266,8 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
     } else if (auto dict_type = type->cast<DictType>()) {
       auto elem_pairs = input.toGenericDict()->elements();
       auto unpack_to_list = state->graph->insert(aten::values, {value});
-      auto unpack_node = state->graph->insertNode(state->graph->createListUnpack(unpack_to_list, elem_pairs.size()));
+      auto list_unpack = state->graph->createListUnpack(unpack_to_list, elem_pairs.size());
+      auto unpack_node = state->graph->insertNode(list_unpack);
       auto elem_values = unpack_node->outputs();
 
       AT_ASSERT(elem_pairs.size() == elem_values.size());
@@ -243,12 +280,13 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
       return c10::ivalue::GenericDict::create(std::move(elem_pairs));
     } else {
       AT_ERROR(
-          "Only tensors or tuples of tensors can be inputs to traced functions");
+          "Only tensors or (possibly nested) dict or tuples of tensors can be "
+          "inputs to traced functions");
     }
   };
   for (IValue& input : inputs) {
     input = add_input(
-        input, attemptToRecoverType(input), state->graph->addInput());
+        input, typeForTraceInput(input), state->graph->addInput());
   }
   return std::make_pair(state, inputs);
 }

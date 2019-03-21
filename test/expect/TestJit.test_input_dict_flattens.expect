@@ -1,0 +1,6 @@
+graph(%0 : Dict[str, Tensor]):
+  %1 : Double(3, 4)[] = aten::values(%0)
+  %2 : Double(3, 4), %3 : Double(3, 4) = prim::ListUnpack(%1)
+  %4 : int = prim::Constant[value=1](), scope: Test
+  %5 : Double(3, 4) = aten::add(%3, %2, %4), scope: Test
+  return (%5)

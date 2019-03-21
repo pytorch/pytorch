@@ -1477,6 +1477,12 @@ Operation dictValues(const Node* n) {
     auto dict = pop(stack).toGenericDictRef();
     if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
       push(stack, makeListForDictValues<at::Tensor>(dict));
+    } else if (outputType->getElementType() == IntType::get()) {
+      push(stack, makeListForDictValues<int64_t>(dict));
+    } else if (outputType->getElementType() == FloatType::get()) {
+      push(stack, makeListForDictValues<double>(dict));
+    } else if (outputType->getElementType() == BoolType::get()) {
+      push(stack, makeListForDictValues<bool>(dict));
     } else {
       push(stack, makeListForDictValues<IValue>(dict));
     }

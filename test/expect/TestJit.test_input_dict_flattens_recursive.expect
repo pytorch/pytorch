@@ -1,0 +1,7 @@
+graph(%0 : Dict[str, Tuple[Tensor, Tensor]]):
+  %1 : (Double(2, 2), Double(2, 2))[] = aten::values(%0)
+  %2 : (Double(2, 2), Double(2, 2)) = prim::ListUnpack(%1)
+  %a : Double(2, 2), %b : Double(2, 2) = prim::TupleUnpack(%2)
+  %5 : int = prim::Constant[value=1](), scope: Test
+  %6 : Double(2, 2) = aten::add(%a, %b, %5), scope: Test
+  return (%6)
