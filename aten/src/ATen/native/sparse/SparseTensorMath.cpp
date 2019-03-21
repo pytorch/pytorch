@@ -205,30 +205,101 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
 
   // saving those because they can be overwritten when doing in-place operations
   int64_t t_nnz = t._nnz(), s_nnz = src._nnz(), max_nnz = t_nnz + s_nnz;
+  bool t_coalesced = t.is_coalesced(), s_coalesced = src.is_coalesced();
   int64_t sparse_dim = src.sparse_dim();
-  LongTensor s_indices = src._indices();
   LongTensor t_indices = t._indices();
   Tensor t_values = t._values();
+  LongTensor src_indices = src._indices();
   Tensor s_values = src._values();
   r.resize_as_(src);
 
-  // We deliberately choose to simply concat the indices and values tensors
-  // rather than merging them. This makes `add_out_sparse_cpu` work on sparse tensors
-  // with non-contiguous `values`, at the cost of having a non-coalesced result.
-  // This trade-off is preferable for the common use-case of gradient accumulation.
+  if (s_values.is_contiguous() && t_values.is_contiguous()) {
+    LongTensor r_indices = at::empty({sparse_dim, max_nnz}, t_indices.options());
+    Tensor r_values = new_values_with_size_of(s_values, max_nnz).zero_();
+    get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
 
-  AT_DISPATCH_ALL_TYPES(
-    s_values.scalar_type(), "add_out_sparse_cuda", [&] {
-        if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
-          s_values = s_values.mul(value);
+    int64_t blockSize = r_values.stride(0);
+    int64_t cmp, d;
+    int64_t r_i = 0, t_i = 0, s_i = 0;
+
+    // NB: relies on nnz tests above
+    auto t_indices_accessor = t_indices.accessor<int64_t, 2>();
+    auto r_indices_accessor = r_indices.accessor<int64_t, 2>();
+    auto src_indices_accessor = src_indices.accessor<int64_t, 2>();
+
+    AT_DISPATCH_ALL_TYPES(
+        t_values.scalar_type(), "cadd_sparse", [&] {
+          scalar_t* t_values_ptr = t_values.data<scalar_t>();
+          scalar_t* s_values_ptr = s_values.data<scalar_t>();
+          scalar_t* r_values_ptr = r_values.data<scalar_t>();
+          scalar_t cast_value = value.to<scalar_t>();
+          while (t_i < t_nnz || s_i < s_nnz) {
+            if (t_i >= t_nnz) {
+              cmp = -1;
+            } else if (s_i >= s_nnz) {
+              cmp = 1;
+            } else {
+              cmp = 0;
+              for (d = 0; d < sparse_dim; d++) {
+                if (t_indices_accessor[d][t_i] < src_indices_accessor[d][s_i]) {
+                  cmp = 1;
+                  break;
+                }
+                if (t_indices_accessor[d][t_i] > src_indices_accessor[d][s_i]) {
+                  cmp = -1;
+                  break;
+                }
+              }
+            }
+            if (cmp >= 0) {
+              for (d = 0; d < sparse_dim; d++) {
+                r_indices_accessor[d][r_i] = t_indices_accessor[d][t_i];
+              }
+              if (t_values.numel() > 0) {  // We add all elements from t_values to r_values only if t_values is not an empty tensor
+                THBlas_axpy<scalar_t>(blockSize, 1,
+                  t_values_ptr + t_i * blockSize, 1,
+                  r_values_ptr + r_i * blockSize, 1);
+              }
+              t_i++;
+            }
+            if (cmp <= 0) {
+              for (d = 0; d < sparse_dim; d++) {
+                r_indices_accessor[d][r_i] = src_indices_accessor[d][s_i];
+              }
+              if (s_values.numel() > 0) {  // We add all elements from s_values to r_values only if s_values is not an empty tensor
+                THBlas_axpy<scalar_t>(blockSize, cast_value,
+                  s_values_ptr + s_i * blockSize, 1,
+                  r_values_ptr + r_i * blockSize, 1);
+              }
+              s_i++;
+            }
+            r_i++;
+          }
         }
-      });
+    );
 
-  LongTensor r_indices = at::cat({t_indices, s_indices}, 1);
-  Tensor r_values = at::cat({t_values, s_values}, 0);
-  alias_into_sparse(r, r_indices, r_values);
+    get_sparse_impl(r)->set_nnz_and_narrow(r_i);
+    // TODO: I think it may be possible to track inside the loop and
+    // detect when we are uncoalesced (e.g., by observing that an
+    // index goes backwards) which may be more precise than using the
+    // coalesced flag here.  But this is easy.
+    return r._coalesced_(t_coalesced && s_coalesced);
+  } else {
+    // If `t` or `src` contains non-contiguous `values`, `THBlas_axpy` doesn't work
+    // and we concat the indices and values tensors instead.
+    AT_DISPATCH_ALL_TYPES(
+      s_values.scalar_type(), "add_out_sparse_cuda", [&] {
+          if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
+            s_values = s_values.mul(value);
+          }
+        });
 
-  return r;
+    LongTensor r_indices = at::cat({t_indices, src_indices}, 1);
+    Tensor r_values = at::cat({t_values, s_values}, 0);
+    alias_into_sparse(r, r_indices, r_values);
+
+    return r;
+  }
 }
 
 // --------------------------------------------------------------------
