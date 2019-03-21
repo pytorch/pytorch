@@ -28,7 +28,7 @@ from common_methods_invocations import tri_tests_args, run_additional_tri_tests,
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist
+    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest
 from multiprocessing.reduction import ForkingPickler
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -10363,6 +10363,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         big_exp[1] = 1000000
         big_out = torch.ones(1000000, dtype=torch.int8, device=device).bincount()
         self.assertEqual(big_exp, big_out)
+
+    @slowTest
+    def test_slow_test(self):
+        # Just a smoketest to make sure our slowTest decorator works.
+        pass
 
     def test_bincount_cpu(self):
         self._test_bincount(self, device='cpu')
