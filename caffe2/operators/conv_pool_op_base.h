@@ -295,7 +295,7 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
   static void InferOutputSize64(
-      const at::IntList& input_dims,
+      const at::IntArrayRef& input_dims,
       const int output_channel,
       const StorageOrder order,
       const bool global_pooling,
