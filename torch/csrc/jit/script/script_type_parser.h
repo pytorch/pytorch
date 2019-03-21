@@ -15,6 +15,10 @@ namespace script {
  */
 class TORCH_API ScriptTypeParser {
  public:
+  ScriptTypeParser(const std::string& class_namespace)
+      : class_namespace_(class_namespace) {}
+  ScriptTypeParser() {}
+
   c10::optional<std::string> parseBaseTypeName(const Expr& expr) const;
 
   c10::TypePtr parseTypeFromExpr(const Expr& expr) const;
@@ -28,6 +32,8 @@ class TORCH_API ScriptTypeParser {
   at::TypePtr subscriptToType(
       const std::string& typeName,
       const Subscript& subscript) const;
+
+  c10::optional<std::string> class_namespace_;
 };
 } // namespace script
 } // namespace jit

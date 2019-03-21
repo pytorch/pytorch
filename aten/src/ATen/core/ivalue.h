@@ -683,14 +683,17 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 // User-defined object.
 struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
  public:
-  Object(Symbol name, size_t numSlots) : typename_(std::move(name)) {
+  Object(Symbol name_space, Symbol name, size_t numSlots)
+      : namespace_(std::move(name_space)), typename_(std::move(name)) {
     slots_.resize(numSlots);
   }
 
   static c10::intrusive_ptr<Object> create(
+      Symbol ns,
       Symbol name,
       size_t numSlots) {
-    return c10::make_intrusive<Object>(std::move(name), numSlots);
+    return c10::make_intrusive<Object>(
+        std::move(ns), std::move(name), numSlots);
   }
 
   void setSlot(size_t slot, IValue v) {
@@ -705,7 +708,12 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return typename_;
   }
 
+  Symbol name_space() const {
+    return namespace_;
+  }
+
  private:
+  const Symbol namespace_;
   const Symbol typename_;
   std::vector<IValue> slots_;
 };

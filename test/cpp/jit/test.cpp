@@ -21,6 +21,7 @@
 #include <test/cpp/jit/test_misc.h>
 #include <test/cpp/jit/test_netdef_converter.h>
 #include <test/cpp/jit/test_subgraph_utils.h>
+#include <test/cpp/jit/test_class_import.h>
 
 using namespace torch::jit::script;
 using namespace torch::jit::test;
@@ -57,7 +58,8 @@ namespace jit {
   _(THNNConv)                      \
   _(ATenNativeBatchNorm)           \
   _(NoneSchemaMatch)               \
-  _(ClassParser)
+  _(ClassParser)                   \
+  _(ClassImport)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

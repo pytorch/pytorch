@@ -856,10 +856,12 @@ RegisterOperators reg(
          prim::CreateObject,
          [](const Node* node) {
            const auto type = node->output()->type()->expect<ClassType>();
+           const auto name_space = Symbol::user(type->name_space());
            const auto name = Symbol::user(type->name());
            const size_t numAttrs = type->numAttributes();
-           return [name, numAttrs](Stack& stack) {
-             auto userObj = c10::ivalue::Object::create(name, numAttrs);
+           return [name_space, name, numAttrs](Stack& stack) {
+             auto userObj =
+                 c10::ivalue::Object::create(name_space, name, numAttrs);
              push(stack, std::move(userObj));
              return 0;
            };
@@ -1627,7 +1629,7 @@ RegisterOperators reg2({
 #undef CREATE_MUTABLE_LIST_OPS
 
 #define CREATE_LIST_OPS(decl_type, c_type)                                          \
-      Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),     \
+  Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),         \
       Operator(                                                                     \
           "aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type           \
           "[]",                                                                     \

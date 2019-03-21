@@ -440,16 +440,18 @@ bool Type::isSubtypeOf(const TypePtr rhs) const {
 namespace {
 class ClassTypeRegistry {
  public:
-  void registerType(std::string name, ClassTypePtr type) {
+  void registerType(std::string ns, std::string name, ClassTypePtr type) {
     std::lock_guard<std::mutex> g(mutex_);
-    // TODO: new type registrations will override the old ones. Is this safe?
-    reg_[name] = type;
+    reg_[ns][name] = type;
   }
 
-  ClassTypePtr getType(const std::string& name) {
+  ClassTypePtr getType(const std::string& ns, const std::string& name) {
     std::lock_guard<std::mutex> g(mutex_);
-    if (reg_.count(name)) {
-      return reg_.at(name);
+    if (!reg_.count(ns)) {
+      return nullptr;
+    }
+    if (reg_[ns].count(name)) {
+      return reg_[ns][name];
     }
     return nullptr;
   }
@@ -459,9 +461,29 @@ class ClassTypeRegistry {
     reg_.clear();
   }
 
+  std::string getFreshNamespace() {
+    while (lastFreshNamespace_) {
+      lastFreshNamespace_++;
+      const auto fresh = std::to_string(lastFreshNamespace_);
+      if (reg_.count(fresh)) {
+        // if a manually specified namespace already used this name, try again
+        continue;
+      }
+      return fresh;
+    }
+    // Just so that the loop is not potenitally infinite, we break when
+    // lastFreshNamespace_ is 0 (i.e. we've tried every size_t value).
+    AT_ASSERTM(false, "Could not retrieve fresh namespace");
+  }
+
  private:
   std::mutex mutex_;
-  std::unordered_map<std::string, ClassTypePtr> reg_;
+  // namespace => typename => TypePtr
+  std::unordered_map<std::string, std::unordered_map<std::string, ClassTypePtr>>
+      reg_;
+
+  // Will always hold the last fresh namespace we know about.
+  size_t lastFreshNamespace_= 1;
 };
 
 ClassTypeRegistry& getRegistry() {
@@ -470,16 +492,21 @@ ClassTypeRegistry& getRegistry() {
 }
 } // namespace
 
+std::string ClassType::getFreshNamespace() {
+  return getRegistry().getFreshNamespace();
+}
+
 ClassTypePtr ClassType::create(
+    const std::string& ns,
     const std::string& name,
     std::shared_ptr<Module> module) {
-  auto ptr = ClassTypePtr(new ClassType(name, std::move(module)));
-  getRegistry().registerType(name, ptr);
+  auto ptr = ClassTypePtr(new ClassType(ns, name, std::move(module)));
+  getRegistry().registerType(ns, name, ptr);
   return ptr;
 }
 
-ClassTypePtr ClassType::get(const std::string& name) {
-  return getRegistry().getType(name);
+ClassTypePtr ClassType::get(const std::string& ns, const std::string& name) {
+  return getRegistry().getType(ns, name);
 }
 
 void ClassType::clearRegistry() {

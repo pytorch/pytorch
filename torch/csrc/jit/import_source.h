@@ -12,12 +12,14 @@ namespace script {
 
 // Add the methods defined in `src` to the module `mod`.
 TORCH_API void import_methods(
+    const std::string& class_namespace,
     const std::shared_ptr<script::Module>& mod,
     const std::string& src,
     const std::vector<at::Tensor>& constant_table);
 
 // Defined the list of classes in `src`.
 TORCH_API void import_libs(
+    const std::string& class_namespace,
     const std::string& src,
     const std::vector<at::Tensor>& constant_table);
 

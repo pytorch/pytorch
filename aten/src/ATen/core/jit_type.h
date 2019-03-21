@@ -1105,12 +1105,18 @@ using ::torch::jit::script::Method;
 
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public Type {
-  // Create a user type and register it globally.
+  static std::string getFreshNamespace();
+
+  // Create a user type and register it in the namespace `ns`
   static ClassTypePtr create(
+      const std::string& ns,
       const std::string& name,
       std::shared_ptr<Module> module);
+
+  // Get the type `name` in the namespace `ns`.
   // returns nullptr if there is no type with that name
-  static ClassTypePtr get(const std::string& name);
+  static ClassTypePtr get(const std::string& ns, const std::string& name);
+
   // For testing: delete all registered types
   static void clearRegistry();
 
@@ -1166,8 +1172,12 @@ struct CAFFE2_API ClassType : public Type {
   Method* getMethod(const std::string& name) const;
   std::vector<Method*> methods() const;
 
-  std::string name() const {
+  const std::string& name() const {
     return typename_;
+  }
+
+  const std::string& name_space() const {
+    return namespace_;
   }
 
   size_t numAttributes() const {
@@ -1210,10 +1220,14 @@ struct CAFFE2_API ClassType : public Type {
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
-  ClassType(std::string name, std::shared_ptr<Module> module)
+  ClassType(std::string ns, std::string name, std::shared_ptr<Module> module)
       : Type(TypeKind::ClassType),
+        namespace_(std::move(ns)),
         typename_(std::move(name)),
         module_(std::move(module)) {}
+
+  // What namespace this class lives in.
+  std::string namespace_;
 
   // Name of type (note that this has to be globally unique).
   std::string typename_;

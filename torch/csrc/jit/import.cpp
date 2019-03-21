@@ -70,19 +70,23 @@ class ScriptModuleDeserializer final {
 
   std::vector<at::Tensor> tensor_table_;
   std::vector<IValue> attribute_table_;
+  // Private for all defined class types to live in
+  std::string class_namespace_;
 };
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
-    : reader_(filename.c_str()) {
+    : reader_(filename.c_str()),
+      class_namespace_(ClassType::getFreshNamespace()) {
   // TODO appropriate support for mmap, right now still use stream reader
 }
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(std::istream* is)
-    : reader_(is) {}
+    : reader_(is), class_namespace_(ClassType::getFreshNamespace()) {}
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(
     std::unique_ptr<ReadAdapterInterface> rai)
-    : reader_(std::move(rai)) {}
+    : reader_(std::move(rai)),
+      class_namespace_(ClassType::getFreshNamespace()) {}
 
 void ScriptModuleDeserializer::deserialize(
     script::ModuleLookup module_lookup,
@@ -164,7 +168,7 @@ void ScriptModuleDeserializer::loadLibs(torch::ModelDef* model_def) {
     size_t size;
     std::tie(data, size) = reader_.getRecord(lib_def.torchscript_arena().key());
     std::string data_str(static_cast<const char*>(data.get()), size);
-    script::import_libs(data_str, tensor_table_);
+    script::import_libs(class_namespace_, data_str, tensor_table_);
   }
 }
 
@@ -267,10 +271,9 @@ void ScriptModuleDeserializer::convertModule(
     }
 
     module->register_attribute(
-      attr_def.name(),
-      typeParser.parseType(attr_def.type()),
-      attribute_table_.at(attr_def.id())
-    );
+        attr_def.name(),
+        typeParser.parseType(attr_def.type()),
+        attribute_table_.at(attr_def.id()));
   }
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;
@@ -278,7 +281,7 @@ void ScriptModuleDeserializer::convertModule(
     std::tie(data, size) =
         reader_.getRecord(module_def.torchscript_arena().key());
     std::string data_str(static_cast<const char*>(data.get()), size);
-    script::import_methods(module, data_str, tensor_table_);
+    script::import_methods(class_namespace_, module, data_str, tensor_table_);
   }
 }
 

@@ -154,6 +154,7 @@ struct SourceImporter {
 };
 
 void import_methods(
+    const std::string& class_namespace,
     const std::shared_ptr<Module>& mod,
     const std::string& src,
     const std::vector<at::Tensor>& constant_table) {
@@ -168,10 +169,12 @@ void import_methods(
     resolvers.emplace_back(importer.resolver_);
   }
   auto self = std::make_shared<ModuleAccessorValue>(mod);
-  defineMethodsInModule(mod, definitions, resolvers, Self(self));
+  defineMethodsInModule(
+      mod, definitions, resolvers, Self(self), class_namespace);
 }
 
 void import_libs(
+    const std::string& class_namespace,
     const std::string& src,
     const std::vector<at::Tensor>& constant_table) {
   SourceImporter importer(src, constant_table);
@@ -187,8 +190,8 @@ void import_libs(
     }
 
     auto mod = std::make_shared<Module>();
-    Self self(ClassType::create(class_def.name().name(), mod));
-    defineMethodsInModule(mod, definitions, resolvers, self);
+    Self self(ClassType::create(class_namespace, class_def.name().name(), mod));
+    defineMethodsInModule(mod, definitions, resolvers, self, class_namespace);
   }
 }
 

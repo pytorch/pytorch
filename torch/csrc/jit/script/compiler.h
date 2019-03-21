@@ -59,14 +59,16 @@ TORCH_API void defineMethodsInModule(
     const std::vector<Resolver>& resolvers, /* determines how we handle free
                                                variables in each definition*/
     // if non-null, the first argument to each def, is bound to this value
-    const c10::optional<Self>& self);
+    const c10::optional<Self>& self,
+    const c10::optional<std::string> class_namespace = c10::nullopt);
 
 // same as above but parse the definitions from source
 TORCH_API void defineMethodsInModule(
     const std::shared_ptr<Module>& m,
     const std::string& source,
     const Resolver& resolver,
-    const c10::optional<Self>& self);
+    const c10::optional<Self>& self,
+    const c10::optional<std::string> class_namespace = c10::nullopt);
 
 TORCH_API void lambdaLiftFork(Node* fork_node);
 
