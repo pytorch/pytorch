@@ -71,8 +71,8 @@ void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info) {
 }
 
 template<class scalar_t>
-void lapackTrtrs(char uplo, char trans, char diag, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info) {
-  AT_ERROR("trtrs only takes float or double Tensors");
+void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info) {
+  AT_ERROR("triangular_solve only takes float or double Tensors");
 } 
 
 #ifdef USE_LAPACK
@@ -116,11 +116,11 @@ template<> void lapackCholesky<float>(char uplo, int n, float *a, int lda, int *
   spotrf_(&uplo, &n, a, &lda, info);
 }
 
-template<> void lapackTrtrs<double>(char uplo, char trans, char diag, int n, int nrhs, double *a, int lda, double *b, int ldb, int *info) {
+template<> void lapackTriangularSolve<double>(char uplo, char trans, char diag, int n, int nrhs, double *a, int lda, double *b, int ldb, int *info) {
   dtrtrs_(&uplo, &trans, &diag, &n, &nrhs, a, &lda, b, &ldb, info);
 }
 
-template<> void lapackTrtrs<float>(char uplo, char trans, char diag, int n, int nrhs, float *a, int lda, float *b, int ldb, int *info) {
+template<> void lapackTriangularSolve<float>(char uplo, char trans, char diag, int n, int nrhs, float *a, int lda, float *b, int ldb, int *info) {
   strtrs_(&uplo, &trans, &diag, &n, &nrhs, a, &lda, b, &ldb, info);
 }
 #endif
@@ -333,9 +333,6 @@ Tensor cholesky_solve(const Tensor& self, const Tensor& A, bool upper) {
 }
 
 Tensor& cholesky_solve_out(Tensor& result, const Tensor& self, const Tensor& A, bool upper) {
-  AT_CHECK(self.dim() == 2 && A.dim() == 2,
-           "torch.cholesky_solve() with the `out` keyword does not support batching. "
-           "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
   Tensor result_tmp;
   result_tmp = at::_cholesky_solve_helper(self, A, upper);
   result.resize_as_(result_tmp).copy_(result_tmp);
@@ -641,12 +638,12 @@ Tensor& triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
   return result;
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ trtrs ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
-static void apply_trtrs(Tensor& b, Tensor& A, bool upper, bool transpose, bool unitriangular, std::vector<int64_t>& infos) {
+static void apply_triangular_solve(Tensor& b, Tensor& A, bool upper, bool transpose, bool unitriangular) {
 #ifndef USE_LAPACK
-  AT_ERROR("trtrs: LAPACK library not found in compilation");
+  AT_ERROR("triangular_solve: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
   char trans = transpose ? 'T' : 'N';
@@ -659,8 +656,7 @@ static void apply_trtrs(Tensor& b, Tensor& A, bool upper, bool transpose, bool u
 
   int info;
   if (b.dim() == 2) {
-    lapackTrtrs<scalar_t>(uplo, trans, diag, n, nrhs, A_data, n, b_data, n, &info);
-    infos[0] = info;
+    lapackTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_data, n, b_data, n, &info);
   } else {
     auto A_mat_stride = matrixStride(A);
     auto b_mat_stride = matrixStride(b);
@@ -668,49 +664,38 @@ static void apply_trtrs(Tensor& b, Tensor& A, bool upper, bool transpose, bool u
     for (int64_t i = 0; i < batch_size; i++) {
       scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
       scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-      lapackTrtrs<scalar_t>(uplo, trans, diag, n, nrhs, A_working_ptr, n, b_working_ptr, n, &info);
-      infos[i] = info;
-      if (info != 0) {
-        return;
-      }
+      lapackTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_working_ptr, n, b_working_ptr, n, &info);
     }
   }
 #endif
 }
 
-std::tuple<Tensor, Tensor> _trtrs_helper_cpu(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
+std::tuple<Tensor, Tensor> _triangular_solve_helper_cpu(const Tensor& self, const Tensor& A,
+                                                        bool upper, bool transpose, bool unitriangular) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  std::vector<int64_t> infos(batchCount(self), 0);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "trtrs_cpu", [&]{
-    apply_trtrs<scalar_t>(self_working_copy, A_working_copy, upper, transpose, unitriangular, infos);
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "triangular_solve_cpu", [&]{
+    apply_triangular_solve<scalar_t>(self_working_copy, A_working_copy, upper, transpose, unitriangular);
   });
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "trtrs_cpu");
-  } else {
-    singleCheckErrors(infos[0], "trtrs_cpu");
-  }
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
 
 // Supports arbitrary batch dimensions for self and A
-std::tuple<Tensor, Tensor> trtrs(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
+std::tuple<Tensor, Tensor> triangular_solve(const Tensor& self, const Tensor& A,
+                                            bool upper, bool transpose, bool unitriangular) {
   AT_CHECK(self.dim() >= 2,
            "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   AT_CHECK(A.dim() >= 2,
            "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
   Tensor self_broadcasted, A_broadcasted;
   std::tie(self_broadcasted, A_broadcasted) = _linear_solve_broadcast_args(self, A);
-  return at::_trtrs_helper(self_broadcasted, A_broadcasted, upper, transpose, unitriangular);
+  return at::_triangular_solve_helper(self_broadcasted, A_broadcasted, upper, transpose, unitriangular);
 }
 
-std::tuple<Tensor&, Tensor&> trtrs_out(Tensor& result, Tensor& clone_A,
-                                       const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
-  AT_CHECK(self.dim() == 2 && A.dim() == 2,
-           "torch.trtrs() with the `out` keyword does not support batching. "
-           "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
+std::tuple<Tensor&, Tensor&> triangular_solve_out(Tensor& result, Tensor& clone_A, const Tensor& self, const Tensor& A,
+                                                  bool upper, bool transpose, bool unitriangular) {
   Tensor result_tmp, clone_A_tmp;
-  std::tie(result_tmp, clone_A_tmp) = at::_trtrs_helper(self, A, upper, transpose, unitriangular);
+  std::tie(result_tmp, clone_A_tmp) = at::_triangular_solve_helper(self, A, upper, transpose, unitriangular);
   result.resize_as_(result_tmp).copy_(result_tmp);
   clone_A.resize_as_(clone_A_tmp).copy_(clone_A_tmp);
   return std::tuple<Tensor&, Tensor&>(result, clone_A);
