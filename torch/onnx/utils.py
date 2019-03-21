@@ -571,7 +571,11 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 return symbolic_fn(g, *inputs, **attrs)
 
         elif ns in _custom_ops_symbolic_fn:
-            # TODO: do checks
+            if not op_name in _custom_ops_symbolic_fn[ns]:
+                warnings.warn("ONNX export failed on custom operator {}::{} because torch.onnx.symbolic.{} does not exist. "
+                              "Have you registered your symbolic function with "
+                              "torch.onnx.register_custom_op_symbolic(symbolic_name, symbolic_fn)?"
+                              .format(ns, op_name, op_name))
             symbolic_fn = _custom_ops_symbolic_fn[ns][op_name]
             attrs = {k: n[k] for k in n.attributeNames()}
             return symbolic_fn(g, *inputs, **attrs)
@@ -640,13 +644,10 @@ def _node_getitem(self, k):
     return getattr(self, sel)(k)
 
 def register_custom_op_symbolic(symbolic_name, symbolic_fn):
-    # TODO: do checks
     ns, op_name = symbolic_name.split('::')
     if not ns in _custom_ops_symbolic_fn:
         _custom_ops_symbolic_fn[ns] = {}
     _custom_ops_symbolic_fn[ns][op_name] = symbolic_fn
-
-    print(_custom_ops_symbolic_fn)
 
 
 torch._C.Graph.op = _graph_op
