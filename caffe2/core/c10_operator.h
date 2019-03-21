@@ -152,11 +152,11 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
  *   input an input of type TensorList. There must be no other tensor inputs.
  */
 #ifndef C10_MOBILE
-#define C10_DECLARE_CAFFE2_OPERATOR(OperatorName)       \
-  namespace caffe2 {                                    \
-  namespace _c10_ops {                                  \
-  const ::c10::FunctionSchema& schema_##OperatorName(); \
-  }                                                     \
+#define C10_DECLARE_CAFFE2_OPERATOR(OperatorName)                  \
+  namespace caffe2 {                                               \
+  namespace _c10_ops {                                             \
+  CAFFE2_API const ::c10::FunctionSchema& schema_##OperatorName(); \
+  }                                                                \
   }
 
 // TODO This macro should take a JIT schema string instead of a vector of inputs and outputs.
@@ -165,7 +165,7 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
   /* Register the op schema with the c10 dispatcher */                       \
   namespace caffe2 {                                                         \
   namespace _c10_ops {                                                       \
-  const ::c10::FunctionSchema& schema_##OperatorName() {                     \
+  C10_EXPORT const ::c10::FunctionSchema& schema_##OperatorName() {          \
     static ::c10::FunctionSchema schema =                                    \
         ::caffe2::detail::make_function_schema_for_c10(                      \
             #OperatorName, Inputs, Outputs);                                 \
