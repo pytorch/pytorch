@@ -185,6 +185,9 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       }
     } else if (
         node->kind() == aten::__is__ || node->kind() == aten::__isnot__) {
+      // if we are comparing a None value with a value that can't be None
+      // replace the output with true if node is __isnot__ or false if node is
+      // __is__
       AT_ASSERT(node->inputs().size() == 2);
       for (size_t check_none_index : {0, 1}) {
         bool input_must_be_none =
@@ -201,6 +204,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
     } else if (
         node->kind() == prim::unchecked_unwrap_optional ||
         node->kind() == aten::_unwrap_optional) {
+      // we are unwrapping an input that can't be None, remove the unwrap
       auto input = node->input();
       if (input->type() != NoneType::get() &&
           !input->type()->cast<OptionalType>()) {
