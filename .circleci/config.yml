@@ -172,11 +172,13 @@ setup_ci_environment: &setup_ci_environment
       moreutils \
       docker-ce=18.06.2~ce~3-0~ubuntu \
       nvidia-docker2=2.0.3+docker18.06.2-1 \
-      expect-dev
+      expect-dev \
+      python-dev
 
     sudo pkill -SIGHUP dockerd
 
     # Upgrade SSL module to avoid old SSL warnings
+    sudo pip -q install --upgrade setuptools
     sudo pip -q install --upgrade pyOpenSSL ndg-httpsclient pyasn1
     sudo pip -q install awscli==1.16.35
 
