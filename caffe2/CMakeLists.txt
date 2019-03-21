@@ -908,7 +908,9 @@ if(USE_CUDA)
   # Linking statically to thnvrtc is not desirable, so we have to tell the linker
   # not to fail when encountering undefined symbols
    # TODO FIXME kostmo
-   target_link_libraries(caffe2_gpu PUBLIC thnvrtc)
+
+#   target_link_libraries(caffe2_gpu PUBLIC thnvrtc)
+
 #  set_target_properties(caffe2_gpu PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
 
   
