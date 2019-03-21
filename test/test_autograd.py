@@ -2183,14 +2183,14 @@ class TestAutograd(TestCase):
             run_test(upper, dims)
 
     @skipIfNoLapack
-    def test_trtrs(self):
+    def test_triangular_solve(self):
         def _test_with_size(A_dims, B_dims):
             A = torch.rand(*A_dims).requires_grad_()
             b = torch.rand(*B_dims).requires_grad_()
 
             for upper, transpose, unitriangular in product((True, False), repeat=3):
                 def func(A, b):
-                    return torch.trtrs(b, A, upper, transpose, unitriangular)
+                    return torch.triangular_solve(b, A, upper, transpose, unitriangular)
 
                 gradcheck(func, [A, b])
                 gradgradcheck(func, [A, b])

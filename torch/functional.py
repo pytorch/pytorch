@@ -1,13 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch._six import inf
-from torch._C import _add_docstr
-from operator import mul
-from functools import reduce
-from collections import Iterable
-from torch._utils import annotate
 from itertools import product
-import math
 import warnings
 
 __all__ = [
@@ -17,7 +11,6 @@ __all__ = [
     'broadcast_tensors',
     'isfinite',
     'isinf',
-    'isnan',
     'norm',
     'meshgrid',
     'potrf',
@@ -27,6 +20,7 @@ __all__ = [
     'split',
     'stft',
     'tensordot',
+    'trtrs',
     'unique',
     'cartesian_prod',
 ]
@@ -378,22 +372,6 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
         input = input.view(input.shape[-signal_dim:])
     return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
-
-
-isnan = _add_docstr(torch.isnan, r"""
-Returns a new tensor with boolean elements representing if each element is `NaN` or not.
-
-Arguments:
-    tensor (Tensor): A tensor to check
-
-Returns:
-    Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `NaN` elements.
-
-Example::
-
-    >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
-    tensor([ 0,  1,  0], dtype=torch.uint8)
-""")
 
 
 def unique(input, sorted=True, return_inverse=False, dim=None):
@@ -764,3 +742,19 @@ def gesv(b, A, out=None):
     warnings.warn("torch.gesv is deprecated in favour of torch.solve and will be removed in the "
                   "next release. Please use torch.solve instead.", stacklevel=2)
     return torch.solve(b, A, out=out)
+
+
+def trtrs(b, A, upper=True, transpose=False, unitriangular=False, out=None):
+    r"""Solves a system of equations with a triangular coefficient matrix :math:`A`
+    and multiple right-hand sides :attr:`b`.
+
+    In particular, solves :math:`AX = b` and assumes :math:`A` is upper-triangular
+    with the default keyword arguments.
+
+    .. warning::
+        :func:`torch.trtrs` is deprecated in favour of :func:`torch.triangular_solve` and will be
+        removed in the next release. Please use :func:`torch.triangular_solve` instead.
+    """
+    warnings.warn("torch.trtrs is deprecated in favour of torch.triangular_solve and will be "
+                  "removed in the next release. Please use torch.triangular_solve instead.", stacklevel=2)
+    return torch.triangular_solve(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular, out=out)
