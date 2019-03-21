@@ -176,7 +176,7 @@ static void upsample_bicubic2d_out_cpu_template(
 
   upsample_2d_shape_check(
       input_,
-      static_cast<int64_t>(0),
+      Tensor(),
       nbatch,
       channels,
       input_height,
@@ -221,8 +221,8 @@ static void upsample_bicubic2d_backward_out_cpu_template(
   int64_t input_width = input_size[3];
 
   upsample_2d_shape_check(
+      Tensor(),
       grad_output_,
-      static_cast<int64_t>(1),
       nbatch,
       channels,
       input_height,

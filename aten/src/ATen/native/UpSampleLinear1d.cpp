@@ -120,7 +120,7 @@ static void upsample_linear1d_out_cpu_template(
 
   upsample_1d_shape_check(
       input_,
-      static_cast<int64_t>(0),
+      Tensor(),
       nbatch,
       channels,
       input_width,
@@ -161,8 +161,8 @@ static void upsample_linear1d_backward_out_cpu_template(
   int64_t input_width = input_size[2];
 
   upsample_1d_shape_check(
+      Tensor(),
       grad_output_,
-      static_cast<int64_t>(1),
       nbatch,
       channels,
       input_width,

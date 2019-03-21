@@ -5,6 +5,7 @@
 namespace at {
 namespace native {
 
+// Corresponds to THNN_CHECK_DIM_SIZE
 static inline void check_dim_size(
     const Tensor& data,
     int64_t dim,
@@ -28,8 +29,8 @@ static inline void check_dim_size(
 }
 
 static inline void upsample_1d_shape_check(
-    const Tensor& data,
-    int64_t type_check,
+    const Tensor& input,
+    const Tensor& grad_output,
     int64_t nbatch,
     int64_t nchannels,
     int64_t input_width,
@@ -42,22 +43,21 @@ static inline void upsample_1d_shape_check(
       output_width,
       ")");
 
-  if (type_check == 0) {
+  if (input.defined()) {
     AT_CHECK(
-        !data.numel() == 0 && data.dim() == 3,
-        "Non-empty 3D data tensor expected but got: ",
-        data.dim(),
-        "D");
-  } else if (type_check == 1) {
-    check_dim_size(data, 3, 0, nbatch);
-    check_dim_size(data, 3, 1, nchannels);
-    check_dim_size(data, 3, 2, output_width);
+        input.numel() != 0 && input.dim() == 3,
+        "Non-empty 3D data tensor expected but got a tensor with sizes ",
+        input.sizes());
+  } else if (grad_output.defined()) {
+    check_dim_size(grad_output, 3, 0, nbatch);
+    check_dim_size(grad_output, 3, 1, nchannels);
+    check_dim_size(grad_output, 3, 2, output_width);
   }
 }
 
 static inline void upsample_2d_shape_check(
-    const Tensor& data,
-    int64_t type_check,
+    const Tensor& input,
+    const Tensor& grad_output,
     int64_t nbatch,
     int64_t nchannels,
     int64_t input_height,
@@ -78,23 +78,22 @@ static inline void upsample_2d_shape_check(
       output_width,
       ")");
 
-  if (type_check == 0) {
+  if (input.defined()) {
     AT_CHECK(
-        !data.numel() == 0 && data.dim() == 4,
-        "Non-empty 4D data tensor expected but got: ",
-        data.dim(),
-        "D");
-  } else if (type_check == 1) {
-    check_dim_size(data, 4, 0, nbatch);
-    check_dim_size(data, 4, 1, nchannels);
-    check_dim_size(data, 4, 2, output_height);
-    check_dim_size(data, 4, 3, output_width);
+        input.numel() != 0 && input.dim() == 4,
+        "Non-empty 4D data tensor expected but got a tensor with sizes ",
+        input.sizes());
+  } else if (grad_output.defined()) {
+    check_dim_size(grad_output, 4, 0, nbatch);
+    check_dim_size(grad_output, 4, 1, nchannels);
+    check_dim_size(grad_output, 4, 2, output_height);
+    check_dim_size(grad_output, 4, 3, output_width);
   }
 }
 
 static inline void upsample_3d_shape_check(
-    const Tensor& data,
-    int64_t type_check,
+    const Tensor& input,
+    const Tensor& grad_output,
     int64_t nbatch,
     int64_t nchannels,
     int64_t input_depth,
@@ -120,15 +119,17 @@ static inline void upsample_3d_shape_check(
       output_width,
       ")");
 
-  if (type_check == 0) {
+  if (input.defined()) {
     AT_CHECK(
-        data.dim() == 5, "5D data tensor expected but got: ", data.dim(), "D");
-  } else if (type_check == 1) {
-    check_dim_size(data, 5, 0, nbatch);
-    check_dim_size(data, 5, 1, nchannels);
-    check_dim_size(data, 5, 2, output_depth);
-    check_dim_size(data, 5, 3, output_height);
-    check_dim_size(data, 5, 4, output_width);
+        input.numel() != 0 && input.dim() == 5,
+        "Non-empty 5D data tensor expected but got a tensor with sizes ",
+        input.sizes());
+  } else if (grad_output.defined()) {
+    check_dim_size(grad_ouput, 5, 0, nbatch);
+    check_dim_size(grad_ouput, 5, 1, nchannels);
+    check_dim_size(grad_ouput, 5, 2, output_depth);
+    check_dim_size(grad_ouput, 5, 3, output_height);
+    check_dim_size(grad_ouput, 5, 4, output_width);
   }
 }
 
@@ -186,8 +187,8 @@ static scalar_t upsample_get_value_bounded(
     int64_t height,
     int64_t x,
     int64_t y) {
-  int64_t access_x = std::max(std::min(x, width - 1), static_cast<int64_t>(0));
-  int64_t access_y = std::max(std::min(y, height - 1), static_cast<int64_t>(0));
+  int64_t access_x = std::max(std::min(x, width - 1), 0LL);
+  int64_t access_y = std::max(std::min(y, height - 1), 0LL);
   return data[access_y * width + access_x];
 }
 
@@ -199,8 +200,8 @@ static void upsample_increment_value_bounded(
     int64_t x,
     int64_t y,
     scalar_t value) {
-  int64_t access_x = std::max(std::min(x, width - 1), static_cast<int64_t>(0));
-  int64_t access_y = std::max(std::min(y, height - 1), static_cast<int64_t>(0));
+  int64_t access_x = std::max(std::min(x, width - 1), 0LL);
+  int64_t access_y = std::max(std::min(y, height - 1), 0LL);
   data[access_y * width + access_x] += value;
 }
 

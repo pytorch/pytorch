@@ -9,12 +9,7 @@ void THNN_(SpatialUpSamplingBicubic_updateOutput)(
     int output_height,
     int output_width,
     bool align_corners) {
-  const int nbatch = THTensor_(size)(input, 0);
-  const int channels = THTensor_(size)(input, 1);
-  const int input_height = THTensor_(size)(input, 2);
-  const int input_width = THTensor_(size)(input, 3);
-
-  return;
+  AT_ERROR('This function is deprecated, please use it from ATen.');
 }
 
 void THNN_(SpatialUpSamplingBicubic_updateGradInput)(
@@ -28,7 +23,7 @@ void THNN_(SpatialUpSamplingBicubic_updateGradInput)(
     int output_height,
     int output_width,
     bool align_corners) {
-  return;
+  AT_ERROR('This function is deprecated, please use it from ATen.');
 }
 
 #endif

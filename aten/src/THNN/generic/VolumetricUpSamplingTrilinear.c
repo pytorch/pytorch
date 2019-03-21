@@ -13,7 +13,7 @@ void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
     int outputHeight,
     int outputWidth,
     bool align_corners) {
-  return;
+  AT_ERROR('This function is deprecated, please use it from ATen.');
 }
 
 void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
@@ -29,7 +29,7 @@ void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
     int outputHeight,
     int outputWidth,
     bool align_corners) {
-  return;
+  AT_ERROR('This function is deprecated, please use it from ATen.');
 }
 
 #endif

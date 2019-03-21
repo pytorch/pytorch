@@ -11,7 +11,7 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
     THTensor* output,
     int outputWidth,
     bool align_corners) {
-  return;
+  AT_ERROR('This function is deprecated, please use it from ATen.');
 }
 
 void THNN_(TemporalUpSamplingLinear_updateGradInput)(
@@ -23,7 +23,7 @@ void THNN_(TemporalUpSamplingLinear_updateGradInput)(
     int inputWidth,
     int outputWidth,
     bool align_corners) {
-  return;
+  AT_ERROR('This function is deprecated, please use it from ATen.');
 }
 
 #endif
