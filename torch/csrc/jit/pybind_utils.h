@@ -336,16 +336,16 @@ struct VISIBILITY_HIDDEN tuple_slice {
   tuple_slice(py::tuple tup_, int64_t b_, int64_t e_)
       : tup(std::move(tup_)), b(b_), e(e_) {}
   py::detail::tuple_iterator begin() const {
-    return {tup, b};
+    return {tup, static_cast<pybind11::ssize_t>(b)};
   }
   py::detail::tuple_iterator end() const {
-    return {tup, e};
+    return {tup, static_cast<pybind11::ssize_t>(e)};
   }
   size_t size() const {
     return e - b;
   }
   py::detail::tuple_accessor operator[](size_t index) const {
-    return {tup, b + index};
+    return {tup, static_cast<size_t>(b + index)};
   }
 
  private:

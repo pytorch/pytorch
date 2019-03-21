@@ -27,7 +27,7 @@ void concat_op_cpu_impl(
   int adj_size = Tensor(inputs[0]).dim() + (add_axis ? 1 : 0);
   int canonical_axis = caffe2::canonical_axis_index_(axis, adj_size);
   CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
-  for (int i = 1; i < inputs.size(); ++i) {
+  for (size_t i = 1; i < inputs.size(); ++i) {
     CAFFE_ENFORCE(
         Tensor(inputs[i]).dtype() == Tensor(inputs[0]).dtype(),
         "All inputs must have the same type, expected: ",
@@ -51,7 +51,7 @@ void concat_op_cpu_impl(
       after *= dim;
     }
     // check the input dims are compatible.
-    for (int j = 1; j < inputs.size(); ++j) {
+    for (size_t j = 1; j < inputs.size(); ++j) {
       int dim_j = Tensor(inputs[j]).dim32(i);
       CAFFE_ENFORCE(
           dim == dim_j,
@@ -75,7 +75,7 @@ void concat_op_cpu_impl(
   }
 
   int output_channels = 0;
-  for (int i = 0; i < inputs.size(); ++i) {
+  for (size_t i = 0; i < inputs.size(); ++i) {
     axis_data[i] = add_axis ? 1 : Tensor(inputs[i]).dim32(canonical_axis);
     output_channels += axis_data[i];
   }
@@ -86,7 +86,7 @@ void concat_op_cpu_impl(
   }
   output.Resize(output_dims);
   size_t output_offset = 0;
-  for (int i = 0; i < inputs.size(); ++i) {
+  for (size_t i = 0; i < inputs.size(); ++i) {
     Tensor input(inputs[i]);
     auto axis_dim = add_axis ? 1 : input.dim32(canonical_axis);
     caffe2::math::CopyMatrix<Context>(
