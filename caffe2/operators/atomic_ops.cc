@@ -14,8 +14,9 @@ namespace {
 
 class CreateMutexOp final : public Operator<CPUContext> {
  public:
-  CreateMutexOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws) {}
+  template <class... Args>
+  explicit CreateMutexOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<std::mutex>>(0) =
@@ -26,8 +27,9 @@ class CreateMutexOp final : public Operator<CPUContext> {
 
 class AtomicFetchAddOp final : public Operator<CPUContext> {
  public:
-  AtomicFetchAddOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws) {}
+  template <class... Args>
+  explicit AtomicFetchAddOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& mutex = OperatorBase::Input<std::unique_ptr<std::mutex>>(0);

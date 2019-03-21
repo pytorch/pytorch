@@ -2235,6 +2235,8 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     # straight to the normal versions hip::HIPCachingAllocator
     ("cuda::CUDACachingAllocator::get", ("hip::HIPCachingAllocatorMasqueradingAsCUDA::get", API_PYTORCH)),
     ("CUDACachingAllocator::get", ("HIPCachingAllocatorMasqueradingAsCUDA::get", API_PYTORCH)),
+    ("cuda::CUDACachingAllocator::recordStream", ("hip::HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA", API_PYTORCH)),
+    ("CUDACachingAllocator::recordStream", ("HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA", API_PYTORCH)),
 
     ("cuda::CUDAStream", ("hip::HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
     ("CUDAStream", ("HIPStreamMasqueradingAsCUDA", API_PYTORCH)),

@@ -103,17 +103,11 @@ inline bool Tensor::allclose(const Tensor & other, double rtol, double atol, boo
 inline Tensor Tensor::any(int64_t dim, bool keepdim) const {
     return type().any(*this, dim, keepdim);
 }
-inline Tensor Tensor::argmax(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::argmax(c10::optional<int64_t> dim, bool keepdim) const {
     return type().argmax(*this, dim, keepdim);
 }
-inline Tensor Tensor::argmax() const {
-    return type().argmax(*this);
-}
-inline Tensor Tensor::argmin(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::argmin(c10::optional<int64_t> dim, bool keepdim) const {
     return type().argmin(*this, dim, keepdim);
-}
-inline Tensor Tensor::argmin() const {
-    return type().argmin(*this);
 }
 inline Tensor Tensor::as_strided(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset) const {
     return type().as_strided(*this, size, stride, storage_offset);
@@ -288,9 +282,6 @@ inline Tensor & Tensor::floor_() {
 }
 inline Tensor Tensor::ger(const Tensor & vec2) const {
     return type().ger(*this, vec2);
-}
-inline std::tuple<Tensor,Tensor> Tensor::gesv(const Tensor & A) const {
-    return type().gesv(*this, A);
 }
 inline Tensor Tensor::fft(int64_t signal_ndim, bool normalized) const {
     return type().fft(*this, signal_ndim, normalized);
@@ -1009,6 +1000,9 @@ inline Tensor & Tensor::pow_(const Tensor & exponent) {
 inline Tensor & Tensor::lerp_(const Tensor & end, Scalar weight) {
     return type().lerp_(*this, end, weight);
 }
+inline Tensor & Tensor::lerp_(const Tensor & end, const Tensor & weight) {
+    return type().lerp_(*this, end, weight);
+}
 inline Tensor & Tensor::sign_() {
     return type().sign_(*this);
 }
@@ -1156,6 +1150,9 @@ inline Tensor Tensor::cholesky(bool upper) const {
 inline Tensor Tensor::cholesky_solve(const Tensor & input2, bool upper) const {
     return type().cholesky_solve(*this, input2, upper);
 }
+inline std::tuple<Tensor,Tensor> Tensor::solve(const Tensor & A) const {
+    return type().solve(*this, A);
+}
 inline Tensor Tensor::potri(bool upper) const {
     return type().potri(*this, upper);
 }
@@ -1214,6 +1211,9 @@ inline Tensor Tensor::atan2(const Tensor & other) const {
     return type().atan2(*this, other);
 }
 inline Tensor Tensor::lerp(const Tensor & end, Scalar weight) const {
+    return type().lerp(*this, end, weight);
+}
+inline Tensor Tensor::lerp(const Tensor & end, const Tensor & weight) const {
     return type().lerp(*this, end, weight);
 }
 inline Tensor Tensor::histc(int64_t bins, Scalar min, Scalar max) const {
@@ -1336,11 +1336,11 @@ inline bool is_sparse(Tensor self) {
   template <>                                    \
   inline T* Tensor::data() const {               \
     AT_CHECK(                                    \
-        type().scalarType() == ScalarType::name, \
+        scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
         #name,                                   \
         " but found ",                           \
-        c10::toString(type().scalarType()));     \
+        c10::toString(scalar_type()));           \
     return static_cast<T*>(this->data_ptr());    \
   }
 

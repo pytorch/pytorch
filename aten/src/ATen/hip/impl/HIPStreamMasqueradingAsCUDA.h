@@ -104,6 +104,7 @@ inline void setCurrentHIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA st
 
 inline std::ostream& operator<<(std::ostream& stream, const HIPStreamMasqueradingAsCUDA& s) {
   stream << s.hip_stream() << " (masquerading as CUDA)";
+  return stream;
 }
 
 }} // namespace c10::hip

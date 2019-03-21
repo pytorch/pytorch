@@ -351,7 +351,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
         MPI_CHECK(MPI_Bcast(
             data.data_ptr(),
             data.numel(),
-            mpiDatatype.at(data.type().scalarType()),
+            mpiDatatype.at(data.scalar_type()),
             opts.rootRank,
             pgComm_));
       };
@@ -376,7 +376,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
             MPI_IN_PLACE,
             data.data_ptr(),
             data.numel(),
-            mpiDatatype.at(data.type().scalarType()),
+            mpiDatatype.at(data.scalar_type()),
             mpiOp.at(opts.reduceOp),
             pgComm_));
       };
@@ -405,7 +405,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
             sendbuf,
             recvbuf,
             data.numel(),
-            mpiDatatype.at(data.type().scalarType()),
+            mpiDatatype.at(data.scalar_type()),
             mpiOp.at(opts.reduceOp),
             opts.rootRank,
             pgComm_));
@@ -446,10 +446,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
         MPI_CHECK(MPI_Allgather(
             data.data_ptr(),
             data.numel(),
-            mpiDatatype.at(data.type().scalarType()),
+            mpiDatatype.at(data.scalar_type()),
             flatOutputTensor.data_ptr(),
             data.numel(),
-            mpiDatatype.at(data.type().scalarType()),
+            mpiDatatype.at(data.scalar_type()),
             pgComm_));
 
         for (size_t i = 0; i < outputDataVec.size(); ++i) {
@@ -503,10 +503,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
         MPI_CHECK(MPI_Gather(
             data.data_ptr(),
             data.numel(),
-            mpiDatatype.at(data.type().scalarType()),
+            mpiDatatype.at(data.scalar_type()),
             recvbuf,
             data.numel(),
-            mpiDatatype.at(data.type().scalarType()),
+            mpiDatatype.at(data.scalar_type()),
             opts.rootRank,
             pgComm_));
 
@@ -578,10 +578,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
         MPI_CHECK(MPI_Scatter(
             sendbuf,
             data.numel(),
-            mpiDatatype.at(data.type().scalarType()),
+            mpiDatatype.at(data.scalar_type()),
             data.data_ptr(),
             data.numel(),
-            mpiDatatype.at(data.type().scalarType()),
+            mpiDatatype.at(data.scalar_type()),
             opts.rootRank,
             pgComm_));
       };
@@ -615,7 +615,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
     MPI_CHECK(MPI_Isend(
         tensor.data_ptr(),
         tensor.numel(),
-        mpiDatatype.at(tensor.type().scalarType()),
+        mpiDatatype.at(tensor.scalar_type()),
         dstRank,
         tag,
         pgComm_,
@@ -643,7 +643,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
     MPI_CHECK(MPI_Irecv(
         tensor.data_ptr(),
         tensor.numel(),
-        mpiDatatype.at(tensor.type().scalarType()),
+        mpiDatatype.at(tensor.scalar_type()),
         srcRank,
         tag,
         pgComm_,
@@ -670,7 +670,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
     MPI_CHECK(MPI_Irecv(
         tensor.data_ptr(),
         tensor.numel(),
-        mpiDatatype.at(tensor.type().scalarType()),
+        mpiDatatype.at(tensor.scalar_type()),
         MPI_ANY_SOURCE,
         tag,
         pgComm_,

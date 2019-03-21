@@ -134,8 +134,8 @@ inline IValue toIValue(
     c10::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType:
+    case TypeKind::AutogradZeroTensorType:
     case TypeKind::DimensionedTensorType:
-    case TypeKind::UndefinedTensorType:
     case TypeKind::CompleteTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
@@ -222,7 +222,7 @@ inline IValue toIValue(
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
-    case TypeKind::UserType:
+    case TypeKind::ClassType:
       break;
   }
   AT_ERROR(
@@ -323,7 +323,6 @@ inline py::object toPyObject(IValue&& ivalue) {
       py_dict[toPyObject(IValue{pair.first})] = toPyObject(IValue{pair.second});
     }
     return std::move(py_dict);
-
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }
@@ -337,16 +336,16 @@ struct VISIBILITY_HIDDEN tuple_slice {
   tuple_slice(py::tuple tup_, int64_t b_, int64_t e_)
       : tup(std::move(tup_)), b(b_), e(e_) {}
   py::detail::tuple_iterator begin() const {
-    return {tup, b};
+    return {tup, static_cast<pybind11::ssize_t>(b)};
   }
   py::detail::tuple_iterator end() const {
-    return {tup, e};
+    return {tup, static_cast<pybind11::ssize_t>(e)};
   }
   size_t size() const {
     return e - b;
   }
   py::detail::tuple_accessor operator[](size_t index) const {
-    return {tup, b + index};
+    return {tup, static_cast<size_t>(b + index)};
   }
 
  private:

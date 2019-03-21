@@ -61,7 +61,7 @@ class DataParallel(Module):
         In each forward, :attr:`module` is **replicated** on each device, so any
         updates to the running module in ``forward`` will be lost. For example,
         if :attr:`module` has a counter attribute that is incremented in each
-        ``forward``, it will always stay at the initial value becasue the update
+        ``forward``, it will always stay at the initial value because the update
         is done on the replicas which are destroyed after ``forward``. However,
         :class:`~torch.nn.DataParallel` guarantees that the replica on
         ``device[0]`` will have its parameters and buffers sharing storage with
@@ -172,7 +172,7 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
 
     Args:
         module (Module): the module to evaluate in parallel
-        inputs (tensor): inputs to the module
+        inputs (Tensor): inputs to the module
         device_ids (list of int or torch.device): GPU ids on which to replicate module
         output_device (list of int or torch.device): GPU location of the output  Use -1 to indicate the CPU.
             (default: device_ids[0])

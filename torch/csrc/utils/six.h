@@ -1,7 +1,8 @@
 #pragma once
 
 #include <pybind11/pybind11.h>
-#include "torch/csrc/utils/structseq.h"
+#include <torch/csrc/utils/structseq.h>
+#include <torch/csrc/utils/object_ptr.h>
 
 namespace six {
 
@@ -10,12 +11,20 @@ namespace six {
 // the name of the type to determine if it is a namedtupled returned
 // by a pytorch operator.
 
+inline bool isStructSeq(pybind11::handle input) {
+  return pybind11::cast<std::string>(input.get_type().attr("__module__")) == "torch.return_types";
+}
+
+inline bool isStructSeq(PyObject* obj) {
+  return isStructSeq(pybind11::handle(obj));
+}
+
 inline bool isTuple(pybind11::handle input) {
   if (PyTuple_Check(input.ptr())) {
     return true;
   }
 #if PY_MAJOR_VERSION == 2
-  return pybind11::cast<std::string>(input.get_type().attr("__module__")) == "torch.return_types";
+  return isStructSeq(input);
 #else
   return false;
 #endif
@@ -25,15 +34,25 @@ inline bool isTuple(PyObject* obj) {
   return isTuple(pybind11::handle(obj));
 }
 
-inline PyObject *toTuple(PyStructSequence *obj) {
-  // create a new tuple object on python 2, or increase
-  // the ref count of the current object on python 3.
+// maybeAsTuple: if the input is a structseq, then convert it to a tuple
+//
+// On Python 3, structseq is a subtype of tuple, so these APIs could be used directly.
+// But on Python 2, structseq is not a subtype of tuple, so we need to manually create a
+// new tuple object from structseq.
+inline THPObjectPtr maybeAsTuple(PyStructSequence *obj) {
 #if PY_MAJOR_VERSION == 2
-  return torch::utils::structseq_slice(obj, 0, Py_SIZE(obj));
+  return THPObjectPtr(torch::utils::structseq_slice(obj, 0, Py_SIZE(obj)));
 #else
   Py_INCREF(obj);
-  return (PyObject *)obj;
+  return THPObjectPtr((PyObject *)obj);
 #endif
+}
+
+inline THPObjectPtr maybeAsTuple(PyObject *obj) {
+  if (isStructSeq(obj))
+    return maybeAsTuple((PyStructSequence *)obj);
+  Py_INCREF(obj);
+  return THPObjectPtr(obj);
 }
 
 }  // namespace six

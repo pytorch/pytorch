@@ -184,7 +184,7 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
-  AT_DISPATCH_ALL_TYPES(result.type(), "eye", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "eye", [&]() -> void {
     scalar_t* result_data = result.data<scalar_t>();
     for(int64_t i = 0; i < sz; i++) {
       result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
@@ -453,7 +453,7 @@ Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
   AT_CHECK(n >= 0, "n must be non-negative, got", n);
   result.resize_({n});
   auto gen = get_generator(generator);
-  AT_DISPATCH_ALL_TYPES(result.type(), "randperm", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "randperm", [&]() -> void {
     randperm_cpu<scalar_t>(result, n, gen);
   });
 
@@ -501,7 +501,7 @@ Tensor tril_indices_cpu(
   //
   // 3. sequential RAM + transpose: create an n X 2 Tensor, fill the Tensor
   //    sequentially, and then transpose it.
-  AT_DISPATCH_ALL_TYPES(result.type(), "tril_indices", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tril_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data<scalar_t>();
     int64_t i = 0;
@@ -534,7 +534,7 @@ Tensor triu_indices_cpu(
   // create an empty Tensor with correct size
   auto result = at::empty({2, triu_size}, options);
 
-  AT_DISPATCH_ALL_TYPES(result.type(), "triu_indices", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data<scalar_t>();
     int64_t i = 0;
@@ -705,7 +705,7 @@ template <typename T>
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
   AT_ASSERT(result.is_contiguous());
-  AT_DISPATCH_ALL_TYPES(result.type(), "tensor_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tensor_cpu", [&] {
     std::copy(values.begin(), values.end(), result.template data<scalar_t>());
   });
   return result;

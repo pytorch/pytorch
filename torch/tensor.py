@@ -7,6 +7,7 @@ import warnings
 import weakref
 from torch._six import imap
 from torch._C import _add_docstr
+from numbers import Number
 
 
 # NB: If you subclass Tensor, and want to share the subclassed class
@@ -247,14 +248,6 @@ class Tensor(torch._C._TensorBase):
         else:
             return self.flip(0)
 
-    def argmax(self, dim=None, keepdim=False):
-        r"""See :func:`torch.argmax`"""
-        return torch.argmax(self, dim, keepdim)
-
-    def argmin(self, dim=None, keepdim=False):
-        r"""See :func:`torch.argmin`"""
-        return torch.argmin(self, dim, keepdim)
-
     def norm(self, p="fro", dim=None, keepdim=False, dtype=None):
         r"""See :func:`torch.norm`"""
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
@@ -266,6 +259,12 @@ class Tensor(torch._C._TensorBase):
                       ":attr:`upper` argument in torch.cholesky defaults to ``False``.", stacklevel=2)
         return super(Tensor, self).cholesky(upper=upper)
 
+    def pstrf(self, upper=True):
+        r"""See :func:`torch.pstrf`"""
+        warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
+                      "in the next release.", stacklevel=2)
+        return super(Tensor, self).pstrf(upper=upper)
+
     def potrs(self, u, upper=True):
         r"""See :func:`torch.cholesky_solve`"""
         warnings.warn("torch.potrs is deprecated in favour of torch.cholesky_solve and "
@@ -273,6 +272,12 @@ class Tensor(torch._C._TensorBase):
                       "and note that the :attr:`upper` argument in torch.cholesky_solve defaults "
                       "to ``False``.", stacklevel=2)
         return super(Tensor, self).cholesky_solve(u, upper=upper)
+
+    def gesv(self, A):
+        r"""See :func:`torch.solve`"""
+        warnings.warn("torch.gesv is deprecated in favour of torch.solve and will be removed in the "
+                      "next release. Please use torch.solve instead.", stacklevel=2)
+        return super(Tensor, self).solve(A)
 
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
@@ -425,6 +430,17 @@ class Tensor(torch._C._TensorBase):
             # Workaround, torch has no built-in bool tensor
             array = array.astype('uint8')
         return torch.from_numpy(array)
+
+    def __contains__(self, element):
+        r"""Check if `element` is present in tensor
+
+        Arguments:
+            element (Tensor or scalar): element to be checked
+                for presence in current tensor"
+        """
+        if isinstance(element, (torch.Tensor, Number)):
+            return (element == self).any().item()
+        return NotImplemented
 
     @property
     def __cuda_array_interface__(self):
