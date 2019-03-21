@@ -53,7 +53,8 @@ PyObject* c10d_init(PyObject* _unused) {
       .def(
           "prepare_for_backward",
           &::c10d::Reducer::prepare_for_backward,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def("get_backward_stats", &::c10d::Reducer::get_backward_stats);
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class of available reduce operations: ``SUM``, ``PRODUCT``,

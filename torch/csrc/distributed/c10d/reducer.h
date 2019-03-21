@@ -36,7 +36,9 @@ class Reducer {
   // Returns the relative time in nanoseconds when gradients were ready,
   // with respect to the time `prepare_for_backward` was called. The outer
   // vector is for model replicas and the inner vector is for parameters.
-  std::vector<std::vector<int64_t>> get_backward_stats() const;
+  std::vector<std::vector<int64_t>> get_backward_stats() const {
+    return backward_stats_;
+  }
 
  protected:
   std::mutex mutex_;
