@@ -279,6 +279,13 @@ class Tensor(torch._C._TensorBase):
                       "next release. Please use torch.solve instead.", stacklevel=2)
         return super(Tensor, self).solve(A)
 
+    def trtrs(self, A, upper=True, transpose=False, unitriangular=False):
+        r"""See :func:`torch.triangular_solve`"""
+        warnings.warn("torch.trtrs is deprecated in favour of torch.triangular_solve and will be "
+                      "removed in the next release. Please use torch.triangular_solve.", stacklevel=2)
+        return super(Tensor, self).triangular_solve(A, upper=upper,
+                                                    transpose=transpose, unitriangular=unitriangular)
+
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
         r"""See :func:`torch.stft`
