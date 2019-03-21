@@ -178,6 +178,9 @@ setup_ci_environment: &setup_ci_environment
 
     sudo pkill -SIGHUP dockerd
 
+    # DEBUG
+    lsb_release -a
+
     # Upgrade SSL module to avoid old SSL warnings
     sudo pip -q install --upgrade setuptools
     sudo pip -q install --upgrade pyOpenSSL ndg-httpsclient pyasn1
