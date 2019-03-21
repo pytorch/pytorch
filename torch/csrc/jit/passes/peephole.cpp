@@ -166,7 +166,6 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
         }
       }
     } else if (node->kind() == prim::If) {
-      WithInsertPoint guard(node);
       IfView n(node);
       // this handles redundant short circuits like "x and True" or "x or False"
       for (size_t i = 0; i < n.outputs().size(); ++i) {
@@ -196,6 +195,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
         bool other_must_not_be_none = !other_input->mustBeNone() &&
             !other_input->type()->cast<OptionalType>();
         if (input_must_be_none && other_must_not_be_none) {
+          WithInsertPoint guard(node);
           auto output = node->owningGraph()->insertConstant(
               node->kind() == aten::__isnot__);
           node->output()->replaceAllUsesWith(output);
