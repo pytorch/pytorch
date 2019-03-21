@@ -343,38 +343,22 @@ void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
       continue;
     }
 
-    bool should_fuse = true;
-    for (auto input : sumInputs) {
-      auto consumer = repr::nn::getConsumers(input).back();
-      if (consumer != sumNode) {
-        should_fuse = false;
-        break;
-      }
-    }
-    // Sum inputs should not be referenced by sequential ops.
-    if (!should_fuse) {
-      continue;
-    }
-
+    int sum_idx = i;
     repr::NNGraph::NodeRef convNode = nullptr;
     while (--i >= 0) {
-      if (!repr::nn::hasInputs(sumNode)) {
-        continue;
-      }
-
-      // Find the nearest Op before Sum
       if (repr::nn::is<repr::NeuralNetOperator>(allNodes[i])) {
-        // The Op must be a Conv
+        // Find the nearest conv Op before Sum
         if (repr::nn::is<repr::Conv>(allNodes[i]) ||
             isOpType(allNodes[i], "Int8Conv")) {
           convNode = allNodes[i];
+          break;
         }
-        break;
       }
     }
     if (convNode == nullptr) {
       continue;
     }
+    int conv_idx = i;
 
     auto conv = repr::nn::get<repr::NeuralNetOperator>(convNode);
     if (!isOnIdeepDevice(*conv)) {
@@ -396,6 +380,9 @@ void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
     }
 
     auto convOutput = repr::nn::getOutputs(convNode).front();
+    if (convOutput != sumInputs[0] && convOutput != sumInputs[1]) {
+      continue;
+    }
     repr::NNGraph::NodeRef sumInputX =
         (sumInputs[0] == convOutput ? sumInputs[1] : sumInputs[0]);
     CAFFE_ENFORCE(sumInputX != nullptr, "Invalid sum inputs");
@@ -406,6 +393,56 @@ void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
     auto preNode = repr::nn::getProducer(sumInputX);
     if (preNode == nullptr || !repr::nn::is<repr::NeuralNetOperator>(preNode)) {
       LOG(WARNING) << "Can not fuse Conv Sum";
+      continue;
+    }
+    int pre_idx = sum_idx - 1;
+    while (pre_idx >= 0) {
+      if (preNode == allNodes[pre_idx]) {
+        break;
+      }
+      pre_idx--;
+    }
+
+    bool should_fuse = true;
+    auto convInput = repr::nn::getInputs(convNode).front();
+    for (int idx = conv_idx + 1; idx < allNodes.size() - 1; ++idx) {
+      if (idx == sum_idx || !repr::nn::is<repr::NeuralNetOperator>(allNodes[idx])) {
+        continue;
+      }
+
+      auto checkNode = allNodes[idx];
+      auto checkInputs = repr::nn::getInputs(checkNode);
+      // Conv output should not be used by other ops after Conv node (except the fused Sum)
+      // The other Sum input (sumInputX) should not be used by the other ops after Sum node
+      // due to the Sum output is inplace with sumInputX
+      for (size_t input_idx = 0; input_idx < checkInputs.size(); ++input_idx) {
+        if (convOutput == checkInputs[input_idx] || (idx > sum_idx && sumInputX == checkInputs[input_idx])) {
+          should_fuse = false;
+          break;
+        }
+      }
+      if (!should_fuse) {
+        break;
+      }
+
+      // If fuse Conv with Sum, the Conv op will be pulled down between preNode and Sum
+      // Check Conv input tensor buffer has been re-written by other ops between Conv and preNode
+      if (idx <= pre_idx) {
+        auto checkOutputs = repr::nn::getOutputs(checkNode);
+        for (size_t output_idx = 0; output_idx < checkOutputs.size(); ++output_idx) {
+          auto check_output_tensor = repr::nn::get<repr::Tensor>(checkOutputs[output_idx]);
+          auto conv_input_tensor = repr::nn::get<repr::Tensor>(convInput);
+          if (conv_input_tensor->getName() == check_output_tensor->getName()) {
+            should_fuse = false;
+            break;
+          }
+        }
+      }
+      if (!should_fuse) {
+        break;
+      }
+    }
+    if (!should_fuse) {
       continue;
     }
 
