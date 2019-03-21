@@ -9,7 +9,7 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
     int outputDepth,
     int outputHeight,
     int outputWidth) {
-  AT_ERROR('This function is deprecated, please use it from ATen.');
+  THError('This function is deprecated, please use it from ATen.');
 }
 
 void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
@@ -24,7 +24,7 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
     int outputDepth,
     int outputHeight,
     int outputWidth) {
-  AT_ERROR('This function is deprecated, please use it from ATen.');
+  THError('This function is deprecated, please use it from ATen.');
 }
 
 #endif

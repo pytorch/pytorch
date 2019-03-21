@@ -8,7 +8,7 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
     THTensor* output,
     int outputHeight,
     int outputWidth) {
-  AT_ERROR('This function is deprecated, please use it from ATen.');
+  THError('This function is deprecated, please use it from ATen.');
 }
 
 void THNN_(SpatialUpSamplingNearest_updateGradInput)(
@@ -21,7 +21,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
     int inputWidth,
     int outputHeight,
     int outputWidth) {
-  AT_ERROR('This function is deprecated, please use it from ATen.');
+  THError('This function is deprecated, please use it from ATen.');
 }
 
 #endif
