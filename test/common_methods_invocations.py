@@ -1032,6 +1032,7 @@ EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
     'test_slogdet_1x1_neg_det',
     'test_slogdet_neg_det',
     'test_slogdet_symmetric',
+    'test_cdist',
 }
 
 
