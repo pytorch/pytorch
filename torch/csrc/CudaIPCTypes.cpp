@@ -27,6 +27,7 @@ void warnProducerTerminatedBeforeSharedTensorsReleased() {
 
 struct CudaIPCGlobalEntities {
   std::mutex ref_counters_mutex_;
+  int64_t sync_events_used_ = 0;
   std::map<std::string, std::shared_ptr<CudaIPCRefCountersFile>>
       ref_counters_files_;
   std::shared_ptr<CudaIPCRefCountersFile> next_available_ref_counters_file_;
@@ -111,12 +112,64 @@ void ReturnRefCounter(const std::string& handle, uint64_t offset /* unused */) {
 
 } // namespace
 
+CudaIPCSentData::CudaIPCSentData(
+    std::string handle,
+    int64_t offset,
+    int64_t* counter_ptr,
+    at::Device device)
+    : handle_(handle),
+      offset_(offset),
+      counter_ptr_(counter_ptr),
+      original_ptr_(),
+      device_(device) {
+#ifndef __HIP_PLATFORM_HCC__
+  // CUDA have the unofficial limit on the number of recorded blocking interprocess
+  // events, to prevent using of all events, we are switching to StreamSync
+  // before limit reached.
+  //
+  //  ```python
+  //  import torch
+  //  a = [ torch.cuda.Event(
+  //      enable_timing=False, blocking=True, interprocess=True) for i in range(30000) ]
+  //  [i.record() for i in a]
+  //  ```
+  //
+  if (cuda_ipc_global_entities.sync_events_used_ < CUDA_IPC_MAXIMUM_EVENTS_TO_USE) {
+    // TODO: More efficient would be to create event inside of main thread (at
+    // the moment of the queue.put). The reason this is more efficient is
+    // because the main thread may have queued extra work on the stream, which
+    // this event will consequently wait for (uselessly).
+    cuda_ipc_global_entities.sync_events_used_ ++;
+    C10_CUDA_CHECK(cudaEventCreateWithFlags(
+        &event_,
+        cudaEventDisableTiming | cudaEventInterprocess |
+            cudaEventBlockingSync));
+    C10_CUDA_CHECK(cudaEventRecord(
+        event_, c10::cuda::getCurrentCUDAStream(device.index())));
+    event_sync_required_ = true;
+  } else {
+    auto stream = c10::cuda::getCurrentCUDAStream(device.index());
+    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+    event_sync_required_ = false;
+  }
+#else
+  // cuIpcGetEventHandle with HIP is not supported, so we have to sync
+  // stream instead of passing event
+  auto stream = c10::cuda::getCurrentCUDAStream(device.index());
+  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+  event_sync_required_ = false;
+#endif
+}
+
 CudaIPCSentData::~CudaIPCSentData() {
   ReturnRefCounter(handle_, offset_);
 #ifndef __HIP_PLATFORM_HCC__
   try {
-    at::cuda::CUDAGuard device_guard(device_.index());
-    cudaEventDestroy(event_);
+    if (event_sync_required_) {
+      at::cuda::CUDAGuard device_guard(device_.index());
+      cudaEventDestroy(event_);
+      cuda_ipc_global_entities.sync_events_used_ --;
+    }
   } catch (...) { /* No throw */
   }
 #endif
@@ -148,9 +201,7 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
           sizeof(int64_t) * CUDA_IPC_REF_COUNTER_FILE_SIZE,
           nullptr);
       auto rc = std::make_shared<CudaIPCRefCountersFile>(
-          ref_counter_handle,
-          CUDA_IPC_REF_COUNTER_FILE_SIZE,
-          std::move(sptr));
+          ref_counter_handle, CUDA_IPC_REF_COUNTER_FILE_SIZE, std::move(sptr));
       cuda_ipc_global_entities.ref_counters_files_[ref_counter_handle] = rc;
       cuda_ipc_global_entities.next_available_ref_counters_file_ = rc;
     }

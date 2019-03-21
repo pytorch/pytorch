@@ -223,7 +223,7 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
   }
 
   at::DeviceGuard device_guard(storage->device());
-  THPObjectPtr tuple(PyTuple_New(7));
+  THPObjectPtr tuple(PyTuple_New(8));
   THPObjectPtr device(PyLong_FromLong(storage->device().index()));
   THPObjectPtr _handle(Py_None);
   Py_INCREF(Py_None);
@@ -233,6 +233,8 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
   Py_INCREF(Py_None);
   THPObjectPtr _ref_counter_offset(PyLong_FromLong(0));
   THPObjectPtr _event_handle(Py_None);
+  Py_INCREF(Py_None);
+  THPObjectPtr _event_sync_required(Py_None);
   Py_INCREF(Py_None);
   if (THWStorage_(data)(LIBRARY_STATE storage)) {
     size_t base_size;
@@ -257,12 +259,15 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
     cudaIpcEventHandle_t ipc_event_handle;
 
 #ifndef __HIP_PLATFORM_HCC__
-    THCudaCheck(cudaIpcGetEventHandle(&ipc_event_handle, sent_data->event_));
+    if (sent_data->event_sync_required_) {
+      THCudaCheck(cudaIpcGetEventHandle(&ipc_event_handle, sent_data->event_));
+    }
 #else
     // ipc_event_handle unused in storage receiver, we can leave it uninitialized.
 #endif
 
     _event_handle = PyBytes_FromStringAndSize((char *)&ipc_event_handle, CUDA_IPC_HANDLE_SIZE);
+    _event_sync_required = PyBool_FromLong(sent_data->event_sync_required_);
 
   }
 
@@ -282,6 +287,7 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
   PyTuple_SET_ITEM(tuple.get(), 4, _ref_counter.release());
   PyTuple_SET_ITEM(tuple.get(), 5, _ref_counter_offset.release());
   PyTuple_SET_ITEM(tuple.get(), 6, _event_handle.release());
+  PyTuple_SET_ITEM(tuple.get(), 7, _event_sync_required.release());
   return tuple.release();
   END_HANDLE_TH_ERRORS
 }
@@ -338,7 +344,7 @@ static std::string THPStorage_(bytesAsHandleString)(PyObject *handle) {
 static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  THPUtils_assert(PyTuple_GET_SIZE(args) == 7, "tuple of 7 items expected");
+  THPUtils_assert(PyTuple_GET_SIZE(args) == 8, "tuple of 8 items expected");
   PyObject *_device = PyTuple_GET_ITEM(args, 0);
   PyObject *_handle = PyTuple_GET_ITEM(args, 1);
   PyObject *_size_bytes = PyTuple_GET_ITEM(args, 2);
@@ -346,16 +352,17 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   PyObject *_ref_counter = PyTuple_GET_ITEM(args, 4);
   PyObject *_ref_counter_offset = PyTuple_GET_ITEM(args, 5);
   PyObject *_event_handle = PyTuple_GET_ITEM(args, 6);
+  PyObject *_event_sync_required = PyTuple_GET_ITEM(args, 7);
   if (!(THPUtils_checkLong(_device) && THPUtils_checkLong(_size_bytes) &&
         PyBytes_Check(_handle) && PyBytes_Check(_ref_counter) &&
         PyBytes_Check(_event_handle) && THPUtils_checkLong(_offset_bytes) &&
-        THPUtils_checkLong(_ref_counter_offset))) {
+        THPUtils_checkLong(_ref_counter_offset) && PyBool_Check(_event_sync_required))) {
     THPUtils_invalidArguments(
         args,
         nullptr,
         "_new_shared in CUDA mode",
         1,
-        "(int device, bytes handle, int storage_size_bytes, int storage_offset_bytes, bytes _ref_counter, int _ref_counter_offset, bytes event_handle)");
+        "(int device, bytes handle, int storage_size_bytes, int storage_offset_bytes, bytes _ref_counter, int _ref_counter_offset, bytes event_handle, bool event_sync_required)");
     return nullptr;
   }
 
@@ -366,15 +373,17 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   at::cuda::CUDAGuard device_guard(device);
 
 #ifndef __HIP_PLATFORM_HCC__
-  // Ensure that producer prepared all tensor's data
-  std::string s_ipc_event_handle =
-      THPStorage_(bytesAsHandleString)(_event_handle);
-  auto ipc_event_handle =
-      reinterpret_cast<const cudaIpcEventHandle_t*>(s_ipc_event_handle.c_str());
-  cudaEvent_t event;
-  cudaIpcOpenEventHandle(&event, *ipc_event_handle);
-  AT_CUDA_CHECK(
-      cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(device), event, 0));
+  if (PyObject_IsTrue(_event_sync_required)) {
+    // Ensure that producer prepared all tensor's data
+    std::string s_ipc_event_handle =
+        THPStorage_(bytesAsHandleString)(_event_handle);
+    auto ipc_event_handle = reinterpret_cast<const cudaIpcEventHandle_t*>(
+        s_ipc_event_handle.c_str());
+    cudaEvent_t event;
+    cudaIpcOpenEventHandle(&event, *ipc_event_handle);
+    AT_CUDA_CHECK(
+        cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(device), event, 0));
+  }
 #else
   // Already synchronized inside producer stream
 #endif

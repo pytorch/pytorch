@@ -15,7 +15,7 @@ bool CudaIPCCollect();
 
 struct CudaIPCReceivedData final {
   explicit CudaIPCReceivedData(std::shared_ptr<void> shared_ptr)
-      : shared_ptr_(std::move(shared_ptr)){}
+      : shared_ptr_(std::move(shared_ptr)) {}
   std::shared_ptr<void> shared_ptr_;
 };
 
@@ -25,36 +25,14 @@ struct CudaIPCSentData final {
   int64_t* counter_ptr_; // Reference counter shared memory block
   at::DataPtr original_ptr_; // Original mem allocation
   cudaEvent_t event_; // Sync cuEventDestroy
+  bool event_sync_required_;
   at::Device device_;
 
   CudaIPCSentData(
       std::string handle,
       int64_t offset,
       int64_t* counter_ptr,
-      at::Device device)
-      : handle_(handle),
-        offset_(offset),
-        counter_ptr_(counter_ptr),
-        original_ptr_(),
-        device_(device) {
-#ifndef __HIP_PLATFORM_HCC__
-    // TODO: More efficient would be to create event inside of main thread (at
-    // the moment of the queue.put). The reason this is more efficient is
-    // because the main thread may have queued extra work on the stream, which
-    // this event will consequently wait for (uselessly).
-    C10_CUDA_CHECK(cudaEventCreateWithFlags(
-        &event_,
-        cudaEventDisableTiming | cudaEventInterprocess |
-            cudaEventBlockingSync));
-    C10_CUDA_CHECK(cudaEventRecord(
-        event_, c10::cuda::getCurrentCUDAStream(device.index())));
-#else
-    // cuIpcGetEventHandle with HIP is not supported, so we have to sync
-    // stream instead of passing event
-    auto stream = c10::cuda::getCurrentCUDAStream(device.index());
-    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
-#endif
-  }
+      at::Device device);
   ~CudaIPCSentData();
 
   int64_t counter_value();
@@ -75,6 +53,7 @@ namespace {
 
 constexpr int64_t CUDA_IPC_REF_COUNTER_FILE_SIZE = 10000;
 constexpr int64_t CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO = 1000;
+constexpr int64_t CUDA_IPC_MAXIMUM_EVENTS_TO_USE = 1000;
 
 // All to be deleted data blocks with non zero reference counter goes there
 struct CudaIPCSentDataLimbo final {

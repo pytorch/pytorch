@@ -87,7 +87,7 @@ def rebuild_tensor(cls, storage, metadata):
 
 def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                         storage_cls, storage_device, storage_handle, storage_size_bytes, storage_offset_bytes,
-                        requires_grad, ref_counter_handle, ref_counter_offset, event_handle):
+                        requires_grad, ref_counter_handle, ref_counter_offset, event_handle, event_sync_required):
     # If storage_handle is None, storage points to nullptr.
     if storage_handle is None or storage_size_bytes == 0:
         storage = storage_cls(0)
@@ -102,7 +102,8 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                 storage_offset_bytes,
                 ref_counter_handle,
                 ref_counter_offset,
-                event_handle)
+                event_handle,
+                event_sync_required)
             shared_cache[(storage_handle, storage_offset_bytes)] = StorageWeakRef(storage)
         else:
             # We already ref counting this Storage, but producer needs new ref-counters to be released.
@@ -223,7 +224,8 @@ def reduce_tensor(tensor):
          storage_offset_bytes,
          ref_counter_handle,
          ref_counter_offset,
-         event_handle) = storage._share_cuda_()
+         event_handle,
+         event_sync_required) = storage._share_cuda_()
         tensor_offset = tensor.storage_offset()
         shared_cache[handle] = StorageWeakRef(storage)
         # _backward_hooks purposely omitted here, see
@@ -241,7 +243,8 @@ def reduce_tensor(tensor):
                  tensor.requires_grad,
                  ref_counter_handle,
                  ref_counter_offset,
-                 event_handle))
+                 event_handle,
+                 event_sync_required))
 
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
     metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad)
