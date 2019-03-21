@@ -277,6 +277,8 @@ class JitTestCase(TestCase):
         torch._C._jit_set_emit_module_hook(self.emitModuleHook)
 
     def emitModuleHook(self, module):
+        import zipfile
+
         def copy_structure_and_params(m):
             c = torch.jit.ScriptModule()
             for name, v in m._get_parameters():
@@ -290,7 +292,15 @@ class JitTestCase(TestCase):
         # disable the hook while we parse code, otherwise we will re-enter the hook
         with self.disableModuleHook():
             try:
-                pp, constant_table = module._python_print()
+                if len(module.code) == 0:
+                    # short-circuit
+                    return
+                saved_module_buffer = io.BytesIO()
+                torch.jit.save(module, saved_module_buffer)
+
+                saved_module_buffer.seek(0)
+                archive = zipfile.ZipFile(saved_module_buffer)
+                main_module = archive.open(os.path.join('archive', 'code', 'archive.py'))
             except RuntimeError as e:
                 se = str(e)
                 if "could not export python function" not in se and \
@@ -298,12 +308,23 @@ class JitTestCase(TestCase):
                     raise
                 else:
                     return
-            ppv = "op_version_set = 0\n{}".format(pp)
-            sm = copy_structure_and_params(module)
-            torch._C._jit_import_methods(sm, ppv, constant_table)
-            pp2, _ = sm._python_print()
-            if pp != pp2:
-                self.assertMultiLineEqual(pp, pp2)
+
+            saved_module_buffer.seek(0)
+            imported = torch.jit.load(saved_module_buffer)
+            saved_module_buffer_2 = io.BytesIO()
+            torch.jit.save(imported, saved_module_buffer_2)
+
+            saved_module_buffer_2.seek(0)
+            archive2 = zipfile.ZipFile(saved_module_buffer_2)
+            main_module_2 = archive.open(os.path.join('archive', 'code', 'archive.py'))
+
+            main_module_code = ""
+            for line in main_module:
+                main_module_code += line.decode()
+            main_module_2_code = ""
+            for line in main_module_2:
+                main_module_2_code += line.decode()
+            self.assertMultiLineEqual(main_module_code, main_module_2_code)
 
     def getExportImportCopy(self, m, also_test_file=True, map_location=None):
         buffer = io.BytesIO()
@@ -14124,7 +14145,7 @@ class TestClassType(JitTestCase):
             return foo
 
         # create from python
-        x = torch.ones(2, 3);
+        x = torch.ones(2, 3)
         y = torch.zeros(2, 3)
         f = Foo(x, y)
 
