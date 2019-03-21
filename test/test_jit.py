@@ -10354,13 +10354,18 @@ a")
         self.checkScript(fn, (torch.ones(2, 4, 2), torch.ones(2, 4, 2)))
 
     def test_hash(self):
+        def tester(fn, inputs):
+            for x in inputs:
+                for y in inputs:
+                    if x == y:
+                        self.assertEqual(fn(x), fn(y))
+                    else:
+                        self.assertNotEqual(fn(x), fn(y))
+
+        @torch.jit.script
         def int_hash(x):
             # type: (int) -> int
             return hash(x)
-
-        self.checkScript(int_hash, (20,))
-        self.checkScript(int_hash, (-20,))
-        self.checkScript(int_hash, (2**20,))
 
         @torch.jit.script
         def float_hash(x):
@@ -10375,9 +10380,9 @@ a")
             # type: (str) -> int
             return hash(x)
 
-        str_hash("")
-        str_hash("h")
-        str_hash("hello hello hello")
+        tester(int_hash, (20, 21, 22))
+        tester(float_hash, (20.0, 21.00001, 22.443))
+        tester(str_hash, ("", "hello", "a"))
 
     def test_mutable_dce(self):
         @torch.jit.script
