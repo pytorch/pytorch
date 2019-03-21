@@ -178,11 +178,6 @@ setup_ci_environment: &setup_ci_environment
 
     sudo pkill -SIGHUP dockerd
 
-    sudo add-apt-repository ppa:jonathonf/python-3.6
-    sudo apt-get update
-    sudo apt-get install python3.6
-    sudo pip --version
-    sudo pip3 --version
     sudo python --version
     sudo python3 --version
 
