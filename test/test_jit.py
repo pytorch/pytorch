@@ -7143,6 +7143,15 @@ a")
 
             self.checkScript(good_fn, (torch.ones(2, 2),), optimize=True)
 
+    def test_tensor_with_grad_as_constant(self):
+        param = torch.randn(3).requires_grad_()
+        x = torch.randn(3)
+
+        def f(x):
+            return x + param
+        with self.assertRaisesRegex(RuntimeError, "Cannot insert a Tensor that requires grad as a constant"):
+            torch.jit.trace(f, x)
+
     def test_type_annotation_module(self):
         class BaseModule(torch.jit.ScriptModule):
             def foo(self, x):
