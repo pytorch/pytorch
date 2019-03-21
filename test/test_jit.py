@@ -10353,6 +10353,32 @@ a")
 
         self.checkScript(fn, (torch.ones(2, 4, 2), torch.ones(2, 4, 2)))
 
+    def test_hash(self):
+        def int_hash(x):
+            # type: (int) -> int
+            return hash(x)
+
+        self.checkScript(int_hash, (20,))
+        self.checkScript(int_hash, (-20,))
+        self.checkScript(int_hash, (2**20,))
+
+        @torch.jit.script
+        def float_hash(x):
+            # type: (float) -> int
+            return hash(x)
+
+        # float hash is different, just run it
+        float_hash(233.30)
+
+        @torch.jit.script
+        def str_hash(x):
+            # type: (str) -> int
+            return hash(x)
+
+        str_hash("")
+        str_hash("h")
+        str_hash("hello hello hello")
+
     def test_mutable_dce(self):
         @torch.jit.script
         def foo():
