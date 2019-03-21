@@ -1,3 +1,5 @@
+#include <TH/THTensorApply.h>
+
 #ifndef NAN
   #define NAN (nan(NULL))
 #endif
@@ -43,34 +45,6 @@
 { \
   TYPE *TENSOR##_data = TENSOR->data<scalar_t>(); \
   ptrdiff_t TENSOR##_len = THTensor_(nElement)(TENSOR); \
-  CODE \
-}
-#endif
-
-#ifdef _OPENMP
-#define TH_TENSOR_APPLY2_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, CODE) \
-{ \
-  int inOmp = omp_in_parallel(); \
-  ptrdiff_t TH_TENSOR_size = THTensor_(nElement)(TENSOR1); \
-  PRAGMA(omp parallel if ((TH_TENSOR_size > TH_OMP_OVERHEAD_THRESHOLD) && (!inOmp))) \
-  { \
-    size_t num_threads = omp_get_num_threads(); \
-    size_t tid = omp_get_thread_num(); \
-    ptrdiff_t TH_TENSOR_offset = tid * (TH_TENSOR_size / num_threads); \
-    ptrdiff_t TH_TENSOR_end = tid == num_threads - 1 ? TH_TENSOR_size : \
-      TH_TENSOR_offset + TH_TENSOR_size / num_threads; \
-    ptrdiff_t TENSOR1##_len = TH_TENSOR_end - TH_TENSOR_offset; \
-    TYPE1 *TENSOR1##_data = TENSOR1->data<scalar_t>() + TH_TENSOR_offset; \
-    TYPE2 *TENSOR2##_data = TENSOR2->data<scalar_t>() + TH_TENSOR_offset; \
-    CODE \
-  } \
-}
-#else
-#define TH_TENSOR_APPLY2_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, CODE) \
-{ \
-  TYPE1 *TENSOR1##_data = TENSOR1->data<scalar_t>(); \
-  TYPE2 *TENSOR2##_data = TENSOR2->data<scalar_t>(); \
-  ptrdiff_t TENSOR1##_len = THTensor_(nElement)(TENSOR1); \
   CODE \
 }
 #endif
@@ -155,4 +129,114 @@
 if (std::isnan(val)) break;
 #else
 #define th_isnan_break(val)
+#endif
+
+#define TH_TENSOR_APPLY2_PARALLEL(SIZE, CONTIG1, CONTIG2, TYPE1, TENSOR1, TYPE2, TENSOR2, CODE, THRESHOLD) \
+{ \
+  /* for advanced searching index*/ \
+  if( CONTIG1 && CONTIG2 ){ \
+    TYPE1 *rp = THTensor_getStoragePtr(TENSOR1)->data<TYPE1>()+TENSOR1->storage_offset(); \
+    TYPE2 *tp = THTensor_getStoragePtr(TENSOR2)->data<TYPE2>()+TENSOR2->storage_offset(); \
+    if(tp != (TYPE2*)rp) { \
+      at::parallel_for(0, SIZE, (THRESHOLD * 10), [=](int64_t begin, int64_t end) { \
+        PRAGMA_LOOP(ivdep) \
+        for (auto iter = begin; iter < end; iter++) { \
+          TYPE2 *TENSOR2##_data = tp+iter; \
+          TYPE1 *TENSOR1##_data = rp+iter; \
+          CODE \
+        } \
+      }); \
+    } else { \
+      at::parallel_for(0, SIZE, (THRESHOLD * 10), [=](int64_t begin, int64_t end) { \
+        PRAGMA_LOOP(simd) \
+        for (auto iter = begin; iter < end; iter++) { \
+          TYPE2* TENSOR2##_data = tp+iter; \
+          TYPE1* TENSOR1##_data = rp+iter; \
+          CODE \
+        } \
+      }); \
+    } \
+  } else { \
+    /* The following strategy is not easy to understand.
+     * 1. Collapse the dimension of the tensors in order to decrease the number of nested loops.
+     * 2. Calculate the numbers of elements allocated in each thread and the line index of the first one.
+     * 3. Calculate the memory offset of the first element and the indexes in each dimension of the
+     *    first one.
+     * 4. iterate all elements in each thread. update the indexes in each dimension of the rest.
+    */ \
+    int TH_TENSOR_APPLY_hasFinished = 0; \
+    int64_t TH_TENSOR_dim_index = 0; \
+    /*step 1*/ \
+    __TH_TENSOR_APPLYX_PREAMBLE(TYPE2, TENSOR2, -1, 1) \
+    __TH_TENSOR_APPLYX_PREAMBLE(TYPE1, TENSOR1, -1, 1) \
+    if (0 == TH_TENSOR_APPLY_hasFinished) { \
+      at::parallel_for(0, SIZE, THRESHOLD, [=,TENSOR1##_data_l=TENSOR1##_data,TENSOR2##_data_l=TENSOR2##_data,TENSOR1##_i_l=TENSOR1##_i,TENSOR2##_i_l=TENSOR2##_i](int64_t begin, int64_t end) { \
+        auto TENSOR1##_i = TENSOR1##_i_l; \
+        auto TENSOR2##_i = TENSOR2##_i_l; \
+        auto TENSOR1##_data = TENSOR1##_data_l; \
+        auto TENSOR2##_data = TENSOR2##_data_l; \
+        /*step 2*/ \
+        ptrdiff_t line_index_start = begin; \
+        ptrdiff_t line_seg_length = (end - begin); \
+        /* step 3*/ \
+        __TH_TENSOR_APPLYX_CAL_MEMORY_OFFSET(TENSOR2); \
+        __TH_TENSOR_APPLYX_CAL_MEMORY_OFFSET(TENSOR1); \
+        TENSOR2##_data += TENSOR2##_memory_offset; \
+        TENSOR1##_data += TENSOR1##_memory_offset; \
+        ptrdiff_t count = 0; \
+        ptrdiff_t TENSOR2##_start =  TENSOR2##_counter_tmp[TENSOR2##_dim-1]; \
+        ptrdiff_t TENSOR1##_start =  TENSOR1##_counter_tmp[TENSOR1##_dim-1]; \
+        /* step 4*/ \
+        while (count < line_seg_length) { \
+          for(TENSOR2##_i=TENSOR2##_start, TENSOR1##_i = TENSOR1##_start; ((count < line_seg_length) && (TENSOR2##_i < TENSOR2##_size) && (TENSOR1##_i < TENSOR1##_size)); ++TENSOR2##_i, ++TENSOR1##_i, ++count){ \
+            CODE \
+            TENSOR2##_data += TENSOR2##_stride; \
+            TENSOR1##_data += TENSOR1##_stride; \
+          } \
+          if (count < line_seg_length){ \
+            __TH_TENSOR_APPLYX_UPDATE_COUNTERS_PARALLEL(TENSOR2); \
+            __TH_TENSOR_APPLYX_UPDATE_COUNTERS_PARALLEL(TENSOR1); \
+          } \
+        } \
+        if(TENSOR1##_counter_tmp != NULL) \
+          THFree(TENSOR1##_counter_tmp); \
+        if(TENSOR2##_counter_tmp != NULL) \
+          THFree(TENSOR2##_counter_tmp); \
+      }); \
+    } \
+    if(TENSOR2##_counter != NULL) \
+      THFree(TENSOR2##_counter); \
+    if(TENSOR1##_counter != NULL) \
+      THFree(TENSOR1##_counter); \
+  } \
+}
+
+#define INTRA_OP_PARALLEL // TODO: cmake rule
+#ifdef INTRA_OP_PARALLEL
+#define TH_TENSOR_APPLY2_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, CODE) \
+{ \
+  TYPE1 *TENSOR1##_data_start = TENSOR1->data<scalar_t>(); \
+  TYPE2 *TENSOR2##_data_start = TENSOR2->data<scalar_t>(); \
+  auto code_fn = [=](int64_t begin, int64_t end) { \
+    ptrdiff_t TENSOR1##_len = end - begin; \
+    TYPE1 *TENSOR1##_data = TENSOR1##_data_start + begin; \
+    TYPE2 *TENSOR2##_data = TENSOR2##_data_start + begin; \
+    CODE \
+  }; \
+  int inParallel = at::in_parallel_region(); \
+  ptrdiff_t TH_TENSOR_size = THTensor_(nElement)(TENSOR1); \
+  if (!inParallel) { \
+    at::parallel_for(0, TH_TENSOR_size, TH_OMP_OVERHEAD_THRESHOLD, code_fn); \
+  } else { \
+    code_fn(0, TH_TENSOR_size); \
+  } \
+}
+#else
+#define TH_TENSOR_APPLY2_CONTIG(TYPE1, TENSOR1, TYPE2, TENSOR2, CODE) \
+{ \
+  TYPE1 *TENSOR1##_data = TENSOR1->data<scalar_t>(); \
+  TYPE2 *TENSOR2##_data = TENSOR2->data<scalar_t>(); \
+  ptrdiff_t TENSOR1##_len = THTensor_(nElement)(TENSOR1); \
+  CODE \
+}
 #endif

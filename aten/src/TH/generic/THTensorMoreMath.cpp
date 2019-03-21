@@ -1164,45 +1164,45 @@ TENSOR_IMPLEMENT_LOGICAL(ge,>=)
 TENSOR_IMPLEMENT_LOGICAL(eq,==)
 TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 
+#define INTRA_OP_PARALLEL // TODO: cmake rule
+#ifdef INTRA_OP_PARALLEL
 
-#ifdef _OPENMP
-
-#define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, OMP_THRESHOLD)             \
-  void THTensor_(NAME)(THTensor *r_, THTensor *t)             \
-  {                                                           \
-    THTensor_(resizeAs)(r_, t);                               \
-    ptrdiff_t r_Size = THTensor_(nElement)(r_);               \
-    int r_Contig = THTensor_(isContiguous)(r_);               \
-    int tContig = THTensor_(isContiguous)(t);                 \
-    int inOMP = omp_in_parallel();                            \
-    if( !inOMP ){   \
-      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);, OMP_THRESHOLD);        \
-    } else {                                                                                                   \
-      TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data););                                       \
-    }                                                                                                        \
+#define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, THRESHOLD) \
+  void THTensor_(NAME)(THTensor *r_, THTensor *t) \
+  { \
+    THTensor_(resizeAs)(r_, t); \
+    ptrdiff_t r_Size = THTensor_(nElement)(r_); \
+    int r_Contig = THTensor_(isContiguous)(r_); \
+    int tContig = THTensor_(isContiguous)(t); \
+    int inParallel = at::in_parallel_region(); \
+    if( !inParallel) { \
+      TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);, THRESHOLD); \
+    } else { \
+      TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);); \
+    } \
   }
 
-#define LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS(NAME, CFUNC)      \
+#define LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS(NAME, CFUNC) \
   LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD)
 
-#define LAB_IMPLEMENT_VECTORIZED_FUNCTION_3_ARGS(NAME, CFUNC, OMP_THRESHOLD)             \
-  void THTensor_(NAME)(THTensor *r_, THTensor *t)             \
-  {                                                           \
-    THTensor_(resizeAs)(r_, t);                               \
-    ptrdiff_t r_Size = THTensor_(nElement)(r_);               \
-    int r_Contig = THTensor_(isContiguous)(r_);               \
-    int tContig = THTensor_(isContiguous)(t);                 \
-    if (r_Contig && tContig) {                                \
-      TH_TENSOR_APPLY2_CONTIG(scalar_t, r_, scalar_t, t, THVector_(NAME)(r__data, t_data, r__len););                   \
-    } else {                                                                                                   \
-      int inOMP = omp_in_parallel();                            \
-      if( !inOMP ){   \
-        TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);, OMP_THRESHOLD);        \
-      }                                                                                                        \
-      else {                                                                                                   \
-        TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data););                                       \
-      }                                                                                                        \
-    }                                                                                                          \
+#define LAB_IMPLEMENT_VECTORIZED_FUNCTION_3_ARGS(NAME, CFUNC, THRESHOLD) \
+  void THTensor_(NAME)(THTensor *r_, THTensor *t) \
+  { \
+    THTensor_(resizeAs)(r_, t); \
+    ptrdiff_t r_Size = THTensor_(nElement)(r_); \
+    int r_Contig = THTensor_(isContiguous)(r_); \
+    int tContig = THTensor_(isContiguous)(t); \
+    if (r_Contig && tContig) { \
+      TH_TENSOR_APPLY2_CONTIG(scalar_t, r_, scalar_t, t, THVector_(NAME)(r__data, t_data, r__len);); \
+    } else { \
+      int inParallel = at::in_parallel_region(); \
+      if( !inParallel) { \
+        TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);, THRESHOLD); \
+      } \
+      else { \
+        TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);); \
+      } \
+    } \
   }
 
 #define LAB_IMPLEMENT_VECTORIZED_FUNCTION_2_ARGS(NAME, CFUNC) \
@@ -1210,30 +1210,30 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 
 #else
 
-#define LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS(NAME, CFUNC)             \
-  void THTensor_(NAME)(THTensor *r_, THTensor *t)                \
-  {                                                           \
-    THTensor_(resizeAs)(r_, t);                               \
+#define LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS(NAME, CFUNC) \
+  void THTensor_(NAME)(THTensor *r_, THTensor *t) \
+  { \
+    THTensor_(resizeAs)(r_, t); \
     TH_TENSOR_APPLY2(scalar_t, t, scalar_t, r_, *r__data = CFUNC(*t_data);); \
-  }                                                           \
+  } \
 
-#define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, PSEUDO_OMP_THRESHOLD) \
+#define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, PSEUDO_THRESHOLD) \
   LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS(NAME, CFUNC)
 
-#define LAB_IMPLEMENT_VECTORIZED_FUNCTION_2_ARGS(NAME, CFUNC)             \
-  void THTensor_(NAME)(THTensor *r_, THTensor *t)                \
-  {                                                           \
-    THTensor_(resizeAs)(r_, t);                               \
-    int r_Contig = THTensor_(isContiguous)(r_);               \
-    int tContig = THTensor_(isContiguous)(t);                 \
-    if (r_Contig && tContig) {                                \
+#define LAB_IMPLEMENT_VECTORIZED_FUNCTION_2_ARGS(NAME, CFUNC) \
+  void THTensor_(NAME)(THTensor *r_, THTensor *t) \
+  { \
+    THTensor_(resizeAs)(r_, t); \
+    int r_Contig = THTensor_(isContiguous)(r_); \
+    int tContig = THTensor_(isContiguous)(t); \
+    if (r_Contig && tContig) { \
       TH_TENSOR_APPLY2_CONTIG(scalar_t, r_, scalar_t, t, THVector_(NAME)(r__data, t_data, r__len);); \
-    } else {                                                           \
+    } else { \
       TH_TENSOR_APPLY2(scalar_t, t, scalar_t, r_, *r__data = CFUNC(*t_data);); \
-    }                                                           \
-  }                                                             \
+    } \
+  }
 
-#define LAB_IMPLEMENT_VECTORIZED_FUNCTION_3_ARGS(NAME, CFUNC, PSEUDO_OMP_THRESHOLD) \
+#define LAB_IMPLEMENT_VECTORIZED_FUNCTION_3_ARGS(NAME, CFUNC, PSEUDO_THRESHOLD) \
   LAB_IMPLEMENT_VECTORIZED_FUNCTION_2_ARGS(NAME, CFUNC)
 
 #endif
