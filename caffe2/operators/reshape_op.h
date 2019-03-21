@@ -59,7 +59,7 @@ class ReshapeOp : public Operator<Context> {
     }
 
     // Copy over the dimensions for those that are specified zero.
-    for (int i = 0; i < actual_new_shape.size() && i < input.dim(); ++i) {
+    for (size_t i = 0; i < actual_new_shape.size() && i < input.dim(); ++i) {
       if (actual_new_shape[i] == 0) {
         actual_new_shape[i] = input.size(i);
       }

@@ -402,12 +402,12 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim, Sc
   return cumprod_backward(grad.to(input.scalar_type()), input, dim);
 }
 
-Tensor gesv_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
-  return std::get<0>(at::gesv(grad, A.transpose(-2, -1)));
+Tensor solve_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
+  return std::get<0>(at::solve(grad, A.transpose(-2, -1)));
 }
 
-Tensor gesv_backward_A(const Tensor & grad, const Tensor & self, const Tensor & A, const Tensor & solution) {
-  Tensor grad_self = gesv_backward_self(grad, self, A);
+Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor & A, const Tensor & solution) {
+  Tensor grad_self = solve_backward_self(grad, self, A);
   if (self.ndimension() == 2 && A.ndimension() == 2) {
     return -at::mm(grad_self, solution.transpose(-2, -1));
   }
@@ -701,8 +701,8 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
 
   auto P = phi(at::matmul(L, Lbar));
   Tensor S;
-  std::tie(S, std::ignore) = at::gesv(P + P.transpose(-1, -2), L);
-  std::tie(S, std::ignore) = at::gesv(S.transpose(-1, -2), L);
+  std::tie(S, std::ignore) = at::solve(P + P.transpose(-1, -2), L);
+  std::tie(S, std::ignore) = at::solve(S.transpose(-1, -2), L);
   S = phi(S);
   if (upper) {
     S = S.transpose(-1, -2);
@@ -1748,7 +1748,7 @@ std::tuple<Tensor, Tensor> trtrs_backward(
   if (grad_x.defined()) {
     grad_b = std::get<0>(grad_x.trtrs(a, upper, !transpose, unitriangular));
     if (output_mask[1]) {
-      grad_a = transpose ? -x.mm(grad_b.t()) : -grad_b.mm(x.t());
+      grad_a = transpose ? -x.matmul(grad_b.transpose(-1, -2)) : -grad_b.matmul(x.transpose(-1, -2));
       if (upper) {
         grad_a = grad_a.triu((int) unitriangular);
       } else {
