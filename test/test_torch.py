@@ -28,7 +28,7 @@ from common_methods_invocations import tri_tests_args, run_additional_tri_tests,
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist
+    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest
 from multiprocessing.reduction import ForkingPickler
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -100,16 +100,6 @@ class BytesIOContext(io.BytesIO):
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
 # run its methods as test cases.
 class _TestTorchMixin(object):
-    def _check_sum_dim(tensors, dim):
-        for tensor in tensors:
-            expected = tensor.numpy().sum(dim)
-            actual = tensor.sum(dim)
-            self.assertEqual(expected.shape, actual.shape)
-            if actual.dtype == torch.float:
-                self.assertTrue(np.allclose(expected, actual.numpy(), rtol=1e-03, atol=1e-05))
-            else:
-                self.assertTrue(np.allclose(expected, actual.numpy()))
-
     def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True):
         float_types = [torch.double,
                        torch.float]
@@ -10373,6 +10363,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         big_exp[1] = 1000000
         big_out = torch.ones(1000000, dtype=torch.int8, device=device).bincount()
         self.assertEqual(big_exp, big_out)
+
+    @slowTest
+    def test_slow_test(self):
+        # Just a smoketest to make sure our slowTest decorator works.
+        pass
 
     def test_bincount_cpu(self):
         self._test_bincount(self, device='cpu')

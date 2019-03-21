@@ -587,7 +587,8 @@ class TestNN(NNTestCase):
                 self.par = nn.ParameterList()
                 self.par.append(nn.Parameter(torch.randn(10)))
 
-            def forward(inp):
+            def forward(self, inp):
+                # NB: dead code
                 return inp.clone()
 
         net = Net()

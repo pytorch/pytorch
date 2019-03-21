@@ -95,7 +95,10 @@ def filter_unique_options(options, allow_kwarg, type_to_signature, remove_self):
 
 
 def enumerate_options_due_to_default(declaration,
-                                     allow_kwarg=True, type_to_signature=[], remove_self=True):
+                                     allow_kwarg=True, type_to_signature=None, remove_self=True):
+
+    if type_to_signature is None:
+        type_to_signature = []
 
     # Checks to see if an argument with a default keyword is a Tensor that
     # by default can be NULL. In this case, instead of generating another

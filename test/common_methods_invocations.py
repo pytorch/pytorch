@@ -2,6 +2,7 @@ import torch
 from torch._six import inf, nan, istuple
 from functools import reduce, wraps
 from operator import mul, itemgetter
+import collections
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.testing import make_non_contiguous
 from common_utils import (skipIfNoLapack,
@@ -72,9 +73,7 @@ def prod_zeros(dim_size, dim_select):
     return result
 
 
-class non_differentiable(object):
-    def __init__(self, tensor):
-        self.tensor = tensor
+non_differentiable = collections.namedtuple('non_differentiable', ['tensor'])
 
 
 class dont_convert(tuple):
