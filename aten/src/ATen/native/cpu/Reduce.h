@@ -82,10 +82,10 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
     std::is_default_constructible<acc_t>::value,
     "the accumulate type must be default-constructible"
   );
-  const auto num_outputs = iter.outputs();
-  iter.foreach_reduced_elt([&](TensorIterator &sub_iter) {
-    auto reduction_body = [&](acc_t acc, int64_t begin, int64_t end) -> acc_t {
-      sub_iter.serial_for_each([&acc, &ops](int ntensors, char** data, const int64_t* strides, int64_t size) {
+  const int num_outputs = iter.noutputs();
+  iter.foreach_reduced_elt([&ops, &init, num_outputs](TensorIterator &sub_iter) {
+    auto reduction_body = [&ops, &init, &sub_iter, num_outputs](acc_t acc, int64_t begin, int64_t end) -> acc_t {
+      sub_iter.serial_for_each([&acc, &ops, &init, num_outputs](int ntensors, char** data, const int64_t* strides, int64_t size) {
         AT_ASSERT(ntensors - num_outputs == 1);
         char *in = data[ntensors - 1];
         int64_t stride = strides[ntensors - 1];

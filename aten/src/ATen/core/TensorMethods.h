@@ -598,6 +598,9 @@ inline Tensor Tensor::std(bool unbiased) const {
 inline Tensor Tensor::std(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return type().std(*this, dim, unbiased, keepdim);
 }
+inline std::tuple<Tensor,Tensor> Tensor::std_mean(IntArrayRef dim, bool unbiased, bool keepdim) const {
+    return type().std_mean(*this, dim, unbiased, keepdim);
+}
 inline Tensor Tensor::prod(ScalarType dtype) const {
     return type().prod(*this, dtype);
 }
@@ -666,6 +669,9 @@ inline Tensor Tensor::var(bool unbiased) const {
 }
 inline Tensor Tensor::var(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return type().var(*this, dim, unbiased, keepdim);
+}
+inline std::tuple<Tensor,Tensor> Tensor::var_mean(IntArrayRef dim, bool unbiased, bool keepdim) const {
+    return type().var_mean(*this, dim, unbiased, keepdim);
 }
 inline Tensor Tensor::view_as(const Tensor & other) const {
     return type().view_as(*this, other);
