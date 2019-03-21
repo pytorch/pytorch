@@ -3401,7 +3401,7 @@ class TestKL(TestCase):
                 ]))
 
     def test_entropy_monte_carlo(self):
-        set_rng_seed(48)  # see Note [Randomized statistical tests]
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
@@ -3409,7 +3409,7 @@ class TestKL(TestCase):
                     actual = dist.entropy()
                 except NotImplementedError:
                     continue
-                x = dist.sample(sample_shape=(60000,))
+                x = dist.sample(sample_shape=(120000,))
                 expected = -dist.log_prob(x).mean(0)
                 ignore = (expected == inf) | (expected == -inf)
                 expected[ignore] = actual[ignore]
