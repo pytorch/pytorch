@@ -4866,7 +4866,7 @@ class _TestTorchMixin(object):
         self._test_geqrf(self, lambda t: t)
 
     @staticmethod
-    def _test_trtrs(self, cast):
+    def _test_triangular_solve(self, cast):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                           (-6.05, -3.30, 5.36, -4.44, 1.08),
                           (-0.45, 2.58, -2.70, 0.27, 9.04),
@@ -4883,54 +4883,54 @@ class _TestTorchMixin(object):
         L = torch.tril(a)
 
         # solve Ux = b
-        x = torch.trtrs(b, U)[0]
+        x = torch.triangular_solve(b, U)[0]
         self.assertLessEqual(b.dist(torch.mm(U, x)), 1e-12)
-        x = torch.trtrs(b, U, True, False, False)[0]
+        x = torch.triangular_solve(b, U, True, False, False)[0]
         self.assertLessEqual(b.dist(torch.mm(U, x)), 1e-12)
 
         # solve Lx = b
-        x = torch.trtrs(b, L, False)[0]
+        x = torch.triangular_solve(b, L, False)[0]
         self.assertLessEqual(b.dist(torch.mm(L, x)), 1e-12)
-        x = torch.trtrs(b, L, False, False, False)[0]
+        x = torch.triangular_solve(b, L, False, False, False)[0]
         self.assertLessEqual(b.dist(torch.mm(L, x)), 1e-12)
 
         # solve U'x = b
-        x = torch.trtrs(b, U, True, True)[0]
+        x = torch.triangular_solve(b, U, True, True)[0]
         self.assertLessEqual(b.dist(torch.mm(U.t(), x)), 1e-12)
-        x = torch.trtrs(b, U, True, True, False)[0]
+        x = torch.triangular_solve(b, U, True, True, False)[0]
         self.assertLessEqual(b.dist(torch.mm(U.t(), x)), 1e-12)
 
         # solve U'x = b by manual transposition
-        y = torch.trtrs(b, U.t(), False, False)[0]
+        y = torch.triangular_solve(b, U.t(), False, False)[0]
         self.assertLessEqual(x.dist(y), 1e-12)
 
         # solve L'x = b
-        x = torch.trtrs(b, L, False, True)[0]
+        x = torch.triangular_solve(b, L, False, True)[0]
         self.assertLessEqual(b.dist(torch.mm(L.t(), x)), 1e-12)
-        x = torch.trtrs(b, L, False, True, False)[0]
+        x = torch.triangular_solve(b, L, False, True, False)[0]
         self.assertLessEqual(b.dist(torch.mm(L.t(), x)), 1e-12)
 
         # solve L'x = b by manual transposition
-        y = torch.trtrs(b, L.t(), True, False)[0]
+        y = torch.triangular_solve(b, L.t(), True, False)[0]
         self.assertLessEqual(x.dist(y), 1e-12)
 
         # test reuse
-        res1 = torch.trtrs(b, a)[0]
+        res1 = torch.triangular_solve(b, a)[0]
         ta = cast(torch.Tensor())
         tb = cast(torch.Tensor())
-        torch.trtrs(b, a, out=(tb, ta))
+        torch.triangular_solve(b, a, out=(tb, ta))
         self.assertEqual(res1, tb, 0)
         tb.zero_()
-        torch.trtrs(b, a, out=(tb, ta))
+        torch.triangular_solve(b, a, out=(tb, ta))
         self.assertEqual(res1, tb, 0)
 
     @skipIfNoLapack
-    def test_trtrs(self):
-        self._test_trtrs(self, lambda t: t)
+    def test_triangular_solve(self):
+        self._test_triangular_solve(self, lambda t: t)
 
     @staticmethod
-    def _test_trtrs_batched(self, cast):
-        def trtrs_test_helper(A_dims, b_dims, cast, upper, unitriangular):
+    def _test_triangular_solve_batched(self, cast):
+        def triangular_solve_test_helper(A_dims, b_dims, cast, upper, unitriangular):
             A = cast(torch.randn(*A_dims))
             A = A.triu() if upper else A.tril()
             if unitriangular:
@@ -4939,40 +4939,40 @@ class _TestTorchMixin(object):
             return A, b
 
         for upper, transpose, unitriangular in product([True, False], repeat=3):
-            # test against trtrs: one batch with all possible arguments
-            A, b = trtrs_test_helper((1, 5, 5), (1, 5, 10), cast, upper, unitriangular)
-            x_exp = torch.trtrs(b.squeeze(0), A.squeeze(0),
-                                upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
-            x = torch.trtrs(b, A,
-                            upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
+            # test against triangular_solve: one batch with all possible arguments
+            A, b = triangular_solve_test_helper((1, 5, 5), (1, 5, 10), cast, upper, unitriangular)
+            x_exp = torch.triangular_solve(b.squeeze(0), A.squeeze(0),
+                                           upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
+            x = torch.triangular_solve(b, A,
+                                       upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
             self.assertEqual(x, x_exp.unsqueeze(0))
 
-            # test against trtrs in a loop: four batches with all possible arguments
-            A, b = trtrs_test_helper((4, 5, 5), (4, 5, 10), cast, upper, unitriangular)
+            # test against triangular_solve in a loop: four batches with all possible arguments
+            A, b = triangular_solve_test_helper((4, 5, 5), (4, 5, 10), cast, upper, unitriangular)
             x_exp_list = []
             for i in range(4):
-                x_exp = torch.trtrs(b[i], A[i],
-                                    upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
+                x_exp = torch.triangular_solve(b[i], A[i],
+                                               upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
                 x_exp_list.append(x_exp)
             x_exp = torch.stack(x_exp_list)
 
-            x = torch.trtrs(b, A, upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
+            x = torch.triangular_solve(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
             self.assertEqual(x, x_exp)
 
             # basic correctness test
-            A, b = trtrs_test_helper((3, 5, 5), (3, 5, 10), cast, upper, unitriangular)
-            x = torch.trtrs(b, A, upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
+            A, b = triangular_solve_test_helper((3, 5, 5), (3, 5, 10), cast, upper, unitriangular)
+            x = torch.triangular_solve(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
             if transpose:
                 self.assertLessEqual(b.dist(torch.matmul(A.transpose(-1, -2), x)), 2e-12)
             else:
                 self.assertLessEqual(b.dist(torch.matmul(A, x)), 2e-12)
 
     @skipIfNoLapack
-    def test_trtrs_batched(self):
-        _TestTorchMixin._test_trtrs_batched(self, lambda t: t)
+    def test_triangular_solve_batched(self):
+        _TestTorchMixin._test_triangular_solve_batched(self, lambda t: t)
 
     @staticmethod
-    def _test_trtrs_batched_dims(self, cast):
+    def _test_triangular_solve_batched_dims(self, cast):
         if not TEST_SCIPY:
             return
 
@@ -5000,7 +5000,7 @@ class _TestTorchMixin(object):
             x_exp = torch.Tensor(scipy_tri_solve_batched(A.numpy(), b.numpy(),
                                                          upper, transpose, unitriangular))
             A, b = cast(A), cast(b)
-            x = torch.trtrs(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
+            x = torch.triangular_solve(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
 
             self.assertEqual(x, cast(x_exp))
 
@@ -5012,8 +5012,8 @@ class _TestTorchMixin(object):
             run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5), cast, upper, transpose, unitriangular)  # broadcasting A & b
 
     @skipIfNoLapack
-    def test_trtrs_batched_dims(self):
-        self._test_trtrs_batched_dims(self, lambda t: t)
+    def test_triangular_solve_batched_dims(self):
+        self._test_triangular_solve_batched_dims(self, lambda t: t)
 
     @skipIfNoLapack
     def test_gels(self):

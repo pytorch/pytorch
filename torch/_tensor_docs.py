@@ -2601,6 +2601,13 @@ transpose_(dim0, dim1) -> Tensor
 In-place version of :meth:`~Tensor.transpose`
 """)
 
+add_docstr_all('triangular_solve',
+               r"""
+triangular_solve(A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
+
+See :func:`torch.triangular_solve`
+""")
+
 add_docstr_all('tril',
                r"""
 tril(k=0) -> Tensor
@@ -2627,13 +2634,6 @@ add_docstr_all('triu_',
 triu_(k=0) -> Tensor
 
 In-place version of :meth:`~Tensor.triu`
-""")
-
-add_docstr_all('trtrs',
-               r"""
-trtrs(A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
-
-See :func:`torch.trtrs`
 """)
 
 add_docstr_all('trunc',
