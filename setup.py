@@ -231,6 +231,7 @@ cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
 version = '1.1.0a0'
+sha = 'Unknown'
 if os.getenv('PYTORCH_BUILD_VERSION'):
     assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
     build_number = int(os.getenv('PYTORCH_BUILD_NUMBER'))
@@ -257,6 +258,7 @@ def build_deps():
         # this would claim to be a release build when it's not.)
         f.write("debug = {}\n".format(repr(DEBUG)))
         f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
+        f.write("git_version = {}\n".format(sha))
 
     def check_file(f):
         if not os.path.exists(f):
