@@ -2383,6 +2383,26 @@ class _TestTorchMixin(object):
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
 
+    def test_cross_validation(self):
+        self.assertRaisesRegex(
+            RuntimeError, "inconsistent tensors dimensions",
+            lambda: torch.cross(torch.rand(100, 3), torch.rand(100, 3, 10)))
+        self.assertRaisesRegex(
+            RuntimeError, "inconsistent tensors sizes",
+            lambda: torch.cross(torch.rand(5, 3), torch.rand(3, 5)))
+        self.assertRaisesRegex(
+            RuntimeError, "no dimension of size 3 in input",
+            lambda: torch.cross(torch.rand(5, 4), torch.rand(5, 4)))
+        self.assertRaisesRegex(
+            RuntimeError, "dimension 0 does not have size 3",
+            lambda: torch.cross(torch.rand(5, 4, 3), torch.rand(5, 4, 3), dim = 0))
+        self.assertRaisesRegex(
+            RuntimeError, "dimension -1 does not have size 3",
+            lambda: torch.cross(torch.rand(5, 3, 4), torch.rand(5, 3, 4), dim = -1))
+        self.assertRaisesRegex(
+            IndexError, "Dimension out of range",
+            lambda: torch.cross(torch.rand(5, 3, 4), torch.rand(5, 3, 4), dim = -5))
+
     def test_zeros(self):
         res1 = torch.zeros(100, 100)
         res2 = torch.Tensor()

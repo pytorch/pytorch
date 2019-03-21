@@ -29,9 +29,7 @@ Tensor & cross_out(Tensor & out, const Tensor & input, const Tensor & other, con
   AT_CHECK(!out.is_cuda() || out.get_device() == input.get_device(), "device of out (", input.get_device(), ") must match device of input (", other.get_device(), ")");
   AT_CHECK(!input.is_cuda() || input.get_device() == other.get_device(), "device of input (", input.get_device(), ") must match device of other (", other.get_device(), ")");
   AT_CHECK(input.dim() == other.dim(), "inconsistent tensors dimensions input: ", input.dim(), " other: ", other.dim());
-  for(int64_t i = 0; i < input.dim(); i++) {
-    AT_CHECK(input.size(i) == other.size(i), "inconsistent tensors sizes at dim=", i, " input: ", input.size(i), " other: ", other.size(i));
-  }
+  AT_CHECK(input.sizes() == other.sizes(), "inconsistent tensors sizes input: ", input.sizes(), " other: ", other.sizes());
 
   int64_t dim = -1;
   if(!dimension.has_value()) {
@@ -44,8 +42,8 @@ Tensor & cross_out(Tensor & out, const Tensor & input, const Tensor & other, con
     AT_CHECK(dim >= 0, "no dimension of size 3 in input");
   } else {
     dim = maybe_wrap_dim(dimension.value(), input.dim());
+    AT_CHECK(input.size(dim) == 3, "dimension ", dimension.value(), " does not have size 3");
   }
-  AT_CHECK(input.size(dim) == 3, "dimension ", dim, " does not have size 3");
 
   cross_stub(device1, out, input, other, dim);
   return out;
