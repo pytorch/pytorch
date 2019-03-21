@@ -248,14 +248,6 @@ class Tensor(torch._C._TensorBase):
         else:
             return self.flip(0)
 
-    def argmax(self, dim=None, keepdim=False):
-        r"""See :func:`torch.argmax`"""
-        return torch.argmax(self, dim, keepdim)
-
-    def argmin(self, dim=None, keepdim=False):
-        r"""See :func:`torch.argmin`"""
-        return torch.argmin(self, dim, keepdim)
-
     def norm(self, p="fro", dim=None, keepdim=False, dtype=None):
         r"""See :func:`torch.norm`"""
         return torch.norm(self, p, dim, keepdim, dtype=dtype)

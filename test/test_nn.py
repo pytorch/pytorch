@@ -5964,6 +5964,12 @@ class TestNN(NNTestCase):
         input2 = torch.randn(input_size, requires_grad=True)
         self.assertEqual(F.cosine_similarity(input1, input2, dim=1).size(), expected_size)
 
+        # Check numerical precision, issue #18057
+        vv1 = torch.tensor(list([float(i) for i in range(84)])).unsqueeze(0)
+        vv2 = torch.tensor(list([float(i) for i in range(84)])).unsqueeze(0)
+        out = F.cosine_similarity(vv1, vv2)
+        self.assertLessEqual(out, 1.0)
+
     def test_grid_sample_error_checking(self):
         input = torch.empty(1, 1, 2, 2)
         grid = torch.empty(1, 1, 1, 2)

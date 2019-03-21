@@ -1487,6 +1487,13 @@ max(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
 See :func:`torch.max`
 """)
 
+add_docstr_all('argmax',
+               r"""
+argmax(dim=None, keepdim=False) -> LongTensor
+
+See :func:`torch.argmax`
+""")
+
 add_docstr_all('mean',
                r"""
 mean(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
@@ -1506,6 +1513,13 @@ add_docstr_all('min',
 min(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
 
 See :func:`torch.min`
+""")
+
+add_docstr_all('argmin',
+               r"""
+argmin(dim=None, keepdim=False) -> LongTensor
+
+See :func:`torch.argmin`
 """)
 
 add_docstr_all('mm',
