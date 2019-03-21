@@ -1166,7 +1166,11 @@ if _enabled:
                         return
                 if isinstance(value, Attribute):
                     the_type = torch.jit.annotations.ann_to_type(value.type)
-                    self._register_attribute(attr, the_type, value.value)
+                    try:
+                        self._register_attribute(attr, the_type, value.value)
+                    except RuntimeError:
+                        raise RuntimeError("Could not register attribute '{}' of type '{}' for a value of type '{}'"
+                                           .format(attr, value.type, type(value.value)))
                     return
                 return super(ScriptModule, self).__setattr__(attr, value)
 
