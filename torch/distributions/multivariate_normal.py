@@ -32,7 +32,7 @@ def _batch_mahalanobis(bL, bx):
     bx_batch_shape = bx.shape[:-1]
 
     # Assume that bL.shape = (i, 1, n, n), bx.shape = (..., i, j, n),
-    # we are going to make bx have shape (..., 1, j,  i, 1, n) to apply _batch_trtrs_lower
+    # we are going to make bx have shape (..., 1, j,  i, 1, n) to apply batched tri.solve
     bx_batch_dims = len(bx_batch_shape)
     bL_batch_dims = bL.dim() - 2
     outer_batch_dims = bx_batch_dims - bL_batch_dims
@@ -54,7 +54,7 @@ def _batch_mahalanobis(bL, bx):
     flat_L = bL.reshape(-1, n, n)  # shape = b x n x n
     flat_x = bx.reshape(-1, flat_L.size(0), n)  # shape = c x b x n
     flat_x_swap = flat_x.permute(1, 2, 0)  # shape = b x n x c
-    M_swap = torch.trtrs(flat_x_swap, flat_L, upper=False)[0].pow(2).sum(-2)  # shape = b x c
+    M_swap = torch.triangular_solve(flat_x_swap, flat_L, upper=False)[0].pow(2).sum(-2)  # shape = b x c
     M = M_swap.t()  # shape = c x b
 
     # Now we revert the above reshape and permute operators.
