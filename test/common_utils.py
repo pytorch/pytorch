@@ -595,7 +595,14 @@ class TestCase(expecttest.TestCase):
         except IOError as e:
             if e.errno != errno.ENOENT:
                 raise
-            return updateOutput("Setting example output")
+            if expecttest.ACCEPT:
+                return updateOutput("Setting example output")
+            else:
+                msg = ("I got this output for {}{}:\n\n{}\n\n"
+                       "No expect file exists; to accept the current output, run:\n"
+                       "python {} {} --accept").format(munged_id, subname_output, s, __main__.__file__, munged_id)
+                print(msg)
+                return
 
         # a hack for JIT tests
         if IS_WINDOWS:
@@ -603,7 +610,20 @@ class TestCase(expecttest.TestCase):
             s = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', s)
 
         if expected != s:
-            return updateOutput("Updating example output")
+            if expecttest.ACCEPT:
+                return updateOutput("Updating example output")
+            else:
+                try:
+                    if hasattr(self, "assertMultiLineEqual"):
+                        # Python 2.7 only
+                        # NB: Python considers lhs "old" and rhs "new".
+                        self.assertMultiLineEqual(expected, s)
+                    else:
+                        self.assertEqual(s, expected)
+                except AssertionError as error:
+                    print("Example expect file for {}{} does not match current output. To update run"
+                          "with --accept.".format(munged_id, subname_output))
+                    print(error.__str__())
 
     def assertExpected(self, s, subname=None):
         r"""
