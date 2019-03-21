@@ -172,6 +172,52 @@ void testFusion() {
   testConcat(2);
 }
 
+void testRegisterFusionCachesKernel(std::ostream& out = std::cout) {
+  // Build up a fake graph with a FusionGroup
+  auto createGraphWithNames = [](std::string cname, std::string dname) {
+    auto graph = std::make_shared<Graph>();
+    at::ScalarType s = at::ScalarType::Float;
+    auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+    auto a = SymbolicVariable::asNewInput(*graph, type);
+    auto b = SymbolicVariable::asNewInput(*graph, type);
+    auto c = a * b;
+    auto d = c * a;
+    c.value()->setUniqueName(cname);
+    d.value()->setUniqueName(dname);
+    graph->registerOutput(d.value());
+    torch::jit::overrideCanFuseOnCPU(true);
+    FuseGraph(graph);
+    torch::jit::overrideCanFuseOnCPU(false);
+    return graph;
+  };
+
+  auto getFusionGroup = [](const std::shared_ptr<Graph>& graph) {
+    const auto& nodes = graph->nodes();
+    auto maybe_fusion_group =
+        std::find_if(nodes.begin(), nodes.end(), [](const Node* node) {
+          return node->kind() == prim::FusionGroup;
+        });
+    AT_CHECK(
+        maybe_fusion_group != nodes.end(),
+        "testRegisterFusionCachesKernel: could not create FusionGroup");
+    return *maybe_fusion_group;
+  };
+
+  // Create two alpha-equivalent fusion groups
+  auto graph1 = createGraphWithNames("c1", "d1");
+  auto fg1 = getFusionGroup(graph1);
+
+  auto graph2 = createGraphWithNames("c2", "d2");
+  auto fg2 = getFusionGroup(graph2);
+
+  // Register both with the fusion compiler.
+  auto expected_key = registerFusion(fg1);
+  auto second_key = registerFusion(fg2);
+
+  // Because the graphs are alpha-equivalent, they should return the same key
+  // and therefore share a KernelSpec to share kernels for specializations
+  ASSERT_EQ(second_key, expected_key);
+}
 } // namespace
 } // namespace jit
 } // namespace torch
