@@ -142,9 +142,4 @@ inline PyObject* wrap(at::TensorList tl) {
   return r.release();
 }
 
-// inline PyObject* wrap(Quantizer* quantizer) {
-//   // TODO: pybind for quantizer
-//   return THPUtils_packInt64(reinterpret_cast<intptr_t>(quantizer));
-// }
-
 }}} // namespace torch::autograd::utils
