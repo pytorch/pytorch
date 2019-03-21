@@ -27,7 +27,7 @@ void warnProducerTerminatedBeforeSharedTensorsReleased() {
 
 struct CudaIPCGlobalEntities {
   std::mutex ref_counters_mutex_;
-  int64_t sync_events_used_ = 0;
+  std::atomic<int64_t> sync_events_used_;
   std::map<std::string, std::shared_ptr<CudaIPCRefCountersFile>>
       ref_counters_files_;
   std::shared_ptr<CudaIPCRefCountersFile> next_available_ref_counters_file_;
@@ -134,7 +134,7 @@ CudaIPCSentData::CudaIPCSentData(
   //  [i.record() for i in a]
   //  ```
   //
-  if (cuda_ipc_global_entities.sync_events_used_ < CUDA_IPC_MAXIMUM_EVENTS_TO_USE) {
+  if (cuda_ipc_global_entities.sync_events_used_.load() < CUDA_IPC_MAXIMUM_EVENTS_TO_USE) {
     // TODO: More efficient would be to create event inside of main thread (at
     // the moment of the queue.put). The reason this is more efficient is
     // because the main thread may have queued extra work on the stream, which
