@@ -2367,8 +2367,8 @@ class _TestTorchMixin(object):
         self._test_reduce_integer_upcast(lambda x, **kwargs: torch.cumprod(x, 0, **kwargs))
 
     def test_cross(self):
-        x = torch.rand(100, 3)
-        y = torch.rand(100, 3)
+        x = torch.rand(100, 3, 100)
+        y = torch.rand(100, 3, 100)
         res1 = torch.cross(x, y)
         res2 = torch.Tensor()
         torch.cross(x, y, out=res2)

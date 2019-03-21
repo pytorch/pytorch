@@ -10,9 +10,6 @@ DEFINE_DISPATCH(cross_stub);
 
 Tensor cross(const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension) {
   Tensor out = at::empty_like(input);
-  if (input.numel() == 0) {
-    return out;
-  }
   native::cross_out(out, input, other, dimension);
   return out;
 }
@@ -20,9 +17,6 @@ Tensor cross(const Tensor & input, const Tensor & other, const c10::optional<int
 Tensor & cross_out(Tensor & out, const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension) {
   if (out.sizes() != input.sizes()) {
     out.resize_as_(input);
-  }
-  if (input.numel() == 0) {
-    return out;
   }
   auto device_res = input.type().device_type();
   AT_CHECK(device_res == kCPU || device_res == kCUDA, "cross only supports CPU and CUDA devices, out got: ", device_res);
@@ -49,16 +43,11 @@ Tensor & cross_out(Tensor & out, const Tensor & input, const Tensor & other, con
     }
     AT_CHECK(dim >= 0, "no dimension of size 3 in input");
   } else {
-    dim = dimension.value();
-    if(dim < 0) {
-      dim += input.dim();
-    }
+    dim = maybe_wrap_dim(dimension.value(), input.dim());
   }
-
-  AT_CHECK(dim >= 0 && dim < input.dim(), "dimension ", dim, " out of range");
   AT_CHECK(input.size(dim) == 3, "dimension ", dim, " does not have size 3");
 
-  cross_stub(device1, out, input.contiguous(), other.contiguous(), dim);
+  cross_stub(device1, out, input, other, dim);
   return out;
 }
 
