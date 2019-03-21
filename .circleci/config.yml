@@ -173,16 +173,11 @@ setup_ci_environment: &setup_ci_environment
       moreutils \
       docker-ce=18.06.2~ce~3-0~ubuntu \
       nvidia-docker2=2.0.3+docker18.06.2-1 \
-      expect-dev \
-      python3-pip \
-      python3-dev
+      expect-dev
 
     sudo pkill -SIGHUP dockerd
 
-    # Upgrade SSL module to avoid old SSL warnings
-    sudo pip3 -q install --upgrade setuptools pip
-    sudo pip3 -q install --upgrade pyOpenSSL ndg-httpsclient pyasn1
-    sudo pip3 -q install awscli==1.16.35
+    sudo pip -q install awscli==1.16.35
 
     if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
       wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-410.79.run'
@@ -265,7 +260,9 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         DOCKER_IMAGE_BASE_NAME=$(basename "${DOCKER_IMAGE}")
         export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_OSSCI_LINUX_BUILD_S3_BUCKET_V1}
         export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_OSSCI_LINUX_BUILD_S3_BUCKET_V1}
+        set +e
         retcode=$(aws s3 ls s3://ossci-linux-build/pytorch/base/${DOCKER_IMAGE_BASE_NAME}.tar)
+        set -e
         if [ -z "$retcode" ]; then
           docker save -o "${DOCKER_IMAGE_BASE_NAME}.tar" "${DOCKER_IMAGE}"
           aws s3 cp "${DOCKER_IMAGE_BASE_NAME}.tar" "s3://ossci-linux-build/pytorch/base/${DOCKER_IMAGE_BASE_NAME}.tar" --acl public-read
@@ -374,7 +371,9 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         DOCKER_IMAGE_BASE_NAME=$(basename "${DOCKER_IMAGE}")
         export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_OSSCI_LINUX_BUILD_S3_BUCKET_V1}
         export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_OSSCI_LINUX_BUILD_S3_BUCKET_V1}
+        set +e
         retcode=$(aws s3 ls s3://ossci-linux-build/caffe2/base/${DOCKER_IMAGE_BASE_NAME}.tar)
+        set -e
         if [ -z "$retcode" ]; then
           docker save -o "${DOCKER_IMAGE_BASE_NAME}.tar" "${DOCKER_IMAGE}"
           aws s3 cp "${DOCKER_IMAGE_BASE_NAME}.tar" "s3://ossci-linux-build/caffe2/base/${DOCKER_IMAGE_BASE_NAME}.tar" --acl public-read
