@@ -320,12 +320,13 @@ constexpr int CAFFE_CUDA_NUM_THREADS_2D_DIMX = 16;
 constexpr int CAFFE_CUDA_NUM_THREADS_2D_DIMY = 16;
 
 // The maximum number of blocks to use in the default kernel call. We set it to
-// 4096 which would work for compute capability 2.x (where 65536 is the limit).
-// This number is very carelessly chosen. Ideally, one would like to look at
-// the hardware at runtime, and pick the number of blocks that makes most
-// sense for the specific runtime environment. This is a todo item.
-// 1D grid
-constexpr int CAFFE_MAXIMUM_NUM_BLOCKS = 4096;
+// 8192, which would work for compute capability 2.x (where 65536 is the limit)
+// and above, and allows for achieving maximum occupancy of 64 warps per SM on
+// Volta architecture (since 80 SMs x 64 = 5120 < 8192). Further tuning of block
+// count and thread count can be done depending on the operator and input size
+// to yield additional benefits in some cases. Operator developers have the
+// option to specify these manually when launching kernels.
+constexpr int CAFFE_MAXIMUM_NUM_BLOCKS = 8192;
 // 2D grid
 constexpr int CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMX = 128;
 constexpr int CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMY = 128;
