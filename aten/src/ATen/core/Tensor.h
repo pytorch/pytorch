@@ -344,10 +344,8 @@ class CAFFE2_API Tensor {
   Tensor all(int64_t dim, bool keepdim=false) const;
   bool allclose(const Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const;
   Tensor any(int64_t dim, bool keepdim=false) const;
-  Tensor argmax(int64_t dim, bool keepdim=false) const;
-  Tensor argmax() const;
-  Tensor argmin(int64_t dim, bool keepdim=false) const;
-  Tensor argmin() const;
+  Tensor argmax(c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false) const;
+  Tensor argmin(c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false) const;
   Tensor as_strided(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset=c10::nullopt) const;
   Tensor & as_strided_(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset=c10::nullopt);
   Tensor asin() const;
@@ -406,7 +404,6 @@ class CAFFE2_API Tensor {
   Tensor floor() const;
   Tensor & floor_();
   Tensor ger(const Tensor & vec2) const;
-  std::tuple<Tensor,Tensor> gesv(const Tensor & A) const;
   Tensor fft(int64_t signal_ndim, bool normalized=false) const;
   Tensor ifft(int64_t signal_ndim, bool normalized=false) const;
   Tensor rfft(int64_t signal_ndim, bool normalized=false, bool onesided=true) const;
@@ -696,6 +693,7 @@ class CAFFE2_API Tensor {
   std::tuple<Tensor,Tensor,Tensor> svd(bool some=true, bool compute_uv=true) const;
   Tensor cholesky(bool upper=false) const;
   Tensor cholesky_solve(const Tensor & input2, bool upper=false) const;
+  std::tuple<Tensor,Tensor> solve(const Tensor & A) const;
   Tensor potri(bool upper=true) const;
   std::tuple<Tensor,Tensor> pstrf(bool upper=true, Scalar tol=-1) const;
   std::tuple<Tensor,Tensor> qr() const;

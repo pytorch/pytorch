@@ -18,6 +18,7 @@ extern "C" {
 #include "caffe2/utils/math/broadcast.h"
 #include "caffe2/utils/math/elementwise.h"
 #include "caffe2/utils/math/reduce.h"
+#include "caffe2/utils/math/transpose.h"
 #include "caffe2/utils/math/utils.h"
 
 namespace caffe2 {
@@ -163,16 +164,6 @@ ColwiseMax(const int N, const int D, const T* x, T* y, Context* context);
 template <typename T, class Context>
 CAFFE2_API void
 Maximum(const int N, const float alpha, const T* x, T* y, Context* context);
-
-// Transpose tensor X with dims by axes and write the result to tensor Y.
-template <typename T, class Context>
-CAFFE2_API void Transpose(
-    const int ndim,
-    const int* dims,
-    const int* axes,
-    const T* X,
-    T* Y,
-    Context* context);
 
 // Decaf gemm provides a simpler interface to the gemm functions, with the
 // limitation that the data has to be contiguous in memory.
@@ -497,23 +488,6 @@ CAFFE2_API void CopyMatrix(
 template <typename T, class Context>
 CAFFE2_API void CopyVector(const int N, const T* A, T* B, Context* context);
 
-template <typename T, class Context>
-CAFFE2_API void NCHW2NHWC(
-    const int N,
-    const int C,
-    const int HxW,
-    const T* X,
-    T* Y,
-    Context* context);
-
-template <typename T, class Context>
-CAFFE2_API void NHWC2NCHW(
-    const int N,
-    const int C,
-    const int HxW,
-    const T* X,
-    T* Y,
-    Context* context);
 
 } // namespace math
 } // namespace caffe2

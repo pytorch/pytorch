@@ -248,14 +248,6 @@ class Tensor(torch._C._TensorBase):
         else:
             return self.flip(0)
 
-    def argmax(self, dim=None, keepdim=False):
-        r"""See :func:`torch.argmax`"""
-        return torch.argmax(self, dim, keepdim)
-
-    def argmin(self, dim=None, keepdim=False):
-        r"""See :func:`torch.argmin`"""
-        return torch.argmin(self, dim, keepdim)
-
     def norm(self, p="fro", dim=None, keepdim=False, dtype=None):
         r"""See :func:`torch.norm`"""
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
@@ -280,6 +272,12 @@ class Tensor(torch._C._TensorBase):
                       "and note that the :attr:`upper` argument in torch.cholesky_solve defaults "
                       "to ``False``.", stacklevel=2)
         return super(Tensor, self).cholesky_solve(u, upper=upper)
+
+    def gesv(self, A):
+        r"""See :func:`torch.solve`"""
+        warnings.warn("torch.gesv is deprecated in favour of torch.solve and will be removed in the "
+                      "next release. Please use torch.solve instead.", stacklevel=2)
+        return super(Tensor, self).solve(A)
 
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):

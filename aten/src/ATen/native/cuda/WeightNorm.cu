@@ -45,7 +45,9 @@ __device__ __forceinline__ void reduce_block_into_lanes
     __syncthreads();
   }
 
+#ifndef __HIP_PLATFORM_HCC__
   #pragma unroll
+#endif
   for(int i = (blockSize >> 1); i >= 64; i >>= 1)
   {
     if(tid < i)
@@ -62,7 +64,9 @@ __device__ __forceinline__ void reduce_block_into_lanes
       final = val;
     // __SYNCWARP();
 
+#ifndef __HIP_PLATFORM_HCC__
     #pragma unroll
+#endif
     for(int i = 16; i >= lanes; i >>= 1)
       final = reduceOp(final, WARP_SHFL_DOWN(final, i));
 
