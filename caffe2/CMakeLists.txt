@@ -573,7 +573,7 @@ if (NOT BUILD_ATEN_MOBILE)
 
 
   if (NOT NO_API)
-    target_include_directories(caffe2 PUBLIC
+    target_include_directories(caffe2 PRIVATE
       ${TORCH_SRC_DIR}/csrc/api
       ${TORCH_SRC_DIR}/csrc/api/include)
   endif()
@@ -589,7 +589,7 @@ if (NOT BUILD_ATEN_MOBILE)
       set(TORCH_CUDA_LIBRARIES
 	${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
 	${CUDA_LIBRARIES})
-      target_include_directories(caffe2 PUBLIC "${NVTOOLEXT_HOME}/include")
+      target_include_directories(caffe2 PRIVATE "${NVTOOLEXT_HOME}/include")
     elseif(APPLE)
       set(TORCH_CUDA_LIBRARIES
 	${CUDA_TOOLKIT_ROOT_DIR}/lib/libcudart.dylib
@@ -622,12 +622,12 @@ if (NOT BUILD_ATEN_MOBILE)
     ${CMAKE_CURRENT_BINARY_DIR}/../aten/src
     ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
     ${CMAKE_BINARY_DIR}/aten/src)
-  target_include_directories(caffe2 PUBLIC ${ATen_CPU_INCLUDE})
+  target_include_directories(caffe2 PRIVATE ${ATen_CPU_INCLUDE})
 
-  target_include_directories(caffe2 PUBLIC
+  target_include_directories(caffe2 PRIVATE
     ${TORCH_SRC_DIR}/csrc)
 
-  target_include_directories(caffe2 PUBLIC
+  target_include_directories(caffe2 PRIVATE
     ${TORCH_ROOT}/third_party/miniz-2.0.8)
 
 
