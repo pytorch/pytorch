@@ -89,7 +89,7 @@ template<class scalar_t>
 void magmaTriangularSolve(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     scalar_t* dA, magma_int_t ldda, scalar_t* dB, magma_int_t lddb) {
-  AT_ERROR("trtrs only takes float or double Tensors");
+  AT_ERROR("triangular_solve only takes float or double Tensors");
 }
 
 template<class scalar_t>
@@ -97,7 +97,7 @@ void magmaTriangularSolveBatched(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     scalar_t** dA_array, magma_int_t ldda, scalar_t** dB_array, magma_int_t lddb, magma_int_t batchsize,
     const MAGMAQueue& magma_queue) {
-  AT_ERROR("trtrs only takes float or double Tensors");
+  AT_ERROR("triangular_solve only takes float or double Tensors");
 }
 
 template<>

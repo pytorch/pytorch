@@ -2575,14 +2575,6 @@ class TestCuda(TestCase):
     def test_triangular_solve_batched_dims(self):
         _TestTorchMixin._test_triangular_solve_batched_dims(self, lambda t: t.cuda())
 
-    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_trtrs_batched(self):
-        _TestTorchMixin._test_trtrs_batched(self, lambda t: t.cuda())
-
-    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_trtrs_batched_dims(self):
-        _TestTorchMixin._test_trtrs_batched_dims(self, lambda t: t.cuda())
-
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_get_set_rng_state_all(self):
         states = torch.cuda.get_rng_state_all()
