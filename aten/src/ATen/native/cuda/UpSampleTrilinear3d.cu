@@ -41,9 +41,5 @@ Tensor upsample_trilinear3d_backward_cuda(
         grad_output, output_size, input_size, align_corners);
 }
 
-namespace {
-
-} // namespace
-
 } // native
 } // at

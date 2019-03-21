@@ -6,10 +6,10 @@ void THNN_(SpatialUpSamplingBicubic_updateOutput)(
     THNNState* state,
     THTensor* input,
     THTensor* output,
-    int output_height,
-    int output_width,
+    int outputHeight,
+    int outputWidth,
     bool align_corners) {
-  THError('This function is deprecated, please use it from ATen.');
+  AT_ERROR("This function is deprecated, please use it from ATen.");
 }
 
 void THNN_(SpatialUpSamplingBicubic_updateGradInput)(
@@ -18,12 +18,12 @@ void THNN_(SpatialUpSamplingBicubic_updateGradInput)(
     THTensor* gradInput,
     int nbatch,
     int channels,
-    int input_height,
-    int input_width,
-    int output_height,
-    int output_width,
+    int inputHeight,
+    int inputWidth,
+    int outputHeight,
+    int outputWidth,
     bool align_corners) {
-  THError('This function is deprecated, please use it from ATen.');
+  AT_ERROR("This function is deprecated, please use it from ATen.");
 }
 
 #endif

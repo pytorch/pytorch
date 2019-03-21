@@ -37,9 +37,5 @@ Tensor upsample_nearest3d_backward_cuda(
         grad_output, output_size, input_size);
 }
 
-namespace {
-
-} // namespace
-
 } // native
 } // at

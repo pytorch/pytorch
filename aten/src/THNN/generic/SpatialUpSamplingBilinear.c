@@ -9,7 +9,7 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
     int outputHeight,
     int outputWidth,
     bool align_corners) {
-  THError('This function is deprecated, please use it from ATen.');
+  AT_ERROR("This function is deprecated, please use it from ATen.");
 }
 
 void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
@@ -23,7 +23,7 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
     int outputHeight,
     int outputWidth,
     bool align_corners) {
-  THError('This function is deprecated, please use it from ATen.');
+  AT_ERROR("This function is deprecated, please use it from ATen.");
 }
 
 #endif
