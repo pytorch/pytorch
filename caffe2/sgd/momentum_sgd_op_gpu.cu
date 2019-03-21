@@ -4,6 +4,14 @@
 
 namespace caffe2 {
 
+inline int CAFFE_GET_BLOCKS_SGD(const int N) {
+  return std::max(
+      (N + CAFFE_CUDA_NUM_THREADS - 1) / CAFFE_CUDA_NUM_THREADS,
+      // Use at least 1 block, since CUDA does not allow empty block
+      1);
+}
+
+template <bool nesterov>
 __global__ void MomentumSGDKernel(
     const int N,
     const float* g,
@@ -12,7 +20,6 @@ __global__ void MomentumSGDKernel(
     float* nm,
     const float* lr,
     const float momentum,
-    const bool nesterov,
     float* param) {
   const float LR = lr[0];
   if (!nesterov) {
@@ -20,7 +27,7 @@ __global__ void MomentumSGDKernel(
       const float adjusted_gradient =  LR * g[i] + momentum * m[i];
       nm[i] = adjusted_gradient;
       ng[i] = adjusted_gradient;
-      if (param) {
+      if (param != nullptr) {
         param[i] -= adjusted_gradient;
       }
     }
@@ -29,7 +36,7 @@ __global__ void MomentumSGDKernel(
       const float mi = m[i];
       const float mi_new = momentum * mi + LR * g[i];
       nm[i] = mi_new;
-      ng[i] = (1 + momentum) * mi_new - momentum * mi;
+      ng[i] = fmaf(momentum, mi_new - mi, mi_new);
       if (param) {
         param[i] -= ng[i];
       }
@@ -49,12 +56,19 @@ void momentum_sgd_update<CUDAContext>(
     const bool nesterov,
     float* param,
     CUDAContext* context) {
-  MomentumSGDKernel<<<
-      CAFFE_GET_BLOCKS(N),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context->cuda_stream()>>>(
-      N, g, m, ng, nm, lr, momentum, nesterov, param);
+  if (nesterov) {
+    MomentumSGDKernel<true>
+        <<<CAFFE_GET_BLOCKS_SGD(N),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context->cuda_stream()>>>(N, g, m, ng, nm, lr, momentum, param);
+  } else {
+    MomentumSGDKernel<false>
+        <<<CAFFE_GET_BLOCKS_SGD(N),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context->cuda_stream()>>>(N, g, m, ng, nm, lr, momentum, param);
+  }
 }
 
 
