@@ -889,22 +889,19 @@ RegisterOperators reg(
          return 0;
        };
      }),
-     Operator("prim::BumpCounter(str key, float val) -> ()", [](const Node* node) {
+     Operator("prim::BumpCounter(str key, int val) -> ()", [](const Node* node) {
        return [](Stack& stack) {
-         auto val = pop(stack).toDouble();
+         auto val = pop(stack).toInt();
          auto name = pop(stack).toString();
          torch::jit::logging::getLogger()->addStatValue(*name, val);
          return 0;
        };
      }),
-     Operator("prim::GetCounters() -> Dict(str, float)", [](const Node* node) {
+     Operator("prim::GetCounters(str name) -> int", [](const Node* node) {
        return [](Stack& stack) {
-         auto counters = torch::jit::logging::getLogger()->getCounters();
-         auto counters_generic_dict = c10::ivalue::UnorderedMap();
-         for (auto &kv : counters) {
-           counters_generic_dict[kv.first] = kv.second;
-         }
-         push(stack, std::move(counters_generic_dict));
+         auto name = pop(stack).toString();
+         auto val = torch::jit::logging::getLogger()->getCounterValue(*name);
+         push(stack, val);
          return 0;
        };
      }),

@@ -14008,42 +14008,41 @@ class TestLogging(JitTestCase):
             def forward(self, x):
                 for i in range(x.size(0)):
                     x += 1.0
-                    torch.jit._logging.add_stat_value('foo', 1.0)
+                    torch.jit._logging.add_stat_value('foo', 1)
 
                 if bool(x.sum() > 0.0):
-                    torch.jit._logging.add_stat_value('positive', 1.0)
+                    torch.jit._logging.add_stat_value('positive', 1)
                 else:
-                    torch.jit._logging.add_stat_value('negative', 1.0)
+                    torch.jit._logging.add_stat_value('negative', 1)
                 return x
 
         logger = torch.jit._logging.LockingLogger()
         old_logger = torch.jit._logging.set_logger(logger)
+        try:
 
-        mtl = ModuleThatLogs()
-        for i in range(5):
-            mtl(torch.rand(3, 4, 5))
+            mtl = ModuleThatLogs()
+            for i in range(5):
+                mtl(torch.rand(3, 4, 5))
 
-        counters = torch.jit._logging.get_counters()
-
-        self.assertEqual(counters['foo'], 15.0)
-        self.assertEqual(counters['positive'], 5.0)
-
-        torch.jit._logging.set_logger(old_logger)
+            self.assertEqual(torch.jit._logging.get_counter_val('foo'), 15)
+            self.assertEqual(torch.jit._logging.get_counter_val('positive'), 5)
+        finally:
+            torch.jit._logging.set_logger(old_logger)
 
     def test_trace_numeric_counter(self):
         def foo(x):
-            torch.jit._logging.add_stat_value('foo', 1.0)
+            torch.jit._logging.add_stat_value('foo', 1)
             return x + 1.0
 
         traced = torch.jit.trace(foo, torch.rand(3, 4))
         logger = torch.jit._logging.LockingLogger()
         old_logger = torch.jit._logging.set_logger(logger)
-        traced(torch.rand(3, 4))
+        try:
+            traced(torch.rand(3, 4))
 
-        counters = torch.jit._logging.get_counters()
-        self.assertEqual(counters['foo'], 1.0)
-
-        torch.jit._logging.set_logger(old_logger)
+            self.assertEqual(torch.jit._logging.get_counter_val('foo'), 1)
+        finally:
+            torch.jit._logging.set_logger(old_logger)
 
     def test_time_measurement_counter(self):
         class ModuleThatTimes(torch.jit.ScriptModule):
@@ -14057,11 +14056,11 @@ class TestLogging(JitTestCase):
         mtm = ModuleThatTimes()
         logger = torch.jit._logging.LockingLogger()
         old_logger = torch.jit._logging.set_logger(logger)
-        mtm(torch.rand(3, 4))
-        counters = torch.jit._logging.get_counters()
-        self.assertTrue('mytimer' in counters)
-
-        torch.jit._logging.set_logger(old_logger)
+        try:
+            mtm(torch.rand(3, 4))
+            self.assertGreater(torch.jit._logging.get_counter_val('mytimer'), 0)
+        finally:
+            torch.jit._logging.set_logger(old_logger)
 
     def test_time_measurement_counter_script(self):
         class ModuleThatTimes(torch.jit.ScriptModule):
@@ -14076,28 +14075,28 @@ class TestLogging(JitTestCase):
         mtm = ModuleThatTimes()
         logger = torch.jit._logging.LockingLogger()
         old_logger = torch.jit._logging.set_logger(logger)
-        mtm(torch.rand(3, 4))
-        counters = torch.jit._logging.get_counters()
-        self.assertTrue('mytimer' in counters)
-
-        torch.jit._logging.set_logger(old_logger)
+        try:
+            mtm(torch.rand(3, 4))
+            self.assertGreater(torch.jit._logging.get_counter_val('mytimer'), 0)
+        finally:
+            torch.jit._logging.set_logger(old_logger)
 
     def test_counter_aggregation(self):
         def foo(x):
             for i in range(3):
-                torch.jit._logging.add_stat_value('foo', 1.0)
+                torch.jit._logging.add_stat_value('foo', 1)
             return x + 1.0
 
         traced = torch.jit.trace(foo, torch.rand(3, 4))
         logger = torch.jit._logging.LockingLogger()
         logger.set_aggregation_type('foo', torch.jit._logging.AggregationType.AVG)
         old_logger = torch.jit._logging.set_logger(logger)
-        traced(torch.rand(3, 4))
+        try:
+            traced(torch.rand(3, 4))
 
-        counters = torch.jit._logging.get_counters()
-        self.assertEqual(counters['foo'], 1.0)
-
-        torch.jit._logging.set_logger(old_logger)
+            self.assertEqual(torch.jit._logging.get_counter_val('foo'), 1)
+        finally:
+            torch.jit._logging.set_logger(old_logger)
 
 
 for test in autograd_method_tests():

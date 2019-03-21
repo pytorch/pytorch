@@ -552,7 +552,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<BuiltinFunction>(prim::BumpCounter, c10::nullopt);
   } else if (
       obj.ptr() ==
-      py::module::import("torch.jit._logging").attr("get_counters").ptr()) {
+      py::module::import("torch.jit._logging").attr("get_counter_val").ptr()) {
     return std::make_shared<BuiltinFunction>(prim::GetCounters, c10::nullopt);
   } else if (
       obj.ptr() ==
@@ -1104,7 +1104,7 @@ void initJitScriptBindings(PyObject* module) {
         return f.run(g);
       });
 
-  m.def("_logging_add_stat_value", [](std::string name, float val) {
+  m.def("_logging_add_stat_value", [](std::string name, int64_t val) {
     // TODO: dynamic val (and maybe name?). Had too much trouble with pybind
     // and decided to just leave it like this.
     if (jit::tracer::isTracing()) {
@@ -1118,8 +1118,8 @@ void initJitScriptBindings(PyObject* module) {
     }
     logging::getLogger()->addStatValue(name, val);
   });
-  m.def("_logging_get_counters", []() {
-    return logging::getLogger()->getCounters();
+  m.def("_logging_get_counter_val", [](const std::string& name) {
+    return logging::getLogger()->getCounterValue(name);
   });
   m.def("_logging_set_logger", [](logging::LoggerBase* logger) {
     return logging::setLogger(logger);
