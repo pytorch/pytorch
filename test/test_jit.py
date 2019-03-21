@@ -10372,9 +10372,6 @@ a")
             # type: (float) -> int
             return hash(x)
 
-        # float hash is different, just run it
-        float_hash(233.30)
-
         @torch.jit.script
         def str_hash(x):
             # type: (str) -> int
