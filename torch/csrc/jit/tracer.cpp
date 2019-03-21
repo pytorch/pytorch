@@ -204,25 +204,28 @@ inline TypePtr typeForTraceInput(const IValue& input) {
         keyType = thisKeyType;
         valueType = thisValueType;
       } else {
-        bool isWellTyped = *keyType == *thisKeyType;
-        if (isWellTyped && !thisValueType->isSubtypeOf(valueType)) {
-          if (valueType->isSubtypeOf(thisValueType)) {
-            valueType = thisValueType;
-          } else if (valueType->isSubtypeOf(TensorType::get()) &&
-                     thisValueType->isSubtypeOf(TensorType::get())) {
-            valueType = TensorType::get();
-          } else {
-            isWellTyped = false;
-          }
-        }
-        if (!isWellTyped) {
+        bool keyIsWellTyped = *keyType == *thisKeyType;
+        auto unify = unifyTypes(thisValueType, valueType);
+
+        if (!keyIsWellTyped || !unify) {
           AT_ERROR(
               "Dictionary inputs to traced functions must have consistent "
               "key and value types");
         }
+        valueType = *unify;
       }
     }
     return DictType::create(keyType, valueType);
+  } else if (input.isTuple()) {
+    std::vector<TypePtr> types;
+
+    auto elements = input.toTuple()->elements();
+    types.reserve(elements.size());
+
+    for (auto element : elements) {
+      types.push_back(typeForTraceInput(element));
+    }
+    return TupleType::create(std::move(types));
   } else {
     return incompleteInferTypeFrom(input);
   }

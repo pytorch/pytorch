@@ -1313,6 +1313,21 @@ class TestJit(JitTestCase):
                   'float': torch.ones((2,2), dtype=torch.float32)}
         self.checkTrace(test, (inputs,), inputs_require_grads=False)
 
+    def test_input_tuple_of_dicts(self):
+        def test(t):
+            d = t[0]
+            return d['x']['y']
+        inputs= {'x': {'y': torch.rand(2,3)}}
+        self.checkTrace(test, ((inputs, inputs),), allow_unused=True)
+
+    def test_input_dict_of_dicts(self):
+        def test(d):
+            return d['x']['y']
+        nested_input = {'y': torch.rand(2,3)}
+        unified_nested = {'y': torch.rand(3,2)}
+        inputs = {'x': nested_input, 'force_unify': unified_nested}
+        self.checkTrace(test, (inputs,), allow_unused=True)
+
     # TODO: adapt to a GraphExecutor test
     @unittest.skip("Need to instrument GraphExecutors a bit more")
     def test_flags(self):
