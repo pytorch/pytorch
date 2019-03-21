@@ -469,10 +469,9 @@ if (BUILD_SHARED_LIBS)
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
 
-    # FIXME KARL - figure out what to do with thnvrtc
-#  install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
-#      FILE Caffe2Targets.cmake
-#      COMPONENT dev)
+  install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
+      FILE Caffe2Targets.cmake
+      COMPONENT dev)
 else()
   message(WARNING
       "Generated cmake files are only available when building "
