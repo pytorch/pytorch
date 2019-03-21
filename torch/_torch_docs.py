@@ -2724,6 +2724,55 @@ Example::
     tensor([ 0.8722, -0.7416,  0.2653, -0.1584])
 """)
 
+add_docstr(torch.argmax,
+           r"""
+.. function:: argmax(input) -> LongTensor
+
+Returns the indices of all elements in the :attr:`input` tensor.
+
+This is the second value returned by :meth:`torch.max`. See its
+documentation for the exact semantics of this method.
+
+Args:
+    input (Tensor): the input tensor
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 1.3398,  0.2663, -0.2686,  0.2450],
+            [-0.7401, -0.8805, -0.3402, -1.1936],
+            [ 0.4907, -1.3948, -1.0691, -0.3132],
+            [-1.6092,  0.5419, -0.2993,  0.3195]])
+    >>> torch.argmax(a)
+    tensor(0)
+
+.. function:: argmax(input, dim, keepdim=False) -> LongTensor
+
+Returns the indices of the maximum values of a tensor across a dimension.
+
+This is the second value returned by :meth:`torch.max`. See its
+documentation for the exact semantics of this method.
+
+Args:
+    input (Tensor): the input tensor
+    dim (int): the dimension to reduce. If ``None``, the argmax of the
+        flattened input is returned.
+    keepdim (bool): whether the output tensors have :attr:`dim`
+        retained or not. Ignored if ``dim=None``.
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 1.3398,  0.2663, -0.2686,  0.2450],
+            [-0.7401, -0.8805, -0.3402, -1.1936],
+            [ 0.4907, -1.3948, -1.0691, -0.3132],
+            [-1.6092,  0.5419, -0.2993,  0.3195]])
+    >>> torch.argmax(a, dim=1)
+    tensor([ 0,  2,  0,  1])
+""")
+
 add_docstr(torch.mean,
            r"""
 .. function:: mean(input) -> Tensor
@@ -2897,6 +2946,55 @@ Example::
     tensor([-0.1369,  0.1555,  0.4019, -0.1929])
     >>> torch.min(a, b)
     tensor([-0.1369, -1.1740, -0.6460, -0.1929])
+""")
+
+add_docstr(torch.argmin,
+           r"""
+.. function:: argmin(input) -> LongTensor
+
+Returns the indices of the minimum value of all elements in the :attr:`input` tensor.
+
+This is the second value returned by :meth:`torch.min`. See its
+documentation for the exact semantics of this method.
+
+Args:
+    input (Tensor): the input tensor
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 0.1139,  0.2254, -0.1381,  0.3687],
+            [ 1.0100, -1.1975, -0.0102, -0.4732],
+            [-0.9240,  0.1207, -0.7506, -1.0213],
+            [ 1.7809, -1.2960,  0.9384,  0.1438]])
+    >>> torch.argmin(a)
+    tensor(13)
+
+.. function:: argmin(input, dim, keepdim=False, out=None) -> LongTensor
+
+Returns the indices of the minimum values of a tensor across a dimension.
+
+This is the second value returned by :meth:`torch.min`. See its
+documentation for the exact semantics of this method.
+
+Args:
+    input (Tensor): the input tensor
+    dim (int): the dimension to reduce. If ``None``, the argmin of the
+        flattened input is returned.
+    keepdim (bool): whether the output tensors have :attr:`dim`
+        retained or not. Ignored if ``dim=None``.
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 0.1139,  0.2254, -0.1381,  0.3687],
+            [ 1.0100, -1.1975, -0.0102, -0.4732],
+            [-0.9240,  0.1207, -0.7506, -1.0213],
+            [ 1.7809, -1.2960,  0.9384,  0.1438]])
+    >>> torch.argmin(a, dim=1)
+    tensor([ 2,  1,  3,  1])
 """)
 
 add_docstr(torch.mm,
