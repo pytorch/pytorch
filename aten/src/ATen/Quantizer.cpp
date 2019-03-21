@@ -56,7 +56,7 @@ inline QTensor new_qtensor(
     nelements,
     allocator->allocate(nelements * dtype.itemsize()),
     allocator,
-    /*resizeable=*/true);
+    /*resizable=*/true);
   auto quantizer = make_per_layer_affine_quantizer(scale, zero_point);
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage_impl, at::CPUTensorId(), false, quantizer);

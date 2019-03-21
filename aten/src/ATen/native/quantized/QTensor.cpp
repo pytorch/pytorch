@@ -44,5 +44,9 @@ Scalar q_zero_point(const QTensor& self) {
   return Scalar(static_cast<PerLayerAffineQuantizer*>(quantizer)->zero_point());
 }
 
+Quantizer* quantizer(const QTensor& self) {
+  return get_qtensorimpl(self)->quantizer();
+}
+
 } // namespace native
 } // namespace at

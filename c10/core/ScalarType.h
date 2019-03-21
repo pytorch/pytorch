@@ -29,7 +29,7 @@ _(at::ComplexHalf,ComplexHalf,z)        /* 8 */ \
 _(std::complex<float>,ComplexFloat,z)   /* 9 */ \
 _(std::complex<double>,ComplexDouble,z) /* 10 */ \
 _(bool,Bool,i) /* 11 */ \
-_(qint8,QInt8,i) /* 12 */
+_(c10::qint8,QInt8,i) /* 12 */
 
 // If you want to support ComplexHalf for real, replace occurrences
 // of this macro with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX.  But
@@ -46,7 +46,7 @@ _(double,Double,d) \
 _(std::complex<float>,ComplexFloat,z) \
 _(std::complex<double>,ComplexDouble,z) \
 _(bool,Bool,i)                          \
-_(qint8,QInt8,i)
+_(c10::qint8,QInt8,i)
 
 #define AT_FORALL_SCALAR_TYPES(_) \
 _(uint8_t,Byte,i)  \
@@ -57,7 +57,7 @@ _(int64_t,Long,i)  \
 _(at::Half,Half,d) \
 _(float,Float,d)   \
 _(double,Double,d) \
-_(qint8,QInt8,i)
+_(c10::qint8,QInt8,i)
 
 #define AT_FORALL_SCALAR_TYPES_EXCEPT_QINT(_) \
 _(uint8_t,Byte,i)  \
@@ -79,7 +79,7 @@ _(int,Int,i) \
 _(int64_t,Long,i) \
 _(float,Float,d) \
 _(double,Double,d) \
-_(qint8,QInt8,i)
+_(c10::qint8,QInt8,i)
 
 #define AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(_) \
 _(uint8_t,Byte,i) \

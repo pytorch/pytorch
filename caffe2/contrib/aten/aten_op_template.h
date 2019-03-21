@@ -124,7 +124,7 @@ private:
           assignToValue<ctype>(dst, at::convert<ctype,decltype(value)>(value)); \
         } break;
       AT_FORALL_SCALAR_TYPES_EXCEPT_QINT(DEFINE_CASE)
-      #undef DEFINE_CASE
+#undef DEFINE_CASE
       default:
         CAFFE_THROW("Unknown ATen Type");
     }

@@ -27,6 +27,7 @@ namespace at {
 
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
+struct Quantizer;
 
 // Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
 // has an embedded reference count. In this way, Tensor is similar to boost::intrusive_ptr.
@@ -572,6 +573,7 @@ class CAFFE2_API Tensor {
   Tensor dequantize() const;
   Scalar q_scale() const;
   Scalar q_zero_point() const;
+  Quantizer* quantizer() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;

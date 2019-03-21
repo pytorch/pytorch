@@ -42,9 +42,4 @@ const char * Tensor::toString() const {
   return type().toString();
 }
 
-// Get quantizer from QTensorImpl
-// Quantizer* Tensor::get_quantizer() const {
-//   return nullptr;
-// }
-
 } // namespace at

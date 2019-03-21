@@ -787,6 +787,9 @@ inline Scalar Tensor::q_scale() const {
 inline Scalar Tensor::q_zero_point() const {
     return type().q_zero_point(*this);
 }
+inline Quantizer* Tensor::quantizer() const {
+    return type().quantizer(*this);
+}
 inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy) const {
     return type().to(*this, options, non_blocking, copy);
 }
