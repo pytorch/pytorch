@@ -115,7 +115,7 @@ static std::unique_ptr<TensorIterator> make_reduction(
 }
 
 static std::unique_ptr<TensorIterator> make_reduction(
-    const char* name, Tensor& result1, Tensor& result2, const Tensor& self, IntArrayRef dim,
+    const char* name, Tensor& result1, Tensor& result2, const Tensor& self, optional<IntArrayRef> dim,
     bool keepdim, ScalarType dtype)
 {
   // check that result type and dtype match if provided
@@ -134,8 +134,15 @@ static std::unique_ptr<TensorIterator> make_reduction(
       " and ",
       toString(dtype),
       ".");
+
   int64_t ndim = self.dim();
-  auto mask = make_dim_mask(dim, ndim);
+  DimMask mask;
+  if (dim.has_value()) {
+    mask = make_dim_mask(dim, ndim);
+  } else {
+    mask = DimMask();
+    mask.set();
+  }
   allocate_reduction_result(result1, self, mask, keepdim, dtype);
   auto viewed_result1 = review_reduce_result(result1, ndim, mask, keepdim);
 
@@ -687,14 +694,38 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
            "std and var only support CPU AND CUDA backend, got: ", toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "std and var only support floating-point dtypes");
   ScalarType dtype = get_dtype(result, self, {}, true);
-  Tensor result2 = at::empty({0}, self.options());
-  auto iter = make_reduction2("std or var", result, result2, self, dim, keepdim, dtype);
+  auto iter = make_reduction("std or var", result, self, dim, keepdim, dtype);
   if (iter->numel() == 0) {
     result.fill_(NAN);
   } else {
     std_var_stub(iter->device_type(), *iter, unbiased, take_sqrt);
   }
   return result;
+}
+
+static std::tuple<Tensor&,Tensor&> std_var_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, optional<IntArrayRef> dim, bool unbiased, bool keepdim, bool take_sqrt) {
+  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+           "std and var only support CPU AND CUDA backend, got: ", toString(self.type().backend()));
+  AT_CHECK(at::isFloatingType(self.type().scalarType()), "std and var only support floating-point dtypes");
+  ScalarType dtype
+  if (result1.defined()) {
+    AT_CHECK(!result2.defined() || result1.type().scalarType() == result2.type().scalarType(),
+        "provided by result1 dtype must match dtype of result2. Got ",
+        toString(result1.type().scalarType()),
+             " and ",
+             toString(result2.type().scalarType()),
+             ".");
+    dtype = get_dtype(result1, self, {}, true);
+  } else {
+    dtype = get_dtype(result2, self, {}, true);
+  }
+  auto iter = make_reduction("std or var", result1, result2, self, dim, keepdim, dtype);
+  if (iter->numel() == 0) {
+    result.fill_(NAN);
+  } else {
+    std_var_stub(iter->device_type(), *iter, unbiased, take_sqrt);
+  }
+  return std::tuple<Tensor&, Tensor&>(result1, result2);
 }
 
 Tensor var(const Tensor& self, bool unbiased) {
