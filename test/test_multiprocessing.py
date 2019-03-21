@@ -56,7 +56,7 @@ def send_tensor(queue, event, tp):
     event.wait()
 
 
-def send_and_delete_tensors(queue, event, tp, count, size = 5):
+def send_and_delete_tensors(queue, event, tp, count, size=5):
     for i in range(count):
         t = torch.full([size], i).type(tp)
         queue.put(t)
@@ -64,8 +64,8 @@ def send_and_delete_tensors(queue, event, tp, count, size = 5):
     event.wait()
 
 
-def receive_and_send_sum(queue, out_queue, event, tp, count, size = 5):
-    s = torch.full([size],0).type(tp)
+def receive_and_send_sum(queue, out_queue, event, tp, count, size=5):
+    s = torch.full([size], 0).type(tp)
     for i in range(count):
         t = queue.get()
         s += t
@@ -377,7 +377,6 @@ class TestMultiprocessing(TestCase):
         e.set()
         p.join(1)
 
-
     @slowTest
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
@@ -397,7 +396,7 @@ class TestMultiprocessing(TestCase):
         p2.start()
         p3.start()
         result = q3.get()
-        self.assertEqual(result[0], int(count*(count-1)/2))
+        self.assertEqual(result[0], int(count * (count - 1) / 2))
         del result
         e1.set()
         e2.set()
