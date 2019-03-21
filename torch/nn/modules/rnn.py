@@ -138,8 +138,7 @@ class RNNBase(Module):
         return self._flat_weights
 
     def _get_flat_weights_names(self):
-        all_weights = [[weight for weight in weights] for weights in self._all_weights]
-        return [p for layerparams in all_weights for p in layerparams]
+        return [weight for weights in self._all_weights for weight in weights]
 
     @weak_script_method
     def check_input(self, input, batch_sizes):
