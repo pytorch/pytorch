@@ -1693,18 +1693,29 @@ RegisterOperators reg2({
         "aten::ne(Tensor[] a, Tensor[] b) -> bool",
         listNe<Shared<TensorList>>),
     Operator("aten::ne(bool[] a, bool[] b) -> bool", listNe<Shared<BoolList>>),
-  Operator(
-      "aten::slice(str string, int start, int end=9223372036854775807, int step=1) -> str",
-      stringSlice),
-  Operator(
-      "prim::StringIndex(str string, int index) -> str",
-      [](Stack& stack) {
-        auto index = pop(stack).toInt();
-        auto string = pop(stack).toStringRef();
-        char c = string.at(index);
-        push(stack, std::string(&c, 1));
-        return 0;
-      }),
+    Operator(
+        "aten::slice(str string, int start, int end=9223372036854775807, int step=1) -> str",
+        stringSlice),
+    Operator(
+        "prim::StringIndex(str string, int index) -> str",
+        [](Stack& stack) {
+          auto index = pop(stack).toInt();
+          auto string = pop(stack).toStringRef();
+          char c = string.at(index);
+          push(stack, std::string(&c, 1));
+          return 0;
+        }),
+    Operator(
+        "aten::ord(str string) -> int",
+        [](Stack& stack) {
+          auto string = pop(stack).toStringRef();
+          AT_CHECK(
+              string.size() == 1,
+              "String for ord() must be 1 character, found",
+              string.size());
+          push(stack, int64_t(string.at(0)));
+          return 0;
+        }),
 #define CREATE_COPY_OP(other_type, c_type)                                 \
   Operator(                                                                \
       "aten::copy_(Tensor(a!) self, " #other_type " other) -> Tensor(a!)", \

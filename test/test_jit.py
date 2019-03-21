@@ -10449,6 +10449,14 @@ a")
 
         self.checkScript(fn, ("abcde",))
 
+    def test_ord(self):
+        def fn(x):
+            # type: (str) -> int
+            return ord(x)
+
+        self.checkScript(fn, ("h"))
+        self.checkScript(fn, ("y"))
+
     def test_string_slicing(self):
         def fn1(x):
             # type: (str) -> str
