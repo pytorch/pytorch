@@ -488,6 +488,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
             optim.Rprop(None, lr=1e-2, etas=(1.0, 0.5))
 
+    @skipIfRocm
     def test_lbfgs(self):
         def add_param_constructor(weight, bias):
             """Test the `add_param_group` method"""
