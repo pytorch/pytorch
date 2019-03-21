@@ -1268,12 +1268,14 @@ class ShapePropagator {
         node->output()->setType(type->withRequiresGrad(false));
         return true;
       }
-    } else if (node->matches("aten::batch_norm_stats(Tensor input, float eps) -> (Tensor, Tensor)")) {
+    } else if (
+        node->matches(
+            "aten::batch_norm_stats(Tensor input, float eps) -> (Tensor, Tensor)")) {
       if (auto type = input_type(0)) {
         if (type->scalarType() == at::kHalf) {
           type = type->toScalarType(at::kFloat);
         }
-	type = type->withDim(1);
+        type = type->withDim(1);
         node->outputs()[0]->setType(type);
         node->outputs()[1]->setType(type);
         return true;
