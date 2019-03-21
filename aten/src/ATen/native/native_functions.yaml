@@ -4000,6 +4000,9 @@
 - func: median(Tensor self) -> Tensor
   matches_jit_signature: True
   variants: method, function
+  dispatch:
+    CPU: median_cpu
+    CUDA: median_cuda
 
 - func: sort(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   matches_jit_signature: True
