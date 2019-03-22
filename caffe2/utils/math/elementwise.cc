@@ -243,7 +243,7 @@ DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(double, Div, /)
 #define CAFFE2_SPECIALIZED_SCALE(TAlpha, TData)                               \
   template <>                                                                 \
   C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
-      const int N,                                                            \
+      const std::int64_t N,                                                   \
       const TAlpha alpha,                                                     \
       const TData* X,                                                         \
       TData* Y,                                                               \
@@ -257,7 +257,7 @@ DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(double, Div, /)
   }                                                                           \
   template <>                                                                 \
   C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
-      const int N,                                                            \
+      const std::int64_t N,                                                   \
       const TAlpha* alpha,                                                    \
       const TData* X,                                                         \
       TData* Y,                                                               \
@@ -281,7 +281,7 @@ CAFFE2_SPECIALIZED_SCALE(float, double)
 #define DELEGATE_SCALE(TAlpha, TData, MKLFunc1, MKLFunc2)            \
   template <>                                                        \
   C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                  \
-      const int N,                                                   \
+      const std::int64_t N,                                          \
       const TAlpha alpha,                                            \
       const TData* X,                                                \
       TData* Y,                                                      \
@@ -294,7 +294,7 @@ CAFFE2_SPECIALIZED_SCALE(float, double)
   }                                                                  \
   template <>                                                        \
   C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                  \
-      const int N,                                                   \
+      const std::int64_t N,                                          \
       const TAlpha* alpha,                                           \
       const TData* X,                                                \
       TData* Y,                                                      \
@@ -315,7 +315,7 @@ DELEGATE_SCALE(float, double, cblas_dscal, cblas_daxpby)
 #define DELEGATE_SCALE(TAlpha, TData, BLASFunc)                               \
   template <>                                                                 \
   C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
-      const int N,                                                            \
+      const std::int64_t N,                                                   \
       const TAlpha alpha,                                                     \
       const TData* X,                                                         \
       TData* Y,                                                               \
@@ -329,7 +329,7 @@ DELEGATE_SCALE(float, double, cblas_dscal, cblas_daxpby)
   }                                                                           \
   template <>                                                                 \
   C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
-      const int N,                                                            \
+      const std::int64_t N,                                                   \
       const TAlpha* alpha,                                                    \
       const TData* X,                                                         \
       TData* Y,                                                               \
@@ -418,7 +418,7 @@ CAFFE2_SPECIALIZED_NEG(double)
 #define CAFFE2_SPECIALIZED_SCALE(TAlpha, TData)                               \
   template <>                                                                 \
   C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
-      const int N,                                                            \
+      const std::int64_t N,                                                   \
       const TAlpha alpha,                                                     \
       const TData* X,                                                         \
       TData* Y,                                                               \
@@ -432,7 +432,7 @@ CAFFE2_SPECIALIZED_NEG(double)
   }                                                                           \
   template <>                                                                 \
   C10_EXPORT void Scale<TAlpha, TData, CPUContext>(                           \
-      const int N,                                                            \
+      const std::int64_t N,                                                   \
       const TAlpha* alpha,                                                    \
       const TData* X,                                                         \
       TData* Y,                                                               \
