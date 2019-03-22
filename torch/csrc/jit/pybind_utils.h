@@ -223,11 +223,27 @@ inline IValue toIValue(
       }
       return toIValue(obj, type->expect<OptionalType>()->getElementType());
     }
+    case TypeKind::ClassType: {
+      auto classType = type->expect<ClassType>();
+      // 1. create a bare ivalue
+      const auto name = Symbol::user(classType->name());
+      const size_t numAttrs = classType->numAttributes();
+      auto userObj = c10::ivalue::Object::create(name, numAttrs);
+
+      // 2. copy all the contained types
+      for (size_t slot = 0; slot < numAttrs; slot++) {
+        const auto& attrType = classType->getAttribute(slot);
+        const auto& attrName = classType->getAttributeName(slot);
+
+        const auto& contained = py::getattr(obj, attrName.c_str());
+        userObj->setSlot(slot, toIValue(contained, attrType));
+      }
+      return userObj;
+    }
     case TypeKind::NumberType:
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
-    case TypeKind::ClassType:
       break;
   }
   AT_ERROR(
@@ -328,6 +344,22 @@ inline py::object toPyObject(IValue&& ivalue) {
       py_dict[toPyObject(IValue{pair.first})] = toPyObject(IValue{pair.second});
     }
     return std::move(py_dict);
+  } else if (ivalue.isObject()) {
+    const auto obj = ivalue.toObject();
+    const auto classType = ClassType::get(obj->name().toUnqualString());
+    AT_ASSERT(classType);
+    auto pyClass = py::module::import("torch.jit")
+                       .attr("_get_script_class")(obj->name().toUnqualString());
+    auto pyObj = pyClass.attr("__new__")(pyClass);
+
+
+    const auto numAttrs = classType->numAttributes();
+
+    for (size_t slot = 0; slot < numAttrs; slot++) {
+      const auto& attrName = classType->getAttributeName(slot);
+      py::setattr(pyObj, attrName.c_str(), toPyObject(obj->getSlot(slot)));
+    }
+    return pyObj;
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }

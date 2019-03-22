@@ -526,15 +526,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
           << "Attempted to inline a Module with parameters. "
              "Stateful modules to be inlined must be submodules of the callee.";
     }
-    const auto script_class_type =
-        py::module::import("torch.jit").attr("ScriptClass");
-    const bool is_class_type = py::isinstance(obj, script_class_type);
-    if (is_class_type) {
-      const auto classname = py::cast<std::string>(py::getattr(obj, "_name"));
-      auto classType = ClassType::get(classname);
-      AT_ASSERT(classType);
-      return std::make_shared<ClassValue>(std::move(classType));
-    }
     return std::make_shared<ModuleValue>(mod);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
