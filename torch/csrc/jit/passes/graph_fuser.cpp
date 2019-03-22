@@ -167,9 +167,10 @@ struct GraphFuser {
   Block* block_;
   std::unique_ptr<AliasDb> aliasDb_;
   std::shared_ptr<Graph> graph_;
+  bool fuse_diff; // whether we fuse nodes with differentiable inputs
 
-  GraphFuser(Block* block, std::shared_ptr<Graph> graph)
-      : block_(block), graph_(std::move(graph)) {}
+  GraphFuser(Block* block, std::shared_ptr<Graph> graph, bool fuse_diff_)
+      : block_(block), graph_(std::move(graph)), fuse_diff(fuse_diff_) {}
 
   value_list tensorInputs(Node* node) {
     return filter(node->inputs(), [](Value* v) {
@@ -184,6 +185,14 @@ struct GraphFuser {
     });
   }
 
+  bool inputsAllowFusion(Node* node) {
+    return fuse_diff ||
+        !std::any_of(
+               node->inputs().begin(), node->inputs().end(), [](Value* n) {
+                 return n->type()->requires_grad();
+               });
+  }
+
   bool isFusable(Node* node) {
     return isFusableMap(node) || isFusableBatchNorm(node);
   }
@@ -191,7 +200,7 @@ struct GraphFuser {
   bool isFusableMap(Node* node) {
     // We don't want to bother with cross-block node movements, as they
     // are not necessarily correct.
-    if (node->owningBlock() != block_)
+    if (node->owningBlock() != block_ || !inputsAllowFusion(node))
       return false;
     if (node->kind() == aten::_grad_sum_to_size) {
       // We only fuse _grad_sum_to_size if
@@ -1187,8 +1196,12 @@ struct GraphFuser {
     }
 
     for (Node* node : block_->nodes()) {
+      if (node->kind() == prim::DifferentiableGraph) {
+        auto subgraph = node->g(attr::Subgraph);
+        GraphFuser(subgraph->block(), subgraph, /*fuse_diff=*/true).run();
+      }
       for (Block* sub_block : node->blocks()) {
-        GraphFuser(sub_block, graph_).run();
+        GraphFuser(sub_block, graph_, fuse_diff).run();
       }
     }
   }
@@ -1327,7 +1340,7 @@ bool trackSingleGradSumToSizeToOutputs(
 
 void FuseGraph(std::shared_ptr<Graph>& graph) {
   if (canFuseOnCPU() || canFuseOnGPU()) {
-    GraphFuser(graph->block(), graph).run();
+    GraphFuser(graph->block(), graph, /*fuse_diff=*/false).run();
     // After FuseGraph some common subexpressions may come back
     EliminateCommonSubexpression(graph);
     // We might have emitted a fair amount of useless shape propagating code, so

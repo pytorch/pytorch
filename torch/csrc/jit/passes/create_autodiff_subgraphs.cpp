@@ -65,7 +65,16 @@ class SubgraphSlicer {
         // redundant prim::Constants). Run CSE to clean them up.
         EliminateCommonSubexpression(curNode->g(attr::Subgraph));
 
-        if (!inlineIfTooSmall(curNode)) {
+        // If no inputs requrie grad, we don't need the DifferentiableGraph
+        if (!std::any_of(
+                curNode->inputs().begin(),
+                curNode->inputs().end(),
+                [](const Value* input) {
+                  return input->type()->isSubtypeOf(TensorType::get()) &&
+                      input->type()->requires_grad();
+                })) {
+          SubgraphUtils::unmergeSubgraph(curNode);
+        } else if (!inlineIfTooSmall(curNode)) {
           diffGraphs.push_back(curNode);
         }
       }
@@ -165,7 +174,7 @@ class SubgraphSlicer {
   std::shared_ptr<Graph> graph_;
   size_t minSubgraphSize_;
 };
-} // anonymous namespace
+} // namespace
 
 std::vector<Node*> CreateAutodiffSubgraphs(
     const std::shared_ptr<Graph>& graph,

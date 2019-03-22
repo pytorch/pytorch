@@ -485,13 +485,11 @@ struct GraphExecutorImpl {
       for (Node* dnode : diff_nodes) {
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
         Gradient gradient = differentiate(diff_graph);
-        runNondiffOptimization(gradient.f);
         packGradient(gradient, dnode);
       }
       InlineAutodiffSubgraphs(opt_graph, autodiffSubgraphInlineThreshold);
-    } else {
-      runNondiffOptimization(opt_graph);
     }
+    FuseGraph(opt_graph);
     // Make sure there are no leftovers from any passes.
     EliminateDeadCode(opt_graph);
     return ExecutionPlan(opt_graph);
@@ -516,10 +514,6 @@ struct GraphExecutorImpl {
     BatchMM(graph);
 
     CheckInplace(graph);
-  }
-
-  void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
-    FuseGraph(graph);
   }
 
   static bool needsGradient(const std::shared_ptr<const Graph>& graph) {
