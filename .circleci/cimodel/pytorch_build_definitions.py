@@ -105,7 +105,7 @@ class Conf(object):
 
     def gen_workflow_yaml_item(self, phase):
 
-        if self.is_xla or phase == "test":
+        if phase == "test":
             val = OrderedDict()
 
             # TODO When merging the caffe2 and pytorch jobs, it might be convenient for a while to make a
