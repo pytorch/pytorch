@@ -1078,6 +1078,11 @@ void initJitScriptBindings(PyObject* module) {
           [](testing::FileCheck& f, const std::string& str) {
             return f.run(str);
           })
+      .def(
+          "run",
+          [](testing::FileCheck& f,
+             const std::string& output,
+             const std::string& expected) { return f.run(output, expected); })
       .def("run", [](testing::FileCheck& f, const Graph& g) {
         return f.run(g);
       });

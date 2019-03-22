@@ -128,6 +128,8 @@ void assertNotFind(
 struct FileCheckImpl {
   TORCH_API explicit FileCheckImpl() = default;
 
+  TORCH_API void run(const std::string& output, const std::string& expected);
+
   TORCH_API void run(const std::string& test_file) {
     has_run = true;
     doChecks(std::make_shared<std::string>(test_file));
@@ -275,6 +277,7 @@ struct FileCheckImpl {
       }
     }
   }
+  void addCheckFromStr(const std::string& str);
 
   std::vector<Check> checks;
   std::shared_ptr<std::string> check_file;
@@ -298,6 +301,47 @@ FileCheck::~FileCheck() {
   }
   fcImpl.reset();
 };
+
+/**
+ * Given a string detect known CHECK markers in it and register the
+ * corresponding check.
+ */
+void FileCheckImpl::addCheckFromStr(const std::string& str) {
+  std::vector<std::pair<CheckType, std::string>> markers = {
+      {CHECK, "CHECK"},
+      {CHECK_NEXT, "CHECK-NEXT"},
+      {CHECK_SAME, "CHECK-SAME"},
+      {CHECK_NOT, "CHECK-NOT"},
+      {CHECK_COUNT, "CHECK-COUNT"},
+      {CHECK_DAG, "CHECK-DAG"},
+  };
+  for (auto& kv : markers) {
+    CheckType marker = kv.first;
+    std::string token = kv.second + ":";
+    std::string::size_type pos = 0;
+    if ((pos = str.find(token)) != std::string::npos) {
+      addCheck(marker, str.substr(pos + token.size(), str.size()));
+      return;
+    }
+  }
+}
+
+void FileCheckImpl::run(
+    const std::string& output,
+    const std::string& expected) {
+  std::string::size_type pos = 0;
+  std::string::size_type prev = 0;
+  while ((pos = expected.find('\n', prev)) != std::string::npos) {
+    std::string line = expected.substr(prev, pos - prev);
+    prev = pos + 1;
+    addCheckFromStr(line);
+  }
+  run(output);
+}
+
+void FileCheck::run(const std::string& output, const std::string& expected) {
+  fcImpl->run(output, expected);
+}
 
 void FileCheck::run(const std::string& test_file) {
   fcImpl->run(test_file);

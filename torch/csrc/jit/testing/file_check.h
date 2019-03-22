@@ -17,6 +17,9 @@ struct FileCheck {
   TORCH_API explicit FileCheck();
   TORCH_API ~FileCheck();
 
+  // Run FileCheck against test string with annotation parsed from `expected`.
+  TORCH_API void run(const std::string& output, const std::string& expected);
+
   // Run FileCheck against test string
   TORCH_API void run(const std::string& test_string);
 
