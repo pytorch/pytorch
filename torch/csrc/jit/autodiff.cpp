@@ -165,15 +165,11 @@ bool isDifferentiable(Node* n) {
         static_cast<bool (*)(Node*)>(isDifferentiable));
   }
 
-  // check if the node inputs' value type is scalar type, in autodiff, scalar
-  // value aren't differentiable, so user should cast the scalar to double
-  // before using it.
+  // formulas are only defined with floating point scalars,
+  // so we fallback to autograd for other cases.
   for (const Value* input : n->inputs()) {
     if (input->type() == NumberType::get()) {
-      throw std::runtime_error(
-          std::string("differentiation of ") + n->kind().toDisplayString() +
-          " is not supported, cannot pass Scalar/Number type to op during differentiation," +
-          " you need to cast it to double before passing it to the op");
+      return false;
     }
   }
 

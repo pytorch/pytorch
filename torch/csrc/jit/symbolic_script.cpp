@@ -986,13 +986,8 @@ c10::optional<GradientPair> gradientInfoForSchema(
     // 2. to make sure the input of any graph node does not contain scalar type
     //    in its argument, all scalar arg should already be passed with float
     //    value since scalar/int aren't differentiable either way.
-    for (const Argument& arg : schema.arguments()) {
-      if (arg.type() == NumberType::get()) {
-        const auto& arg_type_str = arg.type()->str();
-        schema_str.replace(
-            schema_str.find(arg_type_str), arg_type_str.length(), "float");
-      }
-    }
+    //
+    c10::ReplaceAll(schema_str, "Scalar", "float");
 
     auto sym_script_it = schema_to_graphs.find(schema_str);
 
