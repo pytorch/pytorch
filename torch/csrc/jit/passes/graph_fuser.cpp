@@ -201,6 +201,10 @@ struct GraphFuser {
       //   but this is checked later
       return isFusable(node->inputs()[0]->node());
     }
+    if( (node->inputs().size() + node->outputs().size()) >
+        fusion_kernel_args_limit ) {
+      return false;
+    }
     return node->kind() == prim::FusionGroup || isSimpleMap(node);
   }
 
@@ -209,6 +213,12 @@ struct GraphFuser {
       return false;
     if (!node->is_constant(attr::dim))
       return false;
+
+    Node* list_construct = node->namedInput(attr::tensors)->node();
+    if( (list_construct->inputs().size() + node->outputs().size()) >
+        fusion_kernel_args_limit ) {
+      return false;
+    }
     auto tensors_node = node->namedInput(attr::tensors)->node();
     if (tensors_node->kind() != prim::ListConstruct)
       return false;
@@ -470,6 +480,13 @@ struct GraphFuser {
     if (!shouldFuse) {
       return at::nullopt;
     }
+
+    if( (consumer->inputs().size() + consumer->outputs().size() +
+         producer->node()->inputs().size() + producer->node()->outputs().size()) >
+        fusion_kernel_args_limit ) {
+        return at::nullopt;
+    }
+
     if (producer->node()->kind() == aten::_grad_sum_to_size &&
         consumer->kind() == prim::FusionGroup) {
       // check that we will be able to move the _grad_sum_to_size to be fused
@@ -1066,7 +1083,11 @@ struct GraphFuser {
       auto subgraph = producer->node()->g(attr::Subgraph);
       auto* node = subgraph->outputs().at(producer->offset())->node();
       return node->kind() != prim::FusedConcat &&
-          !containsGradSumToSize(producer->node());
+          !containsGradSumToSize(producer->node()) &&
+          ((before_check->inputs().size() + before_check->outputs().size() +
+            producer->node()->inputs().size() + producer->node()->outputs().size())
+           <= fusion_kernel_args_limit);
+
     }
     return true;
   }
@@ -1108,6 +1129,9 @@ struct GraphFuser {
         }
         any_fused = true;
         auto maybe_group = tryFuse(fused_cat, input);
+        if( !maybe_group ) {
+          continue;
+        }
         AT_ASSERT(maybe_group && maybe_group == fused_cat);
         // We could have destroyed multiple inputs when performing this fusion,
         // so we have to recompute the list and iterate over it again.

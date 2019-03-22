@@ -568,12 +568,9 @@ class FooToPickle(torch.nn.Module):
 class TestJit(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_large_nbr_kernel_args(self):
-        class GRU(nn.Module):
-            ''' GRU simplified for testing
-            '''
-
+        class Recurrence(nn.Module):
             def __init__(self, input_size, seq_len):
-                super(GRU, self).__init__()
+                super(Recurrence, self).__init__()
                 self.input_size = input_size
                 self.batch_first = True
                 self.seq_len = seq_len
@@ -597,14 +594,14 @@ class TestJit(JitTestCase):
         batch_size = 2
         seq_len = 130
 
-        gru = GRU(input_size, seq_len)
+        rec = Recurrence(input_size, seq_len)
         input = torch.rand(batch_size, seq_len, input_size)
 
         torch.cuda.set_device(0)
-        gru = gru.cuda()
+        rec = rec.cuda()
         input = input.cuda()
 
-        traced_gru = torch.jit.trace(gru, (input))
+        traced_rec = torch.jit.trace(rec, (input))
 
     @unittest.skip("Requires a lot of RAM")
     def test_big(self):
