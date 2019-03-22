@@ -150,7 +150,32 @@ setup_ci_environment: &setup_ci_environment
   name: Set Up CI Environment After Checkout
   no_output_timeout: "1h"
   command: |
-    set -e
+    set -ex
+
+    # Check if we should actually run
+    echo "BUILD_ENVIRONMENT: ${BUILD_ENVIRONMENT}"
+    echo "CIRCLE_PULL_REQUEST: ${CIRCLE_PULL_REQUEST}"
+    if [[ "${BUILD_ENVIRONMENT}" == *-slow-* ]]; then
+      if ! [ -z "${CIRCLE_PULL_REQUEST}" ]; then
+        # It's a PR; test for [slow ci] tag on the TOPMOST commit
+        if !(git log --format='%B' -n 1 HEAD | grep -q -e '\[slow ci\]' -e '\[ci slow\]' -e '\[test slow\]' -e '\[slow test\]'); then
+          circleci step halt
+          exit
+        fi
+      fi
+    fi
+    if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
+      if ! [ -z "${CIRCLE_PULL_REQUEST}" ]; then
+        # It's a PR; test for [xla ci] tag on the TOPMOST commit
+        if !(git log --format='%B' -n 1 HEAD | grep -q -e '\[xla ci\]' -e '\[ci xla\]' -e '\[test xla\]' -e '\[xla test\]'); then
+          # NB: This doesn't halt everything, just this job.  So
+          # the rest of the workflow will keep going and you need
+          # to make sure you halt there too.  Blegh.
+          circleci step halt
+          exit
+        fi
+      fi
+    fi
 
     # Set up NVIDIA docker repo
     curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
@@ -3048,16 +3073,8 @@ workflows:
       - pytorch_linux_trusty_py3_6_gcc5_4_test:
           requires:
             - pytorch_linux_trusty_py3_6_gcc5_4_build
-      - pytorch_xla_linux_trusty_py3_6_gcc5_4_build:
-          filters:
-            branches:
-              only:
-                - master
+      - pytorch_xla_linux_trusty_py3_6_gcc5_4_build
       - pytorch_xla_linux_trusty_py3_6_gcc5_4_test:
-          filters:
-            branches:
-              only:
-                - master
           requires:
             - pytorch_xla_linux_trusty_py3_6_gcc5_4_build
       - pytorch_linux_trusty_py3_6_gcc7_build
@@ -3086,10 +3103,6 @@ workflows:
           requires:
             - pytorch_linux_xenial_cuda8_cudnn7_py3_build
       - pytorch_linux_xenial_cuda8_cudnn7_py3_slow_test:
-          filters:
-            branches:
-              only:
-                - master
           requires:
             - pytorch_linux_xenial_cuda8_cudnn7_py3_build
       - pytorch_short_perf_test_gpu:
