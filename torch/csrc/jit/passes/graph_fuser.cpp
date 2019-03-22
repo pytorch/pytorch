@@ -271,8 +271,11 @@ struct GraphFuser {
             for i in range(input_ndim - normalized_ndim):
                 n *= input.size(i)
             input_reshape = input.contiguous().view(1, n, -1)
-            bn_out = torch.batch_norm(input_reshape, None, None, None, None, True, 0.0, eps, cudnn_enable)
-            return bn_out.view(input.size())
+            mean, invstd = torch.batch_norm_stats(input_reshape, eps)
+            mean = mean.view(input.size()[:input_ndim - normalized_ndim])
+            print(mean.size())
+
+            return (input - mean) * invstd
       )SCRIPT";
           auto module = std::make_shared<script::Module>();
           defineMethodsInModule(
