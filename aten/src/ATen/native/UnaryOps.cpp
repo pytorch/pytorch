@@ -145,12 +145,11 @@ Tensor sigmoid(const Tensor& self) {
   Tensor result = at::empty({0}, self.options());
   return at::sigmoid_out(result, self);
 }
-Tensor& _sigmoid__cpu(Tensor& self_) {
-  Tensor self = sort_strides(self_);
+Tensor& _sigmoid__cpu(Tensor& self) {
   return at::sigmoid_out(self, self);
 }
 Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
-  auto iter = TensorIterator::binary_op(result, self, self);
+  auto iter = TensorIterator::unary_op(result, self);
   sigmoid_stub(iter->device_type(), *iter);
   return result;
 }
@@ -163,20 +162,19 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
     Tensor result = at::empty({0}, self.options());                        \
     return at::op##_out(result, self);                                     \
   }                                                                        \
-  Tensor& _##op##__cpu(Tensor& self_) {                                    \
-    Tensor self = sort_strides(self_);                                     \
+  Tensor& _##op##__cpu(Tensor& self) {                                     \
     return at::op##_out(self, self);                                       \
   }                                                                        \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) {            \
-    result.resize_(self.sizes());                                          \
     if (self.is_contiguous() && result.is_contiguous()) {                  \
+      result.resize_(self.sizes());                                        \
       AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), op##_cpu, [&]() {     \
         vml::v##op(                                                        \
             result.data<scalar_t>(), self.data<scalar_t>(), self.numel()); \
                                                                            \
       });                                                                  \
     } else {                                                               \
-      auto iter = TensorIterator::binary_op(result, self, self);           \
+      auto iter = TensorIterator::unary_op(result, self);                  \
       op##_stub(iter->device_type(), *iter);                               \
     }                                                                      \
     return result;                                                         \

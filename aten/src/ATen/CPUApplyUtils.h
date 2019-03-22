@@ -126,20 +126,6 @@ inline std::pair<int64_t, int64_t> collapse_dims(
  * reducing the number of nested loops.
  */
 
-inline Tensor sort_strides(Tensor& tensor_) {
-  IntArrayRef strides = tensor_.strides();
-  std::vector<int64_t> indices;
-  indices.reserve(tensor_.ndimension());
-  for (int64_t i = 0; i < tensor_.ndimension(); i++) {
-    indices.push_back(i);
-  }
-  std::sort(indices.begin(), indices.end(), [&strides](int64_t i1, int64_t i2) {
-    return strides[i1] > strides[i2];
-  });
-  Tensor tensor = tensor_.permute(indices);
-  return tensor;
-}
-
 template <typename T, int N>
 struct strided_tensor_iter_fixed {
  public:
