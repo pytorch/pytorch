@@ -736,17 +736,15 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         return obj
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
+    mod = ScriptModule()
     if inspect.isclass(obj):
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
-        name = obj.__name__
-        mod = ScriptClass(name)
         ast = get_jit_class_def(obj)
         _jit_script_class_compile(mod, ast, _rcb)
-        _add_script_class(obj, name)
+        _add_script_class(obj, obj.__name__)
         return obj
     else:
-        mod = ScriptModule()
         ast = get_jit_def(obj)
         _jit_script_compile(mod, ast, _rcb, get_default_args(obj))
     # Forward docstrings
@@ -991,21 +989,23 @@ class ScriptMeta(type(torch._C.ScriptModule)):
     # this has to inherit from pybind11's metaclass otherwise we get
     # issues because ScriptModule inherits from torch._C.ScriptModule,
     # a pybind11 type
-    def __init__(cls, name, bases, attrs):
+    def __init__(self, name, bases, attrs):
         # find all the script methods
-        cls._original_methods = {}
+        self._original_methods = {}
         methods = []
         for k, v in sorted(attrs.items()):
             if isinstance(v, ScriptMethodStub):
-                delattr(cls, k)
+                delattr(self, k)
                 methods.append(v)
-                cls._original_methods[v.original_method.__name__] = v.original_method
+                self._original_methods[v.original_method.__name__] = v.original_method
         # after the user's __init__ register all the script methods
         # with the module
-        original_init = getattr(cls, '__init__', lambda self: None)
-        super_constants = getattr(super(cls), '_constants_set', set())
-        cls._constants_set = set(getattr(cls, '__constants__', ())).union(super_constants)
-        cls._overloads = dict(getattr(cls, '__overloads__', {}))
+        original_init = getattr(self, '__init__', lambda self: None)
+        super_constants = getattr(super(self), '_constants_set', set())
+        self._constants_set = set(getattr(self, '__constants__', ())).union(super_constants)
+        self._overloads = dict(getattr(self, '__overloads__', {}))
+
+        cls = self
 
         @functools.wraps(original_init)
         def init_then_register(self, *args, **kwargs):
@@ -1017,8 +1017,8 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             original_init(self, *args, **kwargs)
             _create_methods_from_stubs(self, methods)
 
-        cls.__init__ = init_then_register
-        return super(ScriptMeta, cls).__init__(name, bases, attrs)
+        self.__init__ = init_then_register
+        return super(ScriptMeta, self).__init__(name, bases, attrs)
 
 
 if _enabled:
@@ -1302,19 +1302,10 @@ if _enabled:
                                      "weak script module once it has been "
                                      "created".format(attr))
 
-    class ScriptClass(ScriptModule):
-        def __init__(self, name):
-            super(ScriptClass, self).__init__()
-            self._name = name
-
 else:
     class ScriptModule(torch.nn.Module):
         def __init__(self, optimize=True):
             super(ScriptModule, self).__init__()
-
-    class ScriptClass(ScriptModule):
-        def __init__(self, name):
-            super(ScriptClass, self).__init__()
 
 
 def _get_weak_stubs(cls):
@@ -1589,10 +1580,7 @@ def annotate(the_type, the_value):
     return the_value
 
 
-class Attribute(object):
-    def __init__(self, value, the_type):
-        self.value = value
-        self.type = the_type
+Attribute = collections.namedtuple('Attribute', ['value', 'type'])
 
 
 if not torch._C._jit_init():

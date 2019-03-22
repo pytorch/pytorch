@@ -14,6 +14,7 @@
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/ComplexHooksInterface.h>
 #include <c10/util/Exception.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 
 #include <memory>
 #include <mutex>
@@ -75,6 +76,9 @@ class CAFFE2_API Context {
   }
   bool hasHIP() const {
     return detail::getHIPHooks().hasHIP();
+  }
+  bool hasXLA() const {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
@@ -200,14 +204,28 @@ static inline bool hasHIP() {
   return globalContext().hasHIP();
 }
 
+static inline bool hasXLA() {
+  return globalContext().hasXLA();
+}
+
+// Despite its name, this function returns the number of *CUDA* GPUs.
 static inline size_t getNumGPUs() {
-  if (hasCUDA()) {
+  // WARNING: DO NOT ADD LOGIC TO HANDLE OTHER DEVICE TYPES TO THIS
+  // FUNCTION.  If you are interested in interrogating the number of
+  // devices for a specific device type, add that function to the
+  // relevant library (e.g., similar to at::cuda::device_count())
+  if (hasCUDA() && hasHIP()) {
+    throw std::runtime_error(
+        "Enabling both CUDA and HIP in ATen is not supported, as HIP masquerades "
+        "to be CUDA (e.g., when you say CUDA, on a HIP build of ATen, this actually "
+        "means HIP.  Rebuild PyTorch with one or the other disabled.");
+  } else if (hasCUDA()) {
     return detail::getCUDAHooks().getNumGPUs();
-  }
-  if (hasHIP()) {
+  } else if (hasHIP()) {
     return detail::getHIPHooks().getNumGPUs();
+  } else {
+    return 0;
   }
-  return 0;
 }
 
 static inline bool hasOpenMP() {

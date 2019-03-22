@@ -401,6 +401,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: trace
    .. automethod:: transpose
    .. automethod:: transpose_
+   .. automethod:: triangular_solve
    .. automethod:: tril
    .. automethod:: tril_
    .. automethod:: triu
