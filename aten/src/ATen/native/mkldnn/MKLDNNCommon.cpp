@@ -38,7 +38,6 @@ c10::Storage new_with_itensor_storage(const ideep::tensor& it, const TensorOptio
     std::move(data_ptr), nullptr, false);
 }
 
-// Construct MKL-DNN tensor given `sizes` for allocation
 Tensor new_with_sizes_mkldnn(IntArrayRef sizes, const TensorOptions& options) {
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
@@ -48,7 +47,6 @@ Tensor new_with_sizes_mkldnn(IntArrayRef sizes, const TensorOptions& options) {
   return new_with_itensor_mkldnn(std::move(it), options);
 }
 
-// Construct MKL-DNN tensor from an initialized `ideep::tensor`
 Tensor new_with_itensor_mkldnn(ideep::tensor&& it, const TensorOptions& options) {
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
