@@ -154,6 +154,11 @@ static void upsample_nearest3d_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
     IntArrayRef output_size) {
+  AT_CHECK(
+      output_size.size() == 3,
+      "It is expected output_size equals to 3, but got size ",
+      output_size.size());
+
   int64_t output_depth = output_size[0];
   int64_t output_height = output_size[1];
   int64_t output_width = output_size[2];
@@ -208,6 +213,16 @@ static void upsample_nearest3d_backward_out_cpu_template(
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size) {
+  AT_CHECK(
+      output_size.size() == 3,
+      "It is expected output_size equals to 3, but got size ",
+      output_size.size());
+
+  AT_CHECK(
+      input_size.size() == 5,
+      "It is expected input_size equals to 5, but got size ",
+      input_size.size());
+
   int64_t output_depth = output_size[0];
   int64_t output_height = output_size[1];
   int64_t output_width = output_size[2];

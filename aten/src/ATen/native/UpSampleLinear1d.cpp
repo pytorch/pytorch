@@ -112,6 +112,11 @@ static void upsample_linear1d_out_cpu_template(
     const Tensor& input_,
     IntArrayRef output_size,
     bool align_corners) {
+  AT_CHECK(
+      output_size.size() == 1,
+      "It is expected output_size equals to 1, but got size ",
+      output_size.size());
+
   int64_t output_width = output_size[0];
 
   int64_t nbatch = input_.size(0);
@@ -154,6 +159,16 @@ static void upsample_linear1d_backward_out_cpu_template(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners) {
+  AT_CHECK(
+      output_size.size() == 1,
+      "It is expected output_size equals to 1, but got size ",
+      output_size.size());
+
+  AT_CHECK(
+      input_size.size() == 3,
+      "It is expected input_size equals to 3, but got size ",
+      input_size.size());
+
   int64_t output_width = output_size[0];
 
   int64_t nbatch = input_size[0];
