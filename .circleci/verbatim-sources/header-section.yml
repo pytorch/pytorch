@@ -156,7 +156,7 @@ setup_ci_environment: &setup_ci_environment
     if [[ "${BUILD_ENVIRONMENT}" == *-slow-* ]]; then
       if ! [ -z "$CIRCLE_PULL_REQUEST" ]; then
         # It's a PR; test for [slow ci] tag on the TOPMOST commit
-        if !(git log --format='%B' -n 1 HEAD | grep -q '\[slow ci\]'); then
+        if !(git log --format='%B' -n 1 HEAD | grep -q -e '\[slow ci\]' -e '\[ci slow\]'); then
           circleci step halt
         fi
       fi
@@ -164,7 +164,7 @@ setup_ci_environment: &setup_ci_environment
     if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
       if ! [ -z "$CIRCLE_PULL_REQUEST" ]; then
         # It's a PR; test for [xla ci] tag on the TOPMOST commit
-        if !(git log --format='%B' -n 1 HEAD | grep -q '\[xla ci\]'); then
+        if !(git log --format='%B' -n 1 HEAD | grep -q -e '\[xla ci\]' -e '\[ci xla\]'); then
           circleci step halt
         fi
       fi
