@@ -31,10 +31,10 @@ using namespace vec256;
 
 static void sigmoid_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sigmoid_cpu", [&]() {
-    binary_kernel_vec(
+    unary_kernel_vec(
         iter,
-        [=](scalar_t a, scalar_t b) -> scalar_t { return (1 / (1 + std::exp((-a)))); },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        [=](scalar_t a) -> scalar_t { return (1 / (1 + std::exp((-a)))); },
+        [=](Vec256<scalar_t> a) {
           a = Vec256<scalar_t>((scalar_t)(0)) - a;
           a = a.exp();
           a = Vec256<scalar_t>((scalar_t)(1)) + a;
@@ -104,12 +104,12 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
 
 static void rsqrt_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), rsqrt, [&] {
-    binary_kernel_vec(
+    unary_kernel_vec(
         iter,
-        [=](scalar_t a, scalar_t b) -> scalar_t {
+        [=](scalar_t a) -> scalar_t {
           return ((scalar_t)1) / std::sqrt(a);
         },
-        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a.rsqrt(); });
+        [=](Vec256<scalar_t> a) { return a.rsqrt(); });
   });
 }
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel)
@@ -117,10 +117,10 @@ REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel)
 #define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                          \
   static void op##_kernel(TensorIterator& iter) {                          \
     AT_DISPATCH_##dispatchtypes##_TYPES(iter.dtype(), #op, [&] {           \
-      binary_kernel_vec(                                                   \
+      unary_kernel_vec(                                                   \
           iter,                                                            \
-          [=](scalar_t a, scalar_t b) -> scalar_t { return std::op(a); },  \
-          [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a.op(); }); \
+          [=](scalar_t a) -> scalar_t { return std::op(a); },  \
+          [=](Vec256<scalar_t> a) { return a.op(); }); \
     });                                                                    \
   }                                                                        \
   REGISTER_DISPATCH(op##_stub, &op##_kernel)
