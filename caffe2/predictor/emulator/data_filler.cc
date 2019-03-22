@@ -96,6 +96,26 @@ DataRandomFiller::DataRandomFiller(
       }
     }
 
+    // the output shape of Slice op must match with the input shape of
+    // next op
+    if (op.type() == "Slice") {
+      for (size_t j = i + 1; j < run_net.op_size(); ++j) {
+        const auto& next_op = run_net.op(j);
+        auto found = false;
+        for (size_t k = 0; k < next_op.input_size(); ++k) {
+          if (op.output(0) == next_op.input(k)) {
+            inputs_[op.input(1)].first.FixedValue({0, 0});
+            inputs_[op.input(2)].first.FixedValue(input_dims[j][k]);
+            found = true;
+            break;
+          }
+        }
+        if (found) {
+          break;
+        }
+      }
+    }
+
     for (size_t j = 0; j < op.output_size(); ++j) {
       output_names.emplace(op.output(j));
     }
