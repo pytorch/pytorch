@@ -169,6 +169,14 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     return ss.str();
   }
 
+  void checkForAddToConstantsError(std::stringstream& ss) {
+    auto nn = py::module::import("torch.nn");
+    if (py::isinstance(self, nn.attr("ModuleList")) ||
+        py::isinstance(self, nn.attr("Sequential"))) {
+      ss << ". Did you forget to add it to __constants__? ";
+    }
+  }
+
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
       Method& m,
@@ -176,11 +184,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     const std::string type_str = typeString(self);
     std::stringstream ss;
     ss << kind() << " cannot be used as a tuple";
-    auto nn = py::module::import("torch.nn");
-    if (py::isinstance(self, nn.attr("ModuleList")) ||
-        py::isinstance(self, nn.attr("Sequential"))) {
-      ss << ". Did you forget to add it to __constants__? ";
-    }
+    checkForAddToConstantsError(ss);
     throw ErrorReport(loc) << ss.str();
   }
 
@@ -192,9 +196,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     std::stringstream ss;
     ss << "attribute lookup is not defined on " << kind();
     auto nn = py::module::import("torch.nn");
-    if (py::isinstance(self, nn.attr("Module"))) {
-      ss << ". Did you forget to add it to __constants__? ";
-    }
+    checkForAddToConstantsError(ss);
     throw ErrorReport(loc) << ss.str();
   }
 
