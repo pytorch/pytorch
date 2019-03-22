@@ -221,6 +221,5 @@ IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
 
 
-
 }
 } // namespace at
