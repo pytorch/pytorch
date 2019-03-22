@@ -513,6 +513,12 @@ class ShapePropagator {
         }
         return;
       }
+      case prim::unchecked_unwrap_optional: {
+	if (node->input()->type()->isSubtypeOf(TensorType::get())) {
+	  node->output()->setType(node->input()->type());
+	  return;
+	}
+      }
       case prim::ConstantChunk: {
         Value* tensor = node->input();
         if (auto type = tensor->type()->cast<DimensionedTensorType>()) {
@@ -529,6 +535,10 @@ class ShapePropagator {
         return;
       }
       case aten::_unwrap_optional: {
+	if (node->input()->type()->isSubtypeOf(TensorType::get())) {
+	  node->output()->setType(node->input()->type());
+	  return;
+	}
         auto input_ivalue = toIValue(node->input());
         if (input_ivalue && input_ivalue->isNone()) {
           return;
