@@ -7,6 +7,7 @@
 #endif
 
 #include <ATen/CPUGenerator.h>
+#include <ATen/AccumulateType.h>
 #include <type_traits>
 #include <limits>
 #include <cmath>
@@ -60,12 +61,33 @@ namespace at {
 template <typename T>
 struct VectorType {  };
 
-template <> struct VectorType<float> {using type = FLOAT2;};
-template <> struct VectorType<at::Half> {using type = FLOAT2;};
-template <> struct VectorType<double> {using type = DOUBLE2;};
+#if defined(__CUDACC__) || defined(__HIPCC__)
+template <> struct VectorType<half> { using type = FLOAT2; };
+#endif
+template <> struct VectorType<Half> { using type = FLOAT2; };
+template <> struct VectorType<float> { using type = FLOAT2; };
+template <> struct VectorType<double> { using type = DOUBLE2; };
 
 template <typename T>
 using vect_type = typename VectorType<T>::type;
+
+// Using DistAccumType in accumulate types for distributions.
+// Note: Ideally we'd be using ATen/AccumulateType.h but looks
+// like the there is some inconsistency in how accumulate types
+// are mapped currently, e.g. for the cpu side, float is mapped
+// to double.
+template <typename T>
+struct DistAccumType {  };
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+template <> struct DistAccumType<half> { using type = float; };
+#endif
+template <> struct DistAccumType<Half> { using type = float; };
+template <> struct DistAccumType<float> { using type = float; };
+template <> struct DistAccumType<double> { using type = double; };
+
+template <typename T>
+using dist_acctype = typename DistAccumType<T>::type;
 
 // Constants for uniform distribution
 constexpr float POW_2_32_INV = 1.0f/std::numeric_limits<uint32_t>::max();
@@ -91,26 +113,16 @@ struct uniform_real_distribution {
     b = b_in;
   }
 
-  template<typename U = T> 
-  C10_HOST inline typename std::enable_if<std::is_same<U, double>::value, double>::type
-  operator()(at::CPUGenerator* generator){
+  C10_HOST inline dist_acctype<T> operator()(at::CPUGenerator* generator){
     // See Note [Uniform Distribution Algorithm]
-    double x = generator->random64() * POW_2_64_INV;
-    if (x == 1.0) {
-      x = std::nextafter(1.0, 0.0);
+    dist_acctype<T> x;
+    if(std::is_same<T, double>::value) {
+      x = generator->random64() * POW_2_64_INV;
+    } else {
+      x = generator->random() * POW_2_32_INV;
     }
-    return (x * (b - a) + a);
-
-  }
-
-  template<typename U = T> 
-  C10_HOST inline typename std::enable_if<std::is_same<U, float>::value
-                                          || std::is_same<U, at::Half>::value, float>::type
-  operator()(at::CPUGenerator* generator){
-    // See Note [Uniform Distribution Algorithm]
-    float x = generator->random() * POW_2_32_INV;
-    if (x == 1.0f) {
-      x = std::nextafter(1.0f, 0.0f);
+    if (x == static_cast<T>(1.0)) {
+      x = std::nextafter(static_cast<T>(1.0), static_cast<T>(0.0));
     }
     return (x * (b - a) + a);
   }
@@ -234,7 +246,7 @@ struct exponential_distribution {
     if (sample == static_cast<T>(0.0)) {
       sample = std::numeric_limits<T>::min();
     }
-    return -1. / lambda * ::log(sample);
+    return static_cast<T>(-1.0) / lambda * ::log(sample);
   }
 
   private:
