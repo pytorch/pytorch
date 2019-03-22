@@ -55,6 +55,7 @@ bool isDifferentiable(Node* n) {
       "aten::mul(Tensor self, Scalar other) -> Tensor",
       "aten::div(Tensor self, Tensor other) -> Tensor",
       "aten::div(Tensor self, Scalar other) -> Tensor",
+      "aten::pow(Tensor self, Scalar exponent) -> Tensor",
       "aten::max(Tensor self, Tensor other) -> Tensor",
       "aten::min(Tensor self, Tensor other) -> Tensor",
       "aten::sigmoid(Tensor self) -> Tensor",
@@ -338,6 +339,10 @@ class GradientHelper {
     } else if (node->matches(
                    "aten::div(Tensor self, Scalar other) -> Tensor")) {
       return {grads.at(0) / inputs.at(1), nullptr};
+
+    } else if (node->matches(
+                   "aten::pow(Tensor self, Scalar exponent) -> Tensor")) {
+      return {grads.at(0) * (inputs.at(0).pow(at::Scalar(-1) + inputs.at(1)) * inputs.at(1)), nullptr};
 
     } else if (node->matches(
                    "aten::max(Tensor self, Tensor other) -> Tensor")) {

@@ -244,6 +244,9 @@ struct SymbolicVariable {
   SymbolicVariable pow(at::Scalar other) const {
     return create(t("pow"), {*this, insertConstant(other)})[0];
   }
+  SymbolicVariable pow(Value* other) const {
+    return create(t("pow"), {*this, other})[0];
+  }
   SymbolicVariable rsqrt() const {
     return create(t("rsqrt"), {*this})[0];
   }
