@@ -63,7 +63,7 @@ static inline bool is_reduction(char** data, const int64_t* strides) {
 #define UNARY_VEC_LOOP_HEADER(func_t, data) \
   UNARY_VEC_HEADER(func_t) \
   char* out_ptr = data[0]; \
-  const char* in1_ptr = data[1]; \
+  const char* in1_ptr = data[1];
 
 #define LOOP_HEADER(func_t, data, strides) \
   using traits = binary_function_traits<func_t>; \
