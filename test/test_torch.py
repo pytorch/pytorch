@@ -766,6 +766,15 @@ class _TestTorchMixin(object):
                 return inf
         self._test_math(torch.exp, exp)
 
+    @slowTest
+    def test_exp_slow(self):
+        # Test for https://github.com/pytorch/pytorch/issues/17271
+        # This is pretty slow on my Macbook but it only takes a few
+        # seconds on a beefy Xeon server
+        a = torch.exp(torch.ones(2 ** 31, dtype=torch.float32))
+        b = torch.exp(torch.ones(1, dtype=torch.float32))
+        self.assertEqual(a, b.expand(2 ** 31))
+
     def test_expm1(self):
         def expm1(x):
             try:
@@ -2892,31 +2901,6 @@ class _TestTorchMixin(object):
         self.assertIs(torch.float64, x.dtype)
         self.assertTrue(x.is_cuda)
         torch.set_default_tensor_type(saved_type)
-
-    def test_tensor_randoms_bool(self):
-        expectedShape = (1, 2)
-
-        test = torch.rand(expectedShape, dtype=torch.bool)
-        self.assertEqual(expectedShape, test.shape)
-        self.assertEqual(torch.bool, test.dtype)
-
-        test2 = torch.rand_like(test, dtype=torch.bool)
-        self.assertEqual(test.shape, test2.shape)
-        self.assertEqual(torch.bool, test2.dtype)
-
-        test = torch.rand(expectedShape, dtype=torch.bool)
-        self.assertEqual(expectedShape, test.shape)
-        self.assertEqual(torch.bool, test.dtype)
-
-        # capped & clamped random
-        test = torch.tensor([[0, 0]], dtype=torch.bool)
-        test.random_(0, 2)
-        self.assertEqual(expectedShape, test.shape)
-        self.assertEqual(torch.bool, test.dtype)
-
-        test.random_(2)
-        self.assertEqual(expectedShape, test.shape)
-        self.assertEqual(torch.bool, test.dtype)
 
     # This is a temporary test for a boolean tensors on CPU. Once the CUDA part
     # will be done, these test cases will be moved down to test_tensor_factories_empty test

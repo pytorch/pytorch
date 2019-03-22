@@ -22,7 +22,6 @@ TH_API void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *inde
 
 TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
 
-TH_API scalar_t THTensor_(powOne)(scalar_t x, scalar_t y);
 TH_API scalar_t THTensor_(minall)(THTensor *t);
 TH_API scalar_t THTensor_(maxall)(THTensor *t);
 TH_API accreal THTensor_(sumall)(THTensor *t);
