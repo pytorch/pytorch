@@ -107,10 +107,6 @@ class Conf(object):
 
         if self.is_xla or phase == "test":
             val = OrderedDict()
-            if self.is_xla or "slow" in self.parms:
-                # this makes the job run on merges rather than new PRs
-                # TODO Many of the binary build jobs on PRs could be moved to this mode as well
-                val["filters"] = {"branches": {"only": ["master"]}}
 
             # TODO When merging the caffe2 and pytorch jobs, it might be convenient for a while to make a
             #  caffe2 test job dependent on a pytorch build job. This way we could quickly dedup the repeated
