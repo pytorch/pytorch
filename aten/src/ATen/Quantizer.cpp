@@ -42,7 +42,7 @@ inline QTensorImpl* get_qtensorimpl(const QTensor& self) {
 }
 
 inline QTensor new_qtensor(
-    IntList sizes, const TensorOptions& options, float scale, int32_t zero_point) {
+    IntArrayRef sizes, const TensorOptions& options, float scale, int32_t zero_point) {
   AT_ASSERT(options.device().is_cpu());
 
   native::check_size_nonnegative(sizes);
@@ -126,7 +126,7 @@ inline qint8 QuantizeUint8(float scale, int32_t zero_point, float value) {
 QTensor PerLayerAffineQuantizer::quantize(RealTensor tensor) {
   //ChooseParams(tensor, &scale_, &zero_point_);
 
-  IntList sizes = tensor.sizes();
+  IntArrayRef sizes = tensor.sizes();
   QTensor qv = new_qtensor(sizes, tensor.options(), scale_, zero_point_);
   auto qvd = qv.data<qint8>();
   const float* svd = tensor.data<float>();

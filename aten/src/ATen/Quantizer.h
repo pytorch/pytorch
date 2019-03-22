@@ -197,6 +197,6 @@ void ChooseParams(RealTensor tensor, float* r_scale, int* r_zero_point);
 
 std::shared_ptr<Quantizer> make_per_layer_affine_quantizer(double scale, int64_t zero_point);
 QTensor new_qtensor(
-    IntList sizes, const TensorOptions& options, float scale, int32_t zero_point);
+    IntArrayRef sizes, const TensorOptions& options, float scale, int32_t zero_point);
 
 } // namespace at
