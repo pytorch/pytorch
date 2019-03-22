@@ -582,7 +582,6 @@ class TestOperators(TestCase):
                 return a, b
 
         model = MyModel()
-        print(type(model))
         A = 4
         H = 10
         W = 8
@@ -595,8 +594,6 @@ class TestOperators(TestCase):
         anchors = torch.ones(A, 4, dtype=torch.float32)
         inputs = (scores, bbox_deltas, im_info, anchors)
         self.assertONNX(model, inputs)
-        f = io.BytesIO()
-        torch.onnx.export(model, inputs, f)
 
 
 if __name__ == '__main__':
