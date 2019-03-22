@@ -9,6 +9,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/LegacyTHFunctions.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtils.h>
 
 #include <ATen/CPUApplyUtils.h>
@@ -149,6 +150,7 @@ Tensor& _sigmoid__cpu(Tensor& self) {
   return at::sigmoid_out(self, self);
 }
 Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
+  assert_no_internal_overlap(result, "sigmoid");
   auto iter = TensorIterator::unary_op(result, self);
   sigmoid_stub(iter->device_type(), *iter);
   return result;
@@ -174,6 +176,7 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
                                                                            \
       });                                                                  \
     } else {                                                               \
+      assert_no_internal_overlap(result, #op);                             \
       auto iter = TensorIterator::unary_op(result, self);                  \
       op##_stub(iter->device_type(), *iter);                               \
     }                                                                      \

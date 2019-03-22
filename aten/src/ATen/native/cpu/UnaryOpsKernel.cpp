@@ -5,7 +5,6 @@
 #include <ATen/CPUGenerator.h>
 #include <ATen/CheckGenerator.h>
 #include <ATen/Generator.h>
-#include <ATen/MemoryOverlap.h>
 
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/cpu/vec256/functional.h>
