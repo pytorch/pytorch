@@ -105,9 +105,8 @@ bool isSimpleMap(Node* node) {
   if (!simple_mappable.find(node)) {
     return false;
   }
-  // Check that all non-tensor inputs are constant
   for (Value* input : node->inputs()) {
-    if (input->type()->isSubtypeOf(TensorType::get())) {
+    if (input->type()->isSubtypeOf(TensorType::get()) || input->type()->isSubtypeOf(FloatType::get())) {
       continue;
     }
     if (input->node()->kind() != prim::Constant) {
@@ -384,8 +383,9 @@ struct GraphFuser {
           group->insertInput(tensor_insert_idx, input);
           tensor_insert_idx++;
         } else if (
-            n->kind() == aten::_grad_sum_to_size &&
-            input->type()->isSubtypeOf(ListType::ofInts())) {
+          (input->type()->isSubtypeOf(FloatType::get()) && input->node()->kind() != prim::Constant) ||
+          (n->kind() == aten::_grad_sum_to_size &&
+            input->type()->isSubtypeOf(ListType::ofInts()))) {
           auto in_group = subgraph.addInput();
           in_group->setType(input->type());
           inputs_map[input] = in_group;
