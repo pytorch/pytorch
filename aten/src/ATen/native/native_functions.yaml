@@ -3145,6 +3145,8 @@
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   matches_jit_signature: True
   variants: method
+  cpu_bool: True
+  cuda_bool: True
   device_guard: False
 
 - func: masked_fill_(Tensor(a!) self, Tensor mask, Scalar value) -> Tensor(a!)
@@ -3481,7 +3483,6 @@
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
   matches_jit_signature: True
-  cpu_bool: True
   variants: method
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)

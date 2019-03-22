@@ -236,6 +236,12 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   }
 }
 
+ptrdiff_t
+THCTensor_(numel)(THCState *state, THCTensor *t)
+{
+  return THCTensor_(nElement)(state, t);
+}
+
 #if !defined(THC_REAL_IS_BOOL) /* non bool only part */
 
 void THCTensor_(zerosLike)(THCState *state, THCTensor *r_, THCTensor *input)
@@ -250,12 +256,6 @@ void THCTensor_(onesLike)(THCState *state, THCTensor *r_, THCTensor *input)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
   THCTensor_(resizeAs)(state, r_, input);
   THCTensor_(fill)(state, r_, ScalarConvert<int, scalar_t>::to(1));
-}
-
-ptrdiff_t
-THCTensor_(numel)(THCState *state, THCTensor *t)
-{
-  return THCTensor_(nElement)(state, t);
 }
 
 void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,

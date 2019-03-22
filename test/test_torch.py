@@ -46,6 +46,11 @@ if TEST_LIBROSA:
 
 SIZE = 100
 
+devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+dtypes = [torch.bool, torch.float, torch.double, torch.half, torch.uint8,
+          torch.int8, torch.short, torch.int, torch.long]
+
+
 can_retrieve_source = True
 with warnings.catch_warnings(record=True) as warns:
     with tempfile.NamedTemporaryFile() as checkpoint:
@@ -765,6 +770,15 @@ class _TestTorchMixin(object):
             except OverflowError:
                 return inf
         self._test_math(torch.exp, exp)
+
+    @slowTest
+    def test_exp_slow(self):
+        # Test for https://github.com/pytorch/pytorch/issues/17271
+        # This is pretty slow on my Macbook but it only takes a few
+        # seconds on a beefy Xeon server
+        a = torch.exp(torch.ones(2 ** 31, dtype=torch.float32))
+        b = torch.exp(torch.ones(1, dtype=torch.float32))
+        self.assertEqual(a, b.expand(2 ** 31))
 
     def test_expm1(self):
         def expm1(x):
@@ -2893,12 +2907,61 @@ class _TestTorchMixin(object):
         self.assertTrue(x.is_cuda)
         torch.set_default_tensor_type(saved_type)
 
+    def test_unfolf_all_devices_and_dtypes_except_half(self):
+        for device in devices:
+            for dt in dtypes:
+                if dt != torch.half:
+                    x = torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device)
+                    self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
+
+    def test_copy_all_dtypes_and_devices(self):
+        from copy import copy
+        for device in devices:
+            for dt in dtypes:
+                x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
+                y = copy(x)
+
+                # copy is a shallow copy, only copies the tensor view,
+                # not the data
+                self.assertEqual(x, y)
+
+    def test_resize_all_dtypes_and_devices(self):
+        shape = (2, 2)
+        for device in devices:
+            for dt in dtypes:
+                x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
+                x.resize_(shape)
+                self.assertEqual(shape, x.shape)
+
+    def test_fill_all_dtypes_and_devices(self):
+        for device in devices:
+            for dt in dtypes:
+                x = torch.tensor((1, 1), dtype=dt, device=device)
+                x.fill_(1)
+
+                self.assertEqual(x, torch.tensor([1, 1], dtype=dt, device=device))
+                self.assertEqual(dt, x.dtype)
+
+    def test_clone_all_dtypes_and_devices(self):
+        for device in devices:
+            for dt in dtypes:
+                x = torch.tensor((1, 1), dtype=dt, device=device)
+                y = x.clone()
+                self.assertEqual(x, y)
+
+    def test_cat_all_dtypes_and_devices(self):
+        for device in devices:
+            for dt in dtypes:
+                x = torch.tensor([[1, 2], [3, 4]], dtype=dt, device=device)
+                expected1 = torch.tensor([[1, 2], [3, 4], [1, 2], [3, 4]], dtype=dt, device=device)
+                self.assertEqual(torch.cat((x, x), 0), expected1)
+
+                expected2 = torch.tensor([[1, 2, 1, 2], [3, 4, 3, 4]], dtype=dt, device=device)
+                self.assertEqual(torch.cat((x, x), 1), expected2)
+
     def test_tensor_factories_empty(self):
         # ensure we can create empty tensors from each factory function
         shapes = [(5, 0, 1), (0,), (0, 0, 1, 0, 2, 0, 0)]
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        dtypes = [torch.bool, torch.float, torch.double, torch.half, torch.uint8,
-                  torch.int8, torch.short, torch.int, torch.long]
 
         for device in devices:
             for shape in shapes:
@@ -2938,6 +3001,7 @@ class _TestTorchMixin(object):
             self.assertEqual((0,), torch.hann_window(0, device=device).shape)
             self.assertEqual((1, 1, 0), torch.tensor([[[]]], device=device).shape)
             self.assertEqual((1, 1, 0), torch.as_tensor([[[]]], device=device).shape)
+
 
     def test_new_tensor(self):
         expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
@@ -7619,10 +7683,6 @@ class _TestTorchMixin(object):
 
             # select
             self.assertEqual((0, 1, 0), torch.select(x, 2, 2).shape)
-            # unfold
-            self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
-            y = torch.randn((0, 1, 3), device=device)
-            self.assertEqual((1, 1, 3, 0), y.unfold(0, 0, 4).shape)
 
             # repeat, permute
             self.assertEqual((9, 0, 5, 6, 0), x.repeat(9, 7, 5, 2, 3).shape)
@@ -8036,6 +8096,10 @@ class _TestTorchMixin(object):
                          "Tensors with no storages should not appear to be set "
                          "to each other")
 
+        t1 = torch.tensor([True, True], dtype=torch.bool)
+        t2 = torch.tensor([0], dtype=torch.bool).set_(t1)
+        self.assertTrue(t1.is_set_to(t2))
+
     def test_tensor_set(self):
         t1 = torch.Tensor()
         t2 = torch.Tensor(3, 4, 9, 10).uniform_()
@@ -8066,6 +8130,11 @@ class _TestTorchMixin(object):
         t1.set_(source=t2.storage(), storage_offset=0, size=size, stride=stride)
         self.assertEqual(t1.size(), size)
         self.assertEqual(t1.stride(), stride)
+
+        t1 = torch.tensor([True, True], dtype=torch.bool)
+        t2 = torch.tensor([False, False], dtype=torch.bool)
+        t1.set_(t2)
+        self.assertEqual(t1.storage()._cdata, t2.storage()._cdata)
 
     def test_equal(self):
         # Contiguous, 1D
@@ -8502,16 +8571,6 @@ class _TestTorchMixin(object):
         s2 = deepcopy(s)
         self.assertEqual(torch.nn.Parameter, type(s2['weight']))
         self.assertEqual(torch.nn.Parameter, type(s2['bias']))
-
-    def test_copy(self):
-        from copy import copy
-        a = torch.randn(5, 5)
-        a_clone = a.clone()
-        b = copy(a)
-        b.fill_(1)
-        # copy is a shallow copy, only copies the tensor view,
-        # not the data
-        self.assertEqual(a, b)
 
     def test_pickle(self):
         if sys.version_info[0] == 2:
