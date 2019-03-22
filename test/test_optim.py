@@ -181,27 +181,27 @@ class TestOptim(TestCase):
 
     def _test_basic_cases(self, constructor, scheduler_constructors=None,
                           ignore_multidevice=False):
-        torch.manual_seed(0)
+        torch.manual_seed(1)
         if scheduler_constructors is None:
             scheduler_constructors = []
         self._test_state_dict(
-            torch.randn(10, 5),
-            torch.randn(10),
-            torch.randn(5),
+            torch.rand(10, 5),
+            torch.rand(10),
+            torch.rand(5),
             constructor
         )
         self._test_basic_cases_template(
-            torch.randn(10, 5),
-            torch.randn(10),
-            torch.randn(5),
+            torch.rand(10, 5),
+            torch.rand(10),
+            torch.rand(5),
             constructor,
             scheduler_constructors
         )
         # non-contiguous parameters
         self._test_basic_cases_template(
-            torch.randn(10, 5, 2)[..., 0],
-            torch.randn(10, 2)[..., 0],
-            torch.randn(5),
+            torch.rand(10, 5, 2)[..., 0],
+            torch.rand(10, 2)[..., 0],
+            torch.rand(5),
             constructor,
             scheduler_constructors
         )
@@ -209,9 +209,9 @@ class TestOptim(TestCase):
         if not torch.cuda.is_available():
             return
         self._test_basic_cases_template(
-            torch.randn(10, 5).cuda(),
-            torch.randn(10).cuda(),
-            torch.randn(5).cuda(),
+            torch.rand(10, 5).cuda(),
+            torch.rand(10).cuda(),
+            torch.rand(5).cuda(),
             constructor,
             scheduler_constructors
         )
@@ -219,9 +219,9 @@ class TestOptim(TestCase):
         if not torch.cuda.device_count() > 1 or ignore_multidevice:
             return
         self._test_basic_cases_template(
-            torch.randn(10, 5).cuda(0),
-            torch.randn(10).cuda(1),
-            torch.randn(5).cuda(0),
+            torch.rand(10, 5).cuda(0),
+            torch.rand(10).cuda(1),
+            torch.rand(5).cuda(0),
             constructor,
             scheduler_constructors
         )
