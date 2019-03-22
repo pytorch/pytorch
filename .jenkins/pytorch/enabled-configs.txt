@@ -8,6 +8,7 @@
 pytorch-linux-xenial-cuda8-cudnn7-py3-build
 pytorch-linux-xenial-cuda8-cudnn7-py3-test
 pytorch-linux-xenial-cuda8-cudnn7-py3-multigpu-test
+pytorch-linux-xenial-cuda8-cudnn7-py3-nogpu-test
 pytorch-linux-xenial-cuda9-cudnn7-py2-build
 pytorch-linux-xenial-cuda9-cudnn7-py2-test
 pytorch-linux-xenial-cuda9-cudnn7-py3-build
