@@ -150,9 +150,11 @@ setup_ci_environment: &setup_ci_environment
   name: Set Up CI Environment After Checkout
   no_output_timeout: "1h"
   command: |
-    set -e
+    set -ex
 
     # Check if we should actually run
+    echo "BUILD_ENVIRONMENT: ${BUILD_ENVIRONMENT}"
+    echo "CIRCLE_PULL_REQUEST: ${CIRCLE_PULL_REQUEST}"
     if [[ "${BUILD_ENVIRONMENT}" == *-slow-* ]]; then
       if ! [ -z "${CIRCLE_PULL_REQUEST}" ]; then
         # It's a PR; test for [slow ci] tag on the TOPMOST commit
