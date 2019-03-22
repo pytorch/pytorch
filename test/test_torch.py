@@ -8,6 +8,7 @@ import copy
 import shutil
 import torch
 import torch.cuda
+import torch.backends.cuda
 import tempfile
 import unittest
 import warnings
@@ -28,7 +29,7 @@ from common_methods_invocations import tri_tests_args, run_additional_tri_tests,
 from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfRocm, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist
+    IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest
 from multiprocessing.reduction import ForkingPickler
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -100,16 +101,6 @@ class BytesIOContext(io.BytesIO):
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
 # run its methods as test cases.
 class _TestTorchMixin(object):
-    def _check_sum_dim(tensors, dim):
-        for tensor in tensors:
-            expected = tensor.numpy().sum(dim)
-            actual = tensor.sum(dim)
-            self.assertEqual(expected.shape, actual.shape)
-            if actual.dtype == torch.float:
-                self.assertTrue(np.allclose(expected, actual.numpy(), rtol=1e-03, atol=1e-05))
-            else:
-                self.assertTrue(np.allclose(expected, actual.numpy()))
-
     def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True):
         float_types = [torch.double,
                        torch.float]
@@ -776,6 +767,15 @@ class _TestTorchMixin(object):
                 return inf
         self._test_math(torch.exp, exp)
 
+    @slowTest
+    def test_exp_slow(self):
+        # Test for https://github.com/pytorch/pytorch/issues/17271
+        # This is pretty slow on my Macbook but it only takes a few
+        # seconds on a beefy Xeon server
+        a = torch.exp(torch.ones(2 ** 31, dtype=torch.float32))
+        b = torch.exp(torch.ones(1, dtype=torch.float32))
+        self.assertEqual(a, b.expand(2 ** 31))
+
     def test_expm1(self):
         def expm1(x):
             try:
@@ -1035,6 +1035,7 @@ class _TestTorchMixin(object):
         for dtype in types:
             x = cast(torch.tensor(example, dtype=dtype))
             self.assertEqual(x.argmax().item(), 5)
+            self.assertEqual(x.argmax(dim=None).item(), 5)
             self.assertEqual(x.argmax(dim=0), torch.FloatTensor([1, 1, 1]))
             self.assertEqual(x.argmax(dim=1), torch.FloatTensor([1, 2]))
             self.assertEqual(x.argmax(dim=0, keepdim=True), torch.FloatTensor([[1, 1, 1]]))
@@ -1044,6 +1045,7 @@ class _TestTorchMixin(object):
         for dtype in types:
             x = cast(torch.tensor(example, dtype=dtype))
             self.assertEqual(x.argmin().item(), 0)
+            self.assertEqual(x.argmin(dim=None).item(), 0)
             self.assertEqual(x.argmin(dim=0), torch.FloatTensor([0, 0, 0]))
             self.assertEqual(x.argmin(dim=1), torch.FloatTensor([0, 1]))
             self.assertEqual(x.argmin(dim=1, keepdim=True), torch.FloatTensor([[0], [1]]))
@@ -4874,7 +4876,7 @@ class _TestTorchMixin(object):
         self._test_geqrf(self, lambda t: t)
 
     @staticmethod
-    def _test_trtrs(self, cast):
+    def _test_triangular_solve(self, cast):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                           (-6.05, -3.30, 5.36, -4.44, 1.08),
                           (-0.45, 2.58, -2.70, 0.27, 9.04),
@@ -4891,54 +4893,54 @@ class _TestTorchMixin(object):
         L = torch.tril(a)
 
         # solve Ux = b
-        x = torch.trtrs(b, U)[0]
+        x = torch.triangular_solve(b, U)[0]
         self.assertLessEqual(b.dist(torch.mm(U, x)), 1e-12)
-        x = torch.trtrs(b, U, True, False, False)[0]
+        x = torch.triangular_solve(b, U, True, False, False)[0]
         self.assertLessEqual(b.dist(torch.mm(U, x)), 1e-12)
 
         # solve Lx = b
-        x = torch.trtrs(b, L, False)[0]
+        x = torch.triangular_solve(b, L, False)[0]
         self.assertLessEqual(b.dist(torch.mm(L, x)), 1e-12)
-        x = torch.trtrs(b, L, False, False, False)[0]
+        x = torch.triangular_solve(b, L, False, False, False)[0]
         self.assertLessEqual(b.dist(torch.mm(L, x)), 1e-12)
 
         # solve U'x = b
-        x = torch.trtrs(b, U, True, True)[0]
+        x = torch.triangular_solve(b, U, True, True)[0]
         self.assertLessEqual(b.dist(torch.mm(U.t(), x)), 1e-12)
-        x = torch.trtrs(b, U, True, True, False)[0]
+        x = torch.triangular_solve(b, U, True, True, False)[0]
         self.assertLessEqual(b.dist(torch.mm(U.t(), x)), 1e-12)
 
         # solve U'x = b by manual transposition
-        y = torch.trtrs(b, U.t(), False, False)[0]
+        y = torch.triangular_solve(b, U.t(), False, False)[0]
         self.assertLessEqual(x.dist(y), 1e-12)
 
         # solve L'x = b
-        x = torch.trtrs(b, L, False, True)[0]
+        x = torch.triangular_solve(b, L, False, True)[0]
         self.assertLessEqual(b.dist(torch.mm(L.t(), x)), 1e-12)
-        x = torch.trtrs(b, L, False, True, False)[0]
+        x = torch.triangular_solve(b, L, False, True, False)[0]
         self.assertLessEqual(b.dist(torch.mm(L.t(), x)), 1e-12)
 
         # solve L'x = b by manual transposition
-        y = torch.trtrs(b, L.t(), True, False)[0]
+        y = torch.triangular_solve(b, L.t(), True, False)[0]
         self.assertLessEqual(x.dist(y), 1e-12)
 
         # test reuse
-        res1 = torch.trtrs(b, a)[0]
+        res1 = torch.triangular_solve(b, a)[0]
         ta = cast(torch.Tensor())
         tb = cast(torch.Tensor())
-        torch.trtrs(b, a, out=(tb, ta))
+        torch.triangular_solve(b, a, out=(tb, ta))
         self.assertEqual(res1, tb, 0)
         tb.zero_()
-        torch.trtrs(b, a, out=(tb, ta))
+        torch.triangular_solve(b, a, out=(tb, ta))
         self.assertEqual(res1, tb, 0)
 
     @skipIfNoLapack
-    def test_trtrs(self):
-        self._test_trtrs(self, lambda t: t)
+    def test_triangular_solve(self):
+        self._test_triangular_solve(self, lambda t: t)
 
     @staticmethod
-    def _test_trtrs_batched(self, cast):
-        def trtrs_test_helper(A_dims, b_dims, cast, upper, unitriangular):
+    def _test_triangular_solve_batched(self, cast):
+        def triangular_solve_test_helper(A_dims, b_dims, cast, upper, unitriangular):
             A = cast(torch.randn(*A_dims))
             A = A.triu() if upper else A.tril()
             if unitriangular:
@@ -4947,40 +4949,40 @@ class _TestTorchMixin(object):
             return A, b
 
         for upper, transpose, unitriangular in product([True, False], repeat=3):
-            # test against trtrs: one batch with all possible arguments
-            A, b = trtrs_test_helper((1, 5, 5), (1, 5, 10), cast, upper, unitriangular)
-            x_exp = torch.trtrs(b.squeeze(0), A.squeeze(0),
-                                upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
-            x = torch.trtrs(b, A,
-                            upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
+            # test against triangular_solve: one batch with all possible arguments
+            A, b = triangular_solve_test_helper((1, 5, 5), (1, 5, 10), cast, upper, unitriangular)
+            x_exp = torch.triangular_solve(b.squeeze(0), A.squeeze(0),
+                                           upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
+            x = torch.triangular_solve(b, A,
+                                       upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
             self.assertEqual(x, x_exp.unsqueeze(0))
 
-            # test against trtrs in a loop: four batches with all possible arguments
-            A, b = trtrs_test_helper((4, 5, 5), (4, 5, 10), cast, upper, unitriangular)
+            # test against triangular_solve in a loop: four batches with all possible arguments
+            A, b = triangular_solve_test_helper((4, 5, 5), (4, 5, 10), cast, upper, unitriangular)
             x_exp_list = []
             for i in range(4):
-                x_exp = torch.trtrs(b[i], A[i],
-                                    upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
+                x_exp = torch.triangular_solve(b[i], A[i],
+                                               upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
                 x_exp_list.append(x_exp)
             x_exp = torch.stack(x_exp_list)
 
-            x = torch.trtrs(b, A, upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
+            x = torch.triangular_solve(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
             self.assertEqual(x, x_exp)
 
             # basic correctness test
-            A, b = trtrs_test_helper((3, 5, 5), (3, 5, 10), cast, upper, unitriangular)
-            x = torch.trtrs(b, A, upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
+            A, b = triangular_solve_test_helper((3, 5, 5), (3, 5, 10), cast, upper, unitriangular)
+            x = torch.triangular_solve(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
             if transpose:
                 self.assertLessEqual(b.dist(torch.matmul(A.transpose(-1, -2), x)), 2e-12)
             else:
                 self.assertLessEqual(b.dist(torch.matmul(A, x)), 2e-12)
 
     @skipIfNoLapack
-    def test_trtrs_batched(self):
-        _TestTorchMixin._test_trtrs_batched(self, lambda t: t)
+    def test_triangular_solve_batched(self):
+        _TestTorchMixin._test_triangular_solve_batched(self, lambda t: t)
 
     @staticmethod
-    def _test_trtrs_batched_dims(self, cast):
+    def _test_triangular_solve_batched_dims(self, cast):
         if not TEST_SCIPY:
             return
 
@@ -5008,7 +5010,7 @@ class _TestTorchMixin(object):
             x_exp = torch.Tensor(scipy_tri_solve_batched(A.numpy(), b.numpy(),
                                                          upper, transpose, unitriangular))
             A, b = cast(A), cast(b)
-            x = torch.trtrs(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
+            x = torch.triangular_solve(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular)[0]
 
             self.assertEqual(x, cast(x_exp))
 
@@ -5020,8 +5022,8 @@ class _TestTorchMixin(object):
             run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5), cast, upper, transpose, unitriangular)  # broadcasting A & b
 
     @skipIfNoLapack
-    def test_trtrs_batched_dims(self):
-        self._test_trtrs_batched_dims(self, lambda t: t)
+    def test_triangular_solve_batched_dims(self):
+        self._test_triangular_solve_batched_dims(self, lambda t: t)
 
     @skipIfNoLapack
     def test_gels(self):
@@ -10372,6 +10374,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         big_out = torch.ones(1000000, dtype=torch.int8, device=device).bincount()
         self.assertEqual(big_exp, big_out)
 
+    @slowTest
+    def test_slow_test(self):
+        # Just a smoketest to make sure our slowTest decorator works.
+        pass
+
     def test_bincount_cpu(self):
         self._test_bincount(self, device='cpu')
 
@@ -10411,7 +10418,10 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertTrue(grid_b2.equal(expected_grid_b))
         self.assertTrue(grid_c2.equal(expected_grid_c))
 
-    @unittest.skipIf(torch.cuda.is_available() or IS_SANDCASTLE, "CUDA is available, can't test CUDA not built error")
+    # NB: we must not be built with CUDA; if we are built with CUDA but no CUDA
+    # is available, we get a different error.
+    @unittest.skipIf(torch.backends.cuda.is_built()
+        or IS_SANDCASTLE, "CUDA is built, can't test CUDA not built error")
     def test_cuda_not_built(self):
         msg = "Torch not compiled with CUDA enabled"
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.current_device())

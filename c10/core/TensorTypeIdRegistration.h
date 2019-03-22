@@ -88,11 +88,11 @@ inline c10::TensorTypeId TensorTypeIdRegistrar::id() const noexcept {
 }
 
 #define C10_DECLARE_TENSOR_TYPE(TensorName) \
-  C10_API c10::TensorTypeId TensorName()
+  C10_API ::c10::TensorTypeId TensorName()
 
 #define C10_DEFINE_TENSOR_TYPE(TensorName)          \
-  c10::TensorTypeId TensorName() {                  \
-    static TensorTypeIdRegistrar registration_raii; \
+  ::c10::TensorTypeId TensorName() {                \
+    static ::c10::TensorTypeIdRegistrar registration_raii; \
     return registration_raii.id();                  \
   }
 

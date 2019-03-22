@@ -402,6 +402,7 @@ class TestMultiprocessing(TestCase):
             self.assertEqual(list(tensor), [4, 4, 4, 4])
         p.join()
 
+    @staticmethod
     def _test_event_multiprocess_child(event, p2c, c2p):
         c2p.put(0)  # notify parent child is ready
         p2c.get()  # wait for record in parent
@@ -457,6 +458,7 @@ class TestMultiprocessing(TestCase):
             # create handle on different device from recorded event
             e1.ipc_handle()
 
+    @staticmethod
     def _test_event_handle_importer_consumer(handle, p2c, c2p):
         e1 = torch.cuda.Event.from_ipc_handle(0, handle)
         c2p.put(0)  # notify parent child is ready
@@ -491,6 +493,7 @@ class TestMultiprocessing(TestCase):
         p2c.put(1)  # notify child that parent is done
         p.join()
 
+    @staticmethod
     def _test_event_handle_exporter_consumer(handle, p2c, c2p):
         stream = torch.cuda.Stream()
         with torch.cuda.stream(stream):
