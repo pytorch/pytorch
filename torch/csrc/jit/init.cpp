@@ -129,16 +129,6 @@ void initJITBindings(PyObject* module) {
           [](const std::shared_ptr<Graph>& g) { return Canonicalize(g); })
       .def("_jit_pass_lint", LintGraph)
       .def(
-          "_jit_pass_shape_analysis",
-          [](std::shared_ptr<Graph> graph,
-             std::vector<at::Tensor> inputs,
-             bool with_grad) {
-            setInputTypes(
-                *graph,
-                ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
-            PropagateInputShapes(graph);
-          })
-      .def(
           "_jit_pass_complete_shape_analysis",
           [](std::shared_ptr<Graph> graph, py::tuple inputs, bool with_grad) {
             CompleteArgumentSpec spec(
@@ -352,7 +342,8 @@ void initJITBindings(PyObject* module) {
       .def_property_readonly(
           "name", [](FunctionSchema& self) { return self.name(); })
       .def_property_readonly(
-          "overload_name", [](FunctionSchema& self) { return self.overload_name(); })
+          "overload_name",
+          [](FunctionSchema& self) { return self.overload_name(); })
       .def_property_readonly(
           "arguments", [](FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(

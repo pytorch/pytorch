@@ -209,16 +209,6 @@ void initPythonIRBindings(PyObject* module_) {
             db.dump();
           })
       .def(
-          "propagate_shapes",
-          [](std::shared_ptr<Graph> g,
-             std::vector<at::Tensor> inputs,
-             bool with_grad) {
-            setInputTypes(
-                *g,
-                ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
-            PropagateInputShapes(g);
-          })
-      .def(
           "_export_onnx",
           [](const std::shared_ptr<Graph> g,
              const std::vector<at::Tensor>& initializers,
@@ -421,16 +411,8 @@ void initPythonIRBindings(PyObject* module_) {
           [](Block& b) {
             return py::make_iterator(b.outputs().begin(), b.outputs().end());
           })
-      .def(
-          "returnNode",
-          [](Block& b) {
-            return b.return_node();
-          })
-      .def(
-          "paramNode",
-          [](Block& b) {
-            return b.param_node();
-          });
+      .def("returnNode", [](Block& b) { return b.return_node(); })
+      .def("paramNode", [](Block& b) { return b.param_node(); });
 
 #define NS(name) def(#name, &Node ::name)
   py::class_<Node, std::unique_ptr<Node, py::nodelete>>(m, "Node")
