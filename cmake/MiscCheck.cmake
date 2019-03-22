@@ -167,6 +167,8 @@ CHECK_CXX_SOURCE_COMPILES(
        a = _mm256_set1_epi8 (1);
        b = a;
        _mm256_add_epi8 (a,a);
+       __m256 x;
+       _mm256_extract_epi64(x, 0); // we rely on this in our AVX2 code
        return 0;
      }" CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
 if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
@@ -329,23 +331,6 @@ endif()
 if (IOS)
   add_definitions("-mfpu=neon-fp16")
   add_definitions("-Wno-deprecated-declarations")
-endif()
-
-# ---[ If we are building with ACL, we will enable neon-fp16.
-if(USE_ACL)
-  if (CMAKE_SYSTEM_PROCESSOR MATCHES "^armv")
-    # 32-bit ARM (armv7, armv7-a, armv7l, etc)
-    set(ACL_ARCH "armv7a")
-    # Compilers for 32-bit ARM need extra flags to enable NEON-FP16
-    add_definitions("-mfpu=neon-fp16")
-
-    include(CheckCCompilerFlag)
-    CHECK_C_COMPILER_FLAG(
-        -mfp16-format=ieee CAFFE2_COMPILER_SUPPORTS_FP16_FORMAT)
-    if (CAFFE2_COMPILER_SUPPORTS_FP16_FORMAT)
-      add_definitions("-mfp16-format=ieee")
-    endif()
-  endif()
 endif()
 
 # ---[ If we use asan, turn on the flags.

@@ -51,18 +51,22 @@ struct CAFFE2_API List : c10::intrusive_ptr_target {
   static c10::intrusive_ptr<List<Elem>> create(std::vector<Elem> elements_) {
     return c10::make_intrusive<List<Elem>>(std::move(elements_));
   }
-  const std::vector<Elem>& elements() const {
+  const std::vector<Elem>& elements() const & {
     return elements_;
   }
   operator const std::vector<Elem>&() const {
     return elements();
   }
 
-  std::vector<Elem>& elements() {
+  std::vector<Elem>& elements() & {
     return elements_;
   }
   operator std::vector<Elem>&() {
     return elements();
+  }
+
+  std::vector<Elem>&& elements() && {
+    return std::move(elements_);
   }
 };
 
@@ -958,6 +962,23 @@ inline bool IValue::isSameIdentity(IValue& rhs) {
         && this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
   }
 }
+
+inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
+  if (lhs.isNone()) {
+    return rhs.isNone();
+  } else if (lhs.isInt()) {
+    return rhs.isInt() && lhs.toInt() == rhs.toInt();
+  } else if (lhs.isString()) {
+    return rhs.isString() && lhs.toStringRef() == rhs.toStringRef();
+  } else if (lhs.isDouble()) {
+    return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
+  } else if (lhs.isBool()) {
+    return rhs.isBool() && lhs.toBool() == rhs.toBool();
+  } else {
+    AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
+  }
+}
+
 } // namespace c10
 
 inline size_t at::ivalue::DictHash::operator()(
@@ -976,7 +997,9 @@ inline size_t at::ivalue::DictHash::operator()(
 inline bool at::ivalue::DictEqualTo::operator()(
     const c10::IValue& lhs,
     const c10::IValue& rhs) const {
-  if (lhs.isInt()) {
+  if (lhs.isNone()) {
+    return rhs.isNone();
+  } else if (lhs.isInt()) {
     return lhs.toInt() == rhs.toInt();
   } else if (lhs.isString()) {
     return lhs.toStringRef() == rhs.toStringRef();

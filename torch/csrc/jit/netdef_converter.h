@@ -11,14 +11,14 @@ namespace jit {
  * The NetDef \p net is converted and the result is stored in the
  * torch::jit::Graph \p graph. The function also records name->value map in \p
  * valueMapPtr. If the original net had several values with the same name, the
- * map will contain the value for the last definition.
+ * map will contain the value for the last definition. valueMapPtr is optional.
  * \p Prefix can be used for appending some string to every operator name (e.g.
  * we can add "caffe2::").
  */
 void convertNetDefToIR(
     const caffe2::NetDef& net,
     Graph* graph,
-    std::unordered_map<std::string, Value*>* valueMapPtr,
+    std::unordered_map<std::string, Value*>* valueMapPtr = nullptr,
     const std::string& prefix = "");
 
 /** \brief Convert PyTorch IR \p graph to Caffe2 NetDef \p net.

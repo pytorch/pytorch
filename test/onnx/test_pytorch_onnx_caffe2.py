@@ -1089,6 +1089,14 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(RsubModel(), train=False, input=(x,),
                             batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_isnan(self):
+        class IsNaNModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.isnan(input)
+
+        x = torch.tensor([1.0, float('nan'), 2.0])
+        self.run_model_test(IsNaNModel(), train=False, input=x, batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_flatten(self):
         class FlattenModel(torch.nn.Module):
             def forward(self, input):

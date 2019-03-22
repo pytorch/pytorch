@@ -8,6 +8,7 @@
 
 #include <ATen/Utils.h>
 #include <ATen/native/Copy.h>
+#include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
 
 #if defined(__GNUC__)
@@ -323,7 +324,7 @@ template <class T> Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> 
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = (a[i] > b[i]) ? a[i] : b[i];
-    if (std::is_floating_point<T>::value && std::isnan(a[i])) {
+    if (_isnan(a[i])) {
       // If either input is NaN, propagate a NaN.
       // NOTE: The case where b[i] was NaN is handled correctly by the naive
       // ternary operator above.
@@ -336,7 +337,7 @@ template <class T> Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> 
 template <typename T>
 inline T maximum(const T& a, const T& b) {
   T c = (a > b) ? a : b;
-  if (std::is_floating_point<T>::value && std::isnan(a)) {
+  if (_isnan(a)) {
     c = a;
   }
   return c;
@@ -348,7 +349,7 @@ template <class T> Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> 
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = (a[i] < b[i]) ? a[i] : b[i];
-    if (std::is_floating_point<T>::value && std::isnan(a[i])) {
+    if (_isnan(a[i])) {
       // If either input is NaN, propagate a NaN.
       // NOTE: The case where b[i] was NaN is handled correctly by the naive
       // ternary operator above.
@@ -361,7 +362,7 @@ template <class T> Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> 
 template <typename T>
 inline T minimum(const T& a, const T& b) {
   T c = (a < b) ? a : b;
-  if (std::is_floating_point<T>::value && std::isnan(a)) {
+  if (_isnan(a)) {
     c = a;
   }
   return c;
