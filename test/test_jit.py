@@ -14158,7 +14158,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(2 * input, output)
 
     def test_python_interop(self):
-        @torch.jit.script
+        @torch.jit.script  # noqa: B903
         class Foo(object):
             def __init__(self, x, y):
                 self.x = x
