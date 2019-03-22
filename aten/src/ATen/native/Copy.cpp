@@ -114,21 +114,21 @@ void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
     } else if (copy_transpose_valid(self, src)) {
       _copy_same_type_transpose_(self, src);
     } else {
-#ifdef _OPENMP
-      if (!in_parallel_region()) {
-        auto iter = TensorIterator::unary_op(self, src);
-        AT_DISPATCH_ALL_TYPES_AND(
-            at::ScalarType::Half, self.scalar_type(), "_copy_same_type_", [&] {
-              unary_kernel(
-                  *iter,
-                  [=](scalar_t a) -> scalar_t { return a; });
-            });
-      } else {
-        serial_path = true;
-      }
-#else
+// #ifdef _OPENMP
+//       if (!in_parallel_region()) {
+//         auto iter = TensorIterator::unary_op(self, src);
+//         AT_DISPATCH_ALL_TYPES_AND(
+//             at::ScalarType::Half, self.scalar_type(), "_copy_same_type_", [&] {
+//               unary_kernel(
+//                   *iter,
+//                   [=](scalar_t a) -> scalar_t { return a; });
+//             });
+//       } else {
+//         serial_path = true;
+//       }
+// #else
       serial_path = true;
-#endif
+// #endif
     }
   } else {
     serial_path = true;
