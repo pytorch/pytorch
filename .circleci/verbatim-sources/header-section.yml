@@ -152,6 +152,24 @@ setup_ci_environment: &setup_ci_environment
   command: |
     set -e
 
+    # Check if we should actually run
+    if [[ "${BUILD_ENVIRONMENT}" == *-slow-* ]]; then
+      if ! [ -z "$CIRCLE_PULL_REQUEST" ]; then
+        # It's a PR; test for [slow ci] tag on the TOPMOST commit
+        if !(git log --format='%B' -n 1 HEAD | grep -q '\[slow ci\]'); then
+          circleci step halt
+        fi
+      fi
+    fi
+    if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
+      if ! [ -z "$CIRCLE_PULL_REQUEST" ]; then
+        # It's a PR; test for [xla ci] tag on the TOPMOST commit
+        if !(git log --format='%B' -n 1 HEAD | grep -q '\[xla ci\]'); then
+          circleci step halt
+        fi
+      fi
+    fi
+
     # Set up NVIDIA docker repo
     curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
     echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
