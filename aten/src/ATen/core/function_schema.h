@@ -216,4 +216,10 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   return out;
 }
 
+inline std::string toString(const FunctionSchema& schema) {
+  std::ostringstream str;
+  str << schema;
+  return str.str();
+}
+
 } // namespace c10

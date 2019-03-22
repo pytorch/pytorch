@@ -35,11 +35,12 @@ namespace c10 {
  */
 class C10_API RegisterOperators final {
 public:
-  RegisterOperators() = default;
+  RegisterOperators();
+  RegisterOperators(RegisterOperators&&);
+  RegisterOperators& operator=(RegisterOperators&&);
   RegisterOperators(const RegisterOperators&) = delete;
-  RegisterOperators(RegisterOperators&&) = default;
   RegisterOperators& operator=(const RegisterOperators&) = delete;
-  RegisterOperators& operator=(RegisterOperators&&) = default;
+  ~RegisterOperators();
 
   /**
    * Register an operator based on a function schema and a set of configuration
@@ -61,21 +62,18 @@ public:
    */
   template<class... ConfigParameters>
   RegisterOperators op(FunctionSchema schema, ConfigParameters&&... configParameters) && {
-    detail::KernelRegistrationConfig config = make_registration_config(configParameters...);
-
-    if (config.inferred_function_schema.get() != nullptr) {
-      assertSchemasHaveSameSignature(*config.inferred_function_schema, schema);
-    }
-
-    registrars_.emplace_back(std::move(schema), config.dispatch_key, config.kernel_func, std::move(config.cache_creator_func));
+    registerOp_(std::move(schema), make_registration_config(configParameters...));
     return std::move(*this);
   }
 
-  // TODO error if dispatch key is not specified
   // TODO Add deprecated function and lambda based kernel APIs
 
 private:
-  std::vector<detail::OperatorRegistrar> registrars_;
+  void registerOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config);
+
+  class OperatorRegistrar;
+
+  std::vector<OperatorRegistrar> registrars_;
 };
 
 }
