@@ -16,16 +16,18 @@ namespace at {
 using QTensor = Tensor;
 using RealTensor = Tensor;
 
-/* Quantizer is the class for storing all the information
+/**
+ * Quantizer is the class for storing all the information
  * that's necessary to perform quantize and dequantize
- * operation and providing quantize() and dequantize() methods
+ * operation.
+ *
  * We might have different types of quantization schemes and this is
  * the base class for all quantizers.
  *
  * QTensorImpl will hold a pointer to Quantizer so that we can support
  * different quantization schemes on Tensor.
  *
- * For example, the most common quantization scheme, Affine Quantization, requries
+ * For example, the most common quantization scheme, Affine Quantization, requires
  * scale and zero_point as parameters, we'll store scale and zero_point inside
  * the instance and we can use it to quantize a float Tensor or dequantize a
  * quantized Tensor.

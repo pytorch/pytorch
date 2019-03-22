@@ -86,10 +86,6 @@ struct C10_API Device final {
     return type_ == DeviceType::CPU;
   }
 
-  bool is_quantized() const noexcept {
-    return type_ == DeviceType::QUANTIZED;
-  }
-
  private:
   DeviceType type_;
   DeviceIndex index_ = -1;

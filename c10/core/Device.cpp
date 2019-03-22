@@ -23,7 +23,6 @@ DeviceType parse_type(const std::string& device_string) {
       {"hip", DeviceType::HIP},
       {"msnpu", DeviceType::MSNPU},
       {"xla", DeviceType::XLA},
-      {"quantized", DeviceType::QUANTIZED},
   }};
   auto device = std::find_if(
       types.begin(),
