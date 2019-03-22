@@ -385,14 +385,13 @@ def run(paths):
                 declaration['requires_tensor'] = func.get('requires_tensor', False)
                 declaration['matches_jit_signature'] = func.get('matches_jit_signature', False)
                 declaration['cpu_half'] = func.get('cpu_half', False)
-                declaration['enable_for_bool'] = func.get('enable_for_bool', False)
+                declaration['cpu_bool'] = func.get('cpu_bool', False)
+                declaration['cuda_bool'] = func.get('cuda_bool', False)
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
                 declaration['python_module'] = func.get('python_module', '')
-                declaration['aten_sparse'] = has_sparse_dispatches(
-                    declaration['type_method_definition_dispatch'])
                 declarations.append(declaration)
             except Exception as e:
                 msg = '''Exception raised in processing function:

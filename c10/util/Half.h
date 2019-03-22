@@ -482,6 +482,7 @@ typename std::enable_if<is_complex_t<From>::value, bool>::type overflows(
 
 template <typename To, typename From>
 To checked_convert(From f, const char* name) {
+  // Converting to bool can't overflow so we exclude this case from checking.
   if (!std::is_same<To, bool>::value && overflows<To, From>(f)) {
     std::ostringstream oss;
     oss << "value cannot be converted to type " << name
