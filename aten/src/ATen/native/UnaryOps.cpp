@@ -13,7 +13,9 @@
 
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/cpu/UnaryOpsKernel.h>
+#include <ATen/native/UnaryOps.h>
+#include <ATen/cpu/vml.h>
+#include <ATen/native/TensorIterator.h>
 
 #include <algorithm>
 #include <cmath>
@@ -30,6 +32,31 @@
 
 namespace at {
 namespace native {
+
+DEFINE_DISPATCH(abs_stub);
+DEFINE_DISPATCH(acos_stub);
+DEFINE_DISPATCH(asin_stub);
+DEFINE_DISPATCH(atan_stub);
+DEFINE_DISPATCH(ceil_stub);
+DEFINE_DISPATCH(cos_stub);
+DEFINE_DISPATCH(erf_stub);
+DEFINE_DISPATCH(erfc_stub);
+DEFINE_DISPATCH(exp_stub);
+DEFINE_DISPATCH(expm1_stub);
+DEFINE_DISPATCH(floor_stub);
+DEFINE_DISPATCH(log_stub);
+DEFINE_DISPATCH(log10_stub);
+DEFINE_DISPATCH(log1p_stub);
+DEFINE_DISPATCH(log2_stub);
+DEFINE_DISPATCH(round_stub);
+// DEFINE_DISPATCH(rsqrt_stub);
+DEFINE_DISPATCH(sin_stub);
+DEFINE_DISPATCH(sqrt_stub);
+DEFINE_DISPATCH(tan_stub);
+DEFINE_DISPATCH(tanh_stub);
+DEFINE_DISPATCH(trunc_stub);
+
+DEFINE_DISPATCH(sigmoid_stub);
 
 Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   Tensor result = at::empty({0}, self.options());
@@ -113,27 +140,68 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
 }
 
-// NB: If you use this macro, you may also need to add a CUDA forwarding
-// stub in CUDAUnaryOps
 
-#define IMPLEMENT_UNARY_OP_VEC(op)                              \
-  Tensor op(const Tensor& self) {                               \
-    Tensor result = at::empty({0}, self.options());             \
-    return at::op##_out(result, self);                          \
-  }                                                             \
-  Tensor& _##op##__cpu(Tensor& self_) {                         \
-    if (self_.numel() > 0) {                                    \
-      Tensor self = sort_strides(self_);                        \
-      op##Impl(kCPU, self, self);                               \
-    }                                                           \
-    return self_;                                               \
-  }                                                             \
-  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
-    result.resize_(self.sizes());                               \
-    if (result.numel() > 0) {                                   \
-      op##Impl(kCPU, result, self);                             \
-    }                                                           \
-    return result;                                              \
+Tensor sigmoid(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  return at::sigmoid_out(result, self);
+}
+Tensor& _sigmoid__cpu(Tensor& self_) {
+  Tensor self = sort_strides(self_);
+  return at::sigmoid_out(self, self);
+}
+Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
+  auto iter = TensorIterator::binary_op(result, self, self);
+  sigmoid_stub(iter->device_type(), *iter);
+  return result;
+}
+
+Tensor log2(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  return at::log2_out(result, self);
+}
+Tensor& _log2__cpu(Tensor& self_) {
+  Tensor self = sort_strides(self_);
+  return at::log2_out(self, self);
+}
+Tensor& _log2_out_cpu(Tensor& result, const Tensor& self) {
+  result.resize_(self.sizes());
+  if (self.is_contiguous() && result.is_contiguous()) {
+    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), log2_cpu, [&]() {
+      vml::vlog2(result.data<scalar_t>(), self.data<scalar_t>(), self.numel());
+
+    });
+  } else {
+    auto iter = TensorIterator::binary_op(result, self, self);
+    log2_stub(iter->device_type(), *iter);
+  }
+  return result;
+}
+
+  // NB: If you use this macro, you may also need to add a CUDA forwarding
+  // stub in CUDAUnaryOps
+
+#define IMPLEMENT_UNARY_OP_VEC(op)                                         \
+  Tensor op(const Tensor& self) {                                          \
+    Tensor result = at::empty({0}, self.options());                        \
+    return at::op##_out(result, self);                                     \
+  }                                                                        \
+  Tensor& _##op##__cpu(Tensor& self_) {                                    \
+    Tensor self = sort_strides(self_);                                     \
+    return at::op##_out(self, self);                                       \
+  }                                                                        \
+  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) {            \
+    result.resize_(self.sizes());                                          \
+    if (self.is_contiguous() && result.is_contiguous()) {                  \
+      AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), op##_cpu, [&]() {     \
+        vml::v##op(                                                        \
+            result.data<scalar_t>(), self.data<scalar_t>(), self.numel()); \
+                                                                           \
+      });                                                                  \
+    } else {                                                               \
+      auto iter = TensorIterator::binary_op(result, self, self);           \
+      op##_stub(iter->device_type(), *iter);                               \
+    }                                                                      \
+    return result;                                                         \
   }
 
 #define IMPLEMENT_UNARY_OP_TH(op)                               \
@@ -168,8 +236,7 @@ IMPLEMENT_UNARY_OP_VEC(log10)
 IMPLEMENT_UNARY_OP_VEC(log1p)
 IMPLEMENT_UNARY_OP_VEC(log2)
 IMPLEMENT_UNARY_OP_VEC(round)
-IMPLEMENT_UNARY_OP_VEC(rsqrt)
-IMPLEMENT_UNARY_OP_VEC(sigmoid)
+IMPLEMENT_UNARY_OP_TH(rsqrt)
 IMPLEMENT_UNARY_OP_VEC(sin)
 IMPLEMENT_UNARY_OP_TH(sinh)
 IMPLEMENT_UNARY_OP_VEC(sqrt)
@@ -177,29 +244,7 @@ IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
 
-DEFINE_DISPATCH(absImpl);
-DEFINE_DISPATCH(acosImpl);
-DEFINE_DISPATCH(asinImpl);
-DEFINE_DISPATCH(atanImpl);
-DEFINE_DISPATCH(ceilImpl);
-DEFINE_DISPATCH(cosImpl);
-DEFINE_DISPATCH(erfImpl);
-DEFINE_DISPATCH(erfcImpl);
-DEFINE_DISPATCH(expImpl);
-DEFINE_DISPATCH(expm1Impl);
-DEFINE_DISPATCH(floorImpl);
-DEFINE_DISPATCH(logImpl);
-DEFINE_DISPATCH(log10Impl);
-DEFINE_DISPATCH(log1pImpl);
-DEFINE_DISPATCH(log2Impl);
-DEFINE_DISPATCH(roundImpl);
-DEFINE_DISPATCH(rsqrtImpl);
-DEFINE_DISPATCH(sigmoidImpl);
-DEFINE_DISPATCH(sinImpl);
-DEFINE_DISPATCH(sqrtImpl);
-DEFINE_DISPATCH(tanImpl);
-DEFINE_DISPATCH(tanhImpl);
-DEFINE_DISPATCH(truncImpl);
+
 
 }
 } // namespace at
