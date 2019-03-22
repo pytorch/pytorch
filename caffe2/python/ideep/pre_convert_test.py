@@ -59,7 +59,7 @@ class PreConvertTest(hu.HypothesisTestCase):
             output_dict_cosim = {}
             old_ws_name = workspace.CurrentWorkspace()
             workspace.FeedBlob('X', X)
-            workspace.FeedBlob('label', label)
+            workspace.FeedBlob('label', label, core.DeviceOption(caffe2_pb2.CPU, 0))
             workspace.RunNetOnce(train_model.param_init_net)
             for op in train_model.net.Proto().op:
                 if op.type == "Softmax":
@@ -76,7 +76,7 @@ class PreConvertTest(hu.HypothesisTestCase):
 
             workspace.SwitchWorkspace("_device_check_", True)
             workspace.FeedBlob('X', X)
-            workspace.FeedBlob('label', label)
+            workspace.FeedBlob('label', label, core.DeviceOption(caffe2_pb2.CPU, 0))
             for blob in blob_dict.keys():
                 workspace.FeedBlob(blob, blob_dict[blob])
             workspace.CreateNet(train_model.net, overwrite=True)

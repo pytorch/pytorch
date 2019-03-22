@@ -888,7 +888,7 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
       if (filter->get_descriptor() != expectedDesc) {
         filter->set_public_format(ideep::format::iohw);
         itensor&& newFilter(expectedDesc);
-        ideep::reorder::compute(*filter, newFilter);
+        newFilter.feed_from(*filter);
         newFilter.set_public_format(ideep::format::iohw);
         filterBlob->Reset<itensor>(new itensor(newFilter));
       }
@@ -928,7 +928,7 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
 
       if (filter->get_descriptor() != expectedDesc) {
         itensor&& newFilter(expectedDesc);
-        ideep::reorder::compute(*filter, newFilter);
+        newFilter.feed_from(*filter);
         filterBlob->Reset<itensor>(new itensor(newFilter));
       }
       // convert weights for FC
@@ -955,7 +955,7 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
 
       if (filter->get_descriptor() != expectedDesc) {
         itensor&& newFilter(expectedDesc);
-        ideep::reorder::compute(filter->as_weights(), newFilter);
+        newFilter.feed_from(filter->as_weights());
         filterBlob->Reset<itensor>(new itensor(newFilter));
       }
     }
