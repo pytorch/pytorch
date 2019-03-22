@@ -2154,7 +2154,10 @@ class TestAutograd(TestCase):
         for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
             f_args_variable = (torch.randn(S, S, requires_grad=True),
                                torch.randn(S, S, requires_grad=True))
-            f = lambda a, b: torch.cdist(a, b, p)
+
+            def f(a, b):
+                return torch.cdist(a, b, p)
+
             f_args_tensor = deepcopy(unpack_variables(f_args_variable))
             run_functional_checks(self, "test_cdist", "cdist", f,
                                   True, f_args_variable, f_args_tensor)
@@ -2180,14 +2183,14 @@ class TestAutograd(TestCase):
             run_test(upper, dims)
 
     @skipIfNoLapack
-    def test_trtrs(self):
+    def test_triangular_solve(self):
         def _test_with_size(A_dims, B_dims):
             A = torch.rand(*A_dims).requires_grad_()
             b = torch.rand(*B_dims).requires_grad_()
 
             for upper, transpose, unitriangular in product((True, False), repeat=3):
                 def func(A, b):
-                    return torch.trtrs(b, A, upper, transpose, unitriangular)
+                    return torch.triangular_solve(b, A, upper, transpose, unitriangular)
 
                 gradcheck(func, [A, b])
                 gradgradcheck(func, [A, b])

@@ -2224,6 +2224,22 @@ Example::
     tensor(1.9073e-06)
 """)
 
+add_docstr(torch.isnan,
+           r"""
+Returns a new tensor with boolean elements representing if each element is `NaN` or not.
+
+Arguments:
+    tensor (Tensor): A tensor to check
+
+Returns:
+    Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `NaN` elements.
+
+Example::
+
+    >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
+    tensor([ 0,  1,  0], dtype=torch.uint8)
+""")
+
 add_docstr(torch.is_floating_point,
            r"""
 is_floating_point(tensor) -> (bool)
@@ -5073,6 +5089,59 @@ Example::
             [ 0.5809,  0.4942]])
 """)
 
+add_docstr(torch.triangular_solve,
+           r"""
+triangular_solve(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
+
+Solves a system of equations with a triangular coefficient matrix :math:`A`
+and multiple right-hand sides :attr:`b`.
+
+In particular, solves :math:`AX = b` and assumes :math:`A` is upper-triangular
+with the default keyword arguments.
+
+`torch.triangular_solve(b, A)` can take in 2D inputs `b, A` or inputs that are
+batches of 2D matrices. If the inputs are batches, then returns
+batched outputs `X`
+
+.. note::
+
+    The :attr:`out` keyword only supports 2D matrix inputs, that is,
+    `b, A` must be 2D matrices.
+
+Args:
+    A (Tensor): the input triangular coefficient matrix of size :math:`(*, m, m)`
+                where :math:`*` is zero or more batch dimensions
+    b (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
+                :math:`*` is zero of more batch dimensions
+    upper (bool, optional): whether to solve the upper-triangular system
+        of equations (default) or the lower-triangular system of equations. Default: ``True``.
+    transpose (bool, optional): whether :math:`A` should be transposed before
+        being sent into the solver. Default: ``False``.
+    unitriangular (bool, optional): whether :math:`A` is unit triangular.
+        If True, the diagonal elements of :math:`A` are assumed to be
+        1 and not referenced from :math:`A`. Default: ``False``.
+
+Returns:
+    A tuple :math:`(X, M)` where :math:`M` is a clone of :math:`A` and :math:`X`
+    is the solution to :math:`AX = b` (or whatever variant of the system of
+    equations, depending on the keyword arguments.)
+
+Examples::
+
+    >>> A = torch.randn(2, 2).triu()
+    >>> A
+    tensor([[ 1.1527, -1.0753],
+            [ 0.0000,  0.7986]])
+    >>> b = torch.randn(2, 3)
+    >>> b
+    tensor([[-0.0210,  2.3513, -1.5492],
+            [ 1.5429,  0.7403, -1.0243]])
+    >>> torch.triangular_solve(b, A)
+    (tensor([[ 1.7840,  2.9045, -2.5405],
+            [ 1.9319,  0.9269, -1.2826]]), tensor([[ 1.1527, -1.0753],
+            [ 0.0000,  0.7986]]))
+""")
+
 add_docstr(torch.tril,
            r"""
 tril(input, diagonal=0, out=None) -> Tensor
@@ -5290,59 +5359,6 @@ Example::
     tensor([[0, 0, 1],
             [1, 2, 2]])
 """.format(**factory_common_args))
-
-add_docstr(torch.trtrs,
-           r"""
-trtrs(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
-
-Solves a system of equations with a triangular coefficient matrix :math:`A`
-and multiple right-hand sides :attr:`b`.
-
-In particular, solves :math:`AX = b` and assumes :math:`A` is upper-triangular
-with the default keyword arguments.
-
-`torch.trtrs(b, A)` can take in 2D inputs `b, A` or inputs that are
-batches of 2D matrices. If the inputs are batches, then returns
-batched outputs `X`
-
-.. note::
-
-    The :attr:`out` keyword only supports 2D matrix inputs, that is,
-    `b, A` must be 2D matrices.
-
-Args:
-    A (Tensor): the input triangular coefficient matrix of size :math:`(*, m, m)`
-                where :math:`*` is zero or more batch dimensions
-    b (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
-                :math:`*` is zero of more batch dimensions
-    upper (bool, optional): whether to solve the upper-triangular system
-        of equations (default) or the lower-triangular system of equations. Default: ``True``.
-    transpose (bool, optional): whether :math:`A` should be transposed before
-        being sent into the solver. Default: ``False``.
-    unitriangular (bool, optional): whether :math:`A` is unit triangular.
-        If True, the diagonal elements of :math:`A` are assumed to be
-        1 and not referenced from :math:`A`. Default: ``False``.
-
-Returns:
-    A tuple :math:`(X, M)` where :math:`M` is a clone of :math:`A` and :math:`X`
-    is the solution to :math:`AX = b` (or whatever variant of the system of
-    equations, depending on the keyword arguments.)
-
-Examples::
-
-    >>> A = torch.randn(2, 2).triu()
-    >>> A
-    tensor([[ 1.1527, -1.0753],
-            [ 0.0000,  0.7986]])
-    >>> b = torch.randn(2, 3)
-    >>> b
-    tensor([[-0.0210,  2.3513, -1.5492],
-            [ 1.5429,  0.7403, -1.0243]])
-    >>> torch.trtrs(b, A)
-    (tensor([[ 1.7840,  2.9045, -2.5405],
-            [ 1.9319,  0.9269, -1.2826]]), tensor([[ 1.1527, -1.0753],
-            [ 0.0000,  0.7986]]))
-""")
 
 add_docstr(torch.trunc,
            r"""
