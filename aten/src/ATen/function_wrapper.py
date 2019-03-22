@@ -194,6 +194,8 @@ CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 class NYIError(Exception):
     """Indicates we don't support this declaration yet"""
 
+    __slots__ = ['reason']
+
     def __init__(self, reason):
         self.reason = reason
 
