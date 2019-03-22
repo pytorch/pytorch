@@ -256,6 +256,7 @@ class JitTestCase(TestCase):
     _restored_warnings = False
 
     def setUp(self):
+        super(JitTestCase, self).setUp()
         # unittest overrides all warning filters and forces all of them to show up
         # after we install our own to silence those coming from inside PyTorch.
         # This will ensure that our filter still takes precedence.
@@ -265,6 +266,7 @@ class JitTestCase(TestCase):
         torch._C._jit_set_emit_module_hook(self.emitModuleHook)
 
     def tearDown(self):
+        super(JitTestCase, self).tearDown()
         # needs to be cleared because python might be unloaded before
         # the callback gets destucted
         torch._C._jit_set_emit_module_hook(None)
@@ -8331,7 +8333,7 @@ a")
     def test_method_no_self(self):
         with self.assertRaisesRegex(RuntimeError, 'methods must have a self argument'):
             class MethodNoSelf(torch.jit.ScriptModule):
-                @torch.jit.script_method
+                @torch.jit.script_method  # noqa: B902
                 def forward():
                     return torch.zeros(3, 4)
 
@@ -10735,6 +10737,29 @@ a")
             return a
 
         self.assertEqual(fn(), {'ok': 10})
+
+    def test_dict_membership(self):
+        def fn(x, y):
+            # type: (Dict[int, int], int) -> int
+            return x.get(y, 3)
+
+        d = {1: 2, 3: 4}
+        self.checkScript(fn, (d, 3))
+        self.checkScript(fn, (d, 2))
+
+        def optional(x, y):
+            # type: (Dict[int, int], int) -> bool
+            res = x.get(y)
+            return res is None
+
+        self.checkScript(fn, (d, 3))
+        self.checkScript(fn, (d, 2))
+
+        with self.assertRaisesRegex(RuntimeError, "is actually of type Optional"):
+            @torch.jit.script
+            def bad_types(x, y):
+                # type: (Dict[int, int], int) -> int
+                return x.get(y)  # noqa: T484
 
     def dict_to_python(self):
         def python_lookup(my_dict, keys):
@@ -13919,7 +13944,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(fn(input), input)
 
     def test_get_attr(self):
-        @torch.jit.script
+        @torch.jit.script  # noqa: B903
         class FooTest(object):
             def __init__(self, x):
                 self.foo = x
@@ -13982,7 +14007,7 @@ class TestClassType(JitTestCase):
 
     def test_type_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "expected a value of type bool"):
-            @torch.jit.script
+            @torch.jit.script  # noqa: B903
             class FooTest(object):
                 def __init__(self, x):
                     # type: (bool) -> None
@@ -14003,7 +14028,7 @@ class TestClassType(JitTestCase):
                         self.attr = x
 
     def test_class_type_as_param(self):
-        @torch.jit.script
+        @torch.jit.script  # noqa: B903
         class FooTest(object):
             def __init__(self, x):
                 self.attr = x
@@ -14071,7 +14096,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(input, output)
 
     def test_save_load_with_classes_nested(self):
-        @torch.jit.script
+        @torch.jit.script  # noqa: B903
         class FooNestedTest(object):
             def __init__(self, y):
                 self.y = y
