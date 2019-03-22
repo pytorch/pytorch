@@ -224,10 +224,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
 
   /**
-   * Construct a tensor with an opaque layout given `opaque_handle` and
+   * Construct a tensor with an opaque layout given `opaque_handle` backed by `storage` and
    * metadata `type_id`, `data_type` and `sizes` for dims.
    */
-  TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable,
+  TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable,
              c10::intrusive_ptr<c10::intrusive_ptr_target> opaque_handle,
              IntArrayRef sizes = IntArrayRef());
 
@@ -874,7 +874,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       impl->refresh_contiguous();
       return impl;
     } else {
-      auto impl = c10::make_intrusive<TensorImpl>(type_id(), dtype(), is_variable(), opaque_handle_, sizes());
+      auto impl = c10::make_intrusive<TensorImpl>(
+        Storage(storage()), type_id(), is_variable(), opaque_handle_, sizes());
       impl->reserved_ = reserved_;
       return impl;
     }
@@ -1276,7 +1277,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * storage UNINITIALIZED after a Resize() or FreeMemory()
    */
   bool storage_initialized() const noexcept {
-    return storage_ && (storage_.data() || numel_ == 0);
+    return storage_.data() || numel_ == 0;
   }
 
   /**
@@ -1432,15 +1433,16 @@ protected:
   // should pack this into a bitfield.
   TensorTypeId type_id_;
 
-  // An opaque handle `opaque_handle_` allows customized data layout other than the default
-  // strided layout. A valid opaque handle manages the tensor storage by itself so the default
-  // `storage_` is never initialized and getting data pointer from the default `storage_`
-  // would fail. Metadata like device, dtype and dims can be queried like a normal tensor with
-  // strided layout but cannot be changed. The `strides()` is not supported. Call to `is_contiguous()`
+  // An `opaque_handle_` allows customized data layout other than the default strided layout.
+  // Storage is initialized and it is valid to get data pointer and range via `data()` and `numel()`.
+  // Metadata like device, dtype and dims can be queried like a normal tensor with strided layout
+  // but cannot be changed. Therefore `allow_tensor_metadata_change()` always returns
+  // `false` and `set_allow_tensor_metadata_change()` is no-op. The `strides()` is not supported.
+  // Calling any method that changes the metadata and storage would fail. Calling to `is_contiguous()`
   // always returns false since "contiguous" is not well-defined for a customized layout.
   //
   // Following invariant holds when `opaque_handle_` is valid:
-  //     `!is_contiguous() && !storage_initialized() && !allow_tensor_metadata_change()`
+  //     `!is_contiguous() && !allow_tensor_metadata_change()`
   c10::intrusive_ptr<c10::intrusive_ptr_target> opaque_handle_;
 
   bool is_contiguous_ = true;

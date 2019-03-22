@@ -46,9 +46,9 @@ TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, 
 TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable)
     : TensorImpl(std::move(storage), type_id, storage.dtype(), is_variable) {}
 
-TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable,
+TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable,
                        c10::intrusive_ptr<c10::intrusive_ptr_target> opaque_handle, IntArrayRef sizes)
-  : TensorImpl({}, type_id, data_type, is_variable) {
+  : TensorImpl(std::move(storage), type_id, is_variable) {
   AT_ASSERT(opaque_handle);
   opaque_handle_ = opaque_handle;
   sizes_ = sizes;

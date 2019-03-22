@@ -11,6 +11,9 @@ class TestMkldnn(TestCase):
         self.assertEqual(mkldnn_tensor.dtype, torch.float)
         self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
         self.assertEqual(mkldnn_tensor.size(), torch.Size([1, 2, 3, 4]))
+        self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
+        self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size())
+        self.assertTrue(mkldnn_tensor.data_ptr() != 0)
         self.assertEqual(cpu_tensor.sum().backward(), cpu_tensor_1.sum().backward())
 
     def test_unsupported(self):

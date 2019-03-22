@@ -23,13 +23,12 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
              "dense_to_mkldnn expects dense CPU tensor input");
   AT_ASSERTM(cpu_tensor.scalar_type() == ScalarType::Float,
              "dense_to_mkldnn expects float tensor input");
-  auto src_dims = cpu_tensor.sizes();
-  ideep::tensor::dims dst_dims (src_dims.begin(), src_dims.end());
-  ideep::tensor dtensor;
-  dtensor.resize(dst_dims, ideep::tensor::data_type::f32);
-  dtensor.reorder_from(dst_dims, ideep::tensor::data_type::f32,
+  Tensor mkldnn_tensor = new_with_sizes_mkldnn(cpu_tensor.sizes(), cpu_tensor.options());
+  ideep::tensor& dtensor = itensor_from_mkldnn(mkldnn_tensor);
+  dtensor.reorder_from(dtensor.get_dims(),
+                       ideep::tensor::data_type::f32,
                        (void*)(cpu_tensor.template data<float>()));
-  return new_mkldnn_with_itensor(std::move(dtensor), cpu_tensor.options());
+  return mkldnn_tensor;
 }
 
 #else

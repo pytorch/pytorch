@@ -8,7 +8,9 @@
 
 namespace at { namespace native {
 
-Tensor new_mkldnn_with_itensor(ideep::tensor&& ideep_tensor, const TensorOptions& options);
+Tensor new_with_sizes_mkldnn(IntArrayRef sizes, const TensorOptions& options);
+
+Tensor new_with_itensor_mkldnn(ideep::tensor&& it, const TensorOptions& options);
 
 ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
 
