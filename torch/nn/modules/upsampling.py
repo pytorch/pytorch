@@ -126,7 +126,12 @@ class Upsample(Module):
         super(Upsample, self).__init__()
         self.name = type(self).__name__
         self.size = size
-        self.scale_factor = float(scale_factor) if scale_factor else None
+        if isinstance(scale_factor, tuple):
+            self.scale_factor = tuple(float(f) for f in scale_factor)
+        elif scale_factor:
+            self.scale_factor = float(scale_factor)
+        else:
+            self.scale_factor = None
         self.mode = mode
         self.align_corners = align_corners
 
