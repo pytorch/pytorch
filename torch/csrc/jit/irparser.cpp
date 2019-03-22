@@ -73,7 +73,7 @@ struct VarWithType {
   TypePtr type;
 };
 
-void parseIR(const std::string& str, torch::jit::Graph* graph) {
+TORCH_API void parseIR(const std::string& str, torch::jit::Graph* graph) {
   torch::jit::script::IRParser p(str, graph);
   p.parse();
 }

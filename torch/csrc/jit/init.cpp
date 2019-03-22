@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/irparser.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
@@ -103,6 +104,11 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
       .def("_jit_pass_fuse", FuseGraph)
+      .def(
+          "_jit_parse_ir",
+          [](const std::string& str, std::shared_ptr<Graph>& g) {
+            script::parseIR(str, g.get());
+          })
       .def(
           "_jit_pass_dce",
           [](std::shared_ptr<Graph>& g) {
@@ -352,7 +358,8 @@ void initJITBindings(PyObject* module) {
       .def_property_readonly(
           "name", [](FunctionSchema& self) { return self.name(); })
       .def_property_readonly(
-          "overload_name", [](FunctionSchema& self) { return self.overload_name(); })
+          "overload_name",
+          [](FunctionSchema& self) { return self.overload_name(); })
       .def_property_readonly(
           "arguments", [](FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(
