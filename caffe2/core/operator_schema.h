@@ -425,6 +425,24 @@ class CAFFE2_API OpSchema {
   OpSchema&
   SliceInputFillers(size_t value_index, size_t starts_index, size_t ends_index);
 
+  // The helper is build input with starts and ends; e.g.:
+  //  data  = [ 1, 2,  3,   4,   5,       6]
+  //            ^       \___/    ^        ^
+  //            |         ^      |        |
+  //            |         |      |        |
+  //          [0, 1]   [2, 2] [4, 1]   [5, 1]
+  //  ranges = [
+  //    [
+  //      [0, 1],
+  //      [2, 2],
+  //    ],
+  //    [
+  //      [4, 1],
+  //      [5, 1],
+  //    ]
+  //  ]
+  OpSchema& GatherRangesInputFillers(size_t value_index, size_t ranges_index);
+
   OpSchema& DisallowInputFillers();
 
   std::vector<TensorFiller> InputFillers(
