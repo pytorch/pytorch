@@ -1,3 +1,5 @@
+#include <ATen/Config.h>
+
 #if AT_MKLDNN_ENABLED()
 
 // needs to be included only once in library.
