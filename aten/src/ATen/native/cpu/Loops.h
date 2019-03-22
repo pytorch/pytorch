@@ -40,13 +40,6 @@ static inline bool is_unary_contiguous(const int64_t* strides) {
          strides[1] == sizeof(typename traits::arg1_t);
 }
 
-// arg1 is a scalar
-template <typename traits>
-static inline bool is_unary_contiguous_s1(const int64_t* strides) {
-  return strides[0] == sizeof(typename traits::result_type) &&
-         strides[1] == 0;
-}
-
 // result is
 static inline bool is_reduction(char** data, const int64_t* strides) {
   return strides[0] == 0 &&
@@ -119,22 +112,6 @@ static inline void vectorized_unary_loop(char** data, int64_t n, func_t op, vec_
     out2.store(out_ptr + (i + Vec::size()) * sizeof(scalar_t));
   }
   int64_t strides[] = { sizeof(scalar_t), sizeof(scalar_t) };
-  unary_loop(data, strides, i, n, op);
-}
-
-// computes out = op(in1) where in1 is a constant
-template <typename func_t, typename vec_func_t>
-static inline void vectorized_unary_loop_s1(char** data, int64_t n, func_t op, vec_func_t vop) {
-  UNARY_VEC_LOOP_HEADER(func_t, data)
-  int64_t i = 0;
-  auto a = Vec(*(scalar_t*)in1_ptr);
-  for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
-    auto out1 = vop(a);
-    auto out2 = vop(a);
-    out1.store(out_ptr + i * sizeof(scalar_t));
-    out2.store(out_ptr + (i + Vec::size()) * sizeof(scalar_t));
-  }
-  int64_t strides[] = { sizeof(scalar_t), 0 };
   unary_loop(data, strides, i, n, op);
 }
 
@@ -292,8 +269,6 @@ void unary_kernel(TensorIterator& iter, func_t op) {
     // Specializations to encourage auto-vectorization (trick from Numpy's loops.c.src)
     if (is_unary_contiguous<traits>(strides)) {
       unary_loop(data, strides, 0, n, op);
-    } else if (is_unary_contiguous_s1<traits>(strides)) {
-      unary_loop(data, strides, 0, n, op);
     } else {
       unary_loop(data, strides, 0, n, op);
     }
@@ -310,8 +285,6 @@ void unary_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
   iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
     if (is_unary_contiguous<traits>(strides)) {
       vectorized_unary_loop(data, n, op, vop);
-    } else if (is_unary_contiguous_s1<traits>(strides)) {
-      vectorized_unary_loop_s1(data, n, op, vop);
     } else {
       unary_loop(data, strides, 0, n, op);
     }

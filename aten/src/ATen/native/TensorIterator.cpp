@@ -483,7 +483,6 @@ std::unique_ptr<TensorIterator> TensorIterator::unary_op(Tensor& out, const Tens
   auto builder = TensorIterator::Builder();
   builder.add_output(out);
   builder.add_input(a);
-  builder.iter_->allow_cpu_scalars_ = true;
   return builder.build();
 }
 
