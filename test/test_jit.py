@@ -14001,7 +14001,7 @@ class TestDataParallel(JitTestCase):
 class TestClassType(JitTestCase):
     def test_get_with_method(self):
         @torch.jit.script
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 self.foo = x
 
@@ -14018,7 +14018,7 @@ class TestClassType(JitTestCase):
 
     def test_get_attr(self):
         @torch.jit.script  # noqa: B903
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 self.foo = x
 
@@ -14032,7 +14032,7 @@ class TestClassType(JitTestCase):
 
     def test_set_attr_in_method(self):
         @torch.jit.script
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 # type: (int) -> None
                 self.foo = x
@@ -14053,7 +14053,7 @@ class TestClassType(JitTestCase):
     def test_set_attr_type_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):
             @torch.jit.script
-            class FooTest:
+            class FooTest(object):
                 def __init__(self, x):
                     self.foo = x
                     self.foo = 10  # should error since int != Tensor
@@ -14061,7 +14061,7 @@ class TestClassType(JitTestCase):
     def test_get_attr_not_initialized(self):
         with self.assertRaisesRegex(RuntimeError, "Tried to access to nonexistent attribute"):
             @torch.jit.script
-            class FooTest:
+            class FooTest(object):
                 def __init__(self, x):
                     self.foo = x
 
@@ -14071,7 +14071,7 @@ class TestClassType(JitTestCase):
     def test_set_attr_non_initialized(self):
         with self.assertRaisesRegex(RuntimeError, "Tried to set nonexistent attribute"):
             @torch.jit.script
-            class FooTest:
+            class FooTest(object):
                 def __init__(self, x):
                     self.foo = x
 
@@ -14081,7 +14081,7 @@ class TestClassType(JitTestCase):
     def test_type_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "expected a value of type bool"):
             @torch.jit.script  # noqa: B903
-            class FooTest:
+            class FooTest(object):
                 def __init__(self, x):
                     # type: (bool) -> None
                     self.foo = x
@@ -14095,14 +14095,14 @@ class TestClassType(JitTestCase):
     def test_conditional_set_attr(self):
         with self.assertRaisesRegex(RuntimeError, "assignment cannot be in a control-flow block"):
             @torch.jit.script
-            class FooTest:
+            class FooTest(object):
                 def __init__(self, x):
                     if True:
                         self.attr = x
 
     def test_class_type_as_param(self):
         @torch.jit.script  # noqa: B903
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 self.attr = x
 
@@ -14121,7 +14121,7 @@ class TestClassType(JitTestCase):
 
     def test_out_of_order_methods(self):
         @torch.jit.script
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 self.x = x
                 self.x = self.get_stuff(x)
@@ -14139,7 +14139,7 @@ class TestClassType(JitTestCase):
 
     def test_save_load_with_classes(self):
         @torch.jit.script
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 self.x = x
 
@@ -14170,18 +14170,18 @@ class TestClassType(JitTestCase):
 
     def test_save_load_with_classes_nested(self):
         @torch.jit.script  # noqa: B903
-        class FooNestedTest:
+        class FooNestedTest(object):
             def __init__(self, y):
                 self.y = y
 
         @torch.jit.script
-        class FooNestedTest2:
+        class FooNestedTest2(object):
             def __init__(self, y):
                 self.y = y
                 self.nested = FooNestedTest(y)
 
         @torch.jit.script
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 self.class_attr = FooNestedTest(x)
                 self.class_attr2 = FooNestedTest2(x)
@@ -14208,6 +14208,32 @@ class TestClassType(JitTestCase):
         input = torch.rand(2, 3)
         output = m_loaded(input)
         self.assertEqual(2 * input, output)
+
+    def test_python_interop(self):
+        @torch.jit.script  # noqa: B903
+        class Foo(object):
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        @torch.jit.script
+        def use_foo(foo):
+            # type: (Foo) -> Foo
+            return foo
+
+        # create from python
+        x = torch.ones(2, 3)
+        y = torch.zeros(2, 3)
+        f = Foo(x, y)
+
+        self.assertEqual(x, f.x)
+        self.assertEqual(y, f.y)
+
+        # pass in and out of script
+        f2 = use_foo(f)
+
+        self.assertEqual(x, f2.x)
+        self.assertEqual(y, f2.y)
 
 
 for test in autograd_method_tests():

@@ -573,7 +573,12 @@ struct ParserImpl {
   TreeRef parseClass() {
     L.expect(TK_CLASS_DEF);
     const auto name = parseIdent();
-    // TODO no inheritance or () allowed right now
+    if (L.nextIf('(')) {
+      // The parser only supports py3 syntax, so classes are new-style when
+      // they don't inherit from anything.
+      L.reportError(
+          "Inheritance is not yet supported for TorchScript classes yet.");
+    }
     L.expect(':');
 
     L.expect(TK_INDENT);
