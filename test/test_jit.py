@@ -256,6 +256,7 @@ class JitTestCase(TestCase):
     _restored_warnings = False
 
     def setUp(self):
+        super(JitTestCase, self).setUp()
         # unittest overrides all warning filters and forces all of them to show up
         # after we install our own to silence those coming from inside PyTorch.
         # This will ensure that our filter still takes precedence.
@@ -265,6 +266,7 @@ class JitTestCase(TestCase):
         torch._C._jit_set_emit_module_hook(self.emitModuleHook)
 
     def tearDown(self):
+        super(JitTestCase, self).tearDown()
         # needs to be cleared because python might be unloaded before
         # the callback gets destucted
         torch._C._jit_set_emit_module_hook(None)
