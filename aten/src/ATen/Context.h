@@ -67,6 +67,7 @@ class CAFFE2_API Context {
   }
   bool hasOpenMP() const;
   bool hasMKL() const;
+  bool hasMKLDNN() const;
   bool hasLAPACK() const;
   bool hasMKLDNN() const;
   bool hasMAGMA() const {
@@ -235,6 +236,10 @@ static inline bool hasOpenMP() {
 
 static inline bool hasMKL() {
   return globalContext().hasMKL();
+}
+
+static inline bool hasMKLDNN() {
+  return globalContext().hasMKLDNN();
 }
 
 static inline bool hasLAPACK() {

@@ -40,6 +40,15 @@ bool cudnn_is_acceptable(const Tensor& self) {
   return true;
 }
 
+bool mkldnn_is_acceptable(const Tensor& self) {
+  if (!globalContext().hasMKLDNN()) return false;
+  if (self.is_cuda() || self.is_sparse()) return false;
+  if (self.type().scalarType() != kFloat) return false;
+  // MKLDNN doesn't support empty input tensors
+  if (self.numel() == 0) return false;
+  return true;
+}
+
 Tensor detach(const Tensor& self) {
   // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
   AT_ERROR("detach is not implemented for Tensor");

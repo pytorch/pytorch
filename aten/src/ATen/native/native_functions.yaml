@@ -1440,6 +1440,10 @@
   matches_jit_signature: True
   variants: function, method
 
+- func: mkldnn_is_acceptable(Tensor self) -> bool
+  matches_jit_signature: True
+  device_guard: false
+
 - func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
   matches_jit_signature: True
 
@@ -1450,6 +1454,18 @@
   matches_jit_signature: True
 
 - func: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
+
+- func: mkldnn_convolution_transpose(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups) -> Tensor
+  matches_jit_signature: True
+
+- func: mkldnn_convolution_transpose_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool bias_defined) -> Tensor
+  matches_jit_signature: True
+
+- func: mkldnn_convolution_transpose_backward_weights(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool bias_defined) -> (Tensor, Tensor)
+  matches_jit_signature: True
+
+- func: mkldnn_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   matches_jit_signature: True
 
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
