@@ -15,7 +15,7 @@ safe_to_use_tensor = tensor.clone()
 event.set()
 ```
 
-However, this requires additional memory as well as blocking producer process (and gets overcomplicated in case of multiple consumers and handling various race-conditions).
+However, this requires blocking producer process (and gets overcomplicated in case of multiple consumers and handling various race-conditions).
 
 Instead, we implement cross-process reference counting for shared CUDA (and HIP) tensors, which will take care of keeping producers memory allocated for entire tensor's life-span.
 

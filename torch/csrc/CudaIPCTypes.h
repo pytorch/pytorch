@@ -53,6 +53,10 @@ namespace {
 
 constexpr int64_t CUDA_IPC_REF_COUNTER_FILE_SIZE = 10000;
 constexpr int64_t CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO = 1000;
+// This was determined empirically that CUDA (v10.1 and below) have the limit
+// on the number of recorded blocking interprocess events. It is around ~22,000.
+// And to give us leeway, we picked 1000 as it gives us enough events to share
+// tensors effectively.
 constexpr int64_t CUDA_IPC_MAXIMUM_EVENTS_TO_USE = 1000;
 
 // All to be deleted data blocks with non zero reference counter goes there
