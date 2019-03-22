@@ -126,7 +126,9 @@ DataRandomFiller::DataRandomFiller(
   for (size_t i = 0; i < run_net.arg_size(); ++i) {
     const auto& arg = run_net.arg(i);
     // TODO: replace "PredictorParameters" with the constant in OSS bbp
-    if (arg.has_name() && arg.name() == "PredictorParameters") {
+    if (arg.has_name() &&
+        ((arg.name() == "PredictorParameters") ||
+         arg.name().find("RemovedOp") != std::string::npos)) {
       parameters.reserve(arg.strings_size());
       for (size_t j = 0; j < arg.strings_size(); ++j) {
         parameters.emplace(arg.strings(j));
