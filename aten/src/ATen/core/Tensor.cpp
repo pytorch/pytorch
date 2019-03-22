@@ -20,6 +20,9 @@ void Tensor::enforce_invariants() {
           impl_->dtype_initialized(),
           "Partially-initialized tensor not supported by at::Tensor");
       AT_ASSERTM(
+          !impl_->is_sparse(),
+          "Sparse Tensors are supported by at::Tensor, but invariants aren't implemented.  Please file a bug.");
+      AT_ASSERTM(
           impl_->storage_initialized(),
           "Partially-initialized tensor not supported by at::Tensor");
     }
