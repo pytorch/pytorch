@@ -991,7 +991,7 @@ void OptimizeForMkldnn(
 
   fuseOrderSwitchToQuantizeOp(nn);
 
-  fusePreConvertOp(nn);
+  //fusePreConvertOp(nn);
 }
 
 #endif // CAFFE2_USE_MKLDNN
