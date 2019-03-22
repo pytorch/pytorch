@@ -1,13 +1,14 @@
 #ifndef CAFFE2_CORE_OPERATOR_SCHEMA_H_
 #define CAFFE2_CORE_OPERATOR_SCHEMA_H_
 
+#include <algorithm>
 #include <climits>
 #include <functional>
 #include <initializer_list>
 #include <ostream>
 #include <set>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 #include "c10/util/Registry.h"
 #include "caffe2/core/common.h"
@@ -405,6 +406,24 @@ class CAFFE2_API OpSchema {
   //            \_____/  \________/  \__/
   // lengths =    [3,        4,       2]
   OpSchema& ValueLengthInputFillers(size_t value_index, size_t length_index);
+
+  // The helper is filling the starts and ends; e.g.:
+  //         1
+  //         |
+  //         V
+  // data = [
+  //     [1, 2, 3, 4],  <- 0
+  //     [5, 6, 7, 8],  <- -1
+  // ]
+  //            ^
+  //            |
+  //            3
+  //
+  // starts = [0, 1]
+  // ends = [-1, 3]
+  //
+  OpSchema&
+  SliceInputFillers(size_t value_index, size_t starts_index, size_t ends_index);
 
   OpSchema& DisallowInputFillers();
 
