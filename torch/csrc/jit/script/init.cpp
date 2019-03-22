@@ -195,7 +195,6 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     const std::string type_str = typeString(self);
     std::stringstream ss;
     ss << "attribute lookup is not defined on " << kind();
-    auto nn = py::module::import("torch.nn");
     checkForAddToConstantsError(ss);
     throw ErrorReport(loc) << ss.str();
   }
