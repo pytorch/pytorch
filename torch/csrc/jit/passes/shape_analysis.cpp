@@ -516,8 +516,8 @@ class ShapePropagator {
       case prim::unchecked_unwrap_optional: {
 	if (node->input()->type()->isSubtypeOf(TensorType::get())) {
 	  node->output()->setType(node->input()->type());
-	  return;
 	}
+	return;
       }
       case prim::ConstantChunk: {
         Value* tensor = node->input();
