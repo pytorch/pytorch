@@ -180,7 +180,7 @@ extension_backends = ['MSNPU', 'XLA']
 
 # scalar_name, c_type, accreal, th_scalar_type, is_floating_type
 scalar_types = [
-    ('Bool', 'bool', 'BoolAccrealNotDefined', 'uint8_t', False),
+    ('Bool', 'uint8_t', 'BoolAccrealNotDefined', 'uint8_t', False),
     ('Byte', 'uint8_t', 'Long', 'uint8_t', False),
     ('Char', 'int8_t', 'Long', 'int8_t', False),
     ('Double', 'double', 'Double', 'double', True),
@@ -249,7 +249,10 @@ def format_yaml(data):
     noalias_dumper.ignore_aliases = lambda self, data: True
     # Support serializing OrderedDict
     noalias_dumper.add_representer(OrderedDict, dict_representer)
-    return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper)
+    # Some yaml parsers (e.g. Haskell's) don't understand line breaks.
+    # width=float('Inf') turns off optional line breaks and improves
+    # the portability of the outputted yaml.
+    return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper, width=float('Inf'))
 
 
 def generate_storage_type_and_tensor(backend, density, scalar_type, declarations):

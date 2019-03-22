@@ -164,7 +164,7 @@ void Variable::Impl::set_data(const at::Tensor &new_data) {
   auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
   if (prior_accumulator) {
     const auto prior_device = prior_accumulator->input_metadata(0).device();
-    const auto new_device = new_data.is_cuda() ? new_data.get_device() : -1;
+    const auto new_device = new_data.device();
 
     if (new_data.type() != data_.type() || prior_device != new_device) {
       autograd_meta->grad_accumulator_.reset();
@@ -217,7 +217,7 @@ const std::shared_ptr<Function>& Variable::grad_fn() const {
       fn->add_input_metadata(
         diff_view_meta->base_.type()
       , sizes() // Note: sizes(), not base_.sizes(), is intentional
-      , diff_view_meta->base_.is_cuda() ? diff_view_meta->base_.get_device() : -1);
+      , diff_view_meta->base_.device());
       diff_view_meta->grad_fn_ = std::move(fn);
       diff_view_meta->attr_version = current_version;
     }

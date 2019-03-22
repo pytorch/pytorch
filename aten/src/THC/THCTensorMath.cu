@@ -111,6 +111,3 @@ struct NonZeroOp
 
 #include <THC/generic/THCTensorMath.cu>
 #include <THC/THCGenerateAllTypes.h>
-
-#include <THC/generic/THCTensorMath.cu>
-#include <THC/THCGenerateBoolType.h>

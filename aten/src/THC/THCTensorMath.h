@@ -7,9 +7,6 @@
 #include <THC/generic/THCTensorMath.h>
 #include <THC/THCGenerateAllTypes.h>
 
-#include <THC/generic/THCTensorMath.h>
-#include <THC/THCGenerateBoolType.h>
-
 #include <THC/generic/THCTensorMathBlas.h>
 #include <THC/THCGenerateAllTypes.h>
 
