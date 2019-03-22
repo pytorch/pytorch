@@ -904,11 +904,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   DeviceType device_type() const {
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
-    if (!opaque_handle_) {
-      return storage_.device_type();
-    } else {
-      return computeDeviceType(type_id());
-    }
+    return storage_.device_type();
   }
 
   /**
@@ -916,11 +912,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * device).
    */
   Device GetDevice() const {
-    if (!opaque_handle_) {
-      return storage_.device();
-    } else {
-      return device();
-    }
+    return storage_.device();
   }
 
   /**

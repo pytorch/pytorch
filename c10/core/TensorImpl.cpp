@@ -130,11 +130,7 @@ TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
 }
 
 bool TensorImpl::has_storage() const {
-  if (!opaque_handle_) {
-    return false;
-  } else {
-    return storage_;
-  }
+  return storage_;
 }
 
 const Storage& TensorImpl::storage() const {
