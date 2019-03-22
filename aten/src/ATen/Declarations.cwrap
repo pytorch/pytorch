@@ -3,7 +3,8 @@
   cname: set
   variants: function
   cpu_half: True
-  enable_for_bool: True
+  cpu_bool: True
+  cuda_bool: True
   device_guard: False
   return: argument 0
   options:
@@ -40,7 +41,8 @@
   cname: fill
   variants: function
   cpu_half: True
-  enable_for_bool: True
+  cpu_bool: True
+  cuda_bool: True
   options:
     - arguments:
       - THTensor* self
@@ -56,7 +58,8 @@
   variants:
     - function
   cpu_half: True
-  enable_for_bool: True
+  cpu_bool: True
+  cuda_bool: True
   device_guard: False
   return: bool
   arguments:
@@ -123,7 +126,8 @@
   variants:
     - function
   cpu_half: True
-  enable_for_bool: True
+  cpu_bool: True
+  cuda_bool: True
   arguments:
     - THTensor* self
 ]]
@@ -242,7 +246,8 @@
   variants:
     - function
   cpu_half: True
-  enable_for_bool: True
+  cpu_bool: True
+  cuda_bool: True
   device_guard: False
   return: argument 0
   arguments:
@@ -822,36 +827,6 @@
       default: __last_dim
     - arg: bool keepdim
       default: "false"
-]]
-[[
-  name: _th_median
-  variants:
-    - function
-  return: argument 0,1
-  options:
-    - cname: medianall
-      return: real
-      arguments:
-        - THTensor* self
-]]
-[[
-  name: _th_median
-  variants: function
-  cname: median
-  return: argument 0,1
-  options:
-    - cname: median
-      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
-      arguments:
-        - arg: THTensor* values
-          output: True
-        - arg: THIndexTensor* indices
-          output: True
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-        - arg: bool keepdim
-          default: "false"
 ]]
 [[
   name: _th_sort
@@ -1698,7 +1673,8 @@
   cname: zero
   return: self
   cpu_half: True
-  enable_for_bool: True
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   arguments:
@@ -2243,38 +2219,6 @@
     - THTensor* A
 ]]
 [[
-  name: _th_trtrs
-  cname: trtrs
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0,1
-  arguments:
-    - arg: THTensor* res1
-      output: True
-    - arg: THTensor* res2
-      output: True
-    - THTensor* self
-    - THTensor* A
-    - arg: bool upper
-      if_true: U
-      if_false: L
-      default: U
-    - arg: bool transpose
-      if_true: T
-      if_false: N
-      default: N
-    - arg: bool unitriangular
-      if_true: U
-      if_false: N
-      default: N
-]]
-[[
   name: _th_symeig
   cname: syev
   types:
@@ -2522,8 +2466,9 @@
     - CPU
     - CUDA
   return: self
-  enable_for_bool: True
   variants: function
+  cpu_bool: True
+  cuda_bool: True
   options:
     - cname: random
       arguments:
@@ -2573,12 +2518,10 @@
   name: _th_uniform_
   types:
     - floating_point
-    - Bool
   backends:
     - CPU
     - CUDA
   cname: uniform
-  enable_for_bool: True
   variants: function
   return: self
   arguments:
@@ -2749,7 +2692,8 @@
   name: _th_alias
   return: THTensor*
   cpu_half: True
-  enable_for_bool: True
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   options:
@@ -2774,7 +2718,8 @@
   cname: catArray
   variants: [function]
   cpu_half: True
-  enable_for_bool: True
+  cpu_bool: True
+  cuda_bool: True
   return: self
   arguments:
     - arg: THTensor* self
