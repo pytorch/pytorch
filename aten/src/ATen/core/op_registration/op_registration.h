@@ -36,11 +36,12 @@ namespace c10 {
  */
 class C10_API RegisterOperators final {
 public:
-  RegisterOperators() = default;
+  RegisterOperators();
+  RegisterOperators(RegisterOperators&&);
+  RegisterOperators& operator=(RegisterOperators&&);
   RegisterOperators(const RegisterOperators&) = delete;
-  RegisterOperators(RegisterOperators&&) = default;
   RegisterOperators& operator=(const RegisterOperators&) = delete;
-  RegisterOperators& operator=(RegisterOperators&&) = default;
+  ~RegisterOperators();
 
   /**
    * Register an operator based on a function schema and a set of configuration
@@ -62,33 +63,58 @@ public:
    */
   template<class... ConfigParameters>
   RegisterOperators op(FunctionSchema schema, ConfigParameters&&... configParameters) && {
-    detail::KernelRegistrationConfig config = make_registration_config(configParameters...);
-
-    if (config.inferred_function_schema.get() != nullptr) {
-      assertSchemasHaveSameSignature(*config.inferred_function_schema, schema);
-    }
-
-    registrars_.emplace_back(std::move(schema), config.dispatch_key, config.kernel_func, std::move(config.cache_creator_func));
+    registerOp_(std::move(schema), make_registration_config(configParameters...));
     return std::move(*this);
   }
 
   // TODO allow input schema to be just the operator name + overload name, in that case use schema generated from kernel function
-  // TODO if schema is fully specified, still generate schema from kernel function and make sure it's correct
 
-  // TODO error if dispatch key is not specified
-
-  // Deprecated. For backwards compatibility only.
-  // Don't use this, it introduces a performance overhead on each kernel call
-  // due to the kernel being stored in the wrapper as a runtime function pointer.
+  /**
+   * Deprecated. For backwards compatibility only.
+   * Don't use this, it introduces a performance overhead on each kernel call
+   * due to the kernel being stored in the wrapper as a runtime function pointer.
+   *
+   * Given a kernel
+   *
+   * > namespace { Tensor my_kernel_cpu(Tensor a, Tensor b) {...} }
+   *
+   * This deprecated API looks like:
+   *
+   * > static auto registry = c10::RegisterOperators()
+   * >     .op("my_op", &my_kernel_cpu);
+   *
+   * But you should use the new API instead:
+   *
+   * > static auto registry = c10::RegisterOperators()
+   * >     .op("my_op", kernel<decltype(my_kernel_cpu), &my_kernel_cpu>());
+   *
+   * Or, alternatively, write your kernel as a functor:
+   *
+   * > namespace {
+   * >   class my_kernel_cpu final : public c10::OperatorKernel {
+   * >   public:
+   * >     Tensor operator()(Tensor a, Tensor b) {...}
+   * >   };
+   * > }
+   * >
+   * > static auto registry = c10::RegisterOperators()
+   * >     .op("my_op", c10::kernel<my_kernel_cpu>());
+   */
   template<class KernelFunc>
   RegisterOperators op(FunctionSchema schema, KernelFunc* func) && {
+    // We intentionally don't extend this deprecated API to support dispatch keys
+    // and the like to push people towards using the new API.
     return op(std::move(schema), kernel<detail::WrapKernelFunctionRuntime>(func));
   }
 
   // TODO Add deprecated lambda-based API
 
 private:
-  std::vector<detail::OperatorRegistrar> registrars_;
+  void registerOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config);
+
+  class OperatorRegistrar;
+
+  std::vector<OperatorRegistrar> registrars_;
 };
 
 }
