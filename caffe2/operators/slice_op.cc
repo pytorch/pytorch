@@ -9,7 +9,10 @@ REGISTER_CPU_GRADIENT_OPERATOR(SliceGradient, SliceGradientOp<CPUContext>);
 OPERATOR_SCHEMA(Slice)
     .NumInputs(1, 3)
     .NumOutputs(1)
-    .DisallowInputFillers() // the filler cannot be enabled without output dims
+    .SliceInputFillers(
+        0, // value
+        1, // starts
+        2) // ends
     .SetDoc(R"DOC(
 Produces a slice of the input tensor.
 

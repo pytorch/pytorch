@@ -351,6 +351,21 @@ void SparseWeightsFillerHelper(
       .Dist(FD_UNIFORM);
 }
 
+void SliceInputFillerHelper(
+    const std::vector<std::vector<int64_t>>& shapes,
+    size_t value_index,
+    size_t starts_index,
+    size_t ends_index,
+    std::vector<TensorFiller>* fillers) {
+  (*fillers)[starts_index]
+      .Min(0)
+      .Max(*std::min_element(
+          shapes[value_index].begin(), shapes[value_index].end()))
+      .Dist(FD_UNIFORM);
+
+  (*fillers)[ends_index].Min(-1).Max(-1).Dist(FD_UNIFORM);
+}
+
 void SparseSegmentsFillerHelper(
     const std::vector<std::vector<int64_t>>& shapes,
     size_t value_index,
@@ -424,6 +439,36 @@ OpSchema& OpSchema::ValueLengthInputFillers(
     auto fillers = SupplyDenseFillers(shapes);
     // fill in the length (value_index is used to get the correct shape)
     SparseLengthsFillerHelper(shapes, value_index, length_index, &fillers);
+    return fillers;
+  };
+  return *this;
+}
+
+// The helper is build input with starts and ends; e.g.:
+//         1
+//         |
+//         V
+// data = [
+//     [1, 2, 3, 4],  <- 0
+//     [5, 6, 7, 8],  <- -1
+// ]
+//            ^
+//            |
+//            3
+//
+// starts = [0, 1]
+// ends = [-1, 3]
+//
+OpSchema& OpSchema::SliceInputFillers(
+    size_t value_index,
+    size_t starts_index,
+    size_t ends_index) {
+  filler_supplier_ = [this, value_index, starts_index, ends_index](
+                         const std::vector<std::vector<int64_t>>& shapes) {
+    auto fillers = SupplyDenseFillers(shapes);
+    // fill in the length (value_index is used to get the correct shape)
+    SliceInputFillerHelper(
+        shapes, value_index, starts_index, ends_index, &fillers);
     return fillers;
   };
   return *this;
