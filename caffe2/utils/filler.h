@@ -80,9 +80,10 @@ class TensorFiller {
   // A helper function to construct the lengths vector for sparse features
   // We try to pad least one index per batch unless the total_length is 0
   template <class Type>
-  TensorFiller& SparseLengths(Type total_length) {
+  TensorFiller& SparseLengths(Type total_length, size_t num_elems) {
+    Type min_value = total_length / num_elems;
     return FixedSum(total_length)
-        .Min(std::min(static_cast<Type>(1), total_length))
+        .Min(std::min(static_cast<Type>(1), min_value))
         .Max(total_length);
   }
 
