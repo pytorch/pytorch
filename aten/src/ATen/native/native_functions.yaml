@@ -4006,6 +4006,9 @@
 
 - func: sort(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   matches_jit_signature: True
+  dispatch:
+    CPU: sort_out_cpu
+    CUDA: sort_out_cuda
 
 - func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor, Tensor)
   matches_jit_signature: True

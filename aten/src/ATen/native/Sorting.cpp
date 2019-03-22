@@ -66,6 +66,195 @@ void dim_apply(TensorList tensors, int64_t dim, Fn f) {
   });
 }
 
+template <typename scalar_t, typename ComparisonOp>
+void quick_sort_impl(
+    TensorAccessor<scalar_t, 1> arr,
+    TensorAccessor<int64_t, 1> idx,
+    ComparisonOp gt_or_nan) {
+  auto ARR_SWAP = [&](int64_t i, int64_t j) { std::swap(arr[i], arr[j]); };
+  auto BOTH_SWAP = [&](int64_t i, int64_t j) {
+    std::swap(arr[i], arr[j]);
+    std::swap(idx[i], idx[j]);
+  };
+
+  int64_t beg[MAX_LEVELS], end[MAX_LEVELS], i, j, L, R, P, swap, pid,
+      stack = 0, sz_right, sz_left;
+  scalar_t rswap, piv;
+  unsigned char done = 0;
+
+  // beg[0]=0; end[0]=arr.size(0);
+  stack = 0;
+  L = 0;
+  R = arr.size(0) - 1;
+  done = arr.size(0) - 1 <= M_SMALL;
+
+  while (!done) {
+    // Use median of three for pivot choice
+    P = (L + R) >> 1;
+    BOTH_SWAP(P, L + 1);
+    if (gt_or_nan(arr[L + 1], arr[R])) {
+      BOTH_SWAP(L + 1, R);
+    }
+    if (gt_or_nan(arr[L], arr[R])) {
+      BOTH_SWAP(L, R);
+    }
+    if (gt_or_nan(arr[L + 1], arr[L])) {
+      BOTH_SWAP(L + 1, L);
+    }
+
+    i = L + 1;
+    j = R;
+    piv = arr[L];
+    pid = idx[L];
+
+    do {
+      do {
+        i = i + 1;
+      } while (gt_or_nan(piv, arr[i]));
+      do {
+        j = j - 1;
+      } while (gt_or_nan(arr[j], piv));
+      if (j < i)
+        break;
+      BOTH_SWAP(i, j);
+    } while (1);
+    BOTH_SWAP(L, j);
+    // Left subfile is (L, j-1)
+    // Right subfile is (i, R)
+    sz_left = j - L;
+    sz_right = R - i + 1;
+    if (sz_left <= M_SMALL && sz_right <= M_SMALL) {
+      // both subfiles are small
+      // if stack empty
+      if (stack == 0) {
+        done = 1;
+      } else {
+        stack--;
+        L = beg[stack];
+        R = end[stack];
+      }
+    } else if (sz_left <= M_SMALL || sz_right <= M_SMALL) {
+      // exactly one of the subfiles is small
+      // (L,R) = large subfile
+      if (sz_left > sz_right) {
+        // Implicit: L = L;
+        R = j - 1;
+      } else {
+        L = i;
+        // Implicit: R = R;
+      }
+    } else {
+      // none of the subfiles is small
+      // push large subfile
+      // (L,R) = small subfile
+      if (sz_left > sz_right) {
+        beg[stack] = L;
+        end[stack] = j - 1;
+        stack++;
+        L = i;
+        // Implicit: R = R
+      } else {
+        beg[stack] = i;
+        end[stack] = R;
+        stack++;
+        // Implicit: L = L;
+        R = j - 1;
+      }
+    }
+  } // while not done
+  // Now insertion sort on the concatenation of subfiles
+  for (i = arr.size(0) - 2; i >= 0; i--) {
+    if (gt_or_nan(arr[i], arr[i + 1])) {
+      piv = arr[i];
+      pid = idx[i];
+      j = i + 1;
+      do {
+        arr[j - 1] = arr[j];
+        idx[j - 1] = idx[j];
+        j = j + 1;
+      } while (j < arr.size(0) && gt_or_nan(piv, arr[j]));
+      arr[j - 1] = piv;
+      idx[j - 1] = pid;
+    }
+  }
+}
+
+template <typename scalar_t>
+void quick_sort(
+    TensorAccessor<scalar_t, 1> arr,
+    TensorAccessor<int64_t, 1> idx,
+    bool descending) {
+  // ComparisonOp emulates NumPy behavior of putting NaNs
+  // at the end of an ascending list.
+  // We would use a lambda within quick_sort, if it were not for
+  // https://stackoverflow.com/questions/27989031/msvc-error-when-using-capture-less-lambda-expressions-as-second-and-third-operan
+  if (descending) {
+    quick_sort_impl(arr, idx, [](scalar_t x, scalar_t y) -> bool {
+      return ((y != y && x == x) || (x < y));
+    });
+  } else {
+    quick_sort_impl(arr, idx, [](scalar_t x, scalar_t y) -> bool {
+      return ((x != x && y == y) || (x > y));
+    });
+  }
+}
+
+} // anonymous namespace
+
+std::tuple<Tensor&, Tensor&> sort_out_cpu(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t dim_,
+    bool descending) {
+  int64_t dim = maybe_wrap_dim(dim_, self.dim());
+
+  if (values.defined()) {
+    AT_CHECK(
+        self.scalar_type() == values.scalar_type(),
+        "output values must be of same type as input");
+    values.resize_as_(self);
+  } else {
+    values = at::empty_like(self);
+  }
+  at::_copy_same_type_(values, self);
+  if (indices.defined()) {
+    AT_CHECK(
+        indices.dtype() == kLong, "output indices must be of scalar type Long");
+    AT_CHECK(
+        indices.device() == self.device(),
+        "output indices must be on same device as input");
+    indices.resize_(self.sizes());
+  } else {
+    indices = at::empty(self.sizes(), self.options().dtype(kLong));
+  }
+  if (self.dim() == 0 && self.numel() == 1) {
+    indices.zero_();
+    return std::forward_as_tuple(values, indices);
+  }
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "sort", [&] {
+    dim_apply({values, indices}, dim, [&](int64_t i, TensorList tl) {
+      auto values = tl[0].accessor<scalar_t, 1>();
+      auto indices = tl[1].accessor<int64_t, 1>();
+      for (int64_t j = 0; j < indices.size(0); j++) {
+        indices[j] = j;
+      }
+      quick_sort(values, indices, descending);
+    });
+  });
+  return std::forward_as_tuple(values, indices);
+}
+
+std::tuple<Tensor, Tensor> sort(
+    const Tensor& self,
+    int64_t dim,
+    bool descending) {
+  Tensor values = at::empty({0}, self.options());
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  at::sort_out(values, indices, self, dim, descending);
+  return std::make_tuple(values, indices);
+}
+
 template <typename scalar_t, typename Comp, typename Fn>
 void quick_select_template(
     TensorAccessor<scalar_t, 1> arr,
@@ -124,8 +313,6 @@ void quick_select_template(
       R = j - 1;
   } while (1);
 }
-
-} // namespace
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
     Tensor& values,
@@ -231,7 +418,7 @@ Tensor median_cpu(const Tensor& self) {
   }
   auto tmp_values = self.clone().view(-1);
   auto result = at::empty({1}, self.options());
-  AT_DISPATCH_ALL_TYPES(self.type(), "median", [&] {
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "median", [&] {
     // note, quick_select is 0 based while kthvalue is not
     int64_t k = (tmp_values.size(0) - 1) / 2;
     auto val_accessor = tmp_values.accessor<scalar_t, 1>();
@@ -247,6 +434,10 @@ Tensor median_cpu(const Tensor& self) {
     result.fill_(tmp_values[k]);
   });
   return result.view({});
+}
+
+Tensor argsort(const Tensor& self, int64_t dim, bool descending) {
+  return std::get<1>(at::sort(self, dim, descending));
 }
 
 } // namespace native

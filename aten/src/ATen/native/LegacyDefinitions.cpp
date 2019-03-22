@@ -650,18 +650,6 @@ Tensor max(const Tensor & self) {
   return at::legacy::th::_th_max(self);
 }
 
-std::tuple<Tensor &,Tensor &> sort_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending) {
-  return at::legacy::th::_th_sort_out(values, indices, self, dim, descending);
-}
-
-std::tuple<Tensor,Tensor> sort(const Tensor & self, int64_t dim, bool descending) {
-  return at::legacy::th::_th_sort(self, dim, descending);
-}
-
-Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
-  return std::get<1>(at::legacy::th::_th_sort(self, dim, descending));
-}
-
 std::tuple<Tensor &,Tensor &> topk_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
   return at::legacy::th::_th_topk_out(values, indices, self, k, dim, largest, sorted);
 }

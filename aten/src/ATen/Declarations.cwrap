@@ -824,24 +824,6 @@
       default: "false"
 ]]
 [[
-  name: _th_sort
-  cname: sort
-  variants:
-    - function
-  return: argument 0,1
-  arguments:
-    - arg: THTensor* values
-      output: True
-    - arg: THIndexTensor* indices
-      output: True
-    - THTensor* self
-    - arg: long dim
-      default: __last_dim
-      wrap_dim: self
-    - arg: bool descending
-      default: "false"
-]]
-[[
   name: _th_topk
   cname: topk
   variants:

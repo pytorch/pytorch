@@ -93,7 +93,6 @@ TH_API void THTensor_(diag)(THTensor *r_, THTensor *t, int k);
 TH_API void THTensor_(eye)(THTensor *r_, int64_t n, int64_t m);
 TH_API void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n);
 
-TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder);
 TH_API void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, int dim, int dir, int sorted);
 TH_API void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k);
 

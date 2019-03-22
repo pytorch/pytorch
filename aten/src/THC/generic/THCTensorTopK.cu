@@ -168,7 +168,11 @@ void THCTensor_(topk)(THCState* state,
       // allocated tensors to receive the results.
       THCTensor* sortedTopK = THCTensor_(new)(state);
       THCudaLongTensor* sortedIndices = THCudaLongTensor_new(state);
-      THCTensor_(sort)(state, sortedTopK, sortedIndices, topK, dim, dir);
+      at::Tensor wrapped_topk = THTensor_wrap(topK);
+      at::Tensor wrapped_sorted_topk = THTensor_wrap(sortedTopK);
+      at::Tensor wrapped_sorted_indices = THTensor_wrap(sortedIndices);
+      at::sort_out(wrapped_sorted_topk, wrapped_sorted_indices, wrapped_topk,
+		   dim, dir);
 
       THCudaLongTensor* sortedTopKIndices = THCudaLongTensor_new(state);
 

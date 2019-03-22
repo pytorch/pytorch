@@ -727,35 +727,6 @@ static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t ele
 #undef MAX_LEVELS
 #undef M_SMALL
 
-void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder)
-{
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "invalid dimension %d",
-      dimension);
-
-  THTensor_(resizeAs)(rt_, t);
-  at::Tensor rt__wrap = THTensor_wrap(rt_);
-  at::Tensor t_wrap = THTensor_wrap(t);
-  at::_copy_same_type_(rt__wrap, t_wrap);
-  THLongTensor_resize(ri_, t->sizes(), {});
-
-  if(descendingOrder)
-  {
-    TH_TENSOR_DIM_APPLY2(scalar_t, rt_, int64_t, ri_, dimension,
-                         int64_t i;
-                         for(i = 0; i < ri__size; i++)
-                           ri__data[i*ri__stride] = i;
-                         THTensor_(quicksortdescend)(rt__data, ri__data, rt__size, rt__stride);)
-      }
-  else
-  {
-    TH_TENSOR_DIM_APPLY2(scalar_t, rt_, int64_t, ri_, dimension,
-                         int64_t i;
-                         for(i = 0; i < ri__size; i++)
-                           ri__data[i*ri__stride] = i;
-                         THTensor_(quicksortascend)(rt__data, ri__data, rt__size, rt__stride);)
-      }
-}
-
 /* Implementation of the Quickselect algorithm, based on Nicolas Devillard's
 public domain implementation at http://ndevilla.free.fr/median/median/
 Adapted similarly to the above Quicksort algorithm. */
@@ -865,54 +836,6 @@ void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int
                        }
                        *values__data = mode;
                        *indices__data = modei;);
-
-  c10::raw::intrusive_ptr::decref(temp_);
-  THLongTensor_free(tempi_);
-  if (!keepdim) {
-    THTensor_(squeeze1d)(values_, values_, dimension);
-    THLongTensor_squeeze1d(indices_, indices_, dimension);
-  }
-}
-
-void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t, int64_t k, int dimension, int keepdim)
-{
-  THTensor *temp_;
-  THLongTensor *tempi_;
-  scalar_t *temp__data;
-  int64_t *tempi__data;
-  int64_t t_size_dim;
-
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "dimension out of range");
-  THArgCheck(k > 0 && k <= THTensor_sizeLegacyNoScalars(t, dimension), 2, "selected index out of range");
-
-  int in_dims = THTensor_(nDimensionLegacyAll)(t);
-  THTensor_(preserveReduceDimSemantics)(values_, in_dims, dimension, keepdim);
-  THLongTensor_preserveReduceDimSemantics(indices_, in_dims, dimension, keepdim);
-  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
-  dim[dimension] = 1;
-  THTensor_(resize)(values_, dim, {});
-  THLongTensor_resize(indices_, dim, {});
-
-  t_size_dim = THTensor_sizeLegacyNoScalars(t, dimension);
-
-  temp_ = THTensor_(new)();
-  THTensor_(resize1d)(temp_, t_size_dim);
-  temp__data = temp_->data<scalar_t>();
-
-  tempi_ = THLongTensor_new();
-  THLongTensor_resize1d(tempi_, t_size_dim);
-  tempi__data = THLongTensor_data(tempi_);
-
-  TH_TENSOR_DIM_APPLY3(scalar_t, t, scalar_t, values_, int64_t, indices_, dimension,
-                       TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
-                       int64_t i;
-                       for(i = 0; i < t_size_dim; i++)
-                          temp__data[i] = t_data[i*t_stride];
-                       for(i = 0; i < t_size_dim; i++)
-                          tempi__data[i] = i;
-                       THTensor_(quickselect)(temp__data, tempi__data, k - 1, t_size_dim, 1);
-                       *values__data = temp__data[k-1];
-                       *indices__data = tempi__data[k-1];);
 
   c10::raw::intrusive_ptr::decref(temp_);
   THLongTensor_free(tempi_);
