@@ -99,14 +99,25 @@ void PropagateRequiresGrad(Node* node) {
         fmap(node->inputs().slice(2), getRequiresGrad);
     std::vector<bool> body_outputs_require(node->outputs().size(), false);
 
+
     while (body_inputs_require != body_outputs_require) {
-      body_inputs_require =
-          bitwiseOr(body_inputs_require, body_outputs_require);
+      auto body_inputs_require_new = bitwiseOr(body_inputs_require, body_outputs_require);
       setRequiresGrad(
           body->param_node()->outputs().slice(1), body_inputs_require);
       PropagateRequiresGrad(body);
-      body_outputs_require =
+      auto body_outputs_require_new =
           fmap(body->return_node()->inputs().slice(1), getRequiresGrad);
+
+      // if the results haven't changed since the previous iteration, break
+      // this prevents infinite loops where the input grad != output grad
+      if (body_outputs_require_new == body_outputs_require &&
+          body_inputs_require == body_inputs_require_new) {
+        body_outputs_require = bitwiseOr(body_inputs_require, body_outputs_require);
+        break;
+      }
+
+      body_inputs_require = body_inputs_require_new;
+      body_outputs_require = body_outputs_require_new;
     }
 
     setRequiresGrad(node, body_outputs_require);
