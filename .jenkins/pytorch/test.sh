@@ -23,6 +23,11 @@ if [ -n "${IN_CIRCLECI}" ]; then
     sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
     sudo mkdir -p /var/run/sshd
   fi
+
+  if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
+    export PYTORCH_TEST_WITH_SLOW=1
+    export PYTORCH_TEST_SKIP_FAST=1
+  fi
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
