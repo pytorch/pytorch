@@ -765,6 +765,7 @@ bool fusePreConvertOp(repr::NNModule* nn, caffe2::Workspace* ws) {
     }
 
     auto input = repr::nn::getInputs(opNode).front();
+    /*
     if (isOpType(opNode, "Int8Dequantize") &&
         repr::nn::hasSingleOutputAndConsumer(opNode)) {
       auto preNode = repr::nn::getProducer(input);
@@ -774,6 +775,7 @@ bool fusePreConvertOp(repr::NNModule* nn, caffe2::Workspace* ws) {
         removeArg(*predOp, "Y_zero_point");
       }
     }
+    */
 
     nn->dataFlow.replaceNode(output, input);
 
@@ -969,7 +971,7 @@ static Fuser fusers[] = {
     fuseActivation,
     enforceFusionInplace,
     fuseOrderSwitchToQuantizeOp,
-    // fusePreConvertOp,
+    fusePreConvertOp,
 };
 
 void OptimizeForMkldnn(
