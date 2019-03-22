@@ -119,10 +119,9 @@ void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
         auto iter = TensorIterator::unary_op(self, src);
         AT_DISPATCH_ALL_TYPES_AND(
             at::ScalarType::Half, self.scalar_type(), "_copy_same_type_", [&] {
-              unary_kernel_vec(
+              unary_kernel(
                   *iter,
-                  [=](scalar_t a) -> scalar_t { return a; },
-                  [=](Vec256<scalar_t> a) { return a; });
+                  [=](scalar_t a) -> scalar_t { return a; });
             });
       } else {
         serial_path = true;
