@@ -310,7 +310,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         retcode=$(aws s3 ls s3://ossci-linux-build/pytorch/intermediate/${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar)
         set -e
         if [ -z "$retcode" ]; then
-          docker save -o "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" "${DOCKER_IMAGE}"
+          docker save -o "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" "${COMMIT_DOCKER_IMAGE}"
           aws s3 cp "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" "s3://ossci-linux-build/pytorch/intermediate/${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" --acl public-read
           echo "Docker image is uploaded to S3."
           rm "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar"
@@ -466,7 +466,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         retcode=$(aws s3 ls s3://ossci-linux-build/caffe2/intermediate/${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar)
         set -e
         if [ -z "$retcode" ]; then
-          docker save -o "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" "${DOCKER_IMAGE}"
+          docker save -o "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" "${COMMIT_DOCKER_IMAGE}"
           aws s3 cp "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" "s3://ossci-linux-build/caffe2/intermediate/${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" --acl public-read
           echo "Docker image is uploaded to S3."
           rm "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar"
