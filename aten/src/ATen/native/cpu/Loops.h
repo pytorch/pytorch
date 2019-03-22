@@ -93,7 +93,7 @@ static inline bool is_reduction(char** data, const int64_t* strides) {
   const char* in1_ptr = data[1]; \
   const char* in2_ptr = data[2];
 
-// Basic loop unary operation (two inputs, one output). May be auto-vectorized
+// Basic loop unary operation (one input, one output). May be auto-vectorized
 // by the compiler.
 template <typename func_t>
 static inline void unary_loop(char** data, const int64_t* strides, int64_t i, int64_t n, func_t op) {
@@ -105,7 +105,7 @@ static inline void unary_loop(char** data, const int64_t* strides, int64_t i, in
   }
 }
 
-// computes out = op(in1, in2)
+// computes out = op(in1)
 template <typename func_t, typename vec_func_t>
 static inline void vectorized_unary_loop(char** data, int64_t n, func_t op, vec_func_t vop) {
   UNARY_VEC_LOOP_HEADER(func_t, data)
@@ -122,7 +122,7 @@ static inline void vectorized_unary_loop(char** data, int64_t n, func_t op, vec_
   unary_loop(data, strides, i, n, op);
 }
 
-// computes out = op(in1, in2) where in1 is a constant
+// computes out = op(in1) where in1 is a constant
 template <typename func_t, typename vec_func_t>
 static inline void vectorized_unary_loop_s1(char** data, int64_t n, func_t op, vec_func_t vop) {
   UNARY_VEC_LOOP_HEADER(func_t, data)

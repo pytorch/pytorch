@@ -103,7 +103,7 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
 #endif
 
 static void rsqrt_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), rsqrt, [&] {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rsqrt", [&] {
     unary_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t {
