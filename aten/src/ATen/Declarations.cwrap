@@ -2518,10 +2518,12 @@
   name: _th_uniform_
   types:
     - floating_point
+    - Bool
   backends:
     - CPU
     - CUDA
   cname: uniform
+  enable_for_bool: True
   variants: function
   return: self
   arguments:

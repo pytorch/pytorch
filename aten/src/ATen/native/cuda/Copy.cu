@@ -20,10 +20,10 @@ struct CopyOp {
     CUDA_tensor_apply2<dst_T, src_T>(
         dst, src, [] __device__(dst_T & dst_val, const src_T& src_val) {
 #if __CUDA_ARCH__ >= 350
-          dst_val = static_cast<dst_T>(
-              static_cast<native::inter_copy_type_t<dst_T>>(__ldg(&src_val)));
+        dst_val = static_cast<dst_T>(
+            static_cast<native::inter_copy_type_t<dst_T>>(__ldg(&src_val)));
 #else
-          dst_val = static_cast<dst_T>(static_cast<native::inter_copy_type_t<dst_T>>(src_val));
+        dst_val = static_cast<dst_T>(static_cast<native::inter_copy_type_t<dst_T>>(src_val));
 #endif
       });
   }
