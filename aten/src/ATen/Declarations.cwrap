@@ -824,36 +824,6 @@
       default: "false"
 ]]
 [[
-  name: _th_median
-  variants:
-    - function
-  return: argument 0,1
-  options:
-    - cname: medianall
-      return: real
-      arguments:
-        - THTensor* self
-]]
-[[
-  name: _th_median
-  variants: function
-  cname: median
-  return: argument 0,1
-  options:
-    - cname: median
-      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
-      arguments:
-        - arg: THTensor* values
-          output: True
-        - arg: THIndexTensor* indices
-          output: True
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-        - arg: bool keepdim
-          default: "false"
-]]
-[[
   name: _th_sort
   cname: sort
   variants:
@@ -2243,38 +2213,6 @@
     - THTensor* A
 ]]
 [[
-  name: _th_trtrs
-  cname: trtrs
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0,1
-  arguments:
-    - arg: THTensor* res1
-      output: True
-    - arg: THTensor* res2
-      output: True
-    - THTensor* self
-    - THTensor* A
-    - arg: bool upper
-      if_true: U
-      if_false: L
-      default: U
-    - arg: bool transpose
-      if_true: T
-      if_false: N
-      default: N
-    - arg: bool unitriangular
-      if_true: U
-      if_false: N
-      default: N
-]]
-[[
   name: _th_symeig
   cname: syev
   types:
@@ -2573,12 +2511,10 @@
   name: _th_uniform_
   types:
     - floating_point
-    - Bool
   backends:
     - CPU
     - CUDA
   cname: uniform
-  cpu_bool: True
   variants: function
   return: self
   arguments:

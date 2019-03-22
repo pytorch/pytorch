@@ -22,10 +22,8 @@ TH_API void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *inde
 
 TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
 
-TH_API scalar_t THTensor_(powOne)(scalar_t x, scalar_t y);
 TH_API scalar_t THTensor_(minall)(THTensor *t);
 TH_API scalar_t THTensor_(maxall)(THTensor *t);
-TH_API scalar_t THTensor_(medianall)(THTensor *t);
 TH_API accreal THTensor_(sumall)(THTensor *t);
 
 TH_API void THTensor_(neg)(THTensor *self, THTensor *src);
@@ -77,7 +75,6 @@ TH_API void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *
 TH_API void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim);
 TH_API void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t, int64_t k, int dimension, int keepdim);
 TH_API void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim);
-TH_API void THTensor_(median)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim);
 TH_API void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim);
 TH_API void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension);
 TH_API void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension);

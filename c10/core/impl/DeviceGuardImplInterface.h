@@ -131,4 +131,8 @@ inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
   return p;
 }
 
+inline bool hasDeviceGuardImpl(DeviceType type) {
+  return device_guard_impl_registry[static_cast<size_t>(type)].load();
+}
+
 }} // namespace c10::impl

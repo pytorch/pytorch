@@ -758,53 +758,6 @@ void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimensio
 
 /* Implementation of the Quickselect algorithm, based on Nicolas Devillard's
 public domain implementation at http://ndevilla.free.fr/median/median/
-Adapted similarly to the above Quicksort algorithm.
-This version does not produce indices along with values. */
-static void THTensor_(quickselectnoidx)(scalar_t *arr, int64_t k, int64_t elements, int64_t stride)
-{
-  int64_t P, L, R, i, j;
-  scalar_t rswap, piv;
-  L = 0;
-  R = elements-1;
-
-  do {
-    if (R <= L) /* One element only */
-      return;
-
-    if (R == L+1) {  /* Two elements only */
-      if (ARR(L) > ARR(R)) {
-        ARR_SWAP(L, R);
-      }
-      return;
-    }
-
-    /* Use median of three for pivot choice */
-    P=(L+R)>>1;
-    ARR_SWAP(P, L+1);
-    if (ARR(L+1) > ARR(R)) { ARR_SWAP(L+1, R); }
-    if (ARR(L) > ARR(R)) { ARR_SWAP(L, R); }
-    if (ARR(L+1) > ARR(L)) { ARR_SWAP(L+1, L); }
-
-    i = L+1;
-    j = R;
-    piv = ARR(L);
-    do {
-      do i++; while(ARR(i) < piv);
-      do j--; while(ARR(j) > piv);
-      if (j < i)
-        break;
-      ARR_SWAP(i, j);
-    } while(1);
-    ARR_SWAP(L, j);
-
-    /* Re-set active partition */
-    if (j <= k) L=i;
-    if (j >= k) R=j-1;
-  } while(1);
-}
-
-/* Implementation of the Quickselect algorithm, based on Nicolas Devillard's
-public domain implementation at http://ndevilla.free.fr/median/median/
 Adapted similarly to the above Quicksort algorithm. */
 static void THTensor_(quickselect)(scalar_t *arr, int64_t *idx, int64_t k, int64_t elements, int64_t stride)
 {
@@ -854,31 +807,6 @@ static void THTensor_(quickselect)(scalar_t *arr, int64_t *idx, int64_t k, int64
 #undef LONG_SWAP
 #undef REAL_SWAP
 #undef BOTH_SWAP
-
-scalar_t THTensor_(medianall)(THTensor *tensor)
-{
-  THArgCheck(THTensor_nDimensionLegacyAll(tensor) > 0, 1, "tensor must have one dimension");
-
-  scalar_t theMedian;
-  ptrdiff_t numel;
-  int64_t k;
-  THTensor *temp_;
-  scalar_t *temp__data;
-
-  numel = THTensor_(nElement)(tensor);
-  k = (numel-1) >> 1;
-
-  temp_ = THTensor_(newClone)(tensor);
-  temp__data = temp_->data<scalar_t>();
-
-  THTensor_(quickselectnoidx)(temp__data, k, numel, 1);
-
-  theMedian = temp__data[k];
-
-  c10::raw::intrusive_ptr::decref(temp_);
-
-  return theMedian;
-}
 
 void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
 {
@@ -992,18 +920,6 @@ void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t,
     THTensor_(squeeze1d)(values_, values_, dimension);
     THLongTensor_squeeze1d(indices_, indices_, dimension);
   }
-}
-
-void THTensor_(median)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
-{
-  int64_t t_size_dim, k;
-
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "dimension out of range");
-
-  t_size_dim = THTensor_sizeLegacyNoScalars(t, dimension);
-  k = (t_size_dim-1) >> 1; /* take middle or one-before-middle element */
-
-  THTensor_(kthvalue)(values_, indices_, t, k+1, dimension, keepdim);
 }
 
 void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, int dim, int dir, int sorted)
