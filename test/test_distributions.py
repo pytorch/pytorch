@@ -2208,6 +2208,39 @@ class TestDistributions(TestCase):
             x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
             self.assertTrue(np.isfinite(x) and x > 0, 'Invalid Beta.sample(): {}'.format(x))
 
+    def test_beta_underflow(self):
+        # For low values of (alpha, beta), the gamma samples can underflow
+        # with float32 and result in a spurious mode at 0.5. To prevent this,
+        # torch._sample_dirichlet works with double precision for intermediate
+        # calculations.
+        set_rng_seed(1)
+        num_samples = 50000
+        for dtype in [torch.float, torch.double]:
+            conc = torch.tensor(1e-2, dtype=dtype)
+            beta_samples = Beta(conc, conc).sample([num_samples])
+            self.assertEqual((beta_samples == 0).sum(), 0)
+            self.assertEqual((beta_samples == 1).sum(), 0)
+            # assert support is concentrated around 0 and 1
+            frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
+            frac_ones = float((beta_samples > 0.9).sum()) / num_samples
+            self.assertEqual(frac_zeros, 0.5, 0.05)
+            self.assertEqual(frac_ones, 0.5, 0.05)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_beta_underflow_gpu(self):
+        set_rng_seed(1)
+        num_samples = 50000
+        conc = torch.tensor(1e-2, dtype=torch.float64).cuda()
+        beta_samples = Beta(conc, conc).sample([num_samples])
+        self.assertEqual((beta_samples == 0).sum(), 0)
+        self.assertEqual((beta_samples == 1).sum(), 0)
+        # assert support is concentrated around 0 and 1
+        frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
+        frac_ones = float((beta_samples > 0.9).sum()) / num_samples
+        # TODO: increase precision once imbalance on GPU is fixed.
+        self.assertEqual(frac_zeros, 0.5, 0.12)
+        self.assertEqual(frac_ones, 0.5, 0.12)
+
     def test_independent_shape(self):
         for Dist, params in EXAMPLES:
             for param in params:
@@ -3375,7 +3408,7 @@ class TestKL(TestCase):
                     continue
                 x = dist.sample(sample_shape=(60000,))
                 expected = -dist.log_prob(x).mean(0)
-                ignore = (expected == inf)
+                ignore = (expected == inf) | (expected == -inf)
                 expected[ignore] = actual[ignore]
                 self.assertEqual(actual, expected, prec=0.2, message='\n'.join([
                     '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),
