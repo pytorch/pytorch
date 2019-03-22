@@ -3,6 +3,7 @@
 #include <numeric>
 #include <iterator>
 #include <algorithm>
+#include <vector>
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
@@ -22,7 +23,7 @@ static void apply_cross(Tensor& result, const Tensor& a, const Tensor& b, const 
 
   parallel_for(0, total, internal::GRAIN_SIZE, [&](int64_t s, int64_t e) {
     const int64_t a_dim = a.dim();
-    int64_t position_in_dims[a_dim];
+    std::vector<int64_t> position_in_dims(a_dim);
     int64_t index_in_curr_dim = s;
     int64_t a_start = 0;
     int64_t b_start = 0;
