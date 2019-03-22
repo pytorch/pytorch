@@ -36,7 +36,6 @@ install_official_git_client: &install_official_git_client
     set -e
 
     sudo apt-get -q -y update
-    sudo dpkg --configure -a
     sudo apt-get -q -y install openssh-client git
 
 install_doc_push_script: &install_doc_push_script
