@@ -233,6 +233,7 @@ class TestOptim(TestCase):
     def _build_params_dict_single(self, weight, bias, **kwargs):
         return [dict(params=bias, **kwargs)]
 
+    @skipIfRocm
     def test_sgd(self):
         def add_param_constructor(weight, bias):
             """Test the `add_param_group` method"""
@@ -430,6 +431,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
             optim.Adamax(None, lr=1e-2, betas=(0.0, 1.0))
 
+    @skipIfRocm
     def test_rmsprop(self):
         def add_param_constructor(weight, bias):
             """Test the `add_param_group` method"""
@@ -469,6 +471,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
             optim.ASGD(None, lr=1e-2, weight_decay=-0.5)
 
+    @skipIfRocm
     def test_rprop(self):
         def add_param_constructor(weight, bias):
             """Test the `add_param_group` method"""
