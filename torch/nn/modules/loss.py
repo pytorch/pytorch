@@ -113,8 +113,9 @@ class NLLLoss(_WeightedLoss):
     You may use `CrossEntropyLoss` instead, if you prefer not to add an extra
     layer.
 
-    The `target` that this loss expects is a class index in the range :math:`[0, C-1]`
-    where `C = number of classes`.
+    The `target` that this loss expects should be a class index in the range :math:`[0, C-1]`
+    where `C = number of classes`; if `ignore_index` is specified, this loss also accepts
+    this class index (this index may not necessarily be in the class range).
 
     The unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
 
@@ -852,7 +853,9 @@ class CrossEntropyLoss(_WeightedLoss):
     with :math:`K \geq 1` for the `K`-dimensional case (described later).
 
     This criterion expects a class index in the range :math:`[0, C-1]` as the
-    `target` for each value of a 1D tensor of size `minibatch`.
+    `target`for each value of a 1D tensor of size `minibatch`; if `ignore_index`
+    is specified, this criterion also accepts this class index (this index may not
+    necessarily be in the class range).
 
     The loss can be described as:
 
@@ -1165,7 +1168,7 @@ class TripletMarginLoss(_Loss):
     Args:
         margin (float, optional): Default: :math:`1`.
         p (int, optional): The norm degree for pairwise distance. Default: :math:`2`.
-        swap (float, optional): The distance swap is described in detail in the paper
+        swap (bool, optional): The distance swap is described in detail in the paper
             `Learning shallow convolutional feature descriptors with triplet losses` by
             V. Balntas, E. Riba et al. Default: ``False``.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
