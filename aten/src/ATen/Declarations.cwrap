@@ -2774,7 +2774,6 @@
   cname: catArray
   variants: [function]
   cpu_half: True
-  enable_for_bool: True
   return: self
   arguments:
     - arg: THTensor* self

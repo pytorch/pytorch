@@ -35,6 +35,37 @@ void THCTensor_(zero)(THCState *state, THCTensor *self_)
   THCudaCheck(cudaGetLastError());
 }
 
+#if !defined(THC_REAL_IS_BOOL) /* non bool only part */
+
+void THCTensor_(zerosLike)(THCState *state, THCTensor *r_, THCTensor *input)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
+  THCTensor_(resizeAs)(state, r_, input);
+  THCTensor_(zero)(state, r_);
+}
+
+void THCTensor_(onesLike)(THCState *state, THCTensor *r_, THCTensor *input)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
+  THCTensor_(resizeAs)(state, r_, input);
+  THCTensor_(fill)(state, r_, ScalarConvert<int, scalar_t>::to(1));
+}
+
+ptrdiff_t
+THCTensor_(numel)(THCState *state, THCTensor *t)
+{
+  return THCTensor_(nElement)(state, t);
+}
+
+void THCTensor_(cat)(THCState *state, THCTensor *result,
+		     THCTensor *ta, THCTensor *tb, int dimension)
+{
+  THCTensor* inputs[2];
+  inputs[0] = ta;
+  inputs[1] = tb;
+  THCTensor_(catArray)(state, result, inputs, 2, dimension);
+}
+
 void THCTensor_(check_shape_except_dim)(THCState *state,
     THCTensor *first, THCTensor *second, int dimension);
 inline void THCTensor_(check_shape_except_dim)(THCState *state,
@@ -55,15 +86,6 @@ inline void THCTensor_(check_shape_except_dim)(THCState *state,
         "Sizes of tensors must match except in dimension %d. Got %lld and %lld in dimension %d",
         dimension, (long long)first_dim_size, (long long)second_dim_size, dim);
   }
-}
-
-void THCTensor_(cat)(THCState *state, THCTensor *result,
-		     THCTensor *ta, THCTensor *tb, int dimension)
-{
-  THCTensor* inputs[2];
-  inputs[0] = ta;
-  inputs[1] = tb;
-  THCTensor_(catArray)(state, result, inputs, 2, dimension);
 }
 
 void THCTensor_(catArray)(THCState *state, THCTensor *result,
@@ -234,28 +256,6 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
       offset += dimSize;
     }
   }
-}
-
-#if !defined(THC_REAL_IS_BOOL) /* non bool only part */
-
-void THCTensor_(zerosLike)(THCState *state, THCTensor *r_, THCTensor *input)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
-  THCTensor_(resizeAs)(state, r_, input);
-  THCTensor_(zero)(state, r_);
-}
-
-void THCTensor_(onesLike)(THCState *state, THCTensor *r_, THCTensor *input)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
-  THCTensor_(resizeAs)(state, r_, input);
-  THCTensor_(fill)(state, r_, ScalarConvert<int, scalar_t>::to(1));
-}
-
-ptrdiff_t
-THCTensor_(numel)(THCState *state, THCTensor *t)
-{
-  return THCTensor_(nElement)(state, t);
 }
 
 void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
