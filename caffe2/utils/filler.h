@@ -10,7 +10,7 @@
 namespace caffe2 {
 
 // TODO: replace filler distribution enum with a better abstraction
-enum FillerDistribution { FD_UNIFORM, FD_FIXEDSUM, FD_SYNTHETIC };
+enum FillerDistribution { FD_UNIFORM, FD_FIXEDSUM, FD_SYNTHETIC, FD_FIXED };
 
 class TensorFiller {
  public:
@@ -50,6 +50,10 @@ class TensorFiller {
             tensor->numel(), min, max, data, context);
         break;
       }
+      case FD_FIXED: {
+        std::copy(fixed_index_.begin(), fixed_index_.end(), data);
+        break;
+      }
     }
   }
 
@@ -87,6 +91,12 @@ class TensorFiller {
         .Max(total_length);
   }
 
+  TensorFiller& FixedValue(const std::vector<int64_t>& fixed_index) {
+    dist_ = FD_FIXED;
+    fixed_index_ = std::move(fixed_index);
+    return *this;
+  }
+
   // a helper function to construct the segments vector for sparse features
   template <class Type>
   TensorFiller& SparseSegments(Type max_segment) {
@@ -106,6 +116,11 @@ class TensorFiller {
   TensorFiller(const std::vector<int64_t>& shape)
       : shape_(shape), dist_(FD_UNIFORM), fixed_sum_(0) {}
 
+  TensorFiller(
+      const std::vector<int64_t>& shape,
+      std::vector<int64_t> fixed_index)
+      : shape_(shape), dist_(FD_FIXED), fixed_index_(fixed_index) {}
+
   TensorFiller() : TensorFiller(std::vector<int64_t>()) {}
 
   std::string DebugString() const {
@@ -118,6 +133,9 @@ class TensorFiller {
         break;
       case FD_SYNTHETIC:
         stream << "; dist = FD_SYNTHETIC";
+        break;
+      case FD_FIXED:
+        stream << "; dist = FD_FIXED";
         break;
       default:
         stream << "; dist = FD_UNIFORM";
@@ -134,6 +152,7 @@ class TensorFiller {
   double max_ = 1.0;
   FillerDistribution dist_;
   double fixed_sum_;
+  std::vector<int64_t> fixed_index_;
 };
 
 } // namespace caffe2
