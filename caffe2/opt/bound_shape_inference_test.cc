@@ -244,7 +244,8 @@ TEST(BoundShapeInference, FC) {
       {spec.max_batch_size, 1024});
 }
 
-TEST(BoundShapeInference, FC3D) {
+// We don't support inference input shape when Weight is not 2D
+TEST(BoundShapeInference, UnsupportedFC) {
   NetDef net;
   net.add_op()->CopyFrom(
       CreateOperatorDef("FC", "", {"X0", "W0", "B0"}, {"Out0"}, {}));
@@ -254,12 +255,7 @@ TEST(BoundShapeInference, FC3D) {
   shape_map.emplace("B0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16}));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(net, shape_map);
-  const auto& out_shape = eng.shape_info();
-  verifyShapeInfo(
-      out_shape, "X0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 1024});
-  verifyShapeInfo(
-      out_shape, "Out0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 16});
+  EXPECT_THROW(eng.InferBoundShapeAndType(net, shape_map), EnforceNotMet);
 }
 
 TEST(BoundShapeInference, Combo0) {
