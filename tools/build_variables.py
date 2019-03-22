@@ -89,6 +89,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
     "torch/csrc/jit/register_prim_ops.cpp",
     "torch/csrc/jit/register_special_ops.cpp",
+    "torch/csrc/jit/register_quantized_ops.cpp",
     "torch/csrc/jit/scope.cpp",
     "torch/csrc/jit/script/compiler.cpp",
     "torch/csrc/jit/script/edit_distance.cpp",
@@ -199,6 +200,7 @@ def add_torch_libs():
             "//caffe2/aten:ATen-cpu",
             "//caffe2/caffe2:caffe2_cpu",
             "//caffe2/torch/lib/libshm:libshm",
+            "//caffe2/caffe2/quantization/server:dnnlowp_ops",
         ],
         external_deps=[
             ("nanopb", None, "protobuf-nanopb"),
