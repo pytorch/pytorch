@@ -7,7 +7,6 @@
 #endif
 
 #include <ATen/CPUGenerator.h>
-#include <ATen/AccumulateType.h>
 #include <type_traits>
 #include <limits>
 #include <cmath>
