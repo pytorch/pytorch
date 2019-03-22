@@ -192,7 +192,7 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     result.resize_(self.sizes());                               \
-    return at::legacy::th::_th_##op##_out(result, self);                    \
+    return at::legacy::th::_th_##op##_out(result, self);        \
   }
 
 // NB: Temp. defaulting to TH implementation of abs due to issues with Apple

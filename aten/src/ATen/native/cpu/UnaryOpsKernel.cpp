@@ -112,7 +112,6 @@ static void rsqrt_kernel(TensorIterator& iter) {
         [=](Vec256<scalar_t> a) { return a.rsqrt(); });
   });
 }
-REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel)
 
 #define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                          \
   static void op##_kernel(TensorIterator& iter) {                          \
@@ -126,6 +125,7 @@ REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel)
   REGISTER_DISPATCH(op##_stub, &op##_kernel)
 } // anonymous namespace
 
+REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel)
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel)
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 
