@@ -28,7 +28,7 @@ DECLARE_DISPATCH(unary_fn, log10_stub);
 DECLARE_DISPATCH(unary_fn, log1p_stub);
 DECLARE_DISPATCH(unary_fn, log2_stub);
 DECLARE_DISPATCH(unary_fn, round_stub);
-// DECLARE_DISPATCH(unary_fn, rsqrt_stub);
+DECLARE_DISPATCH(unary_fn, rsqrt_stub);
 DECLARE_DISPATCH(unary_fn, sigmoid_stub);
 DECLARE_DISPATCH(unary_fn, sin_stub);
 // DECLARE_DISPATCH(unary_fn, sinh_stub);

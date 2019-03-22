@@ -49,7 +49,7 @@ DEFINE_DISPATCH(log10_stub);
 DEFINE_DISPATCH(log1p_stub);
 DEFINE_DISPATCH(log2_stub);
 DEFINE_DISPATCH(round_stub);
-// DEFINE_DISPATCH(rsqrt_stub);
+DEFINE_DISPATCH(rsqrt_stub);
 DEFINE_DISPATCH(sin_stub);
 DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);
@@ -155,30 +155,8 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
   return result;
 }
 
-Tensor log2(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  return at::log2_out(result, self);
-}
-Tensor& _log2__cpu(Tensor& self_) {
-  Tensor self = sort_strides(self_);
-  return at::log2_out(self, self);
-}
-Tensor& _log2_out_cpu(Tensor& result, const Tensor& self) {
-  result.resize_(self.sizes());
-  if (self.is_contiguous() && result.is_contiguous()) {
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), log2_cpu, [&]() {
-      vml::vlog2(result.data<scalar_t>(), self.data<scalar_t>(), self.numel());
-
-    });
-  } else {
-    auto iter = TensorIterator::binary_op(result, self, self);
-    log2_stub(iter->device_type(), *iter);
-  }
-  return result;
-}
-
-  // NB: If you use this macro, you may also need to add a CUDA forwarding
-  // stub in CUDAUnaryOps
+// NB: If you use this macro, you may also need to add a CUDA forwarding
+// stub in CUDAUnaryOps
 
 #define IMPLEMENT_UNARY_OP_VEC(op)                                         \
   Tensor op(const Tensor& self) {                                          \
@@ -236,7 +214,7 @@ IMPLEMENT_UNARY_OP_VEC(log10)
 IMPLEMENT_UNARY_OP_VEC(log1p)
 IMPLEMENT_UNARY_OP_VEC(log2)
 IMPLEMENT_UNARY_OP_VEC(round)
-IMPLEMENT_UNARY_OP_TH(rsqrt)
+IMPLEMENT_UNARY_OP_VEC(rsqrt)
 IMPLEMENT_UNARY_OP_VEC(sin)
 IMPLEMENT_UNARY_OP_TH(sinh)
 IMPLEMENT_UNARY_OP_VEC(sqrt)

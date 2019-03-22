@@ -102,6 +102,18 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
 }
 #endif
 
+static void rsqrt_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), rsqrt, [&] {
+    binary_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          return ((scalar_t)1) / std::sqrt(a);
+        },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) { return a.rsqrt(); });
+  });
+}
+REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel)
+
 #define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                          \
   static void op##_kernel(TensorIterator& iter) {                          \
     AT_DISPATCH_##dispatchtypes##_TYPES(iter.dtype(), #op, [&] {           \
@@ -134,7 +146,6 @@ IMPLEMENT_FLOAT_KERNEL(FLOATING, log10)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, log1p)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, log2)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, round)
-// IMPLEMENT_FLOAT_KERNEL(FLOATING, rsqrt)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, sin)
 // IMPLEMENT_FLOAT_KERNEL(FLOATING, sinh)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, sqrt)
