@@ -509,6 +509,7 @@ class LegacyCosineAnnealingLR(CosineAnnealingLR):
 
 class TestLRScheduler(TestCase):
     def setUp(self):
+        super(TestLRScheduler, self).setUp()
         self.net = SchedulerTestNet()
         self.opt = SGD(
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],

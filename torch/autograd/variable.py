@@ -3,7 +3,7 @@ from torch._six import with_metaclass
 
 
 class VariableMeta(type):
-    def __instancecheck__(self, other):
+    def __instancecheck__(cls, other):
         return isinstance(other, torch.Tensor)
 
 
