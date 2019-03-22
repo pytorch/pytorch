@@ -111,7 +111,7 @@ void THCTensor_(clamp)(THCState *state, THCTensor *self_, THCTensor *src, scalar
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(cross)(THCState *state, THCTensor *self, THCTensor *x, THCTensor *y, int dimension)
+void THCTensor_(crossKernel)(THCState *state, THCTensor *self, THCTensor *x, THCTensor *y, int dimension)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self, x, y));
 

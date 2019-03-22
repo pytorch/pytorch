@@ -1877,7 +1877,7 @@
 ]]
 [[
   name: _th_cross
-  cname: cross
+  cname: crossKernel
   variants:
     - function
   backends:

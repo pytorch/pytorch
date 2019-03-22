@@ -15,9 +15,6 @@ Tensor cross(const Tensor & input, const Tensor & other, const c10::optional<int
 }
 
 Tensor & cross_out(Tensor & out, const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension) {
-  if (out.sizes() != input.sizes()) {
-    out.resize_as_(input);
-  }
   auto device_res = input.type().device_type();
   AT_CHECK(device_res == kCPU || device_res == kCUDA, "cross only supports CPU and CUDA devices, out got: ", device_res);
   auto device1 = input.type().device_type();
@@ -43,6 +40,10 @@ Tensor & cross_out(Tensor & out, const Tensor & input, const Tensor & other, con
   } else {
     dim = maybe_wrap_dim(dimension.value(), input.dim());
     AT_CHECK(input.size(dim) == 3, "dimension ", dimension.value(), " does not have size 3");
+  }
+
+  if (out.sizes() != input.sizes()) {
+    out.resize_as_(input);
   }
 
   cross_stub(device1, out, input, other, dim);
