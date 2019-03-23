@@ -168,6 +168,7 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
     return at::op##_out(self, self);                                       \
   }                                                                        \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) {            \
+    checkBackend(#op, {result}, Backend::CPU); \
     if (self.is_contiguous() && result.is_contiguous()) {                  \
       result.resize_(self.sizes());                                        \
       AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), op##_cpu, [&]() {     \
