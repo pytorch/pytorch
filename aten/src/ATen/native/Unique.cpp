@@ -38,8 +38,6 @@ std::tuple<Tensor, Tensor, Tensor> _unique_cpu_template(
   if (return_inverse || return_counts) {
     inverse_indices.resize_(input.sizes());
     int64_t* inverse_indices_data = inverse_indices.data<int64_t>();
-    counts.resize_(output.sizes());
-    counts.fill_(0);
     std::unordered_map<scalar_t, int64_t> inverse_map;
     inverse_map.reserve(output.numel());
     for (int i = 0; i < output.numel(); ++i) {
@@ -47,7 +45,13 @@ std::tuple<Tensor, Tensor, Tensor> _unique_cpu_template(
     }
     for (int i = 0; i < input.numel(); ++i) {
       inverse_indices_data[i] = inverse_map[input_data[i]];
-      counts[inverse_map[input_data[i]]] += 1;
+    }
+    if (return_counts) {
+      counts.resize_(output.sizes());
+      counts.fill_(0);
+      for (int i = 0; i < input.numel(); ++i) {
+        counts[inverse_map[input_data[i]]] += 1;
+      }
     }
   }
   return std::make_tuple(output, inverse_indices, counts);
