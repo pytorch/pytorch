@@ -34,7 +34,7 @@ template <typename scalar_t>
     output = output.view(-1);
     scalar_t* output_data = output.data<scalar_t>();
     Tensor inverse_indices;
-    if (!return_inverse) {
+    if (!return_inverse && !return_counts) {
         inverse_indices = at::empty({0},  self.type().toScalarType(kLong));
         thrust::sort(policy, output_data, output_data + num_inp);
     } else {
