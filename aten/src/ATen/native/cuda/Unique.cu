@@ -57,8 +57,7 @@ template <typename scalar_t>
     Tensor counts = at::empty({0}, self.options().dtype(kLong));
     if (return_counts) {
       counts.resize_(output.sizes()).fill_(0);
-      Tensor val = at::ones({num_inp}, self.options().dtype(kLong));
-      counts.scatter_add_(0, inverse_indices.view(-1), val);
+      counts.scatter_add_(0, inverse_indices.view(-1), 1);
     }
 
     THCudaCheck(cudaGetLastError());
