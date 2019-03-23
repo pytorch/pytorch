@@ -5,17 +5,18 @@
 #include <ATen/CPUGenerator.h>
 #include <ATen/CheckGenerator.h>
 #include <ATen/Generator.h>
+#include <ATen/Parallel.h>
 
 #include <ATen/cpu/vml.h>
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/cpu/vec256/functional.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/Parallel.h>
-
-#include <ATen/native/UnaryOps.h>
-#include <ATen/native/cpu/Loops.h>
 
 #include <ATen/native/Distributions.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/UnaryOps.h>
+
+#include <ATen/native/cpu/Loops.h>
+
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
@@ -103,7 +104,7 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
 #endif
 
 static void rsqrt_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rsqrt", [&] {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rsqrt_cpu", [&] {
     unary_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t {
@@ -116,7 +117,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
 #define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                           \
   static void op##_kernel(TensorIterator& iter) {                           \
     if (iter.tensor(0).is_contiguous() && iter.tensor(1).is_contiguous()) { \
-      AT_DISPATCH_FLOATING_TYPES(iter.dtype(), op##_vml_cpu, [&]() {      \
+      AT_DISPATCH_FLOATING_TYPES(iter.dtype(), op##_vml_cpu, [&]() {        \
         vml::v##op(                                                         \
             iter.tensor(0).data<scalar_t>(),                                \
             iter.tensor(1).data<scalar_t>(),                                \
