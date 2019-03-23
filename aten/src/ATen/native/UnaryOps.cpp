@@ -33,31 +33,6 @@
 namespace at {
 namespace native {
 
-DEFINE_DISPATCH(abs_stub);
-DEFINE_DISPATCH(acos_stub);
-DEFINE_DISPATCH(asin_stub);
-DEFINE_DISPATCH(atan_stub);
-DEFINE_DISPATCH(ceil_stub);
-DEFINE_DISPATCH(cos_stub);
-DEFINE_DISPATCH(erf_stub);
-DEFINE_DISPATCH(erfc_stub);
-DEFINE_DISPATCH(exp_stub);
-DEFINE_DISPATCH(expm1_stub);
-DEFINE_DISPATCH(floor_stub);
-DEFINE_DISPATCH(log_stub);
-DEFINE_DISPATCH(log10_stub);
-DEFINE_DISPATCH(log1p_stub);
-DEFINE_DISPATCH(log2_stub);
-DEFINE_DISPATCH(round_stub);
-DEFINE_DISPATCH(rsqrt_stub);
-DEFINE_DISPATCH(sin_stub);
-DEFINE_DISPATCH(sqrt_stub);
-DEFINE_DISPATCH(tan_stub);
-DEFINE_DISPATCH(tanh_stub);
-DEFINE_DISPATCH(trunc_stub);
-
-DEFINE_DISPATCH(sigmoid_stub);
-
 Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
@@ -217,6 +192,29 @@ IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
 
+DEFINE_DISPATCH(abs_stub);
+DEFINE_DISPATCH(acos_stub);
+DEFINE_DISPATCH(asin_stub);
+DEFINE_DISPATCH(atan_stub);
+DEFINE_DISPATCH(ceil_stub);
+DEFINE_DISPATCH(cos_stub);
+DEFINE_DISPATCH(erf_stub);
+DEFINE_DISPATCH(erfc_stub);
+DEFINE_DISPATCH(exp_stub);
+DEFINE_DISPATCH(expm1_stub);
+DEFINE_DISPATCH(floor_stub);
+DEFINE_DISPATCH(log_stub);
+DEFINE_DISPATCH(log10_stub);
+DEFINE_DISPATCH(log1p_stub);
+DEFINE_DISPATCH(log2_stub);
+DEFINE_DISPATCH(round_stub);
+DEFINE_DISPATCH(rsqrt_stub);
+DEFINE_DISPATCH(sigmoid_stub);
+DEFINE_DISPATCH(sin_stub);
+DEFINE_DISPATCH(sqrt_stub);
+DEFINE_DISPATCH(tan_stub);
+DEFINE_DISPATCH(tanh_stub);
+DEFINE_DISPATCH(trunc_stub);
 
 }
 } // namespace at
