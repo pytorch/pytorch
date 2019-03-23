@@ -92,9 +92,14 @@ inline IValue toIValue(py::handle input) {
     }
     return Tuple::create(s);
   } else {
-    AT_ERROR(
-        "Only tensors and (possibly nested) tuples of tensors are supported "
-        "as inputs or outputs of traced functions");
+    throw std::runtime_error(c10::str(
+        "Only tensors and (possibly nested) tuples of tensors are supported ",
+        "as inputs or outputs of traced functions",
+        ", but instead got value of type ",
+        py::str(input.get_type().attr("__name__")),
+        ".",
+        "\nValue: ",
+        py::repr(input)));
   }
 }
 
