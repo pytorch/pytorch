@@ -6429,6 +6429,21 @@ a")
         with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
             a = M(nn.ModuleList([nn.ReLU()]))
 
+    def test_attr_module_constants_error(self):
+        class M2(torch.jit.ScriptModule):
+            def __init__(self, mod_list):
+                super(M2, self).__init__(False)
+                self.mods = mod_list
+
+            @torch.jit.script_method
+            def forward(self, v):
+                return self.mods.forward(x)
+
+        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
+            M2(nn.Sequential(nn.ReLU()))
+        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
+            M2(nn.ModuleList([nn.ReLU()]))
+
     def test_script_sequential_for(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
