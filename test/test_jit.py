@@ -4952,13 +4952,13 @@ a")
             else:
                 return 0
 
-            fn(None)
-            g = fn.graph_for(None)
-            self.assertEqual(list(g.inputs())[0].type().str(), 'UndefinedTensor')
-            t = torch.ones(1)
-            fn(t)
-            g = fn.graph_for(t)
-            self.assertEqual(list(g.inputs())[0].type().kind(), 'DimensionedTensorType')
+        fn(None)
+        g = fn.graph_for(None)
+        self.assertEqual(list(g.inputs())[0].type().str(), 'UndefinedTensor')
+        t = torch.ones(1)
+        fn(t)
+        g = fn.graph_for(t)
+        self.assertEqual(list(g.inputs())[0].type().kind(), 'DimensionedTensorType')
 
     def test_while_write_outer_then_read(self):
         def func(a, b):
