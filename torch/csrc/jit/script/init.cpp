@@ -255,10 +255,10 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
       size_t n_binders) override {
     // Add all module parameters as inputs to the graph
     std::vector<Value*> params;
-    const auto& param_list = module_->get_parameters().items();
+    const auto& param_list = module_->get_parameters();
     for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
       auto& param = *it;
-      params.push_back(caller.get_or_add_parameter(param->slot()));
+      params.push_back(caller.get_or_add_parameter(param.slot()));
     }
     auto list = caller.graph()->createList(TensorType::get(), params);
     caller.graph()->insertNode(list);
@@ -597,15 +597,15 @@ static void gatherParametersAndBuffers(
     std::vector<Slot>& values,
     const Module& m) {
   for (auto& param : m.get_parameters()) {
-    values.push_back(param->slot());
+    values.push_back(param.slot());
   }
   for (auto& param : m.get_attributes()) {
-    if (param->type()->isSubtypeOf(TensorType::get())) {
-      values.push_back(param->slot());
+    if (param.type()->isSubtypeOf(TensorType::get())) {
+      values.push_back(param.slot());
     }
   }
   for (const auto& sub : m.get_modules()) {
-    gatherParametersAndBuffers(values, *sub->module);
+    gatherParametersAndBuffers(values, *sub.module);
   }
 }
 
@@ -757,38 +757,38 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_get_modules",
           [](Module& self) -> py::tuple {
-            auto& modules = self.get_modules();
+            auto modules = self.get_modules();
             py::tuple result(modules.size());
             for (size_t i = 0; i < modules.size(); ++i) {
               auto& item = modules[i];
-              result[i] = std::make_pair(item.key(), item.value().module);
+              result[i] = std::make_pair(item.name, item.module);
             }
             return result;
           })
       .def(
           "_get_parameters",
           [](Module& self) -> py::tuple {
-            auto& parameters = self.get_parameters();
+            auto parameters = self.get_parameters();
             py::tuple result(parameters.size());
             for (size_t i = 0; i < parameters.size(); ++i) {
               auto& p = parameters[i];
               py::tuple r(2);
               result[i] = std::make_tuple(
-                  p.key(), autograd::as_variable_ref(p->slot()->toTensor()));
+                  p.name(), autograd::as_variable_ref(p.slot()->toTensor()));
             }
             return result;
           })
       .def(
           "_get_attributes",
           [](Module& self) -> py::tuple {
-            auto& attributes = self.get_attributes();
+            auto attributes = self.get_attributes();
             py::tuple result(attributes.size());
             for (size_t i = 0; i < attributes.size(); ++i) {
               auto& buffer = attributes[i];
               py::tuple r(3);
-              IValue v = *buffer->slot();
+              IValue v = *buffer.slot();
               result[i] = std::make_tuple(
-                  buffer.key(), buffer->type(), toPyObject(std::move(v)));
+                  buffer.name(), buffer.type(), toPyObject(std::move(v)));
             }
             return result;
           })
@@ -817,9 +817,10 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) {
             using Item =
                 torch::OrderedDict<std::string, std::unique_ptr<Method>>::Item;
-            return fmap(self.get_methods(), [](const Item& item) {
-              return (*item)->name();
-            });
+            return fmap(
+                self.get_methods(), [](const std::unique_ptr<Method>& method) {
+                  return method->name();
+                });
           })
       .def(
           "_create_method_from_graph",
@@ -961,13 +962,15 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "propagate_and_assign_input_and_output_shapes",
           &Method::propagate_and_assign_input_and_output_shapes)
-      .def("initial_ivalues",[](Method& m) {
-        std::vector<at::Tensor> tensors;
-        for (auto& t : m.initial_ivalues()) {
-          tensors.push_back(t->toTensor());
-        }
-        return tensors;
-      })
+      .def(
+          "initial_ivalues",
+          [](Method& m) {
+            std::vector<at::Tensor> tensors;
+            for (auto& t : m.initial_ivalues()) {
+              tensors.push_back(t->toTensor());
+            }
+            return tensors;
+          })
       .def(
           "graph_for",
           [](py::args args, py::kwargs kwargs) {
