@@ -6,6 +6,7 @@
 #include <ATen/CheckGenerator.h>
 #include <ATen/Generator.h>
 
+#include <ATen/cpu/vml.h>
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/cpu/vec256/functional.h>
 #include <ATen/native/TensorIterator.h>
@@ -112,15 +113,25 @@ static void rsqrt_kernel(TensorIterator& iter) {
   });
 }
 
-#define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                          \
-  static void op##_kernel(TensorIterator& iter) {                          \
-    AT_DISPATCH_##dispatchtypes##_TYPES(iter.dtype(), #op, [&] {           \
-      unary_kernel_vec(                                                   \
-          iter,                                                            \
-          [=](scalar_t a) -> scalar_t { return std::op(a); },  \
-          [=](Vec256<scalar_t> a) { return a.op(); }); \
-    });                                                                    \
-  }                                                                        \
+#define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                           \
+  static void op##_kernel(TensorIterator& iter) {                           \
+    if (iter.tensor(0).is_contiguous() && iter.tensor(1).is_contiguous()) { \
+      AT_DISPATCH_FLOATING_TYPES(iter.dtype(), op##_vml_cpu, [&]() {      \
+        vml::v##op(                                                         \
+            iter.tensor(0).data<scalar_t>(),                                \
+            iter.tensor(1).data<scalar_t>(),                                \
+            iter.numel());                                                  \
+                                                                            \
+      });                                                                   \
+    } else {                                                                \
+      AT_DISPATCH_##dispatchtypes##_TYPES(iter.dtype(), #op, [&] {          \
+        unary_kernel_vec(                                                   \
+            iter,                                                           \
+            [=](scalar_t a) -> scalar_t { return std::op(a); },             \
+            [=](Vec256<scalar_t> a) { return a.op(); });                    \
+      });                                                                   \
+    }                                                                       \
+  }                                                                         \
   REGISTER_DISPATCH(op##_stub, &op##_kernel)
 } // anonymous namespace
 

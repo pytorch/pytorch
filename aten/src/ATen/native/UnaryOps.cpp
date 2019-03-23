@@ -15,7 +15,6 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/UnaryOps.h>
-#include <ATen/cpu/vml.h>
 #include <ATen/native/TensorIterator.h>
 
 #include <algorithm>
@@ -150,6 +149,7 @@ Tensor& _sigmoid__cpu(Tensor& self) {
   return at::sigmoid_out(self, self);
 }
 Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
+  checkBackend("sigmoid", {result}, Backend::CPU);
   assert_no_internal_overlap(result, "sigmoid");
   auto iter = TensorIterator::unary_op(result, self);
   sigmoid_stub(iter->device_type(), *iter);
@@ -159,29 +159,20 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 
-#define IMPLEMENT_UNARY_OP_VEC(op)                                         \
-  Tensor op(const Tensor& self) {                                          \
-    Tensor result = at::empty({0}, self.options());                        \
-    return at::op##_out(result, self);                                     \
-  }                                                                        \
-  Tensor& _##op##__cpu(Tensor& self) {                                     \
-    return at::op##_out(self, self);                                       \
-  }                                                                        \
-  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) {            \
-    checkBackend(#op, {result}, Backend::CPU); \
-    if (self.is_contiguous() && result.is_contiguous()) {                  \
-      result.resize_(self.sizes());                                        \
-      AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), op##_cpu, [&]() {     \
-        vml::v##op(                                                        \
-            result.data<scalar_t>(), self.data<scalar_t>(), self.numel()); \
-                                                                           \
-      });                                                                  \
-    } else {                                                               \
-      assert_no_internal_overlap(result, #op);                             \
-      auto iter = TensorIterator::unary_op(result, self);                  \
-      op##_stub(iter->device_type(), *iter);                               \
-    }                                                                      \
-    return result;                                                         \
+#define IMPLEMENT_UNARY_OP_VEC(op)                              \
+  Tensor op(const Tensor& self) {                               \
+    Tensor result = at::empty({0}, self.options());             \
+    return at::op##_out(result, self);                          \
+  }                                                             \
+  Tensor& _##op##__cpu(Tensor& self) {                          \
+    return at::op##_out(self, self);                            \
+  }                                                             \
+  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
+    checkBackend(#op, {result}, Backend::CPU);                  \
+    assert_no_internal_overlap(result, #op);                    \
+    auto iter = TensorIterator::unary_op(result, self);         \
+    op##_stub(iter->device_type(), *iter);                      \
+    return result;                                              \
   }
 
 #define IMPLEMENT_UNARY_OP_TH(op)                               \
@@ -193,6 +184,8 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
     return at::op##_out(self, self);                            \
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
+    checkBackend(#op, {result}, Backend::CPU);                  \
+    assert_no_internal_overlap(result, #op);                    \
     result.resize_(self.sizes());                               \
     return at::legacy::th::_th_##op##_out(result, self);        \
   }
