@@ -4098,6 +4098,47 @@ a")
             return a == [0, 1, 2, 3]
         self.checkScript(test_append, ())
 
+    def test_comprehensions_basic(self):
+        def comp(l):
+            # type: (List[int]) -> List[int]
+
+            n = [x * 3 for x in l]
+            return n
+
+        comp([1, 2, 3])
+        self.checkScript(comp, ([1, 2, 3],))
+
+    def test_comprehensions_basic_float(self):
+        def comp(l):
+            # type: (List[float]) -> List[float]
+
+            n = [x * 3 for x in l]
+            return n
+
+        self.checkScript(comp, ([1.0, 2.0, 3.0],))
+
+    def test_comprehensions_two_comps(self):
+        @torch.jit.script
+        def comp(l1, l2):
+            # type: (List[int], List[int]) -> List[int]
+
+            n = [x * 3 for x in l1]
+            n2 = [x + 2 for x in l2]
+            return n + n2
+
+        self.assertEqual(comp([1, 2, 3], [4, 5]), [3, 6, 9, 6, 7])
+
+    def test_comprehensions_wrong_expr_type(self):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
+            @torch.jit.script
+            def comp(l):
+                # type: (List[int]) -> List[float]
+
+                n = [float(x) for x in l]
+                return n
+
+            comp([1, 2, 3])
+
     def test_mutable_list_append_2(self):
         def test_append_2():
             a = [0, 1]
@@ -6388,6 +6429,21 @@ a")
         with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
             a = M(nn.ModuleList([nn.ReLU()]))
 
+    def test_attr_module_constants_error(self):
+        class M2(torch.jit.ScriptModule):
+            def __init__(self, mod_list):
+                super(M2, self).__init__(False)
+                self.mods = mod_list
+
+            @torch.jit.script_method
+            def forward(self, v):
+                return self.mods.forward(x)
+
+        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
+            M2(nn.Sequential(nn.ReLU()))
+        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
+            M2(nn.ModuleList([nn.ReLU()]))
+
     def test_script_sequential_for(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
@@ -7144,6 +7200,21 @@ a")
                 return y, z, w
 
             self.checkScript(good_fn, (torch.ones(2, 2),), optimize=True)
+
+    def test_tensor_with_grad_as_constant(self):
+        param = torch.randn(3).requires_grad_()
+        x = torch.randn(3)
+
+        def f(x):
+            return x + param
+        with self.assertRaisesRegex(RuntimeError, "Cannot insert a Tensor that requires grad as a constant"):
+            torch.jit.trace(f, x)
+
+    def test_non_tensor_tracing(self):
+        def f(x):
+            return x + param
+        with self.assertRaisesRegex(RuntimeError, "inputs or outputs of traced functions, but instead got value of type int."):
+            torch.jit.trace(f, (1,))
 
     def test_type_annotation_module(self):
         class BaseModule(torch.jit.ScriptModule):
@@ -12213,6 +12284,23 @@ class TestFuser(JitTestCase):
 
         self.assertEqual(f(x), scripted(x))
         self.assertAllFused(scripted.graph_for(x))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_scalar_arg_cuda(self):
+        def fn_test_scalar_arg(x, p):
+            # type: (Tensor, float) -> Tensor
+            return p * (x * x + x)
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        p = 3
+        scripted = torch.jit.script(fn_test_scalar_arg, (x, p))
+        self.assertEqual(fn_test_scalar_arg(x, p), scripted(x, p))
+        self.assertAllFused(scripted.graph_for(x, p))
+        x.requires_grad_(True)
+        out = scripted(x, p)
+        self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes"))
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
