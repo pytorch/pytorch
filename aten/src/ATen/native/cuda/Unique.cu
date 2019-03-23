@@ -29,12 +29,12 @@ template <typename scalar_t>
     int64_t num_inp = input.numel();
     const scalar_t* input_data = input.data<scalar_t>();
 
-    //sort & unique
+    //sort
     Tensor output = input.clone();
     output = output.view(-1);
     scalar_t* output_data = output.data<scalar_t>();
     Tensor inverse_indices;
-    if (!return_inverse && !return_counts) {
+    if (!return_inverse) {
         inverse_indices = at::empty({0},  self.type().toScalarType(kLong));
         thrust::sort(policy, output_data, output_data + num_inp);
     } else {
@@ -51,13 +51,21 @@ template <typename scalar_t>
         thrust::scatter(policy, inv_loc_ptr, inv_loc_ptr + num_inp, sorted_indices_ptr, inverse_indices_ptr);
         inverse_indices.resize_(input.sizes());
     }
-    int64_t num_out = thrust::unique(policy, output_data, output_data + num_inp) - output_data;
-    output.resize_(num_out);
 
+    // unique
     Tensor counts = at::empty({0}, self.options().dtype(kLong));
-    if (return_counts) {
-      counts.resize_(output.sizes()).fill_(0);
-      counts.scatter_add_(0, inverse_indices.view(-1), 1);
+    if (!return_counts) {
+      int64_t num_out = thrust::unique(policy, output_data, output_data + num_inp) - output_data;
+      output.resize_(num_out);
+    } else {
+      Tensor sorted_indices = at::arange(0, num_inp + 1, self.type().toScalarType(kLong));
+      int64_t* sorted_indices_ptr = sorted_indices.data<int64_t>();
+      int64_t num_out = thrust::unique_by_key(policy, output_data, output_data + num_inp, sorted_indices_ptr).first - output_data;
+      sorted_indices[num_out] = num_inp;
+      output.resize_(num_out);
+      counts.resize_(num_out);
+      int64_t* counts_ptr = counts.data<int64_t>();
+      thrust::adjacent_difference(policy, sorted_indices_ptr + 1, sorted_indices_ptr + num_out + 1, counts_ptr);
     }
 
     THCudaCheck(cudaGetLastError());
