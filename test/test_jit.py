@@ -256,6 +256,7 @@ class JitTestCase(TestCase):
     _restored_warnings = False
 
     def setUp(self):
+        super(JitTestCase, self).setUp()
         # unittest overrides all warning filters and forces all of them to show up
         # after we install our own to silence those coming from inside PyTorch.
         # This will ensure that our filter still takes precedence.
@@ -265,6 +266,7 @@ class JitTestCase(TestCase):
         torch._C._jit_set_emit_module_hook(self.emitModuleHook)
 
     def tearDown(self):
+        super(JitTestCase, self).tearDown()
         # needs to be cleared because python might be unloaded before
         # the callback gets destucted
         torch._C._jit_set_emit_module_hook(None)
@@ -1340,6 +1342,27 @@ class TestJit(JitTestCase):
         with torch.random.fork_rng(devices=[]):
             m = self.createScriptModuleFromGraph(trace)
             self.assertEqual(outputs, m(*inputs))
+
+    @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
+    def test_dropout_cuda(self):
+        # Dropout AD is dispatched to _fused_dropout in CUDA case,
+        # which is not included in TestJitGeneratedFunctional
+        x = torch.ones(4, 4).cuda().requires_grad_()
+
+        @torch.jit.script
+        def func(x):
+            return torch.nn.functional.dropout(x)
+
+        with freeze_rng_state():
+            out_ref = torch.nn.functional.dropout(x)
+            grad_ref = torch.autograd.grad(out_ref.sum(), x)
+
+        with freeze_rng_state():
+            out = func(x)
+            grad = torch.autograd.grad(out.sum(), x)
+
+        self.assertEqual(out, out_ref)
+        self.assertEqual(grad, grad_ref)
 
     def test_conv(self):
         x = torch.ones(20, 16, 50, 40)
@@ -4075,6 +4098,47 @@ a")
             return a == [0, 1, 2, 3]
         self.checkScript(test_append, ())
 
+    def test_comprehensions_basic(self):
+        def comp(l):
+            # type: (List[int]) -> List[int]
+
+            n = [x * 3 for x in l]
+            return n
+
+        comp([1, 2, 3])
+        self.checkScript(comp, ([1, 2, 3],))
+
+    def test_comprehensions_basic_float(self):
+        def comp(l):
+            # type: (List[float]) -> List[float]
+
+            n = [x * 3 for x in l]
+            return n
+
+        self.checkScript(comp, ([1.0, 2.0, 3.0],))
+
+    def test_comprehensions_two_comps(self):
+        @torch.jit.script
+        def comp(l1, l2):
+            # type: (List[int], List[int]) -> List[int]
+
+            n = [x * 3 for x in l1]
+            n2 = [x + 2 for x in l2]
+            return n + n2
+
+        self.assertEqual(comp([1, 2, 3], [4, 5]), [3, 6, 9, 6, 7])
+
+    def test_comprehensions_wrong_expr_type(self):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
+            @torch.jit.script
+            def comp(l):
+                # type: (List[int]) -> List[float]
+
+                n = [float(x) for x in l]
+                return n
+
+            comp([1, 2, 3])
+
     def test_mutable_list_append_2(self):
         def test_append_2():
             a = [0, 1]
@@ -6365,6 +6429,21 @@ a")
         with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
             a = M(nn.ModuleList([nn.ReLU()]))
 
+    def test_attr_module_constants_error(self):
+        class M2(torch.jit.ScriptModule):
+            def __init__(self, mod_list):
+                super(M2, self).__init__(False)
+                self.mods = mod_list
+
+            @torch.jit.script_method
+            def forward(self, v):
+                return self.mods.forward(x)
+
+        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
+            M2(nn.Sequential(nn.ReLU()))
+        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
+            M2(nn.ModuleList([nn.ReLU()]))
+
     def test_script_sequential_for(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
@@ -8310,7 +8389,7 @@ a")
     def test_method_no_self(self):
         with self.assertRaisesRegex(RuntimeError, 'methods must have a self argument'):
             class MethodNoSelf(torch.jit.ScriptModule):
-                @torch.jit.script_method
+                @torch.jit.script_method  # noqa: B902
                 def forward():
                     return torch.zeros(3, 4)
 
@@ -10715,6 +10794,29 @@ a")
 
         self.assertEqual(fn(), {'ok': 10})
 
+    def test_dict_membership(self):
+        def fn(x, y):
+            # type: (Dict[int, int], int) -> int
+            return x.get(y, 3)
+
+        d = {1: 2, 3: 4}
+        self.checkScript(fn, (d, 3))
+        self.checkScript(fn, (d, 2))
+
+        def optional(x, y):
+            # type: (Dict[int, int], int) -> bool
+            res = x.get(y)
+            return res is None
+
+        self.checkScript(fn, (d, 3))
+        self.checkScript(fn, (d, 2))
+
+        with self.assertRaisesRegex(RuntimeError, "is actually of type Optional"):
+            @torch.jit.script
+            def bad_types(x, y):
+                # type: (Dict[int, int], int) -> int
+                return x.get(y)  # noqa: T484
+
     def dict_to_python(self):
         def python_lookup(my_dict, keys):
             # type: (Dict[str, int], List[str]) -> List[int]
@@ -10757,6 +10859,97 @@ a")
         m = torch.jit.ScriptModule()
         m._create_method_from_graph("forward", foo.graph)
         self.getExportImportCopy(m)
+
+    def test_attribute_serialization(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.table = torch.jit.Attribute({"I": "am", "a test": "test"}, Dict[str, str])
+                self.float = torch.jit.Attribute(2.3, float)
+                self.int = torch.jit.Attribute(99, int)
+                self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
+                self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
+                self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
+                self.int_list = torch.jit.Attribute([1, 2, 3, 4], List[int])
+
+            @torch.jit.script_method
+            def forward(self):
+                return (self.table, self.float, self.int, self.tuple, self.list, self.int_list)
+
+        m = M()
+        imported_m = self.getExportImportCopy(m)
+        self.assertEqual(m(), imported_m())
+
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    def test_attribute_unpickling(self):
+        import zipfile
+
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.table = torch.jit.Attribute({"I": "am", "a test": "test"}, Dict[str, str])
+                self.float = torch.jit.Attribute(2.3, float)
+                self.int = torch.jit.Attribute(99, int)
+                self.tuple = torch.jit.Attribute((1, 2, 3, 4), Tuple[int, int, int, int])
+                self.list = torch.jit.Attribute([(1, 2), (3, 4)], List[Tuple[int, int]])
+                self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
+                self.int_list = torch.jit.Attribute([1, 2, 3, 4], List[int])
+
+            @torch.jit.script_method
+            def forward(self):
+                return (self.table, self.float, self.int, self.tuple, self.list, self.int_list)
+
+        class TensorID(object):
+            def __setstate__(self, id):
+                self.id = id
+
+        class IntList(object):
+            def __setstate__(self, data):
+                self.data = data
+
+        class JitUnpickler(pickle.Unpickler):
+            def find_class(self, module, name):
+                if not module == '__main__':
+                    return None
+
+                if name == 'TensorID':
+                    return TensorID
+                elif name == 'IntList':
+                    return IntList
+
+        with TemporaryFileName() as fname:
+            M().save(fname)
+            archive_name = os.path.basename(os.path.normpath(fname))
+            archive = zipfile.ZipFile(fname, 'r')
+            pickled_data = archive.read(os.path.join(archive_name, 'attributes.pkl'))
+            JitUnpickler(io.BytesIO(pickled_data)).load()
+
+    def test_submodule_attribute_serialization(self):
+        class S(torch.jit.ScriptModule):
+            def __init__(self, list_data):
+                super(S, self).__init__()
+                self.table = torch.jit.Attribute({"I": "am", "a test": "test"}, Dict[str, str])
+                self.list = torch.jit.Attribute(list_data, List[Tuple[int, int]])
+
+            @torch.jit.script_method
+            def forward(self):
+                return (self.table, self.list)
+
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.table = torch.jit.Attribute({"this": "is", "a different": "dict"}, Dict[str, str])
+                self.tensor = torch.jit.Attribute(torch.randn(2, 2), torch.Tensor)
+                self.s1 = S([(1, 2)])
+                self.s2 = S([(4, 5)])
+
+            @torch.jit.script_method
+            def forward(self):
+                return (self.table, self.tensor, self.s1.table, self.s2.list, self.s1.list)
+
+        m = M()
+        imported_m = self.getExportImportCopy(m)
+        self.assertEqual(m(), imported_m())
 
     def test_optional_tuple(self):
         def fn(x=None):
@@ -12076,6 +12269,23 @@ class TestFuser(JitTestCase):
 
         self.assertEqual(f(x), scripted(x))
         self.assertAllFused(scripted.graph_for(x))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_scalar_arg_cuda(self):
+        def fn_test_scalar_arg(x, p):
+            # type: (Tensor, float) -> Tensor
+            return p * (x * x + x)
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        p = 3
+        scripted = torch.jit.script(fn_test_scalar_arg, (x, p))
+        self.assertEqual(fn_test_scalar_arg(x, p), scripted(x, p))
+        self.assertAllFused(scripted.graph_for(x, p))
+        x.requires_grad_(True)
+        out = scripted(x, p)
+        self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes"))
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
@@ -13846,7 +14056,7 @@ class TestDataParallel(JitTestCase):
 class TestClassType(JitTestCase):
     def test_get_with_method(self):
         @torch.jit.script
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 self.foo = x
 
@@ -13862,8 +14072,8 @@ class TestClassType(JitTestCase):
         self.assertEqual(fn(input), input)
 
     def test_get_attr(self):
-        @torch.jit.script
-        class FooTest:
+        @torch.jit.script  # noqa: B903
+        class FooTest(object):
             def __init__(self, x):
                 self.foo = x
 
@@ -13877,7 +14087,7 @@ class TestClassType(JitTestCase):
 
     def test_set_attr_in_method(self):
         @torch.jit.script
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 # type: (int) -> None
                 self.foo = x
@@ -13898,7 +14108,7 @@ class TestClassType(JitTestCase):
     def test_set_attr_type_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):
             @torch.jit.script
-            class FooTest:
+            class FooTest(object):
                 def __init__(self, x):
                     self.foo = x
                     self.foo = 10  # should error since int != Tensor
@@ -13906,7 +14116,7 @@ class TestClassType(JitTestCase):
     def test_get_attr_not_initialized(self):
         with self.assertRaisesRegex(RuntimeError, "Tried to access to nonexistent attribute"):
             @torch.jit.script
-            class FooTest:
+            class FooTest(object):
                 def __init__(self, x):
                     self.foo = x
 
@@ -13916,7 +14126,7 @@ class TestClassType(JitTestCase):
     def test_set_attr_non_initialized(self):
         with self.assertRaisesRegex(RuntimeError, "Tried to set nonexistent attribute"):
             @torch.jit.script
-            class FooTest:
+            class FooTest(object):
                 def __init__(self, x):
                     self.foo = x
 
@@ -13925,8 +14135,8 @@ class TestClassType(JitTestCase):
 
     def test_type_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "expected a value of type bool"):
-            @torch.jit.script
-            class FooTest:
+            @torch.jit.script  # noqa: B903
+            class FooTest(object):
                 def __init__(self, x):
                     # type: (bool) -> None
                     self.foo = x
@@ -13940,14 +14150,14 @@ class TestClassType(JitTestCase):
     def test_conditional_set_attr(self):
         with self.assertRaisesRegex(RuntimeError, "assignment cannot be in a control-flow block"):
             @torch.jit.script
-            class FooTest:
+            class FooTest(object):
                 def __init__(self, x):
                     if True:
                         self.attr = x
 
     def test_class_type_as_param(self):
-        @torch.jit.script
-        class FooTest:
+        @torch.jit.script  # noqa: B903
+        class FooTest(object):
             def __init__(self, x):
                 self.attr = x
 
@@ -13966,7 +14176,7 @@ class TestClassType(JitTestCase):
 
     def test_out_of_order_methods(self):
         @torch.jit.script
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 self.x = x
                 self.x = self.get_stuff(x)
@@ -13984,7 +14194,7 @@ class TestClassType(JitTestCase):
 
     def test_save_load_with_classes(self):
         @torch.jit.script
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 self.x = x
 
@@ -14014,19 +14224,19 @@ class TestClassType(JitTestCase):
         self.assertEqual(input, output)
 
     def test_save_load_with_classes_nested(self):
-        @torch.jit.script
-        class FooNestedTest:
+        @torch.jit.script  # noqa: B903
+        class FooNestedTest(object):
             def __init__(self, y):
                 self.y = y
 
         @torch.jit.script
-        class FooNestedTest2:
+        class FooNestedTest2(object):
             def __init__(self, y):
                 self.y = y
                 self.nested = FooNestedTest(y)
 
         @torch.jit.script
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 self.class_attr = FooNestedTest(x)
                 self.class_attr2 = FooNestedTest2(x)
@@ -14053,6 +14263,32 @@ class TestClassType(JitTestCase):
         input = torch.rand(2, 3)
         output = m_loaded(input)
         self.assertEqual(2 * input, output)
+
+    def test_python_interop(self):
+        @torch.jit.script  # noqa: B903
+        class Foo(object):
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        @torch.jit.script
+        def use_foo(foo):
+            # type: (Foo) -> Foo
+            return foo
+
+        # create from python
+        x = torch.ones(2, 3)
+        y = torch.zeros(2, 3)
+        f = Foo(x, y)
+
+        self.assertEqual(x, f.x)
+        self.assertEqual(y, f.y)
+
+        # pass in and out of script
+        f2 = use_foo(f)
+
+        self.assertEqual(x, f2.x)
+        self.assertEqual(y, f2.y)
 
 
 for test in autograd_method_tests():
