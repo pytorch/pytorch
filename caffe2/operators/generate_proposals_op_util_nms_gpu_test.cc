@@ -466,7 +466,6 @@ TEST(UtilsNMSTest, TestNMSGPURotatedAngle0) {
   cuda_context.FinishDeviceComputation();
 }
 
-#if defined(CV_MAJOR_VERSION) && (CV_MAJOR_VERSION >= 3)
 TEST(UtilsNMSTest, TestPerfRotatedNMS) {
   if (!HasCudaGPU())
     return;
@@ -678,6 +677,5 @@ TEST(UtilsNMSTest, GPUEqualsCPURotatedCorrectnessTest) {
     }
   }
 }
-#endif // CV_MAJOR_VERSION >= 3
 
 } // namespace caffe2
