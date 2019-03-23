@@ -126,6 +126,20 @@ inline std::pair<int64_t, int64_t> collapse_dims(
  * reducing the number of nested loops.
  */
 
+inline Tensor sort_strides(Tensor& tensor_) {
+  IntArrayRef strides = tensor_.strides();
+  std::vector<int64_t> indices;
+  indices.reserve(tensor_.ndimension());
+  for (int64_t i = 0; i < tensor_.ndimension(); i++) {
+    indices.push_back(i);
+  }
+  std::sort(indices.begin(), indices.end(), [&strides](int64_t i1, int64_t i2) {
+    return strides[i1] > strides[i2];
+  });
+  Tensor tensor = tensor_.permute(indices);
+  return tensor;
+}
+
 template <typename T, int N>
 struct strided_tensor_iter_fixed {
  public:
@@ -242,6 +256,17 @@ inline bool iterate_continue(Arg& iter, Args&... iter_tail) {
       iterate_continue(iter_tail...);
 }
 
+inline int64_t max_iterate_size() {
+  return std::numeric_limits<int64_t>::max();
+};
+
+template <typename Arg, typename... Args>
+inline int64_t max_iterate_size(Arg& iter, Args&... iter_tail) {
+  return std::min(
+      (iter.sizes_[iter.dim_ - 1] - iter.counter_[iter.dim_ - 1]),
+      max_iterate_size(iter_tail...));
+}
+
 inline void iterate_overflow(){};
 
 template <typename Arg, typename... Args>
@@ -302,6 +327,69 @@ apply_op(int64_t numel, int64_t offset, const Op& op, Args... iters) {
       i++;
     }
     iterate_overflow(iters...);
+  }
+}
+
+
+inline void apply_kernel(){};
+
+// TODO: Deal elegantly with 0-dim tensors. iters.strides_ of 0-dim
+// strided_tensor_iter will be of size 0 for dim 0 and iters.strides_[iters.dim_
+// - 1] will index at -1. C++14 integer_sequence could be of use here.
+template <typename Op, typename... Args>
+inline void
+apply_kernel(int64_t numel, int64_t offset, const Op& op, Args... iters) {
+  if (offset > 0)
+    forward(offset, iters...);
+  int64_t size = std::min(numel, max_iterate_size(iters...));
+  op(size, iters.data_..., iters.strides_[iters.dim_ - 1]...);
+  iterate(size, iters...);
+  iterate_overflow(iters...);
+  int64_t i = size;
+  size = std::min(numel, max_iterate_size(iters...));
+  for (; i < numel;) {
+    op(size, iters.data_..., iters.strides_[iters.dim_ - 1]...);
+    iterate(size, iters...);
+    i += size;
+    iterate_overflow(iters...);
+  }
+}
+
+template <typename scalar1, typename scalar2, typename Op>
+inline void
+CPU_tensor_parallel_kernel_apply2(Tensor tensor1, Tensor tensor2, const Op op) {
+  if (!_apply_preamble({tensor1, tensor2}))
+    return;
+  if (tensor1.numel() == 1) {
+    op(1, tensor1.data<scalar1>(), tensor2.data<scalar2>(), 0, 0);
+    return;
+  }
+  if (tensor1.ndimension() < 8 && tensor2.ndimension() < 8) {
+    parallel_for(
+        0,
+        tensor1.numel(),
+        1,
+        [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
+          apply_kernel(
+              end - begin,
+              begin,
+              op,
+              strided_tensor_iter_fixed<scalar1, 8>(tensor1),
+              strided_tensor_iter_fixed<scalar2, 8>(tensor2));
+        });
+  } else {
+    parallel_for(
+        0,
+        tensor1.numel(),
+        1,
+        [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
+          apply_kernel(
+              end - begin,
+              begin,
+              op,
+              strided_tensor_iter<scalar1>(tensor1),
+              strided_tensor_iter<scalar2>(tensor2));
+        });
   }
 }
 
@@ -407,6 +495,43 @@ inline void CPU_tensor_apply4(
         strided_tensor_iter<scalar2>(tensor2),
         strided_tensor_iter<scalar3>(tensor3),
         strided_tensor_iter<scalar4>(tensor4));
+  }
+}
+
+template <typename scalar1, typename scalar2, typename Op>
+inline void CPU_tensor_parallel_apply2(
+    Tensor tensor1,
+    Tensor tensor2,
+    const Op op,
+    int64_t grain_size = internal::GRAIN_SIZE) {
+  if (!_apply_preamble({tensor1, tensor2}))
+    return;
+  if (tensor1.ndimension() < 8 && tensor2.ndimension() < 8) {
+    parallel_for(
+        0,
+        tensor1.numel(),
+        grain_size,
+        [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
+          apply_op(
+              end - begin,
+              begin,
+              op,
+              strided_tensor_iter_fixed<scalar1, 8>(tensor1),
+              strided_tensor_iter_fixed<scalar2, 8>(tensor2));
+        });
+  } else {
+    parallel_for(
+        0,
+        tensor1.numel(),
+        grain_size,
+        [&tensor1, &tensor2, &op](int64_t begin, int64_t end) {
+          apply_op(
+              end - begin,
+              begin,
+              op,
+              strided_tensor_iter<scalar1>(tensor1),
+              strided_tensor_iter<scalar2>(tensor2));
+        });
   }
 }
 
