@@ -10420,8 +10420,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
     # NB: we must not be built with CUDA; if we are built with CUDA but no CUDA
     # is available, we get a different error.
-    @unittest.skipIf(torch.backends.cuda.is_built()
-        or IS_SANDCASTLE, "CUDA is built, can't test CUDA not built error")
+    @unittest.skipIf(torch.backends.cuda.is_built() or IS_SANDCASTLE, "CUDA is built, can't test CUDA not built error")
     def test_cuda_not_built(self):
         msg = "Torch not compiled with CUDA enabled"
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.current_device())
