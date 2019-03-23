@@ -15,6 +15,7 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/UnaryOps.h>
+#include <ATen/native/TensorIterator.h>
 
 #include <algorithm>
 #include <cmath>
