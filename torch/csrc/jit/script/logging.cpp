@@ -19,15 +19,13 @@ TORCH_API int64_t LockingLogger::getCounterValue(const std::string& name) const 
   const std::vector<int64_t> *vals;
   int64_t retval;
   AggregationType type;
-  {
-    std::unique_lock<std::mutex> lk(m);
-    if (!raw_counters.count(name)) {
-      return 0;
-    }
-    type = agg_types.count(name) ? agg_types.at(name)
-                                                : AggregationType::SUM;
-    vals = &raw_counters.at(name);
+  std::unique_lock<std::mutex> lk(m);
+  if (!raw_counters.count(name)) {
+    return 0;
   }
+  type = agg_types.count(name) ? agg_types.at(name)
+                                              : AggregationType::SUM;
+  vals = &raw_counters.at(name);
   switch (type) {
     case AggregationType::SUM: {
       float sum = 0;

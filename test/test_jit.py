@@ -14047,10 +14047,11 @@ class TestLogging(JitTestCase):
     def test_time_measurement_counter(self):
         class ModuleThatTimes(torch.jit.ScriptModule):
             def forward(self, x):
-                tp = torch.jit._logging.time_point()
+                tp_start = torch.jit._logging.time_point()
                 for i in range(30):
                     x += 1.0
-                torch.jit._logging.record_duration_since('mytimer', tp)
+                tp_end = torch.jit._logging.time_point()
+                torch.jit._logging.add_stat_value('mytimer', tp_end - tp_start)
                 return x
 
         mtm = ModuleThatTimes()
@@ -14066,10 +14067,11 @@ class TestLogging(JitTestCase):
         class ModuleThatTimes(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                tp = torch.jit._logging.time_point()
+                tp_start = torch.jit._logging.time_point()
                 for i in range(30):
                     x += 1.0
-                torch.jit._logging.record_duration_since('mytimer', tp)
+                tp_end = torch.jit._logging.time_point()
+                torch.jit._logging.add_stat_value('mytimer', tp_end - tp_start)
                 return x
 
         mtm = ModuleThatTimes()

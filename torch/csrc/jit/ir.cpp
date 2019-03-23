@@ -841,9 +841,8 @@ bool Node::hasSideEffects() const {
     case prim::SetAttr:
     case aten::warn:
     case prim::BumpCounter:
-    case prim::GetCounters:
+    case prim::GetCounter:
     case prim::TimePoint:
-    case prim::RecordDuration:
       return true;
   }
   return false;

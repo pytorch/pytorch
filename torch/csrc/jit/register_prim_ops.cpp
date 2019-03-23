@@ -888,56 +888,63 @@ RegisterOperators reg(
          userObj->setSlot(slot, std::move(v));
          return 0;
        };
-     }),
-     Operator("prim::BumpCounter(str key, int val) -> ()", [](const Node* node) {
-       return [](Stack& stack) {
-         auto val = pop(stack).toInt();
-         auto name = pop(stack).toString();
-         torch::jit::logging::getLogger()->addStatValue(*name, val);
-         return 0;
-       };
-     }),
-     Operator("prim::GetCounters(str name) -> int", [](const Node* node) {
-       return [](Stack& stack) {
-         auto name = pop(stack).toString();
-         auto val = torch::jit::logging::getLogger()->getCounterValue(*name);
-         push(stack, val);
-         return 0;
-       };
-     }),
-     // HACK alert: stuffing a struct into a ByteTensor
-     // TODO: we should revisit this when C++-bound script classes are
-     // available.
-     Operator("prim::TimePoint() -> Tensor", [](const Node* node) {
-      return [](Stack& stack) {
-        logging::JITTimePoint *ptr = new logging::JITTimePoint(logging::timePoint());
-        at::DataPtr at_ptr(
-            ptr,
-            ptr,
-            [](void* ptr) {
-              logging::JITTimePoint* typed_ptr =
-                  reinterpret_cast<logging::JITTimePoint*>(ptr);
-              delete typed_ptr;
-            },
-            at::kCPU);
-
-        auto retval = at::empty(
-            {sizeof(logging::JITTimePoint)}, at::kByte);
-
-        retval.storage().set_data_ptr(std::move(at_ptr));
-        push(stack, std::move(retval));
-        return 0;
-      };
-     }),
-     Operator("prim::RecordDuration(str name, Tensor tp) -> ()", [](const Node* node) {
-       return [](Stack& stack) {
-         auto tp = pop(stack).toTensor();
-         auto name = pop(stack).toString();
-         logging::recordDurationSince(*name, *reinterpret_cast<logging::JITTimePoint*>(tp.storage().data_ptr().get()));
-         return 0;
-       };
-     }),
+     })
      });
+
+RegisterOperators logging_operators({
+    Operator("prim::BumpCounter(str key, int val) -> ()", [](Stack& stack) {
+          auto val = pop(stack).toInt();
+          auto key = pop(stack).toString();
+
+          auto schema = parseSchema("prim::BumpCounter(str key, int val) -> ()");
+          if (jit::tracer::isTracing()) {
+            const auto& graph = tracer::getTracingState()->graph;
+            Node* node = graph->create(prim::BumpCounter, /*num_outputs=*/0);
+            tracer::recordSourceLocation(node);
+            node->addInput(insertConstant(*graph, key));
+            tracer::addInputs(node, "val", val);
+            graph->insertNode(node);
+          }
+          torch::jit::logging::getLogger()->addStatValue(*key, val);
+          return 0;
+    }),
+    Operator("prim::GetCounter(str name) -> int", [](Stack& stack) {
+          auto name = pop(stack).toString();
+
+          auto schema = parseSchema("prim::GetCounter(str name) -> int");
+          Node *node = nullptr;
+          if (jit::tracer::isTracing()) {
+            const auto& graph = tracer::getTracingState()->graph;
+            Node* node = graph->create(prim::GetCounter, /*num_outputs=*/0);
+            tracer::recordSourceLocation(node);
+            node->addInput(insertConstant(*graph, name));
+            graph->insertNode(node);
+          }
+          auto val = torch::jit::logging::getLogger()->getCounterValue(*name);
+          if (jit::tracer::isTracing()) {
+            jit::tracer::addOutput(node, val);
+          }
+          push(stack, val);
+          return 0;
+     }),
+    Operator("prim::TimePoint() -> int", [](Stack& stack) {
+        auto schema = parseSchema("prim::TimePoint() -> int");
+        Node* node = nullptr;
+        if (jit::tracer::isTracing()) {
+            const auto& graph = tracer::getTracingState()->graph;
+            Node* node = graph->create(prim::TimePoint, /*num_outputs=*/0);
+            tracer::recordSourceLocation(node);
+            graph->insertNode(node);
+        }
+        auto output = autograd::profiler::getTime();
+        push(stack, output);
+        if (jit::tracer::isTracing()) {
+          jit::tracer::addOutput(node, output);
+        }
+        return 0;
+    })
+});
+
 
 // define implementations for primitive number ops
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
