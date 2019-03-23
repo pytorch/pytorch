@@ -234,6 +234,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledGPU) {
       1e-4);
 }
 
+#if defined(CV_MAJOR_VERSION) && (CV_MAJOR_VERSION >= 3)
 TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0GPU) {
   // Similar to TestRealDownSampledGPU but for rotated boxes with angle info.
   if (!HasCudaGPU())
@@ -636,5 +637,6 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedGPU) {
       0,
       1e-4);
 }
+#endif // CV_MAJOR_VERSION >= 3
 
 } // namespace caffe2
