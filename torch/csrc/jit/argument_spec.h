@@ -156,8 +156,13 @@ struct ArgumentSpec {
     if (original->isSubtypeOf(TensorType::get())
 	|| original->isSubtypeOf(OptionalType::ofTensor())) {
       auto& arg = args.at(offset++);
-      if (!arg.defined())
-        return AutogradZeroTensorType::get();
+      if (!arg.defined()) {
+        if (original->isSubtypeOf(OptionalType::ofTensor())) {
+          return NoneType::get();
+        } else {
+          return AutogradZeroTensorType::get();
+        }
+      }
       return DimensionedTensorType::create(
           arg.type(),
           ConvertIntToCPUOrCUDA(arg.device()),

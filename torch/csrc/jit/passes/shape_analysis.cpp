@@ -514,14 +514,13 @@ class ShapePropagator {
         return;
       }
       case prim::unchecked_unwrap_optional: {
-	// we know we cannot have None as input, so we can always pass
-	// on the type.
-	if(auto ot = node->input()->type()->cast<OptionalType>()) {
+        // If we have None as input, we need to leave the output type alone
+        if(auto ot = node->input()->type()->cast<OptionalType>()) {
 	  node->output()->setType(ot->getElementType());
-	} else {
-	  node->output()->setType(node->input()->type());
-	}
-	return;
+        } else if (!node->input()->type()->isSubtypeOf(NoneType::get())) {
+          node->output()->setType(node->input()->type());
+        }
+        return;
       }
       case prim::ConstantChunk: {
         Value* tensor = node->input();

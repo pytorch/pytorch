@@ -457,10 +457,20 @@ bool Operator::matches(const Node* node) const {
     const MatchTypeReturn matched_type =
         matchTypeVariables(formals[i].type(), actuals[i]->type(), type_env);
     if (!matched_type.type) {
+      if (actuals[i]->type() == NoneType::get() &&
+          formals[i].type()->kind() == TypeKind::OptionalType) {
+        // when looking for a match, None is actually OK here
+        continue;
+      }
       return false;
     }
     TypePtr formal = *matched_type.type;
     if (!actuals[i]->type()->isSubtypeOf(formal)) {
+      if (actuals[i]->type() == NoneType::get() &&
+          formals[i].type()->kind() == TypeKind::OptionalType) {
+        // when looking for a match, None is actually OK here
+        continue;
+      }
       return false;
     }
   }

@@ -4995,11 +4995,13 @@ a")
             else:
                 return 0
 
-        fn(None)
+        res = fn(None)
+        self.assertEqual(res, 1)
         g = fn.graph_for(None)
-        self.assertEqual(list(g.inputs())[0].type().str(), 'UndefinedTensor')
+        self.assertEqual(list(g.inputs())[0].type().kind(), 'NoneType')
         t = torch.ones(1)
-        fn(t)
+        res = fn(t)
+        self.assertEqual(res, 0)
         g = fn.graph_for(t)
         self.assertEqual(list(g.inputs())[0].type().kind(), 'DimensionedTensorType')
 
