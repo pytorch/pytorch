@@ -248,8 +248,8 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
 
   /* backprop */
   if (isizeH == osizeH && isizeW == osizeW){
-    // *gradInput_data = *gradOutput_data;
-    THTensor_(set)(gradInput_data, gradOutput_data);
+    *gradInput_data = *gradOutput_data;
+    // THTensor_(set)(gradInput_data, gradOutput_data);
   }
   else if (idim == 3)
   {
