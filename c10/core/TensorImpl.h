@@ -15,6 +15,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
+#include <c10/util/python_stub.h>
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
@@ -885,6 +886,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return opaque_handle_.get();
   }
 
+  inline void set_pyobj(PyObject* pyobj) noexcept {
+    pyobj_ = pyobj;
+  }
+
+  inline PyObject* pyobj() const noexcept {
+    return pyobj_;
+  }
+
  private:
   // As an optimization, get_device handles the typical CUDA Tensor case and
   // calls get_device_slow if the tensor stores its device somewhere else
@@ -1403,6 +1412,20 @@ protected:
   // at a time).
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
+  PyObject* pyobj_ = nullptr; // weak reference
+
+  // An `opaque_handle_` allows customized data layout other than the default strided layout.
+  // Storage is initialized and it is valid to get data pointer and range via `data()` and `numel()`.
+  // Metadata like device, dtype and dims can be queried like a normal tensor with strided layout
+  // but cannot be changed. Therefore `allow_tensor_metadata_change()` always returns
+  // `false` and `set_allow_tensor_metadata_change()` is no-op. The `strides()` is not supported.
+  // Calling any method that changes the metadata and storage would fail. Calling to `is_contiguous()`
+  // always returns false since "contiguous" is not well-defined for a customized layout.
+  //
+  // Following invariant holds when `opaque_handle_` is valid:
+  //     `!is_contiguous() && !allow_tensor_metadata_change()`
+  c10::intrusive_ptr<c10::intrusive_ptr_target> opaque_handle_;
+
   // We could save a word or two by combining the SmallVector structs,
   // since their size is redundant, and if we need to overflow the buffer space
   // we could keep the two pointers together. However, that would require
@@ -1424,18 +1447,6 @@ protected:
   // You get to have eight byte-size fields here, before you
   // should pack this into a bitfield.
   TensorTypeId type_id_;
-
-  // An `opaque_handle_` allows customized data layout other than the default strided layout.
-  // Storage is initialized and it is valid to get data pointer and range via `data()` and `numel()`.
-  // Metadata like device, dtype and dims can be queried like a normal tensor with strided layout
-  // but cannot be changed. Therefore `allow_tensor_metadata_change()` always returns
-  // `false` and `set_allow_tensor_metadata_change()` is no-op. The `strides()` is not supported.
-  // Calling any method that changes the metadata and storage would fail. Calling to `is_contiguous()`
-  // always returns false since "contiguous" is not well-defined for a customized layout.
-  //
-  // Following invariant holds when `opaque_handle_` is valid:
-  //     `!is_contiguous() && !allow_tensor_metadata_change()`
-  c10::intrusive_ptr<c10::intrusive_ptr_target> opaque_handle_;
 
   bool is_contiguous_ = true;
   bool is_variable_ = false;
@@ -1490,6 +1501,8 @@ protected:
 //    weak refcount
 //    storage pointer
 //    autograd metadata pointer
+//    PyObject pointer
+//    opaque handler pointer
 //    sizes SmallVector (begin)
 //    sizes SmallVector (end)
 //    sizes SmallVector (capacity)
@@ -1509,7 +1522,6 @@ protected:
 //    storage offset
 //    numel
 //    data type pointer
-//    opaque handler pointer
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
