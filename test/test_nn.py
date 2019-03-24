@@ -4370,9 +4370,9 @@ class TestNN(NNTestCase):
             # Ensure warnings are being shown
             warnings.simplefilter("always")
             # Trigger Warning
-            F.mse_loss(i,t)
+            F.mse_loss(i, t)
             # Check warning occurs
-            self.assertEqual(len(w), 1) 
+            self.assertEqual(len(w), 1)
             self.assertIn('Please ensure they have the same size.', str(w[0]))
 
     def test_nll_loss_mismatched_batch(self):
