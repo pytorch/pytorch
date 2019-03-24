@@ -36,6 +36,14 @@ git clone https://github.com/pytorch/pytorch
 cd pytorch
 ```
 
+2.1. If you already have PyTorch from source, update it:
+
+```bash
+git pull --rebase upstream master  # assuming upstream is the official repo
+git submodule sync --recursive
+git submodule update --init --recursive
+```
+
 3. Install PyTorch in `develop` mode:
 
 A full set of instructions on installing PyTorch from source is here:
