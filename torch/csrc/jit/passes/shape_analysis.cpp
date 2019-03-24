@@ -515,6 +515,8 @@ class ShapePropagator {
       }
       case prim::unchecked_unwrap_optional: {
         // If we have None as input, we need to leave the output type alone
+	// note that we cannot have None as input in execution,
+	// but we want to keep the graph consistent during the analysis
         if (auto ot = node->input()->type()->cast<OptionalType>()) {
           node->output()->setType(ot->getElementType());
         } else if (!node->input()->type()->isSubtypeOf(NoneType::get())) {
@@ -543,6 +545,9 @@ class ShapePropagator {
         if (input_ivalue && input_ivalue->isNone()) {
           return;
         }
+	// During analysis we don't want to pass None through here
+	// to not mess up the expectation of the passes working
+	// with the nodes consuming the output.
         if (auto ot = node->input()->type()->cast<OptionalType>()) {
           node->output()->setType(ot->getElementType());
         } else if (!node->input()->type()->isSubtypeOf(NoneType::get())) {
@@ -1013,9 +1018,11 @@ class ShapePropagator {
     };
 
     // Requirements:
-    //   dims           : 0 if dim is None, otherwise preserved if keepdim ==
-    //   false or 1 smaller otherwise scalar type    : preserved device :
-    //   preserved tensor inputs  : 1 tensor outputs : 1
+    //   dims           : 0 if dim is None, otherwise preserved if keepdim == false or 1 smaller otherwise
+    //   scalar type    : preserved
+    //   device         : preserved
+    //   tensor inputs  : 1
+    //   tensor outputs : 1
     // Additionally:
     //   - First input should be the only tensor input
     //   - Has a bool keepdim argument
@@ -1108,9 +1115,7 @@ class ShapePropagator {
         [](Node* node) -> type_vec_t {
           if (auto dim = node->get<std::vector<int64_t>>(attr::dim)) {
             return multidim_reduce_with_postprocess(
-                node,
-                /*num_reduced_dim=*/dim->size(),
-                /*upcast_integer=*/false);
+                node, /*num_reduced_dim=*/dim->size(), /*upcast_integer=*/false);
           }
           return {};
         }};

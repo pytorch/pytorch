@@ -5005,6 +5005,18 @@ a")
         g = fn.graph_for(t)
         self.assertEqual(list(g.inputs())[0].type().kind(), 'DimensionedTensorType')
 
+        @torch.jit.script
+        def fn(x):
+            # type: (Optional[Tensor]) -> Tensor
+            y = torch.jit._unwrap_optional(x)
+            return y
+
+        res = fn(t)
+        self.assertEqual(x, t)
+        with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
+            res = fn(None)
+        self.assertEqual(list(g.nodes())[0].output().type().str(), "Tensor")
+
     def test_while_write_outer_then_read(self):
         def func(a, b):
             while bool(a < 10):
