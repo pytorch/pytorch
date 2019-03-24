@@ -35,7 +35,8 @@ void runFallback(int64_t key, Stack& stack) {
   auto maybe_spec = retrieve(key);
   if (!maybe_spec)
     throw std::runtime_error("Failed to find fusion spec to run fallback.");
-
+  // std::cout << "fallback!" << std::endl;
+  //(*maybe_spec)->graph()->dump();
   InterpreterState{(*maybe_spec)->code()}.run(stack);
 }
 
