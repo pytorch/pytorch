@@ -256,34 +256,13 @@
 - func: _dim_arange(Tensor like, int dim) -> Tensor
   matches_jit_signature: True
 
-# `argmin` and `argmax` are exposed in C++ but not in Python, where we only
-# expose `_argmin` and `_argmax` (which call the first versions). In Python, we
-# then define our own `argmax` and `argmin` that handle passing `dim=None`,
-# which gets the argmax/argmin of the flattened array.
-
-- func: argmax(Tensor self, int dim, bool keepdim=False) -> Tensor
+- func: argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
   matches_jit_signature: True
   variants: function, method
 
-- func: argmax(Tensor self) -> Tensor
+- func: argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
   matches_jit_signature: True
   variants: function, method
-
-- func: _argmax(Tensor self, int dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
-  variants: function
-
-- func: argmin(Tensor self, int dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
-  variants: function, method
-
-- func: argmin(Tensor self) -> Tensor
-  matches_jit_signature: True
-  variants: function, method
-
-- func: _argmin(Tensor self, int dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
-  variants: function
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   matches_jit_signature: True
@@ -1100,21 +1079,6 @@
 - func: ger(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
-- func: gesv(Tensor self, Tensor A) -> (Tensor, Tensor)
-  matches_jit_signature: True
-  variants: function, method
-
-- func: gesv(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) lu) -> (Tensor(a!), Tensor(b!))
-  matches_jit_signature: True
-
-# gesv handles broadcasting of arbitrary batch dims while _gesv_helper does not.
-- func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
-  matches_jit_signature: True
-  variants: function
-  dispatch:
-    CPU: _gesv_helper_cpu
-    CUDA: _gesv_helper_cuda
-
 - func: group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor
   matches_jit_signature: True
 
@@ -1722,6 +1686,8 @@
 
 - func: cdist(Tensor x1, Tensor x2, float p=2) -> Tensor
   matches_jit_signature: True
+
+- func: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
 
 - func: pdist(Tensor self, float p=2) -> Tensor
   matches_jit_signature: True
@@ -2481,6 +2447,13 @@
   dispatch:
     CPU: _s_gamma_cpu
     CUDA: _s_gamma_cuda
+
+- func: _sample_dirichlet(Tensor self, Generator? generator=None) -> Tensor
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: _s_dirichlet_cpu
+    CUDA: _s_dirichlet_cuda
 
 - func: poisson(Tensor self, Generator? generator=None) -> Tensor
   matches_jit_signature: True
@@ -3726,12 +3699,19 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: trtrs(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!), Tensor(b!))
+- func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!), Tensor(b!))
   matches_jit_signature: True
 
-- func: trtrs(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor, Tensor)
+- func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor, Tensor)
   matches_jit_signature: True
   variants: method, function
+
+- func: _triangular_solve_helper(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular) -> (Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: _triangular_solve_helper_cpu
+    CUDA: _triangular_solve_helper_cuda
 
 - func: symeig(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   matches_jit_signature: True
@@ -3781,6 +3761,20 @@
   dispatch:
     CPU: _cholesky_solve_helper_cpu
     CUDA: _cholesky_solve_helper_cuda
+
+- func: solve(Tensor self, Tensor A) -> (Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function, method
+
+- func: solve(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) lu) -> (Tensor(a!), Tensor(b!))
+  matches_jit_signature: True
+
+- func: _solve_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: _solve_helper_cpu
+    CUDA: _solve_helper_cuda
 
 - func: potri(Tensor self, bool upper=True, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -4018,6 +4012,9 @@
 - func: median(Tensor self) -> Tensor
   matches_jit_signature: True
   variants: method, function
+  dispatch:
+    CPU: median_cpu
+    CUDA: median_cuda
 
 - func: sort(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   matches_jit_signature: True

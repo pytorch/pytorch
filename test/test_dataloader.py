@@ -411,6 +411,7 @@ def init_fn(worker_id):
 class TestDataLoader(TestCase):
 
     def setUp(self):
+        super(TestDataLoader, self).setUp()
         self.data = torch.randn(100, 2, 3, 5)
         self.labels = torch.randperm(50).repeat(2)
         self.dataset = TensorDataset(self.data, self.labels)
@@ -926,6 +927,7 @@ class StringDataset(Dataset):
 
 class TestStringDataLoader(TestCase):
     def setUp(self):
+        super(TestStringDataLoader, self).setUp()
         self.dataset = StringDataset()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -951,6 +953,7 @@ class DictDataset(Dataset):
 
 class TestDictDataLoader(TestCase):
     def setUp(self):
+        super(TestDictDataLoader, self).setUp()
         self.dataset = DictDataset()
 
     def test_sequential_batch(self):
@@ -994,6 +997,7 @@ class NamedTupleDataset(Dataset):
 
 class TestNamedTupleDataLoader(TestCase):
     def setUp(self):
+        super(TestNamedTupleDataLoader, self).setUp()
         self.dataset = NamedTupleDataset()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -1004,7 +1008,7 @@ class TestNamedTupleDataLoader(TestCase):
             self.assertIsInstance(batch.data, NamedTupleDataset.Data)
 
 
-class SimpleCustomBatch:
+class SimpleCustomBatch(object):
     def __init__(self, data):
         transposed_data = list(zip(*data))
         self.inp = torch.stack(transposed_data[0], 0)
@@ -1015,13 +1019,31 @@ class SimpleCustomBatch:
         self.tgt = self.tgt.pin_memory()
         return self
 
+    def is_pinned(self):
+        return self.inp.is_pinned() and self.tgt.is_pinned()
+
 
 def collate_wrapper(batch):
     return SimpleCustomBatch(batch)
 
 
+def collate_into_packed_sequence(batch):
+    data = torch.stack([sample[0] for sample in batch], 1)
+    t, b = data.size()
+    lengths = torch.randint(1, t, size=(b,), dtype=torch.int64)
+    return torch.nn.utils.rnn.pack_padded_sequence(data, lengths, enforce_sorted=False)
+
+
+def collate_into_packed_sequence_batch_first(batch):
+    data = torch.stack([sample[0] for sample in batch], 0)
+    b, t = data.size()
+    lengths = torch.randint(1, t, size=(b,), dtype=torch.int64)
+    return torch.nn.utils.rnn.pack_padded_sequence(data, lengths, batch_first=True, enforce_sorted=False)
+
+
 class TestCustomPinFn(TestCase):
     def setUp(self):
+        super(TestCustomPinFn, self).setUp()
         inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
         tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
         self.dataset = TensorDataset(inps, tgts)
@@ -1029,20 +1051,32 @@ class TestCustomPinFn(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @skipIfRocm
     def test_custom_batch_pin(self):
-        loader = DataLoader(self.dataset, batch_size=2, collate_fn=collate_wrapper,
-                            pin_memory=True)
-        for sample in loader:
-            self.assertTrue(sample.inp.is_pinned())
-            self.assertTrue(sample.tgt.is_pinned())
+        test_cases = [
+            (collate_wrapper, SimpleCustomBatch),
+            (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
+            (collate_into_packed_sequence_batch_first, torch.nn.utils.rnn.PackedSequence),
+        ]
+        for collate_fn, elem_cls in test_cases:
+            loader = DataLoader(self.dataset, batch_size=2, collate_fn=collate_fn,
+                                pin_memory=True)
+            for sample in loader:
+                self.assertIsInstance(sample, elem_cls)
+                self.assertTrue(sample.is_pinned())
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @skipIfRocm
     def test_custom_batch_pin_worker(self):
-        loader = DataLoader(self.dataset, batch_size=2, collate_fn=collate_wrapper,
-                            pin_memory=True, num_workers=1)
-        for sample in loader:
-            self.assertTrue(sample.inp.is_pinned())
-            self.assertTrue(sample.tgt.is_pinned())
+        test_cases = [
+            (collate_wrapper, SimpleCustomBatch),
+            (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
+            (collate_into_packed_sequence_batch_first, torch.nn.utils.rnn.PackedSequence),
+        ]
+        for collate_fn, elem_cls in test_cases:
+            loader = DataLoader(self.dataset, batch_size=2, collate_fn=collate_fn,
+                                pin_memory=True, num_workers=1)
+            for sample in loader:
+                self.assertIsInstance(sample, elem_cls)
+                self.assertTrue(sample.is_pinned())
 
 
 class TestWorkerQueueDataset(Dataset):
@@ -1062,6 +1096,7 @@ class TestWorkerQueueDataset(Dataset):
 
 class TestIndividualWorkerQueue(TestCase):
     def setUp(self):
+        super(TestIndividualWorkerQueue, self).setUp()
         self.dataset = TestWorkerQueueDataset([i for i in range(128)])
 
     def _run_ind_worker_queue_test(self, batch_size, num_workers):

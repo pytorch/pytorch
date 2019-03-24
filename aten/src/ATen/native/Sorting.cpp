@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/SortingUtils.h>
-#include <ATen/NumericUtils.h>
 
 namespace at {
 namespace native {
@@ -172,7 +172,8 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
               tmp_values,
               k - 1,
               [](scalar_t x, scalar_t y) -> bool {
-                return ((_isnan<scalar_t>(x) && !_isnan<scalar_t>(y)) || (x > y));
+                return (
+                    (_isnan<scalar_t>(x) && !_isnan<scalar_t>(y)) || (x > y));
               },
               [&](int64_t i, int64_t j) {
                 std::swap(tmp_values[i], tmp_values[j]);
@@ -198,6 +199,54 @@ std::tuple<Tensor, Tensor> kthvalue(
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
   at::kthvalue_out(values, indices, self, k, dim, keepdim);
   return std::make_tuple(values, indices);
+}
+
+std::tuple<Tensor&, Tensor&> median_out(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim) {
+  // note: kthvalue counts from 1..n
+  int64_t k = self.dim() > 0 ? (self.size(dim) + 1) / 2 : 1;
+  at::kthvalue_out(values, indices, self, k, dim, keepdim);
+  return std::forward_as_tuple(values, indices);
+}
+
+std::tuple<Tensor, Tensor> median(
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim) {
+  Tensor values = at::empty({0}, self.options());
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  at::median_out(values, indices, self, dim, keepdim);
+  return std::make_tuple(values, indices);
+}
+
+// this does not reduce to median with dim beause we don't want to copy twice
+Tensor median_cpu(const Tensor& self) {
+  AT_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
+  if (self.dim() == 0 && self.numel() == 1) {
+    return self.clone();
+  }
+  auto tmp_values = self.clone().view(-1);
+  auto result = at::empty({1}, self.options());
+  AT_DISPATCH_ALL_TYPES(self.type(), "median", [&] {
+    // note, quick_select is 0 based while kthvalue is not
+    int64_t k = (tmp_values.size(0) - 1) / 2;
+    auto val_accessor = tmp_values.accessor<scalar_t, 1>();
+    quick_select_template(
+        val_accessor,
+        k,
+        [](scalar_t x, scalar_t y) -> bool {
+          return ((_isnan<scalar_t>(x) && !_isnan<scalar_t>(y)) || (x > y));
+        },
+        [&](int64_t i, int64_t j) {
+          std::swap(val_accessor[i], val_accessor[j]);
+        });
+    result.fill_(tmp_values[k]);
+  });
+  return result.view({});
 }
 
 } // namespace native

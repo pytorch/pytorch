@@ -16,6 +16,8 @@
   _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
   _(cuGetErrorString)                            \
   _(nvrtcGetErrorString)                         \
+  _(nvrtcGetProgramLogSize)                      \
+  _(nvrtcGetProgramLog)                          \
   _(cuLaunchKernel)                              \
   _(nvrtcCompileProgram)                         \
   _(cuCtxGetCurrent)                             \

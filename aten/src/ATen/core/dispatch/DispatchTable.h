@@ -184,12 +184,13 @@ private:
         reverse_index_of_first_tensor_arg_
       );
       if (first_tensor_arg_is_tensor_list_) {
-        auto tensor_list = first_tensor_arg.toTensorList();
-        if (tensor_list->elements().size() == 0) {
+        const auto& tensor_list = first_tensor_arg.toTensorListRef();
+        if (tensor_list.size() == 0) {
           throw std::runtime_error("Tried to dispatch based on an empty tensor list. When the first tensor argument of an operator is a tensor list, then it must not be empty.");
         }
-        return tensor_list->elements()[0].type_id();
+        return tensor_list[0].type_id();
       } else {
+        // TODO Avoid bumping the refcounter
         return first_tensor_arg.toTensor().type_id();
       }
     }
