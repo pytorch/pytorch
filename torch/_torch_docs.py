@@ -6424,9 +6424,9 @@ Arguments:
     with_replacement (boolean, optional): whether to allow duplication in combination
 
 Returns:
-    Tensor: A tensor equivalent to converting all the input tensors into lists,
-        do `itertools.combinations` or `itertools.combinations_with_replacement`
-        on these lists, and finally convert the resulting list into tensor.
+    Tensor: A tensor equivalent to converting all the input tensors into lists, do
+    `itertools.combinations` or `itertools.combinations_with_replacement` on these
+    lists, and finally convert the resulting list into tensor.
 
 Example::
 
