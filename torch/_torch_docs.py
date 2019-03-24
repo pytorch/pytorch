@@ -6424,9 +6424,9 @@ Arguments:
     with_replacement (boolean, optional): whether to allow duplication in combination
 
 Returns:
-    Tensor: A tensor equivalent to converting all the input tensors into lists, do
-    `itertools.combinations` or `itertools.combinations_with_replacement` on these
-    lists, and finally convert the resulting list into tensor.
+    Tensor: A tensor equivalent to converting all the input tensors into lists,
+        do `itertools.combinations` or `itertools.combinations_with_replacement`
+        on these lists, and finally convert the resulting list into tensor.
 
 Example::
 
@@ -6451,4 +6451,49 @@ Example::
             [2, 2],
             [2, 3],
             [3, 3]])
+""")
+
+
+add_docstr(torch.numpy_repeat,
+           r"""
+.. function:: numpy_repeat(input, repeats, dim=None) -> Tensor
+
+Repeat elements of a tensor.
+
+.. warning::
+
+    This is different from :func:`torch.repeat` but similar to `numpy.repeat`.
+
+Args:
+    input (Tensor): The input tensor
+    repeats (Tensor or int): The number of repetitions for each element.
+        repeats is broadcasted to fit the shape of the given axis.
+    dim (int, optional): The dimension along which to repeat values.
+        By default, use the flattened input array, and return a flat output
+        array.
+
+Returns:
+    Tensor: Repeated tensor which has the same shape as input, except along the
+        given axis.
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3])
+    >>> x.numpy_repeat(2)
+    tensor([1, 1, 2, 2, 3, 3])
+    >>> torch.numpy_repeat(y, 2)
+    tensor([1, 1, 2, 2, 3, 3, 4, 4])
+    >>> torch.numpy_repeat(y, 3, dim=1)
+    tensor([[1, 1, 1, 2, 2, 2],
+            [3, 3, 3, 4, 4, 4]])
+    >>> torch.numpy_repeat(y, torch.tensor([1, 2]), dim=0)
+    tensor([[1, 2],
+            [3, 4],
+            [3, 4]])
+
+.. function:: numpy_repeat(repeats) -> Tensor
+
+If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
+`tensor([0, 0, ..., 1, 1, ..., 2, 2, ..., ...])` where `0` appears `n1` times,
+`1` appears `n2` times, `2` appears `n3` times, etc.
 """)
