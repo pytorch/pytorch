@@ -35,8 +35,9 @@ class C10_API Scalar {
 
 #undef DEFINE_IMPLICIT_CTOR
 
-template<typename T>
-Scalar(typename std::enable_if<std::is_same<T, bool>::type>::type, bool vv)
+template <typename T,
+       typename std::enable_if<std::is_same<T, bool>::value, bool>::type* = nullptr>
+Scalar(T vv)
 : tag(Tag::HAS_i) {
   v.i = convert<decltype(v.i), bool>(vv);
 }
