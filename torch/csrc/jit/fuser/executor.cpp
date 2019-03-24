@@ -391,7 +391,7 @@ bool runFusion(const int64_t key, Stack& stack) {
   std::vector<at::Tensor> raw_outputs;
   // Launches fusion
   auto& fusion = *(*maybe_kernel);
-  launchFusion(fusion, device, inputs, raw_outputs);
+  launchFusion(fusion, device, inputs, all_inputs, raw_outputs);
 
   // now we need to do all the sum to size.
   auto outputs =
