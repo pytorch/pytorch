@@ -22,8 +22,8 @@ static void compute_cuda(int64_t *repeat_ptr, int64_t *cumsum_ptr, int64_t *resu
 
 namespace at { namespace native {
 
-Tensor numpy_repeat_cuda(const Tensor &repeat) {
-    return numpy_repeat_common<compute_cuda>(repeat);
+Tensor repeat_interleave_cuda(const Tensor &repeat) {
+    return repeat_interleave_common<compute_cuda>(repeat);
 }
 
 }}

@@ -454,11 +454,11 @@ inline Tensor Tensor::pinverse(double rcond) const {
 inline Tensor Tensor::repeat(IntArrayRef repeats) const {
     return type().repeat(*this, repeats);
 }
-inline Tensor Tensor::numpy_repeat(const Tensor & repeats, c10::optional<int64_t> dim) const {
-    return type().numpy_repeat(*this, repeats, dim);
+inline Tensor Tensor::repeat_interleave(const Tensor & repeats, c10::optional<int64_t> dim) const {
+    return type().repeat_interleave(*this, repeats, dim);
 }
-inline Tensor Tensor::numpy_repeat(int64_t repeats, c10::optional<int64_t> dim) const {
-    return type().numpy_repeat(*this, repeats, dim);
+inline Tensor Tensor::repeat_interleave(int64_t repeats, c10::optional<int64_t> dim) const {
+    return type().repeat_interleave(*this, repeats, dim);
 }
 inline Tensor Tensor::reshape(IntArrayRef shape) const {
     return type().reshape(*this, shape);

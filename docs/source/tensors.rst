@@ -341,6 +341,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: renorm
    .. automethod:: renorm_
    .. automethod:: repeat
+   .. autofunction:: repeat_interleave
    .. automethod:: requires_grad_
    .. automethod:: reshape
    .. automethod:: reshape_as

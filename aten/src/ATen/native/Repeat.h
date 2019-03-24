@@ -5,8 +5,8 @@
 namespace at { namespace native {
 
 template <void compute(int64_t *, int64_t *, int64_t *, int64_t)>
-static inline Tensor numpy_repeat_common(const Tensor &repeats) {
-    AT_CHECK(repeats.dim() == 1, "numpy_repeat only accept 1D vector as repeat");
+static inline Tensor repeat_interleave_common(const Tensor &repeats) {
+    AT_CHECK(repeats.dim() == 1, "repeat_interleave only accept 1D vector as repeat");
     AT_CHECK(repeats.scalar_type() == at::kLong, "repeats has to be Long tensor");
     AT_CHECK((repeats >= 0).all().item<uint8_t>(), "repeats can not be negative");
     Tensor repeats_ = repeats.contiguous();

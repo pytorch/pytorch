@@ -6454,9 +6454,9 @@ Example::
 """)
 
 
-add_docstr(torch.numpy_repeat,
+add_docstr(torch.repeat_interleave,
            r"""
-.. function:: numpy_repeat(input, repeats, dim=None) -> Tensor
+.. function:: repeat_interleave(input, repeats, dim=None) -> Tensor
 
 Repeat elements of a tensor.
 
@@ -6474,24 +6474,24 @@ Args:
 
 Returns:
     Tensor: Repeated tensor which has the same shape as input, except along the
-        given axis.
+     given axis.
 
 Example::
 
     >>> x = torch.tensor([1, 2, 3])
-    >>> x.numpy_repeat(2)
+    >>> x.repeat_interleave(2)
     tensor([1, 1, 2, 2, 3, 3])
-    >>> torch.numpy_repeat(y, 2)
+    >>> torch.repeat_interleave(y, 2)
     tensor([1, 1, 2, 2, 3, 3, 4, 4])
-    >>> torch.numpy_repeat(y, 3, dim=1)
+    >>> torch.repeat_interleave(y, 3, dim=1)
     tensor([[1, 1, 1, 2, 2, 2],
             [3, 3, 3, 4, 4, 4]])
-    >>> torch.numpy_repeat(y, torch.tensor([1, 2]), dim=0)
+    >>> torch.repeat_interleave(y, torch.tensor([1, 2]), dim=0)
     tensor([[1, 2],
             [3, 4],
             [3, 4]])
 
-.. function:: numpy_repeat(repeats) -> Tensor
+.. function:: repeat_interleave(repeats) -> Tensor
 
 If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 `tensor([0, 0, ..., 1, 1, ..., 2, 2, ..., ...])` where `0` appears `n1` times,

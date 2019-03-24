@@ -17,11 +17,11 @@ static void compute_cpu(int64_t *repeat_ptr, int64_t *cumsum_ptr, int64_t *resul
 
 namespace at { namespace native {
 
-Tensor numpy_repeat_cpu(const Tensor &repeat) {
-    return numpy_repeat_common<compute_cpu>(repeat);
+Tensor repeat_interleave_cpu(const Tensor &repeat) {
+    return repeat_interleave_common<compute_cpu>(repeat);
 }
 
-Tensor numpy_repeat(const Tensor &self, const Tensor &repeats, c10::optional<int64_t> dim) {
+Tensor repeat_interleave(const Tensor &self, const Tensor &repeats, c10::optional<int64_t> dim) {
     Tensor input = self;
     if(!dim) {
         input = self.flatten();
@@ -37,11 +37,11 @@ Tensor numpy_repeat(const Tensor &self, const Tensor &repeats, c10::optional<int
         AT_ERROR("repeats must be 0-dim or 1-dim tensor");
     }
 
-    return input.index_select(dim.value(), at::numpy_repeat(repeats_));
+    return input.index_select(dim.value(), at::repeat_interleave(repeats_));
 }
 
-Tensor numpy_repeat(const Tensor &self, int64_t repeats, c10::optional<int64_t> dim) {
-    return at::native::numpy_repeat(self, at::tensor({repeats}, self.options().dtype(kLong)), dim);
+Tensor repeat_interleave(const Tensor &self, int64_t repeats, c10::optional<int64_t> dim) {
+    return at::native::repeat_interleave(self, at::tensor({repeats}, self.options().dtype(kLong)), dim);
 }
 
 }}
