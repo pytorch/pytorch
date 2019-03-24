@@ -8032,8 +8032,8 @@ class _TestTorchMixin(object):
 
         y3 = torch.numpy_repeat(y, torch.tensor([1, 2]), dim=0)
         y3_expect = torch.tensor([[1, 2],
-                                    [3, 4],
-                                    [3, 4]])
+                                  [3, 4],
+                                  [3, 4]])
         self.assertEqual(y3, y3_expect)
 
         with self.assertRaises(RuntimeError):
