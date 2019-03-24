@@ -6481,6 +6481,7 @@ Example::
     >>> x = torch.tensor([1, 2, 3])
     >>> x.repeat_interleave(2)
     tensor([1, 1, 2, 2, 3, 3])
+    >>> y = torch.tensor([[1, 2], [3, 4]])
     >>> torch.repeat_interleave(y, 2)
     tensor([1, 1, 2, 2, 3, 3, 4, 4])
     >>> torch.repeat_interleave(y, 3, dim=1)
