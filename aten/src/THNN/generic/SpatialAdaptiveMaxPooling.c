@@ -82,6 +82,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
 {
   int dimW = 2;
   int dimH = 1;
+  int idim = input->dim();
   int64_t sizeB = 1;
   int64_t sizeD = 0;
   int64_t isizeH = 0;
@@ -97,10 +98,10 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
   THIndex_t *indices_data = nullptr;
 
 
-  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
+  THNN_ARGCHECK(!input->is_empty() && (idim == 3 || idim == 4), 2, input,
 		"non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
 
-  if (input->dim() == 4)
+  if (idim == 4)
   {
     istrideB = input->stride(0);
     sizeB = input->size(0);
@@ -118,7 +119,11 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
   istrideW = input->stride(dimW);
 
   /* resize output */
-  if (input->dim() == 3)
+  if (isizeH == osizeH && isizeW == osizeW){
+    // *output = *input;
+    THTensor_(set)(output, input);
+  }
+  else if (idim == 3)
   {
     THTensor_(resize3d)(output, sizeD, osizeH, osizeW);
     /* indices will contain i,j locations for each output point */
@@ -205,6 +210,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
 {
   int dimW = 2;
   int dimH = 1;
+  int idim = input->dim();
   int64_t sizeB = 1;
   int sizeD;
   int isizeH;
@@ -222,7 +228,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(zero)(gradInput);
 
-  if (input->dim() == 4) {
+  if (idim == 4) {
     sizeB = input->size(0);
     dimW++;
     dimH++;
@@ -241,7 +247,11 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
   indices_data = THIndexTensor_(data)(indices);
 
   /* backprop */
-  if (input->dim() == 3)
+  if (isizeH == osizeH && isizeW == osizeW){
+    // *gradInput_data = *gradOutput_data;
+    THTensor_(set)(gradInput_data, gradOutput_data);
+  }
+  else if (idim == 3)
   {
     THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(gradInput_data, gradOutput_data,
                                                            indices_data,
