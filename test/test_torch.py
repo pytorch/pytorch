@@ -5575,12 +5575,12 @@ class _TestTorchMixin(object):
             if M.is_cuda and is_cuda_8_92:
                 return
 
-            M_det = M.det()
             ref_M_sdet, ref_M_logabsdet = reference_slogdet(M)
 
             test_single_det(M, (ref_M_sdet, ref_M_logabsdet), 'basic')
-            if ref_M_logabsdet.exp().item() >= 1e-10:  # skip singular
-                test_single_det(M.inverse(), (ref_M_sdet, ref_M_logabsdet.neg()), 'inverse')
+            if ref_M_logabsdet.exp().item() >= 1e-6:  # skip singular
+                M_inv = M.inverse()
+                test_single_det(M_inv, reference_slogdet(M_inv), 'inverse')
 
             test_single_det(M, (ref_M_sdet, ref_M_logabsdet), 'transpose')
 
