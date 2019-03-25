@@ -735,9 +735,10 @@ if (NOT NO_API)
 endif()
 
 
-if (MSVC)
-  target_link_libraries(caffe2 PUBLIC onnx onnx_library)
-endif()
+# kostmo
+#if (MSVC)
+#  target_link_libraries(caffe2 PUBLIC onnx onnx_library)
+#endif()
 
 
 find_package(OpenMP QUIET)
