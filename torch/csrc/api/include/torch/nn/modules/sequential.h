@@ -102,6 +102,16 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     push_back(std::forward<Modules>(modules)...);
   }
 
+  /// Constructs the `Sequential` from an `OrderedDict` of named `AnyModule`s.
+  /// Combining with `modules_ordered_dict()`, it enables the following use case:
+  /// `Sequential sequential(modules_ordered_dict({{"m1", M(1)}, {"m2", M(2)}}))`
+  explicit SequentialImpl(torch::OrderedDict<std::string, AnyModule>&& ordered_dict) {
+    modules_.reserve(ordered_dict.size());
+    for (auto& item : ordered_dict) {
+      push_back(std::move(item.key()), std::move(item.value()));
+    }
+  }
+
   /// Special cloning function for `Sequential` because it does not use
   /// `reset()`.
   std::shared_ptr<Module> clone(
@@ -215,15 +225,6 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   template <typename M>
   void push_back(std::string name, const ModuleHolder<M>& module_holder) {
     push_back(std::move(name), module_holder.ptr());
-  }
-
-  /// Adds an `OrderedDict` of named `AnyModule`s to the `Sequential` container.
-  /// Combining with `modules_ordered_dict()`, it enables the following use case:
-  /// `Sequential sequential(modules_ordered_dict({{"m1", M(1)}, {"m2", M(2)}}))`
-  void push_back(torch::OrderedDict<std::string, AnyModule>&& ordered_dict) {
-    for (auto& item : ordered_dict) {
-      push_back(std::move(item.key()), std::move(item.value()));
-    }
   }
 
   /// Iterates over the container and calls `push_back()` on each value.
