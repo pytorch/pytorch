@@ -766,6 +766,15 @@ class _TestTorchMixin(object):
                 return inf
         self._test_math(torch.exp, exp)
 
+    @slowTest
+    def test_exp_slow(self):
+        # Test for https://github.com/pytorch/pytorch/issues/17271
+        # This is pretty slow on my Macbook but it only takes a few
+        # seconds on a beefy Xeon server
+        a = torch.exp(torch.ones(2 ** 31, dtype=torch.float32))
+        b = torch.exp(torch.ones(1, dtype=torch.float32))
+        self.assertEqual(a, b.expand(2 ** 31))
+
     def test_expm1(self):
         def expm1(x):
             try:
