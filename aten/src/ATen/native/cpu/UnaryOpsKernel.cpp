@@ -114,26 +114,39 @@ static void rsqrt_kernel(TensorIterator& iter) {
   });
 }
 
-#define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                           \
-  static void op##_kernel(TensorIterator& iter) {                           \
-    if (iter.tensor(0).is_contiguous() && iter.tensor(1).is_contiguous()) { \
-      AT_DISPATCH_FLOATING_TYPES(iter.dtype(), op##_vml_cpu, [&]() {        \
-        vml::v##op(                                                         \
-            iter.tensor(0).data<scalar_t>(),                                \
-            iter.tensor(1).data<scalar_t>(),                                \
-            iter.numel());                                                  \
-                                                                            \
-      });                                                                   \
-    } else {                                                                \
-      AT_DISPATCH_##dispatchtypes##_TYPES(iter.dtype(), #op, [&] {          \
-        unary_kernel_vec(                                                   \
-            iter,                                                           \
-            [=](scalar_t a) -> scalar_t { return std::op(a); },             \
-            [=](Vec256<scalar_t> a) { return a.op(); });                    \
-      });                                                                   \
-    }                                                                       \
-  }                                                                         \
+// TODO: Disable cont. branch to test more risky code
+
+#define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                             \
+  static void op##_kernel(TensorIterator& iter) {                             \
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), op##_vml_cpu, [&]() {            \
+      iter.serial_for_each(                                                   \
+          [&](int ntensor, char** data_, const int64_t* strides, int64_t n) { \
+            AT_ASSERT(ntensor == 2);                                          \
+            scalar_t* out_data = reinterpret_cast<scalar_t*>(data_[0]);       \
+            scalar_t* in_data = reinterpret_cast<scalar_t*>(data_[1]);        \
+            int64_t out_stride = strides[0] / sizeof(scalar_t);               \
+            int64_t in_stride = strides[1] / sizeof(scalar_t);                \
+            if (out_stride == 1 && in_stride == 1) {                          \
+              vml::v##op(out_data, in_data, n);                               \
+            } else {                                                          \
+              static constexpr int64_t WIDTH = 131072 / sizeof(scalar_t);     \
+              for (int64_t i = 0; i < n; i += WIDTH) {                        \
+                scalar_t buffer[WIDTH];                                       \
+                int64_t width = WIDTH;                                        \
+                width = std::min(width, n - i);                               \
+                for (int64_t j = 0; j < width; j++)                           \
+                  buffer[j] = in_data[in_stride * (i + j)];                   \
+                vml::v##op(buffer, buffer, width);                            \
+                for (int64_t j = 0; j < width; j++)                           \
+                  out_data[out_stride * (i + j)] = buffer[j];                 \
+              }                                                               \
+            }                                                                 \
+          },                                                                  \
+          {0, iter.numel()});                                                 \
+    });                                                                       \
+  }                                                                           \
   REGISTER_DISPATCH(op##_stub, &op##_kernel)
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel)
