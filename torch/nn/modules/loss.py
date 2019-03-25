@@ -1221,9 +1221,9 @@ class TripletMarginLoss(_Loss):
 class CTCLoss(_Loss):
     r"""The Connectionist Temporal Classification loss.
 
-    Calculates loss between a continuous (unsegmented) time series and a target sequence. CTCLoss over the
-    probability of possible alignments of output to target, producing a single loss which is differentiable
-    with respect to each output.
+    Calculates loss between a continuous (unsegmented) time series and a target sequence. CTCLoss sums over the
+    probability of possible alignments of input to target, producing a single loss which is differentiable
+    with respect to each input.
 
     Args:
         blank (int, optional): blank label. Default :math:`0`.
