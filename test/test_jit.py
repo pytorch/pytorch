@@ -4594,6 +4594,32 @@ a")
 
         test_resize_as()
 
+    def test_requires_grad_loop(self):
+        @torch.jit.script
+        def test(x, y, z):
+            # type: (Tensor, Tensor, int) -> Tensor
+            for _ in range(z):
+                x = y
+            return x
+
+        # x requires grad, y does not
+        # testing that requires grad analysis correctly exits, with its input
+        # to the loop (x) requiring grad and its output to the loop not requiring grad
+        # and the output of the node conservatively setting grad to true
+
+        inps = (torch.tensor(1.0, requires_grad=True), torch.tensor(1), 10)
+        test(*inps)
+
+        graph = test.graph_for(*inps)
+        loop = graph.findNode("prim::Loop")
+        loop_body = next(loop.blocks())
+        loop_inputs = list(loop_body.inputs())
+        loop_outputs = list(loop_body.outputs())
+
+        self.assertTrue(loop_inputs[1].requires_grad())
+        self.assertFalse(loop_outputs[1].requires_grad())
+        self.assertTrue(loop.output().requires_grad())
+
     def test_view_shape_prop(self):
         cu = torch.jit.CompilationUnit('''
         def test_view_shape_prop(a):
@@ -4985,23 +5011,6 @@ a")
                 x_none = x is not None
                 if y is not None and x_none:
                     print(x + y)  # noqa: T484
-
-    def test_optional_tensor(self):
-        @torch.jit.script
-        def fn(x):
-            # type: (Optional[Tensor]) -> int
-            if x is None:
-                return 1
-            else:
-                return 0
-
-        fn(None)
-        g = fn.graph_for(None)
-        self.assertEqual(list(g.inputs())[0].type().str(), 'UndefinedTensor')
-        t = torch.ones(1)
-        fn(t)
-        g = fn.graph_for(t)
-        self.assertEqual(list(g.inputs())[0].type().kind(), 'DimensionedTensorType')
 
     def test_while_write_outer_then_read(self):
         def func(a, b):
