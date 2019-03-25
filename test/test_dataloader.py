@@ -411,6 +411,7 @@ def init_fn(worker_id):
 class TestDataLoader(TestCase):
 
     def setUp(self):
+        super(TestDataLoader, self).setUp()
         self.data = torch.randn(100, 2, 3, 5)
         self.labels = torch.randperm(50).repeat(2)
         self.dataset = TensorDataset(self.data, self.labels)
@@ -926,6 +927,7 @@ class StringDataset(Dataset):
 
 class TestStringDataLoader(TestCase):
     def setUp(self):
+        super(TestStringDataLoader, self).setUp()
         self.dataset = StringDataset()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -951,6 +953,7 @@ class DictDataset(Dataset):
 
 class TestDictDataLoader(TestCase):
     def setUp(self):
+        super(TestDictDataLoader, self).setUp()
         self.dataset = DictDataset()
 
     def test_sequential_batch(self):
@@ -994,6 +997,7 @@ class NamedTupleDataset(Dataset):
 
 class TestNamedTupleDataLoader(TestCase):
     def setUp(self):
+        super(TestNamedTupleDataLoader, self).setUp()
         self.dataset = NamedTupleDataset()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -1039,6 +1043,7 @@ def collate_into_packed_sequence_batch_first(batch):
 
 class TestCustomPinFn(TestCase):
     def setUp(self):
+        super(TestCustomPinFn, self).setUp()
         inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
         tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
         self.dataset = TensorDataset(inps, tgts)
@@ -1091,6 +1096,7 @@ class TestWorkerQueueDataset(Dataset):
 
 class TestIndividualWorkerQueue(TestCase):
     def setUp(self):
+        super(TestIndividualWorkerQueue, self).setUp()
         self.dataset = TestWorkerQueueDataset([i for i in range(128)])
 
     def _run_ind_worker_queue_test(self, batch_size, num_workers):
