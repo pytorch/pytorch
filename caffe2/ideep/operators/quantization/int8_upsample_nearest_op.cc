@@ -44,14 +44,14 @@ public:
     int scaled_d1 = d1 / upsample_scale_;
     int scaled_d2 = d2 / upsample_scale_;
 
+    for (int i = 0; i < d0; ++i) {
 #ifdef _OPENMP
 #if (_OPENMP >= 201307)
-#pragma omp parallel for simd
+#pragma omp parallel for simd collapse(3)
 #else
-#pragma omp parallel for
+#pragma omp parallel for collapse(3)
 #endif
 #endif
-    for (int i = 0; i < d0; ++i) {
       for (int j = 0; j < d1; ++j) {
         for (int u = 0; u < d2; ++u) {
           for (int v = 0; v < d3; ++v) {
