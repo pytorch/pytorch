@@ -2,6 +2,9 @@
 #define TH_GENERIC_FILE "TH/generic/THTensorRandom.h"
 #else
 
+#include <ATen/core/Generator.h>
+#include <ATen/core/DistributionsHelper.h>
+
 TH_API void THTensor_(random)(THTensor *self, at::Generator *_generator);
 TH_API void THTensor_(clampedRandom)(THTensor *self, at::Generator *_generator, int64_t min, int64_t max);
 TH_API void THTensor_(cappedRandom)(THTensor *self, at::Generator *_generator, int64_t max);
