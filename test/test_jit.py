@@ -43,7 +43,7 @@ from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from torch.testing import FileCheck
 from torch._C import TensorType, TupleType, FloatType, IntType, \
-    ListType, StringType, DictType
+    ListType, StringType, DictType, parseIR
 from copy import deepcopy
 import random
 from typing import List, Dict, Optional, Tuple
@@ -5932,6 +5932,14 @@ a")
         m2.sub.weight = nn.Parameter(torch.zeros_like(m2.sub.weight))
         m2.sub2.a.data.zero_()
         self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
+
+    def test_irparser(self):
+        graph_str = """graph(%0 : Double(5, 5)):
+          # CHECK: aten::relu
+          %1 : Double(5, 5) = aten::relu(%0)
+          return (%1)
+        """
+        FileCheck().run(graph_str, parseIR(graph_str))
 
     def test_filecheck(self):
         def test_check():
