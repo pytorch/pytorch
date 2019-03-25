@@ -19,7 +19,9 @@ template<>
 struct ScalarTypeToCType<at::ScalarType::Half> {
   using type = at::Half;
 
-  // This is a workaround the CUDA bug which prevents ::detail::ScalarTypeToCType to be resolved.
+  // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
+  // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
+  // TODO: remove once the bug is fixed.
   static at::Half t;
 };
 
@@ -27,7 +29,9 @@ template<>
 struct ScalarTypeToCType<at::ScalarType::Bool> {
   using type = bool;
 
-  // This is a workaround the CUDA bug which prevents ::detail::ScalarTypeToCType to be resolved.
+  // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
+  // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
+  // TODO: remove once the bug is fixed.
   static bool t;
 };
 

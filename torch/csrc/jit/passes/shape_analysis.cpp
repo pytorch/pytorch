@@ -513,6 +513,16 @@ class ShapePropagator {
         }
         return;
       }
+      case prim::unchecked_unwrap_optional: {
+	// we know we cannot have None as input, so we can always pass
+	// on the type.
+	if(auto ot = node->input()->type()->cast<OptionalType>()) {
+	  node->output()->setType(ot->getElementType());
+	} else {
+	  node->output()->setType(node->input()->type());
+	}
+	return;
+      }
       case prim::ConstantChunk: {
         Value* tensor = node->input();
         if (auto type = tensor->type()->cast<DimensionedTensorType>()) {
@@ -529,10 +539,17 @@ class ShapePropagator {
         return;
       }
       case aten::_unwrap_optional: {
+	// if we have None as input, we need to leave the output alone
         auto input_ivalue = toIValue(node->input());
         if (input_ivalue && input_ivalue->isNone()) {
           return;
         }
+	if(auto ot = node->input()->type()->cast<OptionalType>()) {
+	  node->output()->setType(ot->getElementType());
+	} else {
+	  node->output()->setType(node->input()->type());
+	}
+	return;
       }
       default:
         break; // fall-through
