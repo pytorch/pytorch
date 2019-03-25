@@ -899,6 +899,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * device).
    */
   Device GetDevice() const {
+    AssertCaffe2Invariants();
     return storage_.device();
   }
 
@@ -914,6 +915,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * This op is auto-asynchronous if the underlying device (CUDA) supports it.
    */
   void Extend(int64_t num, float growthPct) {
+    AssertCaffe2Invariants();
     AT_ASSERT(sizes_.size() >= 1u);
     AT_ASSERTM(num >= 0, "`num` must be non-negative for Extend");
     AT_ASSERTM(
@@ -979,6 +981,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <class T>
   void ReserveSpace(const T& outer_dim) {
+    AssertCaffe2Invariants();
     AT_ASSERTM(
         is_contiguous_,
         "Right now ReserveSpace is only supported for contiguous Tensor.");
@@ -1024,6 +1027,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename... Ts>
   void Resize(Ts... dim_source) {
+    AssertCaffe2Invariants();
     bool size_changed = SetDims(dim_source...);
     if (size_changed) {
       // If needed, we will free the data. the next mutable_data() call
@@ -1053,6 +1057,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * This requires the total size of the tensor to remains constant.
    */
   inline void Reshape(const std::vector<int64_t>& dims) {
+    AssertCaffe2Invariants();
     AT_ASSERTM(
         is_contiguous_,
         "Right now Reshape is only supported for contiguous Tensor.");
@@ -1081,6 +1086,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * allocation.
    */
   inline void FreeMemory() {
+    AssertCaffe2Invariants();
     // We'll detach from the old Storage and create a new one
     storage_ = Storage::create_legacy(storage_.device(), data_type_);
     storage_offset_ = 0;
@@ -1100,6 +1106,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   // To be deprecated
   void ShareData(const TensorImpl& src) {
+    AssertCaffe2Invariants();
     // Right now, we are assuming the device_type are the same, since it is
     // inherently the same in the non-templatized code. We should probably add
     // an assert here which might affect perf a little bit.
@@ -1170,6 +1177,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * and a new storage will be created.
    */
   inline void* raw_mutable_data(const caffe2::TypeMeta& meta) {
+    AssertCaffe2Invariants();
     // For 0-size tensors it's fine to return any pointer (including nullptr)
     if (data_type_ == meta && storage_initialized()) {
       return static_cast<void*>(static_cast<char*>(storage_.data()) + storage_offset_ * meta.itemsize());
@@ -1231,6 +1239,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* mutable_data() {
+    AssertCaffe2Invariants();
     if (storage_initialized() && storage_.IsType<T>()) {
       return static_cast<T*>(storage_.data()) + storage_offset_;
     }
@@ -1247,7 +1256,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * storage UNINITIALIZED after a Resize() or FreeMemory()
    */
   bool storage_initialized() const {
-    AT_ASSERT(has_storage());
+    AssertCaffe2Invariants();
     return storage_.data() || numel_ == 0;
   }
 
@@ -1257,6 +1266,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * first time mutable_data<T>() is called.
    */
   bool dtype_initialized() const noexcept {
+    AssertCaffe2Invariants();
     return data_type_ != caffe2::TypeMeta();
   }
 
@@ -1267,6 +1277,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
 private:
+
+  // Caffe2 only supports non-variable, has-storage Tensors.  A number of
+  // methods in TensorImpl were not written to handle general TensorImpls; so we
+  // call this method to check that those calls are "safe".
+  inline void AssertCaffe2Invariants() const {
+    AT_ASSERT(!is_variable());
+    AT_ASSERT(has_storage());
+    AT_ASSERT(allow_tensor_metadata_change());
+  }
 
   // The Caffe2 Resize() method supports being called both as Resize({2,2}) as
   // well as variadic with Resize(2, 2).  These overloads provide all of the
