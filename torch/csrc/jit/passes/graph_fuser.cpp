@@ -133,6 +133,23 @@ RegisterOperators reg_bn_unsqueeze({Operator(
       };
     })});
 
+RegisterOperators reg_ln_view({Operator(
+    "aten::_ncf_view(Tensor self, int[] input_shape, int normalized_ndim) -> Tensor",
+    [](const Node* node) {
+      return [](Stack& stack) {
+        const int64_t normalized_ndim = pop(stack).toInt();
+        auto input_shape = pop(stack).toIntListRef();
+        auto self = pop(stack).toTensor();
+        const int64_t input_ndim = input_shape.size();
+        c10::SmallVector<int64_t, 8> sizes(input_ndim, 1);
+        for (int i = 0; i < input_ndim - normalized_ndim; ++i) {
+          sizes.at(i) = input_shape[i];
+        }
+        push(stack, self.reshape(sizes));
+        return 0;
+      };
+    })});
+
 // Yes, no, or no value if we can't tell
 c10::optional<bool> isDefined(Value* tensor) {
   if (tensor->type()->isSubtypeOf(TensorType::get())) {
@@ -150,7 +167,7 @@ bool isFusableLayerNorm(Node* layer_norm) {
     return false;
   }
   // If we can't determine if weight and bias is defined statically there's
-  // really no point in decomposing batch norm into simpler ops, since it won't
+  // really no point in decomposing layer norm into simpler ops, since it won't
   // get fused into a single kernel.
   return isDefined(layer_norm->namedInput(attr::weight)).has_value() &&
       isDefined(layer_norm->namedInput(attr::bias)).has_value();
@@ -272,8 +289,9 @@ struct GraphFuser {
                 n *= input.size(i)
             input_reshape = input.contiguous().view(1, n, -1)
             mean, invstd = torch.batch_norm_stats(input_reshape, eps)
-            mean = mean.view(input.size()[:input_ndim - normalized_ndim])
-            print(mean.size())
+            input_shape = input.size()
+            mean = torch._ncf_view(mean, input_shape, normalized_ndim)
+            invstd = torch._ncf_view(invstd, input_shape, normalized_ndim)
 
             return (input - mean) * invstd
       )SCRIPT";
@@ -566,7 +584,6 @@ struct GraphFuser {
       // We don't do any fusions in here, but simply decompose the batch norm
       // into a kernel that computes the stats + pointwise ops which will be
       // considered in this fusion next.
-      std::cout << "&&&&&" << std::endl;
       decomposeBatchNorm(producer->node());
       return group;
     }
@@ -1233,13 +1250,9 @@ struct GraphFuser {
       refreshAliasDb();
       for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
         bool changed;
-        std::cout << "**** start " << std::endl;
-        (*it)->dump();
         std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
-        std::cout << "**** end" << any_changed << " " << changed << std::endl;
       }
-      graph_->dump();
     }
     refreshAliasDb();
 

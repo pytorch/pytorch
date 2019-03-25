@@ -12308,7 +12308,6 @@ class TestFuser(JitTestCase):
 
             out_noopt = model_noopt(x, y)
             rep_noopt = str(model_noopt.graph_for(x, y))
-            print(rep)
             self.assertEqual(out, out_noopt, prec=3e-5)
 
         # Check that batch_norm has really been decomposed
@@ -12348,23 +12347,24 @@ class TestFuser(JitTestCase):
             graph = model.graph_for(x, y)
             rep = str(graph)
 
+            print(rep)
             out_noopt = model_noopt(x, y)
             rep_noopt = str(model_noopt.graph_for(x, y))
-            # print(rep_noopt)
-            # print(rep)
-            # self.assertEqual(out, out_noopt, prec=3e-5)
+            self.assertEqual(out, out_noopt, prec=3e-5)
 
-        # Check that batch_norm has really been decomposed
-        # self.assertIn('aten::batch_norm_update_stats', rep)
-        # self.assertNotIn('aten::batch_norm(', rep)
-        # self.assertIn('aten::batch_norm(', rep_noopt)
+        # Check that layer_norm has really been decomposed
+        self.assertGraphContainsExactly(
+            rep, 'prim::FusionGroup', 1, consider_subgraphs=True)
 
-        # Make sure the fusion group is big, and contains aten::sqrt, which could
-        # originate only from decomposing batch_norm in this case
+        FileCheck().check("aten::batch_norm_stats").check_not("aten::layer_norm(")
         fusion_groups = [node for node in graph.nodes() if node.kind() == 'prim::FusionGroup']
         self.assertEqual(len(fusion_groups), 1)
         fused_graph = fusion_groups[0].g('Subgraph')
-        self.assertTrue(any(node.kind() == 'aten::sqrt' for node in fused_graph.nodes()))
+
+        # Make sure the fusion graph is big, and contains aten::addcmul, which could
+        # originate only from decomposing layer_norm in this case
+        FileCheck().check("Constant").check_next("sub").check_next("mul").check_next("addcmul").run(str(fused_graph))
+        FileCheck().check("aten::layer_norm").run(rep_noopt)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
