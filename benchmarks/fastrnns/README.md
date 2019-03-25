@@ -1,4 +1,4 @@
-# LSTM Benchmarking
+# PyTorch Benchmarks
 
 ## Setup environment
 Make sure you're on a machine with CUDA, torchvision, and pytorch installed. Install in the following order:
@@ -15,13 +15,16 @@ python setup.py build develop
 python -c "import torch; print(torch.__version__)"
 ```
 
-Test the fastrnns benchmarking scripts with the following:
-`python -m fastrnns.test --rnns jit`
 
+
+## Fast RNN benchmarks
 For most stable results, do the following:
 - Set CPU Governor to performance mode (as opposed to energy save)
 - Turn off turbo for all CPUs (assuming Intel CPUs)
 - Shield cpus via `cset shield` when running benchmarks.
+
+Test the fastrnns benchmarking scripts with the following:
+`python -m fastrnns.test --rnns jit`
 
 ## Run benchmarks
 `python -m fastrnns.bench --rnns cudnn aten jit` should give a good comparision.
