@@ -35,20 +35,6 @@ void THCTensor_(zero)(THCState *state, THCTensor *self_)
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(zerosLike)(THCState *state, THCTensor *r_, THCTensor *input)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
-  THCTensor_(resizeAs)(state, r_, input);
-  THCTensor_(zero)(state, r_);
-}
-
-void THCTensor_(onesLike)(THCState *state, THCTensor *r_, THCTensor *input)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
-  THCTensor_(resizeAs)(state, r_, input);
-  THCTensor_(fill)(state, r_, ScalarConvert<int, scalar_t>::to(1));
-}
-
 ptrdiff_t
 THCTensor_(numel)(THCState *state, THCTensor *t)
 {
@@ -366,28 +352,6 @@ void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
     }
   }
   THCudaCheck(cudaGetLastError());
-}
-
-void THCTensor_(eye)(THCState *state, THCTensor *self_, int64_t n, int64_t m)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
-  THArgCheck(n > 0, 1, "invalid argument");
-
-  if(m <= 0)
-    m = n;
-
-  THCTensor_(resize2d)(state, self_, n, m);
-  THCTensor_(zero)(state, self_);
-
-  int64_t sz = THMin(n, m);
-  int64_t stride = THCTensor_(stride)(state, self_, 0) +
-                   THCTensor_(stride)(state, self_, 1);
-
-  THCTensor *diag = THCTensor_(newWithStorage1d)(state, THTensor_getStoragePtr(self_),
-      self_->storage_offset(),  sz, stride);
-
-  THCTensor_(fill)(state, diag, ScalarConvert<int, scalar_t>::to(1));
-  THCTensor_(free)(state, diag);
 }
 
 accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {

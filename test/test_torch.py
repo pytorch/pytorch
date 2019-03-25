@@ -8,6 +8,7 @@ import copy
 import shutil
 import torch
 import torch.cuda
+import torch.backends.cuda
 import tempfile
 import unittest
 import warnings
@@ -765,6 +766,15 @@ class _TestTorchMixin(object):
             except OverflowError:
                 return inf
         self._test_math(torch.exp, exp)
+
+    @slowTest
+    def test_exp_slow(self):
+        # Test for https://github.com/pytorch/pytorch/issues/17271
+        # This is pretty slow on my Macbook but it only takes a few
+        # seconds on a beefy Xeon server
+        a = torch.exp(torch.ones(2 ** 31, dtype=torch.float32))
+        b = torch.exp(torch.ones(1, dtype=torch.float32))
+        self.assertEqual(a, b.expand(2 ** 31))
 
     def test_expm1(self):
         def expm1(x):
@@ -10408,7 +10418,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertTrue(grid_b2.equal(expected_grid_b))
         self.assertTrue(grid_c2.equal(expected_grid_c))
 
-    @unittest.skipIf(torch.cuda.is_available() or IS_SANDCASTLE, "CUDA is available, can't test CUDA not built error")
+    # NB: we must not be built with CUDA; if we are built with CUDA but no CUDA
+    # is available, we get a different error.
+    @unittest.skipIf(torch.backends.cuda.is_built() or IS_SANDCASTLE, "CUDA is built, can't test CUDA not built error")
     def test_cuda_not_built(self):
         msg = "Torch not compiled with CUDA enabled"
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.current_device())

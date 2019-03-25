@@ -256,6 +256,7 @@ class JitTestCase(TestCase):
     _restored_warnings = False
 
     def setUp(self):
+        super(JitTestCase, self).setUp()
         # unittest overrides all warning filters and forces all of them to show up
         # after we install our own to silence those coming from inside PyTorch.
         # This will ensure that our filter still takes precedence.
@@ -265,6 +266,7 @@ class JitTestCase(TestCase):
         torch._C._jit_set_emit_module_hook(self.emitModuleHook)
 
     def tearDown(self):
+        super(JitTestCase, self).tearDown()
         # needs to be cleared because python might be unloaded before
         # the callback gets destucted
         torch._C._jit_set_emit_module_hook(None)
@@ -4096,6 +4098,47 @@ a")
             return a == [0, 1, 2, 3]
         self.checkScript(test_append, ())
 
+    def test_comprehensions_basic(self):
+        def comp(l):
+            # type: (List[int]) -> List[int]
+
+            n = [x * 3 for x in l]
+            return n
+
+        comp([1, 2, 3])
+        self.checkScript(comp, ([1, 2, 3],))
+
+    def test_comprehensions_basic_float(self):
+        def comp(l):
+            # type: (List[float]) -> List[float]
+
+            n = [x * 3 for x in l]
+            return n
+
+        self.checkScript(comp, ([1.0, 2.0, 3.0],))
+
+    def test_comprehensions_two_comps(self):
+        @torch.jit.script
+        def comp(l1, l2):
+            # type: (List[int], List[int]) -> List[int]
+
+            n = [x * 3 for x in l1]
+            n2 = [x + 2 for x in l2]
+            return n + n2
+
+        self.assertEqual(comp([1, 2, 3], [4, 5]), [3, 6, 9, 6, 7])
+
+    def test_comprehensions_wrong_expr_type(self):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
+            @torch.jit.script
+            def comp(l):
+                # type: (List[int]) -> List[float]
+
+                n = [float(x) for x in l]
+                return n
+
+            comp([1, 2, 3])
+
     def test_mutable_list_append_2(self):
         def test_append_2():
             a = [0, 1]
@@ -4550,6 +4593,32 @@ a")
             self.assertTrue(next(g.outputs()).type() == TensorType.get())
 
         test_resize_as()
+
+    def test_requires_grad_loop(self):
+        @torch.jit.script
+        def test(x, y, z):
+            # type: (Tensor, Tensor, int) -> Tensor
+            for _ in range(z):
+                x = y
+            return x
+
+        # x requires grad, y does not
+        # testing that requires grad analysis correctly exits, with its input
+        # to the loop (x) requiring grad and its output to the loop not requiring grad
+        # and the output of the node conservatively setting grad to true
+
+        inps = (torch.tensor(1.0, requires_grad=True), torch.tensor(1), 10)
+        test(*inps)
+
+        graph = test.graph_for(*inps)
+        loop = graph.findNode("prim::Loop")
+        loop_body = next(loop.blocks())
+        loop_inputs = list(loop_body.inputs())
+        loop_outputs = list(loop_body.outputs())
+
+        self.assertTrue(loop_inputs[1].requires_grad())
+        self.assertFalse(loop_outputs[1].requires_grad())
+        self.assertTrue(loop.output().requires_grad())
 
     def test_view_shape_prop(self):
         cu = torch.jit.CompilationUnit('''
@@ -6385,6 +6454,21 @@ a")
             a = M(nn.Sequential(nn.ReLU()))
         with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
             a = M(nn.ModuleList([nn.ReLU()]))
+
+    def test_attr_module_constants_error(self):
+        class M2(torch.jit.ScriptModule):
+            def __init__(self, mod_list):
+                super(M2, self).__init__(False)
+                self.mods = mod_list
+
+            @torch.jit.script_method
+            def forward(self, v):
+                return self.mods.forward(x)
+
+        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
+            M2(nn.Sequential(nn.ReLU()))
+        with self.assertRaisesRegex(RuntimeError, "Did you forget to add it to __constants"):
+            M2(nn.ModuleList([nn.ReLU()]))
 
     def test_script_sequential_for(self):
         class Sub(torch.jit.ScriptModule):
@@ -12112,6 +12196,45 @@ class TestFuser(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
+    def test_addcmul_cuda(self):
+        t = torch.randn(1, 4, dtype=torch.float, device='cuda')
+        t1 = torch.randn(4, 1, dtype=torch.float, device='cuda')
+        t2 = torch.randn(1, 4, dtype=torch.float, device='cuda')
+
+        def foo(t, t1, t2):
+            return t.addcmul(t + 1, t2, value=0.1)
+
+        ge = self.checkTrace(foo, (t, t1, t2), allow_unused=True)
+        graph = ge.graph_for(t, t1, t2)
+        self.assertAllFused(graph)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_lerp_cuda(self):
+        start = torch.randn(4, 1, dtype=torch.float, device='cuda')
+        end = torch.randn(1, 4, dtype=torch.float, device='cuda')
+        weight = torch.tensor(0.5, dtype=torch.float, device='cuda')
+
+        # scalar weight overload
+        def foo_weight_scalar(start, end):
+            return torch.lerp(start + 1, end, 0.5)
+
+        # tensor weight overload
+        def foo_weight_tensor(start, end):
+            return torch.lerp(start + 1, end, weight)
+
+        ge_weight_scalar = self.checkTrace(foo_weight_scalar, (start, end))
+        graph = ge_weight_scalar.graph_for(start, end)
+        self.assertAllFused(graph)
+
+        ge_weight_tensor = self.checkTrace(foo_weight_tensor, (start, end))
+        graph = ge_weight_tensor.graph_for(start, end)
+        self.assertAllFused(graph)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_concat_cuda(self):
         hx = torch.randn(3, 20, dtype=torch.float, device='cuda')
         cx = torch.randn(3, 20, dtype=torch.float, device='cuda')
@@ -12211,6 +12334,23 @@ class TestFuser(JitTestCase):
 
         self.assertEqual(f(x), scripted(x))
         self.assertAllFused(scripted.graph_for(x))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_scalar_arg_cuda(self):
+        def fn_test_scalar_arg(x, p):
+            # type: (Tensor, float) -> Tensor
+            return p * (x * x + x)
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        p = 3
+        scripted = torch.jit.script(fn_test_scalar_arg, (x, p))
+        self.assertEqual(fn_test_scalar_arg(x, p), scripted(x, p))
+        self.assertAllFused(scripted.graph_for(x, p))
+        x.requires_grad_(True)
+        out = scripted(x, p)
+        self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes"))
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
@@ -13926,7 +14066,7 @@ class TestDataParallel(JitTestCase):
 class TestClassType(JitTestCase):
     def test_get_with_method(self):
         @torch.jit.script
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 self.foo = x
 
@@ -13943,7 +14083,7 @@ class TestClassType(JitTestCase):
 
     def test_get_attr(self):
         @torch.jit.script  # noqa: B903
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 self.foo = x
 
@@ -13957,7 +14097,7 @@ class TestClassType(JitTestCase):
 
     def test_set_attr_in_method(self):
         @torch.jit.script
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 # type: (int) -> None
                 self.foo = x
@@ -13978,7 +14118,7 @@ class TestClassType(JitTestCase):
     def test_set_attr_type_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):
             @torch.jit.script
-            class FooTest:
+            class FooTest(object):
                 def __init__(self, x):
                     self.foo = x
                     self.foo = 10  # should error since int != Tensor
@@ -13986,7 +14126,7 @@ class TestClassType(JitTestCase):
     def test_get_attr_not_initialized(self):
         with self.assertRaisesRegex(RuntimeError, "Tried to access to nonexistent attribute"):
             @torch.jit.script
-            class FooTest:
+            class FooTest(object):
                 def __init__(self, x):
                     self.foo = x
 
@@ -13996,7 +14136,7 @@ class TestClassType(JitTestCase):
     def test_set_attr_non_initialized(self):
         with self.assertRaisesRegex(RuntimeError, "Tried to set nonexistent attribute"):
             @torch.jit.script
-            class FooTest:
+            class FooTest(object):
                 def __init__(self, x):
                     self.foo = x
 
@@ -14006,7 +14146,7 @@ class TestClassType(JitTestCase):
     def test_type_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "expected a value of type bool"):
             @torch.jit.script  # noqa: B903
-            class FooTest:
+            class FooTest(object):
                 def __init__(self, x):
                     # type: (bool) -> None
                     self.foo = x
@@ -14020,14 +14160,14 @@ class TestClassType(JitTestCase):
     def test_conditional_set_attr(self):
         with self.assertRaisesRegex(RuntimeError, "assignment cannot be in a control-flow block"):
             @torch.jit.script
-            class FooTest:
+            class FooTest(object):
                 def __init__(self, x):
                     if True:
                         self.attr = x
 
     def test_class_type_as_param(self):
         @torch.jit.script  # noqa: B903
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 self.attr = x
 
@@ -14046,7 +14186,7 @@ class TestClassType(JitTestCase):
 
     def test_out_of_order_methods(self):
         @torch.jit.script
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 self.x = x
                 self.x = self.get_stuff(x)
@@ -14064,7 +14204,7 @@ class TestClassType(JitTestCase):
 
     def test_save_load_with_classes(self):
         @torch.jit.script
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 self.x = x
 
@@ -14095,18 +14235,18 @@ class TestClassType(JitTestCase):
 
     def test_save_load_with_classes_nested(self):
         @torch.jit.script  # noqa: B903
-        class FooNestedTest:
+        class FooNestedTest(object):
             def __init__(self, y):
                 self.y = y
 
         @torch.jit.script
-        class FooNestedTest2:
+        class FooNestedTest2(object):
             def __init__(self, y):
                 self.y = y
                 self.nested = FooNestedTest(y)
 
         @torch.jit.script
-        class FooTest:
+        class FooTest(object):
             def __init__(self, x):
                 self.class_attr = FooNestedTest(x)
                 self.class_attr2 = FooNestedTest2(x)
@@ -14133,6 +14273,32 @@ class TestClassType(JitTestCase):
         input = torch.rand(2, 3)
         output = m_loaded(input)
         self.assertEqual(2 * input, output)
+
+    def test_python_interop(self):
+        @torch.jit.script  # noqa: B903
+        class Foo(object):
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        @torch.jit.script
+        def use_foo(foo):
+            # type: (Foo) -> Foo
+            return foo
+
+        # create from python
+        x = torch.ones(2, 3)
+        y = torch.zeros(2, 3)
+        f = Foo(x, y)
+
+        self.assertEqual(x, f.x)
+        self.assertEqual(y, f.y)
+
+        # pass in and out of script
+        f2 = use_foo(f)
+
+        self.assertEqual(x, f2.x)
+        self.assertEqual(y, f2.y)
 
 
 for test in autograd_method_tests():

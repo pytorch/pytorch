@@ -13,7 +13,7 @@
 #endif
 
 #include <torch/csrc/cuda/THCP.h>
-
+#include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -213,6 +213,14 @@ PyObject * THCPModule_cudaSynchronize(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
   THCudaCheck(cudaDeviceSynchronize());
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_cudaIPCCollect(PyObject *_unused /* unused */)
+{
+  HANDLE_TH_ERRORS
+  torch::CudaIPCCollect();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -453,6 +461,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_initialSeed", (PyCFunction)THCPModule_initialSeed,      METH_NOARGS,  nullptr},
   {"_cuda_cudaHostAllocator", (PyCFunction)THCPModule_cudaHostAllocator, METH_NOARGS, nullptr},
   {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
+  {"_cuda_ipc_collect", (PyCFunction)THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
   {"_cuda_sleep", (PyCFunction)THCPModule_cudaSleep, METH_O, nullptr},
   {"_cuda_lock_mutex",   (PyCFunction)THCPModule_cudaLockMutex,   METH_NOARGS,  nullptr},
   {"_cuda_unlock_mutex", (PyCFunction)THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},
