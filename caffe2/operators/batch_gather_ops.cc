@@ -15,10 +15,15 @@ OPERATOR_SCHEMA(BatchGather)
       const auto& data_dims = GetDimsVector(in[0]);
       const auto& indices_dims = GetDimsVector(in[1]);
 
-      vector<int> output_dims =
-          caffe2::gather_helper::calc_output_shape_vector<int>(
-              data_dims, indices_dims, 1);
-      out[0] = CreateTensorShape(output_dims, TensorProto::FLOAT);
+      if (data_dims.size() < 2) {
+        out[0].set_unknown_shape(true);
+      } else {
+        vector<int> output_dims =
+            caffe2::gather_helper::calc_output_shape_vector<int>(
+                data_dims, indices_dims, 1);
+        out[0] = CreateTensorShape(output_dims, TensorProto::FLOAT);
+      }
+
       return out;
     })
     .SetDoc(R"DOC(
