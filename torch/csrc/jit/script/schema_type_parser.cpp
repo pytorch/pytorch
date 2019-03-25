@@ -24,13 +24,10 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
       {"None", NoneType::get()},
   };
   auto tok = L.cur();
-  std::string text;
-  if (L.nextIf(TK_NONE)) {
-    text = "None";
-  } else {
+  if (!L.nextIf(TK_NONE)) {
     L.expect(TK_IDENT);
-    text = tok.text();
   }
+  std::string text = tok.text();
 
   auto it = type_map.find(text);
   if (it == type_map.end()) {
