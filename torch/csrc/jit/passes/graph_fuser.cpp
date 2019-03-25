@@ -1083,11 +1083,7 @@ struct GraphFuser {
       auto subgraph = producer->node()->g(attr::Subgraph);
       auto* node = subgraph->outputs().at(producer->offset())->node();
       return node->kind() != prim::FusedConcat &&
-          !containsGradSumToSize(producer->node()) &&
-          ((before_check->inputs().size() + before_check->outputs().size() +
-            producer->node()->inputs().size() + producer->node()->outputs().size())
-           <= fusion_kernel_args_limit);
-
+          !containsGradSumToSize(producer->node());
     }
     return true;
   }
@@ -1127,11 +1123,11 @@ struct GraphFuser {
         if (!canFuseWithConcat(input, fused_cat)) {
           continue;
         }
-        any_fused = true;
         auto maybe_group = tryFuse(fused_cat, input);
         if( !maybe_group ) {
           continue;
         }
+        any_fused = true;
         AT_ASSERT(maybe_group && maybe_group == fused_cat);
         // We could have destroyed multiple inputs when performing this fusion,
         // so we have to recompute the list and iterate over it again.
