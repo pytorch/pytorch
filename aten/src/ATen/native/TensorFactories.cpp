@@ -93,6 +93,8 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
   check_size_nonnegative(size);
 
+  std::cout << "Call empty_cpu " << options.pinned_memory() << "\n";
+
   auto* allocator = at::getCPUAllocator();
   int64_t nelements = prod_intlist(size);
   auto dtype = options.dtype();
