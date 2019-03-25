@@ -210,10 +210,6 @@ public:
     impl->refresh_numel();
     return impl;
   }
- private:
-  int64_t get_device_slow() const override {
-    return values_.get_device();
-  }
 
 };
 

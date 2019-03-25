@@ -31,11 +31,15 @@ namespace {
 // This means that we allocate a [1,0] size indices tensor and a [0] size
 // values tensor for such an empty tensor.
 SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeMeta& data_type)
-    : TensorImpl(type_id, data_type, nullptr, false)
+    : TensorImpl(type_id, data_type, c10::nullopt, false)
     , sparse_dim_(1)
     , dense_dim_(0)
     , indices_(at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(ScalarType::Long)))
-    , values_(at::empty({0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(data_type))) {}
+    , values_(at::empty({0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(data_type))) {
+  // FIXME: we need to wait for data-member initialization to know our device because there isn't a device-dependent way
+  // of getting the device for which a Tensor would be allocated.
+  device_opt_ = values_.device();
+}
 
 IntArrayRef SparseTensorImpl::sizes() const {
   return sizes_;

@@ -320,7 +320,7 @@ struct ContainerTensor : public at::TensorImpl {
       : TensorImpl(
             at::UndefinedTensorId(),
             caffe2::TypeMeta(),
-            nullptr,
+            c10::nullopt,
             /* is_variable */ false) {}
 
   ~ContainerTensor() override = default;
