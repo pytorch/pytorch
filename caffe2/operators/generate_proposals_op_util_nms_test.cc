@@ -212,6 +212,7 @@ TEST(UtilsNMSTest, TestSoftNMS) {
   }
 }
 
+#if defined(CV_MAJOR_VERSION) && (CV_MAJOR_VERSION >= 3)
 TEST(UtilsNMSTest, TestNMSRotatedAngle0) {
   // Same inputs as TestNMS, but in RRPN format with angle 0 for testing
   // nms_cpu_rotated
@@ -435,5 +436,6 @@ TEST(UtilsNMSTest, RotatedBBoxOverlaps) {
     EXPECT_TRUE(((expected - actual).abs() < 1e-6).all());
   }
 }
+#endif // CV_MAJOR_VERSION >= 3
 
 } // namespace caffe2
