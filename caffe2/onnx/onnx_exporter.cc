@@ -157,10 +157,20 @@ std::unordered_map<std::string, std::string> SsaRewrite(
       external_outputs.emplace(output);
     }
     for (auto& op : *pred_net->mutable_op()) {
+      // Create a map of input names to SsaNames for the inputs to the operator.
+      //
+      // For certain in place C2 operators (ie ScatterAssign), the operator
+      // requires the output to match one of its inputs as the data will be
+      // updated in place. In those cases, we don't want to assign a new version
+      // to the output. Instead, we'll reuse the same version as the input.
+      std::unordered_map<std::string, std::string> operator_inputs;
+      
       for (auto& input : *op.mutable_input()) {
         const auto it = blob_versions.find(input);
         if (it != blob_versions.end()) {
+          std::string original = input;
           input = SsaName(input, it->second);
+          operator_inputs.emplace(std::move(original), input);
         } else {
           // Input blob is not versioned yet.
           // If it is not versioned yet, it is assumed to be primary input,
@@ -169,14 +179,21 @@ std::unordered_map<std::string, std::string> SsaRewrite(
         }
       }
       for (auto& output : *op.mutable_output()) {
-        auto it = blob_versions.find(output);
-        if (it != blob_versions.end()) {
-          it->second += 1;
-          output = SsaName(output, it->second);
-        } else {
-          blob_versions.emplace(output, 0);
-          output = SsaName(output, 0);
-        }
+        // If the output is also an input to the operator, the operator updates
+        // the input in place. We'll reuse the same name.
+        auto op_iter = operator_inputs.find(output);
+        if (op_iter != operator_inputs.end()) {
+          output = op_iter->second;
+        } else {        
+          auto it = blob_versions.find(output);
+          if (it != blob_versions.end()) {
+            it->second += 1;
+            output = SsaName(output, it->second);
+          } else {
+            blob_versions.emplace(output, 0);
+            output = SsaName(output, 0);
+          }
+        }        
       }
     }
 
