@@ -765,17 +765,17 @@ bool fusePreConvertOp(repr::NNModule* nn, caffe2::Workspace* ws) {
     }
 
     auto input = repr::nn::getInputs(opNode).front();
-    /*
+
     if (isOpType(opNode, "Int8Dequantize") &&
         repr::nn::hasSingleOutputAndConsumer(opNode)) {
       auto preNode = repr::nn::getProducer(input);
-      if (isOpType(preNode, "Int8FC") || isOpType(preNode, "Int8Conv")) {
+      if (isOpType(preNode, "Int8FC") &&
+          repr::nn::hasSingleOutputAndConsumer(preNode)) {
         auto predOp = repr::nn::get<repr::NeuralNetOperator>(preNode);
         removeArg(*predOp, "Y_scale");
         removeArg(*predOp, "Y_zero_point");
       }
     }
-    */
 
     nn->dataFlow.replaceNode(output, input);
 
@@ -962,6 +962,213 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
   }
 }
 
+void recycleDataMemoryForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
+  auto getIndex = [](std::unordered_map<unsigned long, int>& map, unsigned long key) {
+    int index = -1;
+    if (map.find(key) != map.end()) {
+      index = map[key];
+    }
+    return index;
+  };
+
+  auto assignParitionResult = [](std::vector<int>& partition_result,
+                                 std::vector<std::unordered_set<int>>& inplace_binds,
+                                 int pos, int partition_num) {
+    partition_result[pos] = partition_num;
+    for (auto it = inplace_binds[pos].begin(); it != inplace_binds[pos].end(); ++it) {
+      partition_result[*it] = partition_num;
+    }
+  };
+
+  auto addInterferenceGraph = [](std::vector<std::unordered_set<int>>& interference_graph,
+                                 int node1, int node2) {
+    if (node1 == node2) return;
+    if (interference_graph[node1].find(node2) != interference_graph[node1].end()) return;
+    interference_graph[node1].insert(node2);
+    interference_graph[node2].insert(node1);
+  };
+
+  auto addInplaceBind = [](std::vector<std::unordered_set<int>>& inplace_binds,
+                                 int node1, int node2) {
+    if (node1 == node2) return;
+    if (inplace_binds[node1].find(node2) != inplace_binds[node1].end()) return;
+    inplace_binds[node1].insert(node2);
+    inplace_binds[node2].insert(node1);
+  };
+
+  auto iterate_cur_live_tensors = [](int node, std::string node_name, int total_cids,
+                                   std::vector<bool>& cur_live_tensors,
+                                   std::unordered_map<int, std::string>& cid_to_name,
+                                   std::vector<std::unordered_set<int>>& interference_graph,
+                                   std::vector<std::unordered_set<int>>& inplace_binds) {
+    for (auto l = 0; l < total_cids; l++) {
+      if (!cur_live_tensors[l]) continue;
+      if (node_name != cid_to_name[l]) {
+        interference_graph[node].insert(l);
+        interference_graph[l].insert(node);
+      } else {
+        inplace_binds[node].insert(l);
+        inplace_binds[l].insert(node);
+      }
+    }
+  };
+
+  auto mem_opt_option = getenv("CAFFE2_INFERENCE_MEM_OPT");
+  if ((mem_opt_option == NULL) || (atoi(mem_opt_option) == 0)) return;
+  if (nn->outputs.empty()) return;
+
+  auto allNodes = nn->dataFlow.getMutableNodes();
+  int allnodes_size = allNodes.size();
+
+  // Create candidates index for sharing memory
+  std::unordered_map<unsigned long, int> candidates_index;
+  // Map candidate index to orignal allNodes index, index start from 0
+  std::unordered_map<int, int> cid_to_nid;
+  // Map candidate index to its tensor name
+  std::unordered_map<int, std::string> cid_to_name;
+  int cid = 0;
+  for (int i = 0; i < allnodes_size; i++) {
+    auto opNode = allNodes[i];
+    if (opNode == nullptr) continue;
+    if (isa<repr::NeuralNetData>(opNode->data())) {
+      auto tensor = dyn_cast<nom::repr::NeuralNetData>(opNode->data().get());
+      auto tensor_name = tensor->getName();
+      if (ws->HasBlob(tensor_name)) continue;
+      assert(nn->inputs.find(opNode) == nn->inputs.end());
+      if (nn->outputs.find(opNode) != nn->outputs.end()) continue;
+      unsigned long node_key = (unsigned long)opNode;
+      candidates_index[node_key]= cid;
+      cid_to_nid[cid] = i;
+      cid_to_name[cid] = tensor_name;
+      cid ++;
+    }
+  }
+
+  // Build interference graph
+  std::vector<bool> cur_live_tensors(cid, false);
+  std::vector<std::unordered_set<int>> interference_graph(cid);
+  std::vector<std::unordered_set<int>> inplace_binds(cid);
+  for (int i = allnodes_size-1 ; i > 0; i--) {
+    auto opNode = allNodes[i];
+    if (isa<repr::NeuralNetOperator>(opNode->data())) {
+      auto op = dyn_cast<nom::repr::NeuralNetOperator>(opNode->data().get());
+      auto inputs = repr::nn::getInputs(opNode);
+      auto outputs = repr::nn::getOutputs(opNode);
+      for (int j = 0; j < outputs.size(); j++) {
+        auto out = outputs[j];
+        unsigned long out_key = (unsigned long)out;
+        int out_id = getIndex(candidates_index, out_key);
+        if (out_id == -1) continue;
+        auto out_name = cid_to_name[out_id];
+        cur_live_tensors[out_id] = false;
+        iterate_cur_live_tensors(out_id, out_name, cid,
+                                 cur_live_tensors, cid_to_name, interference_graph, inplace_binds);
+
+        std::unordered_set<int> visited_inputs;
+        for (int k = 0; k < inputs.size(); k++) {
+          auto in = inputs[k];
+          unsigned long in_key = (unsigned long)in;
+          int in_id = getIndex(candidates_index, in_key);
+          if (in_id == -1) continue;
+          auto in_name = cid_to_name[in_id];
+          if (in_name != out_name) {
+            addInterferenceGraph(interference_graph, out_id, in_id);
+          } else {
+            addInplaceBind(inplace_binds, out_id, in_id);
+          }
+
+          if (j > 0) continue;
+          iterate_cur_live_tensors(in_id, in_name, cid,
+                                 cur_live_tensors, cid_to_name, interference_graph, inplace_binds);
+          for (auto it = visited_inputs.begin(); it != visited_inputs.end(); ++it) {
+            int n = *it;
+            addInterferenceGraph(interference_graph, in_id, n);
+          }
+          cur_live_tensors[in_id] = true;
+          visited_inputs.insert(in_id);
+        }
+      }
+    }
+  }
+
+  for (auto i = cid - 1; i >=0; i--) {
+    // Got inplace binds TC
+    auto it = inplace_binds[i].begin();
+    while (it != inplace_binds[i].end()) {
+      auto n = *it;
+      for (auto it0 = inplace_binds[n].begin(); it0 != inplace_binds[n].end(); ++it0) {
+        if (*it0 == i) continue;
+        addInplaceBind(inplace_binds, i, *it0);
+      }
+      ++it;
+    }
+  }
+
+  std::vector<std::pair<int, int>> interference_sort(cid);
+  for(auto i = 0; i< cid; i++) {
+    // Got interference TC
+    auto it1 = interference_graph[i].begin();
+    while (it1 != interference_graph[i].end()) {
+      auto n = *it1;
+      for (auto it0 = inplace_binds[n].begin(); it0 != inplace_binds[n].end(); ++it0) {
+        if (*it0 == i) continue;
+        addInterferenceGraph(interference_graph, i, *it0);
+      }
+      ++it1;
+    }
+    auto nums = interference_graph[i].size();
+    interference_sort[i] = std::make_pair(nums, i);
+  }
+
+  std::stable_sort(interference_sort.begin(), interference_sort.end());
+  // Greedy algorithm to partition tensors to recycle
+  std::vector<int> ocuppied_partitions(cid, false);
+  std::vector<int> partition_result(cid, -1);
+  // The inference less one get the first partition
+  auto is = interference_sort.begin();
+  int i = std::get<1>(*is);
+  assignParitionResult(partition_result, inplace_binds, i, 0);
+  // Then start from the second one to assign the paritions
+  for ( ; is != interference_sort.end(); ++is) {
+    i = std::get<1>(*is);
+    if (partition_result[i] != -1) {
+      for (auto it = inplace_binds[i].begin(); it != inplace_binds[i].end(); ++it) {
+        partition_result[*it] = partition_result[i];
+      }
+      continue;
+    }
+    auto interfere_nodes = interference_graph[i];
+    for (auto it = interfere_nodes.begin(); it != interfere_nodes.end(); ++it) {
+      int n = *it;
+      if (partition_result[n] != -1) {
+        ocuppied_partitions[partition_result[n]] = true;
+      }
+    }
+    auto p = 0;
+    for ( ; p < cid; p++) {
+      if (ocuppied_partitions[p] == false) break;
+    }
+    assert(p < cid);
+    assignParitionResult(partition_result, inplace_binds, i, p);
+    for (auto it = interfere_nodes.begin(); it != interfere_nodes.end(); ++it) {
+      int n = *it;
+      if (partition_result[n] != -1) {
+        ocuppied_partitions[partition_result[n]] = false;
+      }
+    }
+  }
+
+  // Renaming tensor name
+  for (int i = 0; i < cid; i ++) {
+    int nid = cid_to_nid[i];
+    auto opNode = allNodes[nid];
+    auto tensor = dyn_cast<repr::NeuralNetData>(opNode->data().get());
+    int partition_num = partition_result[i];
+    auto new_name = "mem_share_" + std::to_string(partition_num);
+    dyn_cast<repr::Tensor>(tensor)->setName(new_name);
+  }
+}
+
 // Fusers for ideep to parse the graph and apply operator fusion
 using Fuser = bool (*)(repr::NNModule* nn, caffe2::Workspace* ws);
 static Fuser fusers[] = {
@@ -989,6 +1196,7 @@ void OptimizeForMkldnn(
   }
 
   setPoolingInferenceMode(nn);
+  recycleDataMemoryForIdeep(nn, ws);
 }
 
 #endif // CAFFE2_USE_MKLDNN
