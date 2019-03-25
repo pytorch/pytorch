@@ -86,18 +86,18 @@ void magmaCholeskyBatched(
 }
 
 template<class scalar_t>
-void magmaTrsm(
+void magmaTriangularSolve(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     scalar_t* dA, magma_int_t ldda, scalar_t* dB, magma_int_t lddb) {
-  AT_ERROR("trtrs only takes float or double Tensors");
+  AT_ERROR("triangular_solve only takes float or double Tensors");
 }
 
 template<class scalar_t>
-void magmaTrsmBatched(
+void magmaTriangularSolveBatched(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     scalar_t** dA_array, magma_int_t ldda, scalar_t** dB_array, magma_int_t lddb, magma_int_t batchsize,
     const MAGMAQueue& magma_queue) {
-  AT_ERROR("trtrs only takes float or double Tensors");
+  AT_ERROR("triangular_solve only takes float or double Tensors");
 }
 
 template<>
@@ -233,21 +233,21 @@ void magmaCholeskyBatched<float>(
 }
 
 template<>
-void magmaTrsm<double>(
+void magmaTriangularSolve<double>(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     double* dA, magma_int_t ldda, double* dB, magma_int_t lddb) {
   magma_dtrsm(MagmaLeft, uplo, trans, diag, m, n, 1, dA, ldda, dB, lddb);
 }
 
 template<>
-void magmaTrsm<float>(
+void magmaTriangularSolve<float>(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     float* dA, magma_int_t ldda, float* dB, magma_int_t lddb) {
   magma_strsm(MagmaLeft, uplo, trans, diag, m, n, 1, dA, ldda, dB, lddb);
 }
 
 template<>
-void magmaTrsmBatched<double>(
+void magmaTriangularSolveBatched<double>(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     double** dA_array, magma_int_t ldda, double** dB_array, magma_int_t lddb, magma_int_t batchsize,
     const MAGMAQueue& magma_queue) {
@@ -255,7 +255,7 @@ void magmaTrsmBatched<double>(
 }
 
 template<>
-void magmaTrsmBatched<float>(
+void magmaTriangularSolveBatched<float>(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     float** dA_array, magma_int_t ldda, float** dB_array, magma_int_t lddb, magma_int_t batchsize,
     const MAGMAQueue& magma_queue) {
@@ -684,10 +684,10 @@ Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
   return triu_tril_cuda_template<true>(result, self_c, k, "triu");
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ trsm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_trsm(Tensor& b, Tensor& A, bool upper, bool transpose, bool unitriangular) {
+static void apply_triangular_solve(Tensor& b, Tensor& A, bool upper, bool transpose, bool unitriangular) {
 #ifndef USE_MAGMA
 AT_ERROR("cholesky_solve: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -702,7 +702,7 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
 
   if (b.dim() == 2) {
-    magmaTrsm<scalar_t>(uplo, trans, diag, n, nrhs, A_data, n, b_data, n);
+    magmaTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_data, n, b_data, n);
   } else {
     auto A_mat_stride = matrixStride(A);
     auto b_mat_stride = matrixStride(b);
@@ -721,18 +721,19 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
     }
 
     MAGMAQueue magma_queue(b.get_device());
-    magmaTrsmBatched<scalar_t>(
+    magmaTriangularSolveBatched<scalar_t>(
         uplo, trans, diag, n, nrhs, A_array, n,
         b_array, n, batch_size, magma_queue);
   }
 #endif
 }
 
-std::tuple<Tensor, Tensor> _trsm_helper_cuda(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
+std::tuple<Tensor, Tensor> _triangular_solve_helper_cuda(const Tensor& self, const Tensor& A,
+                                                         bool upper, bool transpose, bool unitriangular) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "trsm_cuda", [&]{
-    apply_trsm<scalar_t>(self_working_copy, A_working_copy, upper, transpose, unitriangular);
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "triangular_solve_cuda", [&]{
+    apply_triangular_solve<scalar_t>(self_working_copy, A_working_copy, upper, transpose, unitriangular);
   });
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }

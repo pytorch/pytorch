@@ -2694,14 +2694,14 @@ class TestRsample(TestCase):
 
 class TestDistributionShapes(TestCase):
     def setUp(self):
-        super(TestCase, self).setUp()
+        super(TestDistributionShapes, self).setUp()
         self.scalar_sample = 1
         self.tensor_sample_1 = torch.ones(3, 2)
         self.tensor_sample_2 = torch.ones(3, 2, 3)
         Distribution.set_default_validate_args(True)
 
     def tearDown(self):
-        super(TestCase, self).tearDown()
+        super(TestDistributionShapes, self).tearDown()
         Distribution.set_default_validate_args(False)
 
     def test_entropy_shape(self):
@@ -3082,6 +3082,7 @@ class TestDistributionShapes(TestCase):
 class TestKL(TestCase):
 
     def setUp(self):
+        super(TestKL, self).setUp()
 
         class Binomial30(Binomial):
             def __init__(self, probs):
@@ -3596,6 +3597,7 @@ class TestNumericalStability(TestCase):
 
 class TestLazyLogitsInitialization(TestCase):
     def setUp(self):
+        super(TestLazyLogitsInitialization, self).setUp()
         self.examples = [e for e in EXAMPLES if e.Dist in
                          (Categorical, OneHotCategorical, Bernoulli, Binomial, Multinomial)]
 
@@ -3638,7 +3640,7 @@ class TestLazyLogitsInitialization(TestCase):
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 class TestAgainstScipy(TestCase):
     def setUp(self):
-        set_rng_seed(0)
+        super(TestAgainstScipy, self).setUp()
         positive_var = torch.randn(20).exp()
         positive_var2 = torch.randn(20).exp()
         random_var = torch.randn(20)
@@ -3789,6 +3791,7 @@ class TestAgainstScipy(TestCase):
 
 class TestTransforms(TestCase):
     def setUp(self):
+        super(TestTransforms, self).setUp()
         self.transforms = []
         transforms_by_cache_size = {}
         for cache_size in [0, 1]:
@@ -4197,7 +4200,7 @@ class TestValidation(TestCase):
                     raise AssertionError(fail_string.format(Dist.__name__, i + 1, len(params)))
 
     def tearDown(self):
-        super(TestCase, self).tearDown()
+        super(TestValidation, self).tearDown()
         Distribution.set_default_validate_args(False)
 
 
