@@ -1167,6 +1167,15 @@ class TestSparse(TestCase):
         test_shape([3, 4], [1, 4], [4, 4, 4], [3, 4, 4])
         test_shape([3, 4, 0], [1, 4], [4, 4, 4, 0], [3, 4, 4, 0])
 
+    def test_add_noncontiguous(self):
+        indices = self.index_tensor([[1, 2], [0, 2]])
+        values = self.value_tensor([1.]).expand(2, 3, 4, 5)
+        x = self.sparse_tensor(indices, values)
+        assert not x._values().is_contiguous()
+        y = x + x
+        expected = self.safeToDense(x) + self.safeToDense(x)
+        self.assertEqual(self.safeToDense(y), expected)
+
     def _test_sparse_mask_shape(self, nnz_x1, nnz_x2, shape_i, shape_v=None):
         shape = shape_i + (shape_v or [])
         x1, _, _ = self._gen_sparse(len(shape_i), nnz_x1, shape)

@@ -60,21 +60,6 @@ void THTensor_(cappedRandom)(THTensor *self, at::Generator *_generator, int64_t 
   THTensor_(clampedRandom)(self, _generator, 0, max);
 }
 
-void THTensor_(geometric)(THTensor *self, at::Generator *_generator, double p)
-{
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator().get());
-  // See Note [Thread-safety and Generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
-
-  #if defined(TH_REAL_IS_FLOAT)
-  at::geometric_distribution<float> geometric(p);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)geometric(gen););
-  #else
-  at::geometric_distribution<double> geometric(p);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)geometric(gen););
-  #endif
-}
-
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
 #if defined(TH_REAL_IS_FLOAT)

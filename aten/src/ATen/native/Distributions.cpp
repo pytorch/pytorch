@@ -238,7 +238,7 @@ Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
 
 Tensor _s_dirichlet_cpu(const Tensor& alpha, Generator *gen) {
   Tensor ret = at::zeros(alpha.sizes(), alpha.options());
-  AT_DISPATCH_FLOATING_TYPES(ret.type(), "dirichlet", [&] {
+  AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "dirichlet", [&] {
     Tensor gamma = at::zeros(alpha.sizes(), alpha.options().dtype(ScalarType::Double));
     CPUGenerator* generator = check_generator_with_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator().get());
     // See Note [Thread-safety and Generators]
