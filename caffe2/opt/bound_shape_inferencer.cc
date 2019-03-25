@@ -361,6 +361,8 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
 void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
   // First, we need to check that all the input shape/types are already
   // presented
+  bool input_all_constant = true;
+
   try {
   std::vector<TensorShape> input_shapes;
   for (const auto& input : op.input()) {
@@ -371,6 +373,14 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
       return;
     }
     input_shapes.emplace_back(it->second.shape);
+
+    input_all_constant = input_all_constant &&
+        it->second.dim_type == ShapeInfo::DimType::CONSTANT;
+  }
+
+  // If input has only constant, then the output would be a constant.
+  if (input_all_constant) {
+    current_dim_type_ = ShapeInfo::DimType::CONSTANT;
   }
 
   const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
