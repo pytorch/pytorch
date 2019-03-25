@@ -37,6 +37,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_prelu.*'  # PRelu is not compliant with ONNX yet
                      '|test_operator_repeat.*'  # Tile is not compliant with ONNX yet
                      '|test_.*pool_.*same.*'  # Does not support pool same.
+                     '|test_.*pool_.*ceil.*'  # Does not support pool same.
                      '|test_maxpool_with_argmax.*'  # MaxPool outputs indices in different format.
                      '|test_convtranspose.*'  # ConvTranspose needs some more complicated translation
                      '|test_mvn.*'  # MeanVarianceNormalization is experimental and not supported.
@@ -56,6 +57,9 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_strnorm.*'  # Needs implementation
                      '|test_nonzero.*'  # Needs implementation
                      '|test_tfidfvectorizer.*'  # Needs implementation
+                     '|test_top_k.*'  # opset 10 is not supported yet
+                     '|test_resize.*'  # opset 10 is not supported yet
+                     '|test_slice.*'  # opset 10 is not supported yet
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.

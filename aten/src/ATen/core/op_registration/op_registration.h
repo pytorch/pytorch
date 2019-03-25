@@ -34,11 +34,12 @@ namespace c10 {
  */
 class C10_API RegisterOperators final {
 public:
-  RegisterOperators() = default;
+  RegisterOperators();
   RegisterOperators(const RegisterOperators&) = delete;
-  RegisterOperators(RegisterOperators&&) = default;
+  RegisterOperators(RegisterOperators&&) noexcept;
   RegisterOperators& operator=(const RegisterOperators&) = delete;
-  RegisterOperators& operator=(RegisterOperators&&) = default;
+  RegisterOperators& operator=(RegisterOperators&&) noexcept;
+  ~RegisterOperators();
 
   /**
    * Register an operator based on a function schema and a set of configuration
