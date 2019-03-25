@@ -2,9 +2,9 @@
 #define TH_GENERIC_FILE "TH/generic/THTensorRandom.h"
 #else
 
-TH_API void THTensor_(random)(THTensor *self, THGenerator *_generator);
-TH_API void THTensor_(clampedRandom)(THTensor *self, THGenerator *_generator, int64_t min, int64_t max);
-TH_API void THTensor_(cappedRandom)(THTensor *self, THGenerator *_generator, int64_t max);
+TH_API void THTensor_(random)(THTensor *self, at::Generator *_generator);
+TH_API void THTensor_(clampedRandom)(THTensor *self, at::Generator *_generator, int64_t min, int64_t max);
+TH_API void THTensor_(cappedRandom)(THTensor *self, at::Generator *_generator, int64_t max);
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 TH_API void THTensor_(bernoulli_Tensor)(THTensor *self, at::Generator *_generator, THTensor *p);
