@@ -177,6 +177,18 @@ pytest test/test_nn.py -k Loss -v
 The above is an example of testing a change to Loss functions: this command runs tests such as
 `TestNN.test_BCELoss` and `TestNN.test_MSELoss` and can be useful to save keystrokes.
 
+### Reproducing Linux CI errors locally
+1. If CUDA is needed, run `export USE_CUDA_DOCKER_RUNTIME=1`.
+2. Run `source .circleci/scripts/setup_ci_dependencies.sh` to set up local environment.
+3. In the CI build log, find the line that starts with "Docker image download link: ",
+use the link to download the Docker image tar file `<DOCKER_IMAGE>.tar`.
+4. Run `docker load -i <DOCKER_IMAGE>.tar`, wait until the "Loaded image: " line appears,
+and note the unpacked Docker image name `<DOCKER_IMAGE_NAME>`
+(it should start with something like "308535385114.dkr.ecr.us-east-1.amazonaws.com/...").
+5. Run `docker run -t -i <DOCKER_IMAGE_NAME> /bin/bash` to start a container with this image.
+6. If you are reproducing a test error, run `cd ~/workspace` and then run the test script that causes the error;
+if you are reproducing a build error, clone your branch of PyTorch and then run `.jenkins/pytorch/build.sh`.
+
 ## Writing documentation
 
 PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
