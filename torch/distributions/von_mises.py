@@ -60,9 +60,6 @@ class VonMises(Distribution):
     can be any real number (to facilitate unconstrained optimization), but are
     interpreted as angles modulo 2 pi.
 
-    See :class:`~pyro.distributions.VonMises3D` for a 3D cartesian coordinate
-    cousin of this distribution.
-
     :param torch.Tensor loc: an angle in radians.
     :param torch.Tensor concentration: concentration parameter
     """
@@ -74,10 +71,6 @@ class VonMises(Distribution):
         self.loc, self.concentration = broadcast_all(loc, concentration)
         batch_shape = self.loc.shape
         event_shape = torch.Size()
-
-        # Moments
-        self._variance = 1 - (_log_modified_bessel_fn(self.concentration, order=1) -
-                              _log_modified_bessel_fn(self.concentration, order=0)).exp()
 
         # Parameters for sampling
         tau = 1 + (1 + 4 * self.concentration ** 2).sqrt()
@@ -129,9 +122,10 @@ class VonMises(Distribution):
         """
         return self.loc
 
-    @property
+    @lazy_property
     def variance(self):
         """
         The provided variance is the circular one.
         """
-        return self._variance
+        return 1 - (_log_modified_bessel_fn(self.concentration, order=1) -
+                _log_modified_bessel_fn(self.concentration, order=0)).exp()

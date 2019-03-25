@@ -4476,6 +4476,7 @@ class TestJit(TestCase):
             if Dist not in xfail:
                 self.assertTrue(any(n.isNondeterministic() for n in traced_f.graph.nodes()))
 
+    @skipIfRocm
     def test_log_prob(self):
         for Dist, keys, values, sample in self._examples():
             # FIXME traced functions produce incorrect results
