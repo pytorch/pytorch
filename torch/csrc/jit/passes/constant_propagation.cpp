@@ -147,7 +147,8 @@ bool removeExtraIfOutputs(Node* n) {
 
     // true block output is constant and constant matches false block output
     auto maybe_const = toIValue(t_out);
-    if (maybe_const && t_out->node() == f_out->node()) {
+    auto eq = EqualNode();
+    if (maybe_const && eq(t_out->node(), f_out->node())) {
       auto new_const = graph->insertConstant(*maybe_const, t_out->type());
       replaceAndRemoveIfOutput(n, i, new_const);
       continue;

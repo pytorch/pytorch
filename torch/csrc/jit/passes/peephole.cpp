@@ -191,9 +191,8 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       for (size_t check_none_index : {0, 1}) {
         bool input_must_be_none =
             node->inputs().at(check_none_index)->mustBeNone();
-        Value* other_input = node->inputs().at(1 - check_none_index);
-        bool other_must_not_be_none = !other_input->mustBeNone() &&
-            !other_input->type()->cast<OptionalType>();
+        bool other_must_not_be_none =
+            node->inputs().at(1 - check_none_index)->mustNotBeNone();
         if (input_must_be_none && other_must_not_be_none) {
           WithInsertPoint guard(node);
           auto output = node->owningGraph()->insertConstant(
@@ -206,8 +205,7 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
         node->kind() == aten::_unwrap_optional) {
       // we are unwrapping an input that can't be None, remove the unwrap
       auto input = node->input();
-      if (input->type() != NoneType::get() &&
-          !input->type()->cast<OptionalType>()) {
+      if (input->mustNotBeNone()) {
         node->output()->replaceAllUsesWith(node->input());
       }
     }

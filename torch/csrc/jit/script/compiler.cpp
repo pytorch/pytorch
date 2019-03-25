@@ -2058,7 +2058,6 @@ struct to_ir {
       }
       return classNew->createObject(
           apply.range(), method, Var(apply.inputs()[0]).name().name());
-      ;
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());
