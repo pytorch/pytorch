@@ -1222,8 +1222,9 @@ class CTCLoss(_Loss):
     r"""The Connectionist Temporal Classification loss.
 
     Calculates loss between a continuous (unsegmented) time series and a target sequence. CTCLoss sums over the
-    probability of possible alignments of input to target, producing a single loss which is differentiable
-    with respect to each node in input.
+    probability of possible alignments of input to target, producing a loss value which is differentiable
+    with respect to each input node. The alignment of input to target is assumed to be "many-to-one", which
+    limits the length of the target sequence such that it must be :math: `\leq` the input length.
 
     Args:
         blank (int, optional): blank label. Default :math:`0`.
