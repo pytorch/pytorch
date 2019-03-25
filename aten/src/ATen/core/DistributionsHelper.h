@@ -91,6 +91,8 @@ using dist_acctype = typename DistAccumType<T>::type;
 // Constants for uniform distribution
 constexpr float POW_2_32_INV = 1.0f/std::numeric_limits<uint32_t>::max();
 constexpr double POW_2_64_INV = 1.0/std::numeric_limits<uint64_t>::max();
+constexpr float NEXT_AFTER_1F_0F = 0.99999994039535522461;
+constexpr double NEXT_AFTER_1_0 = 0.99999999999999988897769753748434595763683319091796875;
 
 /**
  * Samples a uniform distribution in the range [0,1) of type T
@@ -117,11 +119,14 @@ struct uniform_real_distribution {
     dist_acctype<T> x;
     if(std::is_same<T, double>::value) {
       x = generator->random64() * POW_2_64_INV;
+      if (x == 1.0) {
+        x = NEXT_AFTER_1_0;
+      }
     } else {
       x = generator->random() * POW_2_32_INV;
-    }
-    if (x == static_cast<T>(1.0)) {
-      x = std::nextafter(static_cast<T>(1.0), static_cast<T>(0.0));
+      if (x == 1.0f) {
+        x = NEXT_AFTER_1F_0F;
+      }
     }
     return (x * (b - a) + a);
   }
