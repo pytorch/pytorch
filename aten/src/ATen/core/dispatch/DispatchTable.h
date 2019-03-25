@@ -100,7 +100,18 @@ class ThreadsafeOperatorTable_ final {
    }
 
    static std::string dispatch_key_to_string(TensorTypeId id) {
-     return std::string(toString(tensorTypeIdToBackend(id))) + "[" + toString(id) + "]";
+      // TODO Find better way to stringify tensor type ids without relying on backend
+      std::string name = "";
+      try {
+        name = toString(tensorTypeIdToBackend(id));
+      } catch (const std::exception&) {
+        // This can fail if the tensor type id is not one of the preregistered backends.
+        // However, dispatch_key_to_string is used to generate error reports, that
+        // means an error already has happened when entering this function.
+        // We don't want inner errors during generation of a report for an
+        // outer error. Just report an empty name instead.
+      }
+      return name + "[" + toString(id) + "]";
    }
 
    LeftRight<ska::flat_hash_map<TensorTypeId, DispatchTableEntry>> map_;

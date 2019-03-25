@@ -36,8 +36,8 @@ namespace c10 {
 class C10_API RegisterOperators final {
 public:
   RegisterOperators();
-  RegisterOperators(RegisterOperators&&);
-  RegisterOperators& operator=(RegisterOperators&&);
+  RegisterOperators(RegisterOperators&&) noexcept;
+  RegisterOperators& operator=(RegisterOperators&&) noexcept;
   RegisterOperators(const RegisterOperators&) = delete;
   RegisterOperators& operator=(const RegisterOperators&) = delete;
   ~RegisterOperators();
