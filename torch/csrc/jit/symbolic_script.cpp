@@ -702,7 +702,9 @@ const std::vector<std::string> functions = {
                     p: float,
                     train: bool):
             use_cuda = input.is_cuda
-            # CUDA has a fused dropout implementation
+            # lowering is specialized for cuda because cuda fuser can efficiently fuse those operations
+            # for cpu backend, where fusions are disabled, a different lowering that is more efficient
+            # in the absence of fusion is used
             p1m = 1. - p
             if use_cuda:
                 mask = torch.rand_like(input) < p1m
