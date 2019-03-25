@@ -86,10 +86,17 @@ def make_non_contiguous(tensor):
     return input
 
 
-def get_all_dtypes():
-    return [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float16, torch.float32, torch.float64]
+def get_all_dtypes(withBool=False):
+    allTypes = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+                torch.float16, torch.float32, torch.float64]
 
+    if withBool:
+        allTypes.append(torch.bool)
+
+    return allTypes
+
+def get_all_devices():
+    return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
 
 # 'dtype': (rtol, atol)
 _default_tolerances = {

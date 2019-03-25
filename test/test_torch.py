@@ -46,11 +46,6 @@ if TEST_LIBROSA:
 
 SIZE = 100
 
-devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-dtypes = [torch.bool, torch.float, torch.double, torch.half, torch.uint8,
-          torch.int8, torch.short, torch.int, torch.long]
-
-
 can_retrieve_source = True
 with warnings.catch_warnings(record=True) as warns:
     with tempfile.NamedTemporaryFile() as checkpoint:
@@ -375,8 +370,7 @@ class _TestTorchMixin(object):
             self.assertEqual(res1, res2)
 
     def test_logical_any(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             x = torch.zeros([2, 3, 400], dtype=torch.uint8, device=device)
 
             self.assertEqual(
@@ -415,8 +409,7 @@ class _TestTorchMixin(object):
             self.assertEqual(y, x.any(2, keepdim=True))
 
     def test_logical_all(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             x = torch.ones([2, 3, 400], dtype=torch.uint8, device=device)
 
             self.assertEqual(
@@ -1139,9 +1132,8 @@ class _TestTorchMixin(object):
             ('logsumexp', torch.logsumexp, -inf),
         ]
 
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         shape = (2, 0, 4)
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             x = torch.randn(shape, device=device)
 
             for item in fns_to_test:
@@ -1183,8 +1175,7 @@ class _TestTorchMixin(object):
             self.assertEqual(torch.ones((), device=device), xb.all())
 
     def test_pairwise_distance_empty(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             shape = (2, 0)
             x = torch.randn(shape, device=device)
             y = torch.randn(shape, device=device)
@@ -1199,8 +1190,7 @@ class _TestTorchMixin(object):
             self.assertEqual(torch.zeros((0, 1), device=device), torch.pairwise_distance(x, y, keepdim=True))
 
     def test_pdist_empty(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             shape = (0, 2)
             x = torch.randn(shape, device=device)
             self.assertEqual(torch.empty(0, device=device), torch.pdist(x))
@@ -1223,8 +1213,7 @@ class _TestTorchMixin(object):
             self.assertEqual(expected.shape, actual.shape)
             self.assertTrue(torch.allclose(expected, actual))
 
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             for shape in [(4, 5), (3, 2), (2, 1)]:
                 for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                     for trans in [False, True]:
@@ -1237,8 +1226,7 @@ class _TestTorchMixin(object):
                 test_pdist_single((1000, 2), device, 2, dtype, False)
 
     def test_cdist_empty(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             x = torch.randn((0, 5), device=device)
             y = torch.randn((4, 5), device=device)
             self.assertEqual(torch.empty(0, 4, device=device), torch.cdist(x, y))
@@ -1256,8 +1244,7 @@ class _TestTorchMixin(object):
             self.assertEqual(torch.empty(2, 0, device=device), torch.cdist(x, y))
 
     def test_cdist_norm(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             for r1 in [3, 4, 5, 6]:
                 for m in [2, 3, 4, 10]:
                     for r2 in [4, 6, 7, 8]:
@@ -1269,8 +1256,7 @@ class _TestTorchMixin(object):
                             self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_large(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             x = torch.randn(1000, 10, device=device)
             y = torch.randn(1000, 10, device=device)
             actual = torch.cdist(x, y, p=2)
@@ -1278,8 +1264,7 @@ class _TestTorchMixin(object):
             self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_non_contiguous(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             x = torch.randn(5, 7, device=device).t()
             y = torch.randn(5, 3, device=device).t()
             actual = torch.cdist(x, y, p=2)
@@ -2552,13 +2537,13 @@ class _TestTorchMixin(object):
         self.assertEqual(output, expected)
 
     def test_dtypes(self):
-        all_dtypes = torch.testing.get_all_dtypes()
+        all_dtypes = torch.testing.get_all_dtypes(True)
         do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cpu'))
         if torch.cuda.is_available():
             do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cuda:0'))
 
     def test_copy_dtypes(self):
-        all_dtypes = torch.testing.get_all_dtypes()
+        all_dtypes = torch.testing.get_all_dtypes(True)
         for dtype in all_dtypes:
             copied_dtype = copy.deepcopy(dtype)
             self.assertIs(dtype, copied_dtype)
@@ -2706,10 +2691,10 @@ class _TestTorchMixin(object):
                     self.assertEqual(b.device, a.to(b, non_blocking=non_blocking).device)
 
     def test_empty_full(self):
-        do_test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cpu'))
+        do_test_empty_full(self, torch.testing.get_all_dtypes(True), torch.strided, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
-            do_test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, None)
-            do_test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cuda:0'))
+            do_test_empty_full(self, torch.testing.get_all_dtypes(True), torch.strided, None)
+            do_test_empty_full(self, torch.testing.get_all_dtypes(True), torch.strided, torch.device('cuda:0'))
 
     def test_dtype_out_match(self):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))
@@ -2907,17 +2892,20 @@ class _TestTorchMixin(object):
         self.assertTrue(x.is_cuda)
         torch.set_default_tensor_type(saved_type)
 
-    def test_unfolf_all_devices_and_dtypes_except_half(self):
-        for device in devices:
-            for dt in dtypes:
-                if dt != torch.half:
+    def test_unfolf_all_devices_and_dtypes(self):
+        for device in torch.testing.get_all_devices():
+            for dt in torch.testing.get_all_dtypes(True):
+                if dt == torch.half and device == 'cpu':
+                    # fix once random is implemented for Half on CPU
+                    self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
+                else:
                     x = torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device)
                     self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
 
     def test_copy_all_dtypes_and_devices(self):
         from copy import copy
-        for device in devices:
-            for dt in dtypes:
+        for device in torch.testing.get_all_devices():
+            for dt in torch.testing.get_all_dtypes(True):
                 x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
                 y = copy(x)
 
@@ -2927,15 +2915,15 @@ class _TestTorchMixin(object):
 
     def test_resize_all_dtypes_and_devices(self):
         shape = (2, 2)
-        for device in devices:
-            for dt in dtypes:
+        for device in torch.testing.get_all_devices():
+            for dt in torch.testing.get_all_dtypes(True):
                 x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
                 x.resize_(shape)
                 self.assertEqual(shape, x.shape)
 
     def test_fill_all_dtypes_and_devices(self):
-        for device in devices:
-            for dt in dtypes:
+        for device in torch.testing.get_all_devices():
+            for dt in torch.testing.get_all_dtypes(True):
                 x = torch.tensor((1, 1), dtype=dt, device=device)
                 x.fill_(1)
 
@@ -2943,15 +2931,15 @@ class _TestTorchMixin(object):
                 self.assertEqual(dt, x.dtype)
 
     def test_clone_all_dtypes_and_devices(self):
-        for device in devices:
-            for dt in dtypes:
+        for device in torch.testing.get_all_devices():
+            for dt in torch.testing.get_all_dtypes(True):
                 x = torch.tensor((1, 1), dtype=dt, device=device)
                 y = x.clone()
                 self.assertEqual(x, y)
 
     def test_cat_all_dtypes_and_devices(self):
-        for device in devices:
-            for dt in dtypes:
+        for device in torch.testing.get_all_devices():
+            for dt in torch.testing.get_all_dtypes(True):
                 x = torch.tensor([[1, 2], [3, 4]], dtype=dt, device=device)
                 expected1 = torch.tensor([[1, 2], [3, 4], [1, 2], [3, 4]], dtype=dt, device=device)
                 self.assertEqual(torch.cat((x, x), 0), expected1)
@@ -2963,9 +2951,9 @@ class _TestTorchMixin(object):
         # ensure we can create empty tensors from each factory function
         shapes = [(5, 0, 1), (0,), (0, 0, 1, 0, 2, 0, 0)]
 
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             for shape in shapes:
-                for dt in dtypes:
+                for dt in torch.testing.get_all_dtypes(True):
                     self.assertEqual(shape, torch.zeros(shape, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                     self.assertEqual(shape, torch.full(shape, 3, device=device, dtype=dt).shape)
@@ -2976,11 +2964,14 @@ class _TestTorchMixin(object):
                     self.assertEqual(shape, torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                     self.assertEqual(shape, torch.empty_strided(shape, (0,) * len(shape), device=device, dtype=dt).shape)
 
-                    if dt != torch.half:
+                    if dt == torch.half and device == "cpu":
+                        # update once random is implemented for half on CPU
+                        self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
+                    else:
                         self.assertEqual(shape, torch.randint(6, shape, device=device, dtype=dt).shape)
                         self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 6).shape)
 
-                    if dt != torch.double and dt != torch.float and dt != torch.half and dt != torch.bool:
+                    if dt != torch.double and dt != torch.float and dt != torch.half:
                         self.assertRaises(RuntimeError, lambda: torch.rand(shape, device=device, dtype=dt).shape)
 
                     if dt == torch.double or dt == torch.float:
@@ -3480,8 +3471,7 @@ class _TestTorchMixin(object):
         self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('inf')))
         self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('inf')))
 
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(-5, float('nan'), device=device))
             # check with step size
             self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('-inf'), -1, device=device))
@@ -3765,9 +3755,8 @@ class _TestTorchMixin(object):
 
     def test_empty_tensor_props(self):
         sizes = [(0,), (0, 3), (5, 0), (5, 0, 3, 0, 2), (0, 3, 0, 2), (0, 5, 0, 2, 0)]
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for size in sizes:
-            for device in devices:
+            for device in torch.testing.get_all_devices():
                 x = torch.empty(tuple(size), device=device)
                 self.assertEqual(size, x.shape)
                 self.assertTrue(x.is_contiguous())
@@ -4046,8 +4035,7 @@ class _TestTorchMixin(object):
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_tensordot(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for d in devices:
+        for d in torch.testing.get_all_devices():
             a = torch.arange(60., device=d).reshape(3, 4, 5)
             b = torch.arange(24., device=d).reshape(4, 3, 2)
             c = torch.tensordot(a, b, dims=([1, 0], [0, 1])).cpu()
@@ -4461,8 +4449,7 @@ class _TestTorchMixin(object):
         self.assertEqual(x.narrow(-2, -1, 1), torch.Tensor([[6, 7, 8]]))
 
     def test_narrow_empty(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             x = torch.randn(2, 3, 4, device=device)
             for d in range(x.dim()):
                 y = x.narrow(d, x.size(d), 0)
@@ -4519,8 +4506,7 @@ class _TestTorchMixin(object):
 
     @skipIfRocm
     def test_linspace(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             _from = random.random()
             to = _from + random.random()
             res1 = torch.linspace(_from, to, 137, device=device)
@@ -7139,8 +7125,7 @@ class _TestTorchMixin(object):
         check(src.transpose(1, 2), idx)
 
     def test_take_empty(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             for input_shape in [(0,), (0, 1, 2, 0), (1, 2, 3)]:
                 for indices_shape in [(0,), (0, 1, 2, 0)]:
                     input = torch.empty(input_shape, device=device)
@@ -7169,8 +7154,7 @@ class _TestTorchMixin(object):
         self.assertEqual(dst.tolist(), [[5, 7], [1, 1]])
 
     def test_put_empty(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             for dst_shape in [(0,), (0, 1, 2, 0), (1, 2, 3)]:
                 for indices_shape in [(0,), (0, 1, 2, 0)]:
                     for accumulate in [False, True]:
@@ -7663,8 +7647,7 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: x.reshape(0, -1))
 
     def test_tensor_shape_empty(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             x = torch.randn((0, 1, 3, 0), device=device)
             # flatten
             self.assertEqual((0,), torch.flatten(x, 0, 3).shape)
@@ -7725,8 +7708,7 @@ class _TestTorchMixin(object):
     # functions that operate over a dimension but don't reduce.
     @skipIfRocm
     def test_dim_function_empty(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             shape = (0, 1, 2, 0)
             x = torch.randn(shape, device=device)
 
@@ -7857,8 +7839,7 @@ class _TestTorchMixin(object):
 
     @skipIfRocm
     def test_blas_empty(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
 
             def fn(torchfn, *args):
                 return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
@@ -7928,8 +7909,7 @@ class _TestTorchMixin(object):
 
     @skipIfRocm
     def test_blas_alpha_beta_empty(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             # ensure beta is respected
             value = 11
             input = torch.full((2,), value, device=device)
@@ -7959,8 +7939,7 @@ class _TestTorchMixin(object):
         # numpy/sci often has a direct wrapper (e.g. lu_factor) and a wrapper that "does the right thing"
         # (e.g. lu).  We often name our functions identically to the lapack function, so it will take work
         # to name / migrate-to better wrappers.
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
 
             # need to init cuda to check has_magma
             empty = torch.randn((0, 0), device=device)
@@ -8350,8 +8329,7 @@ class _TestTorchMixin(object):
         self._test_flip(self, use_cuda=False)
 
     def test_roll(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             numbers = torch.arange(1, 9, device=device)
 
             single_roll = numbers.roll(1, 0)
@@ -8518,8 +8496,7 @@ class _TestTorchMixin(object):
                         self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1], dst1[i, 2]].item(), 0)
 
     def test_nonzero_empty(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             x = torch.randn(0, 2, 0, 5, 0, device=device)
             y = torch.nonzero(x)
             self.assertEqual(0, y.numel())
@@ -9631,8 +9608,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(torch.empty_like(a).type(), a.type())
 
     def test_empty_strided(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
+        for device in torch.testing.get_all_devices():
             for shape in [(2, 3, 4), (0, 2, 0)]:
                 # some of these cases are pretty strange, just verifying that if as_strided
                 # allows them then empty_strided can as well.
