@@ -564,6 +564,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   template <typename T>
   inline T * data() const {
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
+    AT_CHECK(has_storage(),
+        "Cannot access data pointer of Tensor that doesn't have storage");
     AT_ASSERTM(
         storage_initialized(),
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
@@ -595,7 +597,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline void* data() const {
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
-    AT_ASSERT(storage_initialized());
+    AT_CHECK(has_storage(),
+        "Cannot access data pointer of Tensor that doesn't have storage");
     AT_ASSERT(dtype_initialized());
     return static_cast<void*>(
         static_cast<char*>(storage_.data()) +
@@ -1243,7 +1246,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor is storage initialized.  A tensor may become
    * storage UNINITIALIZED after a Resize() or FreeMemory()
    */
-  bool storage_initialized() const noexcept {
+  bool storage_initialized() const {
+    AT_ASSERT(has_storage());
     return storage_.data() || numel_ == 0;
   }
 
