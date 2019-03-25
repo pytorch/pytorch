@@ -12196,6 +12196,45 @@ class TestFuser(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
+    def test_addcmul_cuda(self):
+        t = torch.randn(1, 4, dtype=torch.float, device='cuda')
+        t1 = torch.randn(4, 1, dtype=torch.float, device='cuda')
+        t2 = torch.randn(1, 4, dtype=torch.float, device='cuda')
+
+        def foo(t, t1, t2):
+            return t.addcmul(t + 1, t2, value=0.1)
+
+        ge = self.checkTrace(foo, (t, t1, t2), allow_unused=True)
+        graph = ge.graph_for(t, t1, t2)
+        self.assertAllFused(graph)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_lerp_cuda(self):
+        start = torch.randn(4, 1, dtype=torch.float, device='cuda')
+        end = torch.randn(1, 4, dtype=torch.float, device='cuda')
+        weight = torch.tensor(0.5, dtype=torch.float, device='cuda')
+
+        # scalar weight overload
+        def foo_weight_scalar(start, end):
+            return torch.lerp(start + 1, end, 0.5)
+
+        # tensor weight overload
+        def foo_weight_tensor(start, end):
+            return torch.lerp(start + 1, end, weight)
+
+        ge_weight_scalar = self.checkTrace(foo_weight_scalar, (start, end))
+        graph = ge_weight_scalar.graph_for(start, end)
+        self.assertAllFused(graph)
+
+        ge_weight_tensor = self.checkTrace(foo_weight_tensor, (start, end))
+        graph = ge_weight_tensor.graph_for(start, end)
+        self.assertAllFused(graph)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
     def test_concat_cuda(self):
         hx = torch.randn(3, 20, dtype=torch.float, device='cuda')
         cx = torch.randn(3, 20, dtype=torch.float, device='cuda')
