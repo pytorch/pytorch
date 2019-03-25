@@ -21,6 +21,18 @@ struct Table<float> {
   static const uint32_t __attribute__((aligned(256))) t[256*8];
 };
 
+/* These values represent the reordering indices for a given comparison result
+ * that will put elements <= than the pivot at the beginning of
+ * the vector, and elements >= the pivot at the end (or vice versa for a descending sort)
+ *
+ * For example, if the pivot is 5.2, given a vector (1.0, 6.3, 7.9, 2.8, 4.2, 6.7, 0.3, 2,3),
+ * the pointwise comparison result is (0, 1, 1, 0, 0, 1, 0, 0).  Interpreted as a bitwise-little-endian binary value,
+ * this represents the integer 38.
+ *
+ * Then Table[38*8] through Table[38*8 + 7] inclusive are the indices (0,3,4,6,7,1,2,5),
+ * which represent the permutation that takes the input vector to
+ * (1.0, 2.8, 4.2, 0.3, 2.3, 6.3, 7.9, 6.7).
+ */
 const uint32_t __attribute__((aligned(256))) Table<float>::t[] = {
       0,1,2,3,4,5,6,7,
       1,2,3,4,5,6,7,0,
