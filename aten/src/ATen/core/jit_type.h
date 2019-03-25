@@ -246,6 +246,11 @@ struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType,
     return ss.str();
   }
 
+  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
+    AT_ASSERT(contained_types.size() == 1);
+    return create(contained_types[0]);
+  }
+
   // common cast Optional[Tensor] for undefined tensor type
   static OptionalTypePtr ofTensor();
 private:
@@ -1144,6 +1149,18 @@ struct CAFFE2_API ClassType : public Type {
       return nullptr;
     }
     return attributeTypes_[pos];
+  }
+
+  TypePtr getAttribute(size_t slot) const {
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+    AT_ASSERT(slot < attributeTypes_.size());
+    return attributeTypes_[slot];
+  }
+
+  const std::string& getAttributeName(size_t slot) const {
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+    AT_ASSERT(slot < attributeTypes_.size());
+    return attributeNames_[slot];
   }
 
   Method* getMethod(const std::string& name) const;

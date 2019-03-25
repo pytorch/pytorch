@@ -321,8 +321,10 @@ BLAS and LAPACK Operations
 .. autofunction:: potrs
 .. autofunction:: pstrf
 .. autofunction:: qr
+.. autofunction:: solve
 .. autofunction:: svd
 .. autofunction:: symeig
+.. autofunction:: triangular_solve
 .. autofunction:: trtrs
 
 Utilities
