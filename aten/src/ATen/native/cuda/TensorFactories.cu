@@ -13,6 +13,8 @@
 #include <thrust/sort.h>
 #include <thrust/execution_policy.h>
 #include <thrust/sequence.h>
+#include <thrust/swap.h>
+#include <curand_kernel.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -411,6 +413,131 @@ Tensor triu_indices_cuda(
   }
 
   return tensor;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ choice ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+__global__ void generate_samples(
+  int64_t *samples,
+  int k,
+  curandStateMtgp32 *state
+){
+  int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  samples[thread_id] = curand(state) % (thread_id + k + 1);
+}
+
+template <typename scalar_t>
+__global__ void generate_keys(
+  scalar_t *keys,
+  scalar_t *weights,
+  curandStateMtgp32 *state
+){
+  int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  float u = curand_uniform(state);
+  keys[thread_id] = (scalar_t) __powf(u, (float) 1/weights[thread_id]);
+}
+
+__global__ void generate_reservoir(
+  int64_t *indices,
+  int64_t *samples,
+  int nb_iterations,
+  int k
+){
+  for(int i = 0; i < nb_iterations; i++){
+    int64_t z = samples[i];
+    if (z < k) {
+      thrust::swap(indices[z], indices[i + k]);
+    }
+  }
+}
+
+Tensor reservoir_sampling_cuda(
+  Tensor& x,
+  Tensor &weights,
+  int k
+){
+
+  if (!x.is_contiguous()){
+    x = x.contiguous();
+  }
+
+  int n = x.numel();
+  auto options = x.options().dtype(at::kLong);
+  dim3 threads(threadsPerBlock);
+
+  THCState *state = at::globalContext().getTHCState();
+  THCRandom_seed(state);
+  THCGenerator *generator = THCRandom_getGenerator(state);
+
+  if (weights.numel() == 0){
+    Tensor indices_n = at::arange({n}, options);
+
+    int split, begin, end;
+
+    if(2 * k < n){
+      split = n - k;
+      begin = n - k;
+      end = n;
+    } else {
+      split = k;
+      begin = 0;
+      end = k;
+    }
+
+    int nb_iterations = std::min(k, n - k);
+    dim3 blocks((nb_iterations + threadsPerBlock - 1)/threadsPerBlock);
+
+    Tensor samples = at::arange({nb_iterations}, options);
+
+    generate_samples<<<blocks, threads>>>(
+      samples.data<int64_t>(),
+      split,
+      generator->state.gen_states
+    );
+
+    generate_reservoir<<<1, 1>>>(
+      indices_n.data<int64_t>(),
+      samples.data<int64_t>(),
+      nb_iterations,
+      split
+    );
+
+    return x.index_select(
+      0,
+      indices_n.index_select(
+        0,
+        at::arange(begin, end, options)
+      )
+    );
+
+  } else {
+    Tensor keys = at::empty({n}, weights.options());
+    dim3 all_blocks((n + threadsPerBlock - 1)/threadsPerBlock);
+
+    AT_DISPATCH_FLOATING_TYPES(weights.scalar_type(), "generate keys", [&] {
+      generate_keys<scalar_t><<<all_blocks, threads>>>(
+        keys.data<scalar_t>(),
+        weights.data<scalar_t>(),
+        generator->state.gen_states
+      );
+    });
+
+    return x.index_select(0, std::get<1>(keys.topk(k)));
+  }
+
+}
+
+Tensor choice_cuda(
+  Tensor& input,
+  Tensor& weights,
+  bool replacement,
+  int k
+){
+  if (replacement){
+    return sampling_with_replacement(input, weights, k);
+  } else {
+    return reservoir_sampling_cuda(input, weights, k);
+  }
 }
 
 }} // namespace at::native
