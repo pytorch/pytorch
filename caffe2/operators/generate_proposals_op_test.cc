@@ -413,6 +413,7 @@ TEST(GenerateProposalsTest, TestRealDownSampled) {
       1e-4);
 }
 
+#if defined(CV_MAJOR_VERSION) && (CV_MAJOR_VERSION >= 3)
 TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
   // Similar to TestRealDownSampled but for rotated boxes with angle info.
   const float angle = 0;
@@ -720,5 +721,6 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
     EXPECT_LE(std::abs(rois_data(i, 5) - expected_angle), 1e-4);
   }
 }
+#endif // CV_MAJOR_VERSION >= 3
 
 } // namespace caffe2
