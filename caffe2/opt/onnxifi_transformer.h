@@ -121,6 +121,10 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const ShapeInfoMap& shape_hints,
       std::unordered_set<int>* blacklisted_ops) const;
 
+  // Fix input and output name for inplace operators that might have been
+  // renamed by SsaRewrite.
+  void fixUpInplaceOperators(NetDef* net) const;
+
   // Determine backend id
   void getBackendId();
 

@@ -960,6 +960,41 @@ NetDef OnnxifiTransformer::TransformViaOnnx(
       *pred_net, onnx_supports, onnx_converter, opts_.debug);
 }
 
+// Fix up output name for in place operators.
+void OnnxifiTransformer::fixUpInplaceOperators(NetDef* net) const {
+  CAFFE_ENFORCE(net, "Net cannot be nullptr");
+
+  std::unordered_map<std::string, std::string> to_rename;
+  for (auto& op : *net->mutable_op()) {
+    // For Scattered assign, the operator requires the output to be exactly
+    // the same as the first input because it updates the tensor in place.
+    // In SsaRewrite, we would have assigned the output a new unique name. So
+    // we change it to match the input again.
+    if (op.type() == "ScatterAssign") {
+      if (op.input().size() != 3 and op.output().size() != 1) {
+        LOG(WARNING) << "Invaid ScatterAssign operator. Expected 3 inputs and "
+                     << "1 output. " << ProtoDebugString(op);
+        continue;
+      }
+
+      const auto& input_name = op.input(0);
+      to_rename.emplace(op.output(0), input_name);
+      *op.mutable_output(0) = input_name;
+    }
+  }
+
+  // For any output name that we changed back, update the input to the operators
+  // that fllow it.
+  for (auto& op : *net->mutable_op()) {
+    for (auto& input : *op.mutable_input()) {
+      auto iter = to_rename.find(input);
+      if (iter != to_rename.end()) {
+        input = iter->second;
+      }
+    }
+  }
+}
+
 // Cutting off the runnable part and replace with ONNXIFI ops. Asssume the nets
 // were topologically sorted
 void OnnxifiTransformer::transform(
@@ -1028,9 +1063,12 @@ void OnnxifiTransformer::transform(
   // Need to figure out a proper place to handle device option
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());
 
+  fixUpInplaceOperators(&net_opt);
+
   if (opts_.debug) {
     WriteProtoToTextFile(net_opt, "debug_full_opt_net.pb_txt");
   }
+
   pred_net->Swap(&net_opt);
 }
 
