@@ -1223,7 +1223,7 @@ class CTCLoss(_Loss):
 
     Calculates loss between a continuous (unsegmented) time series and a target sequence. CTCLoss sums over the
     probability of possible alignments of input to target, producing a single loss which is differentiable
-    with respect to each input.
+    with respect to each node in input.
 
     Args:
         blank (int, optional): blank label. Default :math:`0`.
