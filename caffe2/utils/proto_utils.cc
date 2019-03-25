@@ -558,4 +558,56 @@ C10_EXPORT Argument* GetMutableArgument(
   }
 }
 
-}  // namespace caffe2
+C10_EXPORT void cleanupExternalInputsAndOutputs(NetDef* net) {
+  std::vector<std::string> oldExternalInputs;
+  for (const auto& input : net->external_input()) {
+    oldExternalInputs.emplace_back(input);
+  }
+  std::vector<std::string> oldExternalOutputs;
+  for (const auto& output : net->external_output()) {
+    oldExternalOutputs.emplace_back(output);
+  }
+
+  net->clear_external_input();
+  net->clear_external_output();
+
+  std::set<std::string> inputSet;
+  for (const auto& input : oldExternalInputs) {
+    if (inputSet.count(input)) {
+      // Prevent duplicate external inputs.
+      continue;
+    }
+    inputSet.insert(input);
+    net->add_external_input(input);
+  }
+
+  // Set of blobs that are external inputs or outputs of some operators.
+  std::set<std::string> allOutputs(inputSet.begin(), inputSet.end());
+  for (const auto& op : net->op()) {
+    for (const auto& input : op.input()) {
+      if (inputSet.count(input) || allOutputs.count(input)) {
+        continue;
+      }
+      // Add missing external inputs.
+      inputSet.insert(input);
+      net->add_external_input(input);
+    }
+    for (const auto& output : op.output()) {
+      allOutputs.insert(output);
+    }
+  }
+
+  std::set<std::string> outputSet;
+  for (const auto& output : oldExternalOutputs) {
+    if (!allOutputs.count(output)) {
+      continue;
+    }
+    if (outputSet.count(output)) {
+      continue;
+    }
+    outputSet.insert(output);
+    net->add_external_output(output);
+  }
+}
+
+} // namespace caffe2
