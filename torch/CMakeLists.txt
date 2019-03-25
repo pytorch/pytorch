@@ -37,6 +37,7 @@ set(TOOLS_PATH "${TORCH_ROOT}/tools")
 set(TORCH_PYTHON_SRCS
     ${GENERATED_THNN_CXX}
     ${GENERATED_CXX_PYTHON}
+    ${TORCH_SRC_DIR}/csrc/CudaIPCTypes.cpp
     ${TORCH_SRC_DIR}/csrc/DataLoader.cpp
     ${TORCH_SRC_DIR}/csrc/Device.cpp
     ${TORCH_SRC_DIR}/csrc/Dtype.cpp
