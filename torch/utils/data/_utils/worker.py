@@ -100,10 +100,8 @@ def get_worker_info():
     return _worker_info
 
 
-class IterableDatasetStopIteration(object):
-    r"""Dummy class used to signal the end of an IterableDataset"""
-    def __init__(self, worker_id):
-        self.worker_id = worker_id
+r"""Dummy class used to signal the end of an IterableDataset"""
+IterableDatasetStopIteration = namedtuple('IterableDatasetStopIteration', ['worker_id'])
 
 
 def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
