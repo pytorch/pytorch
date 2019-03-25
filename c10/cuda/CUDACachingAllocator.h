@@ -14,6 +14,7 @@ namespace c10 {
 // block inside of already allocated area.
 class C10_CUDA_API FreeMemoryCallback {
  public:
+  virtual ~FreeMemoryCallback() {};
   virtual bool Execute() = 0;
 };
 

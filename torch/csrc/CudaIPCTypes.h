@@ -134,6 +134,7 @@ namespace c10 {
 namespace {
 class CudaIPCCollectCallback : public FreeMemoryCallback {
  public:
+  ~CudaIPCCollectCallback() {};
   bool Execute() override {
     return torch::CudaIPCCollect();
   }
