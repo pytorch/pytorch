@@ -60,7 +60,7 @@ binary_linux_build: &binary_linux_build
 # that on the docker executor)
 binary_linux_test: &binary_linux_test
   machine:
-    image: default
+    image: ubuntu-1604:20190301-01
   steps:
   - run:
       <<: *setup_linux_system_environment
@@ -126,7 +126,7 @@ binary_linux_test: &binary_linux_test
 
 binary_linux_upload: &binary_linux_upload
   machine:
-    image: default
+    image: ubuntu-1604:20190301-01
   steps:
   - run:
       <<: *setup_linux_system_environment
