@@ -425,6 +425,7 @@ Tensor triu_indices_cuda(
 
 __global__ void generate_samples(
   int64_t *samples,
+<<<<<<< HEAD
   int64_t k,
   int64_t n,
   curandStateMtgp32 *state
@@ -433,12 +434,20 @@ __global__ void generate_samples(
   if(thread_id < n){
     samples[thread_id] = curand(state) % (thread_id + k + 1);
   }
+=======
+  int k,
+  curandStateMtgp32 *state
+){
+  int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  samples[thread_id] = curand(state) % (thread_id + k + 1);
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
 }
 
 template <typename scalar_t>
 __global__ void generate_keys(
   scalar_t *keys,
   scalar_t *weights,
+<<<<<<< HEAD
   int64_t n,
   curandStateMtgp32 *state
 ){
@@ -447,13 +456,25 @@ __global__ void generate_keys(
     float u = curand_uniform(state);
     keys[thread_id] = weights[thread_id] > 0? (scalar_t) __powf(u, (float) 1/weights[thread_id]):-1;
   }
+=======
+  curandStateMtgp32 *state
+){
+  int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  float u = curand_uniform(state);
+  keys[thread_id] = (scalar_t) __powf(u, (float) 1/weights[thread_id]);
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
 }
 
 __global__ void generate_reservoir(
   int64_t *indices,
   int64_t *samples,
+<<<<<<< HEAD
   int64_t nb_iterations,
   int64_t k
+=======
+  int nb_iterations,
+  int k
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
 ){
   for(int i = 0; i < nb_iterations; i++){
     int64_t z = samples[i];
@@ -464,6 +485,7 @@ __global__ void generate_reservoir(
 }
 
 Tensor reservoir_sampling_cuda(
+<<<<<<< HEAD
   const Tensor& x,
   const Tensor& weights,
   int64_t k
@@ -490,6 +512,23 @@ Tensor reservoir_sampling_cuda(
   dim3 threads(AT_APPLY_THREADS_PER_BLOCK);
 
   THCState *state = at::globalContext().getTHCState();
+=======
+  Tensor& x,
+  Tensor &weights,
+  int k
+){
+
+  if (!x.is_contiguous()){
+    x = x.contiguous();
+  }
+
+  int n = x.numel();
+  auto options = x.options().dtype(at::kLong);
+  dim3 threads(threadsPerBlock);
+
+  THCState *state = at::globalContext().getTHCState();
+  THCRandom_seed(state);
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
   THCGenerator *generator = THCRandom_getGenerator(state);
 
   if (weights.numel() == 0){
@@ -507,15 +546,23 @@ Tensor reservoir_sampling_cuda(
       end = k;
     }
 
+<<<<<<< HEAD
     int nb_iterations = n - split;
     dim3 blocks((nb_iterations + AT_APPLY_THREADS_PER_BLOCK - 1)/AT_APPLY_THREADS_PER_BLOCK);
+=======
+    int nb_iterations = std::min(k, n - k);
+    dim3 blocks((nb_iterations + threadsPerBlock - 1)/threadsPerBlock);
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
 
     Tensor samples = at::arange({nb_iterations}, options);
 
     generate_samples<<<blocks, threads>>>(
       samples.data<int64_t>(),
       split,
+<<<<<<< HEAD
       n,
+=======
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
       generator->state.gen_states
     );
 
@@ -526,7 +573,10 @@ Tensor reservoir_sampling_cuda(
       split
     );
 
+<<<<<<< HEAD
     THCudaCheck(cudaGetLastError());
+=======
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
     return x.index_select(
       0,
       indices_n.index_select(
@@ -536,6 +586,7 @@ Tensor reservoir_sampling_cuda(
     );
 
   } else {
+<<<<<<< HEAD
 
     AT_CHECK(
       weights.device() == x.device(),
@@ -564,23 +615,34 @@ Tensor reservoir_sampling_cuda(
 
     Tensor keys = at::empty({n}, weights.options());
     dim3 all_blocks((n + AT_APPLY_THREADS_PER_BLOCK - 1)/AT_APPLY_THREADS_PER_BLOCK);
+=======
+    Tensor keys = at::empty({n}, weights.options());
+    dim3 all_blocks((n + threadsPerBlock - 1)/threadsPerBlock);
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
 
     AT_DISPATCH_FLOATING_TYPES(weights.scalar_type(), "generate keys", [&] {
       generate_keys<scalar_t><<<all_blocks, threads>>>(
         keys.data<scalar_t>(),
         weights.data<scalar_t>(),
+<<<<<<< HEAD
         n,
+=======
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
         generator->state.gen_states
       );
     });
 
+<<<<<<< HEAD
     THCudaCheck(cudaGetLastError());
+=======
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
     return x.index_select(0, std::get<1>(keys.topk(k)));
   }
 
 }
 
 Tensor choice_cuda(
+<<<<<<< HEAD
   const Tensor& input,
   const Tensor& weights,
   bool replace,
@@ -601,6 +663,15 @@ Tensor choice_cuda(
   at::Tensor weights = at::empty({0}, input.options().dtype(at::kFloat));
   if (replace){
     return native::sampling_with_replacement(input, weights, k);
+=======
+  Tensor& input,
+  Tensor& weights,
+  bool replacement,
+  int k
+){
+  if (replacement){
+    return sampling_with_replacement(input, weights, k);
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
   } else {
     return reservoir_sampling_cuda(input, weights, k);
   }

@@ -741,15 +741,25 @@ void generate_keys(
 
   for(int i = 0; i < n; i++){
     scalar_t u = THRandom_standard_uniform(generator);
+<<<<<<< HEAD
     keys[i] = weights[i] > 0? (scalar_t) std::pow(u, 1/weights[i]):-1;
+=======
+    keys[i] = (scalar_t) std::pow(u, 1/weights[i]);
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
   }
 
 }
 
 void reservoir_generator_cpu(
+<<<<<<< HEAD
   int64_t *indices,
   int64_t n,
   int64_t k,
+=======
+  int64_t* indices,
+  int n,
+  int k,
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
   THGenerator* generator
 ){
   std::lock_guard<std::mutex> lock(generator->mutex);
@@ -764,6 +774,7 @@ void reservoir_generator_cpu(
 }
 
 Tensor reservoir_sampling_cpu(
+<<<<<<< HEAD
   const Tensor& x,
   const Tensor& weights,
   int64_t k
@@ -788,6 +799,20 @@ Tensor reservoir_sampling_cpu(
 
   auto options = x.options().dtype(at::kLong);
   THGenerator* generator = get_generator(nullptr);
+=======
+  Tensor& x,
+  Tensor &weights,
+  int k
+){
+
+  if (!x.is_contiguous()){
+    x = x.contiguous();
+  }
+
+  int n = x.numel();
+  auto options = x.options().dtype(at::kLong);
+  THGenerator* generator = THGenerator_new();
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
 
   if (weights.numel() == 0){
     Tensor indices_n = at::arange({n}, options);
@@ -808,6 +833,10 @@ Tensor reservoir_sampling_cpu(
       split,
       generator);
 
+<<<<<<< HEAD
+=======
+      THGenerator_free(generator);
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
       return x.index_select(
         0,
         indices_n.index_select(
@@ -817,6 +846,7 @@ Tensor reservoir_sampling_cpu(
       );
 
   } else {
+<<<<<<< HEAD
 
     AT_CHECK(
       weights.device() == x.device(),
@@ -843,6 +873,8 @@ Tensor reservoir_sampling_cpu(
       "All the weights must be non-negative."
     );
 
+=======
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
     Tensor keys = at::empty({n}, weights.options());
 
     AT_DISPATCH_FLOATING_TYPES(weights.scalar_type(), "generate keys", [&] {
@@ -853,15 +885,25 @@ Tensor reservoir_sampling_cpu(
         generator);
     });
 
+<<<<<<< HEAD
+=======
+    THGenerator_free(generator);
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
     return x.index_select(0, std::get<1>(keys.topk(k)));
   }
 
 }
 
 Tensor sampling_with_replacement(
+<<<<<<< HEAD
   const Tensor& x,
   const Tensor& weights,
   int64_t k
+=======
+  Tensor& x,
+  Tensor &weights,
+  int k
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
 ){
   int n = x.numel();
   Tensor samples;
@@ -879,6 +921,7 @@ Tensor sampling_with_replacement(
 }
 
 Tensor choice_cpu(
+<<<<<<< HEAD
   const Tensor& input,
   const Tensor& weights,
   bool replace,
@@ -899,6 +942,15 @@ Tensor choice_cpu(
   at::Tensor weights = at::empty({0}, input.options().dtype(at::kFloat));
   if (replace){
     return native::sampling_with_replacement(input, weights, k);
+=======
+  Tensor& input,
+  Tensor& weights,
+  bool replacement,
+  int k
+){
+  if (replacement){
+    return sampling_with_replacement(input, weights, k);
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
   } else {
     return reservoir_sampling_cpu(input, weights, k);
   }

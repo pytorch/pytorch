@@ -4979,6 +4979,7 @@
     CPU: upsample_nearest3d_backward_cpu
     CUDA: upsample_nearest3d_backward_cuda
 
+<<<<<<< HEAD
 - func: sampling_with_replacement(Tensor input, Tensor weights, int k) -> Tensor
 
 - func: choice(Tensor input, Tensor weights, bool replace, int k) -> Tensor
@@ -4987,6 +4988,9 @@
     CUDA: choice_cuda
 
 - func: choice(Tensor input, bool replace, int k) -> Tensor
+=======
+- func: choice(Tensor& input, Tensor& weights, bool replacement, int k) -> Tensor
+>>>>>>> 3afe34c77... [WIP] declaring Choice in TensorFactories
   dispatch:
     CPU: choice_cpu
     CUDA: choice_cuda
