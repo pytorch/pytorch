@@ -348,7 +348,6 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   // We use this to make sure we can setup the backwards trace
   // correctly when this variable is passed to another function.
   uint32_t output_nr_;
-  PyObject* pyobj_ = nullptr; // weak reference
 
   // Mutex to ensure that concurrent read operations that modify internal
   // state are still thread-safe. Used by grad_fn() and
@@ -756,11 +755,11 @@ inline const std::string& Variable::name() const noexcept {
 }
 
 inline void Variable::set_pyobj(PyObject* pyobj) noexcept {
-  get_autograd_meta()->pyobj_ = pyobj;
+  get()->set_pyobj(pyobj);
 }
 
 inline PyObject* Variable::pyobj() const noexcept {
-  return get_autograd_meta()->pyobj_;
+  return get()->pyobj();
 }
 
 inline Variable::AutogradMeta* Variable::get_autograd_meta() const noexcept {
