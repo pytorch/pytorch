@@ -53,7 +53,12 @@ class LockingLogger : public LoggerBase {
 
  private:
   mutable std::mutex m;
-  std::unordered_map<std::string, std::vector<int64_t>> raw_counters;
+  struct RawCounter {
+    RawCounter() : sum(0), count(0) {}
+    int64_t sum;
+    size_t count;
+  };
+  std::unordered_map<std::string, RawCounter> raw_counters;
   std::unordered_map<std::string, AggregationType> agg_types;
 };
 

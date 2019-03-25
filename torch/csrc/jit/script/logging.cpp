@@ -12,38 +12,28 @@ namespace logging {
 
 void LockingLogger::addStatValue(const std::string& stat_name, int64_t val) {
   std::unique_lock<std::mutex> lk(m);
-  raw_counters[stat_name].push_back(val);
+  auto& raw_counter = raw_counters[stat_name];
+  raw_counter.sum += val;
+  raw_counter.count++;
 }
 
 TORCH_API int64_t LockingLogger::getCounterValue(const std::string& name) const {
-  const std::vector<int64_t> *vals;
-  int64_t retval;
-  AggregationType type;
   std::unique_lock<std::mutex> lk(m);
   if (!raw_counters.count(name)) {
     return 0;
   }
-  type = agg_types.count(name) ? agg_types.at(name)
-                                              : AggregationType::SUM;
-  vals = &raw_counters.at(name);
+  AggregationType type = agg_types.count(name) ? agg_types.at(name)
+                                               : AggregationType::SUM;
+  const auto &raw_counter = raw_counters.at(name);
   switch (type) {
     case AggregationType::SUM: {
-      float sum = 0;
-      for (auto x : *vals) {
-        sum += x;
-      }
-      retval = sum;
+      return raw_counter.sum;
     } break;
     case AggregationType::AVG: {
-      float avg = 0;
-      for (auto x : *vals) {
-        avg += x;
-      }
-      avg /= vals->size();
-      retval = avg;
+      return raw_counter.sum / raw_counter.count;
     } break;
   }
-  return retval;
+  throw std::runtime_error("Unknown aggregation type!");
 }
 
 void LockingLogger::setAggregationType(
