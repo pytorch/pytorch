@@ -429,9 +429,9 @@ AnyModule::AnyModule(std::shared_ptr<ModuleType> module)
       "Can only store object derived from nn::Module into AnyModule");
   static_assert(
       torch::detail::has_forward<ModuleType>::value,
-      "Can only store module with a forward() method that has a non-templatized
-      return type into AnyModule (e.g. we cannot store nn::Sequential
-      into AnyModule, because its forward() method's return type is templatized)");
+      "Can only store module with a forward() method that has a non-templatized"
+      "return type into AnyModule (e.g. we cannot store nn::Sequential"
+      "into AnyModule, because its forward() method's return type is templatized)");
 }
 
 template <typename ModuleType, typename>
