@@ -8,6 +8,7 @@ import copy
 import shutil
 import torch
 import torch.cuda
+import torch.backends.cuda
 import tempfile
 import unittest
 import warnings
@@ -1546,7 +1547,7 @@ class _TestTorchMixin(object):
         self._test_neg(self, lambda t: t)
 
     def test_threshold(self):
-        for dtype in torch.testing.get_all_dtypes():
+        for dtype in torch.testing.get_all_math_dtypes():
             if dtype != torch.uint8 and dtype != torch.float16:
                 # 100 is wide enough to use AVX2 instructions for all types
                 x = torch.randn(100).sign().to(dtype=dtype)
@@ -1579,7 +1580,7 @@ class _TestTorchMixin(object):
         self.assertEqual(res1, res2)
 
     def test_floordiv(self):
-        for dtype in torch.testing.get_all_dtypes():
+        for dtype in torch.testing.get_all_math_dtypes():
             if dtype is torch.float16:
                 continue
             x = torch.randn(100).mul(10).to(dtype)
@@ -1589,7 +1590,7 @@ class _TestTorchMixin(object):
             self.assertEqual(y, z)
 
     def test_rdiv(self):
-        for dtype in torch.testing.get_all_dtypes():
+        for dtype in torch.testing.get_all_math_dtypes():
             if dtype is torch.float16:
                 continue
             x = torch.rand(100).add(1).mul(4).to(dtype)
@@ -2321,7 +2322,7 @@ class _TestTorchMixin(object):
             # 'out' is favored over dtype, check error
             self.assertRaises(RuntimeError, lambda: fn(x, out=out, dtype=other_dtype))
 
-        for dtype in [dtype for dtype in torch.testing.get_all_dtypes() if dtype != torch.float16]:
+        for dtype in [dtype for dtype in torch.testing.get_all_math_dtypes() if dtype != torch.float16]:
             x = torch.ones(shape, dtype=dtype)
             expected_dtype = dtype if dtype.is_floating_point else torch.int64
             self.assertIs(expected_dtype, fn(x).dtype)
@@ -2537,13 +2538,13 @@ class _TestTorchMixin(object):
         self.assertEqual(output, expected)
 
     def test_dtypes(self):
-        all_dtypes = torch.testing.get_all_dtypes(True)
+        all_dtypes = torch.testing.get_all_dtypes()
         do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cpu'))
         if torch.cuda.is_available():
             do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cuda:0'))
 
     def test_copy_dtypes(self):
-        all_dtypes = torch.testing.get_all_dtypes(True)
+        all_dtypes = torch.testing.get_all_dtypes()
         for dtype in all_dtypes:
             copied_dtype = copy.deepcopy(dtype)
             self.assertIs(dtype, copied_dtype)
@@ -2691,10 +2692,10 @@ class _TestTorchMixin(object):
                     self.assertEqual(b.device, a.to(b, non_blocking=non_blocking).device)
 
     def test_empty_full(self):
-        do_test_empty_full(self, torch.testing.get_all_dtypes(True), torch.strided, torch.device('cpu'))
+        do_test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
-            do_test_empty_full(self, torch.testing.get_all_dtypes(True), torch.strided, None)
-            do_test_empty_full(self, torch.testing.get_all_dtypes(True), torch.strided, torch.device('cuda:0'))
+            do_test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, None)
+            do_test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cuda:0'))
 
     def test_dtype_out_match(self):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))
@@ -2892,9 +2893,9 @@ class _TestTorchMixin(object):
         self.assertTrue(x.is_cuda)
         torch.set_default_tensor_type(saved_type)
 
-    def test_unfolf_all_devices_and_dtypes(self):
+    def test_unfold_all_devices_and_dtypes(self):
         for device in torch.testing.get_all_devices():
-            for dt in torch.testing.get_all_dtypes(True):
+            for dt in torch.testing.get_all_dtypes():
                 if dt == torch.half and device == 'cpu':
                     # fix once random is implemented for Half on CPU
                     self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
@@ -2905,9 +2906,12 @@ class _TestTorchMixin(object):
     def test_copy_all_dtypes_and_devices(self):
         from copy import copy
         for device in torch.testing.get_all_devices():
-            for dt in torch.testing.get_all_dtypes(True):
+            for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
+                x_clone = x.clone()
+
                 y = copy(x)
+                y.fill_(1)
 
                 # copy is a shallow copy, only copies the tensor view,
                 # not the data
@@ -2916,14 +2920,14 @@ class _TestTorchMixin(object):
     def test_resize_all_dtypes_and_devices(self):
         shape = (2, 2)
         for device in torch.testing.get_all_devices():
-            for dt in torch.testing.get_all_dtypes(True):
+            for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
                 x.resize_(shape)
                 self.assertEqual(shape, x.shape)
 
     def test_fill_all_dtypes_and_devices(self):
         for device in torch.testing.get_all_devices():
-            for dt in torch.testing.get_all_dtypes(True):
+            for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor((1, 1), dtype=dt, device=device)
                 x.fill_(1)
 
@@ -2932,14 +2936,14 @@ class _TestTorchMixin(object):
 
     def test_clone_all_dtypes_and_devices(self):
         for device in torch.testing.get_all_devices():
-            for dt in torch.testing.get_all_dtypes(True):
+            for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor((1, 1), dtype=dt, device=device)
                 y = x.clone()
                 self.assertEqual(x, y)
 
     def test_cat_all_dtypes_and_devices(self):
         for device in torch.testing.get_all_devices():
-            for dt in torch.testing.get_all_dtypes(True):
+            for dt in torch.testing.get_all_dtypes():
                 x = torch.tensor([[1, 2], [3, 4]], dtype=dt, device=device)
                 expected1 = torch.tensor([[1, 2], [3, 4], [1, 2], [3, 4]], dtype=dt, device=device)
                 self.assertEqual(torch.cat((x, x), 0), expected1)
@@ -2953,7 +2957,7 @@ class _TestTorchMixin(object):
 
         for device in torch.testing.get_all_devices():
             for shape in shapes:
-                for dt in torch.testing.get_all_dtypes(True):
+                for dt in torch.testing.get_all_dtypes():
                     self.assertEqual(shape, torch.zeros(shape, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                     self.assertEqual(shape, torch.full(shape, 3, device=device, dtype=dt).shape)
@@ -10438,7 +10442,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertTrue(grid_b2.equal(expected_grid_b))
         self.assertTrue(grid_c2.equal(expected_grid_c))
 
-    @unittest.skipIf(torch.cuda.is_available() or IS_SANDCASTLE, "CUDA is available, can't test CUDA not built error")
+    # NB: we must not be built with CUDA; if we are built with CUDA but no CUDA
+    # is available, we get a different error.
+    @unittest.skipIf(torch.backends.cuda.is_built() or IS_SANDCASTLE, "CUDA is built, can't test CUDA not built error")
     def test_cuda_not_built(self):
         msg = "Torch not compiled with CUDA enabled"
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.current_device())
