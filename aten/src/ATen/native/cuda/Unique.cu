@@ -5,7 +5,7 @@
 #include <thrust/execution_policy.h>
 
 #include <tuple>
-#include <type_traits>
+#include <iterator>
 #include <thrust/unique.h>
 #include <thrust/sort.h>
 #include <thrust/scan.h>
@@ -26,28 +26,36 @@ template <typename scalar_t>
 class TupleRef {
   int64_t n;
   scalar_t *ptr;
-  friend TupleRef<scalar_t> TupleIterator<scalar_t>::operator*();
-  friend TupleRef<scalar_t> TupleIterator<scalar_t>::operator[](int64_t i);
-  TupleRef(int64_t n, scalar_t ptr):n(n), ptr(ptr) {}
 public:
-  bool operator<(const TupleRef &other) {
+  __device__ TupleRef(int64_t n, scalar_t *ptr):n(n), ptr(ptr) {}
+  __device__ TupleRef(): TupleRef(0, nullptr) {}
+
+  __device__ bool operator<(const TupleRef &other) const {
     int64_t i = 0;
     while(i < n - 1 && ptr[i] == other.ptr[i]) i++;
     return ptr[i] < other.ptr[i];
   }
-  TupleRef &operator=(const TupleRef &other) {
+  __device__ TupleRef &operator=(const TupleRef &other) {
     int64_t i = 0;
     while(i < n) ptr[i] = other.ptr[i];
     ptr = other.ptr;
     return *this;
   }
-  bool operator==(const TupleRef &other) {
+  __device__ bool operator==(const TupleRef &other) const {
     int64_t i = 0;
     while(i < n - 1 && ptr[i] == other.ptr[i]) i++;
     return ptr[i] == other.ptr[i];
   }
-  bool operator!=(const TupleRef &other) {
+  __device__ bool operator!=(const TupleRef &other) const {
     return !(*this == other);
+  }
+
+  // used by thrust::adjacent_difference, we actually don't care what the
+  // results of the conversion are, we just need the conversion to be
+  // there to satisfy the requirement of thrust.
+  __device__ TupleRef(int64_t):n(0), ptr(nullptr){}
+  __device__ operator int64_t () const {
+    return 0;
   }
 };
 
@@ -56,59 +64,50 @@ class TupleIterator {
   int64_t n;
   scalar_t *ptr;
 public:
-  TupleIterator(int64_t n, scalar_t ptr):n(n), ptr(ptr){}
-  TupleIterator(int64_t n):TupleIterator(n, nullptr){}
-  TupleRef<scalar_t> operator*() {
+  using difference_type = int64_t;
+  using value_type = TupleRef<scalar_t>;
+  using pointer = TupleIterator<scalar_t>;
+  using reference = TupleRef<scalar_t>;
+  using iterator_category = std::random_access_iterator_tag;
+
+  __device__ TupleIterator(int64_t n, scalar_t *ptr):n(n), ptr(ptr){}
+
+  __device__ TupleRef<scalar_t> operator*() {
     return TupleRef<scalar_t>(n, ptr);
   }
-  TupleRef<scalar_t> operator[](int64_t i) {
+  __device__ TupleRef<scalar_t> operator[](int64_t i) {
     return TupleRef<scalar_t>(n, ptr + i * n);
   }
-  TupleIterator operator+(int64_t i) {
-    return TupleIterator(n, ptr + i * n);
+  __device__ TupleIterator<scalar_t> operator+(int64_t i) const {
+    return TupleIterator<scalar_t>(n, ptr + i * n);
   }
-  TupleIterator operator-(int64_t i) {
-    return TupleIterator(n, ptr - i * n);
+  __device__ TupleIterator operator-(int64_t i) const {
+    return TupleIterator<scalar_t>(n, ptr - i * n);
   }
-  int64_t operator-(const TupleIterator &other) {
+  __device__ int64_t operator-(const TupleIterator &other) const {
     return (ptr - other.ptr) / n;
   }
-  TupleIterator &operator+=(int64_t i) {
+  __device__ TupleIterator<scalar_t> &operator+=(int64_t i) {
     ptr += i * n;
     return *this;
   }
-  TupleIterator &operator-=(int64_t i) {
+  __device__ TupleIterator<scalar_t> &operator-=(int64_t i) {
     ptr -= i * n;
     return *this;
   }
-  TupleIterator &operator++() {
+  __device__ TupleIterator<scalar_t> &operator++() {
     return *this += 1;
   }
-  TupleIterator &operator++(int) {
-    return *++*this - 1;
-  }
-  TupleIterator &operator--() {
+  __device__ TupleIterator<scalar_t> &operator--() {
     return *this -= 1;
   }
-  TupleIterator &operator--(int) {
-    return --*this + 1;
-  }
-  bool operator<(const TupleIterator &other) {
+  __device__ bool operator<(const TupleIterator<scalar_t> &other) const {
     return ptr < other.ptr;
   }
-  bool operator<=(const TupleIterator &other) {
-    return ptr <= other.ptr;
-  }
-  bool operator>(const TupleIterator &other) {
-    return ptr > other.ptr;
-  }
-  bool operator>=(const TupleIterator &other) {
-    return ptr >= other.ptr;
-  }
-  bool operator==(const TupleIterator &other) {
+  __device__ bool operator==(const TupleIterator<scalar_t> &other) const {
     return ptr == other.ptr;
   }
-  bool operator!=(const TupleIterator &other) {
+  __device__ bool operator!=(const TupleIterator<scalar_t> &other) const {
     return ptr != other.ptr;
   }
 };
@@ -187,86 +186,22 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cuda_template(
     const bool return_inverse,
     const bool return_counts) {
 
-    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-    auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-    auto policy = thrust::cuda::par(allocator).on(stream);
-
     Tensor input_flat = self.transpose(dim, 0);
     auto orig_sizes = input_flat.sizes().vec();
-    input_flat = input_flat.contiguous().view({input_flat.size(0), -1});
+    int64_t num_inp = orig_sizes[0];
+    input_flat = input_flat.contiguous().view({num_inp, -1});
+    int64_t size = input_flat.size(1);
 
-    scalar_t* input_flat_ptr = input_flat.data<scalar_t>();
+    Tensor output = input_flat.clone();
+    TupleIterator<scalar_t> output_data = TupleIterator<scalar_t>(size, output.data<scalar_t>());
 
-    Tensor indices = at::arange(0, input_flat.size(0), self.options().dtype(kLong));
-    int64_t* indices_ptr = indices.data<int64_t>();
-    int64_t numel = input_flat.size(1);
+    Tensor inverse_indices, counts;
+    int64_t num_out;
+    std::tie(inverse_indices, counts, num_out) = compute_unique(output_data, num_inp, return_inverse, return_counts, self.options().dtype(kLong));
+    output.resize_({num_out, size});
 
-    // sort indices using data
-    thrust::sort(policy, indices_ptr, indices_ptr + indices.numel(),
-      [=] __device__ (int64_t a, int64_t b) -> bool {
-        for (int64_t i = 0; i < numel; ++i) {
-          scalar_t lhs = input_flat_ptr[i + a * numel];
-          scalar_t rhs = input_flat_ptr[i + b * numel];
-          if (lhs < rhs) {
-            return true;
-          } else if (lhs > rhs) {
-            return false;
-          }
-        }
-        return false;
-      });
-
-    Tensor input_sorted = input_flat.index_select(0, indices);
-
-    // get unique tensors
-    scalar_t* input_sorted_ptr = input_sorted.data<scalar_t>();
-    Tensor input_sorted_indices = at::arange(0, input_sorted.size(0), self.options().dtype(kLong));
-    int64_t* input_sorted_indices_ptr = input_sorted_indices.data<int64_t>();
-    auto last = thrust::unique(policy, input_sorted_indices_ptr, input_sorted_indices_ptr + input_sorted_indices.numel(),
-      [=] __device__ (int64_t a, int64_t b) -> bool {
-        for (int64_t i = 0; i < numel; ++i) {
-          scalar_t lhs = input_sorted_ptr[i + a * numel];
-          scalar_t rhs = input_sorted_ptr[i + b * numel];
-          if (lhs != rhs) {
-            return false;
-          }
-        }
-        return true;
-      });
-    input_sorted_indices.resize_(last - input_sorted_indices_ptr);
-    Tensor output = input_sorted.index_select(0, input_sorted_indices);
-
-    // reshape back
-    auto new_sizes = std::vector<int64_t>(orig_sizes);
-    new_sizes[0] = -1;
-    output = output.view(new_sizes);
-    output = output.transpose(0, dim);
-
-    // calculate inverse indices and counts
-    Tensor inverse_indices = at::empty({0}, self.options().dtype(kLong));
-    Tensor counts = at::zeros(output.size(dim), self.options().dtype(kLong));
-    if (return_inverse || return_counts) {
-      int64_t size = self.size(dim);
-      inverse_indices.resize_(size);
-      Tensor mask = at::empty(input_sorted.size(0), self.options().dtype(kLong));
-      mask[0] = 1;
-      for (int i = 0; i < input_sorted.size(0) - 1; ++i) {
-        if (!at::equal(input_sorted[i], input_sorted[i+1])) {
-          mask[i+1] = 1;
-        } else {
-          mask[i+1] = 0;
-        }
-      }
-
-      Tensor imask = at::cumsum(mask, 0) - 1;
-      for (int i = 0; i < indices.size(0); ++i) {
-        inverse_indices[indices[i]] = imask[i];
-        counts[inverse_indices[indices[i]]] += 1;
-      }
-    }
-
-    THCudaCheck(cudaGetLastError());
-    return std::tuple<Tensor, Tensor, Tensor>(output, inverse_indices, counts);
+    orig_sizes[0] = num_out;
+    return std::tuple<Tensor, Tensor, Tensor>(output.reshape(orig_sizes).transpose(dim, 0), inverse_indices, counts);
   }
 
 } // namespace
