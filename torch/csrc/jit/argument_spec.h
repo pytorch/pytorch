@@ -153,8 +153,7 @@ struct ArgumentSpec {
 
  private:
   TypePtr fillType(TypePtr original, size_t& offset) const {
-    if (original->isSubtypeOf(TensorType::get())
-	|| original->isSubtypeOf(OptionalType::ofTensor())) {
+    if (original->isSubtypeOf(TensorType::get())) {
       auto& arg = args.at(offset++);
       if (!arg.defined())
         return AutogradZeroTensorType::get();
