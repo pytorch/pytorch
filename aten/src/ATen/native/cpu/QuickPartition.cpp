@@ -1,3 +1,7 @@
+// AVX2 optimized partition algorithm
+// Based on the following paper:
+// Shay Gueron, Vlad Krasnov, Fast Quicksort Implementation Using AVX Instructions, The Computer Journal, Volume 59, Issue 1, January 2016, Pages 83–90, https://doi.org/10.1093/comjnl/bxv063
+
 #include <aten/src/ATen/native/cpu/QuickPartition.h>
 #include <stdint.h>
 #if CPU_CAPABILITY_AVX2
