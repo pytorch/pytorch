@@ -619,7 +619,7 @@ class NamedAnyModule {
 // the `modules_ordered_dict()` function signature be
 // `modules_ordered_dict(std::initializer_list<NamedAnyModule> named_modules)`,
 // instead of
-// `modules_ordered_dict (std::initializer_list<torch::OrderedDict<
+// `modules_ordered_dict(std::initializer_list<torch::OrderedDict<
 //    std::string, ModuleType>::Item> named_modules)`.
 // The reason is that when we pass in a braced-init list such as
 // `modules_ordered_dict({{"m1", M(1)}, {"m2", M(2)}})`,
