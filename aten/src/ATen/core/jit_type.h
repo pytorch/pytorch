@@ -1151,6 +1151,18 @@ struct CAFFE2_API ClassType : public Type {
     return attributeTypes_[pos];
   }
 
+  TypePtr getAttribute(size_t slot) const {
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+    AT_ASSERT(slot < attributeTypes_.size());
+    return attributeTypes_[slot];
+  }
+
+  const std::string& getAttributeName(size_t slot) const {
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+    AT_ASSERT(slot < attributeTypes_.size());
+    return attributeNames_[slot];
+  }
+
   Method* getMethod(const std::string& name) const;
   std::vector<Method*> methods() const;
 

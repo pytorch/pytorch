@@ -10,24 +10,6 @@ std::shared_ptr<Quantizer> make_per_layer_affine_quantizer(double scale, int64_t
   return std::make_shared<PerLayerAffineQuantizer>(static_cast<float>(scale), static_cast<int32_t>(zero_point));
 }
 
-// std::unique_ptr<Quantizer> create_quantizer(QScheme qscheme) {
-//   switch (qscheme.qtype_) {
-//     case QType.AFFINE:
-//       if (is_per_layer) {
-//         return make_shared<PerLayerAffineQuantizer>();
-//       } else {
-//         return make_shared<PerChannelAffineQuantizer>();
-//       }
-//     case QType.Symmetric:
-//       if (is_per_layer) {
-//         return make_shared<PerLayerSymmetricQuantizer>();
-//       } else {
-//         return make_shared<PerChannelSymmetricQuantizer>();
-//       }
-//   }
-//   AT_ERROR("Unrecoginized QScheme in create_quantizer.");
-// }
-
 // This is an internal utility function for getting at the QTensorImpl,
 // You should only use this for writing low level
 // setters/getters for QTensorImpl fields; otherwise, you should use
@@ -46,11 +28,11 @@ inline QTensor new_qtensor(
   AT_ASSERT(options.device().is_cpu());
 
   native::check_size_nonnegative(sizes);
-//  auto* allocator = at::GetAllocator(DeviceType::QUANTIZED);
   auto* allocator = at::getCPUAllocator();
   int64_t nelements = at::prod_intlist(sizes);
   // TODO get from options
-  auto dtype = at::dtype(at::kQInt8).dtype();
+  auto dtype = options.dtype();
+  // TODO: check wheather dtype is compatible with quantization
   auto storage_impl = c10::make_intrusive<StorageImpl>(
     dtype,
     nelements,
@@ -113,7 +95,7 @@ void ChooseParams(RealTensor tensor, float* r_scale, int* r_zero_point) {
   *r_zero_point = int(nudged_zero_point);
 }
 
-inline qint8 QuantizeUint8(float scale, int32_t zero_point, float value) {
+qint8 QuantizeUint8(float scale, int32_t zero_point, float value) {
   const int32_t qmin = std::numeric_limits<uint8_t>::min();
   const int32_t qmax = std::numeric_limits<uint8_t>::max();
 
@@ -127,7 +109,7 @@ QTensor PerLayerAffineQuantizer::quantize(RealTensor tensor) {
   //ChooseParams(tensor, &scale_, &zero_point_);
 
   IntArrayRef sizes = tensor.sizes();
-  QTensor qv = new_qtensor(sizes, tensor.options(), scale_, zero_point_);
+  QTensor qv = new_qtensor(sizes, tensor.options().dtype(at::kQInt8), scale_, zero_point_);
   auto qvd = qv.data<qint8>();
   const float* svd = tensor.data<float>();
   for (int i = 0; i < tensor.numel(); ++i) {
