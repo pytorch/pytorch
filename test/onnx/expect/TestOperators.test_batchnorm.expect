@@ -4,10 +4,10 @@ producer_version: "1.1"
 graph {
   node {
     input: "input"
-    input: "1"
-    input: "2"
-    input: "3"
-    input: "4"
+    input: "weight"
+    input: "bias"
+    input: "running_mean"
+    input: "running_var"
     output: "6"
     op_type: "BatchNormalization"
     attribute {
@@ -25,30 +25,30 @@ graph {
   initializer {
     dims: 2
     data_type: 1
-    name: "1"
+    name: "weight"
     raw_data: "\340e\355<\246\305\315>"
   }
   initializer {
     dims: 2
     data_type: 1
-    name: "2"
+    name: "bias"
     raw_data: "\000\000\000\000\000\000\000\000"
   }
   initializer {
     dims: 2
     data_type: 1
-    name: "3"
+    name: "running_mean"
     raw_data: "\000\000\000\000\000\000\000\000"
   }
   initializer {
     dims: 2
     data_type: 1
-    name: "4"
+    name: "running_var"
     raw_data: "\000\000\200?\000\000\200?"
   }
   initializer {
     data_type: 7
-    name: "5"
+    name: "num_batches_tracked"
     raw_data: "\000\000\000\000\000\000\000\000"
   }
   input {
@@ -74,7 +74,7 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "weight"
     type {
       tensor_type {
         elem_type: 1
@@ -87,7 +87,7 @@ graph {
     }
   }
   input {
-    name: "2"
+    name: "bias"
     type {
       tensor_type {
         elem_type: 1
@@ -100,7 +100,7 @@ graph {
     }
   }
   input {
-    name: "3"
+    name: "running_mean"
     type {
       tensor_type {
         elem_type: 1
@@ -113,7 +113,7 @@ graph {
     }
   }
   input {
-    name: "4"
+    name: "running_var"
     type {
       tensor_type {
         elem_type: 1
@@ -126,7 +126,7 @@ graph {
     }
   }
   input {
-    name: "5"
+    name: "num_batches_tracked"
     type {
       tensor_type {
         elem_type: 7

@@ -105,12 +105,8 @@ class Conf(object):
 
     def gen_workflow_yaml_item(self, phase):
 
-        if self.is_xla or phase == "test":
+        if phase == "test":
             val = OrderedDict()
-            if self.is_xla:
-                # this makes the job run on merges rather than new PRs
-                # TODO Many of the binary build jobs on PRs could be moved to this mode as well
-                val["filters"] = {"branches": {"only": ["master"]}}
 
             # TODO When merging the caffe2 and pytorch jobs, it might be convenient for a while to make a
             #  caffe2 test job dependent on a pytorch build job. This way we could quickly dedup the repeated
@@ -150,6 +146,7 @@ def gen_dependent_configs(xenial_parent_config):
         (["multigpu"], "large"),
         (["NO_AVX2"], "medium"),
         (["NO_AVX", "NO_AVX2"], "medium"),
+        (["slow"], "medium"),
     ]
 
     configs = []
