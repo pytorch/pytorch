@@ -154,6 +154,13 @@ const std::vector<std::string> functions = {
 
             return torch.var(self, dim, unbiased, keepdim), backward
 
+        def tanh(self):
+            output = torch.tanh(self)
+            def backward(grad_output):
+                return grad_output * (1 - output * output)
+
+            return output, backward
+
         def AD_index_select_backward(grad,
                                      dim: int,
                                      indices,
@@ -652,11 +659,11 @@ const std::vector<std::string> functions = {
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
                        eps : float,
-                       cudnn_enabled : bool):
+                       cudnn_enable : bool):
 
             bn_out, save1, save2, impl_idx = torch._batch_norm_impl_index(
                 input, weight, bias, None, None, True,
-                0.0, eps, cudnn_enabled)
+                0.0, eps, cudnn_enable)
             has_weight = weight is not None
             has_bias = bias is not None
 
@@ -684,15 +691,34 @@ const std::vector<std::string> functions = {
 
             return output, backward
 
+        def AD_fused_dropout_backward(grad,
+                                      mask,
+                                      p1m: float):
+            p1r = 1. / p1m
+            if grad.requires_grad:
+                grad_input = grad * (mask.type_as(grad) * p1r)
+            else:
+                grad_input = torch._masked_scale(grad, mask, p1r)
+            return grad_input
+
         def dropout(input,
                     p: float,
                     train: bool):
-            mask = torch.empty_like(input)
-            mask.bernoulli_(1 - p)
-            res = mask * input / (1.0 - p)
+            use_cuda = input.is_cuda
+            # CUDA has a fused dropout implementation
+            p1m = 1. - p
+            if use_cuda:
+                res, mask = torch._fused_dropout(input, p1m)
+            else:
+                mask = torch.empty_like(input)
+                mask.bernoulli_(p1m)
+                res = mask * input / p1m
 
             def backward(grad_output):
-                grad_input = grad_output * mask / (1.0 - p)
+                if use_cuda:
+                    grad_input = AD_fused_dropout_backward(grad_output, mask, p1m)
+                else:
+                    grad_input = grad_output * mask / p1m
                 return grad_input, None, None
             return res, backward
 
@@ -911,6 +937,7 @@ void loadModule(const std::shared_ptr<script::Module>& module) {
     const FunctionSchema& loaded_schema = method->getSchema();
     FunctionSchema actual_schema(
         Symbol::aten(loaded_schema.name()),
+        loaded_schema.overload_name(),
         loaded_schema.arguments(),
         {originalReturnType(new_tuple->type()->expect<TupleType>())});
 

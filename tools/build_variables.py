@@ -53,6 +53,7 @@ libtorch_sources = [
     "torch/csrc/jit/constants.cpp",
     "torch/csrc/jit/node_hashing.cpp",
     "torch/csrc/jit/export.cpp",
+    "torch/csrc/jit/pickler.cpp",
     "torch/csrc/jit/graph_executor.cpp",
     "torch/csrc/jit/import.cpp",
     "torch/csrc/jit/interpreter.cpp",
@@ -88,6 +89,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
     "torch/csrc/jit/register_prim_ops.cpp",
     "torch/csrc/jit/register_special_ops.cpp",
+    "torch/csrc/jit/register_quantized_ops.cpp",
     "torch/csrc/jit/scope.cpp",
     "torch/csrc/jit/script/compiler.cpp",
     "torch/csrc/jit/script/edit_distance.cpp",
@@ -99,7 +101,7 @@ libtorch_sources = [
     "torch/csrc/jit/script/class_type.cpp",
     "torch/csrc/jit/script/parser.cpp",
     "torch/csrc/jit/testing/file_check.cpp",
-    "torch/csrc/jit/import_method.cpp",
+    "torch/csrc/jit/import_source.cpp",
     "torch/csrc/jit/hooks_for_testing.cpp",
     "torch/csrc/jit/script/builtin_functions.cpp",
     "torch/csrc/jit/script/lexer.cpp",
@@ -115,6 +117,7 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/fuser/cpu/dynamic_library_unix.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
+    "test/cpp/jit/test.cpp",
 ]
 
 libtorch_cuda_sources = [
@@ -139,6 +142,8 @@ def add_torch_libs():
             # distributed only uses Module.cpp
             # so remove all other files and just include that
             "torch/csrc/distributed/**/*.cpp",
+            # top-level hook of extension registration lives in a separate file
+            "torch/csrc/stub.cpp",
         ],
     ) + [
         "torch/csrc/distributed/Module.cpp",
@@ -177,7 +182,7 @@ def add_torch_libs():
                 "-Wno-unknown-pragmas",
             ]
         },
-        "headers": native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp"]),
+        "headers": native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp", "test/cpp/jit/*.h"]),
         "preprocessor_flags": [
             "-Icaffe2",
             "-Icaffe2/torch/csrc/api/include",
@@ -198,6 +203,7 @@ def add_torch_libs():
             "//caffe2/aten:ATen-cpu",
             "//caffe2/caffe2:caffe2_cpu",
             "//caffe2/torch/lib/libshm:libshm",
+            "//caffe2/caffe2/quantization/server:dnnlowp_ops",
         ],
         external_deps=[
             ("nanopb", None, "protobuf-nanopb"),
@@ -235,14 +241,13 @@ def add_torch_libs():
         **common_flags
     )
 
-    cpp_python_extension(
-        name="_C",
+    # TODO: split it into cpp and cuda parts similarly to libtorch
+    cpp_library(
+        name="_C_impl",
         srcs=libtorch_python_sources,
-        base_module="torch",
         deps=[
             ":libtorch_cuda",
             ":thnn",
-            ":torch-lib-headers",
             "//caffe2/torch/lib/THD:THD",
             "//caffe2/torch/lib/c10d:c10d",
             "//caffe2/torch/lib/libshm:libshm",
@@ -250,8 +255,18 @@ def add_torch_libs():
         external_deps=[
             ("numpy", None, "cpp"),
             ("pybind11", None),
+            ("python", None),
         ],
         **common_flags
+    )
+
+    cpp_python_extension(
+        name="_C",
+        srcs=[
+            "torch/csrc/stub.cpp",
+        ],
+        base_module="torch",
+        deps=[":_C_impl"],
     )
 
     return r

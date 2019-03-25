@@ -44,10 +44,15 @@ void EnsureShapeNames(std::unordered_map<std::string, ShapeInfo>* info) {
 void BoundShapeInferencer::InferBoundShapeAndType(
     const NetDef& net,
     const std::unordered_map<std::string, ShapeInfo>& info) {
+  const static std::unordered_set<std::string> unsupported{"Tile"};
   shape_info_ = info;
 
   for (const auto& op : net.op()) {
     VLOG(1) << op.type();
+    if (unsupported.count(op.type())) {
+      continue;
+    }
+
     if (op.type() == "SparseLengthsSum" ||
         op.type() == "SparseLengthsSumFused8BitRowwise" ||
         op.type() == "SparseLengthsWeightedSum" ||
@@ -62,9 +67,13 @@ void BoundShapeInferencer::InferBoundShapeAndType(
     } else if (op.type() == "LengthsRangeFill") {
       InferLengthsRangeFill(op);
     } else if (
-        caffe2::StartsWith(op.type(), "GivenTensor") &&
-        caffe2::EndsWith(op.type(), "Fill")) {
+        (caffe2::StartsWith(op.type(), "GivenTensor") &&
+         caffe2::EndsWith(op.type(), "Fill")) ||
+        op.type() == "ConstantFill" || op.type() == "Int8GivenTensorFill" ||
+        op.type() == "Int8GivenIntTensorFill") {
       InferGivenTensorFill(op);
+    } else if (op.type() == "Shape") {
+      InferShape(op);
     } else {
       InferCommonOp(op);
     }
@@ -215,6 +224,14 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
       TensorProto_DataType_FLOAT);
 }
 
+void BoundShapeInferencer::InferShape(const OperatorDef& op) {
+  InferCommonOp(op);
+  // old_shape should be a constant
+  if (op.output_size() > 0 && shape_info_.count(op.output(0))) {
+    shape_info_[op.output(0)].dim_type = ShapeInfo::DimType::CONSTANT;
+  }
+}
+
 void BoundShapeInferencer::InferReshape(const OperatorDef& op) {
   InferCommonOp(op);
   // old_shape should be a constant
@@ -304,34 +321,22 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
     ArgumentHelper helper(op);
     auto axis = helper.GetSingleArgument<int32_t>("axis", 1);
     auto axis_w = helper.GetSingleArgument<int32_t>("axis_w", 1);
-    CAFFE_ENFORCE_EQ(
-        axis,
-        1,
-        "Don't know how to deduce input of FC with axis not equal to 1: ",
-        op.input(0));
-    CAFFE_ENFORCE_EQ(
-        axis_w,
-        1,
-        "Don't know how to deduce input of FC with axis_w not equal to 1: ",
-        op.input(0));
     const TensorShape w_shape = w_shape_info.shape;
-    CAFFE_ENFORCE_EQ(
-        w_shape.dims_size(),
-        2,
-        "Don't know how to deduce input of FC other than of dim size 2: ",
-        op.input(0));
     bool transposed = (op.type() == "FC") ? false : true;
     const int canonical_axis_w =
         canonical_axis_index_(axis_w, w_shape.dims().size());
     const int64_t K = transposed ? SizeToDim(w_shape, canonical_axis_w)
                                  : SizeFromDim(w_shape, canonical_axis_w);
+    std::vector<int64_t> dims;
+    for (int i = 0; i < axis - 1; ++i) {
+      dims.push_back(1);
+    }
+    dims.push_back(spec_.max_batch_size);
+    dims.push_back(K);
     current_dim_type_ = ShapeInfo::DimType::BATCH;
     current_max_batch_size_ = spec_.max_batch_size;
     CheckAndSetTensorShapeAndType(
-        op.input(0),
-        ShapeInfo::DimType::BATCH,
-        {spec_.max_batch_size, K},
-        w_shape.data_type());
+        op.input(0), ShapeInfo::DimType::BATCH, dims, w_shape.data_type());
   } else {
     ShapeInfo& x_shape_info = x_it->second;
     if (x_shape_info.dim_type != ShapeInfo::DimType::BATCH) {
