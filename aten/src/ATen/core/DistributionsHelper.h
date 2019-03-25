@@ -91,8 +91,8 @@ using dist_acctype = typename DistAccumType<T>::type;
 // Constants for uniform distribution
 constexpr float POW_2_32_INV = 1.0f/std::numeric_limits<uint32_t>::max();
 constexpr double POW_2_64_INV = 1.0/std::numeric_limits<uint64_t>::max();
-constexpr float NEXT_AFTER_1F_0F = 0.99999994039535522461;
-constexpr double NEXT_AFTER_1_0 = 0.99999999999999988897769753748434595763683319091796875;
+constexpr float NEXT_AFTER_1F_0F = std::nextafter(1.0f, 0.0f);
+constexpr double NEXT_AFTER_1_0 = std::nextafter(1.0, 0.0);
 
 /**
  * Samples a uniform distribution in the range [0,1) of type T
