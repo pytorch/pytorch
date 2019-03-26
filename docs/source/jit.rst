@@ -706,11 +706,11 @@ Inspecting Code
             # type: (int) -> torch.Tensor
             rv = torch.zeros(3, 4)
             for i in range(len):
-            if i < 10:
-                rv = rv - 1.0
-            else:
-                rv = rv + 1.0
-            return rv
+                if i < 10:
+                    rv = rv - 1.0
+                else:
+                    rv = rv + 1.0
+                return rv
 
         print(foo.code)
 
@@ -728,9 +728,9 @@ Inspecting Code
             rv0 = rv
             for i in range(len):
                 if torch.lt(i, 10):
-                rv1 = torch.sub(rv0, 1., 1)
+                    rv1 = torch.sub(rv0, 1., 1)
                 else:
-                rv1 = torch.add(rv0, 1., 1)
+                    rv1 = torch.add(rv0, 1., 1)
                 rv0 = rv1
             return rv0
 
