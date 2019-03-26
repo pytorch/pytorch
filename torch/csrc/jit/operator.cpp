@@ -467,8 +467,6 @@ bool Operator::matches(const Node* node) const {
 
   // too many inputs
   if (!schema().is_vararg() && actuals.size() != formals.size()) {
-    // std::cout << "not all inputs used\n" << input_i << " " << inputs_size <<
-    // "\n";
     return false;
   }
 
