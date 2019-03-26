@@ -378,6 +378,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
     gpuGuard.set_index(devices[i].index());
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
 
+    c10::cuda::CUDACachingAllocator::recordStream(
+      tensors[i].data_ptr(), ncclStream);
+
     C10D_NCCL_CHECK(ncclAllReduce(
         tensors[i].data_ptr(),
         tensors[i].data_ptr(),
