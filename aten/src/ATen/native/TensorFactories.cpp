@@ -141,7 +141,7 @@ Tensor& empty_out(Tensor& result, IntArrayRef size) {
     return target_type.copy(self, non_blocking);                 \
   }
 
-AT_FORALL_SCALAR_TYPES(DEFINE_CAST_OP)
+AT_FORALL_SCALAR_TYPES_AND_BOOL(DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 
