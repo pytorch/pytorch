@@ -12347,7 +12347,6 @@ class TestFuser(JitTestCase):
             graph = model.graph_for(x, y)
             rep = str(graph)
 
-            print(rep)
             out_noopt = model_noopt(x, y)
             rep_noopt = str(model_noopt.graph_for(x, y))
             self.assertEqual(out, out_noopt, prec=3e-5)

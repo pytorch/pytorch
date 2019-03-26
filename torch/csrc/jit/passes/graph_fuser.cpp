@@ -109,7 +109,8 @@ bool isSimpleMap(Node* node) {
     return false;
   }
   for (Value* input : node->inputs()) {
-    if (input->type()->isSubtypeOf(TensorType::get()) || input->type()->isSubtypeOf(FloatType::get())) {
+    if (input->type()->isSubtypeOf(TensorType::get()) ||
+        input->type()->isSubtypeOf(FloatType::get())) {
       continue;
     }
     if (input->node()->kind() != prim::Constant) {
@@ -468,9 +469,10 @@ struct GraphFuser {
           group->insertInput(tensor_insert_idx, input);
           tensor_insert_idx++;
         } else if (
-          (input->type()->isSubtypeOf(FloatType::get()) && input->node()->kind() != prim::Constant) ||
-          (n->kind() == aten::_grad_sum_to_size &&
-            input->type()->isSubtypeOf(ListType::ofInts()))) {
+            (input->type()->isSubtypeOf(FloatType::get()) &&
+             input->node()->kind() != prim::Constant) ||
+            (n->kind() == aten::_grad_sum_to_size &&
+             input->type()->isSubtypeOf(ListType::ofInts()))) {
           auto in_group = subgraph.addInput();
           in_group->setType(input->type());
           inputs_map[input] = in_group;
@@ -572,7 +574,7 @@ struct GraphFuser {
     }
     if (producer->node()->matches(
             "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor")) {
-      // We don't do any fusions in here, but simply decompose the batch norm
+      // We don't do any fusions in here, but simply decompose the layer norm
       // into a kernel that computes the stats + pointwise ops which will be
       // considered in this fusion next.
       decomposeLayerNorm(producer->node());
