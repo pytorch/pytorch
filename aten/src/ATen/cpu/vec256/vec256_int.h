@@ -212,7 +212,7 @@ struct Vec256<int32_t> : public Vec256i {
 
 template <>
 Vec256<int32_t> permute(const Vec256<int32_t>& src, const Vec256<int32_t>& indices) {
-  return (Vec256<int32_t>)_mm256_permutevar8x32_ps((__m256)src, indices);
+  return (__m256i)_mm256_permutevar8x32_ps((__m256)src, indices);
 }
 
 template <>
