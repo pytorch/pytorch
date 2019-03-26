@@ -110,12 +110,17 @@ class SubgraphSlicer {
     return result;
   }
 
-  bool shouldConsiderForMerge(Node* node) {
+  bool shouldConsiderForMerge(Node* node, const AliasDb& aliasDb) {
     // if we're already in the process of merging
     if (node->kind() == prim::DifferentiableGraph) {
       return true;
     }
     if (node->kind() == prim::Constant) {
+      return false;
+    }
+    // when a node which has writers is moved into a subgraph it may lose
+    // context and CSE could merge it with another node that has writers
+    if (aliasDb.hasWriters(node)) {
       return false;
     }
     return isDifferentiable(node);
@@ -124,7 +129,7 @@ class SubgraphSlicer {
   std::pair<graph_node_list::iterator, bool> scanNode(
       Node* consumer,
       AliasDb& aliasDb) {
-    if (shouldConsiderForMerge(consumer)) {
+    if (shouldConsiderForMerge(consumer, aliasDb)) {
       if (consumer->kind() != prim::DifferentiableGraph) {
         consumer = SubgraphUtils::createSingletonSubgraph(
             consumer, prim::DifferentiableGraph);
@@ -149,7 +154,7 @@ class SubgraphSlicer {
       Node* producer,
       AliasDb& aliasDb) {
     AT_ASSERT(consumer->kind() == prim::DifferentiableGraph);
-    bool canMerge = shouldConsiderForMerge(producer) &&
+    bool canMerge = shouldConsiderForMerge(producer, aliasDb) &&
         aliasDb.moveBeforeTopologicallyValid(producer, consumer);
 
     if (!canMerge) {
@@ -174,6 +179,5 @@ std::vector<Node*> CreateAutodiffSubgraphs(
   SubgraphSlicer(graph->block(), graph, threshold).run(diff_nodes);
   return diff_nodes;
 }
-
 } // namespace jit
 } // namespace torch
