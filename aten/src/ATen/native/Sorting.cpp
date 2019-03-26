@@ -151,14 +151,17 @@ void qsel_with_indices(const Tensor& self, Tensor& values, Tensor& indices, ValF
     dim,
     [&](int64_t i, TensorList tl) {
       auto self = tl[0].accessor<scalar_t, 1>();
-      std::vector<index_t> tmp_indices;
-      std::vector<scalar_t> tmp_values;
-      for (index_t j = 0; j < self.size(0); ++j) {
-        tmp_indices.push_back(j);
-        tmp_values.push_back(self[j]);
+      auto sz = self.size(0);
+      std::unique_ptr<index_t[]> tmp_indices_(new index_t[sz]);
+      std::unique_ptr<scalar_t[]> tmp_values_(new scalar_t[sz]);
+      index_t *tmp_indices = tmp_indices_.get();
+      scalar_t *tmp_values = tmp_values_.get();
+      for (index_t j = 0; j < sz; ++j) {
+        tmp_indices[j] = j;
+        tmp_values[j] = self[j];
       }
-      quick_select_template(tmp_values.data(),
-          tmp_values.size(),
+      quick_select_template(tmp_values,
+          sz,
           k,
           [largest] (scalar_t x, scalar_t y) -> bool {
             return largest ? gt_or_nan<scalar_t>(x,y)
@@ -169,8 +172,8 @@ void qsel_with_indices(const Tensor& self, Tensor& values, Tensor& indices, ValF
             std::swap(tmp_indices[i], tmp_indices[j]);
           },
           [&] (index_t L, index_t R, scalar_t piv) {
-            return partition<scalar_t, index_t>(tmp_values.data(),
-                tmp_indices.data(), L, R, piv, largest, 0);
+            return partition<scalar_t, index_t>(tmp_values,
+                tmp_indices, L, R, piv, largest, 0);
           }
         );
       finalize_vals(tmp_values, tl[1]);
@@ -211,10 +214,10 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
     if (can_use_small_index) {
       using index_t = int_same_size_t<scalar_t>;
       qsel_with_indices<scalar_t, index_t>(self, values, indices,
-          [k](const std::vector<scalar_t>& vals, const Tensor& val_slice) {
+          [k](const scalar_t *vals, const Tensor& val_slice) {
             *val_slice.data<scalar_t>() = vals[k - 1];
           },
-          [k](const std::vector<index_t>& idxs, const Tensor& idx_slice) {
+          [k](const index_t *idxs, const Tensor& idx_slice) {
             *idx_slice.data<int64_t>() = idxs[k - 1];
           },
           k,
@@ -223,10 +226,10 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
         );
     } else {
       qsel_with_indices<scalar_t, int64_t>(self, values, indices,
-          [k](const std::vector<scalar_t>& vals, const Tensor& val_slice) {
+          [k](const scalar_t *vals, const Tensor& val_slice) {
             *val_slice.data<scalar_t>() = vals[k - 1];
           },
-          [k](const std::vector<int64_t>& idxs, const Tensor& idx_slice) {
+          [k](const int64_t *idxs, const Tensor& idx_slice) {
             *idx_slice.data<int64_t>() = idxs[k - 1];
           },
           k,
