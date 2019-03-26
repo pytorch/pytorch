@@ -66,7 +66,19 @@ std::vector<at::Device> getDeviceList(const std::vector<at::Tensor>& tensors) {
   return res;
 }
 
-// Helper that lets the input ncclStreams to wait for the current stream
+// [Sync Streams] Helper that lets the input ncclStreams to wait for the current
+// stream. NCCL communications run on ncclStreams, but input tensors are
+// allocated on different streams (i.e., current streams). Communications on
+// ncclStreams cannot start before pending input tensor ops on current streams
+// finish. Otherwise, ops on two streams might read/write same tensors
+// concurrently.
+//
+// The synchronization above alone is not enough. We also need to make sure
+// input tensors are not freed before their usages on ncclStreams finish. This
+// can be achieved by calling c10::cuda::CUDACachingAllocator::recordStream,
+// which remembers the usage stream (ncclStream), creates an event on the usage
+// stream when GC attempts to free the input tensor, and delays GC until that
+// event is done.
 void syncStreams(
     const std::vector<at::Device>& devices,
     std::vector<at::cuda::CUDAEvent>& ncclEvents,
@@ -361,7 +373,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
   auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices);
 
-  // First let NCCL streams wait for THC stream
+  // First let NCCL streams wait for input tensors allocation streams
   syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
 
   // Work itself will create the CUDA events on all GPUs of tensors
@@ -378,9 +390,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
     gpuGuard.set_index(devices[i].index());
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
 
-    // Input `tensors` are created on a worker stream and used in a different
+    // Input `tensors` are created on a worker stream and used in different
     // ncclStream. Hence, `tensors` must record the ncclStream to prevent being
-    // freed before ncclAllReduce finishes.
+    // freed before ncclAllReduce finishes. See [Sync Streams].
     c10::cuda::CUDACachingAllocator::recordStream(
       tensors[i].data_ptr(), ncclStream);
 
@@ -433,6 +445,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
     // root rank of the the GPU
     int root = opts.rootRank * tensors.size() + opts.rootTensor;
 
+    // Input `tensors` are created on worker streams and used in different
+    // ncclStreams. Hence, `tensors` must record ncclStreams to prevent being
+    // freed before ncclBcast finishes. See [Sync Streams].
+    c10::cuda::CUDACachingAllocator::recordStream(
+      tensors[i].data_ptr(), ncclStream);
+
     C10D_NCCL_CHECK(ncclBcast(
         tensors[i].data_ptr(),
         tensors[i].numel(),
@@ -480,6 +498,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
     // root rank of the the GPU
     int root = opts.rootRank * tensors.size() + opts.rootTensor;
+
+    // Input `tensors` are created on worker streams and used in different
+    // ncclStreams. Hence, `tensors` must record ncclStreams to prevent being
+    // freed before ncclReduce finishes. See [Sync Streams].
+    c10::cuda::CUDACachingAllocator::recordStream(
+      tensors[i].data_ptr(), ncclStream);
 
     C10D_NCCL_CHECK(ncclReduce(
         tensors[i].data_ptr(),
@@ -549,6 +573,16 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
 
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
 
+    // Input `inputTensors` and `flattenOutputTensors` are created on worker
+    // streams and used in different ncclStreams. Hence, `tensors` must record
+    // ncclStreams to prevent beingfreed before ncclReduce finishes.
+    // See [Sync Streams].
+    c10::cuda::CUDACachingAllocator::recordStream(
+      inputTensors[i].data_ptr(), ncclStream);
+
+    c10::cuda::CUDACachingAllocator::recordStream(
+      flattenOutputTensors[i].data_ptr(), ncclStream);
+
     C10D_NCCL_CHECK(ncclAllGather(
         inputTensors[i].data_ptr(),
         flattenOutputTensors[i].data_ptr(),
@@ -565,6 +599,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
     at::cuda::CUDAStreamGuard guard(ncclStream);
     for (size_t j = 0; j < outputTensors[0].size(); ++j) {
+      // See [Sync Streams].
+      c10::cuda::CUDACachingAllocator::recordStream(
+        outputTensors[i][i].data_ptr(), ncclStream);
+
       outputTensors[i][j].copy_(flattenOutputTensors[i][j], true);
     }
   }
