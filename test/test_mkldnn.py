@@ -32,7 +32,7 @@ class TestMkldnn(TestCase):
         # some factory functions
         for creator in [torch.empty, torch.ones, torch.zeros, torch.randn, torch.rand]:
             with self.assertRaises(RuntimeError) as context:
-                creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch.mkldnn)
+                creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch._mkldnn)
 
 if __name__ == '__main__':
     run_tests()
