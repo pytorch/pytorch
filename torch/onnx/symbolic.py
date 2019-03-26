@@ -1690,11 +1690,21 @@ def narrow(g, input, dim, start, length):
     return g.op("Slice", input, axes_i=[dim], starts_i=[start], ends_i=[start + length])
 
 
-@parse_args('v', 'i', 'i')
 def argmax(g, input, dim, keepdim):
-    return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim)
+    if dim.node().mustBeNone():
+        flattened = reshape(g, input, (-1,))
+        return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False)
+    else:
+        dim = _parse_arg(dim, 'i')
+        keepdim = _parse_arg(keepdim, 'i')
+        return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim)
 
 
-@parse_args('v', 'i', 'i')
 def argmin(g, input, dim, keepdim):
-    return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)
+    if dim.node().mustBeNone():
+        flattened = reshape(g, input, (-1,))
+        return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False)
+    else:
+        dim = _parse_arg(dim, 'i')
+        keepdim = _parse_arg(keepdim, 'i')
+        return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)
