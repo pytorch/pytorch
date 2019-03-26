@@ -32,7 +32,7 @@ class Int8ChannelShuffleOp final : public ConvPoolOpBase<CPUContext> {
   bool RunOnDeviceWithOrderNHWC() override {
     const auto& X = Inputs()[0]->template Get<Int8TensorCPU>();
     auto* Y = Outputs()[0]->template GetMutable<Int8TensorCPU>();
-    Y->t.ResizeLike(X.t);
+    ReinitializeTensor(&(Y->t), X.t.sizes(), at::dtype(X.t.dtype()).device(CPU));
     Y->scale = X.scale;
     Y->zero_point = X.zero_point;
     const int32_t Y_offset = this->template GetSingleArgument<int>("Y_zero_point", 0);

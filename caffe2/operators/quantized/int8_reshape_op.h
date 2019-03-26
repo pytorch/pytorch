@@ -36,6 +36,7 @@ class Int8ReshapeOp final : public ReshapeOp<uint8_t, CPUContext> {
     CHECK_EQ(Y_scale, X.scale);
     Y->scale = Y_scale;
     Y->zero_point = Y_offset;
+    ReinitializeTensor(&Y->t, X.t.sizes(), at::dtype(X.t.dtype()).device(CPU));
     DoRunWithTypeImpl<T>(X.t, &Y->t);
     return true;
   }

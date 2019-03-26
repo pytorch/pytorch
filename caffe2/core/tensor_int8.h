@@ -13,6 +13,7 @@ struct Int8TensorCPU {
   int32_t zero_point{0};
   // Generally stores uint8_t data, but sometimes int32_t (e.g. bias
   // parameters).
+  // TODO: remove CPU
   Tensor t{CPU};
 };
 } // namespace int8

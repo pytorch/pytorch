@@ -124,10 +124,14 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
       Wcsr.template data<T>(), iw.template data<int>(),
       jw.template data<int>(), N, K, M, Xt.template data<T>(),
       Yt->template mutable_data<T>(), &context_);
-    // Add bias term
-    if (bias_multiplier_.numel() != M) {
-      // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Resize(shape(M));
+
+    // If the helper bias multiplier is not defined or not M, reshape and fill
+    // it with one.
+    if (!bias_multiplier_.defined() || bias_multiplier_.numel() != M) {
+      ReinitializeTensor(
+          &bias_multiplier_,
+          shape(M),
+          at::dtype<T>().device(Context::GetDeviceType()));
       math::Set<T, Context>(
           M, static_cast<T>(1), bias_multiplier_.template mutable_data<T>(),
           &context_);
@@ -140,7 +144,7 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
   }
 
  protected:
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor bias_multiplier_;
 };
 
 

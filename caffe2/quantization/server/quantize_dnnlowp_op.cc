@@ -39,7 +39,8 @@ bool QuantizeDNNLowPOp<T>::RunOnDevice() {
   }
   int8::Int8TensorCPU* output =
       Outputs()[0]->template GetMutable<int8::Int8TensorCPU>();
-  output->t.ResizeLike(Input(0));
+  ReinitializeTensor(
+      &(output->t), Input(0).sizes(), at::dtype<T>().device(CPU));
 
   const float* in_data = Input(0).template data<float>();
   T* out_data = output->t.template mutable_data<T>();

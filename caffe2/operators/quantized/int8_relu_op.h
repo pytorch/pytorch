@@ -27,7 +27,7 @@ class Int8ReluOp final : public Operator<CPUContext> {
   bool RunOnDevice() override {
     const auto& X = Inputs()[0]->template Get<Int8TensorCPU>();
     auto* Y = Outputs()[0]->template GetMutable<Int8TensorCPU>();
-    Y->t.ResizeLike(X.t);
+    ReinitializeTensor(&(Y->t), X.t.sizes(), at::dtype(X.t.dtype()).device(CPU));
     Y->scale = X.scale;
     Y->zero_point = X.zero_point;
     CHECK_GE(X.zero_point, std::numeric_limits<uint8_t>::min());

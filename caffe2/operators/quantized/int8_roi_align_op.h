@@ -289,9 +289,10 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
 
     if (R.numel() == 0) {
       // Handle empty rois
-      Y->t.Resize(0, pooled_height_, pooled_width_, X.t.dim32(3));
-      // The following mutable_data calls are needed to allocate the tensors
-      Y->t.mutable_data<uint8_t>();
+      ReinitializeTensor(
+          &(Y->t),
+          {0, pooled_height_, pooled_width_, X.t.dim32(3)},
+          at::dtype(X.t.dtype()).device(CPU));
       return true;
     }
 

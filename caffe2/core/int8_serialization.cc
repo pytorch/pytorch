@@ -66,13 +66,14 @@ class Int8TensorCPUDeserializer : public TensorDeserializer {
     Int8TensorCPU* tensor = blob->template GetMutable<Int8TensorCPU>();
     tensor->scale = proto.scale();
     tensor->zero_point = proto.bias();
-    vector<int> dims;
+    vector<int64_t> dims;
     for (const int d : proto.dims()) {
       dims.push_back(d);
     }
-    tensor->t.Resize(dims);
     switch (proto.data_type()) {
       case TensorProto_DataType_INT32:
+        ReinitializeTensor(
+            &(tensor->t), dims, at::dtype<int32_t>().device(CPU));
         detail::CopyFromProtoAsIs(
             tensor->t.numel(),
             proto.data(),
@@ -80,6 +81,7 @@ class Int8TensorCPUDeserializer : public TensorDeserializer {
             &this->context_);
         break;
       case TensorProto_DataType_UINT8:
+        ReinitializeTensor(&(tensor->t), dims, at::dtype<uint8_t>().device(CPU));
         detail::CopyFromProtoWithCast(
             tensor->t.numel(),
             proto.data(),

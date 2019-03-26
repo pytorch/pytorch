@@ -45,7 +45,7 @@ class Int8SoftmaxOp final : public Operator<CPUContext> {
 
     Y->scale = Y_scale;
     Y->zero_point = Y_zero_point;
-    Y->t.ResizeLike(X.t);
+    ReinitializeTensor(&(Y->t), X.t.sizes(), at::dtype(X.t.dtype()).device(CPU));
 
     initQNNPACK();
 

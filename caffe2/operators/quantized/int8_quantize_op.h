@@ -70,7 +70,7 @@ class Int8QuantizeOp final : public Operator<CPUContext> {
   bool RunOnDevice() override {
     const auto& X = Input(0);
     auto* Y = Outputs()[0]->template GetMutable<Int8TensorCPU>();
-    Y->t.ResizeLike(X);
+    ReinitializeTensor(&(Y->t), X.sizes(), at::dtype(X.dtype()).device(CPU));
     int32_t Y_offset = this->template GetSingleArgument<int>("Y_zero_point", 0);
     auto Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
     Y->scale = Y_scale;

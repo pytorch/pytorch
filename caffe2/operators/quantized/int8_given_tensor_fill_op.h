@@ -26,7 +26,7 @@ class Int8GivenTensorFillOp final : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     auto* output = Outputs()[0]->template GetMutable<Int8TensorCPU>();
-    ReinitializeTensor(&output->t, shape_, at::dtype<uint8_t>().device(CPU));
+    ReinitializeTensor(&(output->t), shape_, at::dtype<uint8_t>().device(CPU));
     output->scale = scale_;
     output->zero_point = zero_point_;
     return Fill(output);
@@ -76,7 +76,7 @@ class Int8GivenIntTensorFillOp final : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     auto* output = Outputs()[0]->template GetMutable<Int8TensorCPU>();
-    output->t.Resize(shape_);
+    ReinitializeTensor(&(output->t), shape_, at::dtype<uint8_t>().device(CPU));
     output->scale = scale_;
     output->zero_point = zero_point_;
     return Fill(output);

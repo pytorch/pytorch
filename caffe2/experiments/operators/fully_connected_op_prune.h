@@ -167,7 +167,10 @@ namespace caffe2 {
           if (bias_multiplier_.numel() != M) {
             // If the helper bias multiplier is not M,
             // reshape and fill it with one.
-            bias_multiplier_.Resize(M);
+            ReinitializeTensor(
+                &bias_multiplier_,
+                {M},
+                at::dtype<T>().device(Context::GetDeviceType()));
             math::Set<T, Context>(
                 M, static_cast<T>(1),
                 bias_multiplier_.template mutable_data<T>(),
@@ -193,7 +196,7 @@ namespace caffe2 {
         }
 
       protected:
-       Tensor bias_multiplier_{Context::GetDeviceType()};
+       Tensor bias_multiplier_;
     };
 
   template <typename T, class Context, class Engine=DefaultEngine>
@@ -262,7 +265,10 @@ namespace caffe2 {
               0, dW->template mutable_data<T>(),
               &context_);
 
-          comp_r_buf_.Resize(vector<int64_t>());
+          ReinitializeTensor(
+              &comp_r_buf_,
+              vector<int64_t>(),
+              at::dtype<T>().device(Context::GetDeviceType()));
           T* comp_data = comp_r_buf_.template mutable_data<T>();
           math::Sum<T, Context>(
               Mask.numel(), Mask.template data<T>(), comp_data, &context_);
@@ -284,7 +290,10 @@ namespace caffe2 {
             iter_offset++;
             if (iter_offset % window_size == 0) {
               // TODO(wyiming):do the prune here;
-              sum_buffer_.ResizeLike(W);
+              ReinitializeTensor(
+                  &sum_buffer_,
+                  W.sizes(),
+                  at::dtype<T>().device(Context::GetDeviceType()));
               math::Add<T, Context>(
                   W.numel(),
                   W.template mutable_data<T>(),
@@ -320,10 +329,13 @@ namespace caffe2 {
                   N, K, &context_);
             }
           }
-          if (bias_multiplier_.numel() != M) {
-            // If the helper bias multiplier is not M,
-            // reshape and fill it with one.
-            bias_multiplier_.Resize(M);
+          // If the helper bias multiplier is not defined or not M, reshape and
+          // fill it with one.
+          if (!bias_multiplier_.defined() || bias_multiplier_.numel() != M) {
+            ReinitializeTensor(
+                &bias_multiplier_,
+                {M},
+                at::dtype<T>().device(Context::GetDeviceType()));
             math::Set<T, Context>(
                 M, static_cast<T>(1),
                 bias_multiplier_.template mutable_data<T>(),
@@ -349,9 +361,9 @@ namespace caffe2 {
         }
 
       protected:
-       Tensor bias_multiplier_{Context::GetDeviceType()};
-       Tensor sum_buffer_{Context::GetDeviceType()};
-       Tensor comp_r_buf_{Context::GetDeviceType()};
+       Tensor bias_multiplier_;
+       Tensor sum_buffer_;
+       Tensor comp_r_buf_;
     };
 
 }  // namespace caffe2

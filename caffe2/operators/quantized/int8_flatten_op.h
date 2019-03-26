@@ -28,7 +28,10 @@ class Int8FlattenOp : public Operator<CPUContext> {
     Y->zero_point = Y_offset;
     CAFFE_ENFORCE_GE(
         X.t.sizes().size(), axis_, "The rank of the tensor must be >= axis.");
-    Y->t.Resize(X.t.size_to_dim(axis_), X.t.size_from_dim(axis_));
+    ReinitializeTensor(
+        &(Y->t),
+        {X.t.size_to_dim(axis_), X.t.size_from_dim(axis_)},
+        at::dtype(X.t.dtype()).device(CPU));
     context_.CopyItemsToCPU(
         X.t.dtype(),
         X.t.numel(),

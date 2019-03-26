@@ -50,7 +50,7 @@ class Int8AddOp final : public Operator<CPUContext> {
       this->template GetSingleArgument<int>("Y_zero_point", 0);
     const float Y_scale =
       this->template GetSingleArgument<float>("Y_scale", 1);
-    Y->t.ResizeLike(A.t);
+    ReinitializeTensor(&(Y->t), A.t.sizes(), at::dtype(A.t.dtype()).device(CPU));
     Y->zero_point = Y_zero_point;
     Y->scale = Y_scale;
 

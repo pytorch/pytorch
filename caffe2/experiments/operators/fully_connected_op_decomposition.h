@@ -67,7 +67,10 @@ class FullyConnectedOpDecomp final : public Operator<Context> {
     std::vector<int64_t> dims;
     if (X.dim() > 1) {
       dims = {M, N};
-      multi_buffer_.Resize(M, middle);
+      ReinitializeTensor(
+          &multi_buffer_,
+          {M, middle},
+          at::dtype<T>().device(Context::GetDeviceType()));
     } else {
       dims = {N};
       multi_buffer_.Resize(middle);
@@ -87,9 +90,13 @@ class FullyConnectedOpDecomp final : public Operator<Context> {
         U.template data<T>(), 0, Y->template mutable_data<T>(),
         &context_);
     // Add bias term
-    if (bias_multiplier_.numel() != M) {
-      // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Resize(M);
+    // If the helper bias multiplier is not defined or not M, reshape and fill
+    // it with one.
+    if (!bias_multiplier_.defined() || bias_multiplier_.numel() != M) {
+      ReinitializeTensor(
+          &bias_multiplier_,
+          {M},
+          at::dtype<T>().device(Context::GetDeviceType()));
       math::Set<T, Context>(
           M, static_cast<T>(1), bias_multiplier_.template mutable_data<T>(),
           &context_);
@@ -102,8 +109,8 @@ class FullyConnectedOpDecomp final : public Operator<Context> {
   }
 
  protected:
-  Tensor bias_multiplier_{Context::GetDeviceType()};
-  Tensor multi_buffer_{Context::GetDeviceType()};
+  Tensor bias_multiplier_;
+  Tensor multi_buffer_;
 };
 
 template <typename T, class Context, class Engine=DefaultEngine>
@@ -145,7 +152,10 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
 
     // Compute dU
     // first compute X * V
-    du_buffer_.Resize(N, middle);
+    ReinitializeTensor(
+        &du_buffer_,
+        {N, middle},
+        at::dtype<T>().device(Context::GetDeviceType()));
     T* du_buffer_data = du_buffer_.template mutable_data<T>();
     math::Gemm<T, Context, Engine>(
         CblasNoTrans, CblasNoTrans, M, middle, K, 1,
@@ -159,7 +169,10 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
         &context_);
     // Compute dV
     // first compute dY * U
-    dv_buffer_.Resize(M, middle);
+    ReinitializeTensor(
+        &dv_buffer_,
+        {M, middle},
+        at::dtype<T>().device(Context::GetDeviceType()));
     T* dv_buffer_data = dv_buffer_.template mutable_data<T>();
     math::Gemm<T, Context, Engine>(
         CblasNoTrans, CblasNoTrans, M, middle, N, 1,
@@ -171,9 +184,13 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
         dY.template data<T>(), du_buffer_data,
         0, dV->template mutable_data<T>(),
         &context_);
-    if (bias_multiplier_.numel() != M) {
-      // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Resize(M);
+    // If the helper bias multiplier is not defined or not M, reshape and fill
+    // it with one.
+    if (!bias_multiplier_.defined() || bias_multiplier_.numel() != M) {
+      ReinitializeTensor(
+          &bias_multiplier_,
+          {M},
+          at::dtype<T>().device(Context::GetDeviceType()));
       math::Set<T, Context>(
           M, static_cast<T>(1),
           bias_multiplier_.template mutable_data<T>(),
@@ -188,7 +205,10 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
     // Compute dX if necessary.
     if (OutputSize() == 4) {
       auto* dX = Output(3, X.sizes(), at::dtype<T>());
-      dx_buffer_.Resize(M, middle);
+      ReinitializeTensor(
+          &dx_buffer_,
+          {M, middle},
+          at::dtype<T>().device(Context::GetDeviceType()));
       T* dx_buffer_data = dx_buffer_.template mutable_data<T>();
       math::Gemm<T, Context, Engine>(
           CblasNoTrans, CblasNoTrans, M, middle, N, 1,
@@ -206,10 +226,10 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
   }
 
  protected:
-  Tensor bias_multiplier_{Context::GetDeviceType()};
-  Tensor du_buffer_{Context::GetDeviceType()};
-  Tensor dv_buffer_{Context::GetDeviceType()};
-  Tensor dx_buffer_{Context::GetDeviceType()};
+  Tensor bias_multiplier_;
+  Tensor du_buffer_;
+  Tensor dv_buffer_;
+  Tensor dx_buffer_;
 };
 
 }  // namespace caffe2
