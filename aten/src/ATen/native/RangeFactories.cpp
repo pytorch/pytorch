@@ -116,9 +116,10 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
 
-    // we use double precision for xstart - xend and the division with xstep
-    // to compute size_t for consistency across devices.
-    // The problem with using accscalar_t is that accscalar_t might be float on gpu, but double on cpu,
+    // we use double precision for (start - end) / step
+    // to compute size_d for consistency across devices.
+    // The problem with using accscalar_t is that accscalar_t might be float32 on gpu for a float32 scalar_t,
+    // but double on cpu for the same,
     // and the effective output size starts differing on CPU vs GPU because of precision issues, which
     // we dont want.
     // the corner-case we do want to take into account is int64_t, which has higher precision than double
