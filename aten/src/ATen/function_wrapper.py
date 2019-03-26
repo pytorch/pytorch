@@ -616,6 +616,7 @@ def to_return_type(arg, option):
         'dynamic_type': DYNAMIC_TYPE.get(arg['type'], arg['type']),
     }
 
+
 def emit_version_increment(option):
     version_increment_stmts = []
     for formal in option['formals_list']:
@@ -623,6 +624,7 @@ def emit_version_increment(option):
         if NATIVE_DYNAMIC_TYPE.get(arg_type, arg_type) == 'Tensor' and 'const' not in arg_type:
             version_increment_stmts.append(VERSION_INCREMENT_TEMPLATE.substitute(tensor_name=formal['name']))
     return version_increment_stmts
+
 
 def create_generic(top_env, declarations):
     # type: (TopEnvironment, List[FunctionOption]) -> List[OutputDeclaration]
