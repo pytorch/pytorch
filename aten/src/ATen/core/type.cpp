@@ -492,6 +492,7 @@ ClassTypePtr ClassType::get(const std::string& name) {
   return getRegistry().getType(name);
 }
 
+
 void ClassType::clearRegistry() {
   getRegistry().clear();
 }
