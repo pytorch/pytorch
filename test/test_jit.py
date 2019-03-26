@@ -991,6 +991,24 @@ class TestJit(JitTestCase):
         self.run_pass('cse', graph)
         FileCheck().check("block").check_not("aten::add").check_not("aten::gt").run(str(graph))
 
+    def test_expand_fakequant(self):
+        pass
+
+    def test_expand_propagate_qinfo(self):
+        pass
+
+    def test_expand_insert_observers(self):
+        pass
+
+    def test_expand_insert_fakequant(self):
+        pass
+
+    def test_expand_quantlint(self):
+        pass
+
+    def test_expand_fold_quant_inputs(self):
+        pass
+
     def test_shape_analysis_broadcast(self):
         def broadcast(a, b):
             return a + b
@@ -1344,6 +1362,8 @@ class TestJit(JitTestCase):
             self.assertEqual(outputs, m(*inputs))
 
     @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @skipIfRocm
     def test_dropout_cuda(self):
         # Dropout AD is dispatched to _fused_dropout in CUDA case,
         # which is not included in TestJitGeneratedFunctional
@@ -1860,6 +1880,26 @@ class TestJit(JitTestCase):
 
         # testing that 1 // 0 error is not thrownn
         self.run_pass('constant_propagation', constant_prop.graph)
+
+    def test_short_circuit_optimization(self):
+        @torch.jit.script
+        def const_expressions(x):
+            # type: (int) -> Tuple[bool, bool]
+            return x == 1 and False, x == 1 or True
+        self.run_pass('constant_propagation', const_expressions.graph)
+        FileCheck().check_not("prim::If").check_not("aten::eq").run(const_expressions.graph)
+        self.assertEqual(const_expressions(1), (False, True))
+
+        @torch.jit.script
+        def redundant_expressions(x):
+            # type: (int) -> Tuple[bool, bool]
+            return x == 1 and True, x == 1 or False
+
+        self.run_pass('peephole', redundant_expressions.graph)
+        self.assertEqual(redundant_expressions(1), (True, True))
+        self.assertEqual(redundant_expressions(0), (False, False))
+        # and True / or False are removed from graph
+        FileCheck().check("aten::eq").check_not("prim::If").run(redundant_expressions.graph)
 
     def test_trace_records_names(self):
         def foo(bar, baz):
@@ -12192,6 +12232,45 @@ class TestFuser(JitTestCase):
         x.requires_grad_(True)
         y.requires_grad_(True)
         self.assertAllFused(ge.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes"))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_addcmul_cuda(self):
+        t = torch.randn(1, 4, dtype=torch.float, device='cuda')
+        t1 = torch.randn(4, 1, dtype=torch.float, device='cuda')
+        t2 = torch.randn(1, 4, dtype=torch.float, device='cuda')
+
+        def foo(t, t1, t2):
+            return t.addcmul(t + 1, t2, value=0.1)
+
+        ge = self.checkTrace(foo, (t, t1, t2), allow_unused=True)
+        graph = ge.graph_for(t, t1, t2)
+        self.assertAllFused(graph)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_lerp_cuda(self):
+        start = torch.randn(4, 1, dtype=torch.float, device='cuda')
+        end = torch.randn(1, 4, dtype=torch.float, device='cuda')
+        weight = torch.tensor(0.5, dtype=torch.float, device='cuda')
+
+        # scalar weight overload
+        def foo_weight_scalar(start, end):
+            return torch.lerp(start + 1, end, 0.5)
+
+        # tensor weight overload
+        def foo_weight_tensor(start, end):
+            return torch.lerp(start + 1, end, weight)
+
+        ge_weight_scalar = self.checkTrace(foo_weight_scalar, (start, end))
+        graph = ge_weight_scalar.graph_for(start, end)
+        self.assertAllFused(graph)
+
+        ge_weight_tensor = self.checkTrace(foo_weight_tensor, (start, end))
+        graph = ge_weight_tensor.graph_for(start, end)
+        self.assertAllFused(graph)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
