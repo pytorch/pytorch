@@ -19,12 +19,12 @@ class TORCH_API ScriptTypeParser {
 
   c10::TypePtr parseTypeFromExpr(const Expr& expr) const;
 
+  c10::TypePtr parseNamedTuple(const Expr& expr) const;
+
   c10::optional<std::pair<c10::TypePtr, int32_t>> parseBroadcastList(
       const Expr& expr) const;
 
   c10::TypePtr parseType(const std::string& str);
-
-  c10::TypePtr parseNamedTuple(const Expr& expr);
 
  private:
   at::TypePtr subscriptToType(

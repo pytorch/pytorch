@@ -155,7 +155,7 @@ c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
 // Parse NamedTuple following the grammar like below:
 // NamedTuple('Employee', [('name', str), ('id', int)])
 // See also: https://docs.python.org/3/library/typing.html#typing.NamedTuple
-TypePtr ScriptTypeParser::parseNamedTuple(const Expr& expr) {
+TypePtr ScriptTypeParser::parseNamedTuple(const Expr& expr) const {
   auto apply = Apply(expr);
   auto callee = apply.callee();
   if (callee.kind() != TK_VAR || Var(callee).name().name() != "NamedTuple") {
