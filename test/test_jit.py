@@ -5428,6 +5428,24 @@ a")
                 code = funcs_template.format(func=func, scalar1=scalar1, scalar2=scalar2)
                 run_test(code)
 
+    def test_number_abs(self):
+        def float1():
+            return abs(-3.14)
+
+        def float2():
+            return abs(3.14)
+
+        def int1():
+            return abs(-10)
+
+        def int2():
+            return abs(10)
+
+        self.checkScript(float1, ())
+        self.checkScript(float2, ())
+        self.checkScript(int1, ())
+        self.checkScript(int2, ())
+
     def test_number_div(self):
         self.checkScript(div_int_future, (), optimize=True)
         self.checkScript(div_float_future, (), optimize=True)
