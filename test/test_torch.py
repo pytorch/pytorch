@@ -2905,16 +2905,35 @@ class _TestTorchMixin(object):
 
     # This is a temporary test for a boolean tensors on CPU. Once the CUDA part
     # will be done, these test cases will be moved down to test_tensor_factories_empty test
-    def test_tensor_factories_empty_bool(self):
+    def test_tensor_factories_bool(self):
         expectedShape = (1, 2)
         test = torch.empty(expectedShape, dtype=torch.bool)
         self.assertEqual(expectedShape, test.shape)
-        self.assertEqual(expectedShape, torch.empty_like(test).shape)
+
+        test2 = torch.empty_like(test, dtype=torch.bool)
+        self.assertEqual(test.shape, test2.shape)
 
         test = torch.full(expectedShape, True, dtype=torch.bool)
         self.assertEqual(test, torch.tensor([[True, True]], dtype=torch.bool))
+
+        test2 = torch.full_like(test, True, dtype=torch.bool)
+        self.assertEqual(test, test2)
+
+        test = torch.zeros(expectedShape, dtype=torch.bool)
+        self.assertEqual(test, torch.tensor([[False, False]], dtype=torch.bool))
+
+        test2 = torch.zeros_like(test, dtype=torch.bool)
+        self.assertEqual(test, test2)
+
+        test = torch.ones(expectedShape, dtype=torch.bool)
+        self.assertEqual(test, torch.tensor([[True, True]], dtype=torch.bool))
+
+        test2 = torch.ones_like(test, dtype=torch.bool)
+        self.assertEqual(test, test2)
+
+        test = torch.randint(10, expectedShape, dtype=torch.bool)
         self.assertEqual(expectedShape, test.shape)
-        self.assertEqual(expectedShape, torch.full_like(test, True).shape)
+        self.assertEqual(torch.bool, test.dtype)
 
     def test_tensor_factories_empty(self):
         # ensure we can create empty tensors from each factory function
