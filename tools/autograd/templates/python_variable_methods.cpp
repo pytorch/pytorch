@@ -371,7 +371,7 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
   if (self_.requires_grad()) {
     throw std::runtime_error(
         "Can't call numpy() on Variable that requires grad. "
-        "Use var.detach().numpy() instead.");
+        "Use var().detach().numpy() instead.");
   }
   return torch::utils::tensor_to_numpy(self_.data());
   END_HANDLE_TH_ERRORS
