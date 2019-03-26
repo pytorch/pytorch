@@ -378,6 +378,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
     gpuGuard.set_index(devices[i].index());
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
 
+    // Input `tensors` are created on a worker stream and used in a different
+    // ncclStream. Hence, `tensors` must record the ncclStream to prevent being
+    // freed before ncclAllReduce finishes.
     c10::cuda::CUDACachingAllocator::recordStream(
       tensors[i].data_ptr(), ncclStream);
 
