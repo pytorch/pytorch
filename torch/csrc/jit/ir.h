@@ -171,6 +171,7 @@ struct Value {
     return type()->kind() == TypeKind::CompleteTensorType;
   }
   TORCH_API bool mustBeNone() const;
+  TORCH_API bool mustNotBeNone() const;
   size_t unique() const {
     return unique_;
   }

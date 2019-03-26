@@ -138,23 +138,6 @@ static inline DeviceType backendToDeviceType(Backend b) {
   }
 }
 
-static inline Backend deviceTypeToBackend(DeviceType d) {
-  switch (d) {
-    case DeviceType::CPU:
-      return Backend::CPU;
-    case DeviceType::CUDA:
-      return Backend::CUDA;
-    case DeviceType::HIP:
-      return Backend::HIP;
-    case DeviceType::MSNPU:
-      return Backend::MSNPU;
-    case DeviceType::XLA:
-      return Backend::XLA;
-    default:
-      AT_ERROR("Unknown device type ", d);
-  }
-}
-
 static inline Backend backendToCPU(Backend b) {
   switch (b) {
     case Backend::CPU:

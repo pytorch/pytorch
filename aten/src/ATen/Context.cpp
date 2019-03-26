@@ -84,6 +84,14 @@ bool Context::hasMKL() const {
 #endif
 }
 
+bool Context::hasMKLDNN() const {
+#if AT_MKLDNN_ENABLED()
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool Context::hasOpenMP() const {
 #ifdef _OPENMP
   return true;

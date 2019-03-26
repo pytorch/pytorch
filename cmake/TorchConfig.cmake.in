@@ -36,7 +36,9 @@ else()
 endif()
 
 # Library dependencies.
-find_package(Caffe2 REQUIRED PATHS ${CMAKE_CURRENT_LIST_DIR}/../Caffe2)
+if (@BUILD_SHARED_LIBS@)
+  find_package(Caffe2 REQUIRED PATHS ${CMAKE_CURRENT_LIST_DIR}/../Caffe2)
+endif()
 
 find_library(TORCH_LIBRARY torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
 add_library(torch UNKNOWN IMPORTED)

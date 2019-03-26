@@ -105,6 +105,7 @@ void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
     return;
   }
 
+  // TODO: Replace this with TensorIterator!
   bool serial_path = false;
   if (self.numel() == src.numel()) {
     if (self.is_contiguous() && src.is_contiguous()) {
