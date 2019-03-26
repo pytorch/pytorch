@@ -7411,6 +7411,41 @@ class _TestTorchMixin(object):
         self.assertEqual(ret1.S, ret[1])
         self.assertEqual(ret1.V, ret[2])
 
+        # test gesv
+        ret = a.gesv(a)
+        self.assertEqual(ret.solution, ret[0])
+        self.assertEqual(ret.LU, ret[1])
+        ret1 = torch.gesv(a, a, out=tuple(ret))
+        self.assertEqual(ret1.solution, ret1[0])
+        self.assertEqual(ret1.LU, ret1[1])
+        self.assertEqual(ret1.solution, ret[0])
+        self.assertEqual(ret1.LU, ret[1])
+
+        # test slogdet
+        ret = a.slogdet()
+        self.assertEqual(ret.sign, ret[0])
+        self.assertEqual(ret.logabsdet, ret[1])
+
+        # test sort
+        ret = a.sort(dim=0)
+        self.assertEqual(ret.values, ret[0])
+        self.assertEqual(ret.indices, ret[1])
+        ret1 = torch.sort(a, dim=0, out=tuple(ret))
+        self.assertEqual(ret1.values, ret1[0])
+        self.assertEqual(ret1.indices, ret1[1])
+        self.assertEqual(ret1.values, ret[0])
+        self.assertEqual(ret1.indices, ret[1])
+
+        # test topk
+        ret = a.topk(2)
+        self.assertEqual(ret.values, ret[0])
+        self.assertEqual(ret.indices, ret[1])
+        ret1 = torch.topk(a, 2, out=tuple(ret))
+        self.assertEqual(ret1.values, ret1[0])
+        self.assertEqual(ret1.indices, ret1[1])
+        self.assertEqual(ret1.values, ret[0])
+        self.assertEqual(ret1.indices, ret[1])
+
         # test symeig, eig
         fn = ['symeig', 'eig']
         for f in fn:
