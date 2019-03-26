@@ -419,7 +419,7 @@ Tensor triu_indices_cuda(
 
 __global__ void generate_samples(
   int64_t *samples,
-  int k,
+  int64_t k,
   curandStateMtgp32 *state
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -440,8 +440,8 @@ __global__ void generate_keys(
 __global__ void generate_reservoir(
   int64_t *indices,
   int64_t *samples,
-  int nb_iterations,
-  int k
+  int64_t nb_iterations,
+  int64_t k
 ){
   for(int i = 0; i < nb_iterations; i++){
     int64_t z = samples[i];
@@ -451,17 +451,29 @@ __global__ void generate_reservoir(
   }
 }
 
-Tensor reservoir_sampling_cuda(
-  Tensor& x,
-  Tensor &weights,
-  int k
+Tensor sampling_with_replacement(
+  const Tensor& x,
+  const Tensor& weights,
+  int64_t k
 ){
 
-  if (!x.is_contiguous()){
-    x = x.contiguous();
-  }
+  AT_ASSERTM(
+    weights.dtype() == kFloat,
+    "The sampling weights must be Float, got", weights.dtype()
+  );
+
+  AT_ASSERTM(
+    weights.is_contiguous(),
+    "The sampling weights must be contiguous."
+  );
 
   int n = x.numel();
+
+  AT_ASSERTM(
+    n >= k,
+    "Cannot take a larger sample than population when 'replace=False'"
+  );
+
   auto options = x.options().dtype(at::kLong);
   dim3 threads(threadsPerBlock);
 
@@ -528,12 +540,12 @@ Tensor reservoir_sampling_cuda(
 }
 
 Tensor choice_cuda(
-  Tensor& input,
-  Tensor& weights,
-  bool replacement,
-  int k
+  const Tensor& input,
+  const Tensor& weights,
+  bool replace,
+  int64_t k
 ){
-  if (replacement){
+  if (replace){
     return sampling_with_replacement(input, weights, k);
   } else {
     return reservoir_sampling_cuda(input, weights, k);
