@@ -15,6 +15,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
+#include <c10/util/python_stub.h>
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
@@ -563,6 +564,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   template <typename T>
   inline T * data() const {
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
+    AT_CHECK(has_storage(),
+        "Cannot access data pointer of Tensor that doesn't have storage");
     AT_ASSERTM(
         storage_initialized(),
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
@@ -594,7 +597,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline void* data() const {
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
-    AT_ASSERT(storage_initialized());
+    AT_CHECK(has_storage(),
+        "Cannot access data pointer of Tensor that doesn't have storage");
     AT_ASSERT(dtype_initialized());
     return static_cast<void*>(
         static_cast<char*>(storage_.data()) +
@@ -858,6 +862,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     impl->refresh_numel();
     impl->refresh_contiguous();
     return impl;
+  }
+
+  inline void set_pyobj(PyObject* pyobj) noexcept {
+    pyobj_ = pyobj;
+  }
+
+  inline PyObject* pyobj() const noexcept {
+    return pyobj_;
   }
 
  private:
@@ -1234,7 +1246,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor is storage initialized.  A tensor may become
    * storage UNINITIALIZED after a Resize() or FreeMemory()
    */
-  bool storage_initialized() const noexcept {
+  bool storage_initialized() const {
+    AT_ASSERT(has_storage());
     return storage_.data() || numel_ == 0;
   }
 
@@ -1368,6 +1381,8 @@ protected:
   // at a time).
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
+  PyObject* pyobj_ = nullptr; // weak reference
+
   // We could save a word or two by combining the SmallVector structs,
   // since their size is redundant, and if we need to overflow the buffer space
   // we could keep the two pointers together. However, that would require
@@ -1461,10 +1476,11 @@ protected:
 //    numel
 //    data type pointer
 //    autograd metadata pointer
+//    PyObject pointer
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 25,
+              sizeof(TensorImpl) == sizeof(int64_t) * 26,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 

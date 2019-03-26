@@ -428,11 +428,15 @@ class TestCase(expecttest.TestCase):
                     else:
                         b = b.to(a)
 
-                    if x.dtype == torch.bool and y.dtype == torch.bool:
-                        self.assertEqual(x.tolist(), y.tolist())
-                    elif x.dtype == torch.bool or y.dtype == torch.bool:
+                    if (a.dtype == torch.bool) != (b.dtype == torch.bool):
                         raise TypeError("Was expecting both tensors to be bool type.")
                     else:
+                        if a.dtype == torch.bool and b.dtype == torch.bool:
+                            # we want to respect precision but as bool doesn't support substraction,
+                            # boolean tensor has to be converted to int
+                            a = a.to(torch.int)
+                            b = b.to(torch.int)
+
                         diff = a - b
                         if a.is_floating_point():
                             # check that NaNs are in the same locations

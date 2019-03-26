@@ -280,10 +280,13 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   // Creates chunk and flattened input descriptions
   std::vector<PartitionDesc> chunk_desc;
-  std::vector<std::pair<const Value*, const TensorDesc>> flat_inputs;
+  std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>> flat_inputs;
   {
     size_t input_index = 0;
     for (const auto& p : graph->inputs()) {
+      if (p->type()->isSubtypeOf(FloatType::get())) {
+        flat_inputs.emplace_back(p, c10::nullopt);
+      }
       if (!p->type()->isSubtypeOf(TensorType::get())) {
         continue;
       }

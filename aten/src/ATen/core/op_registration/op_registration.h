@@ -33,11 +33,13 @@ namespace c10 {
 class C10_API RegisterOperators final {
 public:
   RegisterOperators();
-  RegisterOperators(const RegisterOperators&) = delete;
-  RegisterOperators(RegisterOperators&&) noexcept;
-  RegisterOperators& operator=(const RegisterOperators&) = delete;
-  RegisterOperators& operator=(RegisterOperators&&) noexcept;
   ~RegisterOperators();
+
+  RegisterOperators(const RegisterOperators&) = delete;
+  RegisterOperators& operator=(const RegisterOperators&) = delete;
+  RegisterOperators(RegisterOperators&&) noexcept;
+  RegisterOperators& operator=(RegisterOperators&&) noexcept;
+
 
   /**
    * Register an operator based on a function schema and a set of configuration
@@ -58,8 +60,9 @@ public:
    * >         c10::dispatchKey(CPUTensorId()));
    */
   template<class... ConfigParameters>
-  RegisterOperators op(FunctionSchema schema, ConfigParameters&&... configParameters) && {
-    detail::KernelRegistrationConfig config = make_registration_config(configParameters...);
+  guts::enable_if_t<guts::conjunction<detail::is_registration_config_parameter<guts::decay_t<ConfigParameters>>...>::value, RegisterOperators>
+  op(FunctionSchema schema, ConfigParameters&&... configParameters) && {
+    detail::KernelRegistrationConfig config = detail::make_registration_config(std::forward<ConfigParameters>(configParameters)...);
     registrars_.emplace_back(std::move(schema), config.dispatch_key, config.kernel_func, config.cache_creator_func);
     return std::move(*this);
   }

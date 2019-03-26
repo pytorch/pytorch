@@ -16,16 +16,12 @@
 namespace c10 {
 
 namespace detail {
-  inline std::unique_ptr<c10::KernelCache> noCache() {
-    return nullptr;
-  }
-
   struct KernelRegistrationConfigParameter final {
     explicit constexpr KernelRegistrationConfigParameter(KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator_func)
     : kernel_func_(kernel_func), cache_creator_func_(std::move(cache_creator_func)) {
     }
 
-    void apply(KernelRegistrationConfig* registration) && {
+    void apply(KernelRegistrationConfig* registration) const {
       registration->kernel_func = kernel_func_;
       registration->cache_creator_func = cache_creator_func_;
     }
@@ -34,6 +30,8 @@ namespace detail {
     KernelFunction* kernel_func_;
     KernelCacheCreatorFunction* cache_creator_func_;
   };
+
+  static_assert(is_registration_config_parameter<KernelRegistrationConfigParameter>::value, "KernelRegistrationConfigParameter must fulfill the registration config parameter concept");
 }
 
 /**
@@ -54,7 +52,7 @@ namespace detail {
  * >         c10::kernel(&my_kernel_cpu, &my_cache_creator),
  * >         c10::dispatchKey(CPUTensorId()));
  */
-inline constexpr detail::KernelRegistrationConfigParameter kernel(KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator = &detail::noCache) {
+inline constexpr detail::KernelRegistrationConfigParameter kernel(KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator) {
   return detail::KernelRegistrationConfigParameter(kernel_func, cache_creator);
 }
 
