@@ -9,6 +9,7 @@
 
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
+#include <THC/THCGenerator.hpp>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #include <thrust/execution_policy.h>
@@ -19,6 +20,9 @@
 #include <algorithm>
 #include <cstddef>
 #include <cmath>
+
+THCGenerator* THCRandom_getGenerator(THCState* state);
+int const threadsPerBlock = 512;
 
 namespace at {
 namespace native {
@@ -451,7 +455,7 @@ __global__ void generate_reservoir(
   }
 }
 
-Tensor sampling_with_replacement(
+Tensor reservoir_sampling_cuda(
   const Tensor& x,
   const Tensor& weights,
   int64_t k
@@ -545,6 +549,19 @@ Tensor choice_cuda(
   bool replace,
   int64_t k
 ){
+  if (replace){
+    return sampling_with_replacement(input, weights, k);
+  } else {
+    return reservoir_sampling_cuda(input, weights, k);
+  }
+}
+
+Tensor choice_cuda(
+  const Tensor& input,
+  bool replace,
+  int64_t k
+){
+  at::Tensor weights = at::empty({0}, input.options().dtype(at::kLong));
   if (replace){
     return sampling_with_replacement(input, weights, k);
   } else {

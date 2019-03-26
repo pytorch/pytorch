@@ -867,5 +867,18 @@ Tensor choice_cpu(
   }
 }
 
+Tensor choice_cpu(
+  const Tensor& input,
+  bool replace,
+  int64_t k
+){
+  at::Tensor weights = at::empty({0}, input.options().dtype(at::kFloat));
+  if (replace){
+    return sampling_with_replacement(input, weights, k);
+  } else {
+    return reservoir_sampling_cpu(input, weights, k);
+  }
+}
+
 } // namespace native
 } // namespace at
