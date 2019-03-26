@@ -173,7 +173,9 @@ namespace detail {
  * >         c10::dispatchKey(CPUTensorId()));
  */
 template<class KernelFunctor, class... ConstructorParameters>
-inline constexpr detail::KernelRegistrationConfigParameter<detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>, detail::FunctionSchemaInferer<KernelFunctor>>
+// enable_if: only enable it if KernelFunctor is actually a functor and inherits from c10::OperatorKernel
+inline constexpr guts::enable_if_t<guts::is_functor<KernelFunctor>::value && std::is_base_of<OperatorKernel, KernelFunctor>::value,
+detail::KernelRegistrationConfigParameter<detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>, detail::FunctionSchemaInferer<KernelFunctor>>>
 kernel(ConstructorParameters&&... constructorParameters) {
   return {
     &detail::wrap_kernel_functor<KernelFunctor>::call,
