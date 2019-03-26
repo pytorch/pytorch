@@ -366,9 +366,6 @@ void AliasDb::analyzeImpl(Node* node) {
     case aten::wait:
       return analyzeWait(node);
     case prim::Constant:
-    case prim::DictConstruct:
-    case prim::ListConstruct:
-    case prim::TupleConstruct:
     case prim::AutogradZero:
     case prim::FusedConcat:
     case prim::MMTreeReduce:
@@ -378,6 +375,10 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Function:
     case prim::CreateObject:
       return analyzeCreator(node);
+    case prim::TupleConstruct:
+    case prim::ListConstruct:
+    case prim::DictConstruct:
+      return analyzeContainer(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:
     case prim::DictIndex:
@@ -592,6 +593,15 @@ void AliasDb::analyzeCreator(Node* node) {
   }
 }
 
+// For nodes that generate a value from contained values
+void AliasDb::analyzeContainer(Node* node) {
+  for (const auto output : node->outputs()) {
+    if (shouldAnnotate(output)) {
+      setWildcard(output);
+    }
+  }
+}
+
 // For nodes that extract values from a composite type. Right now, this just
 // gives up and creates wildcards for everything.
 void AliasDb::analyzeExtractor(Node* node) {
@@ -738,6 +748,10 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
 }
 
 bool AliasDb::mayAlias(const Value* a, const Value* b) const {
+  if (!shouldAnnotate(a) || !shouldAnnotate(b)) {
+    return false;
+  }
+
   if (isWildcard(a) || isWildcard(b)) {
     return true;
   }

@@ -54,6 +54,7 @@ namespace jit {
   _(AliasAnalysis)                 \
   _(WriteTracking)                 \
   _(Wildcards)                     \
+  _(ContainerAliasing)             \
   _(MemoryDAG)                     \
   _(IRParser)                      \
   _(ConstantPooling)               \

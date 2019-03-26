@@ -176,6 +176,7 @@ class AliasDb {
   void analyzeLoop(Node* node);
   void analyzeSubgraph(Node* node);
   void analyzeCreator(Node* node);
+  void analyzeContainer(Node* node);
   void analyzeExtractor(Node* node);
   void analyzeChunk(Node* node);
   void analyzeBroadcastingChunk(Node* node);
