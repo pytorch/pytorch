@@ -77,7 +77,7 @@ struct Method {
     for (auto input : initial_ivalues_) {
       push(stack, *input);
     }
-    get_executor().run(stack);
+    get_executor().getExecutionPlan(stack).run(stack);
   }
 
   void run(Stack&& stack) {

@@ -313,7 +313,7 @@ void initJITBindings(PyObject* module) {
             evilDeprecatedBadCreateStackDoNotUse(args, graph->inputs());
         {
           AutoNoGIL no_gil_guard;
-          ge.run(stack);
+          ge.getExecutionPlan(stack).run(stack);
         }
         return createPyObjectForStack(std::move(stack));
       });

@@ -26,11 +26,36 @@ struct GraphExecutorState {
   std::unordered_map<ArgumentSpec, ExecutionPlanState> execution_plans;
 };
 
+struct ExecutionPlan {
+  ExecutionPlan() = default;
+  ExecutionPlan(std::shared_ptr<Graph> graph)
+      : code(graph), graph(std::move(graph)) {}
+
+  void run(Stack& stack) const {
+    return InterpreterState(code).run(stack);
+  }
+
+  operator bool() const {
+    return static_cast<bool>(graph);
+  }
+
+  ExecutionPlanState getDebugState() {
+    ExecutionPlanState state;
+    state.code = &code;
+    state.graph = graph.get();
+    return state;
+  }
+
+  Code code;
+  std::shared_ptr<Graph> graph;
+};
+
 struct GraphExecutorImpl;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
   GraphExecutor(std::shared_ptr<Graph> graph, bool optimize = true);
-  void run(Stack& inputs);
+  void run22(Stack& inputs);
+  const ExecutionPlan& getExecutionPlan(Stack& inputs);
   explicit operator bool() const {
     return pImpl != nullptr;
   }

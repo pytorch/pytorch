@@ -50,30 +50,6 @@ using tensor_list = std::vector<at::Tensor>;
 using Variable = autograd::Variable;
 using autograd::variable_list;
 
-struct ExecutionPlan {
-  ExecutionPlan() = default;
-  ExecutionPlan(std::shared_ptr<Graph> graph)
-      : code(graph), graph(std::move(graph)) {}
-
-  void run(Stack& stack) const {
-    return InterpreterState(code).run(stack);
-  }
-
-  operator bool() const {
-    return static_cast<bool>(graph);
-  }
-
-  ExecutionPlanState getDebugState() {
-    ExecutionPlanState state;
-    state.code = &code;
-    state.graph = graph.get();
-    return state;
-  }
-
-  Code code;
-  std::shared_ptr<Graph> graph;
-};
-
 struct DifferentiableGraphBackward : public autograd::Function {
   DifferentiableGraphBackward(GraphExecutor executor, size_t capture_size)
       : executor(std::move(executor)) {
@@ -101,7 +77,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
       }
     }
 
-    executor.run(stack);
+    executor.getExecutionPlan(stack).run(stack);
     AT_ASSERT(stack.size() == num_outputs());
 
     variable_list outputs;
@@ -366,6 +342,12 @@ struct GraphExecutorImpl {
         num_flat_inputs(countFlatInputs(graph)),
         num_outputs(this->graph->outputs().size()) {}
 
+
+  const ExecutionPlan& getExecutionPlan(Stack& stack)
+  {
+    return optimize ? getOrCompile(stack) : getOrCompileFallback();
+  }
+
   // entry point where execution begins
   void run(Stack& stack) {
     AT_CHECK(
@@ -379,8 +361,7 @@ struct GraphExecutorImpl {
       return runTraced(stack);
     }
 
-    auto& execution_plan =
-        optimize ? getOrCompile(stack) : getOrCompileFallback();
+    auto& execution_plan = getExecutionPlan(stack);
     return execution_plan.run(stack);
   }
 
@@ -613,8 +594,9 @@ struct GraphExecutorImpl {
 GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize)
     : pImpl(new GraphExecutorImpl(std::move(graph), optimize)) {}
 
-void GraphExecutor::run(Stack& inputs) {
-  return pImpl->run(inputs);
+
+const ExecutionPlan& GraphExecutor::getExecutionPlan(Stack& inputs) {
+  return pImpl->getExecutionPlan(inputs);
 }
 
 std::shared_ptr<Graph> GraphExecutor::graph() const {

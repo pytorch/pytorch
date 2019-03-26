@@ -687,9 +687,9 @@ struct CodeImpl {
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
   InterpreterStateImpl(const Code& code)
       : function(code.pImpl),
-        int_data(function->int_data.data()),
-        bool_data(function->bool_data),
-        registers(function->register_size) {}
+        int_data_(function->int_data.data()),
+        bool_data_(function->bool_data),
+        registers_(function->register_size) {}
 
  private:
   c10::intrusive_ptr<InterpreterStateImpl> intrusive_from_this() {
@@ -711,8 +711,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         size_t new_pc = pc + 1 + inst.callback(stack);
         for (int i = inst.outputs.size - 1; i >= 0; --i) {
           int reg = get(inst.outputs, i);
-          registers[reg] = pop(stack);
-          // std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
+          registers()[reg] = pop(stack);
+          // std::cout << "pop reg[" << reg << "];\n" << registers()[reg] << "\n";
         }
         pc = new_pc;
       } catch (Suspend& e) {
@@ -723,7 +723,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
         if (get(inst.inputs.free_flags, 0)) {
           // make sure the register is not freed once we are waked up
-          registers[get(inst.inputs.values, 0)] = e.future;
+          registers()[get(inst.inputs.values, 0)] = e.future;
         }
 
         // Make sure adding callback is the last step.
@@ -809,19 +809,19 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   int get(const ListHandle<int>& list, int i) {
-    return int_data[list.start + i];
+    return int_data()[list.start + i];
   };
   bool get(const ListHandle<bool>& list, int i) {
-    return bool_data[list.start + i];
+    return bool_data()[list.start + i];
   }
   void loadTensorsFromRegisters(const UseList& uses, Stack& stack) {
     for (int i = 0; i < uses.values.size; i++) {
       int reg = get(uses.values, i);
-      // std::cout << "push reg[" << reg << "];\n" << registers[reg] << "\n\n";
+      // std::cout << "push reg[" << reg << "];\n" << registers()[reg] << "\n\n";
       if (get(uses.free_flags, i)) {
-        stack.push_back(std::move(registers[reg]));
+        stack.push_back(std::move(registers()[reg]));
       } else {
-        stack.push_back(registers[reg]);
+        stack.push_back(registers()[reg]);
       }
     }
   }
@@ -831,8 +831,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   c10::intrusive_ptr<Future> future;
   std::shared_ptr<CodeImpl> function; // keep function alive
   // these are just copies of function to prevent indirections in interpreter
-  int* int_data;
-  const std::vector<bool>& bool_data;
+  int* int_data_;
+  int* int_data() {return int_data_; }
+  const std::vector<bool>& bool_data_;
+  const std::vector<bool>& bool_data() { return bool_data_; }
 
   // this holds all the tensors for this interpreter run
   // we don't bother minimizing the size of this vector, since the extra
@@ -844,8 +846,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // in the case where it is true, then the interpreter and this array get
   // copied if this every becomes a bottleneck then we _should_ consider
   // minimizing the total number or register
-  std::vector<IValue> registers;
-
+  std::vector<IValue> registers_;
+  std::vector<IValue>& registers() { return registers_; }
   // single buffer for input/output calls to ATen functions, so that we do not
   // reallocate
   Stack stack;
