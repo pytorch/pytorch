@@ -76,6 +76,18 @@
   dispatch:
      CUDA: masked_scale_cuda
 
+- func: _sobol_engine_draw(Tensor quasi, int n, Tensor sobolstate, int dimension, int num_generated, ScalarType? dtype) -> (Tensor, Tensor)
+  matches_jit_signature: True
+
+- func: _sobol_engine_ff_(Tensor(a!) self, int n, Tensor sobolstate, int dimension, int num_generated) -> Tensor(a!)
+  matches_jit_signature: True
+
+- func: _sobol_engine_scramble_(Tensor(a!) self, Tensor ltm, int dimension) -> Tensor(a!)
+  matches_jit_signature: True
+
+- func: _sobol_engine_initialize_state_(Tensor(a!) self, int dimension) -> Tensor(a!)
+  matches_jit_signature: True
+
 - func: _reshape_from_tensor(Tensor self, Tensor shape) -> Tensor
   matches_jit_signature: True
 
