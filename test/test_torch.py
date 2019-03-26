@@ -3465,6 +3465,10 @@ class _TestTorchMixin(object):
                 RuntimeError, "overflow",
                 lambda: torch.arange(1.175494351e-38, 3.402823466e+38, device=device))
 
+            # check that it holds a consistent output shape on precision-cornered step sizes
+            d = torch.arange(-4.0, 4.0, 0.01, dtype=torch.float32, device=device)
+            self.assertEqual(d.shape[0], 800)
+
     def test_arange_inference(self):
         saved_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.float32)
