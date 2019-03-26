@@ -697,20 +697,20 @@ Disable JIT for Debugging
 Inspecting Code
 ^^^^^^^^^^^^^^^
 
-TorchScript provides a code pretty-printer for all ScriptModule instances. This
-pretty-printer gives an interpretation of the script method's code as valid
-Python syntax. For example::
+    TorchScript provides a code pretty-printer for all ScriptModule instances. This
+    pretty-printer gives an interpretation of the script method's code as valid
+    Python syntax. For example::
 
         @torch.jit.script
         def foo(len):
-          # type: (int) -> torch.Tensor
-          rv = torch.zeros(3, 4)
-          for i in range(len):
+            # type: (int) -> torch.Tensor
+            rv = torch.zeros(3, 4)
+            for i in range(len):
             if i < 10:
                 rv = rv - 1.0
             else:
                 rv = rv + 1.0
-          return rv
+            return rv
 
         print(foo.code)
 
@@ -723,16 +723,16 @@ Python syntax. For example::
     The example script abouve produces the code::
 
         def forward(self,
-            len: int) -> Tensor:
-        rv = torch.zeros([3, 4], dtype=None, layout=None, device=None)
-        rv0 = rv
-        for i in range(len):
-            if torch.lt(i, 10):
-            rv1 = torch.sub(rv0, 1., 1)
-            else:
-            rv1 = torch.add(rv0, 1., 1)
-            rv0 = rv1
-        return rv0
+                    len: int) -> Tensor:
+            rv = torch.zeros([3, 4], dtype=None, layout=None, device=None)
+            rv0 = rv
+            for i in range(len):
+                if torch.lt(i, 10):
+                rv1 = torch.sub(rv0, 1., 1)
+                else:
+                rv1 = torch.add(rv0, 1., 1)
+                rv0 = rv1
+            return rv0
 
     This is TorchScript's interpretation of the code for the ``forward`` method.
     You can use this to ensure TorchScript (tracing or scripting) has captured
