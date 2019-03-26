@@ -24,6 +24,10 @@ C10_DEFINE_TENSOR_TYPE(TensorType1);
 C10_DECLARE_TENSOR_TYPE(TensorType2);
 C10_DEFINE_TENSOR_TYPE(TensorType2);
 
+std::unique_ptr<c10::KernelCache> noCache() {
+  return nullptr;
+}
+
 void errorKernel(Stack* stack, KernelCache* cache) {
   EXPECT_TRUE(false); // this kernel should never be called
 }
@@ -72,32 +76,32 @@ void expectCallsDecrement(TensorTypeId type_id) {
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators().op(opSchema, kernel(&incrementKernel), dispatchKey(TensorType1()));
+  auto registrar = RegisterOperators().op(opSchema, kernel(&incrementKernel, &noCache), dispatchKey(TensorType1()));
   expectCallsIncrement(TensorType1());
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
-      .op(opSchema, kernel(&incrementKernel), dispatchKey(TensorType1()))
-      .op(opSchema, kernel(&errorKernel), dispatchKey(TensorType2()))
-      .op(errorOpSchema, kernel(&errorKernel), dispatchKey(TensorType1()))
-      .op(errorOpSchema, kernel(&errorKernel), dispatchKey(TensorType2()));
+      .op(opSchema, kernel(&incrementKernel, &noCache), dispatchKey(TensorType1()))
+      .op(opSchema, kernel(&errorKernel, &noCache), dispatchKey(TensorType2()))
+      .op(errorOpSchema, kernel(&errorKernel, &noCache), dispatchKey(TensorType1()))
+      .op(errorOpSchema, kernel(&errorKernel, &noCache), dispatchKey(TensorType2()));
   expectCallsIncrement(TensorType1());
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
-  auto registrar1 = RegisterOperators().op(opSchema, kernel(&incrementKernel), dispatchKey(TensorType1()));
-  auto registrar2 = RegisterOperators().op(opSchema, kernel(&errorKernel), dispatchKey(TensorType2()));
-  auto registrar3 = RegisterOperators().op(errorOpSchema, kernel(&errorKernel), dispatchKey(TensorType1()));
-  auto registrar4 = RegisterOperators().op(errorOpSchema, kernel(&errorKernel), dispatchKey(TensorType2()));
+  auto registrar1 = RegisterOperators().op(opSchema, kernel(&incrementKernel, &noCache), dispatchKey(TensorType1()));
+  auto registrar2 = RegisterOperators().op(opSchema, kernel(&errorKernel, &noCache), dispatchKey(TensorType2()));
+  auto registrar3 = RegisterOperators().op(errorOpSchema, kernel(&errorKernel, &noCache), dispatchKey(TensorType1()));
+  auto registrar4 = RegisterOperators().op(errorOpSchema, kernel(&errorKernel, &noCache), dispatchKey(TensorType2()));
   expectCallsIncrement(TensorType1());
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
   {
-    auto registrar1 = RegisterOperators().op(opSchema, kernel(&incrementKernel), dispatchKey(TensorType1()));
+    auto registrar1 = RegisterOperators().op(opSchema, kernel(&incrementKernel, &noCache), dispatchKey(TensorType1()));
     {
-      auto registrar2 = RegisterOperators().op(opSchema, kernel(&decrementKernel), dispatchKey(TensorType2()));
+      auto registrar2 = RegisterOperators().op(opSchema, kernel(&decrementKernel, &noCache), dispatchKey(TensorType2()));
 
       // assert that schema and cpu kernel are present
       expectCallsIncrement(TensorType1());

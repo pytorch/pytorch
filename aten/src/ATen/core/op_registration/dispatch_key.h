@@ -18,13 +18,14 @@ namespace detail {
     explicit constexpr DispatchKeyConfigParameter(TensorTypeId dispatch_key)
     : dispatch_key_(dispatch_key) {}
 
-    void apply(KernelRegistrationConfig* registration) && {
-      registration->dispatch_key = std::move(dispatch_key_);
+    void apply(KernelRegistrationConfig* registration) const {
+      registration->dispatch_key = dispatch_key_;
     }
 
   private:
     TensorTypeId dispatch_key_;
   };
+  static_assert(is_registration_config_parameter<DispatchKeyConfigParameter>::value, "KernelRegistrationConfigParameter must fulfill the registration config parameter concept");
 }
 
 /**
