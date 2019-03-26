@@ -2,7 +2,11 @@
 
 
 def quote(s):
-    return '"' + s + '"'
+    return sandwich('"', s)
+
+
+def sandwich(bread, jam):
+    return bread + jam + bread
 
 
 def override(word, substitutions):

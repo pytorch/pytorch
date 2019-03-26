@@ -22,6 +22,7 @@ class ConfigNode(object):
     def get_label(self):
         return self.node_name
 
+    # noinspection PyMethodMayBeStatic
     def get_children(self):
         return []
 
