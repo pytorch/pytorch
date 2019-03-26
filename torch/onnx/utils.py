@@ -550,8 +550,13 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 elif n.output().type().kind() == "DeviceObjType":
                     return None
                 else:
-                    raise RuntimeError("Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
-                        n.kindOf("value")))
+                    is_caffe2_op = False
+                    for use_node in n.output().uses():
+                        if use_node.user.kind().startswith("_caffe2::"):
+                            is_caffe2_op = True
+                    if not is_caffe2_op:
+                        raise RuntimeError("Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
+                            n.kindOf("value")))
             elif n.mustBeNone() or op_name == "ListConstruct" or op_name == "ListUnpack":
                 # None is not an ONNX operator; keep it as None
                 # let the exporter handle finally eliminating these

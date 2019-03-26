@@ -1230,14 +1230,41 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(3, 3, requires_grad=True)
         self.run_model_test(NarrowModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
-    def test_c2_op(self):
+    def test_c2_roi_align(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, feature, rois):
+                roi_feature = torch.ops._caffe2.RoIAlign(
+                    feature, rois, order="NCHW", spatial_scale=1.0,
+                    pooled_h=3, pooled_w=3, sampling_ratio=3,
+                )
+                return roi_feature
+
+        def rand_roi(N, C, H, W):
+            return [
+                float(int(N * np.random.rand())),
+                0.5 * np.random.rand() * W,
+                0.5 * np.random.rand() * H,
+                (0.5 + 0.5 * np.random.rand()) * W,
+                (0.5 + 0.5 * np.random.rand()) * H,
+            ]
+
+        N, C, H, W = 1, 4, 10, 8
+        feature = torch.randn(N, C, H, W)
+        rois = torch.tensor([rand_roi(N, C, H, W) for _ in range(10)])
+        inputs = (feature, rois)
+        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
+
+    def test_c2_generate_proposals(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
                 super(MyModel, self).__init__()
 
             def forward(self, scores, bbox_deltas, im_info, anchors):
                 a, b = torch.ops._caffe2.GenerateProposals(
-                    (scores), (bbox_deltas), (im_info), (anchors),
+                    scores, bbox_deltas, im_info, anchors,
                     2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0,
                 )
                 return a, b
@@ -1253,6 +1280,72 @@ class TestCaffe2Backend(unittest.TestCase):
         im_info = torch.ones(img_count, 3, dtype=torch.float32)
         anchors = torch.ones(A, 4, dtype=torch.float32)
         inputs = (scores, bbox_deltas, im_info, anchors)
+        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
+
+    def test_c2_bbox_transform(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, rois, deltas, im_info):
+                a, b = torch.ops._caffe2.BBoxTransform(
+                    rois, deltas, im_info,
+                    weights=[1., 1., 1., 1.], apply_scale=False, rotated=True, angle_bound_on=True, angle_bound_lo=-90, angle_bound_hi=90, clip_angle_thresh=0.5,
+                )
+                return a, b
+
+        def generate_rois(roi_counts, im_dims):
+            assert len(roi_counts) == len(im_dims)
+            all_rois = []
+            for i, num_rois in enumerate(roi_counts):
+                if num_rois == 0:
+                    continue
+                # [batch_idx, x1, y1, x2, y2]
+                rois = np.random.uniform(0, im_dims[i], size=(roi_counts[i], 5)).astype(
+                    np.float32
+                )
+                rois[:, 0] = i  # batch_idx
+                # Swap (x1, x2) if x1 > x2
+                rois[:, 1], rois[:, 3] = (
+                    np.minimum(rois[:, 1], rois[:, 3]),
+                    np.maximum(rois[:, 1], rois[:, 3]),
+                )
+                # Swap (y1, y2) if y1 > y2
+                rois[:, 2], rois[:, 4] = (
+                    np.minimum(rois[:, 2], rois[:, 4]),
+                    np.maximum(rois[:, 2], rois[:, 4]),
+                )
+                all_rois.append(rois)
+            if len(all_rois) > 0:
+                return np.vstack(all_rois)
+            return np.empty((0, 5)).astype(np.float32)
+
+        def generate_rois_rotated(roi_counts, im_dims):
+            rois = generate_rois(roi_counts, im_dims)
+            # [batch_id, ctr_x, ctr_y, w, h, angle]
+            rotated_rois = np.empty((rois.shape[0], 6)).astype(np.float32)
+            rotated_rois[:, 0] = rois[:, 0]  # batch_id
+            rotated_rois[:, 1] = (rois[:, 1] + rois[:, 3]) / 2.  # ctr_x = (x1 + x2) / 2
+            rotated_rois[:, 2] = (rois[:, 2] + rois[:, 4]) / 2.  # ctr_y = (y1 + y2) / 2
+            rotated_rois[:, 3] = rois[:, 3] - rois[:, 1] + 1.0  # w = x2 - x1 + 1
+            rotated_rois[:, 4] = rois[:, 4] - rois[:, 2] + 1.0  # h = y2 - y1 + 1
+            rotated_rois[:, 5] = np.random.uniform(-90.0, 90.0)  # angle in degrees
+            return rotated_rois
+
+        roi_counts = [0, 2, 3, 4, 5]
+        batch_size = len(roi_counts)
+        total_rois = sum(roi_counts)
+        im_dims = np.random.randint(100, 600, batch_size)
+        rois = generate_rois_rotated(roi_counts, im_dims)
+        box_dim = 5
+        num_classes = 7
+        deltas = np.random.randn(total_rois, box_dim * num_classes).astype(np.float32)
+        im_info = np.zeros((batch_size, 3)).astype(np.float32)
+        im_info[:, 0] = im_dims
+        im_info[:, 1] = im_dims
+        im_info[:, 2] = 1.0
+        im_info = torch.zeros((batch_size, 3))
+        inputs = (torch.tensor(rois), torch.tensor(deltas), torch.tensor(im_info))
         self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
 
 

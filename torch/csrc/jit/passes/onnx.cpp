@@ -254,7 +254,7 @@ void BlockToONNX(
           ++tensor_input_num;
           continue;
         } else if (type->kind() == TypeKind::BoolType || type->kind() == TypeKind::FloatType || type->kind() == TypeKind::IntType) {
-          const auto& constant_node = node->inputs()[input_index]->node();
+          const auto* constant_node = node->inputs()[input_index]->node();
           AT_ASSERT(constant_node->kind() == prim::Constant);
           const auto& tensor = constant_node->t(attr::value);
           AT_ASSERT(tensor.numel() == 1);
@@ -267,38 +267,49 @@ void BlockToONNX(
             throw std::runtime_error("Unhandled scalar arg: " + args[arg_index].name() + ", type: " + c10::typeKindToString(type->kind()));
           }
           new_node->removeInput(tensor_input_num);
-        } else if (type->kind() == TypeKind::ListType) {
-          const auto& constant_node = node->inputs()[input_index]->node();
+        } else if (type->kind() == TypeKind::StringType) {
+          const auto* constant_node = node->inputs()[input_index]->node();
           AT_ASSERT(constant_node->kind() == prim::Constant);
-          const auto& tensor = constant_node->t(attr::value);
+          new_node->s_(Symbol::attr(args[arg_index].name()), constant_node->s(attr::value));
+          new_node->removeInput(tensor_input_num);
+        } else if (type->kind() == TypeKind::ListType) {
+          const auto& list_node = node->inputs()[input_index]->node();
+          // std::cout << "===>: " << list_node->kind().toQualString() << std::endl;
+          AT_ASSERT(list_node->kind() == prim::ListConstruct);
           const auto& elem_type = reinterpret_cast<ListType*>(type.get())->getElementType();
           if (elem_type->isSubclass(TypeKind::TensorType)) {
-            while (input_index < node->inputs().size()) {
-              if (node->inputs()[input_index]->type()->isSubclass(TypeKind::TensorType)) {
-                ++input_index;
-                ++tensor_input_num;
-              } else {
-                break;
-              }
-            }
-            continue;
+            // FIXME
+            throw std::runtime_error("not supported yet!");
+            //while (input_index < node->inputs().size()) {
+            //  if (node->inputs()[input_index]->type()->isSubclass(TypeKind::TensorType)) {
+            //    ++input_index;
+            //    ++tensor_input_num;
+            //  } else {
+            //    break;
+            //  }
+            //}
+            //continue;
           } else if (elem_type->kind() == TypeKind::IntType || elem_type->kind() == TypeKind::BoolType) {
-            std::vector<int64_t> values;
-            int64_t* ptr = tensor.data<int64_t>();
-            for (int vi = 0; vi < tensor.numel(); ++vi) {
-              values.push_back(*(ptr + vi));
-            }
-            new_node->is_(Symbol::attr(args[arg_index].name()), values);
-          } else if (type->kind() == TypeKind::FloatType) {
+            throw std::runtime_error("not supported yet!");
+            //std::vector<int64_t> values;
+            //int64_t* ptr = tensor.data<int64_t>();
+            //for (int vi = 0; vi < tensor.numel(); ++vi) {
+            //  values.push_back(*(ptr + vi));
+            //}
+            //new_node->is_(Symbol::attr(args[arg_index].name()), values);
+          } else if (elem_type->kind() == TypeKind::FloatType) {
             std::vector<double> values;
-            double* ptr = tensor.data<double>();
-            for (int vi = 0; vi < tensor.numel(); ++vi) {
-              values.push_back(*(ptr + vi));
+            for (const auto* elem_input : list_node->inputs()) {
+              const auto* constant_node = elem_input->node();
+              AT_ASSERT(constant_node->kind() == prim::Constant);
+              const auto& tensor = constant_node->t(attr::value);
+              AT_ASSERT(tensor.numel() == 1);
+              values.push_back(tensor.item().to<double>());
             }
             new_node->fs_(Symbol::attr(args[arg_index].name()), values);
           } else {
             // TODO handle the StringType, no c10 op accept String as argument yet
-            throw std::runtime_error("Unhandled scalar arg: " + args[arg_index].name() + ", type: " + c10::typeKindToString(type->kind()));
+            throw std::runtime_error("Unhandled scalar arg: " + args[arg_index].name() + ", type: " + c10::typeKindToString(elem_type->kind()));
           }
           new_node->removeInput(tensor_input_num);
         } else {
