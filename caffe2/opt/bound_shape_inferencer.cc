@@ -2,6 +2,7 @@
 #include "caffe2/core/operator_schema.h"
 #include "caffe2/core/tensor_impl.h"
 #include "caffe2/utils/proto_utils.h"
+#include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
 
@@ -43,10 +44,15 @@ void EnsureShapeNames(std::unordered_map<std::string, ShapeInfo>* info) {
 void BoundShapeInferencer::InferBoundShapeAndType(
     const NetDef& net,
     const std::unordered_map<std::string, ShapeInfo>& info) {
+  const static std::unordered_set<std::string> unsupported{"Tile"};
   shape_info_ = info;
 
   for (const auto& op : net.op()) {
     VLOG(1) << op.type();
+    if (unsupported.count(op.type())) {
+      continue;
+    }
+
     if (op.type() == "SparseLengthsSum" ||
         op.type() == "SparseLengthsSumFused8BitRowwise" ||
         op.type() == "SparseLengthsWeightedSum" ||
@@ -60,6 +66,14 @@ void BoundShapeInferencer::InferBoundShapeAndType(
       InferReshape(op);
     } else if (op.type() == "LengthsRangeFill") {
       InferLengthsRangeFill(op);
+    } else if (
+        (caffe2::StartsWith(op.type(), "GivenTensor") &&
+         caffe2::EndsWith(op.type(), "Fill")) ||
+        op.type() == "ConstantFill" || op.type() == "Int8GivenTensorFill" ||
+        op.type() == "Int8GivenIntTensorFill") {
+      InferGivenTensorFill(op);
+    } else if (op.type() == "Shape") {
+      InferShape(op);
     } else {
       InferCommonOp(op);
     }
@@ -120,6 +134,15 @@ std::vector<TensorShape> InferOutput(
   const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
   CAFFE_ENFORCE(schema);
   return schema->InferTensor(op, input_shapes);
+}
+
+void BoundShapeInferencer::InferGivenTensorFill(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.output_size(), 1, op.type(), " must have 1 output");
+  InferCommonOp(op);
+  auto it = shape_info_.find(op.output(0));
+  if (it != shape_info_.end()) {
+    it->second.dim_type = ShapeInfo::DimType::CONSTANT;
+  }
 }
 
 void BoundShapeInferencer::InferLengthsRangeFill(const OperatorDef& op) {
@@ -199,6 +222,14 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
       ShapeInfo::DimType::BATCH,
       {spec_.max_batch_size, output_dim1},
       TensorProto_DataType_FLOAT);
+}
+
+void BoundShapeInferencer::InferShape(const OperatorDef& op) {
+  InferCommonOp(op);
+  // old_shape should be a constant
+  if (op.output_size() > 0 && shape_info_.count(op.output(0))) {
+    shape_info_[op.output(0)].dim_type = ShapeInfo::DimType::CONSTANT;
+  }
 }
 
 void BoundShapeInferencer::InferReshape(const OperatorDef& op) {
@@ -290,37 +321,25 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
     ArgumentHelper helper(op);
     auto axis = helper.GetSingleArgument<int32_t>("axis", 1);
     auto axis_w = helper.GetSingleArgument<int32_t>("axis_w", 1);
-    CAFFE_ENFORCE_EQ(
-        axis,
-        1,
-        "Don't know how to deduce input of FC with axis not equal to 1: ",
-        op.input(0));
-    CAFFE_ENFORCE_EQ(
-        axis_w,
-        1,
-        "Don't know how to deduce input of FC with axis_w not equal to 1: ",
-        op.input(0));
     const TensorShape w_shape = w_shape_info.shape;
-    CAFFE_ENFORCE_EQ(
-        w_shape.dims_size(),
-        2,
-        "Don't know how to deduce input of FC other than of dim size 2: ",
-        op.input(0));
     bool transposed = (op.type() == "FC") ? false : true;
     const int canonical_axis_w =
         canonical_axis_index_(axis_w, w_shape.dims().size());
     const int64_t K = transposed ? SizeToDim(w_shape, canonical_axis_w)
                                  : SizeFromDim(w_shape, canonical_axis_w);
+    std::vector<int64_t> dims;
+    for (int i = 0; i < axis - 1; ++i) {
+      dims.push_back(1);
+    }
+    dims.push_back(spec_.max_batch_size);
+    dims.push_back(K);
     current_dim_type_ = ShapeInfo::DimType::BATCH;
     current_max_batch_size_ = spec_.max_batch_size;
     CheckAndSetTensorShapeAndType(
-        op.input(0),
-        ShapeInfo::DimType::BATCH,
-        {spec_.max_batch_size, K},
-        w_shape.data_type());
+        op.input(0), ShapeInfo::DimType::BATCH, dims, w_shape.data_type());
   } else {
     ShapeInfo& x_shape_info = x_it->second;
-    if (x_shape_info.dim_type == ShapeInfo::DimType::UNKNOWN) {
+    if (x_shape_info.dim_type != ShapeInfo::DimType::BATCH) {
       CAFFE_ENFORCE_GE(x_shape_info.shape.dims_size(), 1);
       x_shape_info.shape.set_dims(0, spec_.max_batch_size);
       x_shape_info.dim_type = ShapeInfo::DimType::BATCH;
@@ -342,6 +361,7 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
 void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
   // First, we need to check that all the input shape/types are already
   // presented
+  try {
   std::vector<TensorShape> input_shapes;
   for (const auto& input : op.input()) {
     const auto it = shape_info_.find(input);
@@ -356,11 +376,7 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
   const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
   CAFFE_ENFORCE(schema);
   std::vector<TensorShape> output_shapes;
-  try {
     output_shapes = schema->InferTensor(op, input_shapes);
-  } catch (const std::exception& e) {
-    LOG(WARNING) << "Caught exception while inferring shapes for " << op.type();
-  }
   int i = 0;
   for (const auto& shape : output_shapes) {
     if (shape.unknown_shape()) {
@@ -372,6 +388,13 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
         current_dim_type_,
         ConvertToVec(shape.dims()),
         shape.data_type());
+  }
+  } catch (const caffe2::EnforceNotMet& e) {
+    LOG(ERROR) << "Enforce not met while inferring shapes for " << op.type()
+               << ": " << e.msg();
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "Caught exception while inferring shapes for " << op.type()
+                 << ": " << e.what();
   }
 }
 

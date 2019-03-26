@@ -2,21 +2,6 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathReduce.cu"
 #else
 
-void THCTensor_(sum)(THCState* state, THCTensor *self, THCTensor *src, int dimension, int keepdim) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
-  if (!THC_reduceDim<scalar_t>(state, self, src,
-                           thrust::identity<accreal>{},
-                           ReduceAdd<accreal>{},
-                           thrust::identity<accreal>{},
-                           scalar_cast<accreal>(0),
-                           dimension,
-                           keepdim)) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
 void THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, int dimension, int keepdim) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   if (!THC_reduceDim<scalar_t>(state, self, src,
@@ -25,23 +10,6 @@ void THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, int dime
                            thrust::identity<accreal>{},
                            scalar_cast<accreal>(1),
                            dimension,
-                           keepdim)) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
-void THCTensor_(mean)(THCState *state, THCTensor *self, THCTensor *src, int dim, int keepdim)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
-  const accreal size = scalar_cast<accreal>(THCTensor_(size)(state, src, dim));
-  if (!THC_reduceDim<scalar_t>(state, self, src,
-                           thrust::identity<accreal>{},
-                           ReduceAdd<accreal>{},
-                           ReduceDivide<accreal>{size},
-                           scalar_cast<accreal>(0),
-                           dim,
                            keepdim)) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
   }
@@ -326,21 +294,6 @@ accreal THCTensor_(sumall)(THCState *state, THCTensor *self) {
   return val;
 }
 
-accreal THCTensor_(prodall)(THCState *state, THCTensor *self) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
-  accreal val;
-  if (!THC_reduceAll<scalar_t>(state, self,
-                           thrust::identity<accreal>{},
-                           ReduceMultiply<accreal>{},
-                           scalar_cast<accreal>(1),
-                           &val, 0)) {
-    THArgCheck(false, 1, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-  return val;
-}
-
 accreal THCTensor_(meanall)(THCState *state, THCTensor *self)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
@@ -373,74 +326,6 @@ scalar_t THCTensor_(maxall)(THCState *state, THCTensor *self) {
 
   THCudaCheck(cudaGetLastError());
   return scalar_cast<scalar_t>(val);
-}
-
-scalar_t THCTensor_(medianall)(THCState *state, THCTensor *self) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
-
-  scalar_t val;
-  ptrdiff_t nelem, k;
-
-  nelem = THCTensor_(nElement)(state, self);
-  k = (nelem-1) >> 1;
-
-  THCTensor *view = THCTensor_(newView)(state, self, {nelem});
-
-  THCTensor *sorted = THCTensor_(new)(state);
-  THCudaLongTensor *indices = THCudaLongTensor_new(state);
-
-  THCTensor_(sort)(state, sorted, indices, view, 0, 0);
-
-  val = THCTensor_(get1d)(state, sorted, k);
-
-  THCTensor_(free)(state, view);
-  THCTensor_(free)(state, sorted);
-  THCudaLongTensor_free(state, indices);
-
-  THCudaCheck(cudaGetLastError());
-
-  return val;
-}
-
-void THCTensor_(median)(THCState *state,
-                        THCTensor *values,
-                        THCudaLongTensor *indices,
-                        THCTensor *self,
-                        int dimension,
-                        int keepdim) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
-
-  int64_t t_size_dim, k;
-
-  t_size_dim = THCTensor_(size)(state, self, dimension);
-
-  k = (t_size_dim-1) >> 1;
-
-  THCTensor *sorted = THCTensor_(new)(state);
-  THCudaLongTensor *sorted_indices = THCudaLongTensor_new(state);
-
-  THCTensor_(sort)(state, sorted, sorted_indices, self, dimension, 0);
-
-  THCTensor *newValues = THCTensor_(newNarrow)(state, sorted, dimension, k, 1);
-  THCudaLongTensor *newIndices = THCudaLongTensor_newNarrow(state, sorted_indices, dimension, k, 1);
-
-  THCTensor_(free)(state, sorted);
-  THCudaLongTensor_free(state, sorted_indices);
-
-  if (!keepdim) {
-    THCTensor_(squeeze1d)(state, newValues, newValues, dimension);
-    THCudaLongTensor_squeeze1d(state, newIndices, newIndices, dimension);
-  }
-
-  THCTensor_(resizeAs)(state, values, newValues);
-  THCudaLongTensor_resizeAs(state, indices, newIndices);
-  THCTensor_(copy)(state, values, newValues);
-  THCudaLongTensor_copy(state, indices, newIndices);
-
-  THCTensor_(free)(state, newValues);
-  THCudaLongTensor_free(state, newIndices);
-
-  THCudaCheck(cudaGetLastError());
 }
 
 void THCTensor_(max)(THCState *state,

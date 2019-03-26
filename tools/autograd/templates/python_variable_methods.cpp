@@ -45,6 +45,18 @@ using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
 
+static PyObject * THPVariable__is_view(PyObject *self, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  if (self_.is_view()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
@@ -219,7 +231,7 @@ static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   jit::tracer::warn("Converting a tensor to a Python integer", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  if (isFloatingType(self_.type().scalarType())) {
+  if (isFloatingType(self_.scalar_type())) {
     // we can't dispatch to item<int64_t> here because we want to avoid ATen overflow checks;
     // the python integral type (long in python2) can't overflow.
     return THPUtils_packDoubleAsInt(dispatch_to_CDouble(self_));
@@ -237,7 +249,7 @@ static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   // TODO: change the condition to `self_.dim() != 0` once we expose scalars
   // in PyTorch.
-  if (!isIntegralType(self_.type().scalarType()) || self_.numel() != 1) {
+  if (!isIntegralType(self_.scalar_type()) || self_.numel() != 1) {
     throw TypeError("only integer tensors of a single element can be converted to an index");
   }
   return wrap(dispatch_to_CLong(self_));
@@ -253,7 +265,7 @@ static Tensor dispatch_invert(const Tensor & self) {
 static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  if (self_.type().scalarType() != at::kByte) {
+  if (self_.scalar_type() != at::kByte) {
     throw TypeError("~ (operator.invert) is only implemented on byte tensors");
   }
   return THPVariable_Wrap(dispatch_invert(self_));
@@ -347,8 +359,7 @@ static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  size_t element_size = self_.type().elementSizeInBytes();
-  return THPUtils_packInt64(element_size);
+  return THPUtils_packInt64(self_.element_size());
   END_HANDLE_TH_ERRORS
 }
 
@@ -660,6 +671,7 @@ PyMethodDef variable_methods[] = {
   {"__nonzero__", (PyCFunction)THPVariable_bool, METH_NOARGS, NULL},
   {"__invert__", (PyCFunction)THPVariable_invert, METH_NOARGS, NULL},
   {"__matmul__", (PyCFunction)THPVariable_matmul, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"_is_view", (PyCFunction)THPVariable__is_view, METH_NOARGS, NULL},
   {"apply_", (PyCFunction)THPVariable_apply_, METH_O, NULL},
   {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},

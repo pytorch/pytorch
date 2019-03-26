@@ -29,6 +29,8 @@ void THTensor_(random)(THTensor *self, THGenerator *_generator)
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (float)(THRandom_random(_generator) % ((1ULL << FLT_MANT_DIG) + 1)););
 #elif defined(TH_REAL_IS_DOUBLE)
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (double)(THRandom_random64(_generator) % ((1ULL << DBL_MANT_DIG) + 1)););
+#elif defined(TH_REAL_IS_BOOL)
+    TH_TENSOR_APPLY(scalar_t, self, *self_data = (bool)(THRandom_random(_generator) % 2););
 #else
 #error "Unknown type"
 #endif
@@ -51,12 +53,6 @@ void THTensor_(clampedRandom)(THTensor *self, THGenerator *_generator, int64_t m
 void THTensor_(cappedRandom)(THTensor *self, THGenerator *_generator, int64_t max) {
   THArgCheck(max > 0, 1, "max must be positive, but got: max = %lld", max);
   THTensor_(clampedRandom)(self, _generator, 0, max);
-}
-
-void THTensor_(geometric)(THTensor *self, THGenerator *_generator, double p)
-{
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)THRandom_geometric(_generator, p););
 }
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)

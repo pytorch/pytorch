@@ -51,7 +51,7 @@ fillSliceWithIndex(TensorInfo<int64_t, IndexType> out,
 
   for (int64_t i = threadIdx.x; i < sliceSize; i += blockDim.x) {
     // Torch indices are 1-based (hence the +1)
-    base[i * sliceStride] = i + TH_INDEX_BASE;
+    base[i * sliceStride] = i;
   }
 }
 
@@ -76,7 +76,7 @@ struct GlobalIndexToPerSliceIndex {
   GlobalIndexToPerSliceIndex(int64_t size) : sliceSize(size) {}
 
   __device__ inline void operator()(int64_t& v) const {
-    v = v % sliceSize + TH_INDEX_BASE;
+    v = v % sliceSize;
   }
 
   const int64_t sliceSize;

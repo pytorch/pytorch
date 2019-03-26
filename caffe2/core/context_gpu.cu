@@ -112,7 +112,7 @@ void CUDAContext::CopyBytesSync(
   // This emulates Caffe2 original behavior where sync copy doesn't change the
   // device. It's probably better for clarity to switch to the target device
   // explicitly here, but in the worst case CUDA would sync for us.
-  // TODO: change it to DeviceGuard
+  // TODO: change it to CUDAGuard
   CUDAContext context(-1); // take current device
   CUDA_ENFORCE(cudaMemcpyAsync(
       dst, src, nbytes, cudaMemcpyDefault, context.cuda_stream()));
@@ -212,7 +212,7 @@ static void Caffe2InitializeCuda() {
       "). Increase that and recompile.");
 
   for (DeviceIndex i = 0; i < NumCudaDevices(); ++i) {
-    DeviceGuard g(i);
+    CUDAGuard g(i);
     // Enable peer access.
     const int peer_group = i / CAFFE2_CUDA_MAX_PEER_SIZE;
     const int peer_start = peer_group * CAFFE2_CUDA_MAX_PEER_SIZE;

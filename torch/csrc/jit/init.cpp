@@ -26,10 +26,11 @@
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/passes/specialize_undef.h>
+#include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/to_batch.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/pybind_utils.h>
@@ -80,11 +81,11 @@ bool loadPythonClasses() {
 } // anonymous namespace
 
 #if defined(_WIN32)
-std::string runJITCPPTests() {
+void runJITCPPTests() {
   AT_ERROR("JIT tests not yet supported on Windows");
 }
 #else
-std::string runJITCPPTests();
+void runJITCPPTests();
 #endif
 
 void initJITBindings(PyObject* module) {
@@ -112,6 +113,26 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_cse",
           [](std::shared_ptr<Graph>& g) {
             return EliminateCommonSubexpression(g); // overload resolution
+          })
+      .def(
+          "_jit_pass_expand_fakequant",
+          [](std::shared_ptr<Graph>& g) { return ExpandFakeQuantNodes(g); })
+      .def(
+          "_jit_pass_propagate_qinfo",
+          [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
+      .def(
+          "_jit_pass_insert_observers",
+          [](std::shared_ptr<Graph>& g) { return InsertObserverNodes(g); })
+      .def(
+          "_jit_pass_insert_fakequant",
+          [](std::shared_ptr<Graph>& g) { return InsertFakeQuantNodes(g); })
+      .def(
+          "_jit_pass_quantlint",
+          [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
+      .def(
+          "_jit_pass_fold_quant_inputs",
+          [](std::shared_ptr<Graph>& g) {
+            return FoldQuantNodesIntoInputsOutputs(g);
           })
       .def(
           "_jit_pass_remove_inplace_ops",
@@ -188,7 +209,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
-      .def("_jit_pass_specialize_undef", specializeUndef)
+      .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def(
           "_jit_differentiate",
@@ -351,6 +372,9 @@ void initJITBindings(PyObject* module) {
   py::class_<FunctionSchema>(m, "FunctionSchema")
       .def_property_readonly(
           "name", [](FunctionSchema& self) { return self.name(); })
+      .def_property_readonly(
+          "overload_name",
+          [](FunctionSchema& self) { return self.overload_name(); })
       .def_property_readonly(
           "arguments", [](FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(

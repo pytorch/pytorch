@@ -123,11 +123,12 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/pickler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/import_method.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/import_source.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
@@ -136,7 +137,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/irparser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/caffe2_operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_c10_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/symbolic_script.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
@@ -161,14 +161,16 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_inplace_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/shape_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/requires_grad_analysis.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_undef.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_autogradzero.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/python_print.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/utils/subgraph_utils.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/utils/check_alias_annotation.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/passes/utils/alias_tracker.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/utils/memory_dag.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/quantization.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/register_quantized_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
@@ -177,7 +179,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/schema_type_parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/script/user_type.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/class_type.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/parser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
@@ -192,13 +194,8 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/fuser/executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
-  ${TORCH_ROOT}/test/cpp/jit/no-gtest.cpp
+  ${TORCH_ROOT}/test/cpp/jit/test.cpp
   )
-
-if (BUILD_CAFFE2_OPS)
-  list(APPEND TORCH_SRCS
-    ${TORCH_SRC_DIR}/csrc/jit/register_caffe2_ops.cpp)
-endif()
 
 if (WIN32)
   list(APPEND TORCH_SRCS
@@ -493,6 +490,7 @@ if (BUILD_PYTHON)
   endif()
 
   set(TORCH_PYTHON_SRCS
+    ${TORCH_SRC_DIR}/csrc/CudaIPCTypes.cpp
     ${TORCH_SRC_DIR}/csrc/DataLoader.cpp
     ${TORCH_SRC_DIR}/csrc/Device.cpp
     ${TORCH_SRC_DIR}/csrc/Dtype.cpp

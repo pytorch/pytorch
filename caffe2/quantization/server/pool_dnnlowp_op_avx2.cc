@@ -34,7 +34,7 @@ void max_pool_avx2(
       wstart = wstart > 0 ? wstart : 0;
 
       uint8_t* Yh = Ydata_temp + (ph * pooled_width + pw) * channels;
-      constexpr int VLEN = 8;
+      constexpr int VLEN = 32;
       // vectorized loop
       for (int c = 0; c < channels / VLEN * VLEN; c += VLEN) {
         __m256i Y_v = _mm256_setzero_si256();

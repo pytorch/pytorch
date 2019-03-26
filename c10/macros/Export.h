@@ -30,6 +30,20 @@
 // C10_BUILD_SHARED_LIB to check whether pytorch is building shared or static
 // libraries.
 
+// For build systems that do not directly depend on CMake and directly build
+// from the source directory (such as Buck), one may not have a cmake_macros.h
+// file at all. In this case, the build system is responsible for providing
+// correct macro definitions corresponding to the cmake_macros.h.in file.
+//
+// In such scenarios, one should define the macro
+//     C10_USING_CUSTOM_GENERATED_MACROS
+// to inform this header that it does not need to include the cmake_macros.h
+// file.
+
+#ifndef C10_USING_CUSTOM_GENERATED_MACROS
+#include "c10/macros/cmake_macros.h"
+#endif // C10_USING_CUSTOM_GENERATED_MACROS
+
 #ifdef _WIN32
 #if defined(C10_BUILD_SHARED_LIBS)
 #define C10_EXPORT __declspec(dllexport)

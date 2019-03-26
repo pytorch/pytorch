@@ -191,7 +191,7 @@ void reflection_pad1d_out_template(
   Tensor input = input_.contiguous();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-    input.type(), "reflection_pad1d_out_template", [&] {
+    input.scalar_type(), "reflection_pad1d_out_template", [&] {
       reflection_pad1d_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
           input.data<scalar_t>(), output.data<scalar_t>(),
@@ -239,7 +239,7 @@ void reflection_pad1d_backward_out_template(
   dim3 grid_size((int) ::ceil(output_w / 256.0), nplane, nbatch);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-    grad_input.type(), "reflection_pad1d_backward_out_template", [&] {
+    grad_input.scalar_type(), "reflection_pad1d_backward_out_template", [&] {
       reflection_pad1d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
           grad_input.data<scalar_t>(), grad_output.data<scalar_t>(),
@@ -311,7 +311,7 @@ void reflection_pad2d_out_template(
     (int) std::ceil(output_plane_size/256.0), nplane, nbatch);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-    input.type(), "reflection_pad2d_out_template", [&] {
+    input.scalar_type(), "reflection_pad2d_out_template", [&] {
       reflection_pad2d_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
           input.data<scalar_t>(), output.data<scalar_t>(),
@@ -368,7 +368,7 @@ void reflection_pad2d_backward_out_template(
     (int) std::ceil(output_plane_size/256.0), nplane, nbatch);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-    input.type(), "reflection_pad2d_backward_out_template", [&] {
+    input.scalar_type(), "reflection_pad2d_backward_out_template", [&] {
       reflection_pad2d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
           grad_input.data<scalar_t>(), grad_output.data<scalar_t>(),

@@ -12,7 +12,7 @@
 
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
-#include <torch/csrc/jit/import_method.h>
+#include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/passes/to_batch.h>
 #include <torch/csrc/jit/pybind_utils.h>
@@ -116,7 +116,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       }
       rets.push_back(Argument("0", ret_type, {}, {}, false));
     }
-    return FunctionSchema("", std::move(args), std::move(rets));
+    return FunctionSchema("", "", std::move(args), std::move(rets));
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
@@ -169,6 +169,14 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     return ss.str();
   }
 
+  void checkForAddToConstantsError(std::stringstream& ss) {
+    auto nn = py::module::import("torch.nn");
+    if (py::isinstance(self, nn.attr("ModuleList")) ||
+        py::isinstance(self, nn.attr("Sequential"))) {
+      ss << ". Did you forget to add it to __constants__? ";
+    }
+  }
+
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
       Method& m,
@@ -176,11 +184,18 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     const std::string type_str = typeString(self);
     std::stringstream ss;
     ss << kind() << " cannot be used as a tuple";
-    auto nn = py::module::import("torch.nn");
-    if (py::isinstance(self, nn.attr("ModuleList")) ||
-        py::isinstance(self, nn.attr("Sequential"))) {
-      ss << ". Did you forget to add it to __constants__? ";
-    }
+    checkForAddToConstantsError(ss);
+    throw ErrorReport(loc) << ss.str();
+  }
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Method& m,
+      const std::string& field) override {
+    const std::string type_str = typeString(self);
+    std::stringstream ss;
+    ss << "attribute lookup is not defined on " << kind();
+    checkForAddToConstantsError(ss);
     throw ErrorReport(loc) << ss.str();
   }
 
@@ -258,9 +273,7 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
     const auto& param_list = module_->get_parameters().items();
     for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
       auto& param = *it;
-      if (!param->is_buffer) {
-        params.push_back(caller.get_or_add_parameter(param->slot()));
-      }
+      params.push_back(caller.get_or_add_parameter(param->slot()));
     }
     auto list = caller.graph()->createList(TensorType::get(), params);
     caller.graph()->insertNode(list);
@@ -294,14 +307,14 @@ struct ModuleValue : public SugaredValue {
     // it adds a buffer 'training' to the model if one doesn't exist
     // and then loads that parameter, casting it to bool
     if (field == "training") {
-      NamedParameter* v = module->find_parameter(field);
+      NamedIValue* v = module->find_buffer(field);
       if (!v) {
         py::object py_module = py::cast(module);
         bool training = py::cast<bool>(py::getattr(py_module, "training"));
         auto t =
             autograd::make_variable(at::full({}, training ? 1 : 0, at::kLong));
-        module->register_parameter("training", std::move(t), true);
-        v = module->find_parameter(field);
+        module->register_buffer("training", std::move(t));
+        v = module->find_buffer(field);
       }
       Value* the_tensor = m.get_or_add_parameter(v->slot());
       Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
@@ -312,9 +325,13 @@ struct ModuleValue : public SugaredValue {
       return std::make_shared<ModuleValue>(v->module);
     } else if (Method* v = module->find_method(field)) {
       return std::make_shared<MethodValue>(shared_from_this(), *v);
-    } else if (NamedParameter* v = module->find_parameter(field)) {
+    } else if (NamedIValue* v = module->find_parameter(field)) {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
+    } else if (NamedIValue* v = module->find_attribute(field)) {
+      return std::make_shared<SimpleValue>(
+          m.get_or_add_attribute(v->type, v->slot()));
     }
+
     // This can also be a call to a non-script module, or a plain
     // python method. If so return this as a python value.
     py::object py_module = py::cast(module);
@@ -524,15 +541,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
           << "Attempted to inline a Module with parameters. "
              "Stateful modules to be inlined must be submodules of the callee.";
     }
-    const auto script_class_type =
-        py::module::import("torch.jit").attr("ScriptClass");
-    const bool is_user_type = py::isinstance(obj, script_class_type);
-    if (is_user_type) {
-      const auto classname = py::cast<std::string>(py::getattr(obj, "_name"));
-      auto userType = UserType::get(classname);
-      AT_ASSERT(userType);
-      return std::make_shared<UserTypeValue>(std::move(userType));
-    }
     return std::make_shared<ModuleValue>(mod);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
@@ -592,10 +600,15 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
 }
 
 static void gatherParametersAndBuffers(
-    std::vector<at::Tensor*>& values,
+    std::vector<IValue*>& values,
     const Module& m) {
   for (auto& param : m.get_parameters()) {
     values.push_back(param->slot());
+  }
+  for (auto& param : m.get_attributes()) {
+    if (param->type->isSubtypeOf(TensorType::get())) {
+      values.push_back(param->slot());
+    }
   }
   for (const auto& sub : m.get_modules()) {
     gatherParametersAndBuffers(values, *sub->module);
@@ -650,6 +663,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
 
   return FunctionSchema(
       new_name.value_or(schema.name()),
+      schema.overload_name(),
       new_args,
       schema.returns(),
       schema.is_vararg(),
@@ -693,7 +707,10 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& script,
              ResolutionCallback rcb,
              bool has_self) {
-            auto self = has_self ? std::make_shared<ModuleValue>(m) : nullptr;
+            c10::optional<Self> self;
+            if (has_self) {
+              self = Self(std::make_shared<ModuleValue>(m));
+            }
             defineMethodsInModule(m, script, pythonResolver(rcb), self);
           })
       .def(
@@ -708,7 +725,7 @@ void initJitScriptBindings(PyObject* module) {
               resolvers.push_back(pythonResolver(callback));
             }
             defineMethodsInModule(
-                m, defs, resolvers, std::make_shared<ModuleValue>(m));
+                m, defs, resolvers, Self(std::make_shared<ModuleValue>(m)));
 
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
@@ -732,9 +749,16 @@ void initJitScriptBindings(PyObject* module) {
           },
           py::return_value_policy::reference_internal)
       .def("_register_parameter", &Module::register_parameter)
+      .def(
+          "_register_attribute",
+          [](Module& self, std::string name, TypePtr type, py::object value) {
+            self.register_attribute(name, type, toIValue(value, type));
+          })
       .def("_register_module", &Module::register_module)
+      .def("_register_buffer", &Module::register_buffer)
       .def("_set_parameter", &Module::set_parameter)
       .def("_get_parameter", &Module::get_parameter)
+      .def("_get_buffer", &Module::get_buffer)
       .def("_get_module", &Module::get_module)
       .def(
           "_get_modules",
@@ -754,27 +778,35 @@ void initJitScriptBindings(PyObject* module) {
             py::tuple result(parameters.size());
             for (size_t i = 0; i < parameters.size(); ++i) {
               auto& p = parameters[i];
-              py::tuple r(3);
+              py::tuple r(2);
               result[i] = std::make_tuple(
-                  p.key(), autograd::as_variable_ref(*p->slot()), p->is_buffer);
+                  p.key(), autograd::as_variable_ref(p->slot()->toTensor()));
+            }
+            return result;
+          })
+      .def(
+          "_get_attributes",
+          [](Module& self) -> py::tuple {
+            auto& attributes = self.get_attributes();
+            py::tuple result(attributes.size());
+            for (size_t i = 0; i < attributes.size(); ++i) {
+              auto& buffer = attributes[i];
+              py::tuple r(3);
+              IValue v = *buffer->slot();
+              result[i] = std::make_tuple(
+                  buffer.key(), buffer->type, toPyObject(std::move(v)));
             }
             return result;
           })
       .def(
           "_has_parameter",
-          [](Module& self, const std::string& name) {
-            if (auto r = self.find_parameter(name)) {
-              return !r->is_buffer;
-            }
-            return false;
+          [](Module& self, const std::string& name) -> bool {
+            return self.find_parameter(name);
           })
       .def(
           "_has_buffer",
-          [](Module& self, const std::string& name) {
-            if (auto r = self.find_parameter(name)) {
-              return r->is_buffer;
-            }
-            return false;
+          [](Module& self, const std::string& name) -> bool {
+            return self.find_buffer(name);
           })
       .def(
           "_has_module",
@@ -812,10 +844,10 @@ void initJitScriptBindings(PyObject* module) {
              bool force_outplace) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
-            std::vector<at::Tensor*> parameters;
+            std::vector<IValue*> parameters;
             gatherParametersAndBuffers(parameters, *self);
             Stack inputs = toStack(input_tuple);
-            for (at::Tensor* param : parameters) {
+            for (IValue* param : parameters) {
               inputs.emplace_back(*param);
             }
             auto graph = tracer::createGraphByTracing(
@@ -884,7 +916,8 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            PythonPrint(ss, self, tensors, true);
+            std::vector<ClassTypePtr> classes;
+            PythonPrint(ss, self, tensors, classes, true);
             return std::make_pair(ss.str(), tensors);
           })
       .def_property_readonly(
@@ -892,7 +925,8 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            PythonPrint(ss, self, tensors, false);
+            std::vector<ClassTypePtr> classes;
+            PythonPrint(ss, self, tensors, classes, false);
             return ss.str();
           })
       .def("apply", &Module::apply)
@@ -904,10 +938,12 @@ void initJitScriptBindings(PyObject* module) {
              std::vector<std::tuple<std::shared_ptr<Module>, std::string>>
                  params,
              std::shared_ptr<Module> orig) {
-            std::vector<at::Tensor*> member_inputs;
+            std::vector<IValue*> member_inputs;
             for (auto& p : params) {
-              NamedParameter* np =
-                  std::get<0>(p)->find_parameter(std::get<1>(p));
+              NamedIValue* np = std::get<0>(p)->find_parameter(std::get<1>(p));
+              if (np == nullptr) {
+                np = std::get<0>(p)->find_buffer(std::get<1>(p));
+              }
               AT_ASSERT(np != nullptr);
               member_inputs.push_back(np->slot());
             }
@@ -931,7 +967,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "propagate_and_assign_input_and_output_shapes",
           &Method::propagate_and_assign_input_and_output_shapes)
-      .def("params", &Method::params)
+      .def("initial_ivalues", &Method::initial_ivalues)
       .def(
           "graph_for",
           [](py::args args, py::kwargs kwargs) {
@@ -948,7 +984,8 @@ void initJitScriptBindings(PyObject* module) {
       .def("python_print", [](Method& m) {
         std::ostringstream oss;
         std::vector<at::Tensor> constants;
-        PythonPrint(oss, m, constants, true);
+        std::vector<ClassTypePtr> classes;
+        PythonPrint(oss, m, constants, classes, true);
         return std::make_pair(oss.str(), std::move(constants));
       });
 
@@ -959,7 +996,8 @@ void initJitScriptBindings(PyObject* module) {
          ResolutionCallback rcb,
          FunctionDefaults defaults) {
         auto def_f = def.withName("forward");
-        defineMethodsInModule(mod, {def_f}, {pythonResolver(rcb)}, nullptr);
+        defineMethodsInModule(
+            mod, {def_f}, {pythonResolver(rcb)}, c10::nullopt);
         auto& method = mod->get_method("forward");
         method.setSchema(getSchemaWithNameAndDefaults(
             def.range(), method.getSchema(), def.name().name(), defaults));
@@ -972,18 +1010,14 @@ void initJitScriptBindings(PyObject* module) {
       [](std::shared_ptr<Module> module,
          const ClassDef& classDef,
          ResolutionCallback rcb) {
-        auto userType = UserType::create(classDef.name().name(), module);
+        auto classType = ClassType::create(classDef.name().name(), module);
         std::vector<Resolver> rcbs;
         std::vector<Def> methodDefs;
         for (const auto& def : classDef.defs()) {
           methodDefs.push_back(def);
           rcbs.push_back(pythonResolver(rcb));
         }
-        defineMethodsInModule(
-            module,
-            methodDefs,
-            rcbs,
-            std::make_shared<UserTypeValue>(userType));
+        defineMethodsInModule(module, methodDefs, rcbs, Self(classType));
         return module;
       });
 
@@ -1024,6 +1058,7 @@ void initJitScriptBindings(PyObject* module) {
       });
   m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
+  m.def("_jit_clear_class_registry", ClassType::clearRegistry);
 
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())
@@ -1044,7 +1079,14 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("str"),
           py::arg("count"),
           py::arg("exactly") = false)
-      .def("run", &testing::FileCheck::run);
+      .def(
+          "run",
+          [](testing::FileCheck& f, const std::string& str) {
+            return f.run(str);
+          })
+      .def("run", [](testing::FileCheck& f, const Graph& g) {
+        return f.run(g);
+      });
 }
 } // namespace script
 } // namespace jit

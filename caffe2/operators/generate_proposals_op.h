@@ -6,7 +6,7 @@
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
-C10_DECLARE_CAFFE2_OPERATOR(GenerateProposalsOp);
+C10_DECLARE_CAFFE2_OPERATOR(GenerateProposals);
 
 namespace caffe2 {
 

@@ -18,7 +18,7 @@ the following signature.
 
 How to implement an entrypoint?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Here is a code snipet from pytorch/vision repository, which specifies an entrypoint
+Here is a code snippet from pytorch/vision repository, which specifies an entrypoint
 for ``resnet18`` model. You can see a full script in
 `pytorch/vision repo <https://github.com/pytorch/vision/blob/master/hubconf.py>`_
 
@@ -39,10 +39,10 @@ for ``resnet18`` model. You can see a full script in
         # The following logic is REQUIRED
         if pretrained:
             # For weights saved in local repo
-			# model.load_state_dict(<path_to_saved_file>)
+            # model.load_state_dict(<path_to_saved_file>)
 
-			# For weights saved elsewhere
-			checkpoint = 'https://download.pytorch.org/models/resnet18-5c106cde.pth'
+            # For weights saved elsewhere
+            checkpoint = 'https://download.pytorch.org/models/resnet18-5c106cde.pth'
             model.load_state_dict(model_zoo.load_url(checkpoint, progress=False))
         return model
 
