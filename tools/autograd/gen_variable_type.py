@@ -198,6 +198,14 @@ SET_HISTORY = CodeTemplate("""\
 ${fn}_history(${differentiable_outputs}, grad_fn);
 """)
 
+SAVE_VERSION = CodeTemplate("""\
+uint32_t ${tensor_name}_saved_version = ${tensor_name}.current_version();
+""")
+
+CHECK_VERSION = CodeTemplate("""\
+AT_ASSERT(${tensor_name}.current_version() > ${tensor_name}_saved_version);
+""")
+
 CONDITIONAL = CodeTemplate("""\
 if (${cond}) {
   ${statements}
@@ -840,10 +848,15 @@ def emit_body(declaration):
             return []
         return ['check_inplace({});'.format(arg['name']) for arg in differentiable_outputs]
 
-    def emit_increment_version():
+    def emit_save_version():
         if not modifies_arguments:
             return []
-        return ['increment_version({});'.format(arg['name']) for arg in differentiable_outputs]
+        return [SAVE_VERSION.substitute(tensor_name=arg['name']) for arg in differentiable_outputs]
+
+    def emit_check_version():
+        if not modifies_arguments:
+            return []
+        return [CHECK_VERSION.substitute(tensor_name=arg['name']) for arg in differentiable_outputs]
 
     env = {}
     combined = nested_dict(env, declaration)
@@ -861,11 +874,12 @@ def emit_body(declaration):
     pre_record_trace, post_record_trace = emit_record_trace(env)
 
     body.append(pre_record_trace)
+    if requires_derivative:
+        body.extend(emit_save_version())
     body.append(emit_call(env))
     if requires_derivative:
-        # set_flags has to appear after version_counter, because rebase_history
-        # requires that the counter is incremented before it is called
-        body.extend(emit_increment_version())
+        # rebase_history requires that the counter is incremented before it is called
+        body.extend(emit_check_version())
         body.append(emit_history())
     # post_record_trace must appear before save_outputs so that saved outputs
     # have their tracing state saved (that is setup by recordTrace)

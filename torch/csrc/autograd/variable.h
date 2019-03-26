@@ -251,20 +251,6 @@ struct TORCH_API Variable : public at::Tensor {
   /// True if this `Variable` is a leaf and thus does not have a `grad_fn`.
   bool is_leaf() const noexcept;
 
-  // Versions
-  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  /// Increments the version count of this `Variable`.
-  void bump_version() noexcept;
-  void set_version_counter(const c10::VariableVersion& version_counter) noexcept;
-
-  /// Retrieves this `Variable`s version counter.
-  const c10::VariableVersion& version_counter() const noexcept;
-
-  /// Retrieves the current value of the `Variable`'s version counter.
-  /// Equivalent to calling `version_counter().current_version()`.
-  uint32_t current_version() const noexcept;
-
   // Autograd Graph Interaction
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -434,6 +420,10 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   }
 
   int64_t storage_offset() const override;
+
+  void set_version_counter(const c10::VariableVersion& version_counter) noexcept override;
+  const c10::VariableVersion& version_counter() const noexcept override;
+  void bump_version() noexcept override;
 
   /// The underlying data tensor for this Variable.
   /// This field will be removed once VariableImpl and TensorImpl are merged.
@@ -688,26 +678,6 @@ inline uint32_t Variable::output_nr() const noexcept {
 
 inline bool Variable::is_leaf() const noexcept {
   return get_autograd_meta()->grad_fn_ == nullptr;
-}
-
-// Versions
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-inline void Variable::set_version_counter(
-    const c10::VariableVersion& version_counter) noexcept {
-  get()->set_version_counter(version_counter);
-}
-
-inline void Variable::bump_version() noexcept {
-  get()->bump_version();
-}
-
-inline uint32_t Variable::current_version() const noexcept {
-  return get()->version_counter().current_version();
-}
-
-inline const c10::VariableVersion& Variable::version_counter() const noexcept {
-  return get()->version_counter();
 }
 
 // Hooks

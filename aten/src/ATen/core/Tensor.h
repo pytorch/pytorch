@@ -324,6 +324,28 @@ class CAFFE2_API Tensor {
       bool keep_graph = false,
       bool create_graph = false);
 
+  /// Increments the version count of this tensor.
+  void bump_version() noexcept {
+    unsafeGetTensorImpl()->bump_version();
+  }
+
+  /// Sets this tensor's version counter.
+  void set_version_counter(
+      const c10::VariableVersion& version_counter) noexcept {
+    unsafeGetTensorImpl()->set_version_counter(version_counter);
+  }
+
+  /// Retrieves this tensor's version counter.
+  const c10::VariableVersion& version_counter() const noexcept {
+    return unsafeGetTensorImpl()->version_counter();
+  }
+
+  /// Retrieves the current value of this tensor's version counter.
+  /// Equivalent to calling `version_counter().current_version()`.
+  uint32_t current_version() const noexcept {
+    return unsafeGetTensorImpl()->version_counter().current_version();
+  }
+
   // STOP.  Thinking of adding a method here, which only makes use
   // of other ATen methods?  Define it in native_functions.yaml.
 
