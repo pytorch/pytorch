@@ -235,7 +235,7 @@ struct C10_API TensorOptions {
   }
 
 
-  /// Sets the `is_variable` property on the `TensorOptions`.
+  /// Sets the `pinned_memory` property on the `TensorOptions`.
   C10_NODISCARD TensorOptions pinned_memory(c10::optional<bool> pinned_memory) const noexcept {
     TensorOptions r = *this;
     r.set_pinned_memory(pinned_memory);
@@ -323,12 +323,12 @@ struct C10_API TensorOptions {
   }
 
 
-  /// Returns the `is_variable` property of the `TensorOptions`.
+  /// Returns the `pinned_memory` property of the `TensorOptions`.
   bool pinned_memory() const noexcept {
     return has_pinned_memory_ ? pinned_memory_ : false;
   }
 
-  /// Returns whether the `is_variable` is specified.
+  /// Returns whether the `pinned_memory` is specified.
   bool has_pinned_memory() const noexcept {
     return has_pinned_memory_;
   }
@@ -341,8 +341,8 @@ struct C10_API TensorOptions {
   }
 
 
-  /// Returns the `is_variable` property of the `TensorOptions`, or
-  /// `c10::nullopt` if `is_variable` is not specified.
+  /// Returns the `pinned_memory` property of the `TensorOptions`, or
+  /// `c10::nullopt` if `pinned_memory` is not specified.
   c10::optional<bool> pinned_memory_opt() const noexcept {
     return has_pinned_memory_ ? c10::make_optional(pinned_memory_) : c10::nullopt;
   }
@@ -467,7 +467,7 @@ struct C10_API TensorOptions {
     }
   }
 
-  /// Mutably set the `is_variable` property of `TensorOptions`.
+  /// Mutably set the `pinned_memory` property of `TensorOptions`.
   void set_pinned_memory(c10::optional<bool> pinned_memory) & noexcept {
     if (pinned_memory) {
       pinned_memory_ = *pinned_memory;
@@ -492,7 +492,7 @@ struct C10_API TensorOptions {
 
   bool requires_grad_     : 1;
   bool is_variable_       : 1;
-  bool pinned_memory_     : 1; // VITALYF
+  bool pinned_memory_     : 1;
 
 
   bool has_device_        : 1;

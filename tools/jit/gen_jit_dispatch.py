@@ -155,9 +155,7 @@ auto result_ = (${first}).${name}(${args_with_tensor_options});
 CONSTRUCTOR = CodeTemplate("""\
 [](Stack & stack) {
     autograd::profiler::RecordFunction record("${name}");
-    // -- lvalues
     ${lvalues}
-    // -- call
     ${call}
     drop(stack, ${num_inputs});
     pack(stack, std::move(result_));
@@ -257,13 +255,13 @@ def gen_jit_dispatch(declarations, out, template_path):
                 ['options'] + args[(tensor_options_arg_index + 4):]
             if is_namespace_function:
                 return CALL_NAMESPACE_WITH_TENSOR_OPTIONS.substitute(
-                    name=decl['name'], dtype=dtype, layout=layout, device=device,
-                    pin_memory=pin_memory,
+                    name=decl['name'], dtype=dtype, layout=layout,
+                    device=device, pin_memory=pin_memory,
                     args_with_tensor_options=pack_arguments(args_with_tensor_options))
             else:
                 return CALL_METHOD_WITH_TENSOR_OPTIONS.substitute(
-                    name=decl['name'], dtype=dtype, layout=layout, device=device,
-                    pin_memory=pin_memory,
+                    name=decl['name'], dtype=dtype, layout=layout,
+                    device=device, pin_memory=pin_memory,
                     args_with_tensor_options=pack_arguments(args_with_tensor_options[1:]),
                     first=args_with_tensor_options[0], num_inputs=num_inputs)
         else:
@@ -308,8 +306,6 @@ def gen_jit_dispatch(declarations, out, template_path):
                                              num_inputs=num_inputs,
                                              op_capture=op_capture,
                                              lvalues=lvalues)
-        if decl['name'] == 'arange':
-            print("CONSTRUCTOR %s" % constructor)
         return constructor
 
     # This function declares an order on declarations. This is necessary because
@@ -364,9 +360,8 @@ def gen_jit_dispatch(declarations, out, template_path):
             {'name': 'layout', 'simple_type': 'Layout'},
             # device is specified as an IntArrayRef of { at::Device::Type, device_id }
             {'name': 'device', 'simple_type': 'Device'},
+            # pin_memory is specified as a boolean
             {'name': 'pin_memory', 'simple_type': 'bool'},
-
-
         ]
         # TODO: Don't repack this into TensorOptions. Needs various changes in downstream code.
         if 'default' in arg:
@@ -476,8 +471,6 @@ def match_signature(decl, constructed_string, should_match_schema):
 
 
 def signature(decl, should_match_schema=True):
-    import json
-    # print(json.dumps(decl, indent=2))
     def format_arg(arg):
         name = arg['name']
         typ = jit_type_of(arg)
@@ -524,10 +517,6 @@ def signature(decl, should_match_schema=True):
         ret_list = '({})'.format(', '.join(type_maybe_field(r) for r in decl['returns']))
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
     constructed_string = 'aten::{}({}) -> {}'.format(name, arg_list, ret_list)
-
-    if name == 'arange':
-        print(json.dumps(decl, indent=2))
-
     return match_signature(decl, constructed_string, should_match_schema)
 
 

@@ -18,7 +18,9 @@
 #include <c10/core/TensorOptions.h>
 #include <TH/THRandom.h>
 #include <TH/THGenerator.hpp>
+#include <THC/THCGeneral.hpp>
 #include <c10/util/Exception.h>
+
 
 #include <algorithm>
 #include <cmath>
@@ -93,9 +95,14 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
   check_size_nonnegative(size);
 
-  std::cout << "Call empty_cpu " << options.pinned_memory() << "\n";
+  c10::Allocator* allocator;
+  if (options.pinned_memory()) {
+    auto state = at::globalContext().lazyInitCUDA();
+    allocator = state->cudaHostAllocator;
+  } else {
+    allocator = at::getCPUAllocator();
+  }
 
-  auto* allocator = at::getCPUAllocator();
   int64_t nelements = prod_intlist(size);
   auto dtype = options.dtype();
   auto storage_impl = c10::make_intrusive<StorageImpl>(

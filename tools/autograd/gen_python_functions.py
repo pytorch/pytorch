@@ -698,8 +698,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         # emit dispatch
         grouped = group_declarations(declarations)
         for i, dictionary in enumerate(grouped):
-
-
             signature = dictionary['signature']
             if has_self:
                 signature = signature.replace('Tensor self, ', '')
@@ -711,12 +709,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             if dictionary['base'].get('deprecated', False):
                 signature += '|deprecated'
             env['signatures'].append('"{}",'.format(signature))
-
-
-            if dictionary['base']['name'] == 'zeros':
-                import json
-                print(json.dumps(dictionary, indent=2))
-
             env['dispatch'].append(emit_dispatch(i, dictionary, env))
 
         env['dispatch'].append('}')
