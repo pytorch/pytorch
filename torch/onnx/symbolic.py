@@ -1363,6 +1363,21 @@ def topk(g, self, k, dim, largest, sorted, out=None):
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
 
 
+@parse_args('v', 'v', 'i', 'i', 'i')
+def topk_opset10(g, self, k, dim, largest, sorted, out=None):
+    if out is not None:
+        _unimplemented("TopK", "Out parameter is not supported for topk")
+    if not largest:
+        _unimplemented("TopK", "Ascending TopK is not supported")
+
+    k_value = _maybe_get_const(k, 'i')
+    if not _is_value(k_value):
+        k_value = g.op("Constant", value_t=torch.tensor(k_value, dtype=torch.long))
+
+    k_value = g.op("Unsqueeze", k_value, axes_i=[0])
+    return g.op("TopK", self, k_value, axis_i=dim, outputs=2)
+
+
 def to(g, self, *args):
     # ONNX doesn't have a concept of a device, so we ignore device casts
     if len(args) == 3:
