@@ -138,6 +138,8 @@ struct C10_API AutogradMetaInterface {
   virtual ~AutogradMetaInterface();
 };
 
+// NOTE [ Version Counter Sharing ]
+// 
 // Every Tensor has a version counter. Version counters are incremented
 // whenever the data or shape of a tensor changes through non-Variable type dispatch.
 // These are typically in-place operations. Version counters are used to
@@ -147,6 +149,10 @@ struct C10_API AutogradMetaInterface {
 // 1. A view shares the version counter of the base Variable,
 // 2. Detached variables share the version counter of the source,
 // 3. Unpacked saved variables share the version counter of the source.
+//
+// Version counters are not shared when:
+//
+// 1. We replace a `Variable`'s underlying `Tensor` by calling `set_data(...)`.
 struct C10_API VariableVersion {
  public:
   // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
@@ -876,8 +882,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return std::move(autograd_meta_);
   }
 
-  // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
-  // because it is unique for each Variable.
+  // NOTE: `shallow_copy_and_detach()` does not copy the following TensorImpl fields:
+  // 1. the AutogradMeta pointer, because it is unique for each Variable.
+  // 2. the version counter, because we should decide whether the new TensorImpl should share version
+  // counter with the original TensorImpl case-by-case. See NOTE [ Version Counter Sharing ] for details.
+  //
   // NOTE: We don't set `allow_tensor_metadata_change_` to false here, because there are call sites
   // to this function that need to change the shallow copy's size or storage afterwards, and setting
   // `allow_tensor_metadata_change_` to false would prevent those changes from happening and is
