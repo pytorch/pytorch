@@ -698,7 +698,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     slots_[slot] = v;
   }
 
-  IValue getSlot(size_t slot) const {
+  const IValue& getSlot(size_t slot) const {
     return slots_.at(slot);
   }
 
@@ -707,6 +707,13 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   const std::vector<IValue>& slots() const {
     return slots_;
   }
+  std::shared_ptr<ClassType> type() const {
+    return type_;
+  }
+  void appendSlot(IValue v) {
+    slots_.emplace_back(std::move(v));
+  }
+
  private:
   std::shared_ptr<ClassType> type_;
   std::vector<IValue> slots_;
