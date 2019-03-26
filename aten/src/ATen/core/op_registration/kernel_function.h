@@ -37,7 +37,10 @@ namespace detail {
  * >         c10::dispatchKey(CPUTensorId()));
  */
 template<class FuncType, FuncType* kernel_func>
-inline constexpr auto kernel() -> decltype(kernel<detail::WrapKernelFunction<FuncType, kernel_func>>()) {
+inline constexpr auto kernel() ->
+// enable_if: only enable it if FuncType is actually a function, but not a stack based KernelFunction.
+guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value,
+decltype(kernel<detail::WrapKernelFunction<FuncType, kernel_func>>())> {
   return kernel<detail::WrapKernelFunction<FuncType, kernel_func>>();
 }
 

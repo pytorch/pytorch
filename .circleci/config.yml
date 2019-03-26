@@ -5,8 +5,8 @@
 # https://github.com/pytorch/ossci-job-dsl/blob/master/src/main/groovy/ossci/pytorch/DockerVersion.groovy and
 # https://github.com/pytorch/ossci-job-dsl/blob/master/src/main/groovy/ossci/caffe2/DockerVersion.groovy,
 # and then update DOCKER_IMAGE_VERSION at the top of the following files:
-# * cimodel/pytorch_build_definitions.py
-# * cimodel/caffe2_build_definitions.py
+# * cimodel/data/pytorch_build_definitions.py
+# * cimodel/data/caffe2_build_definitions.py
 
 docker_config_defaults: &docker_config_defaults
   user: jenkins
@@ -150,7 +150,32 @@ setup_ci_environment: &setup_ci_environment
   name: Set Up CI Environment After Checkout
   no_output_timeout: "1h"
   command: |
-    set -e
+    set -ex
+
+    # Check if we should actually run
+    echo "BUILD_ENVIRONMENT: ${BUILD_ENVIRONMENT}"
+    echo "CIRCLE_PULL_REQUEST: ${CIRCLE_PULL_REQUEST}"
+    if [[ "${BUILD_ENVIRONMENT}" == *-slow-* ]]; then
+      if ! [ -z "${CIRCLE_PULL_REQUEST}" ]; then
+        # It's a PR; test for [slow ci] tag on the TOPMOST commit
+        if !(git log --format='%B' -n 1 HEAD | grep -q -e '\[slow ci\]' -e '\[ci slow\]' -e '\[test slow\]' -e '\[slow test\]'); then
+          circleci step halt
+          exit
+        fi
+      fi
+    fi
+    if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
+      if ! [ -z "${CIRCLE_PULL_REQUEST}" ]; then
+        # It's a PR; test for [xla ci] tag on the TOPMOST commit
+        if !(git log --format='%B' -n 1 HEAD | grep -q -e '\[xla ci\]' -e '\[ci xla\]' -e '\[test xla\]' -e '\[xla test\]'); then
+          # NB: This doesn't halt everything, just this job.  So
+          # the rest of the workflow will keep going and you need
+          # to make sure you halt there too.  Blegh.
+          circleci step halt
+          exit
+        fi
+      fi
+    fi
 
     # Set up NVIDIA docker repo
     curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
@@ -1078,9 +1103,7 @@ smoke_mac_test: &smoke_mac_test
 
 
 ##############################################################################
-##############################################################################
 # Job specifications job specs
-##############################################################################
 ##############################################################################
 version: 2
 jobs:
@@ -1120,6 +1143,19 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.5-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.5:291"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
+
+  pytorch_linux_trusty_pynightly_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-trusty-pynightly-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:291"
+    <<: *pytorch_linux_build_defaults
+
+  pytorch_linux_trusty_pynightly_test:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-trusty-pynightly-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:291"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
@@ -1172,19 +1208,6 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-trusty-py3.6-gcc7-test
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-py3.6-gcc7:291"
-    resource_class: large
-    <<: *pytorch_linux_test_defaults
-
-  pytorch_linux_trusty_pynightly_build:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-linux-trusty-pynightly-build
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:291"
-    <<: *pytorch_linux_build_defaults
-
-  pytorch_linux_trusty_pynightly_test:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-linux-trusty-pynightly-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-trusty-pynightly:291"
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
@@ -1254,6 +1277,14 @@ jobs:
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
+    <<: *pytorch_linux_test_defaults
+
+  pytorch_linux_xenial_cuda8_cudnn7_py3_nogpu_test:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda8-cudnn7-py3-nogpu-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:291"
+      PYTHON_VERSION: "3.6"
+    resource_class: large
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_xenial_cuda9_cudnn7_py2_build:
@@ -1652,14 +1683,12 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: caffe2-py2-ios-macos10.13-build
       BUILD_IOS: "1"
-      PYTHON_INSTALLATION: "system"
       PYTHON_VERSION: "2"
     <<: *caffe2_macos_build_defaults
 
   caffe2_py2_system_macos10_13_build:
     environment:
       BUILD_ENVIRONMENT: caffe2-py2-system-macos10.13-build
-      PYTHON_INSTALLATION: "system"
       PYTHON_VERSION: "2"
     <<: *caffe2_macos_build_defaults
 
@@ -2015,10 +2044,11 @@ jobs:
       BUILD_ENVIRONMENT: "libtorch 2.7 cpu"
     <<: *binary_mac_build
 
-  # Binary build tests
-  # These are the smoke tests run right after the build, before the upload. If
-  # these fail, the upload doesn't happen
-  #############################################################################
+##############################################################################
+# Binary build tests
+# These are the smoke tests run right after the build, before the upload.
+# If these fail, the upload doesn't happen.
+##############################################################################
   binary_linux_manywheel_2.7m_cpu_test:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cpu"
@@ -2314,8 +2344,9 @@ jobs:
 #    resource_class: gpu.medium
 #    <<: *binary_linux_test
 
-  # Binary build uploads
-  #############################################################################
+##############################################################################
+# Binary build uploads
+##############################################################################
   binary_linux_manywheel_2.7m_cpu_upload:
     environment:
       BUILD_ENVIRONMENT: "manywheel 2.7m cpu"
@@ -2560,7 +2591,6 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "libtorch 2.7 cpu"
     <<: *binary_mac_upload
-
 
 ##############################################################################
 # Smoke test specs individual job specifications
@@ -3040,6 +3070,10 @@ workflows:
       - pytorch_linux_trusty_py3_5_test:
           requires:
             - pytorch_linux_trusty_py3_5_build
+      - pytorch_linux_trusty_pynightly_build
+      - pytorch_linux_trusty_pynightly_test:
+          requires:
+            - pytorch_linux_trusty_pynightly_build
       - pytorch_linux_trusty_py3_6_gcc4_8_build
       - pytorch_linux_trusty_py3_6_gcc4_8_test:
           requires:
@@ -3048,26 +3082,14 @@ workflows:
       - pytorch_linux_trusty_py3_6_gcc5_4_test:
           requires:
             - pytorch_linux_trusty_py3_6_gcc5_4_build
-      - pytorch_xla_linux_trusty_py3_6_gcc5_4_build:
-          filters:
-            branches:
-              only:
-                - master
+      - pytorch_xla_linux_trusty_py3_6_gcc5_4_build
       - pytorch_xla_linux_trusty_py3_6_gcc5_4_test:
-          filters:
-            branches:
-              only:
-                - master
           requires:
             - pytorch_xla_linux_trusty_py3_6_gcc5_4_build
       - pytorch_linux_trusty_py3_6_gcc7_build
       - pytorch_linux_trusty_py3_6_gcc7_test:
           requires:
             - pytorch_linux_trusty_py3_6_gcc7_build
-      - pytorch_linux_trusty_pynightly_build
-      - pytorch_linux_trusty_pynightly_test:
-          requires:
-            - pytorch_linux_trusty_pynightly_build
       - pytorch_linux_xenial_py3_clang5_asan_build
       - pytorch_linux_xenial_py3_clang5_asan_test:
           requires:
@@ -3086,10 +3108,9 @@ workflows:
           requires:
             - pytorch_linux_xenial_cuda8_cudnn7_py3_build
       - pytorch_linux_xenial_cuda8_cudnn7_py3_slow_test:
-          filters:
-            branches:
-              only:
-                - master
+          requires:
+            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
+      - pytorch_linux_xenial_cuda8_cudnn7_py3_nogpu_test:
           requires:
             - pytorch_linux_xenial_cuda8_cudnn7_py3_build
       - pytorch_short_perf_test_gpu:
@@ -3257,7 +3278,6 @@ workflows:
       - smoke_macos_conda_3.7_cpu
       - smoke_macos_libtorch_2.7_cpu
 
-
 ##############################################################################
 # Daily binary build trigger
 ##############################################################################
@@ -3320,7 +3340,9 @@ workflows:
       - binary_macos_conda_3.7_cpu_build
       - binary_macos_libtorch_2.7_cpu_build
 
-      # Nightly tests
+##############################################################################
+# Nightly tests
+##############################################################################
       - binary_linux_manywheel_2.7m_cpu_test:
           requires:
             - binary_linux_manywheel_2.7m_cpu_build
