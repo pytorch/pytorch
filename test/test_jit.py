@@ -9305,7 +9305,7 @@ a")
                 return x
 
     def test_namedtuple_input(self):
-        def f(x):
+        def f(x):  # noqa: T484
             # type: (NamedTuple('T1', [('a', Tensor), ('b', NamedTuple('T2', [('a', int)]))]))
             x_b = x.b
             x_b_a = x_b.a
@@ -9320,12 +9320,12 @@ a")
         self.checkScript(f, (input_,), optimize=True)
 
         # test that name is preserved on return
-        @torch.jit.script
+        @torch.jit.script  # noqa: T484
         def g1(x):
             # type: (NamedTuple('T2', [('a', int)]))
             return x.a
 
-        @torch.jit.script
+        @torch.jit.script  # noqa: T484
         def g2(x):
             # type: (NamedTuple('T1', [('a', Tensor), ('b', NamedTuple('T2', [('a', int)]))]))
             return g1(x.b)
@@ -9335,13 +9335,13 @@ a")
         # test that a namedtuple could be used wherever a tuple is required
         input_ = T1(a=1, b=2)
 
-        def h(x):
+        def h(x):  # noqa: T484
             # type: (Tuple[int, int])
             return x
         self.checkScript(h, (input_,), optimize=True)
 
         # test that a tuple could not be used when a namedtuple is required
-        @torch.jit.script
+        @torch.jit.script  # noqa: T484
         def p1(x):
             # type: (NamedTuple('T1', [('a', int), ('b', int)]))
             return x.a, x.b
@@ -9363,7 +9363,7 @@ a")
 
         error = re.escape("expected a value of type (int a) for argument 'x' but found (int)")
         with self.assertRaisesRegex(RuntimeError, error):
-            @torch.jit.script
+            @torch.jit.script  # noqa: T484
             def g3(x):
                 # type: (NamedTuple('T1', [('a', Tensor), ('b', NamedTuple('T2', [('c', int)]))]))
                 return g1(x.b)
