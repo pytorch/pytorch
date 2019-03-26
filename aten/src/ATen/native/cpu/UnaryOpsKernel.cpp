@@ -126,6 +126,9 @@ static void rsqrt_kernel(TensorIterator& iter) {
             scalar_t* in_data = reinterpret_cast<scalar_t*>(data_[1]);        \
             int64_t out_stride = strides[0] / sizeof(scalar_t);               \
             int64_t in_stride = strides[1] / sizeof(scalar_t);                \
+            if (out_stride == 1 && in_stride == 1) {                          \
+              vml::v##op(out_data, in_data, n);                               \
+            } else {                                                          \
               static constexpr int64_t WIDTH = 131072 / sizeof(scalar_t);     \
               for (int64_t i = 0; i < n; i += WIDTH) {                        \
                 scalar_t buffer[WIDTH];                                       \
@@ -137,6 +140,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
                 for (int64_t j = 0; j < width; j++)                           \
                   out_data[out_stride * (i + j)] = buffer[j];                 \
               }                                                               \
+            }                                                                 \
           },                                                                  \
           {0, iter.numel()});                                                 \
     });                                                                       \
