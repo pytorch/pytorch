@@ -747,9 +747,9 @@ void generate_keys(
 }
 
 void reservoir_generator_cpu(
-  int64_t* indices,
-  int n,
-  int k,
+  int64_t *indices,
+  int64_t n,
+  int64_t k,
   THGenerator* generator
 ){
   std::lock_guard<std::mutex> lock(generator->mutex);
@@ -764,16 +764,28 @@ void reservoir_generator_cpu(
 }
 
 Tensor reservoir_sampling_cpu(
-  Tensor& x,
-  Tensor &weights,
-  int k
+  const Tensor& x,
+  const Tensor& weights,
+  int64_t k
 ){
 
-  if (!x.is_contiguous()){
-    x = x.contiguous();
-  }
+  AT_ASSERTM(
+    weights.dtype() == kFloat,
+    "The sampling weights must be Float, got", weights.dtype()
+  );
+
+  AT_ASSERTM(
+    weights.is_contiguous(),
+    "The sampling weights must be contiguous."
+  );
 
   int n = x.numel();
+
+  AT_ASSERTM(
+    n >= k,
+    "Cannot take a larger sample than population when 'replace=False'"
+  );
+
   auto options = x.options().dtype(at::kLong);
   THGenerator* generator = THGenerator_new();
 
@@ -823,9 +835,9 @@ Tensor reservoir_sampling_cpu(
 }
 
 Tensor sampling_with_replacement(
-  Tensor& x,
-  Tensor &weights,
-  int k
+  const Tensor& x,
+  const Tensor& weights,
+  int64_t k
 ){
   int n = x.numel();
   Tensor samples;
@@ -843,12 +855,12 @@ Tensor sampling_with_replacement(
 }
 
 Tensor choice_cpu(
-  Tensor& input,
-  Tensor& weights,
-  bool replacement,
-  int k
+  const Tensor& input,
+  const Tensor& weights,
+  bool replace,
+  int64_t k
 ){
-  if (replacement){
+  if (replace){
     return sampling_with_replacement(input, weights, k);
   } else {
     return reservoir_sampling_cpu(input, weights, k);
