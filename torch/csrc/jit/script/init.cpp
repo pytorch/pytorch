@@ -780,7 +780,8 @@ void initJitScriptBindings(PyObject* module) {
               auto& p = parameters[i];
               py::tuple r(2);
               result[i] = std::make_tuple(
-                  p.name(), autograd::as_variable_ref(p.slot()->toTensor()));
+                  p.name(),
+                  autograd::as_variable_ref(p.slot().value().toTensor()));
             }
             return result;
           })
@@ -792,7 +793,7 @@ void initJitScriptBindings(PyObject* module) {
             for (size_t i = 0; i < attributes.size(); ++i) {
               auto& buffer = attributes[i];
               py::tuple r(3);
-              IValue v = *buffer.slot();
+              IValue v = buffer.slot().value();
               result[i] = std::make_tuple(
                   buffer.name(), buffer.type(), toPyObject(std::move(v)));
             }
@@ -847,7 +848,7 @@ void initJitScriptBindings(PyObject* module) {
             gatherParametersAndBuffers(parameters, *self);
             Stack inputs = toStack(input_tuple);
             for (const Slot& param : parameters) {
-              inputs.emplace_back(*param);
+              inputs.emplace_back(param.value());
             }
             auto graph = tracer::createGraphByTracing(
                 func,
@@ -971,7 +972,7 @@ void initJitScriptBindings(PyObject* module) {
           [](Method& m) {
             std::vector<at::Tensor> tensors;
             for (auto& t : m.initial_ivalues()) {
-              tensors.push_back(t->toTensor());
+              tensors.push_back(t.value().toTensor());
             }
             return tensors;
           })
