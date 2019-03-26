@@ -712,7 +712,6 @@ class ShapePropagator {
             "aten::narrow(Tensor self, int dim, int start, int length) -> Tensor",
             "aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor",
             "aten::alias(Tensor self) -> Tensor",
-            "aten::detach(Tensor self) -> Tensor",
             "aten::cumprod(Tensor self, int dim) -> Tensor",
             "aten::cumsum(Tensor self, int dim) -> Tensor",
 
@@ -1285,6 +1284,23 @@ class ShapePropagator {
       }
       if (auto type = input_type(0)) {
         node->output()->setType(type->withDim(1));
+        return true;
+      }
+    } else if (node->matches("aten::detach(Tensor self) -> Tensor")) {
+      if (auto type = input_type(0)) {
+        node->output()->setType(type->withRequiresGrad(false));
+        return true;
+      }
+    } else if (
+        node->matches(
+            "aten::batch_norm_stats(Tensor input, float eps) -> (Tensor, Tensor)")) {
+      if (auto type = input_type(0)) {
+        if (type->scalarType() == at::kHalf) {
+          type = type->toScalarType(at::kFloat);
+        }
+        type = type->withDim(1);
+        node->outputs()[0]->setType(type);
+        node->outputs()[1]->setType(type);
         return true;
       }
     } else if (node->matches(
