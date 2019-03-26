@@ -16,8 +16,10 @@
 #include <vector>
 
 namespace c10 {
-namespace cuda {
 
+C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
+
+namespace cuda {
 namespace CUDACachingAllocator {
 
 //
@@ -46,6 +48,8 @@ namespace CUDACachingAllocator {
 // ensure that the block is not reused before each recorded stream completes
 // work.
 //
+
+
 
 namespace {
 
@@ -154,7 +158,7 @@ struct THCCachingAllocator
   std::vector<DeviceStats> device_stats;
 
   // lock around all operations
-  std::mutex mutex;
+  std::recursive_mutex mutex;
 
   // lock around calls to cudaFree (to prevent deadlocks with NCCL)
   std::mutex cuda_free_mutex;
@@ -186,7 +190,7 @@ struct THCCachingAllocator
   /** allocates a block which is safe to use from the provided stream */
   void malloc(void** devPtr, size_t size, cudaStream_t stream)
   {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
 
     int device;
     C10_CUDA_CHECK(cudaGetDevice(&device));
@@ -201,14 +205,29 @@ struct THCCachingAllocator
     Block search_key(device, stream, size);
     auto& pool = get_pool(size);
 
-    Block* block = nullptr;
-    Block* remaining = nullptr;
+    auto find_free_block = [&]()->Block*{
+      auto it = pool.lower_bound(&search_key);
+      if (it != pool.end() && (*it)->device == device &&
+          (*it)->stream == stream) {
+        Block* block = *it;
+        pool.erase(it);
+        return block;
+      }
+      return nullptr;
+    };
 
-    auto it = pool.lower_bound(&search_key);
-    if (it != pool.end() && (*it)->device == device && (*it)->stream == stream) {
-      block = *it;
-      pool.erase(it);
-    } else {
+    Block* block = find_free_block();
+    if (block == nullptr) {
+      bool freed_memory = false;
+      for (const auto& name : FreeCudaMemoryCallbacksRegistry()->Keys()) {
+        freed_memory |=
+            FreeCudaMemoryCallbacksRegistry()->Create(name)->Execute();
+      }
+      if (freed_memory) {
+        block = find_free_block();
+      }
+    }
+    if (block == nullptr) {
       void* ptr;
       size_t alloc_size = get_allocation_size(size);
       cudaError_t err = cuda_malloc_retry(device, &ptr, alloc_size);
@@ -253,8 +272,10 @@ struct THCCachingAllocator
       block = new Block(device, stream, alloc_size, &pool, ptr);
     }
 
+    Block* remaining = nullptr;
     AT_ASSERT(block);
     if (should_split(block, size)) {
+
       remaining = block;
 
       block = new Block(device, stream, size, &pool, block->ptr);
@@ -280,7 +301,7 @@ struct THCCachingAllocator
 
   void free(void* ptr)
   {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     if (!ptr) {
       return;
     }
@@ -305,14 +326,14 @@ struct THCCachingAllocator
   /** returns cached blocks to the system allocator */
   void emptyCache()
   {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     free_blocks(large_blocks, large_blocks.begin(), large_blocks.end());
     free_blocks(small_blocks, small_blocks.begin(), small_blocks.end());
   }
 
   void* getBaseAllocation(void* ptr, size_t* outSize)
   {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     Block* block = find_allocated_block(ptr);
     if (!block) {
       AT_ERROR("invalid device pointer: %p", ptr);
@@ -348,14 +369,14 @@ struct THCCachingAllocator
 
   void cacheInfo(int dev_id, size_t* total, size_t* largest)
   {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     cacheInfoAux(large_blocks, dev_id, total, largest);
     cacheInfoAux(small_blocks, dev_id, total, largest);
   }
 
   void recordStream(void* ptr, cuda::CUDAStream stream)
   {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     Block* block = find_allocated_block(ptr);
     if (!block) {
       AT_ERROR("invalid device pointer: %p", ptr);

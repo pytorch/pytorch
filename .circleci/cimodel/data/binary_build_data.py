@@ -14,7 +14,8 @@ to produce a visualization of config dimensions.
 
 from collections import OrderedDict
 
-from cimodel.conf_tree import ConfigNode
+from cimodel.lib.conf_tree import ConfigNode
+import cimodel.data.dimensions as dimensions
 
 
 LINKING_DIMENSIONS = [
@@ -32,23 +33,8 @@ def get_processor_arch_name(cuda_version):
     return "cpu" if not cuda_version else "cu" + cuda_version
 
 
-CUDA_VERSIONS = [
-    None,  # cpu build
-    "80",
-    "90",
-    "100",
-]
-
-STANDARD_PYTHON_VERSIONS = [
-    "2.7",
-    "3.5",
-    "3.6",
-    "3.7",
-]
-
-
 CONFIG_TREE_DATA = OrderedDict(
-    linux=(CUDA_VERSIONS, OrderedDict(
+    linux=(dimensions.CUDA_VERSIONS, OrderedDict(
         manywheel=[
             "2.7m",
             "2.7mu",
@@ -56,14 +42,14 @@ CONFIG_TREE_DATA = OrderedDict(
             "3.6m",
             "3.7m",
         ],
-        conda=STANDARD_PYTHON_VERSIONS,
+        conda=dimensions.STANDARD_PYTHON_VERSIONS,
         libtorch=[
             "2.7m",
         ]
     )),
     macos=([None], OrderedDict(
-        wheel=STANDARD_PYTHON_VERSIONS,
-        conda=STANDARD_PYTHON_VERSIONS,
+        wheel=dimensions.STANDARD_PYTHON_VERSIONS,
+        conda=dimensions.STANDARD_PYTHON_VERSIONS,
         libtorch=[
             "2.7",
         ],
