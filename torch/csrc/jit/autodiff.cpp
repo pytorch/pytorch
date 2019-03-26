@@ -131,7 +131,8 @@ bool isDifferentiable(Node* n) {
     return true;
 
   if (n->matches(
-          "aten::dropout(Tensor input, float p, bool train) -> Tensor", attr::train)) {
+          "aten::dropout(Tensor input, float p, bool train) -> Tensor",
+          attr::train)) {
     return n->get<bool>(attr::train).value();
   }
 
@@ -164,6 +165,14 @@ bool isDifferentiable(Node* n) {
         body->nodes().begin(),
         body->nodes().end(),
         static_cast<bool (*)(Node*)>(isDifferentiable));
+  }
+
+  // formulas are only defined with floating point scalars,
+  // so we fallback to autograd for other cases.
+  for (const Value* input : n->inputs()) {
+    if (input->type() == NumberType::get()) {
+      return false;
+    }
   }
 
   return false;
@@ -206,7 +215,6 @@ static c10::optional<std::vector<Value*>> build_script_grad(
     Node* node,
     const ArrayRef<Value*>& grads) {
   auto graph = node->owningGraph();
-
   auto compiled_graphs = gradientInfoForSchema(node->schema());
   if (!compiled_graphs) {
     return c10::nullopt;
@@ -230,7 +238,7 @@ static c10::optional<std::vector<Value*>> build_script_grad(
   auto bw_graph = compiled_graphs->backward;
   auto grad_vec = grads.vec();
   if (needTrimGrad(node)) {
-    grad_vec.erase(grad_vec.begin()+1, grad_vec.end());
+    grad_vec.erase(grad_vec.begin() + 1, grad_vec.end());
   }
   auto it = grad_vec.begin();
   grad_vec.insert(it, new_outputs.back());

@@ -170,10 +170,8 @@ class StoreTestBase(object):
 
 class FileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
+        super(FileStoreTest, self).setUp()
         self.file = tempfile.NamedTemporaryFile(delete=False)
-
-    def tearDown(self):
-        pass
 
     def _create_store(self):
         store = c10d.FileStore(self.file.name, 1)
@@ -183,13 +181,11 @@ class FileStoreTest(TestCase, StoreTestBase):
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
+        super(PrefixFileStoreTest, self).setUp()
         self.file = tempfile.NamedTemporaryFile(delete=False)
         self.filestore = c10d.FileStore(self.file.name, 1)
         self.prefix = "test_prefix"
         self.filestore.set_timeout(timedelta(seconds=300))
-
-    def tearDown(self):
-        pass
 
     def _create_store(self):
         return c10d.PrefixStore(self.prefix, self.filestore)
@@ -232,6 +228,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
+        super(PrefixTCPStoreTest, self).setUp()
         self.tcpstore = create_tcp_store('localhost')
         self.prefix = "test_prefix"
         self.tcpstore.set_timeout(timedelta(seconds=300))
@@ -449,11 +446,13 @@ class MultiProcessTestCase(TestCase):
                 setattr(cls, attr, cls.join_or_run(fn))
 
     def setUp(self):
+        super(MultiProcessTestCase, self).setUp()
         self.rank = self.MAIN_PROCESS_RANK
         self.file = tempfile.NamedTemporaryFile(delete=False)
         self.processes = [self._spawn_process(rank) for rank in range(int(self.world_size))]
 
     def tearDown(self):
+        super(MultiProcessTestCase, self).tearDown()
         for p in self.processes:
             p.terminate()
 

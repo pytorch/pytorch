@@ -1205,10 +1205,11 @@ def conv_tbc(g, input, weight, bias, pad):
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
 
 
-@parse_args('v', 'i', 'i')
-def _unique(g, input, sorted, return_inverse):
+@parse_args('v', 'i', 'i', 'i')
+def _unique(g, input, sorted, return_inverse, return_counts):
     return g.op("ATen", input, operator_s="_unique", sorted_i=sorted,
-                return_inverse_i=return_inverse, outputs=2)
+                return_inverse_i=return_inverse, return_counts_i=return_counts,
+                outputs=3)
 
 
 # Metaprogram symbolics for each ATen native specialized cast operator.
@@ -1606,7 +1607,7 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     if not lengths.type().isSubtypeOf(torch._C.TensorType.get()):
         raise RuntimeError("Lengths must be a Tensor for ONNX export")
     # We know it's a TensorType so this check is now safe.
-    # It's really only necessary beacuse those operators expand to something that
+    # It's really only necessary because those operators expand to something that
     # only works with int32 types in Caffe2...
     if lengths.type().scalarType() != 'Int':
         lengths = _cast_Int(g, lengths, False)
@@ -1689,11 +1690,21 @@ def narrow(g, input, dim, start, length):
     return g.op("Slice", input, axes_i=[dim], starts_i=[start], ends_i=[start + length])
 
 
-@parse_args('v', 'i', 'i')
-def _argmax(g, input, dim, keepdim):
-    return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim)
+def argmax(g, input, dim, keepdim):
+    if dim.node().mustBeNone():
+        flattened = reshape(g, input, (-1,))
+        return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False)
+    else:
+        dim = _parse_arg(dim, 'i')
+        keepdim = _parse_arg(keepdim, 'i')
+        return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim)
 
 
-@parse_args('v', 'i', 'i')
-def _argmin(g, input, dim, keepdim):
-    return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)
+def argmin(g, input, dim, keepdim):
+    if dim.node().mustBeNone():
+        flattened = reshape(g, input, (-1,))
+        return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False)
+    else:
+        dim = _parse_arg(dim, 'i')
+        keepdim = _parse_arg(keepdim, 'i')
+        return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)
