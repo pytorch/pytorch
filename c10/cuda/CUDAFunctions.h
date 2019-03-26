@@ -28,7 +28,8 @@ inline DeviceIndex device_count() noexcept {
     // Clear out the error state, so we don't spuriously trigger someone else.
     // (This shouldn't really matter, since we won't be running very much CUDA
     // code in this regime.)
-    cudaGetLastError();
+    cudaError_t last_err = cudaGetLastError();
+    (void)last_err;
     return 0;
   }
   return static_cast<DeviceIndex>(count);
