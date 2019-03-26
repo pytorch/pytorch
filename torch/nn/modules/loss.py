@@ -1255,7 +1255,7 @@ class CTCLoss(_Loss):
             Target sequences. Each element in the target sequence is a class index. Target index
             cannot be blank (default=0). In the second form, the targets are assumed to be concatenated.
         **input_lengths**: Tuple or tensor of size :math:`(N)`.
-            Lengths of the inputs.
+            Lengths of the inputs (must each be :math:`\leq T`).
             Lengths are specified for each sequence to achieve masking under the
             assumption that sequences are padded to equal lengths. In effect, length is the stop index
             :math:`s_n` for each target sequence, such that :math:`target_n = targets[n,:s_n]` for
