@@ -21,8 +21,9 @@ struct TORCH_API ArgSpec {
   ArgSpec(
       at::TensorList inputs,
       const int _device,
-      const std::vector<int64_t> list_input_lengths)
+      const std::vector<int64_t>& list_input_lengths)
       : descs_{c10::fmap<TensorDesc>(inputs)},
+        list_input_lengths_(list_input_lengths),
         hash_code_{torch::get_hash(
             _device,
             inputs.size(),
@@ -37,7 +38,7 @@ struct TORCH_API ArgSpec {
 
   // Comparators
   bool operator==(const ArgSpec& other) const {
-    return (descs_ == other.descs_ && device_ == other.device_);
+    return (descs_ == other.descs_ && device_ == other.device_ && list_input_lengths_ == other.list_input_lengths_);
   }
 
   bool operator!=(const ArgSpec& spec) const {
@@ -57,6 +58,7 @@ struct TORCH_API ArgSpec {
 
  private:
   std::vector<TensorDesc> descs_;
+  std::vector<int64_t> list_input_lengths_;
   size_t hash_code_;
   int device_;
 };

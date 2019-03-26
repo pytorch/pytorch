@@ -100,8 +100,7 @@ static c10::optional<std::vector<int64_t>> canRunKernel(
 static bool expandArgs(
     const KernelSpec& spec,
     std::vector<at::Tensor>& args,
-    std::vector<int64_t>& map_size,
-    bool dry_run) {
+    std::vector<int64_t>& map_size, bool dry_run) {
   bool has_broadcast = false;
   for (size_t i = 0; i < args.size(); ++i) {
     auto& arg = args[i];
@@ -370,11 +369,9 @@ bool runFusion(const int64_t key, Stack& stack) {
   if (!maybe_map_size)
     return false;
   if (spec.hasRandom()) {
-    bool hasBroadcast = shouldExpandArgs(spec, inputs, *maybe_map_size);
-    if (hasBroadcast)
-      return false;
+      bool hasBroadcast = shouldExpandArgs(spec,inputs, *maybe_map_size);
+      if (hasBroadcast) return false;
   }
-
   expandArgs(spec, inputs, *maybe_map_size, /*dry_run=*/false);
 
   // Retrieves the kernel, compiling (and caching) if necessary
@@ -388,6 +385,7 @@ bool runFusion(const int64_t key, Stack& stack) {
   maybe_kernel = spec.findKernel(arg_spec);
   AT_ASSERT(maybe_kernel);
 
+  // Launches fusion
   std::vector<at::Tensor> raw_outputs;
   // Launches fusion
   auto& fusion = *(*maybe_kernel);
