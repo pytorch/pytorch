@@ -1748,6 +1748,23 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),
 
+    Operator(
+        "prim::abs(int x) -> int",
+        [](Stack& stack) {
+          int64_t x;
+          pop(stack, x);
+          push(stack, x < 0 ? -x : x);
+          return 0;
+        }),
+    Operator(
+        "prim::abs(float x) -> float",
+        [](Stack& stack) {
+          float x;
+          pop(stack, x);
+          push(stack, x < 0 ? -x : x);
+          return 0;
+        }),
+
     // NB: This is the python truediv operation
     Operator(
         "aten::div(int a, int b) -> float",

@@ -5409,7 +5409,7 @@ a")
         def func():
             return {func}({scalar1}, {scalar2})
         ''')
-        funcs = ['min', 'max']
+        funcs = ['min', 'max', 'abs']
         scalars = ['7', '2', '3', '-3', '3.14', '0.125', '-0.5', '2.0', '-2.0']
         scalar_pairs = [(scalar1, scalar2) for scalar1 in scalars for scalar2 in scalars]
 
