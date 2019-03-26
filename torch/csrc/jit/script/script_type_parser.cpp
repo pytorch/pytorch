@@ -155,17 +155,20 @@ c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
 // Parse NamedTuple following the grammar like below:
 // NamedTuple('Employee', [('name', str), ('id', int)])
 // See also: https://docs.python.org/3/library/typing.html#typing.NamedTuple
-TypePtr parseNamedTuple(const Expr& expr) {
+TypePtr ScriptTypeParser::parseNamedTuple(const Expr& expr) {
   auto apply = Apply(expr);
   auto callee = apply.callee();
   if (callee.kind() != TK_VAR || Var(callee).name().name() != "NamedTuple") {
-    throw ErrorReport(callee.range()) << "Unknown type expression";
+    throw ErrorReport(callee.range()) << "Unknown type expression: function apply of "
+        << Var(callee).name().name();
   }
   auto inputs = apply.inputs();
-  if (inputs.size() != 2 || inputs[0].kind() != TK_STRINGLITERAL ||
-      inputs[1].kind() != TK_LIST_LITERAL)
+  if (inputs.size() != 2)
   {
-    throw ErrorReport(inputs.range()) << "Bad NamedTuple construct";
+    throw ErrorReport(inputs.range()) << "NamedTuple takes 2 arguments, but get " << inputs.size();
+  }
+  if (inputs[0].kind() != TK_STRINGLITERAL || inputs[1].kind() != TK_LIST_LITERAL) {
+    throw ErrorReport(inputs.range()) << "Only literals are supported as arguments of NamedTuple";
   }
   auto names_and_types = ListLiteral(inputs[1]).inputs();
   std::vector<TypePtr> types(names_and_types.size());
@@ -173,11 +176,11 @@ TypePtr parseNamedTuple(const Expr& expr) {
   int index = 0;
   for (auto i : names_and_types) {
     if (i.kind() != TK_TUPLE_LITERAL) {
-      throw ErrorReport(i.range()) << "Bad NamedTuple construct";
+      throw ErrorReport(i.range()) << "The second argument of NamedTuple must be list of tuples";
     }
     auto name_and_type = TupleLiteral(i).inputs();
     if (name_and_type.size() != 2 || name_and_type[0].kind() != TK_STRINGLITERAL) {
-      throw ErrorReport(name_and_type.range()) << "Bad NamedTuple construct";
+      throw ErrorReport(name_and_type.range()) << "The elements of sencond argument of NamedTuple must be of format (name, type)";
     }
     names[index] = StringLiteral(name_and_type[0]).text();
     types[index++] = parseTypeFromExpr(name_and_type[1]);
