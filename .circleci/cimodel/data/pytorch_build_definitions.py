@@ -2,11 +2,11 @@
 
 from collections import OrderedDict
 
-import cimodel.conf_tree as conf_tree
-import cimodel.dimensions as dimensions
-import cimodel.miniutils as miniutils
-import cimodel.visualization as visualization
-from cimodel.conf_tree import ConfigNode
+import cimodel.data.dimensions as dimensions
+import cimodel.lib.conf_tree as conf_tree
+import cimodel.lib.miniutils as miniutils
+import cimodel.lib.visualization as visualization
+from cimodel.lib.conf_tree import ConfigNode
 
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
@@ -129,11 +129,7 @@ class HiddenConf(object):
 
     def gen_workflow_yaml_item(self, phase):
 
-        val = OrderedDict()
-        dependency_build = self.parent_build
-        val["requires"] = [dependency_build.gen_build_name("build")]
-
-        return {self.gen_build_name(phase): val}
+        return {self.gen_build_name(phase): {"requires": [self.parent_build.gen_build_name("build")]}}
 
     def gen_build_name(self, _):
         return self.name
@@ -153,10 +149,10 @@ def gen_dependent_configs(xenial_parent_config):
     for parms, gpu in extra_parms:
 
         c = Conf(
-            "xenial",
+            xenial_parent_config.distro,
             ["py3"] + parms,
             pyver="3.6",
-            cuda_version="8",
+            cuda_version=xenial_parent_config.cuda_version,
             restrict_phases=["test"],
             gpu_resource=gpu,
             parent_build=xenial_parent_config,
@@ -170,25 +166,33 @@ def gen_dependent_configs(xenial_parent_config):
     return configs
 
 
-# TODO make the schema consistent between "trusty" and "xenial"
+def X(val):
+    """
+    Compact way to write a leaf node
+    """
+    return val, []
+
+
 CONFIG_TREE_DATA = [
     ("trusty", [
-        ("2.7.9", []),
-        ("2.7", []),
-        ("3.5", []),
-        ("3.6", [
-            ("gcc4.8", []),
-            ("gcc5.4", [False, True]),
-            ("gcc7", []),
+        (None, [
+            X("2.7.9"),
+            X("2.7"),
+            X("3.5"),
+            X("nightly"),
         ]),
-        ("nightly", []),
+        ("gcc", [
+            ("4.8", [X("3.6")]),
+            ("5.4", [("3.6", [X(False), X(True)])]),
+            ("7", [X("3.6")]),
+        ]),
     ]),
     ("xenial", [
         ("clang", [
-            ("5", [("3.6", [])]),
+            ("5", [X("3.6")]),
         ]),
         ("cuda", [
-            ("8", [("3.6", [])]),
+            ("8", [X("3.6")]),
             ("9", [
                 # Note there are magic strings here
                 # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L21
@@ -197,11 +201,11 @@ CONFIG_TREE_DATA = [
                 # and
                 # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L153
                 # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
-                ("2.7", []),
-                ("3.6", []),
+                X("2.7"),
+                X("3.6"),
             ]),
-            ("9.2", [("3.6", [])]),
-            ("10", [("3.6", [])]),
+            ("9.2", [X("3.6")]),
+            ("10", [X("3.6")]),
         ]),
     ]),
 ]
@@ -222,99 +226,92 @@ def gen_tree():
     return configs_list
 
 
-class TopLevelNode(ConfigNode):
-    def __init__(self, node_name, config_tree_data):
-        super(TopLevelNode, self).__init__(None, node_name)
-
-        self.config_tree_data = config_tree_data
-
-    def get_children(self):
-        return [DistroConfigNode(self, d, p) for (d, p) in self.config_tree_data]
-
-
-class DistroConfigNode(ConfigNode):
-    def __init__(self, parent, distro_name, subtree):
-        super(DistroConfigNode, self).__init__(parent, distro_name)
-
+class TreeConfigNode(ConfigNode):
+    def __init__(self, parent, node_name, subtree):
+        super(TreeConfigNode, self).__init__(parent, self.modify_label(node_name))
         self.subtree = subtree
-        self.props["distro_name"] = distro_name
+        self.init2(node_name)
+
+    def modify_label(self, label):
+        return label
+
+    def init2(self, node_name):
+        pass
 
     def get_children(self):
-
-        if self.find_prop("distro_name") == "trusty":
-            return [PyVerConfigNode(self, k, v) for k, v in self.subtree]
-        else:
-            return [XenialCompilerConfigNode(self, v, subtree) for (v, subtree) in self.subtree]
+        return [self.child_constructor()(self, k, v) for (k, v) in self.subtree]
 
 
-class PyVerConfigNode(ConfigNode):
-    def __init__(self, parent, pyver, subtree):
-        super(PyVerConfigNode, self).__init__(parent, pyver)
+class TopLevelNode(TreeConfigNode):
+    def __init__(self, node_name, subtree):
+        super(TopLevelNode, self).__init__(None, node_name, subtree)
 
-        self.subtree = subtree
-        self.props["pyver"] = pyver
-
-        self.props["abbreviated_pyver"] = get_major_pyver(pyver)
-
-    def get_children(self):
-        return [CompilerConfigNode(self, v, xla_options) for (v, xla_options) in self.subtree]
+    def child_constructor(self):
+        return DistroConfigNode
 
 
-class CompilerConfigNode(ConfigNode):
-    def __init__(self, parent, compiler_name, subtree):
-        super(CompilerConfigNode, self).__init__(parent, compiler_name)
+class DistroConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["distro_name"] = node_name
 
-        self.props["compiler_name"] = compiler_name
-
-        self.subtree = subtree
-
-    def get_children(self):
-        return [XlaConfigNode(self, v) for v in self.subtree]
+    def child_constructor(self):
+        distro = self.find_prop("distro_name")
+        return TrustyCompilerConfigNode if distro == "trusty" else XenialCompilerConfigNode
 
 
-class XenialCompilerConfigNode(ConfigNode):
-    def __init__(self, parent, compiler_name, subtree):
-        super(XenialCompilerConfigNode, self).__init__(parent, compiler_name)
+class TrustyCompilerConfigNode(TreeConfigNode):
 
-        self.props["compiler_name"] = compiler_name
+    def modify_label(self, label):
+        return label or "<unspecified>"
 
-        self.subtree = subtree
+    def init2(self, node_name):
+        self.props["compiler_name"] = node_name
 
-    def get_children(self):
-        return [XenialCompilerVersionConfigNode(self, k, v) for (k, v) in self.subtree]
-
-
-class XenialCompilerVersionConfigNode(ConfigNode):
-    def __init__(self, parent, compiler_version, subtree):
-        super(XenialCompilerVersionConfigNode, self).__init__(parent, compiler_version)
-
-        self.subtree = subtree
-
-        self.props["compiler_version"] = compiler_version
-
-    def get_children(self):
-        return [XenialPythonVersionConfigNode(self, v) for (v, _) in self.subtree]
+    def child_constructor(self):
+        return TrustyCompilerVersionConfigNode if self.props["compiler_name"] else PyVerConfigNode
 
 
-class XenialPythonVersionConfigNode(ConfigNode):
-    def __init__(self, parent, python_version):
-        super(XenialPythonVersionConfigNode, self).__init__(parent, python_version)
+class TrustyCompilerVersionConfigNode(TreeConfigNode):
 
-        self.props["pyver"] = python_version
-        self.props["abbreviated_pyver"] = get_major_pyver(python_version)
+    def init2(self, node_name):
+        self.props["compiler_version"] = node_name
 
-    def get_children(self):
-        return []
+    def child_constructor(self):
+        return PyVerConfigNode
 
 
-class XlaConfigNode(ConfigNode):
-    def __init__(self, parent, xla_enabled):
-        super(XlaConfigNode, self).__init__(parent, "XLA=" + str(xla_enabled))
+class PyVerConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["pyver"] = node_name
+        self.props["abbreviated_pyver"] = get_major_pyver(node_name)
 
-        self.props["is_xla"] = xla_enabled
+    def child_constructor(self):
+        return XlaConfigNode
 
-    def get_children(self):
-        return []
+
+class XlaConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "XLA=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_xla"] = node_name
+
+
+class XenialCompilerConfigNode(TreeConfigNode):
+
+    def init2(self, node_name):
+        self.props["compiler_name"] = node_name
+
+    def child_constructor(self):
+        return XenialCompilerVersionConfigNode
+
+
+class XenialCompilerVersionConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["compiler_version"] = node_name
+
+    def child_constructor(self):
+        return PyVerConfigNode
 
 
 def instantiate_configs():
@@ -330,18 +327,17 @@ def instantiate_configs():
         python_version = None
         if distro_name == "xenial":
             python_version = fc.find_prop("pyver")
-
-        if distro_name == "xenial":
             parms_list = [fc.find_prop("abbreviated_pyver")]
         else:
             parms_list = ["py" + fc.find_prop("pyver")]
 
+        compiler_name = fc.find_prop("compiler_name")
+
         cuda_version = None
-        if fc.find_prop("compiler_name") == "cuda":
+        if compiler_name == "cuda":
             cuda_version = fc.find_prop("compiler_version")
 
-        compiler_name = fc.find_prop("compiler_name")
-        if compiler_name and compiler_name != "cuda":
+        elif compiler_name:
             gcc_version = compiler_name + (fc.find_prop("compiler_version") or "")
             parms_list.append(gcc_version)
 
@@ -381,7 +377,6 @@ def add_build_env_defs(jobs_dict):
     mydict = OrderedDict()
 
     config_list = instantiate_configs()
-
     for c in config_list:
 
         for phase in dimensions.PHASES:
@@ -427,7 +422,7 @@ def get_workflow_list():
             x.append(conf_options.gen_workflow_yaml_item(phase))
 
         # TODO convert to recursion
-        for conf in conf_options.dependent_tests:
+        for conf in conf_options.get_dependents():
             x.append(conf.gen_workflow_yaml_item("test"))
 
     return x
