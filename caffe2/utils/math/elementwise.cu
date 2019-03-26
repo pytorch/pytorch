@@ -29,6 +29,188 @@ __global__ void SinCosCUDAKernel(const int N, const T* X, T* S, T* C) {
   }
 }
 
+#ifdef __HIP_PLATFORM_HCC__
+
+template <typename TAlpha, typename TData>
+__global__ void AxpyCUDAKernel(
+    const std::int64_t N,
+    const TAlpha alpha,
+    const TData* X,
+    TData* Y) {
+  const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) *
+          static_cast<std::int64_t>(CAFFE_CUDA_NUM_THREADS) +
+      static_cast<std::int64_t>(threadIdx.x);
+  if (index < N) {
+    Y[index] += static_cast<TData>(alpha) * __ldg(X + index);
+  }
+}
+
+template <typename TAlpha, typename TData>
+__global__ void AxpyCUDAKernel(
+    const std::int64_t N,
+    const TAlpha* alpha,
+    const TData* X,
+    TData* Y) {
+  __shared__ TData a;
+  if (threadIdx.x == 0) {
+    a = static_cast<TData>(__ldg(alpha));
+  }
+  __syncthreads();
+  const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) *
+          static_cast<std::int64_t>(CAFFE_CUDA_NUM_THREADS) +
+      static_cast<std::int64_t>(threadIdx.x);
+  if (index < N) {
+    Y[index] += a * __ldg(X + index);
+  }
+}
+
+#define DELEGATE_HALF_AXPY_CUDA_KERNEL(TAlpha, FMAFunc)                \
+  template <>                                                          \
+  __global__ void AxpyCUDAKernel<TAlpha, at::Half>(                    \
+      const std::int64_t N,                                            \
+      const TAlpha alpha,                                              \
+      const at::Half* X,                                               \
+      at::Half* Y) {                                                   \
+    const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) * \
+            static_cast<std::int64_t>(CAFFE_CUDA_NUM_THREADS) +        \
+        static_cast<std::int64_t>(threadIdx.x);                        \
+    if (index < N) {                                                   \
+      Y[index] = convert::To<TAlpha, at::Half>(FMAFunc(                \
+          alpha,                                                       \
+          convert::To<at::Half, TAlpha>(X[index]),                     \
+          convert::To<at::Half, TAlpha>(Y[index])));                   \
+    }                                                                  \
+  }                                                                    \
+  template <>                                                          \
+  __global__ void AxpyCUDAKernel<TAlpha, at::Half>(                    \
+      const std::int64_t N,                                            \
+      const TAlpha* alpha,                                             \
+      const at::Half* X,                                               \
+      at::Half* Y) {                                                   \
+    __shared__ TAlpha a;                                               \
+    if (threadIdx.x == 0) {                                            \
+      a = __ldg(alpha);                                                \
+    }                                                                  \
+    __syncthreads();                                                   \
+    const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) * \
+            static_cast<std::int64_t>(CAFFE_CUDA_NUM_THREADS) +        \
+        static_cast<std::int64_t>(threadIdx.x);                        \
+    if (index < N) {                                                   \
+      Y[index] = convert::To<TAlpha, at::Half>(FMAFunc(                \
+          a,                                                           \
+          convert::To<at::Half, TAlpha>(X[index]),                     \
+          convert::To<at::Half, TAlpha>(Y[index])));                   \
+    }                                                                  \
+  }
+DELEGATE_HALF_AXPY_CUDA_KERNEL(float, fmaf)
+#undef DELEGATE_HALF_AXPY_CUDA_KERNEL
+
+#endif // __HIP_PLATFORM_HCC__
+
+template <typename TAlpha, typename TData>
+__global__ void AxpbyCUDAKernel(
+    const std::int64_t N,
+    const TAlpha alpha,
+    const TData* X,
+    const TAlpha beta,
+    TData* Y);
+
+template <typename TAlpha, typename TData>
+__global__ void AxpbyCUDAKernel(
+    const std::int64_t N,
+    const TAlpha* alpha,
+    const TData* X,
+    const TAlpha* beta,
+    TData* Y);
+
+#define DELEGATE_AXPBY_CUDA_KERNEL(TAlpha, TData, FMAFunc)             \
+  template <>                                                          \
+  __global__ void AxpbyCUDAKernel<TAlpha, TData>(                      \
+      const std::int64_t N,                                            \
+      const TAlpha alpha,                                              \
+      const TData* X,                                                  \
+      const TAlpha beta,                                               \
+      TData* Y) {                                                      \
+    const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) * \
+            static_cast<std::int64_t>(CAFFE_CUDA_NUM_THREADS) +        \
+        static_cast<std::int64_t>(threadIdx.x);                        \
+    if (index < N) {                                                   \
+      Y[index] = FMAFunc(                                              \
+          static_cast<TData>(alpha),                                   \
+          X[index],                                                    \
+          static_cast<TData>(beta) * Y[index]);                        \
+    }                                                                  \
+  }                                                                    \
+  template <>                                                          \
+  __global__ void AxpbyCUDAKernel<TAlpha, TData>(                      \
+      const std::int64_t N,                                            \
+      const TAlpha* alpha,                                             \
+      const TData* X,                                                  \
+      const TAlpha* beta,                                              \
+      TData* Y) {                                                      \
+    __shared__ TData a;                                                \
+    __shared__ TData b;                                                \
+    if (threadIdx.x == 0) {                                            \
+      a = static_cast<TData>(*alpha);                                  \
+      b = static_cast<TData>(*beta);                                   \
+    }                                                                  \
+    __syncthreads();                                                   \
+    const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) * \
+            static_cast<std::int64_t>(CAFFE_CUDA_NUM_THREADS) +        \
+        static_cast<std::int64_t>(threadIdx.x);                        \
+    if (index < N) {                                                   \
+      Y[index] = FMAFunc(a, X[index], b * Y[index]);                   \
+    }                                                                  \
+  }
+DELEGATE_AXPBY_CUDA_KERNEL(float, float, fmaf)
+DELEGATE_AXPBY_CUDA_KERNEL(float, double, fma)
+#undef DELEGATE_AXPBY_CUDA_KERNEL
+
+#define DELEGATE_HALF_AXPBY_CUDA_KERNEL(TAlpha, FMAFunc)               \
+  template <>                                                          \
+  __global__ void AxpbyCUDAKernel<TAlpha, at::Half>(                   \
+      const std::int64_t N,                                            \
+      const TAlpha alpha,                                              \
+      const at::Half* X,                                               \
+      const TAlpha beta,                                               \
+      at::Half* Y) {                                                   \
+    const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) * \
+            static_cast<std::int64_t>(CAFFE_CUDA_NUM_THREADS) +        \
+        static_cast<std::int64_t>(threadIdx.x);                        \
+    if (index < N) {                                                   \
+      Y[index] = convert::To<TAlpha, at::Half>(FMAFunc(                \
+          alpha,                                                       \
+          convert::To<at::Half, TAlpha>(X[index]),                     \
+          beta * convert::To<at::Half, TAlpha>(Y[index])));            \
+    }                                                                  \
+  }                                                                    \
+  template <>                                                          \
+  __global__ void AxpbyCUDAKernel<TAlpha, at::Half>(                   \
+      const std::int64_t N,                                            \
+      const TAlpha* alpha,                                             \
+      const at::Half* X,                                               \
+      const TAlpha* beta,                                              \
+      at::Half* Y) {                                                   \
+    __shared__ TAlpha a;                                               \
+    __shared__ TAlpha b;                                               \
+    if (threadIdx.x == 0) {                                            \
+      a = *alpha;                                                      \
+      b = *beta;                                                       \
+    }                                                                  \
+    __syncthreads();                                                   \
+    const std::int64_t index = static_cast<std::int64_t>(blockIdx.x) * \
+            static_cast<std::int64_t>(CAFFE_CUDA_NUM_THREADS) +        \
+        static_cast<std::int64_t>(threadIdx.x);                        \
+    if (index < N) {                                                   \
+      Y[index] = convert::To<TAlpha, at::Half>(FMAFunc(                \
+          a,                                                           \
+          convert::To<at::Half, TAlpha>(X[index]),                     \
+          b * convert::To<at::Half, TAlpha>(Y[index])));               \
+    }                                                                  \
+  }
+DELEGATE_HALF_AXPBY_CUDA_KERNEL(float, fmaf)
+#undef DELEGATE_HALF_AXPBY_CUDA_KERNEL
+
 } // namespace
 
 #define CAFFE2_SPECIALIZED_CUDA_SET(T)                                    \
@@ -304,89 +486,80 @@ CAFFE2_SPECIALIZED_CUDA_HALF_SCALE(float)
 
 #else // __HIP_PLATFORM_HCC__
 
-#define DELEGATE_CUDA_HALF_SCALE_BY_CUBLAS_FUNCTION(              \
-    TAlpha, CuBLASFunc, kAlphaType, kExecutionType)               \
-  template <>                                                     \
-  CAFFE2_CUDA_EXPORT void Scale<TAlpha, at::Half, CUDAContext>(   \
-      const int N,                                                \
-      const TAlpha alpha,                                         \
-      const at::Half* X,                                          \
-      at::Half* Y,                                                \
-      CUDAContext* context) {                                     \
-    if (N == 0) {                                                 \
-      return;                                                     \
-    }                                                             \
-    if (Y == X) {                                                 \
-      CUBLAS_ENFORCE(cublasSetPointerMode(                        \
-          context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));   \
-      CUBLAS_ENFORCE(cublasScalEx(                                \
-          context->cublas_handle(),                               \
-          N,                                                      \
-          &alpha,                                                 \
-          kAlphaType,                                             \
-          Y,                                                      \
-          CUDA_R_16F,                                             \
-          1,                                                      \
-          kExecutionType));                                       \
-    } else {                                                      \
-      const float alpha_host = convert::To<TAlpha, float>(alpha); \
-      thrust::transform(                                          \
-          thrust::cuda::par.on(context->cuda_stream()),           \
-          X,                                                      \
-          X + N,                                                  \
-          Y,                                                      \
-          [alpha_host] __device__(const at::Half x) {             \
-            return convert::To<float, at::Half>(                  \
-                convert::To<at::Half, float>(x) * alpha_host);    \
-          });                                                     \
-    }                                                             \
-  }                                                               \
-  template <>                                                     \
-  CAFFE2_CUDA_EXPORT void Scale<TAlpha, at::Half, CUDAContext>(   \
-      const int N,                                                \
-      const TAlpha* alpha,                                        \
-      const at::Half* X,                                          \
-      at::Half* Y,                                                \
-      CUDAContext* context) {                                     \
-    if (N == 0) {                                                 \
-      return;                                                     \
-    }                                                             \
-    if (Y == X) {                                                 \
-      CUBLAS_ENFORCE(cublasSetPointerMode(                        \
-          context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));   \
-      CUBLAS_ENFORCE(cublasScalEx(                                \
-          context->cublas_handle(),                               \
-          N,                                                      \
-          alpha,                                                  \
-          kAlphaType,                                             \
-          Y,                                                      \
-          CUDA_R_16F,                                             \
-          1,                                                      \
-          kExecutionType));                                       \
-    } else {                                                      \
-      thrust::transform(                                          \
-          thrust::cuda::par.on(context->cuda_stream()),           \
-          X,                                                      \
-          X + N,                                                  \
-          Y,                                                      \
-          [alpha] __device__(const at::Half x) {                  \
-            return convert::To<float, at::Half>(                  \
-                convert::To<at::Half, float>(x) *                 \
-                convert::To<TAlpha, float>(*alpha));              \
-          });                                                     \
-    }                                                             \
+#define DELEGATE_CUDA_HALF_SCALE(TAlpha, kAlphaType, kExecutionType) \
+  template <>                                                        \
+  CAFFE2_CUDA_EXPORT void Scale<TAlpha, at::Half, CUDAContext>(      \
+      const int N,                                                   \
+      const TAlpha alpha,                                            \
+      const at::Half* X,                                             \
+      at::Half* Y,                                                   \
+      CUDAContext* context) {                                        \
+    if (N == 0) {                                                    \
+      return;                                                        \
+    }                                                                \
+    if (Y == X) {                                                    \
+      CUBLAS_ENFORCE(cublasSetPointerMode(                           \
+          context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));      \
+      CUBLAS_ENFORCE(cublasScalEx(                                   \
+          context->cublas_handle(),                                  \
+          N,                                                         \
+          &alpha,                                                    \
+          kAlphaType,                                                \
+          Y,                                                         \
+          CUDA_R_16F,                                                \
+          1,                                                         \
+          kExecutionType));                                          \
+    } else {                                                         \
+      const float alpha_host = convert::To<TAlpha, float>(alpha);    \
+      thrust::transform(                                             \
+          thrust::cuda::par.on(context->cuda_stream()),              \
+          X,                                                         \
+          X + N,                                                     \
+          Y,                                                         \
+          [alpha_host] __device__(const at::Half x) {                \
+            return convert::To<float, at::Half>(                     \
+                convert::To<at::Half, float>(x) * alpha_host);       \
+          });                                                        \
+    }                                                                \
+  }                                                                  \
+  template <>                                                        \
+  CAFFE2_CUDA_EXPORT void Scale<TAlpha, at::Half, CUDAContext>(      \
+      const int N,                                                   \
+      const TAlpha* alpha,                                           \
+      const at::Half* X,                                             \
+      at::Half* Y,                                                   \
+      CUDAContext* context) {                                        \
+    if (N == 0) {                                                    \
+      return;                                                        \
+    }                                                                \
+    if (Y == X) {                                                    \
+      CUBLAS_ENFORCE(cublasSetPointerMode(                           \
+          context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));      \
+      CUBLAS_ENFORCE(cublasScalEx(                                   \
+          context->cublas_handle(),                                  \
+          N,                                                         \
+          alpha,                                                     \
+          kAlphaType,                                                \
+          Y,                                                         \
+          CUDA_R_16F,                                                \
+          1,                                                         \
+          kExecutionType));                                          \
+    } else {                                                         \
+      thrust::transform(                                             \
+          thrust::cuda::par.on(context->cuda_stream()),              \
+          X,                                                         \
+          X + N,                                                     \
+          Y,                                                         \
+          [alpha] __device__(const at::Half x) {                     \
+            return convert::To<float, at::Half>(                     \
+                convert::To<at::Half, float>(x) *                    \
+                convert::To<TAlpha, float>(*alpha));                 \
+          });                                                        \
+    }                                                                \
   }
-DELEGATE_CUDA_HALF_SCALE_BY_CUBLAS_FUNCTION(
-    at::Half,
-    cublasScalEx,
-    CUDA_R_16F,
-    CUDA_R_32F)
-DELEGATE_CUDA_HALF_SCALE_BY_CUBLAS_FUNCTION(
-    float,
-    cublasScalEx,
-    CUDA_R_32F,
-    CUDA_R_32F)
-#undef DELEGATE_CUDA_HALF_SCALE_BY_CUBLAS_FUNCTION
+DELEGATE_CUDA_HALF_SCALE(at::Half, CUDA_R_16F, CUDA_R_32F)
+DELEGATE_CUDA_HALF_SCALE(float, CUDA_R_32F, CUDA_R_32F)
+#undef DELEGATE_CUDA_HALF_SCALE
 
 #endif // __HIP_PLATFORM_HCC__
 
@@ -571,6 +744,151 @@ DELEGATE_SIMPLE_CUDA_COMPARE_FUNCTION(
     GE,
     thrust::greater_equal<double>())
 #undef DELEGATE_SIMPLE_CUDA_COMPARE_FUNCTION
+
+#define DELEGATE_CUDA_AXPY(T, CuBLASFunc)                             \
+  template <>                                                         \
+  CAFFE2_CUDA_EXPORT void Axpy<T, T, CUDAContext>(                    \
+      const std::int64_t N,                                           \
+      const T alpha,                                                  \
+      const T* X,                                                     \
+      T* Y,                                                           \
+      CUDAContext* context) {                                         \
+    CUBLAS_ENFORCE(cublasSetPointerMode(                              \
+        context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));         \
+    CUBLAS_ENFORCE(                                                   \
+        CuBLASFunc(context->cublas_handle(), N, &alpha, X, 1, Y, 1)); \
+  }                                                                   \
+  template <>                                                         \
+  CAFFE2_CUDA_EXPORT void Axpy<T, T, CUDAContext>(                    \
+      const std::int64_t N,                                           \
+      const T* alpha,                                                 \
+      const T* X,                                                     \
+      T* Y,                                                           \
+      CUDAContext* context) {                                         \
+    CUBLAS_ENFORCE(cublasSetPointerMode(                              \
+        context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));       \
+    CUBLAS_ENFORCE(                                                   \
+        cublasSaxpy(context->cublas_handle(), N, alpha, X, 1, Y, 1)); \
+  }
+DELEGATE_CUDA_AXPY(float, cublasSaxpy)
+#undef DELEGATE_CUDA_AXPY
+
+#ifndef __HIP_PLATFORM_HCC__
+
+#define DELEGATE_CUDA_AXPY_EX(                                  \
+    TAlpha, TData, kAlphaType, kDataType, kExecutionType)       \
+  template <>                                                   \
+  CAFFE2_CUDA_EXPORT void Axpy<TAlpha, TData, CUDAContext>(     \
+      const std::int64_t N,                                     \
+      const TAlpha alpha,                                       \
+      const TData* X,                                           \
+      TData* Y,                                                 \
+      CUDAContext* context) {                                   \
+    CUBLAS_ENFORCE(cublasSetPointerMode(                        \
+        context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));   \
+    CUBLAS_ENFORCE(cublasAxpyEx(                                \
+        context->cublas_handle(),                               \
+        N,                                                      \
+        &alpha,                                                 \
+        kAlphaType,                                             \
+        X,                                                      \
+        kDataType,                                              \
+        1,                                                      \
+        Y,                                                      \
+        kDataType,                                              \
+        1,                                                      \
+        kExecutionType));                                       \
+  }                                                             \
+  template <>                                                   \
+  CAFFE2_CUDA_EXPORT void Axpy<TAlpha, TData, CUDAContext>(     \
+      const std::int64_t N,                                     \
+      const TAlpha* alpha,                                      \
+      const TData* X,                                           \
+      TData* Y,                                                 \
+      CUDAContext* context) {                                   \
+    CUBLAS_ENFORCE(cublasSetPointerMode(                        \
+        context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE)); \
+    CUBLAS_ENFORCE(cublasAxpyEx(                                \
+        context->cublas_handle(),                               \
+        N,                                                      \
+        alpha,                                                  \
+        kAlphaType,                                             \
+        X,                                                      \
+        kDataType,                                              \
+        1,                                                      \
+        Y,                                                      \
+        kDataType,                                              \
+        1,                                                      \
+        kExecutionType));                                       \
+  }
+DELEGATE_CUDA_AXPY_EX(float, double, CUDA_R_32F, CUDA_R_64F, CUDA_R_64F)
+DELEGATE_CUDA_AXPY_EX(float, at::Half, CUDA_R_32F, CUDA_R_16F, CUDA_R_32F)
+#undef DELEGATE_CUDA_AXPY_EX
+
+#else // __HIP_PLATFORM_HCC__
+
+#define CAFFE2_SPECIALIZED_CUDA_AXPY(TAlpha, TData)                        \
+  template <>                                                              \
+  CAFFE2_CUDA_EXPORT void Axpy<TAlpha, TData, CUDAContext>(                \
+      const std::int64_t N,                                                \
+      const TAlpha alpha,                                                  \
+      const TData* X,                                                      \
+      TData* Y,                                                            \
+      CUDAContext* context) {                                              \
+    const std::int64_t M = DivUp<std::int64_t>(N, CAFFE_CUDA_NUM_THREADS); \
+    AxpyCUDAKernel<TAlpha, TData>                                          \
+        <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
+            N, alpha, X, Y);                                               \
+  }                                                                        \
+  template <>                                                              \
+  CAFFE2_CUDA_EXPORT void Axpy<TAlpha, TData, CUDAContext>(                \
+      const std::int64_t N,                                                \
+      const TAlpha* alpha,                                                 \
+      const TData* X,                                                      \
+      TData* Y,                                                            \
+      CUDAContext* context) {                                              \
+    const std::int64_t M = DivUp<std::int64_t>(N, CAFFE_CUDA_NUM_THREADS); \
+    AxpyCUDAKernel<TAlpha, TData>                                          \
+        <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
+            N, alpha, X, Y);                                               \
+  }
+CAFFE2_SPECIALIZED_CUDA_AXPY(float, double)
+CAFFE2_SPECIALIZED_CUDA_AXPY(float, at::Half)
+#undef CAFFE2_SPECIALIZED_CUDA_AXPY
+
+#endif // __HIP_PLATFORM_HCC__
+
+#define CAFFE2_SPECIALIZED_CUDA_AXPBY(TAlpha, TData)                       \
+  template <>                                                              \
+  CAFFE2_CUDA_EXPORT void Axpby<TAlpha, TData, CUDAContext>(               \
+      const std::int64_t N,                                                \
+      const TAlpha alpha,                                                  \
+      const TData* X,                                                      \
+      const TAlpha beta,                                                   \
+      TData* Y,                                                            \
+      CUDAContext* context) {                                              \
+    const std::int64_t M = DivUp<std::int64_t>(N, CAFFE_CUDA_NUM_THREADS); \
+    AxpbyCUDAKernel<TAlpha, TData>                                         \
+        <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
+            N, alpha, X, beta, Y);                                         \
+  }                                                                        \
+  template <>                                                              \
+  CAFFE2_CUDA_EXPORT void Axpby<TAlpha, TData, CUDAContext>(               \
+      const std::int64_t N,                                                \
+      const TAlpha* alpha,                                                 \
+      const TData* X,                                                      \
+      const TAlpha* beta,                                                  \
+      TData* Y,                                                            \
+      CUDAContext* context) {                                              \
+    const std::int64_t M = DivUp<std::int64_t>(N, CAFFE_CUDA_NUM_THREADS); \
+    AxpbyCUDAKernel<TAlpha, TData>                                         \
+        <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(        \
+            N, alpha, X, beta, Y);                                         \
+  }
+CAFFE2_SPECIALIZED_CUDA_AXPBY(float, float)
+CAFFE2_SPECIALIZED_CUDA_AXPBY(float, double)
+CAFFE2_SPECIALIZED_CUDA_AXPBY(float, at::Half)
+#undef CAFFE2_SPECIALIZED_CUDA_AXPBY
 
 } // namespace math
 } // namespace caffe2
