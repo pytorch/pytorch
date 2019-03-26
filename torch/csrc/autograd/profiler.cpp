@@ -93,21 +93,6 @@ void popRange() {
   }
 }
 
-struct ProfilerCallback : public RecordFunctionCallback {
-  ProfilerCallback(const FunctionCallContext& ctx) {
-    auto* msg = (ctx.seqNr() >= 0) ? ", seq = " : "";
-    if (ctx.hasOwnedName()) {
-      pushRangeImpl<std::string>(ctx.name(), msg, ctx.seqNr()); // copy name
-    } else {
-      pushRangeImpl<const char*>(ctx.name(), msg, ctx.seqNr());
-    }
-  }
-
-  virtual ~ProfilerCallback() {
-    popRange();
-  }
-};
-
 void enableProfiler(ProfilerState new_state) {
   AT_ASSERT(new_state != ProfilerState::Disabled);
   if (new_state == ProfilerState::NVTX && !cuda_stubs->enabled())
@@ -117,7 +102,15 @@ void enableProfiler(ProfilerState new_state) {
   }
 
   pushCallback([](const FunctionCallContext& ctx) {
-    return c10::guts::make_unique<ProfilerCallback>(ctx);
+    auto* msg = (ctx.seqNr() >= 0) ? ", seq = " : "";
+    if (ctx.hasOwnedName()) {
+      pushRangeImpl<std::string>(ctx.name(), msg, ctx.seqNr()); // copy name
+    } else {
+      pushRangeImpl<const char*>(ctx.name(), msg, ctx.seqNr());
+    }
+  },
+  [](const FunctionCallContext& ctx) {
+    popRange();
   });
   state = new_state;
 

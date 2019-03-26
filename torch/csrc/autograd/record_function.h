@@ -65,11 +65,6 @@ struct FunctionCallContext {
   mutable std::vector<c10::IValue> inputs_;
 };
 
-
-struct RecordFunctionCallback {
-  virtual ~RecordFunctionCallback(){}
-};
-
 struct RecordFunction {
   explicit RecordFunction(Function* fn, GetPackedInputsCallback cb = nullptr);
 
@@ -98,14 +93,13 @@ struct RecordFunction {
   void processCallbacks(Args&&... args);
 
   std::shared_ptr<FunctionCallContext> ctx_;
-
-  c10::SmallVector<std::unique_ptr<RecordFunctionCallback>, 4> cbs_;
 };
 
-using CallbackCreator = std::function<std::unique_ptr<RecordFunctionCallback>(const FunctionCallContext&)>;
 // WARNING: all calls to pushCallback/popCallback are not thread safe and
 // must not overlap with other code execution
-void pushCallback(CallbackCreator callback_creator);
+using RecordFunctionCallback = std::function<void(const FunctionCallContext&)>;
+void pushCallback(RecordFunctionCallback, RecordFunctionCallback);
+void pushCallback(RecordFunctionCallback);
 void popCallback();
 // Functions to pass the context across fork calls
 const std::shared_ptr<FunctionCallContext>& currentFunctionCallContext();

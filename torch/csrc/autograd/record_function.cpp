@@ -5,13 +5,19 @@ namespace torch { namespace autograd { namespace profiler {
 
 namespace {
 std::atomic<bool> has_callbacks(false);
-std::vector<CallbackCreator> cbc;
+std::vector<RecordFunctionCallback> start_callbacks;
+std::vector<RecordFunctionCallback> end_callbacks;
 thread_local std::shared_ptr<FunctionCallContext> thread_local_ctx;
 }
 
-void pushCallback(CallbackCreator callback_creator) {
-  cbc.push_back(callback_creator);
+void pushCallback(RecordFunctionCallback start, RecordFunctionCallback end) {
+  start_callbacks.push_back(start);
+  end_callbacks.push_back(end);
   has_callbacks = true;
+}
+
+void pushCallback(RecordFunctionCallback start) {
+  pushCallback(start, [](const FunctionCallContext&){});
 }
 
 const std::shared_ptr<FunctionCallContext>& currentFunctionCallContext() {
@@ -24,11 +30,12 @@ void setCurrentFunctionCallContext(
 }
 
 void popCallback() {
-  if (cbc.empty()) {
+  if (start_callbacks.empty()) {
     throw std::runtime_error("Empty callbacks stack");
   }
-  cbc.pop_back();
-  has_callbacks = !cbc.empty();
+  start_callbacks.pop_back();
+  end_callbacks.pop_back();
+  has_callbacks = !start_callbacks.empty();
 }
 
 // typeid(*fn).name() would avoid an additional string allocation.
@@ -73,14 +80,17 @@ void RecordFunction::processCallbacks(Args&&... args) {
   ctx_ = std::make_shared<FunctionCallContext>(std::forward<Args>(args)...);
   ctx_->setParent(thread_local_ctx);
   thread_local_ctx = ctx_;
-  for (size_t idx = 0; idx < cbc.size(); ++idx) {
-    auto cb_ptr = cbc[idx](*ctx_);
-    cbs_.push_back(std::move(cb_ptr));
+
+  for (size_t idx = 0; idx < start_callbacks.size(); ++idx) {
+    start_callbacks[idx](*ctx_);
   }
 }
 
 RecordFunction::~RecordFunction() {
   if (ctx_) {
+    for (size_t idx = 0; idx < end_callbacks.size(); ++idx) {
+      end_callbacks[idx](*ctx_);
+    }
     thread_local_ctx = ctx_->parent();
   }
 }
