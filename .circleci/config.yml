@@ -1279,6 +1279,14 @@ jobs:
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
+  pytorch_linux_xenial_cuda8_cudnn7_py3_nogpu_test:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda8-cudnn7-py3-nogpu-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:291"
+      PYTHON_VERSION: "3.6"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
+
   pytorch_linux_xenial_cuda9_cudnn7_py2_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py2-build
@@ -3100,6 +3108,9 @@ workflows:
           requires:
             - pytorch_linux_xenial_cuda8_cudnn7_py3_build
       - pytorch_linux_xenial_cuda8_cudnn7_py3_slow_test:
+          requires:
+            - pytorch_linux_xenial_cuda8_cudnn7_py3_build
+      - pytorch_linux_xenial_cuda8_cudnn7_py3_nogpu_test:
           requires:
             - pytorch_linux_xenial_cuda8_cudnn7_py3_build
       - pytorch_short_perf_test_gpu:
