@@ -904,6 +904,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   virtual void bump_version() noexcept {
     version_counter_.bump();
+  }
 
   inline void set_pyobj(PyObject* pyobj) noexcept {
     pyobj_ = pyobj;
