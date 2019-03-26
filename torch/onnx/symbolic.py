@@ -591,14 +591,22 @@ def softmax(g, input, dim, dtype=None):
     #           [0.167, 0.167, 0.167]]
     # So only when dim and axis both equal to ndim - 1 (the last dimension),
     # their semantics are equivalent.
-    if dim < 0:
+    # So use softmax when dim and axis both equal to ndim - 1
+    # otherwise compute softmax using a subgraph with other operators
+    if dim < 0 and input.type().kind() != "Tensor":
         dim = input.type().dim() + dim
-    if input.type().dim() != dim + 1:
-        return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
-    return_op = g.op('Softmax', input, axis_i=dim)
+        if input.type().dim() == dim + 1:
+            softmax = g.op('Softmax', input, axis_i=dim)
+            if dtype:
+                softmax = g.op("Cast", return_op, to_i=scalar_type_to_onnx[dtype])
+            return softmax
+        return sotmax
+    exp = g.op('Exp', input)
+    sum = g.op('ReduceSum', exp, axes_i=[dim])
+    softmax = g.op('Div', exp, sum)
     if dtype:
-        return_op = g.op("Cast", return_op, to_i=scalar_type_to_onnx[dtype])
-    return return_op
+        softmax = g.op("Cast", return_op, to_i=scalar_type_to_onnx[dtype])
+    return softmax
 
 
 @parse_args('v', 't', 'v')

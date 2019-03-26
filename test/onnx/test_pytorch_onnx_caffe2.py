@@ -882,12 +882,20 @@ class TestCaffe2Backend(unittest.TestCase):
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
     # TODO: Add test cases for prod once Caffe2 has support for ReduceProd
-    def test_softmax(self):
+    def test_softmax_dim(self):
         for i in range(7)[2:]:
             model = nn.Softmax(dim=i - 1)
             dims = [2] * (i - 2) + [3, 4]
             input = torch.ones(*dims, requires_grad=True)
             self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=input)
+
+    def test_softmax(self):
+        class SoftmaxModel(torch.nn.Module):
+            def forward(self, input):
+                return nn.functional.softmax(input, dim=0)
+
+        x = torch.randn(1, 2, 3, requires_grad=True)
+        self.run_model_test(SoftmaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_logsoftmax(self):
         for i in range(7)[2:]:
