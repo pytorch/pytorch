@@ -186,7 +186,6 @@ class _TestTorchMixin(object):
                        'as_strided_',
                        re.compile('^clamp_(min|max)_?$'),
                        'coalesce',
-                       'index_put',
                        'is_coalesced',
                        'is_distributed',
                        'is_complex',
