@@ -30,7 +30,7 @@ c10::Storage new_with_itensor_storage(const ideep::tensor& it, const TensorOptio
   c10::DataPtr data_ptr(it.get_data_handle(), c10::DeviceType::CPU);
   return c10::Storage(
     options.dtype(), it.get_size() / options.dtype().itemsize(),
-    std::move(data_ptr), nullptr, false);
+    std::move(data_ptr), /*allocator=*/nullptr, /*resizeable=*/false);
 }
 
 Tensor new_with_sizes_mkldnn(IntArrayRef sizes, const TensorOptions& options) {
