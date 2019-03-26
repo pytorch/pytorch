@@ -4,6 +4,7 @@ import os
 import re
 import ast
 import _ast
+import textwrap
 
 
 path = os.path.dirname(os.path.realpath(__file__))
@@ -30,32 +31,53 @@ class TestDocCoverage(unittest.TestCase):
 
     def test_torch(self):
         # get symbols documented in torch.rst
-        whitelist = {
-            'set_printoptions', 'get_rng_state', 'is_storage', 'initial_seed',
-            'set_default_tensor_type', 'load', 'save', 'set_default_dtype',
-            'is_tensor', 'compiled_with_cxx11_abi', 'set_rng_state',
-            'manual_seed'
-        }
-        in_rst = self.parse_rst('torch.rst', r1) - whitelist
+        in_rst = self.parse_rst('torch.rst', r1)
         # get symbols in functional.py and _torch_docs.py
-        whitelist2 = {'product', 'inf', 'math', 'reduce', 'warnings', 'torch', 'annotate'}
-        has_docstring = set(a for a in dir(torch) if getattr(torch, a).__doc__ and not a.startswith('_'))
-        nn_functional = set(dir(torch.nn.functional))
-        has_docstring -= nn_functional | whitelist2
+        whitelist = {
+            # below are some jit functions
+            'wait', 'fork', 'parse_type_comment', 'import_ir_module',
+            'to_batch_graph', 'import_ir_module_from_buffer',
+            'register_batch_operator', 'merge_type_from_type_comment',
+
+            # below are symbols mistakely binded to torch.*, but should
+            # go to torch.nn.functional.* instead
+            'avg_pool1d', 'conv_transpose2d', 'conv_transpose1d', 'conv3d',
+            'relu_', 'pixel_shuffle', 'conv2d', 'selu_', 'celu_', 'threshold_',
+            'cosine_similarity', 'rrelu_', 'conv_transpose3d', 'conv1d', 'pdist',
+            'adaptive_avg_pool1d', 'conv_tbc'
+        }
+        has_docstring = set(
+            a for a in dir(torch)
+            if getattr(torch, a).__doc__ and not a.startswith('_') and
+            'function' in type(getattr(torch, a)).__name__)
+        self.assertEqual(
+            has_docstring & whitelist, whitelist,
+            textwrap.dedent('''
+            The whitelist in test_docs_coverage.py contains something
+            that don't have docstring or not in torch.*. If you just
+            removed something from torch.*, please remove it from whiltelist
+            in test_docs_coverage.py'''))
+        has_docstring -= whitelist
         # assert they are equal
-        for p in in_rst:
-            self.assertIn(p, has_docstring, 'in torch.rst but not in python')
-        for p in has_docstring:
-            self.assertIn(p, in_rst, 'in python but not in torch.rst')
+        self.assertEqual(
+            has_docstring, in_rst,
+            textwrap.dedent('''
+            List of functions documented in torch.rst and in python are different.
+            Do you forget to add new thing to torch.rst, or whitelist things you
+            don't want to document?''')
+        )
 
     def test_tensor(self):
         in_rst = self.parse_rst('tensors.rst', r2)
         classes = [torch.FloatTensor, torch.LongTensor, torch.ByteTensor]
         has_docstring = set(x for c in classes for x in dir(c) if not x.startswith('_') and getattr(c, x).__doc__)
-        for p in in_rst:
-            self.assertIn(p, has_docstring, 'in tensors.rst but not in python')
-        for p in has_docstring:
-            self.assertIn(p, in_rst, 'in python but not in tensors.rst')
+        self.assertEqual(
+            has_docstring, in_rst,
+            textwrap.dedent('''
+            List of tensor methods documented in tensor.rst and in python are
+            different. Do you forget to add new thing to tensor.rst, or whitelist
+            things you don't want to document?''')
+        )
 
 
 if __name__ == '__main__':
