@@ -323,7 +323,7 @@ For example, here is how to install/configure `ccache` on Ubuntu:
 
 ```bash
 # install ccache
-apt install ccache
+sudo apt install ccache
 
 # update symlinks and create/re-create nvcc link
 sudo /usr/sbin/update-ccache-symlinks
