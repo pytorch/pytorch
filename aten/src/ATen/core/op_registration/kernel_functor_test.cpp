@@ -623,9 +623,9 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithCache_thenCache
   EXPECT_EQ(6, stack[0].toInt());
 }
 
-class KernelWithConstructorArgs final : public OperatorKernel {
+class KernelWithConstructorArg final : public OperatorKernel {
 public:
-  explicit KernelWithConstructorArgs(int64_t offset)
+  explicit KernelWithConstructorArg(int64_t offset)
   : offset_(offset) {}
 
   int64_t operator()(const Tensor&, int64_t input) {
@@ -643,10 +643,10 @@ FunctionSchema opWithConstructorArgsSchema(
                            Argument("input", IntType::get())}),
     (std::vector<Argument>{Argument("output", IntType::get())}));
 
-TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithConstructorArgs_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithConstructorArg_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op(opWithConstructorArgsSchema, kernel<KernelWithConstructorArgs>(2), dispatchKey(TensorType1()))
-      .op(opWithConstructorArgsSchema, kernel<KernelWithConstructorArgs>(4), dispatchKey(TensorType2()));
+      .op(opWithConstructorArgsSchema, kernel<KernelWithConstructorArg>(2), dispatchKey(TensorType1()))
+      .op(opWithConstructorArgsSchema, kernel<KernelWithConstructorArg>(4), dispatchKey(TensorType2()));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::offset_op", "");
   ASSERT_TRUE(op.has_value());
@@ -659,5 +659,36 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithConstructorArgs
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(8, outputs[0].toInt());
 }
+
+class KernelWithMultipleConstructorArgs final : public OperatorKernel {
+public:
+  explicit KernelWithMultipleConstructorArgs(int64_t offset1, int64_t offset2)
+  : offset_(offset1 + offset2) {}
+
+  int64_t operator()(const Tensor&, int64_t input) {
+    return input + offset_;
+  }
+
+private:
+  int64_t offset_;
+};
+
+TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithMultipleConstructorArgs_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op(opWithConstructorArgsSchema, kernel<KernelWithMultipleConstructorArgs>(2, 3), dispatchKey(TensorType1()))
+      .op(opWithConstructorArgsSchema, kernel<KernelWithMultipleConstructorArgs>(4, 5), dispatchKey(TensorType2()));
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::offset_op", "");
+  ASSERT_TRUE(op.has_value());
+
+  auto outputs = callOp(*op, dummyTensor(TensorType1()), 4);
+  EXPECT_EQ(1, outputs.size());
+  EXPECT_EQ(9, outputs[0].toInt());
+
+  outputs = callOp(*op, dummyTensor(TensorType2()), 4);
+  EXPECT_EQ(1, outputs.size());
+  EXPECT_EQ(13, outputs[0].toInt());
+}
+
 
 }

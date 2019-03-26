@@ -103,6 +103,10 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
       std::move(outputs));
 }
 
+inline std::unique_ptr<c10::KernelCache> noCache() {
+  return nullptr;
+}
+
 }
 }
 
@@ -179,7 +183,7 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
           ::c10::kernel(&::caffe2::detail::call_caffe2_op_from_c10<          \
                         ::caffe2::_c10_ops::schema_##OperatorName,           \
-                        OperatorClass>),                                     \
+                        OperatorClass>, &::caffe2::detail::noCache),         \
           ::c10::dispatchKey(::c10::CPUTensorId()));
 
 #define C10_REGISTER_CAFFE2_OPERATOR_CUDA(OperatorName, OperatorClass)       \
@@ -189,7 +193,7 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
           ::c10::kernel(&::caffe2::detail::call_caffe2_op_from_c10<          \
                         ::caffe2::_c10_ops::schema_##OperatorName,           \
-                        OperatorClass>),                                     \
+                        OperatorClass>, &::caffe2::detail::noCache),         \
           ::c10::dispatchKey(::c10::CUDATensorId()));
 
 // You should never manually call the C10_REGISTER_CAFFE2_OPERATOR_HIP macro.
@@ -201,7 +205,7 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
     .op(::caffe2::_c10_ops::schema_##OperatorName(),                               \
         ::c10::kernel(&::caffe2::detail::call_caffe2_op_from_c10<                  \
             ::caffe2::_c10_ops::schema_##OperatorName,                             \
-            OperatorClass>),                                                       \
+            OperatorClass>, &::caffe2::detail::noCache),                           \
         ::c10::dispatchKey(::c10::HIPTensorId()                                    \
     );
 

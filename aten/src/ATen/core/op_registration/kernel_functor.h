@@ -165,10 +165,15 @@ namespace detail {
  */
 template<class KernelFunctor, class... ConstructorParameters>
 inline constexpr auto kernel(ConstructorParameters&&... constructorParameters)
--> decltype(kernel( // TODO This decltype is only needed in C++11. Remove once we have C++14.
+// enable_if: only enable it if KernelFunctor is actually a functor and inherits from c10::OperatorKernel
+-> guts::enable_if_t<
+guts::is_functor<KernelFunctor>::value && std::is_base_of<OperatorKernel, KernelFunctor>::value,
+decltype(kernel(
     &detail::wrap_kernel_functor<KernelFunctor>::call,
     detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)
-)) {
+))> {
+  static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "KernelFunctor cannot be constructed with the given arguments");
+
   return kernel(
       &detail::wrap_kernel_functor<KernelFunctor>::call,
       detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)
