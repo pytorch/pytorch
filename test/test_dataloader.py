@@ -186,14 +186,20 @@ class TestConcatDataset(TestCase):
 # Inspired by https://stackoverflow.com/a/33599967
 class ErrorTrackingProcess(mp.Process):
 
-    def __init__(self, *args, **kwargs):
-        super(ErrorTrackingProcess, self).__init__(*args, **kwargs)
+    # Why no *args?
+    #   py2 doesn't support def fn(x, *args, key=val, **kwargs)
+    # Setting disable_stderr=True may generate a lot of unrelated error outputs
+    # but could be helpful for debugging.
+    def __init__(self, disable_stderr=True, **kwargs):
+        super(ErrorTrackingProcess, self).__init__(**kwargs)
         self._pconn, self._cconn = mp.Pipe()
         self._exception = None
+        self.disable_stderr = disable_stderr
 
     def run(self):
-        # Disable polluting stderr with errors that are supposed to happen.
-        sys.stderr = open(os.devnull, "w")
+        if self.disable_stderr:
+            # Disable polluting stderr with errors that are supposed to happen.
+            sys.stderr = open(os.devnull, "w")
         try:
             super(ErrorTrackingProcess, self).run()
             self._cconn.send(None)
@@ -769,7 +775,8 @@ class TestDataLoader(TestCase):
                 loader_p = ErrorTrackingProcess(target=_test_proper_exit,
                                                 args=(use_workers, pin_memory, exit_method,
                                                       hold_iter_reference, loader_setup_event,
-                                                      tester_setup_event))
+                                                      tester_setup_event),
+                                                disable_stderr=False)
                 loader_p.start()
 
                 # Wait for loader process to set everything up, e.g., starting

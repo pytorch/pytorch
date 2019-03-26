@@ -2,10 +2,10 @@
 
 from collections import OrderedDict
 
-import cimodel.conf_tree as conf_tree
-import cimodel.miniutils as miniutils
-import cimodel.make_build_configs as make_build_configs
-import cimodel.visualization as visualization
+import cimodel.data.binary_build_data as binary_build_data
+import cimodel.lib.conf_tree as conf_tree
+import cimodel.lib.miniutils as miniutils
+import cimodel.lib.visualization as visualization
 
 
 class Conf(object):
@@ -19,7 +19,7 @@ class Conf(object):
         self.libtorch_variant = libtorch_variant
 
     def gen_build_env_parms(self):
-        return [self.pydistro] + self.parms + [make_build_configs.get_processor_arch_name(self.cuda_version)]
+        return [self.pydistro] + self.parms + [binary_build_data.get_processor_arch_name(self.cuda_version)]
 
     def gen_docker_image(self):
 
@@ -50,39 +50,27 @@ class Conf(object):
 
     def gen_yaml_tree(self, build_or_test):
 
-        env_dict = OrderedDict({
-            "BUILD_ENVIRONMENT": miniutils.quote(" ".join(self.gen_build_env_parms())),
-        })
+        env_tuples = [("BUILD_ENVIRONMENT", miniutils.quote(" ".join(self.gen_build_env_parms())))]
 
         if self.libtorch_variant:
-            env_dict["LIBTORCH_VARIANT"] = miniutils.quote(self.libtorch_variant)
+            env_tuples.append(("LIBTORCH_VARIANT", miniutils.quote(self.libtorch_variant)))
 
-        os_word_substitution = {
-            "macos": "mac",
-        }
-
-        os_name = miniutils.override(self.os, os_word_substitution)
-
-        d = {
-            "environment": env_dict,
-            "<<": "*" + "_".join([self.get_name_prefix(), os_name, build_or_test]),
-        }
+        os_name = miniutils.override(self.os, {"macos": "mac"})
+        d = {"<<": "*" + "_".join([self.get_name_prefix(), os_name, build_or_test])}
 
         if build_or_test == "test":
-            tuples = []
 
             if not (self.smoke and self.os == "macos"):
-                tuples.append(("DOCKER_IMAGE", self.gen_docker_image()))
+                env_tuples.append(("DOCKER_IMAGE", self.gen_docker_image()))
 
             if self.cuda_version:
-                tuples.append(("USE_CUDA_DOCKER_RUNTIME", miniutils.quote("1")))
-
-            for (k, v) in tuples:
-                env_dict[k] = v
+                env_tuples.append(("USE_CUDA_DOCKER_RUNTIME", miniutils.quote("1")))
 
         else:
             if self.os == "linux" and build_or_test != "upload":
                 d["docker"] = [{"image": self.gen_docker_image()}]
+
+        d["environment"] = OrderedDict(env_tuples)
 
         if build_or_test == "test":
             if self.cuda_version:
@@ -93,9 +81,9 @@ class Conf(object):
 
 def get_root(smoke, name):
 
-    return make_build_configs.TopLevelNode(
+    return binary_build_data.TopLevelNode(
         name,
-        make_build_configs.CONFIG_TREE_DATA,
+        binary_build_data.CONFIG_TREE_DATA,
         smoke,
     )
 

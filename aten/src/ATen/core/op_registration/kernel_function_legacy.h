@@ -20,7 +20,7 @@ namespace detail {
 
   private:
     FuncType* kernel_func_;
- } ;
+  };
   template<class FuncType>
   using WrapKernelFunctionRuntime = WrapKernelFunctionRuntime_<
       FuncType,

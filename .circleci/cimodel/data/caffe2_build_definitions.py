@@ -2,9 +2,9 @@
 
 from collections import OrderedDict
 
-import cimodel.dimensions as dimensions
-import cimodel.miniutils as miniutils
-from cimodel.conf_tree import Ver
+import cimodel.data.dimensions as dimensions
+import cimodel.lib.miniutils as miniutils
+from cimodel.lib.conf_tree import Ver
 
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/"
@@ -126,33 +126,22 @@ class Conf(object):
             tuples.append(("BUILD_IOS", miniutils.quote("1")))
 
         if self.phase == "test":
-            use_cuda_docker = self.compiler.name == "cuda"
-            if use_cuda_docker:
+            # TODO cuda should not be considered a compiler
+            if self.compiler.name == "cuda":
                 tuples.append(("USE_CUDA_DOCKER_RUNTIME", miniutils.quote("1")))
 
-        if not self.distro.name == "macos":
-            tuples.append(("DOCKER_IMAGE", self.gen_docker_image()))
-
-        if self.is_build_only():
-            if not self.distro.name == "macos":
-                tuples.append(("BUILD_ONLY", miniutils.quote("1")))
-
-        # TODO: not sure we need the distinction between system and homebrew anymore. Our python handling in cmake
-        #  and setuptools is more robust now than when we first had these.
         if self.distro.name == "macos":
-            tuples.append(("PYTHON_INSTALLATION", miniutils.quote("system")))
             tuples.append(("PYTHON_VERSION", miniutils.quote("2")))
 
-        env_dict = OrderedDict(tuples)
+        else:
+            tuples.append(("DOCKER_IMAGE", self.gen_docker_image()))
+            if self.is_build_only():
+                tuples.append(("BUILD_ONLY", miniutils.quote("1")))
 
-        d = OrderedDict([
-            ("environment", env_dict),
-        ])
+        d = OrderedDict({"environment": OrderedDict(tuples)})
 
         if self.phase == "test":
-            is_large = self.compiler.name != "cuda"
-
-            resource_class = "large" if is_large else "gpu.medium"
+            resource_class = "large" if self.compiler.name != "cuda" else "gpu.medium"
             d["resource_class"] = resource_class
 
         d["<<"] = "*" + "_".join(["caffe2", self.get_platform(), self.phase, "defaults"])

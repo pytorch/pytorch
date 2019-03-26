@@ -37,11 +37,13 @@ namespace c10 {
 class C10_API RegisterOperators final {
 public:
   RegisterOperators();
-  RegisterOperators(RegisterOperators&&) noexcept;
-  RegisterOperators& operator=(RegisterOperators&&) noexcept;
+  ~RegisterOperators();
+
   RegisterOperators(const RegisterOperators&) = delete;
   RegisterOperators& operator=(const RegisterOperators&) = delete;
-  ~RegisterOperators();
+  RegisterOperators(RegisterOperators&&) noexcept;
+  RegisterOperators& operator=(RegisterOperators&&) noexcept;
+
 
   /**
    * Register an operator based on a function schema and a set of configuration
@@ -62,8 +64,9 @@ public:
    * >         c10::dispatchKey(CPUTensorId()));
    */
   template<class... ConfigParameters>
-  RegisterOperators op(FunctionSchema schema, ConfigParameters&&... configParameters) && {
-    registerOp_(std::move(schema), make_registration_config(configParameters...));
+  guts::enable_if_t<guts::conjunction<detail::is_registration_config_parameter<guts::decay_t<ConfigParameters>>...>::value, RegisterOperators>
+  op(FunctionSchema schema, ConfigParameters&&... configParameters) && {
+    registerOp_(std::move(schema), detail::make_registration_config(std::forward<ConfigParameters>(configParameters)...));
     return std::move(*this);
   }
 
@@ -100,12 +103,16 @@ public:
    * > static auto registry = c10::RegisterOperators()
    * >     .op("my_op", c10::kernel<my_kernel_cpu>());
    */
-  template<class KernelFunc>
-  RegisterOperators op(FunctionSchema schema, KernelFunc* func) && {
+   template<class FuncType>
+   C10_DEPRECATED_MESSAGE("Registering kernels via passing runtime function pointers to op() is deprecated. " \
+                          "Please use the new c10::kernel() based API instead.")
+   // enable_if: only enable it if FuncType is actually a function, but not a stack based KernelFunction.
+   guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value, RegisterOperators>
+   op(FunctionSchema schema, FuncType* func) && {
     // We intentionally don't extend this deprecated API to support dispatch keys
     // and the like to push people towards using the new API.
-    return std::move(*this).op(std::move(schema), kernel<detail::WrapKernelFunctionRuntime<KernelFunc>>(func));
-  }
+    return std::move(*this).op(std::move(schema), kernel<detail::WrapKernelFunctionRuntime<FuncType>>(func));
+   }
 
   // TODO Add deprecated lambda-based API
 

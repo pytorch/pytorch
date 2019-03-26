@@ -11,7 +11,7 @@ namespace detail {
   template<class FuncType, FuncType* kernel_func, class ReturnType, class... Parameters>
   class WrapKernelFunction_<FuncType, kernel_func, ReturnType, guts::typelist::typelist<Parameters...>> final : public c10::OperatorKernel {
   public:
-    auto operator()(Parameters&&... args) -> decltype(kernel_func(std::forward<Parameters>(args)...)) {
+    auto operator()(Parameters&&... args) -> decltype((*kernel_func)(std::forward<Parameters>(args)...)) {
       return (*kernel_func)(std::forward<Parameters>(args)...);
     }
   };
@@ -37,7 +37,10 @@ namespace detail {
  * >         c10::dispatchKey(CPUTensorId()));
  */
 template<class FuncType, FuncType* kernel_func>
-inline constexpr auto kernel() -> decltype(kernel<detail::WrapKernelFunction<FuncType, kernel_func>>()) {
+inline constexpr auto kernel() ->
+// enable_if: only enable it if FuncType is actually a function, but not a stack based KernelFunction.
+guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value,
+decltype(kernel<detail::WrapKernelFunction<FuncType, kernel_func>>())> {
   return kernel<detail::WrapKernelFunction<FuncType, kernel_func>>();
 }
 
