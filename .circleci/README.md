@@ -23,7 +23,9 @@ The documentation, in the form of diagrams, is automatically generated and canno
 Furthermore, consistency is enforced within the YAML config itself, by using a single source of data to generate
 multiple parts of the file.
 
-See https://github.com/pytorch/pytorch/issues/17038
+* Facilitates one-off culling/enabling of CI configs for testing PRs on special targets
+
+Also see https://github.com/pytorch/pytorch/issues/17038
 
 
 Future direction

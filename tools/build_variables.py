@@ -81,6 +81,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/lower_tuples.cpp",
     "torch/csrc/jit/passes/peephole.cpp",
     "torch/csrc/jit/passes/python_print.cpp",
+    "torch/csrc/jit/passes/quantization.cpp",
     "torch/csrc/jit/passes/remove_expands.cpp",
     "torch/csrc/jit/passes/requires_grad_analysis.cpp",
     "torch/csrc/jit/passes/shape_analysis.cpp",
