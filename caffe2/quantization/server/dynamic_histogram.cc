@@ -212,8 +212,8 @@ const Histogram* DynamicHistogram::Finalize() {
       // The remainder should go to dst_bin2
       // rint is the fastest way to round
       // (https://stackoverflow.com/questions/485525/round-for-float-in-c/5849630)
-      uint64_t dst_bin_cnt = src_bin_width == 0
-          ? 0
+      uint64_t dst_bin_cnt = (src_bin_width == 0 || dst_bin_width == 0)
+          ? bins[i]
           : std::min(
                 static_cast<uint64_t>(rint(
                     (dst_bin_end - src_bin_begin) / src_bin_width * bins[i])),

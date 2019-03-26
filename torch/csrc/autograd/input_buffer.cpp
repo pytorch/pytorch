@@ -1,6 +1,7 @@
 #include <torch/csrc/autograd/input_buffer.h>
 
 #include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/autograd/input_metadata.h>
 
 #include <ATen/DeviceGuard.h>
 
@@ -40,13 +41,22 @@ void InputBuffer::add(size_t pos, Variable var) {
   }
 }
 
-auto InputBuffer::device() const -> int {
+auto InputBuffer::device() const -> at::Device {
+  // Since we pick the first non-CPU tensor, this won't work with
+  // mixed device-type operations (e.g., an op that is both CUDA
+  // and XLA).  This is *incredibly* unlikely, so we don't worry
+  // about it.
   for (auto& var : buffer) {
-    if (var.defined() && var.is_cuda()) {
-      return var.get_device();
+    if (var.defined()) {
+      auto device = var.device();
+      if (device.type() != at::kCPU) {
+        return device;
+      }
     }
   }
-  return -1;
+  // Only report to the CPU thread if there really were no tensors
+  // from other devices.
+  return at::kCPU;
 }
 
 auto InputBuffer::variables(InputBuffer&& g) -> std::vector<Variable> {

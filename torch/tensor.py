@@ -248,14 +248,6 @@ class Tensor(torch._C._TensorBase):
         else:
             return self.flip(0)
 
-    def argmax(self, dim=None, keepdim=False):
-        r"""See :func:`torch.argmax`"""
-        return torch.argmax(self, dim, keepdim)
-
-    def argmin(self, dim=None, keepdim=False):
-        r"""See :func:`torch.argmin`"""
-        return torch.argmin(self, dim, keepdim)
-
     def norm(self, p="fro", dim=None, keepdim=False, dtype=None):
         r"""See :func:`torch.norm`"""
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
@@ -287,6 +279,13 @@ class Tensor(torch._C._TensorBase):
                       "next release. Please use torch.solve instead.", stacklevel=2)
         return super(Tensor, self).solve(A)
 
+    def trtrs(self, A, upper=True, transpose=False, unitriangular=False):
+        r"""See :func:`torch.triangular_solve`"""
+        warnings.warn("torch.trtrs is deprecated in favour of torch.triangular_solve and will be "
+                      "removed in the next release. Please use torch.triangular_solve.", stacklevel=2)
+        return super(Tensor, self).triangular_solve(A, upper=upper,
+                                                    transpose=transpose, unitriangular=unitriangular)
+
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
         r"""See :func:`torch.stft`
@@ -316,26 +315,32 @@ class Tensor(torch._C._TensorBase):
         else:
             return super(Tensor, self).split_with_sizes(split_size, dim)
 
-    def unique(self, sorted=True, return_inverse=False, dim=None):
+    def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
         r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
 
         See :func:`torch.unique`
         """
         if dim is not None:
-            output, inverse_indices = torch._unique_dim(
+            output, inverse_indices, counts = torch._unique_dim(
                 self,
                 sorted=sorted,
                 return_inverse=return_inverse,
+                return_counts=return_counts,
                 dim=dim
             )
         else:
-            output, inverse_indices = torch._unique(
+            output, inverse_indices, counts = torch._unique(
                 self,
                 sorted=sorted,
-                return_inverse=return_inverse
+                return_inverse=return_inverse,
+                return_counts=return_counts
             )
-        if return_inverse:
+        if return_inverse and return_counts:
+            return output, inverse_indices, counts
+        elif return_inverse:
             return output, inverse_indices
+        elif return_counts:
+            return output, counts
         else:
             return output
 

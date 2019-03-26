@@ -11,15 +11,20 @@
 #include <test/cpp/jit/test_argument_spec.h>
 #include <test/cpp/jit/test_autodiff.h>
 #include <test/cpp/jit/test_class_parser.h>
+#include <test/cpp/jit/test_code_template.h>
 #include <test/cpp/jit/test_constant_pooling.h>
 #include <test/cpp/jit/test_create_autodiff_subgraphs.h>
+#include <test/cpp/jit/test_custom_operators.h>
+#include <test/cpp/jit/test_dynamic_dag.h>
 #include <test/cpp/jit/test_fuser.h>
 #include <test/cpp/jit/test_graph_executor.h>
+#include <test/cpp/jit/test_interpreter.h>
 #include <test/cpp/jit/test_ir.h>
 #include <test/cpp/jit/test_irparser.h>
 #include <test/cpp/jit/test_ivalue.h>
 #include <test/cpp/jit/test_misc.h>
 #include <test/cpp/jit/test_netdef_converter.h>
+#include <test/cpp/jit/test_peephole_optimize.h>
 #include <test/cpp/jit/test_subgraph_utils.h>
 
 using namespace torch::jit::script;
@@ -57,7 +62,8 @@ namespace jit {
   _(THNNConv)                      \
   _(ATenNativeBatchNorm)           \
   _(NoneSchemaMatch)               \
-  _(ClassParser)
+  _(ClassParser)                   \
+  _(PeepholeOptimize)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
@@ -92,6 +98,5 @@ void runJITCPPTests() {
   testEvalModeForLoadedModule();
 }
 #undef JIT_TEST
-
 } // namespace jit
 } // namespace torch
