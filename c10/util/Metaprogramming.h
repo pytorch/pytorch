@@ -44,6 +44,16 @@ struct function_traits<Result (Args...)> {
 };
 
 /**
+ * Evaluates to true_type, iff the given class is a Functor
+ * (i.e. has a call operator with some set of arguments)
+ */
+
+template<class Functor, class Enable = void>
+struct is_functor : std::false_type {};
+template<class Functor>
+struct is_functor<Functor, guts::enable_if_t<is_function_type<detail::strip_class_t<decltype(&Functor::operator())>>::value>> : std::true_type {};
+
+/**
  * infer_function_traits: creates a `function_traits` type for a simple
  * function (pointer) or functor (lambda/struct). Currently does not support
  * class methods.

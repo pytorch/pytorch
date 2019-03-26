@@ -385,6 +385,7 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .VS(copyMetadata)
       .VS(isTensor)
+      .VS(requires_grad)
       .def("toIValue", [](Value& n) { return toIValue(&n); })
       .def("type", [](Value& v) { return v.type(); });
 #undef VS
