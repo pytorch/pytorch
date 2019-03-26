@@ -1205,10 +1205,11 @@ def conv_tbc(g, input, weight, bias, pad):
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
 
 
-@parse_args('v', 'i', 'i')
-def _unique(g, input, sorted, return_inverse):
+@parse_args('v', 'i', 'i', 'i')
+def _unique(g, input, sorted, return_inverse, return_counts):
     return g.op("ATen", input, operator_s="_unique", sorted_i=sorted,
-                return_inverse_i=return_inverse, outputs=2)
+                return_inverse_i=return_inverse, return_counts_i=return_counts,
+                outputs=3)
 
 
 # Metaprogram symbolics for each ATen native specialized cast operator.
