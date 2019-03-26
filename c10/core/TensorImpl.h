@@ -139,7 +139,7 @@ struct C10_API AutogradMetaInterface {
 };
 
 // Every Tensor has a version counter. Version counters are incremented
-// whenever the data or shape of a tensor changes through Variable operations.
+// whenever the data or shape of a tensor changes through non-Variable type dispatch.
 // These are typically in-place operations. Version counters are used to
 // detect modifications to saved variables which would result in incorrect
 // gradient calculations. Version counters may be shared between Variables:
