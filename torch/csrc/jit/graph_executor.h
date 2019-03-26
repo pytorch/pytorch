@@ -54,7 +54,7 @@ struct GraphExecutorImpl;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
   GraphExecutor(std::shared_ptr<Graph> graph, bool optimize = true);
-  void run22(Stack& inputs);
+  void run(Stack& inputs);
   const ExecutionPlan& getExecutionPlan(Stack& inputs);
   explicit operator bool() const {
     return pImpl != nullptr;

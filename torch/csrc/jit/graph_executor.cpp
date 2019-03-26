@@ -77,7 +77,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
       }
     }
 
-    executor.getExecutionPlan(stack).run(stack);
+    executor.run(stack);
     AT_ASSERT(stack.size() == num_outputs());
 
     variable_list outputs;
@@ -597,6 +597,10 @@ GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize)
 
 const ExecutionPlan& GraphExecutor::getExecutionPlan(Stack& inputs) {
   return pImpl->getExecutionPlan(inputs);
+}
+
+void GraphExecutor::run(Stack& inputs) {
+  return pImpl->run(inputs);
 }
 
 std::shared_ptr<Graph> GraphExecutor::graph() const {

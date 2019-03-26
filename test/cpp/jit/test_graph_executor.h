@@ -25,7 +25,7 @@ void testGraphExecutor() {
   auto g = build_lstm();
   GraphExecutor executor(g);
   auto stack = createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh)});
-  executor.getExecutionPlan(stack).run(stack);
+  executor.run(stack);
   ASSERT_EQ(stack.size(), 2);
   at::Tensor r0, r1;
   std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
