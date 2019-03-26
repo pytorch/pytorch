@@ -1,3 +1,4 @@
+from __future__ import print_function
 import argparse
 from collections import namedtuple
 import torch
@@ -105,7 +106,8 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
 
 
 def print_stderr(*args, **kwargs):
-    return print(*args, **kwargs, file=sys.stderr)
+    kwargs['file'] = sys.stderr
+    return print(*args, **kwargs)
 
 
 def bench(rnn_runners, group_name, print_json=False, sep=' ', **params):

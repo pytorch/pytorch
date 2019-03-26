@@ -105,7 +105,7 @@ def full_profile(rnns, **args):
     cmd = '{} -m fastrnns.profile {}'.format(
         sys.executable, ' '.join(profile_args))
     rc, stdout, stderr = nvprof(cmd, outpath)
-    if rc is not 0:
+    if rc != 0:
         raise RuntimeError('stderr: {}\nstdout: {}'.format(stderr, stdout))
 
 
