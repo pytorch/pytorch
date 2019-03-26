@@ -39,7 +39,7 @@ static std::pair<std::string, std::string> getDtypeNames(at::ScalarType scalarTy
     case at::ScalarType::Bool:
       return std::make_pair("bool", "");
     case at::ScalarType::QInt8:
-      return std::make_pair("qint8", "qint8");
+      return std::make_pair("qint8", "");
     default:
       throw std::runtime_error("Unimplemented scalar type");
   }

@@ -31,14 +31,14 @@ using RealTensor = Tensor;
  * scale and zero_point as parameters, we'll store scale and zero_point inside
  * the instance and we can use it to quantize a float Tensor or dequantize a
  * quantized Tensor.
+ *
+ * When you add new types of leaf Quantizer class, please also
+ * make sure to add a corresponding QScheme enum since
+ * they should have one to one mapping.
  */
 struct C10_API Quantizer {
   c10::QScheme qscheme_;
   virtual ~Quantizer() {}
-
-  virtual std::string name() {
-    return "Quantizer";
-  }
 
   /**
    * quantize a float Tensor into a quantized Tensor.
@@ -59,9 +59,6 @@ struct C10_API Quantizer {
  */
 struct C10_API UniformQuantizer : public Quantizer {
   virtual ~UniformQuantizer() {}
-  virtual std::string name() {
-    return "UniformQuantizer";
-  }
 };
 
 /**
@@ -72,9 +69,6 @@ struct C10_API UniformQuantizer : public Quantizer {
 struct C10_API NonUniformQuantizer : public Quantizer {
   virtual ~NonUniformQuantizer() {}
 
-  virtual std::string name() {
-    return "NonUniformQuantizer";
-  }
 };
 
 // There is also StochasticQuantizer which is uniform but not affine
@@ -90,9 +84,6 @@ struct C10_API NonUniformQuantizer : public Quantizer {
 struct C10_API AffineQuantizer : public UniformQuantizer {
   virtual ~AffineQuantizer() {}
 
-  virtual std::string name() {
-    return "AffineQuantizer";
-  }
 };
 
 /**
@@ -107,9 +98,6 @@ struct C10_API AffineQuantizer : public UniformQuantizer {
 struct C10_API SymmetricQuantizer : public UniformQuantizer {
   virtual ~SymmetricQuantizer() {}
 
-  virtual std::string name() {
-    return "SymmetricQuantizer";
-  }
 };
 
 /**
@@ -120,9 +108,6 @@ struct C10_API PerLayerSymmetricQuantizer: public SymmetricQuantizer {
   PerLayerSymmetricQuantizer() {}
   PerLayerSymmetricQuantizer(float scale) : scale_(scale) {}
   virtual ~PerLayerSymmetricQuantizer() {}
-  virtual std::string name() {
-    return "PerLayerSymmetricQuantizer";
-  }
   float scale_{1.0};
 };
 
@@ -134,10 +119,6 @@ struct C10_API PerChannelSymmetricQuantizer: public SymmetricQuantizer {
   PerChannelSymmetricQuantizer() {}
   virtual ~PerChannelSymmetricQuantizer() {}
 
-  virtual std::string name() {
-    return "PerChannelSymmetricQuantizer";
-  }
-
   std::vector<float> scales_;
   int64_t channel_axis_;
 };
@@ -147,11 +128,7 @@ struct C10_API PerChannelSymmetricQuantizer: public SymmetricQuantizer {
  * all the values in the Tensor.
  */
 struct C10_API PerLayerAffineQuantizer: public AffineQuantizer{
-  PerLayerAffineQuantizer(float scale, int32_t zero_point): scale_(scale), zero_point_(zero_point) {}
-
-  virtual std::string name() {
-    return "PerLayerAffineQuantizer";
-  }
+  PerLayerAffineQuantizer(float scale, uint8_t zero_point): scale_(scale), zero_point_(zero_point) {}
 
   virtual QTensor quantize(RealTensor tensor);
   virtual RealTensor dequantize(QTensor tensor);
@@ -165,7 +142,7 @@ struct C10_API PerLayerAffineQuantizer: public AffineQuantizer{
   }
 
   float scale_{1.0};
-  int32_t zero_point_{0};
+  uint8_t zero_point_{0};
 };
 
 /**
@@ -176,14 +153,17 @@ struct C10_API PerLayerAffineQuantizer: public AffineQuantizer{
 struct C10_API PerChannelAffineQuantizer: public AffineQuantizer {
   PerChannelAffineQuantizer() {}
 
-  virtual std::string name() {
-    return "PerChannelAffineQuantizer";
-  }
-
   std::vector<float> scales_;
-  std::vector<int32_t> zero_points_;
+  std::vector<uint8_t> zero_points_;
   int64_t channel_axis_;
 };
+
+// This is an internal utility function for getting at the QTensorImpl,
+// You should only use this for writing low level
+// setters/getters for QTensorImpl fields; otherwise, you should use
+// the low level setters/getters that were implemented using this.
+// This may be called repeatedly, so make sure it's pretty cheap.
+QTensorImpl* get_qtensorimpl(const QTensor& self);
 
 /* Some Helper Functions */
 template <class T>
@@ -191,10 +171,10 @@ inline T Round(const T x) {
   return std::nearbyint(x);
 }
 
-qint8 QuantizeUint8(float scale, int32_t zero_point, float value);
+qint8 QuantizeUint8(float scale, uint8_t zero_point, float value);
 
-void ChooseParams(RealTensor tensor, float* r_scale, int* r_zero_point);
-
+// double and int64_t are because of the native function API, we only have these argument
+// types right now in native functions
 std::shared_ptr<Quantizer> make_per_layer_affine_quantizer(double scale, int64_t zero_point);
 QTensor new_qtensor(
     IntArrayRef sizes, const TensorOptions& options, float scale, int32_t zero_point);

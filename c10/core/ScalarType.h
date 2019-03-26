@@ -194,6 +194,7 @@ static inline bool isComplexType(ScalarType t) {
 }
 
 static inline bool isQIntType(ScalarType t) {
+  // Don't forget to extend this when adding new QInt types
   return t == ScalarType::QInt8;
 }
 
