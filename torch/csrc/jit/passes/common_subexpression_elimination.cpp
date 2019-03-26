@@ -9,6 +9,16 @@
 namespace torch {
 namespace jit {
 namespace {
+
+bool mayAliasGraphOutput(Node* n, const AliasDb& aliasDb) {
+  auto g_outputs = n->owningGraph()->outputs();
+  return std::any_of(n->outputs().begin(), n->outputs().end(), [&](Value* v) {
+    return std::any_of(g_outputs.begin(), g_outputs.end(), [&](Value* g_out) {
+      return aliasDb.mayAlias(v, g_out);
+    });
+  });
+}
+
 // The function implements common subexpression elimination.
 // Since the nodes are visited in topological order, one pass is enough.
 void EliminateCommonSubexpression(
@@ -37,6 +47,12 @@ void EliminateCommonSubexpression(
         });
       }
 
+      continue;
+    }
+
+    // since the graph outputs may be mutated after they are returned,
+    // don't introduce new aliasing
+    if (mayAliasGraphOutput(node, aliasDb)) {
       continue;
     }
 
