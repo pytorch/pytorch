@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/core/Generator.h>
+#include <ATen/core/MT19937RNGEngine.h>
 #include <ATen/core/PhiloxRNGEngine.h>
-#include <random>
 
 namespace at {
 
@@ -19,7 +19,7 @@ struct CAFFE2_API CPUGenerator : public CloneableGenerator<CPUGenerator, Generat
 
 private:
   uint64_t current_seed_;
-  std::mt19937 engine_;
+  at::mt19937 engine_;
   CloneableGenerator<CPUGenerator, Generator>* clone_impl() const override;
 };
 
