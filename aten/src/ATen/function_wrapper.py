@@ -123,6 +123,7 @@ ${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ $
 # Overrideable stubs to be used in user-extendable backends
 TYPE_DEFINITION_EXTENSION_BACKEND = CodeTemplate("""\
 ${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formals}) const {
+    ${version_increment_stmts}
     return ${Type}Dispatch::get_function<${return_type} (*)(${formals_types})>("${schema}")(${native_actuals});
 }
 """)
@@ -1647,6 +1648,7 @@ def create_extension_backend(backend_type_env, declarations):
                         ["{} {}".format(f['dynamic_type'], f['name']) for f in option['formals_list']])
                     return_type = NATIVE_DYNAMIC_TYPE.get(option['return_type'], option['return_type'])
                     option['schema'] = "{}({}) -> {}".format(option['api_name'], schema_args, return_type)
+                    option['version_increment_stmts'] = emit_version_increment(option)
                     env = nested_dict(option, backend_type_env)
                     type_object_declarations.append(
                         TYPE_DERIVED_DECLARATION.substitute(env))
