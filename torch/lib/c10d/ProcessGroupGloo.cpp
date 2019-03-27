@@ -155,7 +155,7 @@ void initializeStreamsEvents(
     // `tensors` are created on a different stream. Hence, they must record
     // new streams in this Work to prevent being freed before the Work finishes.
     c10::cuda::CUDACachingAllocator::recordStream(
-      tensors[i].data_ptr(), streams[i]);
+      tensors[i].storage().data(), streams[i]);
   }
 }
 
@@ -198,7 +198,7 @@ void initializeStreamsEvents(
       // `tensors` are created on a different stream. Hence, they must record
       // new streams in this Work to prevent being freed before the Work finishes.
       c10::cuda::CUDACachingAllocator::recordStream(
-        tensor.data_ptr(), streams[i]);
+        tensor.storage().data(), streams[i]);
     }
   }
 }

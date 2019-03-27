@@ -394,7 +394,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
     // ncclStream. Hence, `tensors` must record the ncclStream to prevent being
     // freed before ncclAllReduce finishes. See [Sync Streams].
     c10::cuda::CUDACachingAllocator::recordStream(
-      tensors[i].data_ptr(), ncclStream);
+      tensors[i].storage().data(), ncclStream);
 
     C10D_NCCL_CHECK(ncclAllReduce(
         tensors[i].data_ptr(),
@@ -449,7 +449,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
     // ncclStreams. Hence, `tensors` must record ncclStreams to prevent being
     // freed before ncclBcast finishes. See [Sync Streams].
     c10::cuda::CUDACachingAllocator::recordStream(
-      tensors[i].data_ptr(), ncclStream);
+      tensors[i].storage().data(), ncclStream);
 
     C10D_NCCL_CHECK(ncclBcast(
         tensors[i].data_ptr(),
@@ -503,7 +503,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
     // ncclStreams. Hence, `tensors` must record ncclStreams to prevent being
     // freed before ncclReduce finishes. See [Sync Streams].
     c10::cuda::CUDACachingAllocator::recordStream(
-      tensors[i].data_ptr(), ncclStream);
+      tensors[i].storage().data(), ncclStream);
 
     C10D_NCCL_CHECK(ncclReduce(
         tensors[i].data_ptr(),
@@ -578,10 +578,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
     // ncclStreams to prevent beingfreed before ncclReduce finishes.
     // See [Sync Streams].
     c10::cuda::CUDACachingAllocator::recordStream(
-      inputTensors[i].data_ptr(), ncclStream);
+      inputTensors[i].storage().data(), ncclStream);
 
     c10::cuda::CUDACachingAllocator::recordStream(
-      flattenOutputTensors[i].data_ptr(), ncclStream);
+      flattenOutputTensors[i].storage().data(), ncclStream);
 
     C10D_NCCL_CHECK(ncclAllGather(
         inputTensors[i].data_ptr(),
@@ -601,7 +601,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
     for (size_t j = 0; j < outputTensors[0].size(); ++j) {
       // See [Sync Streams].
       c10::cuda::CUDACachingAllocator::recordStream(
-        outputTensors[i][i].data_ptr(), ncclStream);
+        outputTensors[i][i].storage().data(), ncclStream);
 
       outputTensors[i][j].copy_(flattenOutputTensors[i][j], true);
     }
