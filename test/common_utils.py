@@ -414,6 +414,10 @@ class TestCase(expecttest.TestCase):
             self.assertEqual(x.item(), y, prec, message, allow_inf)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
             self.assertEqual(x, y.item(), prec, message, allow_inf)
+        elif isinstance(x, torch.Tensor) and isinstance(y, numpy.bool_):
+            self.assertEqual(x.item(), y, prec, message, allow_inf)
+        elif isinstance(y, torch.Tensor) and isinstance(x, numpy.bool_):
+            self.assertEqual(x, y.item(), prec, message, allow_inf)
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)

@@ -22,10 +22,10 @@ _(int64_t,Long,i)  /* 4 */ \
 _(at::Half,Half,d) /* 5 */ \
 _(float,Float,d)   /* 6 */ \
 _(double,Double,d) /* 7 */ \
-_(at::ComplexHalf,ComplexHalf,z)        /* 8 */ \
-_(std::complex<float>,ComplexFloat,z)   /* 9 */ \
-_(std::complex<double>,ComplexDouble,z) /* 10 */ \
-_(bool,Bool,i) /* 11 */
+_(bool,Bool,i)     /* 8 */ \
+_(at::ComplexHalf,ComplexHalf,z)        /* 9 */ \
+_(std::complex<float>,ComplexFloat,z)   /* 10 */ \
+_(std::complex<double>,ComplexDouble,z) /* 11 */
 
 // If you want to support ComplexHalf for real, replace occurrences
 // of this macro with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX.  But

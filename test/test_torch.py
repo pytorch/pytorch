@@ -2813,6 +2813,14 @@ class _TestTorchMixin(object):
         b = torch.tensor([-1, -1.1, 0, 1, 1.1], dtype=torch.bool)
         self.assertEqual(a, b)
 
+        # test boolean tensor creating without dtype specification
+        c = torch.tensor([True])
+        self.assertEqual(c.dtype, torch.bool)
+
+        d = torch.tensor([True, True, False, True, True])
+        self.assertEqual(a, d)
+        self.assertEqual(d.dtype, torch.bool)
+
     def test_tensor_factory_copy_var(self):
 
         def check_copy(copy, is_leaf, requires_grad, data_ptr=None):
@@ -2846,7 +2854,7 @@ class _TestTorchMixin(object):
             self.assertIs(default_dtype, torch.tensor(()).dtype)
             self.assertIs(default_dtype, torch.tensor(5.).dtype)
             self.assertIs(torch.int64, torch.tensor(5).dtype)
-            self.assertIs(torch.uint8, torch.tensor(True).dtype)
+            self.assertIs(torch.bool, torch.tensor(True).dtype)
             self.assertIs(torch.int32, torch.tensor(5, dtype=torch.int32).dtype)
             self.assertIs(default_dtype, torch.tensor(((7, 5), (9, 5.))).dtype)
             self.assertIs(default_dtype, torch.tensor(((5., 5), (3, 5))).dtype)
@@ -9913,6 +9921,24 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 y[0][1] = 3
                 self.assertTrue(x[0][1] == 3)
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_to_numpy_bool(self):
+        x = torch.tensor([True, False])
+        self.assertEqual(x.dtype, torch.bool)
+
+        y = x.numpy()
+        self.assertEqual(y.dtype, np.bool)
+        for i in range(len(x)):
+            self.assertEqual(x[i], y[i])
+
+        # test for a scalar case
+        x = torch.tensor([True])
+        self.assertEqual(x.dtype, torch.bool)
+
+        y = x.numpy()
+        self.assertEqual(y.dtype, np.bool)
+        self.assertEqual(x[0], y[0])
+
     def test_dlpack_conversion(self):
         x = torch.randn(1, 2, 3, 4).type('torch.FloatTensor')
         z = from_dlpack(to_dlpack(x))
@@ -9936,6 +9962,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             np.int8,
             np.uint8,
             np.longlong,
+            np.bool,
         ]
         for dtype in dtypes:
             array = np.array([1, 2, 3, 4], dtype=dtype)
@@ -9987,6 +10014,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             np.int16,
             np.int8,
             np.uint8,
+            np.bool,
         ]
 
         incorrect_byteorder = '>' if sys.byteorder == 'little' else '<'
@@ -10032,7 +10060,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             np.int64,
             np.int32,
             np.int16,
-            np.uint8
+            np.uint8,
+            np.bool,
         ]
         for dtype in dtypes:
             self.assertEqual(dtype(42), torch.tensor(dtype(42)).item())
