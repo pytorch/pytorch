@@ -181,9 +181,11 @@ template <typename index_t>
 static OffsetCalculator<2, index_t> make_output_calculator(const TensorIterator& iter) {
   int num_reduce_dims = iter.num_reduce_dims();
   int num_output_dims = iter.ndim() - num_reduce_dims;
+  int input_index = iter.ntensors() - 1;
+  int output_index = 0;
   std::array<const int64_t*, 2> strides = {
-    iter.strides(0).data() + num_reduce_dims,
-    iter.strides(1).data() + num_reduce_dims,
+    iter.strides(output_index).data() + num_reduce_dims,
+    iter.strides(input_index).data() + num_reduce_dims,
   };
   auto shape = iter.shape().data() + num_reduce_dims;
   return OffsetCalculator<2, index_t>(num_output_dims, shape, strides.data());
@@ -192,8 +194,9 @@ static OffsetCalculator<2, index_t> make_output_calculator(const TensorIterator&
 template <typename index_t>
 static OffsetCalculator<1, index_t> make_input_calculator(const TensorIterator& iter) {
   int num_reduce_dims = iter.num_reduce_dims();
+  int input_index = iter.ntensors() - 1;
   std::array<const int64_t*, 1> strides = {
-    iter.strides(1).data(),
+    iter.strides(input_index).data(),
   };
   return OffsetCalculator<1, index_t>(num_reduce_dims, iter.shape().data(), strides.data());
 }
@@ -275,7 +278,7 @@ struct ReduceOp {
   InputCalculator input_calc;
   OutputCalculator output_calc;
   const void* src;
-  void* dst;
+  char* dst[2];
   void* buffer;
   int* semaphores;
   bool accumulate;
@@ -283,17 +286,20 @@ struct ReduceOp {
   int noutputs;
 
   ReduceOp(ops_t ops, ReduceConfig config, InputCalculator input_calc, OutputCalculator output_calc,
-           const void* src, void* dst, void* buffer, int* semaphores, arg_t ident, int noutputs)
+           const void* src, char* dst_[], void* buffer, int* semaphores, arg_t ident, int noutputs)
     : ops(ops)
     , config(config)
     , input_calc(input_calc)
     , output_calc(output_calc)
     , src(src)
-    , dst(dst)
+    //, dst(dst)
     , buffer(buffer)
     , semaphores(semaphores)
     , ident(ident)
     , noutputs(noutputs) {
+    for (int i = 0; i < noutputs; i++) {
+      dst[i] = dst_[i];
+    }
   }
 
   C10_DEVICE void run() const {
@@ -315,22 +321,16 @@ struct ReduceOp {
       value = block_x_reduce(value, shared_memory);
     }
 
-    auto out = (out_scalar_t*)((char*)dst + base_offsets[0]);
-    /*out_scalar_t* outs[noutputs];
-    for (int i = 0; i < noutputs; i++) {
-      outs[i] = (out_scalar_t*)((char*)dst[i] + base_offsets[0]);
-    }*/
-
     if (config.should_global_reduce()) {
-      value = global_reduce(value, out, shared_memory, noutputs);
+      value = global_reduce(value, shared_memory);
     } else if (config.should_store(output_idx)) {
-      if (accumulate) {
-        value = accumulate_in_output<can_accumulate_in_output>(out, value);
+      for (int i = 0; i < noutputs; i++) {
+        auto out = (out_scalar_t*)((char*)dst[i] + base_offsets[0]);
+        if (accumulate) {
+          value = accumulate_in_output<can_accumulate_in_output>(out, value);
+        }
+        *out = project_if_necessary<can_accumulate_in_output>(value, i);
       }
-      *out = project_if_necessary<can_accumulate_in_output>(value, 0);
-      /*for (int i = 0; i < noutputs; i++) {
-        *out[i] = project_if_necessary<can_accumulate_in_output>(value, i);
-      }*/
     }
   }
 
@@ -464,8 +464,10 @@ struct ReduceOp {
     return ops.project2(value, index);
   }
 
-  C10_DEVICE arg_t global_reduce(arg_t value, out_scalar_t* out, char* shared_memory, int noutputs) const {
+  C10_DEVICE arg_t global_reduce(arg_t value, char* shared_memory) const {
     arg_t* reduce_buffer = (arg_t*)buffer;
+    index_t output_idx = config.output_idx();
+    auto base_offsets = output_calc.get(output_idx);
 
     bool should_store = config.should_store(config.output_idx());
     if (should_store) {
@@ -501,13 +503,13 @@ struct ReduceOp {
         value = block_x_reduce(value, shared_memory);
       }
       if (should_store) {
-        if (accumulate) {
-          value = accumulate_in_output<can_accumulate_in_output>(out, value);
+        for (int i = 0; i < noutputs; i++) {
+          auto out = (out_scalar_t *) (dst[i] + base_offsets[0]);
+          if (accumulate) {
+            value = accumulate_in_output<can_accumulate_in_output>(out, value);
+          }
+          *out = project_if_necessary<can_accumulate_in_output>(value, i);
         }
-        /*for (int i = 0; i < noutputs; i++) {
-          *out[i] = project_if_necessary<can_accumulate_in_output>(value, i);
-        }*/
-        *out = project_if_necessary<can_accumulate_in_output>(value, 0);
       }
     }
 
@@ -544,7 +546,6 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     return;
   }
 
-  char* out_data = (char*)iter.data_ptr(0);
   const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
 
   const auto noutputs = iter.noutputs();
@@ -557,13 +558,14 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   // the inputs for that output.
   int64_t num_outputs = iter.num_output_elements();
   int64_t inputs_per_output = iter.numel() / num_outputs;
+  int input_index = iter.ntensors() - 1;
 
   auto config = ReduceConfig(sizeof(arg_t), num_outputs, inputs_per_output);
 
   int64_t dim0;
   int64_t dim1;
   // adjust block size to fit width to fast changing dimension
-  if (iter.strides(/*arg=*/1)[0] == sizeof(scalar_t)) {
+  if (iter.strides(/*arg=*/input_index)[0] == sizeof(scalar_t)) {
     dim0 = iter.shape()[0];
     dim1 = num_outputs;
   } else {
@@ -576,7 +578,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   int block_width = config.block_width;
   int block_height = config.block_height;
 
-  if (iter.ndim() == 0 || iter.strides(/*arg=*/1)[0] == sizeof(scalar_t)) {
+  if (iter.ndim() == 0 || iter.strides(/*arg=*/input_index)[0] == sizeof(scalar_t)) {
     // Split the input across lanes if the input is contiguous in the reduced
     // dimension. This will require reduction between threads using warp
     // shuffle instructions and shared memory (if block_width > warpSize).
@@ -627,7 +629,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
         input_calc,
         output_calc,
         in_data,
-        out_data,
+        out_data_p,
         buffer.get(),
         (int*)semaphores.get(),
         ident,
@@ -645,7 +647,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
         input_calc,
         output_calc,
         in_data,
-        out_data,
+        out_data_p,
         buffer.get(),
         (int*)semaphores.get(),
         ident,
