@@ -109,8 +109,13 @@ def NumpyArrayToCaffe2Tensor(arr, name=None):
     elif arr.dtype == np.uint8:
         tensor.data_type = caffe2_pb2.TensorProto.UINT8
         tensor.int32_data.extend(list(arr.flatten().astype(np.uint8)))   # np.uint8=>pb.UNIT8 use int32_data
+    elif arr.dtype.type is np.str_:
+        tensor.data_type = caffe2_pb2.TensorProto.STRING
+        tensor.string_data.extend([
+            bytes(string, "utf-8") for string in list(arr.flatten().astype(str))
+        ])
     else:
-        # TODO: complete the data type: bool, float16, byte, int64, string
+        # TODO: complete the data type: bool, float16, byte, int64
         raise RuntimeError(
             "Numpy data type not supported yet: " + str(arr.dtype))
     return tensor
