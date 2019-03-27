@@ -257,7 +257,7 @@ struct FileCheckImpl {
       return start;
     }
     start += 1;
-    static const size_t max_whitespace = 6;
+    static constexpr size_t max_whitespace = 6;
     size_t i = 0;
     while (start + i < checks_file->size() && i < max_whitespace) {
       auto c = checks_file->at(start + i);
@@ -266,7 +266,7 @@ struct FileCheckImpl {
       }
       i++;
     }
-    const static std::string check = "CHECK";
+    static const std::string check = "CHECK";
     if (checks_file->substr(start + i, check.size()) == check) {
       return start + i + check.size();
     } else {
