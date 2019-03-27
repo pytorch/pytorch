@@ -7,11 +7,11 @@
 
 namespace at {
 
-std::shared_ptr<Quantizer> make_per_layer_affine_quantizer(double scale, int64_t zero_point) {
-  return std::make_shared<PerLayerAffineQuantizer>(static_cast<float>(scale), static_cast<uint8_t>(zero_point));
+std::shared_ptr<Quantizer> make_per_tensor_affine_quantizer(double scale, int64_t zero_point) {
+  return std::make_shared<PerTensorAffineQuantizer>(static_cast<float>(scale), static_cast<uint8_t>(zero_point));
 }
 
-inline QTensorImpl* get_qtensorimpl(const QTensor& self) {
+QTensorImpl* get_qtensorimpl(const QTensor& self) {
   // TODO: remove this when Variable and Tensor are merged
   AT_ASSERTM(!self.is_variable(), "_internal_get_QTensorImpl: should not be a variable");
   // TODO: uncomment after is_quantized() is implmeented
@@ -34,7 +34,7 @@ inline QTensor new_qtensor(
     allocator->allocate(nelements * dtype.itemsize()),
     allocator,
     /*resizable=*/true);
-  auto quantizer = make_per_layer_affine_quantizer(scale, zero_point);
+  auto quantizer = make_per_tensor_affine_quantizer(scale, zero_point);
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage_impl, at::CPUTensorId(), false, std::move(quantizer));
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
@@ -45,13 +45,20 @@ qint8 QuantizeUint8(float scale, uint8_t zero_point, float value) {
   const int32_t qmin = std::numeric_limits<uint8_t>::min();
   const int32_t qmax = std::numeric_limits<uint8_t>::max();
 
+  // std::nearbyint results in nearest integer value according to the current rounding
+  // mode and the default rounding mode is rounds to even in half-way cases in most
+  // popular processor architectures like x86 and ARM.
+  // This is typically faster than an alternatives like std::round that rounds half-way
+  // cases away from zero, and can be consistent with SIMD implementations for example
+  // in x86 using _mm512_cvtps_epi32 or mm512_round_ps with _MM_FROUND_CUR_DIRECTION
+  // option that also follow the current rounding mode.
   auto r = zero_point + static_cast<int32_t>(std::nearbyint(value / scale));
   r = std::max(r, qmin);
   r = std::min(r, qmax);
   return static_cast<qint8>(r);
 }
 
-QTensor PerLayerAffineQuantizer::quantize(RealTensor tensor) {
+QTensor PerTensorAffineQuantizer::quantize(RealTensor tensor) {
   IntArrayRef sizes = tensor.sizes();
   QTensor qv = new_qtensor(sizes, tensor.options().dtype(at::kQInt8), scale_, zero_point_);
   auto qvd = qv.data<qint8>();
@@ -62,7 +69,7 @@ QTensor PerLayerAffineQuantizer::quantize(RealTensor tensor) {
   return qv;
 }
 
-RealTensor PerLayerAffineQuantizer::dequantize(QTensor tensor) {
+RealTensor PerTensorAffineQuantizer::dequantize(QTensor tensor) {
   std::vector<int64_t> sizes = tensor.sizes().vec();
   at::TensorOptions real_options = tensor.options().dtype(at::kFloat);
 
@@ -80,9 +87,9 @@ UniformQuantizer::~UniformQuantizer() {}
 NonUniformQuantizer::~NonUniformQuantizer() {}
 AffineQuantizer::~AffineQuantizer() {}
 SymmetricQuantizer::~SymmetricQuantizer() {}
-PerLayerSymmetricQuantizer::~PerLayerSymmetricQuantizer() {}
+PerTensorSymmetricQuantizer::~PerTensorSymmetricQuantizer() {}
 PerChannelSymmetricQuantizer::~PerChannelSymmetricQuantizer() {}
-PerLayerAffineQuantizer::~PerLayerAffineQuantizer() {}
+PerTensorAffineQuantizer::~PerTensorAffineQuantizer() {}
 PerChannelAffineQuantizer::~PerChannelAffineQuantizer() {}
 
 

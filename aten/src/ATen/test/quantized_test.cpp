@@ -21,7 +21,7 @@ TEST(TestQTensor, First) {
   ASSERT_EQ(qr.q_zero_point().to<int32_t>(), zero_point);
 
   // TODO: Uncomment when quantizer is ready
-  // auto* quantizer = static_cast<PerLayerAffineQuantizer*>(qr.quantizer());
+  // auto* quantizer = static_cast<PerTensorAffineQuantizer*>(qr.quantizer());
   // ASSERT_EQ(quantizer->scale(), scale);
   // ASSERT_EQ(quantizer->zero_point(), zero_point);
 

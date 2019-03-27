@@ -10,16 +10,16 @@ namespace c10 {
  */
 enum class QScheme : uint8_t {
   NO_QUANT,
-  PER_LAYER_AFFINE,
+  PER_TENSOR_AFFINE,
   PER_CHANNEL_AFFINE,
-  PER_LAYER_SYMMETRIC,
+  PER_TENSOR_SYMMETRIC,
   PER_CHANNEL_SYMMETRIC
 };
 
 constexpr auto kNoQuant = QScheme::NO_QUANT;
-constexpr auto kPerLayerAffine = QScheme::PER_LAYER_AFFINE;
+constexpr auto kPerTensorAffine = QScheme::PER_TENSOR_AFFINE;
 constexpr auto kPerChannelAffine = QScheme::PER_CHANNEL_AFFINE;
-constexpr auto kPerLayerSymmetric = QScheme::PER_LAYER_SYMMETRIC;
+constexpr auto kPerTensorSymmetric = QScheme::PER_TENSOR_SYMMETRIC;
 constexpr auto kPerChannelSymmetric = QScheme::PER_CHANNEL_SYMMETRIC;
 
 } // namespace c10

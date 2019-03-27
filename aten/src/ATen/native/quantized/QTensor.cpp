@@ -8,7 +8,7 @@ namespace at {
 namespace native {
 
 QTensor quantize_linear(const RealTensor& self, double scale, int64_t zero_point) {
-  auto quantizer = make_per_layer_affine_quantizer(scale, zero_point);
+  auto quantizer = make_per_tensor_affine_quantizer(scale, zero_point);
   return quantizer->quantize(self);
 }
 
@@ -18,14 +18,14 @@ RealTensor dequantize(const QTensor& self) {
 
 Scalar q_scale(const QTensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
-  AT_ASSERT(quantizer->qscheme() == kPerLayerAffine);
-  return Scalar(static_cast<PerLayerAffineQuantizer*>(quantizer)->scale());
+  AT_ASSERT(quantizer->qscheme() == kPerTensorAffine);
+  return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer)->scale());
 }
 
 Scalar q_zero_point(const QTensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
-  AT_ASSERT(quantizer->qscheme() == kPerLayerAffine);
-  return Scalar(static_cast<PerLayerAffineQuantizer*>(quantizer)->zero_point());
+  AT_ASSERT(quantizer->qscheme() == kPerTensorAffine);
+  return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer)->zero_point());
 }
 
 Quantizer* quantizer(const QTensor& self) {

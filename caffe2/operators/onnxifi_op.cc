@@ -91,9 +91,11 @@ template <>
 std::vector<onnxTensorDescriptorV1>
 OnnxifiOp<float, CPUContext>::buildInitializationList(
     Workspace* ws,
-    std::unordered_set<std::string>* initialization_list,
+    const std::vector<std::string>& initializers,
     std::vector<std::string>* weight_names,
     std::vector<std::vector<uint64_t>>* weight_shapes) {
+  std::unordered_set<std::string> initialization_list(
+      initializers.begin(), initializers.end());
   const std::vector<string>& ws_blobs = ws->Blobs();
   // Since onnxTensorDescriptorV1.name will point into the memory in
   // weight_names, we need to prevent weight_names from reallocating by
@@ -101,18 +103,17 @@ OnnxifiOp<float, CPUContext>::buildInitializationList(
   weight_names->reserve(ws_blobs.size());
   std::vector<onnxTensorDescriptorV1> descs;
   for (const auto& s : ws_blobs) {
-    auto it = initialization_list->find(s);
-    if (it != initialization_list->end()) {
+    auto it = initialization_list.find(s);
+    if (it != initialization_list.end()) {
       weight_names->emplace_back(s);
       onnxTensorDescriptorV1 tensor_desc;
       tensor_desc.name = weight_names->back().c_str();
       BlobToTensorDescriptor(s, ws, &tensor_desc, weight_shapes);
       descs.push_back(tensor_desc);
-      initialization_list->erase(it);
+      initialization_list.erase(it);
     }
   }
-  CAFFE_ENFORCE(
-      initialization_list->empty(), "Unfulfilled initialization list");
+  CAFFE_ENFORCE(initialization_list.empty(), "Unfulfilled initialization list");
   return descs;
 }
 

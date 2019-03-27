@@ -116,38 +116,44 @@ struct CAFFE2_API SymmetricQuantizer : public UniformQuantizer {
 };
 
 /**
- * PerLayerSymmetricQuantizer stores a single scale number which is
+ * PerTensorSymmetricQuantizer stores a single scale number which is
  * used for quantizing all the values in the given Tensor
  */
-struct CAFFE2_API PerLayerSymmetricQuantizer: public SymmetricQuantizer {
-  PerLayerSymmetricQuantizer() {}
-  PerLayerSymmetricQuantizer(float scale) : SymmetricQuantizer(kPerLayerSymmetric), scale_(scale) {}
-  virtual ~PerLayerSymmetricQuantizer();
+struct CAFFE2_API PerTensorSymmetricQuantizer: public SymmetricQuantizer {
+  PerTensorSymmetricQuantizer() {}
+  PerTensorSymmetricQuantizer(float scale) : SymmetricQuantizer(kPerTensorSymmetric), scale_(scale) {}
+  virtual ~PerTensorSymmetricQuantizer();
   float scale_{1.0};
 };
 
 /**
  * PerChannelSymmetricQuantizer stores a vector of scale number and
- * applys symmetric quantization using different scales.
+ * applys symmetric quantization using different scales on each channel.
+ *
+ * Also note that per channel quantization is mostly applied to output channels of
+ * weights since per-input channel of weight quantization or per-channel quantization
+ * for activations can't be efficiently supported in most of processors since
+ * it requires each multiplication result within a single dot-product
+ * to have a different scale.
  */
 struct CAFFE2_API PerChannelSymmetricQuantizer: public SymmetricQuantizer {
   PerChannelSymmetricQuantizer() {}
-  PerChannelSymmetricQuantizer(std::vector<float> scales, std::vector<int64_t> channel_axis): SymmetricQuantizer(kPerChannelSymmetric), scales_(scales), channel_axis_(channel_axis) {
-    AT_ASSERT(channel_axis_.size() == 1);
+  PerChannelSymmetricQuantizer(std::vector<float> scales, std::vector<int64_t> axis): SymmetricQuantizer(kPerChannelSymmetric), scales_(scales), axis_(axis) {
+    AT_ASSERT(axis_.size() == 1);
   }
   virtual ~PerChannelSymmetricQuantizer();
 
   std::vector<float> scales_;
-  std::vector<int64_t> channel_axis_;
+  std::vector<int64_t> axis_;
 };
 
 /**
- * PerLayerAffineQuantizer stores a scale and a zero_point, which is used for
+ * PerTensorAffineQuantizer stores a scale and a zero_point, which is used for
  * all the values in the Tensor.
  */
-struct CAFFE2_API PerLayerAffineQuantizer: public AffineQuantizer{
-  PerLayerAffineQuantizer(float scale, uint8_t zero_point): AffineQuantizer(kPerLayerAffine), scale_(scale), zero_point_(zero_point) {}
-  ~PerLayerAffineQuantizer();
+struct CAFFE2_API PerTensorAffineQuantizer: public AffineQuantizer{
+  PerTensorAffineQuantizer(float scale, uint8_t zero_point): AffineQuantizer(kPerTensorAffine), scale_(scale), zero_point_(zero_point) {}
+  ~PerTensorAffineQuantizer();
 
   virtual QTensor quantize(RealTensor tensor);
   virtual RealTensor dequantize(QTensor tensor);
@@ -156,7 +162,7 @@ struct CAFFE2_API PerLayerAffineQuantizer: public AffineQuantizer{
     return scale_;
   }
 
-  int32_t zero_point() {
+  uint8_t zero_point() {
     return zero_point_;
   }
 
@@ -165,20 +171,20 @@ struct CAFFE2_API PerLayerAffineQuantizer: public AffineQuantizer{
 };
 
 /**
- * PerChannelAffineQuantizer is the same as PerLayerAffineQuantizer
+ * PerChannelAffineQuantizer is the same as PerTensorAffineQuantizer
  * except that we have an independent scale and zero_point parameter
  * for each channel.
  */
 struct CAFFE2_API PerChannelAffineQuantizer: public AffineQuantizer {
   PerChannelAffineQuantizer() {}
-  PerChannelAffineQuantizer(std::vector<float> scales, std::vector<uint8_t> zero_points, std::vector<int64_t> channel_axis): AffineQuantizer(kPerChannelAffine), scales_(scales), zero_points_(zero_points), channel_axis_(channel_axis) {
-    AT_ASSERT(channel_axis_.size() == 1);
+  PerChannelAffineQuantizer(std::vector<float> scales, std::vector<uint8_t> zero_points, std::vector<int64_t> axis): AffineQuantizer(kPerChannelAffine), scales_(scales), zero_points_(zero_points), axis_(axis) {
+    AT_ASSERT(axis_.size() == 1);
   }
   ~PerChannelAffineQuantizer();
 
   std::vector<float> scales_;
   std::vector<uint8_t> zero_points_;
-  std::vector<int64_t> channel_axis_;
+  std::vector<int64_t> axis_;
 };
 
 // This is an internal utility function for getting at the QTensorImpl,
@@ -192,7 +198,7 @@ CAFFE2_API qint8 QuantizeUint8(float scale, uint8_t zero_point, float value);
 
 // double and int64_t are because of the native function API, we only have these argument
 // types right now in native functions
-CAFFE2_API std::shared_ptr<Quantizer> make_per_layer_affine_quantizer(double scale, int64_t zero_point);
+CAFFE2_API std::shared_ptr<Quantizer> make_per_tensor_affine_quantizer(double scale, int64_t zero_point);
 QTensor new_qtensor(
     IntArrayRef sizes, const TensorOptions& options, float scale, int8_t zero_point);
 
