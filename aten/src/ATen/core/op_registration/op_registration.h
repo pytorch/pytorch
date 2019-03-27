@@ -70,8 +70,6 @@ public:
     return std::move(*this);
   }
 
-  // TODO allow input schema to be just the operator name + overload name, in that case use schema generated from kernel function
-
   /**
    * Deprecated. For backwards compatibility only.
    * Don't use this, it introduces a performance overhead on each kernel call
@@ -114,7 +112,7 @@ public:
     return std::move(*this).op(std::move(schema), kernel<detail::WrapRuntimeKernelFunctor<FuncType*>>(func));
    }
 
-  // TODO Add deprecated lambda-based API
+   // TODO allow input schema to be just the operator name + overload name, in that case use schema generated from kernel function
 
 private:
   void registerOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config);
