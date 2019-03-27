@@ -153,7 +153,7 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
     // Input `gradsBatch` are created on current streams and used in worker
     // streams. Hence, they must record worker streams to prevent being
     // freed before their worker stream ops finish.
-    for (at::Tensor & grad: gradsBatch[devIdx]) {
+    for (at::Tensor& grad : gradsBatch[devIdx]) {
       c10::cuda::CUDACachingAllocator::recordStream(
         grad.data_ptr(), workerStreams.back());
     }
@@ -193,7 +193,7 @@ void syncReduction(
   // Input `gradsBatch` are created on the current stream and used on the worker
   // stream. Hence, they must record worker streams to prevent being freed
   // before their worker stream ops finish.
-  for (at::Tensor & grad: gradsBatch) {
+  for (at::Tensor& grad : gradsBatch) {
     c10::cuda::CUDACachingAllocator::recordStream(
       grad.data_ptr(), workerStream);
   }
