@@ -13461,15 +13461,12 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=Fals
         f_args_tensor = (self_tensor,) + args_tensor
 
         if test_name not in EXCLUDE_SCRIPT:
-            # disable_ad_subgraph_inlining = test_name in DISABLE_AUTODIFF_SUBGRAPH_INLINING
-            disable_ad_subgraph_inlining = check_ad
-
             def run_test():
                 script_fn = create_script_fn(self, name, 'nn_functional', output_process_fn,
-                                             disable_autodiff_subgraph_inlining=disable_ad_subgraph_inlining)
+                                             disable_autodiff_subgraph_inlining=check_ad)
                 check_against_reference(self, script_fn, fn, f_args_variable, kwargs_variable, no_grad=no_grad)
                 # For tests we disabled AD subgraph inlining, make sure it's not falling back to autograd
-                if disable_ad_subgraph_inlining:
+                if check_ad:
                     self.assertGraphContains(script_fn.last_graph, "prim::DifferentiableGraph")
 
             if test_name in EXCLUDE_PYTHON_PRINT:
