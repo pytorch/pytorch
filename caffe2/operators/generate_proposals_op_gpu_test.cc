@@ -234,7 +234,6 @@ TEST(GenerateProposalsTest, TestRealDownSampledGPU) {
       1e-4);
 }
 
-#if defined(CV_MAJOR_VERSION) && (CV_MAJOR_VERSION >= 3)
 TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0GPU) {
   // Similar to TestRealDownSampledGPU but for rotated boxes with angle info.
   if (!HasCudaGPU())
@@ -359,7 +358,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0GPU) {
   ERMatXf rois_gt(rois_gt_xyxy.rows(), 6);
   // Batch ID
   rois_gt.block(0, 0, rois_gt.rows(), 1) =
-      rois_gt_xyxy.block(0, 0, rois_gt.rows(), 0);
+      rois_gt_xyxy.block(0, 0, rois_gt.rows(), 1);
   // rois_gt in [x_ctr, y_ctr, w, h] format
   rois_gt.block(0, 1, rois_gt.rows(), 4) = utils::bbox_xyxy_to_ctrwh(
       rois_gt_xyxy.block(0, 1, rois_gt.rows(), 4).array());
@@ -637,6 +636,5 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedGPU) {
       0,
       1e-4);
 }
-#endif // CV_MAJOR_VERSION >= 3
 
 } // namespace caffe2
