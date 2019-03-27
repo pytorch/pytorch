@@ -7,24 +7,6 @@
 #include <c10/util/Array.h>
 
 namespace c10 { namespace guts {
-namespace detail {
-/**
- * strip_class: helper to remove the class type from pointers to `operator()`.
- */
-
-template <typename T>
-struct strip_class {};
-template <typename Class, typename Result, typename... Args>
-struct strip_class<Result (Class::*)(Args...)> {
-  using type = Result(Args...);
-};
-template <typename Class, typename Result, typename... Args>
-struct strip_class<Result (Class::*)(Args...) const> {
-  using type = Result(Args...);
-};
-template <typename T>
-using strip_class_t = typename strip_class<T>::type;
-} // namespace detail
 
 /**
  * Access information about result type or arguments from a function type.
@@ -42,16 +24,6 @@ struct function_traits<Result (Args...)> {
   using parameter_types = typelist::typelist<Args...>;
   static constexpr auto number_of_parameters = sizeof...(Args);
 };
-
-/**
- * Evaluates to true_type, iff the given class is a Functor
- * (i.e. has a call operator with some set of arguments)
- */
-
-template<class Functor, class Enable = void>
-struct is_functor : std::false_type {};
-template<class Functor>
-struct is_functor<Functor, guts::enable_if_t<is_function_type<detail::strip_class_t<decltype(&Functor::operator())>>::value>> : std::true_type {};
 
 /**
  * infer_function_traits: creates a `function_traits` type for a simple
