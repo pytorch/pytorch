@@ -15,7 +15,7 @@ static std::unordered_map<std::string, int> op_to_key = {
 
 namespace caffe2 {
 
-using at::Half; // for AT_FORALL_SCALAR_TYPES
+using at::Half; // for AT_FORALL_SCALAR_TYPES_AND_BOOL
 
 template <class Context>
 class ATenOp : public Operator<Context> {
@@ -47,7 +47,7 @@ private:
       case at::k##aten_name: \
         return TypeMeta::Make<ctype>();
     switch(st) {
-      AT_FORALL_SCALAR_TYPES(DEFINE_CASE)
+      AT_FORALL_SCALAR_TYPES_AND_BOOL(DEFINE_CASE)
       default:
         CAFFE_THROW("Unknown ATen Type");
     }
@@ -103,7 +103,7 @@ private:
     }
   }
 
-  // the AT_FORALL_SCALAR_TYPES macro just gives a 'i' or 'd' argument
+  // the AT_FORALL_SCALAR_TYPES_AND_BOOL macro just gives a 'i' or 'd' argument
   // for each type to specify if it is stored as a integer or a double.
   // We need this workaround here to extract the value in the scalar losslessly
   // because in some cases like 'sum' Torch promotes float to double
@@ -123,7 +123,7 @@ private:
           auto value = extract_##native(scalar); \
           assignToValue<ctype>(dst, at::convert<ctype,decltype(value)>(value)); \
         } break;
-      AT_FORALL_SCALAR_TYPES(DEFINE_CASE)
+      AT_FORALL_SCALAR_TYPES_AND_BOOL(DEFINE_CASE)
       #undef DEFINE_CASE
       default:
         CAFFE_THROW("Unknown ATen Type");
