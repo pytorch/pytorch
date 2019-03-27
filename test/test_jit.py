@@ -43,7 +43,7 @@ from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from torch.testing import FileCheck
 from torch._C import TensorType, TupleType, FloatType, IntType, \
-    ListType, StringType, DictType, parseIR
+    ListType, StringType, DictType, parse_ir
 from copy import deepcopy
 import random
 from typing import List, Dict, Optional, Tuple
@@ -6050,7 +6050,7 @@ a")
           %1 : Double(5, 5) = aten::relu(%0)
           return (%1)
         """
-        FileCheck().run(graph_str, parseIR(graph_str))
+        FileCheck().run(graph_str, parse_ir(graph_str))
 
     def test_filecheck(self):
         def test_check():
@@ -6166,7 +6166,7 @@ a")
 
         def test_check_count():
             file = "22222"
-            FileCheck().run("# CHECK-COUNT-5: 2")
+            FileCheck().run("# CHECK-COUNT-5: 2", file)
             FileCheck().run("# CHECK-COUNT-EXACTLY-5: 2", file)
             FileCheck().run("# CHECK-COUNT-2: 22", file)
             FileCheck().run("# CHECK-COUNT-1: 222", file)
@@ -6189,9 +6189,6 @@ a")
         test_check_same()
 
         def test_bad_input():
-            with self.assertRaisesRegex(RuntimeError, "Check for bad input"):
-                FileCheck().run("#CHECK: 1", "1")
-
             with self.assertRaisesRegex(RuntimeError, "Check for bad input"):
                 FileCheck().run("", "1")
 

@@ -93,8 +93,9 @@ size_t assertFind(
     printQuotedString(ss, sub);
     ss << " but did not find it\n";
     found_range.highlight(ss);
-    if (extra_msg)
+    if (extra_msg) {
       extra_msg(ss);
+    }
     throw std::runtime_error(ss.str());
   }
   return pos;
@@ -136,7 +137,7 @@ void assertNotFind(
 }
 
 size_t substringCount(
-    std::shared_ptr<std::string>& file,
+    const std::shared_ptr<std::string>& file,
     const std::string& sub) {
   size_t occurances = 0;
   std::string::size_type pos = 0;
@@ -153,6 +154,13 @@ struct FileCheckImpl {
 
   TORCH_API void run(const std::string& test_file) {
     has_run = true;
+
+    if (groups.size() == 0 || groups[0].size() == 0) {
+      throw std::runtime_error(
+          "No checks have been added to this instance of"
+          "Filecheck! Check for bad input.");
+    }
+
     doChecks(std::make_shared<std::string>(test_file));
   }
 
@@ -192,8 +200,9 @@ struct FileCheckImpl {
   friend std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc);
 
  private:
-  void parseStrings(std::shared_ptr<std::string>& checks_file) {
-    std::vector<Check> operands;
+  bool parseSingleCheck(
+      const std::shared_ptr<std::string>& checks_file,
+      size_t* start) {
     const static std::vector<std::pair<CheckType, std::string>> check_pairs = {
         {CHECK, ": "},
         {CHECK_NEXT, "-NEXT: "},
@@ -202,76 +211,84 @@ struct FileCheckImpl {
         {CHECK_DAG, "-DAG: "},
         {CHECK_COUNT, "-COUNT-"}, // needs special parsing
     };
-    const std::string prefix = "# CHECK";
 
-    size_t start = 0;
-    size_t num_checks = 0;
-    start = checks_file->find(prefix, start);
+    for (const auto& check_pair : check_pairs) {
+      const std::string& check_suffix = check_pair.second;
+      auto suffix_pos = checks_file->find(check_suffix, *start);
+      if (suffix_pos != *start) {
+        continue;
+      }
+      size_t end_check_string = suffix_pos + check_suffix.size();
+      CheckType type = check_pair.first;
+      c10::optional<size_t> count = c10::nullopt;
+      auto end_line = checks_file->find("\n", end_check_string);
+      bool exactly = false;
+      if (type == CHECK_COUNT) {
+        const std::string exact = "EXACTLY-";
+        if (checks_file->find(exact, end_check_string) == end_check_string) {
+          exactly = true;
+          end_check_string += exact.size();
+        }
+        size_t end = assertFind(
+            SourceRange(checks_file, end_check_string, end_line), ":");
+        count = std::stoll(
+            checks_file->substr(end_check_string, end - end_check_string));
+        end_check_string = end + 2; // add ':' and the space
+      }
+      auto check = Check(
+          type,
+          checks_file->substr(end_check_string, end_line - end_check_string),
+          count);
+      addCheck(check);
+      if (exactly) {
+        addCheck(CHECK_NOT, check.search_str_);
+      }
+      *start = end_line;
+      return true;
+    }
+    return false;
+  }
 
-    while (start != std::string::npos) {
-      bool found_match = false;
-      for (const auto& check_pair : check_pairs) {
-        const std::string& check_suffix = check_pair.second;
-        auto suffix_pos = checks_file->find(check_suffix, start);
-        if (suffix_pos != start + prefix.size()) {
-          continue;
-        }
-        size_t end_check_string = suffix_pos + check_suffix.size();
-        CheckType type = check_pair.first;
-        c10::optional<size_t> count = c10::nullopt;
-        auto end_line = checks_file->find("\n", end_check_string);
-        bool exactly = false;
-        if (type == CHECK_COUNT) {
-          const std::string exact = "EXACTLY-";
-          if (checks_file->find(exact, end_check_string) == end_check_string) {
-            exactly = true;
-            end_check_string += exact.size();
-          }
-          size_t end = assertFind(
-              SourceRange(checks_file, end_check_string, end_line), ":");
-          count = std::stoll(
-              checks_file->substr(end_check_string, end - end_check_string));
-          end_check_string = end + 2; // add ':' and the space
-        }
-        auto check = Check(
-            type,
-            checks_file->substr(end_check_string, end_line - end_check_string),
-            count);
-        addCheck(check);
-        if (exactly) {
-          addCheck(CHECK_NOT, check.search_str_);
-        }
-        start = end_line;
-        found_match = true;
+  size_t findNextStart(
+      const std::shared_ptr<std::string>& checks_file,
+      size_t prev_end) {
+    size_t start = checks_file->find("#", prev_end);
+    if (start == std::string::npos) {
+      return start;
+    }
+    start += 1;
+    static const size_t max_whitespace = 6;
+    size_t i = 0;
+    while (start + i < checks_file->size() && i < max_whitespace) {
+      auto c = checks_file->at(start + i);
+      if (c != ' ' && c != '\t') {
         break;
       }
+      i++;
+    }
+    const static std::string check = "CHECK";
+    if (checks_file->substr(start + i, check.size()) == check) {
+      return start + i + check.size();
+    } else {
+      return findNextStart(checks_file, start + i + 1);
+    }
+  }
+
+  void parseStrings(const std::shared_ptr<std::string>& checks_file) {
+    size_t start = 0;
+    start = findNextStart(checks_file, 0);
+    while (start != std::string::npos) {
+      bool found_match = parseSingleCheck(checks_file, &start);
       if (!found_match) {
         std::ostringstream ss;
         ss << "Could not parse check at:\n";
-        SourceRange(checks_file, start, start + prefix.size()).highlight(ss);
+        SourceRange(checks_file, start, start + 1).highlight(ss);
         ss << "Check for bad input.";
         has_run = true;
         throw std::runtime_error(ss.str());
       }
-
-      start = checks_file->find(prefix, start);
-      num_checks++;
+      start = findNextStart(checks_file, start);
     }
-    size_t num_check_string = substringCount(checks_file, "CHECK");
-    if (num_checks != 0 && num_checks == num_check_string)
-      return;
-
-    std::ostringstream ss;
-    if (num_checks < num_check_string) {
-      ss << num_checks << " checks generated but found " << num_check_string
-         << " 'CHECK' "
-         << "in input string. Check for bad input:\n"
-         << *checks_file;
-    } else if (num_checks == 0) {
-      ss << "0 checks generated. Check for bad input:\n" << *checks_file;
-    }
-    has_run = true; // no extra print after exception thrown
-    throw std::runtime_error(ss.str());
   }
 
   void doCheckNot(

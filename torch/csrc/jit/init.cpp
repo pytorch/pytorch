@@ -369,7 +369,7 @@ void initJITBindings(PyObject* module) {
       },
       py::arg("qualified_name"));
 
-  m.def("parseIR", [](const std::string& input) {
+  m.def("parse_ir", [](const std::string& input) {
     auto graph = std::make_shared<Graph>();
     script::parseIR(input, &*graph);
     return graph;
