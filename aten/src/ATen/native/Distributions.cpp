@@ -11,7 +11,7 @@
 #include <ATen/core/Generator.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/cpu/UnaryOpsKernel.h>
+#include <ATen/native/UnaryOps.h>
 
 #include <type_traits>
 #include <functional>
