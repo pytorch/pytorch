@@ -142,7 +142,7 @@ void ReinitializeTensor(
       if (tensor->dtype() == options.dtype()) {
         tensor->raw_mutable_data();
       } else {
-        C10_LOG_EVERY_MS(WARNING, 1000)
+        C10_LOG_FIRST_N(WARNING, 10)
             << "Changing the data type of Tensor is discouraged."
             << " Attempt to change data type from: " << tensor->dtype()
             << " to: " << options.dtype();
