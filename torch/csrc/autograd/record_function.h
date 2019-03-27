@@ -2,6 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/SmallVector.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch { namespace autograd {
 
@@ -9,63 +10,25 @@ struct Function;
 
 namespace profiler {
 
-using GetPackedInputsCallback = std::function<std::vector<c10::IValue>()>;
+struct TORCH_API StringView {
+  StringView() : StringView(nullptr) {}
+  explicit StringView(const char* str_ptr)
+    : owned_str_ptr_(nullptr), str_ptr_(str_ptr) {}
+  explicit StringView(std::string str)
+    : owned_str_ptr_(std::make_shared<std::string>(std::move(str))),
+      str_ptr_(owned_str_ptr_->c_str()) {}
 
-struct FunctionCallContext {
-  explicit FunctionCallContext(
-      Function* fn, GetPackedInputsCallback cb = nullptr);
-  explicit FunctionCallContext(
-      std::string name, int64_t sequence_nr = -1, GetPackedInputsCallback cb = nullptr);
-  explicit FunctionCallContext(
-      const char* name_ptr, int64_t sequence_nr = -1, GetPackedInputsCallback cb = nullptr);
-
-  inline Function* func() const {
-    return fn_;
+  inline const char* str() const {
+    return str_ptr_;
   }
-
-  inline const char* name() const {
-    return name_ptr_;
-  }
-
-  inline int64_t seqNr() const {
-    return sequence_nr_;
-  }
-
-  inline bool hasOwnedName() const {
-    return owned_name_ != nullptr;
-  }
-
-  const std::vector<c10::IValue>& inputs() const {
-    if (inputs_cb_ && !inputs_initialized_) {
-      inputs_ = inputs_cb_();
-      inputs_initialized_ = true;
-    }
-    return inputs_;
-  }
-
-  inline const std::shared_ptr<FunctionCallContext>& parent() const {
-    return parent_ctx_;
-  }
-
-  inline void setParent(const std::shared_ptr<FunctionCallContext>& parent) {
-    parent_ctx_ = parent;
-  }
-
  private:
-  Function* fn_ = nullptr;
-  std::unique_ptr<std::string> owned_name_;
-  const char* name_ptr_ = nullptr;
-  int64_t sequence_nr_ = -1;
-
-  std::shared_ptr<FunctionCallContext> parent_ctx_;
-
-  GetPackedInputsCallback inputs_cb_ = nullptr;
-  mutable bool inputs_initialized_ = false;
-  // initialized lazily by inputs_cb_
-  mutable std::vector<c10::IValue> inputs_;
+  std::shared_ptr<std::string> owned_str_ptr_;
+  const char* str_ptr_;
 };
 
-struct RecordFunction {
+using GetPackedInputsCallback = std::function<std::vector<c10::IValue>()>;
+
+struct TORCH_API RecordFunction {
   explicit RecordFunction(Function* fn, GetPackedInputsCallback cb = nullptr);
 
   explicit RecordFunction(
@@ -80,30 +43,60 @@ struct RecordFunction {
 
   explicit RecordFunction(
       std::string name,
-      GetPackedInputsCallback cb) : RecordFunction(name, -1, cb) {};
+      GetPackedInputsCallback cb) : RecordFunction(name, -1, cb) {}
 
   explicit RecordFunction(
       const char* name,
-      GetPackedInputsCallback cb) : RecordFunction(name, -1, cb) {};
+      GetPackedInputsCallback cb) : RecordFunction(name, -1, cb) {}
 
   virtual ~RecordFunction();
 
- private:
-  template<typename... Args>
-  void processCallbacks(Args&&... args);
 
-  std::shared_ptr<FunctionCallContext> ctx_;
+  inline Function* func() const {
+    return fn_;
+  }
+
+  inline const StringView& name() const {
+    return name_;
+  }
+
+  inline int64_t seqNr() const {
+    return sequence_nr_;
+  }
+
+  const std::vector<c10::IValue>& inputs() const {
+    if (inputs_cb_ && !inputs_initialized_) {
+      inputs_ = inputs_cb_();
+      inputs_initialized_ = true;
+    }
+    return inputs_;
+  }
+
+  inline const RecordFunction* parent() const {
+    return parent_;
+  }
+
+ private:
+  void processCallbacks();
+
+  Function* fn_ = nullptr;
+  StringView name_;
+  int64_t sequence_nr_ = -1;
+
+  RecordFunction* parent_ = nullptr;
+
+  GetPackedInputsCallback inputs_cb_ = nullptr;
+  mutable bool inputs_initialized_ = false;
+  // initialized lazily by inputs_cb_
+  mutable std::vector<c10::IValue> inputs_;
 };
 
 // WARNING: all calls to pushCallback/popCallback are not thread safe and
 // must not overlap with other code execution
-using RecordFunctionCallback = std::function<void(const FunctionCallContext&)>;
-void pushCallback(RecordFunctionCallback, RecordFunctionCallback);
-void pushCallback(RecordFunctionCallback);
-void popCallback();
-// Functions to pass the context across fork calls
-const std::shared_ptr<FunctionCallContext>& currentFunctionCallContext();
-void setCurrentFunctionCallContext(const std::shared_ptr<FunctionCallContext>&);
+using RecordFunctionCallback = std::function<void(const RecordFunction&)>;
+TORCH_API void pushCallback(RecordFunctionCallback, RecordFunctionCallback);
+TORCH_API void pushCallback(RecordFunctionCallback);
+TORCH_API void popCallback();
 
 } // namespace profiler
 }} // namespace torch::autograd

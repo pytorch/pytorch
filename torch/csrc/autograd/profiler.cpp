@@ -34,60 +34,46 @@ RangeEventList& getEventList() {
 }
 
 void mark(std::string name, bool include_cuda /* = true */) {
-  if (state == ProfilerState::Disabled) {
-    return;
-  }
   if (state == ProfilerState::NVTX) {
     cuda_stubs->nvtxMarkA(name.c_str());
   } else {
     getEventList().record(
         EventKind::Mark,
-        std::move(name),
+        StringView(std::move(name)),
         thread_id,
         include_cuda && state == ProfilerState::CUDA);
   }
 }
 
-const char* c_str(const char *str) { return str; }
-// NB: non-const to disallow temporaries (lifetime issues)
-const char* c_str(std::string& str) { return str.c_str(); }
-
-template<typename T>
-void pushRangeImpl(T name, const char* msg="", int64_t sequence_nr=-1) {
-  if (state == ProfilerState::Disabled) {
-    return;
-  }
+void pushRangeImpl(const StringView& name, const char* msg="", int64_t sequence_nr=-1) {
   if (state == ProfilerState::NVTX) {
     if(sequence_nr >= 0) {
       std::stringstream s;
-      s << name << msg << sequence_nr;
+      s << name.str() << msg << sequence_nr;
       cuda_stubs->nvtxRangePushA(s.str().c_str());
     } else {
-      cuda_stubs->nvtxRangePushA(c_str(name));
+      cuda_stubs->nvtxRangePushA(name.str());
     }
   } else {
     getEventList().record(
         EventKind::PushRange,
-        std::move(name),
+        name,
         thread_id,
         state == ProfilerState::CUDA);
   }
 }
 
 void pushRange(std::string name) {
-  pushRangeImpl(std::move(name));
+  pushRangeImpl(StringView(std::move(name)));
 }
 
 void popRange() {
-  if (state == ProfilerState::Disabled) {
-    return;
-  }
   if (state == ProfilerState::NVTX) {
     cuda_stubs->nvtxRangePop();
   } else {
     getEventList().record(
         EventKind::PopRange,
-        "",
+        StringView(""),
         thread_id,
         state == ProfilerState::CUDA);
   }
@@ -101,15 +87,11 @@ void enableProfiler(ProfilerState new_state) {
       throw std::runtime_error("can't change kind of profiling (e.g. NVTX to CPU) while profiler is running");
   }
 
-  pushCallback([](const FunctionCallContext& ctx) {
-    auto* msg = (ctx.seqNr() >= 0) ? ", seq = " : "";
-    if (ctx.hasOwnedName()) {
-      pushRangeImpl<std::string>(ctx.name(), msg, ctx.seqNr()); // copy name
-    } else {
-      pushRangeImpl<const char*>(ctx.name(), msg, ctx.seqNr());
-    }
+  pushCallback([](const RecordFunction& fn) {
+    auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
+    pushRangeImpl(fn.name(), msg, fn.seqNr());
   },
-  [](const FunctionCallContext& ctx) {
+  [](const RecordFunction& /* unused */) {
     popRange();
   });
   state = new_state;

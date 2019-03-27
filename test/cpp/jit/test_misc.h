@@ -586,28 +586,28 @@ void invokeTestRecordFunction(at::Tensor& t) {
   t.add_(torch::ones_like(t));
 }
 
-std::string getFullName(const autograd::profiler::FunctionCallContext* ctx_ptr) {
+std::string getFullName(const autograd::profiler::RecordFunction* fn_ptr) {
   std::string full_name = "";
-  while (ctx_ptr != nullptr) {
+  while (fn_ptr != nullptr) {
     if (!full_name.empty()) {
-      full_name = std::string(ctx_ptr->name()) + "::" + full_name;
+      full_name = std::string(fn_ptr->name().str()) + "::" + full_name;
     } else {
-      full_name = ctx_ptr->name();
+      full_name = fn_ptr->name().str();
     }
-    ctx_ptr = ctx_ptr->parent().get();
+    fn_ptr = fn_ptr->parent();
   }
   return full_name;
 }
 
-void invokeTestRecordFunctionAsyncNested() {
+void invokeTestRecordFunctionNested() {
   autograd::profiler::RecordFunction guard("inner");
 }
 
 void testRecordFunction() {
   std::vector<std::vector<int64_t>> input_sizes;
   autograd::profiler::pushCallback([&input_sizes](
-      const autograd::profiler::FunctionCallContext& ctx) {
-    for (const auto& input : ctx.inputs()) {
+      const autograd::profiler::RecordFunction& fn) {
+    for (const auto& input : fn.inputs()) {
       if (input.isTensor()) {
         std::vector<int64_t> t = input.toTensor().sizes().vec();
         input_sizes.push_back(t);
@@ -623,23 +623,17 @@ void testRecordFunction() {
   AT_CHECK(input_sizes.size() == 1);
   AT_CHECK(input_sizes[0] == at::IntArrayRef({1, 2, 3}));
 
-  // test nested RecordFunctions, cover async execution test case
+  // test nested RecordFunctions
   std::vector<std::string> nested_names;
   autograd::profiler::pushCallback([&nested_names](
-      const autograd::profiler::FunctionCallContext& ctx) {
-    nested_names.push_back(getFullName(&ctx));
+      const autograd::profiler::RecordFunction& fn) {
+    nested_names.push_back(getFullName(&fn));
   });
 
-  std::thread test_thread;
   {
     autograd::profiler::RecordFunction guard("outer");
-    auto ctx = autograd::profiler::currentFunctionCallContext();
-    test_thread = std::thread([ctx](){
-      autograd::profiler::setCurrentFunctionCallContext(ctx);
-      invokeTestRecordFunctionAsyncNested();
-    });
+    invokeTestRecordFunctionNested();;
   }
-  test_thread.join(); // wait outside of "outer" scope
 
   autograd::profiler::popCallback();
   AT_CHECK(nested_names.size() == 2);
