@@ -79,6 +79,20 @@ PyObject * THPVariable_Wrap(Variable var)
   return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(var));
 }
 
+PyObject * THPVariable_Wrap_Subclass(Variable var, PyTypeObject *type)
+{
+    if (!var.defined()) {
+        Py_RETURN_NONE;
+    }
+
+    if (auto obj = var.pyobj()) {
+        Py_INCREF(obj);
+        return obj;
+    }
+
+    return THPVariable_NewWithVar(type, std::move(var));
+}
+
 static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
 {
   Py_VISIT(self->backward_hooks);
@@ -141,16 +155,16 @@ static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject 
 static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False)",
+    "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, bool allow_tensor_metadata_change=True)",
   });
-  ParsedArgs<3> parsed_args{};
+  ParsedArgs<4> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
   if (!PyType_Check(cls)) {
     throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
   auto& data = as_variable_ref(r.tensor(1)).data();
-  auto var = make_variable(data, r.toBool(2));
+  auto var = make_variable(data, r.toBool(2), r.toBool(3));
   return THPVariable_NewWithVar((PyTypeObject*)cls, std::move(var));
   END_HANDLE_TH_ERRORS
 }
@@ -412,6 +426,181 @@ static PyObject * THPVariable_device(THPVariable* self) {
   END_HANDLE_TH_ERRORS
 }
 
+// Returns the type object of the most derived subclass of torch._C._TensorBase.
+PyTypeObject *THPVariable_result_ptype(PyObject *self, PyObject *args) {
+    HANDLE_TH_ERRORS
+    PyTypeObject *ptype;
+    PyObject *obj;
+    PyObject *base = THPVariableClass;
+    Py_INCREF(base);
+
+    ptype = (PyTypeObject*)base;
+    Py_INCREF(ptype);
+    if (self != NULL && PyObject_IsInstance(self, base) && PyObject_IsInstance(self, (PyObject*)ptype)){
+        ptype = self->ob_type;
+    }
+    if (args != NULL && PyTuple_Check(args)){
+        for (int i = 0; i < PyTuple_GET_SIZE(args); ++i){
+            obj = PyTuple_GET_ITEM(args, i);
+            if (PyObject_IsInstance(obj, base) && PyObject_IsInstance(obj, (PyObject*)ptype)){
+                ptype = obj->ob_type;
+            }
+        }
+    }
+    Py_DECREF(base);
+    /* obj are borrowed references */
+    return ptype;
+    END_HANDLE_TH_ERRORS
+}
+
+// Implements the default __array_ufunc__ python subclass type propagation. Used in torch._C._TensorBase.
+PyObject* THPVariable_array_ufunc(THPVariable *self, PyObject *args, PyObject *kwargs)
+{
+    HANDLE_TH_ERRORS
+    AutoGIL gil;
+    int in_no, out_no;
+    PyTypeObject *ptype;
+    PyObject *ufunc, *method_name, *ufunc_method, *in_args, *out_args;
+    PyObject *obj, *new_obj, *base;
+    PyObject *key;
+    PyObject *result_args, *result_kwargs;
+    PyObject *result = NULL;
+    PyObject *results = NULL;
+    bool result_requires_grad = false;
+
+    // Input Error Checking
+    assert(PyTuple_CheckExact(args));
+    assert(kwargs == NULL || PyDict_CheckExact(kwargs));
+    if (PyTuple_GET_SIZE(args) < 2) {
+        throw TypeError("__array_ufunc__ requires at least 2 arguments");
+    }
+    ufunc = PyTuple_GET_ITEM(args, 0);
+    method_name = PyTuple_GET_ITEM(args, 1);
+    in_args = PyTuple_GetSlice(args, 2, PyTuple_GET_SIZE(args));
+
+    // Down-cast Input Arguments to np.ndarray
+    ptype = THPVariable_result_ptype((PyObject*)self, in_args);
+    Py_INCREF(ptype);
+    base = THPVariableClass;
+    Py_INCREF(base);
+    in_no = PyTuple_GET_SIZE(in_args);
+    if (in_args == NULL) {
+        return NULL;
+    }
+    for (int i = 0; i < in_no; ++i){
+        obj = PyTuple_GET_ITEM(in_args, i);
+        if (PyObject_IsInstance(obj, base)){
+            auto& var = ((THPVariable*)obj)->cdata;
+            result_requires_grad |= var.requires_grad();
+            var.detach_();
+            new_obj = torch::utils::tensor_to_numpy(var.data());
+            Py_DECREF(obj);
+            PyTuple_SET_ITEM(in_args, i, new_obj);
+        }
+    }
+
+    // Down-cast Output Arguments to np.ndarray
+    out_no = 0;
+    key = PyUnicode_FromString("out");
+    if (kwargs != NULL && PyDict_Contains(kwargs, key) == 1){
+        out_args = PyDict_GetItem(kwargs, key);
+        if (PyTuple_Check(out_args) == 0){
+            out_args = PyTuple_Pack(1, out_args);
+        }
+        out_no = PyTuple_GET_SIZE(out_args);
+        for (int i = 0; i < out_no; ++i){
+            obj = PyTuple_GET_ITEM(out_args, i);
+            if (PyObject_IsInstance(obj, base)){
+                auto& var = ((THPVariable*)obj)->cdata;
+                var.detach_();
+                new_obj = torch::utils::tensor_to_numpy(var.data());
+                Py_DECREF(obj);
+                PyTuple_SET_ITEM(out_args, i, new_obj);
+            }
+        }
+        PyDict_SetItem(kwargs, key, out_args);
+    }
+    else{
+        out_args = PyTuple_New(((PyUFuncObject*)ufunc)->nout);
+        out_no = PyTuple_GET_SIZE(out_args);
+    }
+    Py_DECREF(key);
+
+    // Call ufunc with np.ndarray types
+    ufunc_method = PyObject_GetAttr(ufunc, method_name);
+    if (ufunc_method == NULL)
+        goto cleanup;
+    result = PyObject_Call(ufunc_method, in_args, kwargs);
+    Py_DECREF(ufunc_method);
+
+    // Result Error Checking
+    if (PyUnicode_CompareWithASCIIString(method_name, "at") == 0){
+        goto cleanup;
+    }
+    if (result == NULL || result == Py_NotImplemented)
+        goto cleanup;
+
+    // Up-Cast Results to ptype
+    if (((PyUFuncObject*)ufunc)->nout == 1){
+        if (PyTypeNum_ISBOOL(PyArray_DESCR((PyArrayObject*)result)->type_num)){
+            //Workaround, torch has no built-in bool tensor
+            new_obj = PyArray_CastToType((PyArrayObject*)result, PyArray_DescrFromType(NPY_UINT8), /*is_fortran=*/false);
+            Py_DECREF(result);
+            result = new_obj;
+        }
+        results = PyTuple_Pack(1, result);
+    }
+    else{
+        results = result;
+        Py_INCREF(results);
+    }
+    Py_DECREF(result);
+    for (int i = 0; i < out_no; ++i){
+        obj = PyTuple_GET_ITEM(out_args, i);
+        if(obj == NULL){
+            obj = PyTuple_GET_ITEM(results, i);
+        }
+        auto var = torch::utils::tensor_from_numpy(obj);
+        result_requires_grad &= at::is_floating_point(var);
+        new_obj = THPVariable_Wrap(make_variable(var));
+        Py_DECREF(obj);
+        obj = new_obj;
+        result_args = PyTuple_Pack(2, (PyObject*)ptype, obj);
+        result_kwargs = PyDict_New();
+        key = PyUnicode_FromString("require_grad");
+        PyDict_SetItem(result_kwargs, key, torch::autograd::utils::wrap(result_requires_grad));
+        new_obj = THPVariable_make_subclass(obj, result_args, result_kwargs);
+        Py_DECREF(obj);
+        Py_DECREF(key);
+        Py_DECREF(result_args);
+        Py_DECREF(result_kwargs);
+        if (new_obj == NULL){
+            result = NULL;
+            goto cleanup;
+        }
+        PyTuple_SET_ITEM(results, i, new_obj);
+    }
+    if (PyTuple_GET_SIZE(results) == 1){
+        result = PyTuple_GET_ITEM(results, 0);
+    }
+    else{
+        result = results;
+    }
+    Py_INCREF(result);
+    Py_DECREF(results);
+
+cleanup:
+    Py_DECREF(in_args);
+    Py_DECREF(out_args);
+    Py_DECREF(ptype);
+    Py_DECREF(base);
+    /* ufunc, method_name, obj, var, results are borrowed references */
+    if (result == Py_NotImplemented)
+        Py_RETURN_NOTIMPLEMENTED;
+    return result;
+    END_HANDLE_TH_ERRORS
+}
+
 static struct PyGetSetDef THPVariable_properties[] = {
   {"_cdata", (getter)THPVariable_get_cdata, nullptr, nullptr, nullptr},
   {"_version", (getter)THPVariable_get_version, nullptr, nullptr, nullptr},
@@ -444,6 +633,7 @@ static PyMappingMethods THPVariable_as_mapping = {
 
 static PyMethodDef extra_methods[] = {
   {"_make_subclass", (PyCFunction)THPVariable_make_subclass, METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"__array_ufunc__", (PyCFunction)THPVariable_array_ufunc, METH_VARARGS | METH_KEYWORDS, nullptr},
   {nullptr}
 };
 

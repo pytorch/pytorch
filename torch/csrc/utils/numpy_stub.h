@@ -17,5 +17,6 @@
 #endif
 
 #include <numpy/arrayobject.h>
+#include <numpy/ufuncobject.h>
 
 #endif // USE_NUMPY
