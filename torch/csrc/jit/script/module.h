@@ -110,7 +110,7 @@ struct Method {
 
   // defined here to keep details of member_input handling confined to this
   // class
-  Value* emit_call_to(
+  TORCH_API Value* emit_call_to(
       const SourceRange& loc,
       Method& callee,
       ArrayRef<NamedValue> args,
@@ -604,11 +604,11 @@ struct Module {
     return get_method(method_name)({IValue(std::forward<Types>(args))...});
   }
 
-  void save(
+  TORCH_API void save(
       std::ostream& out,
       const ExtraFilesMap& extra_files = ExtraFilesMap());
 
-  void save(
+  TORCH_API void save(
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap());
 
