@@ -130,7 +130,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   uint32_t add_input_metadata(
     const at::Type& type
   , at::IntArrayRef shape
-  , const int64_t device) noexcept {
+  , at::Device device) noexcept {
     uint32_t input_nr = input_metadata_.size();
     input_metadata_.emplace_back(type, shape, device);
     return input_nr;

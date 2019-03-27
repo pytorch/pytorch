@@ -11,86 +11,93 @@ using c10::intrusive_ptr;
 namespace caffe2 {
 namespace ops {
 // TODO Parse schema strings instead of creating FunctionSchema manually
-C10_DEFINE_OP_SCHEMA(ConstantFill, FunctionSchema(
-    "_c10_experimental::ConstantFill",
-    (std::vector<c10::Argument>{
-      c10::Argument("inputs", ListType::ofTensors()),
-      c10::Argument("output"),
-      c10::Argument("shape", ListType::ofInts()),
-      c10::Argument("extra_shape", ListType::ofInts()),
-      c10::Argument("input_as_shape", BoolType::get()),
-      c10::Argument("dtype", IntType::get()),
-      c10::Argument("value", NumberType::get())
-    }), (std::vector<c10::Argument>{
-    })
-));
-C10_DEFINE_OP_SCHEMA(UniformFill, FunctionSchema(
-    "_c10_experimental::ConstantFill",
-    (std::vector<c10::Argument>{
-      c10::Argument("inputs", ListType::ofTensors()),
-      c10::Argument("output"),
-      c10::Argument("shape", ListType::ofInts()),
-      c10::Argument("extra_shape", ListType::ofInts()),
-      c10::Argument("input_as_shape", BoolType::get()),
-      c10::Argument("min", FloatType::get()),
-      c10::Argument("max", FloatType::get())
-    }), (std::vector<c10::Argument>{
-    })
-));
-C10_DEFINE_OP_SCHEMA(GivenTensorFill, FunctionSchema(
-    "_c10_experimental::ConstantFill",
-    (std::vector<c10::Argument>{
-      c10::Argument("inputs", ListType::ofTensors()),
-      c10::Argument("output"),
-      c10::Argument("shape", ListType::ofInts()),
-      c10::Argument("extra_shape", ListType::ofInts()),
-      c10::Argument("input_as_shape", BoolType::get()),
-      c10::Argument("values"),
-    }), (std::vector<c10::Argument>{
-    })
-));
-C10_DEFINE_OP_SCHEMA(GivenTensorIntFill, FunctionSchema(
-    "_c10_experimental::ConstantFill",
-    (std::vector<c10::Argument>{
-      c10::Argument("inputs", ListType::ofTensors()),
-      c10::Argument("output"),
-      c10::Argument("shape", ListType::ofInts()),
-      c10::Argument("extra_shape", ListType::ofInts()),
-      c10::Argument("input_as_shape", BoolType::get()),
-      c10::Argument("values"),
-    }), (std::vector<c10::Argument>{
-    })
-));
-C10_DEFINE_OP_SCHEMA(GivenTensorInt64Fill, FunctionSchema(
-    "_c10_experimental::ConstantFill",
-    (std::vector<c10::Argument>{
-      c10::Argument("inputs", ListType::ofTensors()),
-      c10::Argument("output"),
-      c10::Argument("shape", ListType::ofInts()),
-      c10::Argument("extra_shape", ListType::ofInts()),
-      c10::Argument("input_as_shape", BoolType::get()),
-      c10::Argument("values"),
-    }), (std::vector<c10::Argument>{
-    })
-));
+C10_DEFINE_OP_SCHEMA(
+    ConstantFill,
+    FunctionSchema(
+        "_c10_experimental::ConstantFill",
+        "",
+        (std::vector<c10::Argument>{
+            c10::Argument("inputs", ListType::ofTensors()),
+            c10::Argument("output"),
+            c10::Argument("shape", ListType::ofInts()),
+            c10::Argument("extra_shape", ListType::ofInts()),
+            c10::Argument("input_as_shape", BoolType::get()),
+            c10::Argument("dtype", IntType::get()),
+            c10::Argument("value", NumberType::get())}),
+        (std::vector<c10::Argument>{})));
+C10_DEFINE_OP_SCHEMA(
+    UniformFill,
+    FunctionSchema(
+        "_c10_experimental::UniformFill",
+        "",
+        (std::vector<c10::Argument>{
+            c10::Argument("inputs", ListType::ofTensors()),
+            c10::Argument("output"),
+            c10::Argument("shape", ListType::ofInts()),
+            c10::Argument("extra_shape", ListType::ofInts()),
+            c10::Argument("input_as_shape", BoolType::get()),
+            c10::Argument("min", FloatType::get()),
+            c10::Argument("max", FloatType::get())}),
+        (std::vector<c10::Argument>{})));
+C10_DEFINE_OP_SCHEMA(
+    GivenTensorFill,
+    FunctionSchema(
+        "_c10_experimental::GivenTensorFill",
+        "",
+        (std::vector<c10::Argument>{
+            c10::Argument("inputs", ListType::ofTensors()),
+            c10::Argument("output"),
+            c10::Argument("shape", ListType::ofInts()),
+            c10::Argument("extra_shape", ListType::ofInts()),
+            c10::Argument("input_as_shape", BoolType::get()),
+            c10::Argument("values"),
+        }),
+        (std::vector<c10::Argument>{})));
+C10_DEFINE_OP_SCHEMA(
+    GivenTensorIntFill,
+    FunctionSchema(
+        "_c10_experimental::GivenTensorIntFill",
+        "",
+        (std::vector<c10::Argument>{
+            c10::Argument("inputs", ListType::ofTensors()),
+            c10::Argument("output"),
+            c10::Argument("shape", ListType::ofInts()),
+            c10::Argument("extra_shape", ListType::ofInts()),
+            c10::Argument("input_as_shape", BoolType::get()),
+            c10::Argument("values"),
+        }),
+        (std::vector<c10::Argument>{})));
+C10_DEFINE_OP_SCHEMA(
+    GivenTensorInt64Fill,
+    FunctionSchema(
+        "_c10_experimental::GivenTensorInt64Fill",
+        "",
+        (std::vector<c10::Argument>{
+            c10::Argument("inputs", ListType::ofTensors()),
+            c10::Argument("output"),
+            c10::Argument("shape", ListType::ofInts()),
+            c10::Argument("extra_shape", ListType::ofInts()),
+            c10::Argument("input_as_shape", BoolType::get()),
+            c10::Argument("values"),
+        }),
+        (std::vector<c10::Argument>{})));
 }
 }
 
 namespace caffe2 {
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
-    ops::ConstantFill(),
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::ConstantFill",
     C10ConstantFill_DontUseThisOpYet)
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
-    ops::UniformFill(),
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::UniformFill",
     C10UniformFill_DontUseThisOpYet)
-
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
-    ops::GivenTensorFill(),
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::GivenTensorFill",
     C10GivenTensorFill_DontUseThisOpYet)
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
-    ops::GivenTensorIntFill(),
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::GivenTensorIntFill",
     C10GivenTensorIntFill_DontUseThisOpYet)
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(
-    ops::GivenTensorInt64Fill(),
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::GivenTensorInt64Fill",
     C10GivenTensorInt64Fill_DontUseThisOpYet)
 } // namespace caffe2

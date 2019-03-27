@@ -107,17 +107,11 @@ inline bool Tensor::allclose(const Tensor & other, double rtol, double atol, boo
 inline Tensor Tensor::any(int64_t dim, bool keepdim) const {
     return dispatch_type().any(*this, dim, keepdim);
 }
-inline Tensor Tensor::argmax(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::argmax(c10::optional<int64_t> dim, bool keepdim) const {
     return dispatch_type().argmax(*this, dim, keepdim);
 }
-inline Tensor Tensor::argmax() const {
-    return dispatch_type().argmax(*this);
-}
-inline Tensor Tensor::argmin(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::argmin(c10::optional<int64_t> dim, bool keepdim) const {
     return dispatch_type().argmin(*this, dim, keepdim);
-}
-inline Tensor Tensor::argmin() const {
-    return dispatch_type().argmin(*this);
 }
 inline Tensor Tensor::as_strided(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset) const {
     return dispatch_type().as_strided(*this, size, stride, storage_offset);
@@ -292,9 +286,6 @@ inline Tensor & Tensor::floor_() {
 }
 inline Tensor Tensor::ger(const Tensor & vec2) const {
     return dispatch_type().ger(*this, vec2);
-}
-inline std::tuple<Tensor,Tensor> Tensor::gesv(const Tensor & A) const {
-    return dispatch_type().gesv(*this, A);
 }
 inline Tensor Tensor::fft(int64_t signal_ndim, bool normalized) const {
     return dispatch_type().fft(*this, signal_ndim, normalized);
@@ -1145,8 +1136,8 @@ inline Tensor Tensor::addcdiv(const Tensor & tensor1, const Tensor & tensor2, Sc
 inline std::tuple<Tensor,Tensor> Tensor::gels(const Tensor & A) const {
     return dispatch_type().gels(*this, A);
 }
-inline std::tuple<Tensor,Tensor> Tensor::trtrs(const Tensor & A, bool upper, bool transpose, bool unitriangular) const {
-    return dispatch_type().trtrs(*this, A, upper, transpose, unitriangular);
+inline std::tuple<Tensor,Tensor> Tensor::triangular_solve(const Tensor & A, bool upper, bool transpose, bool unitriangular) const {
+    return dispatch_type().triangular_solve(*this, A, upper, transpose, unitriangular);
 }
 inline std::tuple<Tensor,Tensor> Tensor::symeig(bool eigenvectors, bool upper) const {
     return dispatch_type().symeig(*this, eigenvectors, upper);
@@ -1162,6 +1153,9 @@ inline Tensor Tensor::cholesky(bool upper) const {
 }
 inline Tensor Tensor::cholesky_solve(const Tensor & input2, bool upper) const {
     return dispatch_type().cholesky_solve(*this, input2, upper);
+}
+inline std::tuple<Tensor,Tensor> Tensor::solve(const Tensor & A) const {
+    return type().solve(*this, A);
 }
 inline Tensor Tensor::potri(bool upper) const {
     return dispatch_type().potri(*this, upper);

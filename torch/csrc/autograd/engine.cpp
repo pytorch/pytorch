@@ -203,22 +203,47 @@ Engine::Engine() = default;
 // This Engine's ReadyQueues and their corresponding threads are leaked here
 Engine::~Engine() = default;
 
-// TODO: Engine is not written in a way that it can deal with anything that's
-// not CUDA.
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
+  // Note [Allocating GPUs to autograd threads]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // What's our strategy here?  Originally, the autograd engine was written
+  // with only CUDA in mind.  We allocate one thread to handle all CPU
+  // operations, and a thread per CUDA device.
+  //
+  // But what if we have OTHER devices?  There are two plausible
+  // strategies:
+  //
+  //  - We can allocate threads equal to max(num_cuda_devices, num_xla_devices,
+  //    ...) and colocate cuda device 0 with xla device 0
+  //  - We can allocate threads equal to sum(num_cuda_devices, num_xla_devices,
+  //    ...) keeping everyone separate.
+  //
+  // We don't have any good reason to prefer one or the other, so we've
+  // arbitrarily picked to colocate devices.  Maybe the other approach is
+  // better.
+  //
   // NB: We MUST NOT construct the guard for device -1,
   // as in some settings we compile with cuda, but
   // have lazy stubs for CUDA functionality (so actually
   // attempting to setup a guard(-1) will cause an
   // error, because it will still query cudaGetDevice).
-  at::OptionalDeviceGuard guard;
+  //
+  // NB: These are not OptionalCUDAGuard/etc because engine.cpp
+  // is built as part of the CPU-only library; so we need to
+  // dynamic dispatch.
+  //
+  // NB: We need an array here since neither DeviceGuard nor OptionalDeviceGuard
+  // are movable.
+  std::array<c10::OptionalDeviceGuard,
+             static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
+      guards;  // Guards! Guards!
   if (device != -1) {
-    if (at::hasCUDA()) {
-      guard.reset_device(at::Device(at::DeviceType::CUDA, device));
-    }
-    if (at::hasHIP()) {
-      guard.reset_device(at::Device(at::DeviceType::HIP, device));
+    for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
+      auto* impl = c10::impl::device_guard_impl_registry[i].load();
+      if (impl && device < impl->deviceCount()) {
+        guards[i].reset_device(at::Device(static_cast<c10::DeviceType>(i), device));
+      }
     }
   }
   worker_device = device;
@@ -276,7 +301,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
         if (--task.base->outstanding_tasks == 0) {
           // Synchronize outstanding_tasks with queue mutex
           std::atomic_thread_fence(std::memory_order_release);
-          ready_queue(base_owner).push(FunctionTask(task.base, nullptr, InputBuffer(0)));
+          ready_queue_by_index(base_owner).push(FunctionTask(task.base, nullptr, InputBuffer(0)));
         }
       }
     }
@@ -352,7 +377,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
       ss << metadata.type() << " but got " << grads[i].type();
       AT_ERROR(format_error(ss.str()));
     }
-    const auto output_device = output.is_cuda() ? output.get_device() : -1;
+    auto output_device = output.device();
     if (output_device != metadata.device()) {
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected device ";
@@ -557,7 +582,7 @@ auto Engine::execute(const edge_list& roots,
   if (!outputs.empty()) {
     graph_task.init_to_execute(*graph_root, outputs);
   }
-  ready_queue(-1).push(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));
+  ready_queue(at::kCPU).push(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));
 
   // Not a worker
   if (worker_device == NO_DEVICE) {
@@ -627,13 +652,34 @@ bool Engine::is_checkpoint_valid() {
   return checkpoint_valid;
 }
 
-auto Engine::ready_queue(int device) -> ReadyQueue& {
-  return *ready_queues.at(device + 1);
+auto Engine::ready_queue(at::Device device) -> ReadyQueue& {
+  // See Note [Allocating GPUs to autograd threads]
+  if (device.type() == at::kCPU) {
+    return *ready_queues.at(0);
+  } else {
+    return *ready_queues.at(device.index() + 1);
+  }
+}
+
+// See Note [Allocating GPUs to autograd threads]
+// NB: This would become obsolete if we truly allocated a CPU thread
+// per device, rather than colocate.
+auto Engine::ready_queue_by_index(int device_index) -> ReadyQueue& {
+  return *ready_queues.at(device_index + 1);
 }
 
 auto Engine::start_threads() -> void {
-  int num_devices = at::getNumGPUs();
-  // One for CPU, plus one for every GPU device
+  // See Note [Allocating GPUs to autograd threads]
+  c10::DeviceIndex num_devices = 0;
+  for (const auto& impl_atomic : c10::impl::device_guard_impl_registry) {
+    auto* impl = impl_atomic.load();
+    if (impl) {
+      num_devices = std::max(num_devices, impl->deviceCount());
+    }
+  }
+
+  // One for CPU, plus one for every GPU device (but colocate GPUs of different
+  // types)
   int num_threads = num_devices + 1;
   ready_queues = std::vector<std::shared_ptr<ReadyQueue>>(num_threads);
   for (auto& queue : ready_queues)

@@ -27,7 +27,7 @@ class TypeProperties {
     return backendToDeviceType(backend_) == kCUDA;
   }
 
-  ScalarType scalarType() const {
+  ScalarType scalar_type() const {
     return scalar_type_;
   }
 
@@ -42,13 +42,13 @@ class TypeProperties {
   TypeProperties& operator=(const TypeProperties& other) {
     if (this != &other) {
       backend_ = other.backend();
-      scalar_type_ = other.scalarType();
+      scalar_type_ = other.scalar_type();
     }
     return *this;
   }
 
   bool operator==(const TypeProperties& other) const {
-    return backend_ == other.backend() && scalar_type_ == other.scalarType();
+    return backend_ == other.backend() && scalar_type_ == other.scalar_type();
   }
 
   bool operator!=(const TypeProperties& other) const {
@@ -57,7 +57,7 @@ class TypeProperties {
 
   std::string toString() const {
     std::stringstream ss;
-    ss << at::toString(backend()) << at::toString(scalarType()) << "Type";
+    ss << at::toString(backend()) << at::toString(scalar_type()) << "Type";
     return ss.str();
   }
 
