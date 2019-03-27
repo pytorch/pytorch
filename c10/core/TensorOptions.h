@@ -591,8 +591,6 @@ inline DeviceType computeDeviceType(TensorTypeId tid) {
     return DeviceType::CUDA;
   } else if (tid == SparseHIPTensorId()) {
     return DeviceType::HIP;
-  } else if (tid == QuantizedTensorId()) {
-    return DeviceType::QUANTIZED;
   } else {
     AT_ASSERTM(false, "Unknown TensorTypeId: ", tid);
   }

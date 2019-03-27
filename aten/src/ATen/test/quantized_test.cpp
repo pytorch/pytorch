@@ -26,16 +26,16 @@ TEST(TestQTensor, First) {
   // ASSERT_EQ(quantizer->zero_point(), zero_point);
 
   // Check for correct quantization
-  auto r_a = r.data<float>();
-  auto qr_a = qr.data<qint8>();
+  auto r_data = r.data<float>();
+  auto qr_data = qr.data<qint8>();
   for (auto i = 0; i < num_elements; ++i) {
-    ASSERT_EQ(QuantizeUint8(scale, zero_point, r_a[i]), qr_a[i]);
+    ASSERT_EQ(QuantizeUint8(scale, zero_point, r_data[i]), qr_data[i]);
   }
 
   // Check for correct dequantization
   Tensor rqr = qr.dequantize();
-  auto rqr_a = rqr.data<float>();
+  auto rqr_data = rqr.data<float>();
   for (auto i = 0; i < num_elements; ++i) {
-    ASSERT_EQ(r_a[i], rqr_a[i]);
+    ASSERT_EQ(r_data[i], rqr_data[i]);
   }
 }

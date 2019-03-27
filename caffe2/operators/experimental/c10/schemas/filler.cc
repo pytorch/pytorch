@@ -86,19 +86,18 @@ C10_DEFINE_OP_SCHEMA(
 
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
-    ops::ConstantFill(),
+    "_c10_experimental::ConstantFill",
     C10ConstantFill_DontUseThisOpYet)
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
-    ops::UniformFill(),
+    "_c10_experimental::UniformFill",
     C10UniformFill_DontUseThisOpYet)
-
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
-    ops::GivenTensorFill(),
+    "_c10_experimental::GivenTensorFill",
     C10GivenTensorFill_DontUseThisOpYet)
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
-    ops::GivenTensorIntFill(),
+    "_c10_experimental::GivenTensorIntFill",
     C10GivenTensorIntFill_DontUseThisOpYet)
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
-    ops::GivenTensorInt64Fill(),
+    "_c10_experimental::GivenTensorInt64Fill",
     C10GivenTensorInt64Fill_DontUseThisOpYet)
 } // namespace caffe2

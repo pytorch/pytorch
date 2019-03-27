@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Quantizer.h>
 #include <ATen/QTensorImpl.h>
+#include <ATen/Type.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorFactories.h>
 
@@ -19,14 +20,14 @@ inline QTensorImpl* get_qtensorimpl(const QTensor& self) {
 }
 
 inline QTensor new_qtensor(
-    IntArrayRef sizes, const TensorOptions& options, float scale, int32_t zero_point) {
+    IntArrayRef sizes, const TensorOptions& options, float scale, uint8_t zero_point) {
   AT_ASSERT(options.device().is_cpu());
 
   native::check_size_nonnegative(sizes);
   auto* allocator = at::getCPUAllocator();
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
-  AT_ASSERT(isQIntType(dtype));
+  AT_ASSERT(isQIntType(typeMetaToScalarType(dtype)));
   auto storage_impl = c10::make_intrusive<StorageImpl>(
     dtype,
     nelements,
@@ -36,18 +37,15 @@ inline QTensor new_qtensor(
   auto quantizer = make_per_layer_affine_quantizer(scale, zero_point);
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage_impl, at::CPUTensorId(), false, std::move(quantizer));
-  // Default TensorImpl has size [0]
-  if (sizes.size() != 1 || sizes[0] != 0) {
-    get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
-  }
+  get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   return tensor;
 }
 
-qint8 QuantizeUint8(float scale, int32_t zero_point, float value) {
+qint8 QuantizeUint8(float scale, uint8_t zero_point, float value) {
   const int32_t qmin = std::numeric_limits<uint8_t>::min();
   const int32_t qmax = std::numeric_limits<uint8_t>::max();
 
-  auto r = zero_point + static_cast<int32_t>(Round(value / scale));
+  auto r = zero_point + static_cast<int32_t>(std::nearbyint(value / scale));
   r = std::max(r, qmin);
   r = std::min(r, qmax);
   return static_cast<qint8>(r);
@@ -76,5 +74,17 @@ RealTensor PerLayerAffineQuantizer::dequantize(QTensor tensor) {
   }
   return rv;
 }
+
+Quantizer::~Quantizer() {}
+UniformQuantizer::~UniformQuantizer() {}
+NonUniformQuantizer::~NonUniformQuantizer() {}
+AffineQuantizer::~AffineQuantizer() {}
+SymmetricQuantizer::~SymmetricQuantizer() {}
+PerLayerSymmetricQuantizer::~PerLayerSymmetricQuantizer() {}
+PerChannelSymmetricQuantizer::~PerChannelSymmetricQuantizer() {}
+PerLayerAffineQuantizer::~PerLayerAffineQuantizer() {}
+PerChannelAffineQuantizer::~PerChannelAffineQuantizer() {}
+
+
 
 } // namespace at
