@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/macros/Export.h>
+
 #ifdef _WIN32
 #define TORCH_API CAFFE2_API
 #elif defined(__GNUC__)
