@@ -16,13 +16,13 @@ RealTensor dequantize_(const QTensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
-Scalar q_scale(const QTensor& self) {
+Scalar q_scale_(const QTensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   AT_ASSERT(quantizer->qscheme() == kPerTensorAffine);
   return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer)->scale());
 }
 
-Scalar q_zero_point(const QTensor& self) {
+Scalar q_zero_point_(const QTensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   AT_ASSERT(quantizer->qscheme() == kPerTensorAffine);
   return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer)->zero_point());
