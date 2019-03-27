@@ -16,6 +16,7 @@
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/interpreter.h"
+#include "torch/csrc/jit/pass_manager.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
@@ -643,6 +644,23 @@ void testNoneSchemaMatch() {
   // checking that constant propagation ran wo/failure
   AT_ASSERT(std::distance(nodes.begin(), nodes.end()) == 1);
 }
+
+void fakePass(std::shared_ptr<Graph>&g) {
+  return;
+}
+
+RegisterPass p(fakePass);
+
+void testPassManagement() {
+  auto hit = false;
+  for (const auto& p : getPasses()) {
+    if (p == fakePass) {
+      hit = true;
+    }
+  }
+  AT_ASSERT(hit);
+}
+
 } // namespace test
 } // namespace jit
 } // namespace torch
