@@ -563,7 +563,7 @@ Tensor choice_cuda(
 ){
   at::Tensor weights = at::empty({0}, input.options().dtype(at::kLong));
   if (replace){
-    return sampling_with_replacement(input, weights, k);
+    return native::sampling_with_replacement(input, weights, k);
   } else {
     return reservoir_sampling_cuda(input, weights, k);
   }

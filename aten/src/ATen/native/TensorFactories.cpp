@@ -874,7 +874,7 @@ Tensor choice_cpu(
 ){
   at::Tensor weights = at::empty({0}, input.options().dtype(at::kFloat));
   if (replace){
-    return sampling_with_replacement(input, weights, k);
+    return native::sampling_with_replacement(input, weights, k);
   } else {
     return reservoir_sampling_cpu(input, weights, k);
   }

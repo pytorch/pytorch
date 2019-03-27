@@ -4981,6 +4981,8 @@
     CPU: upsample_nearest3d_backward_cpu
     CUDA: upsample_nearest3d_backward_cuda
 
+- func: sampling_with_replacement(Tensor input, Tensor weights, int k) -> Tensor
+
 - func: choice(Tensor input, Tensor weights, bool replace, int k) -> Tensor
   dispatch:
     CPU: choice_cpu
