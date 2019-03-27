@@ -19,7 +19,7 @@
 #include <TH/THRandom.h>
 #include <TH/THGenerator.hpp>
 
-#ifdef __CUDACC__
+#if defined(__CUDACC__)
 #include <THC/THCGeneral.hpp>
 #endif
 
@@ -98,7 +98,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
   check_size_nonnegative(size);
 
-#ifdef __CUDACC__
+#if defined(__CUDACC__)
   c10::Allocator* allocator;
   if (options.pinned_memory()) {
     auto state = at::globalContext().lazyInitCUDA();

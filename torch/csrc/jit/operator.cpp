@@ -387,7 +387,6 @@ void registerOperator(Operator&& op) {
           ". File a bug to add a case for this operator.\n");
     }
   }
-
   getRegistry().registerOperator(std::move(op));
 }
 
