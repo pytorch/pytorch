@@ -36,8 +36,9 @@ template <typename... Ts, size_t... Is>
   return {Argument("_" + std::to_string(Is), getTypePtr<guts::decay_t<Ts>>())...};
 }
 
+/// Creates a vector of `Argument` from a list of C++ types that are specified
+/// as template arguments.
 template<class ParameterTypes> struct createArguments final {};
-
 template<class... ParameterTypes>
 struct createArguments<guts::typelist::typelist<ParameterTypes...>> final {
   static std::vector<Argument> call() {
@@ -47,7 +48,13 @@ struct createArguments<guts::typelist::typelist<ParameterTypes...>> final {
   }
 };
 
-template<class ReturnType, class Enable = void> struct createReturns final {};
+/// Creates a vector of `Argument` from a list of C++ types that are specified
+/// as a tuple (i.e. in the way c10 kernels return values).
+/// It can be a tuple<A, B, C> if there's three output arguments with types A, B, C.
+/// It can be an empty tuple<>, or void for kernels that don't return anything.
+/// It can be a single type A (i.e. no tuple) for the case where a kernel just
+/// returns one value.
+template<class ReturnTypeTuple, class Enable = void> struct createReturns final {};
 
 template<class... ReturnTypes>
 struct createReturns<std::tuple<ReturnTypes...>, void> final {
