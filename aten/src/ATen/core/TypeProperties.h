@@ -4,8 +4,14 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/Layout.h>
 
+
+
 namespace at {
 
+// This class specifies a Backend and a ScalarType. Currently, it primarily
+// serves as a replacement return value for Tensor::type(). Previously,
+// Tensor::type() returned Type&, but we are changing Type to not be
+// dtype-specific.
 class TypeProperties {
  public:
   TypeProperties(Backend backend=Backend::Undefined, ScalarType scalar_type=ScalarType::Undefined)

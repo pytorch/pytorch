@@ -1155,7 +1155,7 @@ inline Tensor Tensor::cholesky_solve(const Tensor & input2, bool upper) const {
     return dispatch_type().cholesky_solve(*this, input2, upper);
 }
 inline std::tuple<Tensor,Tensor> Tensor::solve(const Tensor & A) const {
-    return type().solve(*this, A);
+    return dispatch_type().solve(*this, A);
 }
 inline Tensor Tensor::potri(bool upper) const {
     return dispatch_type().potri(*this, upper);
