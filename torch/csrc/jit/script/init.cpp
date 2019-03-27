@@ -1099,7 +1099,8 @@ void initJitScriptBindings(PyObject* module) {
       logging::LoggerBase,
       std::shared_ptr<logging::LockingLogger>>(m, "LockingLogger")
       .def(py::init<>())
-      .def("set_aggregation_type", &logging::LockingLogger::setAggregationType);
+      .def("set_aggregation_type", &logging::LockingLogger::setAggregationType)
+      .def("get_counter_val", &logging::LockingLogger::getCounterValue);
   py::class_<
       logging::NoopLogger,
       logging::LoggerBase,

@@ -17,7 +17,6 @@ class LoggerBase {
   TORCH_API virtual void addStatValue(
       const std::string& stat_name,
       int64_t val) = 0;
-  TORCH_API virtual int64_t getCounterValue(const std::string& name) const = 0;
   virtual ~LoggerBase() {}
 };
 
@@ -30,9 +29,6 @@ TORCH_API LoggerBase* setLogger(LoggerBase* logger);
 class NoopLogger : public LoggerBase {
  public:
   void addStatValue(const std::string& stat_name, int64_t val) override {}
-  TORCH_API virtual int64_t getCounterValue(const std::string& name) const override {
-    return 0;
-  }
   ~NoopLogger() {}
 };
 
@@ -44,7 +40,7 @@ class NoopLogger : public LoggerBase {
 class LockingLogger : public LoggerBase {
  public:
   TORCH_API void addStatValue(const std::string& stat_name, int64_t val) override;
-  TORCH_API virtual int64_t getCounterValue(const std::string& name) const override;
+  TORCH_API virtual int64_t getCounterValue(const std::string& name) const;
   enum class AggregationType { SUM, AVG };
   TORCH_API void setAggregationType(
       const std::string& stat_name,

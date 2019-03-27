@@ -14024,8 +14024,8 @@ class TestLogging(JitTestCase):
             for i in range(5):
                 mtl(torch.rand(3, 4, 5))
 
-            self.assertEqual(torch.jit._logging.get_counter_val('foo'), 15)
-            self.assertEqual(torch.jit._logging.get_counter_val('positive'), 5)
+            self.assertEqual(logger.get_counter_val('foo'), 15)
+            self.assertEqual(logger.get_counter_val('positive'), 5)
         finally:
             torch.jit._logging.set_logger(old_logger)
 
@@ -14040,7 +14040,7 @@ class TestLogging(JitTestCase):
         try:
             traced(torch.rand(3, 4))
 
-            self.assertEqual(torch.jit._logging.get_counter_val('foo'), 1)
+            self.assertEqual(logger.get_counter_val('foo'), 1)
         finally:
             torch.jit._logging.set_logger(old_logger)
 
@@ -14059,7 +14059,7 @@ class TestLogging(JitTestCase):
         old_logger = torch.jit._logging.set_logger(logger)
         try:
             mtm(torch.rand(3, 4))
-            self.assertGreater(torch.jit._logging.get_counter_val('mytimer'), 0)
+            self.assertGreater(logger.get_counter_val('mytimer'), 0)
         finally:
             torch.jit._logging.set_logger(old_logger)
 
@@ -14079,7 +14079,7 @@ class TestLogging(JitTestCase):
         old_logger = torch.jit._logging.set_logger(logger)
         try:
             mtm(torch.rand(3, 4))
-            self.assertGreater(torch.jit._logging.get_counter_val('mytimer'), 0)
+            self.assertGreater(logger.get_counter_val('mytimer'), 0)
         finally:
             torch.jit._logging.set_logger(old_logger)
 
@@ -14096,7 +14096,7 @@ class TestLogging(JitTestCase):
         try:
             traced(torch.rand(3, 4))
 
-            self.assertEqual(torch.jit._logging.get_counter_val('foo'), 1)
+            self.assertEqual(logger.get_counter_val('foo'), 1)
         finally:
             torch.jit._logging.set_logger(old_logger)
 

@@ -892,14 +892,15 @@ RegisterOperators reg(
      });
 
 RegisterOperators logging_operators({
-    Operator("prim::BumpCounter(str key, int val) -> ()", [](Stack& stack) {
+    Operator("prim::AddStatValue(str key, int val) -> ()", [](Stack& stack) {
           auto val = pop(stack).toInt();
           auto key = pop(stack).toString();
 
-          auto schema = parseSchema("prim::BumpCounter(str key, int val) -> ()");
+          auto schema = parseSchema("prim::AddStatValue(str key, int val) -> ()");
+          // TODO: remove this custom tracing code once the custom op bugfix lands
           if (jit::tracer::isTracing()) {
             const auto& graph = tracer::getTracingState()->graph;
-            Node* node = graph->create(prim::BumpCounter, /*num_outputs=*/0);
+            Node* node = graph->create(prim::AddStatValue, /*num_outputs=*/0);
             tracer::recordSourceLocation(node);
             node->addInput(insertConstant(*graph, key));
             tracer::addInputs(node, "val", val);
@@ -908,28 +909,10 @@ RegisterOperators logging_operators({
           torch::jit::logging::getLogger()->addStatValue(*key, val);
           return 0;
     }),
-    Operator("prim::GetCounter(str name) -> int", [](Stack& stack) {
-          auto name = pop(stack).toString();
-
-          auto schema = parseSchema("prim::GetCounter(str name) -> int");
-          Node *node = nullptr;
-          if (jit::tracer::isTracing()) {
-            const auto& graph = tracer::getTracingState()->graph;
-            Node* node = graph->create(prim::GetCounter, /*num_outputs=*/0);
-            tracer::recordSourceLocation(node);
-            node->addInput(insertConstant(*graph, name));
-            graph->insertNode(node);
-          }
-          auto val = torch::jit::logging::getLogger()->getCounterValue(*name);
-          if (jit::tracer::isTracing()) {
-            jit::tracer::addOutput(node, val);
-          }
-          push(stack, val);
-          return 0;
-     }),
     Operator("prim::TimePoint() -> int", [](Stack& stack) {
         auto schema = parseSchema("prim::TimePoint() -> int");
         Node* node = nullptr;
+        // TODO: remove this custom tracing code once the custom op bugfix lands
         if (jit::tracer::isTracing()) {
             const auto& graph = tracer::getTracingState()->graph;
             Node* node = graph->create(prim::TimePoint, /*num_outputs=*/0);
