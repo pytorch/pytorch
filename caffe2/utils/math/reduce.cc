@@ -16,6 +16,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/utils/eigen_utils.h"
+#include "caffe2/utils/math.h"
 #include "caffe2/utils/math/elementwise.h"
 #include "caffe2/utils/math/utils.h"
 
