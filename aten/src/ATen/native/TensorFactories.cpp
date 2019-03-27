@@ -861,7 +861,7 @@ Tensor choice_cpu(
   int64_t k
 ){
   if (replace){
-    return sampling_with_replacement(input, weights, k);
+    return native::sampling_with_replacement(input, weights, k);
   } else {
     return reservoir_sampling_cpu(input, weights, k);
   }

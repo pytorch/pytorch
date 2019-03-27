@@ -550,7 +550,7 @@ Tensor choice_cuda(
   int64_t k
 ){
   if (replace){
-    return sampling_with_replacement(input, weights, k);
+    return native::sampling_with_replacement(input, weights, k);
   } else {
     return reservoir_sampling_cuda(input, weights, k);
   }
