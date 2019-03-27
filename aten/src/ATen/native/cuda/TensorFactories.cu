@@ -461,19 +461,19 @@ Tensor reservoir_sampling_cuda(
   int64_t k
 ){
 
-  AT_ASSERTM(
+  AT_CHECK(
     weights.dtype() == kFloat,
     "The sampling weights must be Float, got", weights.dtype()
   );
 
-  AT_ASSERTM(
+  AT_CHECK(
     weights.is_contiguous(),
     "The sampling weights must be contiguous."
   );
 
-  int n = x.numel();
+  int n = x.size(0);
 
-  AT_ASSERTM(
+  AT_CHECK(
     n >= k,
     "Cannot take a larger sample than population when 'replace=False'"
   );
@@ -527,6 +527,17 @@ Tensor reservoir_sampling_cuda(
     );
 
   } else {
+
+    AT_CHECK(
+      n == weights.numel(),
+      "The weights must have the same number of elements as the input's first dimension."
+    );
+
+    AT_CHECK(
+      weights.dim() == 1,
+      "The weights must 1-dimensional."
+    );
+
     Tensor keys = at::empty({n}, weights.options());
     dim3 all_blocks((n + threadsPerBlock - 1)/threadsPerBlock);
 
@@ -561,7 +572,7 @@ Tensor choice_cuda(
   bool replace,
   int64_t k
 ){
-  at::Tensor weights = at::empty({0}, input.options().dtype(at::kLong));
+  at::Tensor weights = at::empty({0}, input.options().dtype(at::kFloat));
   if (replace){
     return native::sampling_with_replacement(input, weights, k);
   } else {

@@ -769,19 +769,19 @@ Tensor reservoir_sampling_cpu(
   int64_t k
 ){
 
-  AT_ASSERTM(
+  AT_CHECK(
     weights.dtype() == kFloat,
     "The sampling weights must be Float, got", weights.dtype()
   );
 
-  AT_ASSERTM(
+  AT_CHECK(
     weights.is_contiguous(),
     "The sampling weights must be contiguous."
   );
 
-  int n = x.numel();
+  int n = x.size(0);
 
-  AT_ASSERTM(
+  AT_CHECK(
     n >= k,
     "Cannot take a larger sample than population when 'replace=False'"
   );
@@ -818,6 +818,17 @@ Tensor reservoir_sampling_cpu(
       );
 
   } else {
+
+    AT_CHECK(
+      n == weights.numel(),
+      "The weights must have the same number of elements as the input's first dimension."
+    );
+
+    AT_CHECK(
+      weights.dim() == 1,
+      "The weights must 1-dimensional."
+    );
+
     Tensor keys = at::empty({n}, weights.options());
 
     AT_DISPATCH_FLOATING_TYPES(weights.scalar_type(), "generate keys", [&] {
