@@ -167,7 +167,7 @@ struct Value {
   bool requires_grad() const {
     return type()->requires_grad();
   }
-  bool isTensor() const {
+  bool isCompleteTensor() const {
     return type()->kind() == TypeKind::CompleteTensorType;
   }
   TORCH_API bool mustBeNone() const;
