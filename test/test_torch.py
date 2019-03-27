@@ -8,6 +8,7 @@ import copy
 import shutil
 import torch
 import torch.cuda
+import torch.backends.cuda
 import tempfile
 import unittest
 import warnings
@@ -2904,16 +2905,35 @@ class _TestTorchMixin(object):
 
     # This is a temporary test for a boolean tensors on CPU. Once the CUDA part
     # will be done, these test cases will be moved down to test_tensor_factories_empty test
-    def test_tensor_factories_empty_bool(self):
+    def test_tensor_factories_bool(self):
         expectedShape = (1, 2)
         test = torch.empty(expectedShape, dtype=torch.bool)
         self.assertEqual(expectedShape, test.shape)
-        self.assertEqual(expectedShape, torch.empty_like(test).shape)
+
+        test2 = torch.empty_like(test, dtype=torch.bool)
+        self.assertEqual(test.shape, test2.shape)
 
         test = torch.full(expectedShape, True, dtype=torch.bool)
         self.assertEqual(test, torch.tensor([[True, True]], dtype=torch.bool))
+
+        test2 = torch.full_like(test, True, dtype=torch.bool)
+        self.assertEqual(test, test2)
+
+        test = torch.zeros(expectedShape, dtype=torch.bool)
+        self.assertEqual(test, torch.tensor([[False, False]], dtype=torch.bool))
+
+        test2 = torch.zeros_like(test, dtype=torch.bool)
+        self.assertEqual(test, test2)
+
+        test = torch.ones(expectedShape, dtype=torch.bool)
+        self.assertEqual(test, torch.tensor([[True, True]], dtype=torch.bool))
+
+        test2 = torch.ones_like(test, dtype=torch.bool)
+        self.assertEqual(test, test2)
+
+        test = torch.randint(10, expectedShape, dtype=torch.bool)
         self.assertEqual(expectedShape, test.shape)
-        self.assertEqual(expectedShape, torch.full_like(test, True).shape)
+        self.assertEqual(torch.bool, test.dtype)
 
     def test_tensor_factories_empty(self):
         # ensure we can create empty tensors from each factory function
@@ -7391,6 +7411,41 @@ class _TestTorchMixin(object):
         self.assertEqual(ret1.S, ret[1])
         self.assertEqual(ret1.V, ret[2])
 
+        # test gesv
+        ret = a.gesv(a)
+        self.assertEqual(ret.solution, ret[0])
+        self.assertEqual(ret.LU, ret[1])
+        ret1 = torch.gesv(a, a, out=tuple(ret))
+        self.assertEqual(ret1.solution, ret1[0])
+        self.assertEqual(ret1.LU, ret1[1])
+        self.assertEqual(ret1.solution, ret[0])
+        self.assertEqual(ret1.LU, ret[1])
+
+        # test slogdet
+        ret = a.slogdet()
+        self.assertEqual(ret.sign, ret[0])
+        self.assertEqual(ret.logabsdet, ret[1])
+
+        # test sort
+        ret = a.sort(dim=0)
+        self.assertEqual(ret.values, ret[0])
+        self.assertEqual(ret.indices, ret[1])
+        ret1 = torch.sort(a, dim=0, out=tuple(ret))
+        self.assertEqual(ret1.values, ret1[0])
+        self.assertEqual(ret1.indices, ret1[1])
+        self.assertEqual(ret1.values, ret[0])
+        self.assertEqual(ret1.indices, ret[1])
+
+        # test topk
+        ret = a.topk(2)
+        self.assertEqual(ret.values, ret[0])
+        self.assertEqual(ret.indices, ret[1])
+        ret1 = torch.topk(a, 2, out=tuple(ret))
+        self.assertEqual(ret1.values, ret1[0])
+        self.assertEqual(ret1.indices, ret1[1])
+        self.assertEqual(ret1.values, ret[0])
+        self.assertEqual(ret1.indices, ret[1])
+
         # test symeig, eig
         fn = ['symeig', 'eig']
         for f in fn:
@@ -8680,6 +8735,87 @@ class _TestTorchMixin(object):
         self.assertEqual(r[50:].mean(), 1, 0.2)
         self.assertEqual(r[:, :50].std(), 4, 0.3)
         self.assertEqual(r[:, 50:].std(), 1, 0.2)
+
+    def test_sobolengine_unscrambled_lowdim(self):
+        engine_1d = torch.quasirandom.SobolEngine(1)
+        expected_1d = torch.tensor([0.5, 0.75, 0.25, 0.375, 0.875, 0.625, 0.125, 0.1875, 0.6875, 0.9375])
+        actual_1d = engine_1d.draw(10)
+        self.assertEqual(actual_1d.view(-1), expected_1d)
+        self.assertEqual(actual_1d.size(), torch.Size([10, 1]))
+
+        # Test out kwarg
+        engine_1d.reset()
+        actual_1d_out = torch.Tensor().float()
+        engine_1d.draw(10, out=actual_1d_out)
+        self.assertEqual(actual_1d.view(-1), expected_1d)
+
+        engine_3d = torch.quasirandom.SobolEngine(3)
+        expected_3d = torch.tensor([0.5, 0.75, 0.25, 0.625, 0.125, 0.375, 0.875, 0.3125, 0.8125, 0.5625])
+        actual_3d = engine_3d.draw(10)
+        self.assertEqual(actual_3d[:, 2], expected_3d)
+        self.assertEqual(actual_3d[:, 0], expected_1d)
+        self.assertEqual(actual_3d.size(), torch.Size([10, 3]))
+
+        engine_3d = torch.quasirandom.SobolEngine(3)
+        draws = torch.cat([engine_3d.draw() for _ in range(0, 10)])
+        self.assertEqual(draws, actual_3d)
+
+        engine_3d = torch.quasirandom.SobolEngine(3).fast_forward(5)
+        draws = engine_3d.draw(5)
+        self.assertEqual(draws, actual_3d[5:])
+        engine_3d.reset()
+        self.assertEqual(engine_3d.draw(3), actual_3d[:3])
+        engine_3d.fast_forward(2)
+        self.assertEqual(engine_3d.draw(5), actual_3d[5:])
+
+    def test_sobolengine_unscrambled_highdim(self):
+        from collections import Counter
+        engine = torch.quasirandom.SobolEngine(1111)
+        count1 = dict(Counter(engine.draw().view(-1).tolist()))
+        count2 = dict(Counter(engine.draw().view(-1).tolist()))
+        count3 = dict(Counter(engine.draw().view(-1).tolist()))
+        self.assertTrue(count1 == {0.5: 1111})
+        self.assertTrue(count2 == {0.25: 580, 0.75: 531})
+        self.assertTrue(count3 == {0.25: 531, 0.75: 580})
+
+        engine = torch.quasirandom.SobolEngine(1111)
+        draws = engine.draw(1000)
+        self.assertTrue(torch.all(draws <= 1))
+        self.assertTrue(torch.all(draws >= 0))
+
+    def test_sobolengine_scrambled_lowdim(self):
+        engine_1d = torch.quasirandom.SobolEngine(1, scramble=True, seed=1729)
+        expected_1d = [0.16478512, 0.43221009, 0.84261382, 0.99750268, 0.27460563,
+                       0.01084163, 0.73373985, 0.65039611, 0.12329865, 0.35587373]
+        actual_1d = engine_1d.draw(10)
+        self.assertEqual(actual_1d.flatten(), torch.tensor(expected_1d))
+        self.assertEqual(actual_1d.size(), torch.Size([10, 1]))
+
+        engine_3d = torch.quasirandom.SobolEngine(3, scramble=True, seed=1729)
+        expected_3d = [0.32642800, 0.17881306, 0.68837059, 0.46492538, 0.91789097,
+                       0.58075899, 0.03642474, 0.68229187, 0.20051685, 0.30083340]
+        actual_3d = engine_3d.draw(10)
+        self.assertEqual(actual_3d[:, 2], torch.tensor(expected_3d))
+        self.assertEqual(actual_3d.size(), torch.Size([10, 3]))
+
+        engine_3d = torch.quasirandom.SobolEngine(3, scramble=True, seed=1729)
+        draws = torch.cat([engine_3d.draw() for _ in range(0, 10)])
+        self.assertEqual(draws, actual_3d)
+
+        engine_3d = torch.quasirandom.SobolEngine(3, scramble=True, seed=1729)
+        engine_3d.fast_forward(5)
+        draws = engine_3d.draw(5)
+        self.assertEqual(draws, actual_3d[5:])
+        engine_3d.reset()
+        self.assertEqual(engine_3d.draw(3), actual_3d[:3])
+        engine_3d.fast_forward(2)
+        self.assertEqual(engine_3d.draw(5), actual_3d[5:])
+
+    def test_sobolengine_scrambled_highdim(self):
+        engine = torch.quasirandom.SobolEngine(1111, scramble=True)
+        draws = engine.draw(1000)
+        self.assertTrue(torch.all(draws <= 1))
+        self.assertTrue(torch.all(draws >= 0))
 
     def test_parsing_int64(self):
         # accepts integer arguments
@@ -10183,6 +10319,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         x = torch.LongTensor([1, 2, 3, 2, 8, 5, 2, 3])
         expected_unique = torch.LongTensor([1, 2, 3, 5, 8])
         expected_inverse = torch.LongTensor([0, 1, 2, 1, 4, 3, 1, 2])
+        expected_counts = torch.LongTensor([1, 3, 2, 1, 1])
 
         x_unique = torch.unique(x)
         self.assertEqual(
@@ -10196,10 +10333,19 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         x_unique = x.unique(sorted=True)
         self.assertEqual(expected_unique, x_unique)
 
+        x_unique, x_counts = x.unique(sorted=True, return_counts=True)
+        self.assertEqual(expected_counts, x_counts)
+
         x_unique, x_inverse = torch.unique(
             x, sorted=True, return_inverse=True)
         self.assertEqual(expected_unique, x_unique)
         self.assertEqual(expected_inverse, x_inverse)
+
+        x_unique, x_inverse, x_counts = torch.unique(
+            x, sorted=True, return_inverse=True, return_counts=True)
+        self.assertEqual(expected_unique, x_unique)
+        self.assertEqual(expected_inverse, x_inverse)
+        self.assertEqual(expected_counts, x_counts)
 
         # Tests per-element unique on a higher rank tensor.
         y = x.view(2, 2, 2)
@@ -10207,27 +10353,42 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(expected_unique, y_unique)
         self.assertEqual(expected_inverse.view(y.size()), y_inverse)
 
+        y_unique, y_inverse, y_counts = y.unique(
+            sorted=True, return_inverse=True, return_counts=True)
+        self.assertEqual(expected_unique, y_unique)
+        self.assertEqual(expected_inverse.view(y.size()), y_inverse)
+        self.assertEqual(expected_counts, y_counts)
+
         # Tests unique on other types.
-        int_unique, int_inverse = torch.unique(
-            torch.IntTensor([2, 1, 2]), sorted=True, return_inverse=True)
+        int_unique, int_inverse, int_counts = torch.unique(
+            torch.IntTensor([2, 1, 2]),
+            sorted=True,
+            return_inverse=True,
+            return_counts=True
+        )
         self.assertEqual(torch.IntTensor([1, 2]), int_unique)
         self.assertEqual(torch.LongTensor([1, 0, 1]), int_inverse)
+        self.assertEqual(torch.LongTensor([1, 2]), int_counts)
 
-        double_unique, double_inverse = torch.unique(
+        double_unique, double_inverse, double_counts = torch.unique(
             torch.DoubleTensor([2., 1.5, 2.1, 2.]),
             sorted=True,
             return_inverse=True,
+            return_counts=True
         )
         self.assertEqual(torch.DoubleTensor([1.5, 2., 2.1]), double_unique)
         self.assertEqual(torch.LongTensor([1, 0, 2, 1]), double_inverse)
+        self.assertEqual(torch.LongTensor([1, 2, 1]), double_counts)
 
-        byte_unique, byte_inverse = torch.unique(
+        byte_unique, byte_inverse, byte_counts = torch.unique(
             torch.ByteTensor([133, 7, 7, 7, 42, 128]),
             sorted=True,
             return_inverse=True,
+            return_counts=True
         )
         self.assertEqual(torch.ByteTensor([7, 42, 128, 133]), byte_unique)
         self.assertEqual(torch.LongTensor([3, 0, 0, 0, 1, 2]), byte_inverse)
+        self.assertEqual(torch.LongTensor([3, 1, 1, 1]), byte_counts)
 
     def test_unique_dim(self):
         def run_test(dtype=torch.float):
@@ -10244,6 +10405,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                                                   [2., 1.],
                                                   [0., 1.]]], dtype=dtype)
             expected_inverse_dim0 = torch.tensor([0, 0])
+            expected_counts_dim0 = torch.tensor([2])
             expected_unique_dim1 = torch.tensor([[[0., 1.],
                                                   [1., 1.],
                                                   [2., 1.]],
@@ -10251,6 +10413,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                                                   [1., 1.],
                                                   [2., 1.]]], dtype=dtype)
             expected_inverse_dim1 = torch.tensor([1, 0, 2, 0])
+            expected_counts_dim1 = torch.tensor([2, 1, 1])
             expected_unique_dim2 = torch.tensor([[[1., 1.],
                                                   [0., 1.],
                                                   [2., 1.],
@@ -10260,30 +10423,94 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                                                   [2., 1.],
                                                   [0., 1.]]], dtype=dtype)
             expected_inverse_dim2 = torch.tensor([0, 1])
+            expected_counts_dim2 = torch.tensor([1, 1])
 
             # dim0
             x_unique = torch.unique(x, dim=0)
             self.assertEqual(expected_unique_dim0, x_unique)
 
-            x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=0)
+            x_unique, x_inverse = torch.unique(
+                x,
+                return_inverse=True,
+                return_counts=False,
+                dim=0)
             self.assertEqual(expected_unique_dim0, x_unique)
             self.assertEqual(expected_inverse_dim0, x_inverse)
+
+            x_unique, x_counts = torch.unique(
+                x,
+                return_inverse=False,
+                return_counts=True,
+                dim=0)
+            self.assertEqual(expected_unique_dim0, x_unique)
+            self.assertEqual(expected_counts_dim0, x_counts)
+
+            x_unique, x_inverse, x_counts = torch.unique(
+                x,
+                return_inverse=True,
+                return_counts=True,
+                dim=0)
+            self.assertEqual(expected_unique_dim0, x_unique)
+            self.assertEqual(expected_inverse_dim0, x_inverse)
+            self.assertEqual(expected_counts_dim0, x_counts)
 
             # dim1
             x_unique = torch.unique(x, dim=1)
             self.assertEqual(expected_unique_dim1, x_unique)
 
-            x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=1)
+            x_unique, x_inverse = torch.unique(
+                x,
+                return_inverse=True,
+                return_counts=False,
+                dim=1)
             self.assertEqual(expected_unique_dim1, x_unique)
             self.assertEqual(expected_inverse_dim1, x_inverse)
+
+            x_unique, x_counts = torch.unique(
+                x,
+                return_inverse=False,
+                return_counts=True,
+                dim=1)
+            self.assertEqual(expected_unique_dim1, x_unique)
+            self.assertEqual(expected_counts_dim1, x_counts)
+
+            x_unique, x_inverse, x_counts = torch.unique(
+                x,
+                return_inverse=True,
+                return_counts=True,
+                dim=1)
+            self.assertEqual(expected_unique_dim1, x_unique)
+            self.assertEqual(expected_inverse_dim1, x_inverse)
+            self.assertEqual(expected_counts_dim1, x_counts)
 
             # dim2
             x_unique = torch.unique(x, dim=2)
             self.assertEqual(expected_unique_dim2, x_unique)
 
-            x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=2)
+            x_unique, x_inverse = torch.unique(
+                x,
+                return_inverse=True,
+                return_counts=False,
+                dim=2)
             self.assertEqual(expected_unique_dim2, x_unique)
             self.assertEqual(expected_inverse_dim2, x_inverse)
+
+            x_unique, x_counts = torch.unique(
+                x,
+                return_inverse=False,
+                return_counts=True,
+                dim=2)
+            self.assertEqual(expected_unique_dim2, x_unique)
+            self.assertEqual(expected_counts_dim2, x_counts)
+
+            x_unique, x_inverse, x_counts = torch.unique(
+                x,
+                return_inverse=True,
+                return_counts=True,
+                dim=2)
+            self.assertEqual(expected_unique_dim2, x_unique)
+            self.assertEqual(expected_inverse_dim2, x_inverse)
+            self.assertEqual(expected_counts_dim2, x_counts)
 
         run_test(torch.float)
         run_test(torch.double)
@@ -10417,7 +10644,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertTrue(grid_b2.equal(expected_grid_b))
         self.assertTrue(grid_c2.equal(expected_grid_c))
 
-    @unittest.skipIf(torch.cuda.is_available() or IS_SANDCASTLE, "CUDA is available, can't test CUDA not built error")
+    # NB: we must not be built with CUDA; if we are built with CUDA but no CUDA
+    # is available, we get a different error.
+    @unittest.skipIf(torch.backends.cuda.is_built() or IS_SANDCASTLE, "CUDA is built, can't test CUDA not built error")
     def test_cuda_not_built(self):
         msg = "Torch not compiled with CUDA enabled"
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.current_device())
