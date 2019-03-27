@@ -311,10 +311,10 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         opset_version = _default_onnx_opset_version
     _set_opset_version(opset_version)
     graph, params_dict, torch_out = _model_to_graph(model, args, f, verbose,
-                                               training, input_names,
-                                               output_names, operator_export_type,
-                                               example_outputs, propagate,
-                                               _retain_param_name)
+                                                    training, input_names,
+                                                    output_names, operator_export_type,
+                                                    example_outputs, propagate,
+                                                    _retain_param_name)
 
     # TODO: Don't allocate a in-memory string for the protobuf
     defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE

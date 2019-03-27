@@ -211,7 +211,7 @@ class TestCaffe2Backend(unittest.TestCase):
         class SimpleFcNet(nn.Module):
             def __init__(self):
                 super(SimpleFcNet, self).__init__()
-                self.fc1   = nn.Linear(5, 10)
+                self.fc1 = nn.Linear(5, 10)
 
             def forward(self, input):
                 return self.fc1(input)
@@ -224,10 +224,10 @@ class TestCaffe2Backend(unittest.TestCase):
         f = io.BytesIO()
         from torch.onnx import ExportTypes
         # Note that the export call explicitly sets the names of not just the input,
-        # but also the parameters. This test checks that the model can be loaded and 
+        # but also the parameters. This test checks that the model can be loaded and
         # executed in Caffe2 backend correctly.
-        torch.onnx._export(model, input, f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE, \
-            input_names=['input1', 'parameter1', 'parameter2'])
+        torch.onnx._export(model, input, f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE,
+                           input_names=['input1', 'parameter1', 'parameter2'])
 
         f.seek(0)
         import caffe2.python.onnx.backend as c2
