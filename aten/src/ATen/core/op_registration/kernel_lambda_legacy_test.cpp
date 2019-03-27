@@ -498,15 +498,15 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
       ), [] (Tensor) -> int64_t {return 0;});
 
   // and now a set of mismatching schemas
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{Argument("arg"), Argument("arg2")}),
             (std::vector<Argument>{Argument("ret", IntType::get())})
-        ), [] (Tensor) -> int64_t {return 0;}),
-    c10::Error
+        ), [] (Tensor) -> int64_t {return 0;});
+    }, "The number of arguments is different. Specified 2 but inferred 1"
   );
 
   // assert this does not fail because it matches
@@ -519,37 +519,37 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
       ), [] (Tensor, Tensor) -> void {});
 
   // and now a set of mismatching schemas
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{}),
             (std::vector<Argument>{})
-        ), [] (Tensor, Tensor) -> void {}),
-    c10::Error
+        ), [] (Tensor, Tensor) -> void {});
+    }, "The number of arguments is different. Specified 0 but inferred 2"
   );
 
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{Argument("arg")}),
             (std::vector<Argument>{})
-        ), [] (Tensor, Tensor) -> void {}),
-    c10::Error
+        ), [] (Tensor, Tensor) -> void {});
+    }, "The number of arguments is different. Specified 1 but inferred 2"
   );
 
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{Argument("arg"), Argument("arg2"), Argument("arg3")}),
             (std::vector<Argument>{})
-        ), [] (Tensor, Tensor) -> void {}),
-    c10::Error
+        ), [] (Tensor, Tensor) -> void {});
+    }, "The number of arguments is different. Specified 3 but inferred 2"
   );
 }
 
@@ -564,26 +564,26 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
       ), [] (Tensor, int64_t) -> int64_t {return 0;});
 
   // and now a set of mismatching schemas
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{Argument("arg1"), Argument("arg2", FloatType::get())}),
             (std::vector<Argument>{Argument("ret", IntType::get())})
-        ), [] (Tensor, int64_t) -> int64_t {return 0;}),
-    c10::Error
+        ), [] (Tensor, int64_t) -> int64_t {return 0;});
+    }, "Type mismatch in argument 2: specified float but inferred int"
   );
 
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{Argument("arg1", IntType::get()), Argument("arg2", IntType::get())}),
             (std::vector<Argument>{Argument("ret", IntType::get())})
-        ), [] (Tensor, int64_t) -> int64_t {return 0;}),
-    c10::Error
+        ), [] (Tensor, int64_t) -> int64_t {return 0;});
+    }, "Type mismatch in argument 1: specified int but inferred Tensor"
   );
 }
 
@@ -598,18 +598,18 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
       ), [] (Tensor) -> int64_t {return 0;});
 
   // and now a set of mismatching schemas
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{Argument("arg")}),
             (std::vector<Argument>{})
-        ), [] (Tensor) -> int64_t {return 0;}),
-    c10::Error
+        ), [] (Tensor) -> int64_t {return 0;});
+    }, "The number of returns is different. Specified 0 but inferred 1"
   );
 
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
@@ -617,8 +617,8 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
             (std::vector<Argument>{Argument("arg")}),
             (std::vector<Argument>{Argument("ret1", IntType::get()),
                                    Argument("ret2", IntType::get())})
-        ), [] (Tensor) -> int64_t {return 0;}),
-    c10::Error
+        ), [] (Tensor) -> int64_t {return 0;});
+    }, "The number of returns is different. Specified 2 but inferred 1"
   );
 
   // assert this does not fail because it matches
@@ -631,26 +631,26 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
       ), [] (Tensor) -> void {});
 
   // and now a set of mismatching schemas
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{Argument("arg")}),
             (std::vector<Argument>{Argument("ret")})
-        ), [] (Tensor) -> void {}),
-    c10::Error
+        ), [] (Tensor) -> void {});
+    }, "The number of returns is different. Specified 1 but inferred 0"
   );
 
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{Argument("arg")}),
             (std::vector<Argument>{Argument("ret"), Argument("ret2")})
-        ), [] (Tensor) -> void {}),
-    c10::Error
+        ), [] (Tensor) -> void {});
+    }, "The number of returns is different. Specified 2 but inferred 0"
   );
 
   // assert this does not fail because it matches
@@ -663,37 +663,37 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
       ), [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};});
 
   // and now a set of mismatching schemas
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{Argument("arg")}),
             (std::vector<Argument>{})
-        ), [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};}),
-    c10::Error
+        ), [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};});
+    }, "The number of returns is different. Specified 0 but inferred 2"
   );
 
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{Argument("arg")}),
             (std::vector<Argument>{Argument("ret1")})
-        ), [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};}),
-    c10::Error
+        ), [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};});
+    }, "The number of returns is different. Specified 1 but inferred 2"
   );
 
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{Argument("arg")}),
             (std::vector<Argument>{Argument("ret1"), Argument("ret2"), Argument("ret3")})
-        ), [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};}),
-    c10::Error
+        ), [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};});
+    }, "The number of returns is different. Specified 3 but inferred 2"
   );
 }
 
@@ -708,26 +708,26 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
       ), [] (Tensor) -> int64_t {return 0;});
 
   // and now a set of mismatching schemas
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{Argument("arg")}),
             (std::vector<Argument>{Argument("ret")})
-        ), [] (Tensor) -> int64_t {return 0;}),
-    c10::Error
+        ), [] (Tensor) -> int64_t {return 0;});
+    }, "Type mismatch in return 1: specified Tensor but inferred int"
   );
 
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{Argument("arg")}),
             (std::vector<Argument>{Argument("ret", FloatType::get())})
-        ), [] (Tensor) -> int64_t {return 0;}),
-    c10::Error
+        ), [] (Tensor) -> int64_t {return 0;});
+    }, "Type mismatch in return 1: specified float but inferred int"
   );
 
   // assert this does not fail because it matches
@@ -740,15 +740,15 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
       ), [] (Tensor) -> Tensor {return {};});
 
   // and now a set of mismatching schemas
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{Argument("arg")}),
             (std::vector<Argument>{Argument("ret", FloatType::get())})
-        ), [] (Tensor) -> Tensor {return {};}),
-    c10::Error
+        ), [] (Tensor) -> Tensor {return {};});
+    }, "Type mismatch in return 1: specified float but inferred Tensor"
   );
 
   // assert this does not fail because it matches
@@ -761,26 +761,26 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
       ), [] (Tensor) -> std::tuple<Tensor, int64_t> {return {};});
 
   // and now a set of mismatching schemas
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{Argument("arg")}),
             (std::vector<Argument>{Argument("ret1"), Argument("ret2", FloatType::get())})
-        ), [] (Tensor) -> std::tuple<Tensor, int64_t> {return {};}),
-    c10::Error
+        ), [] (Tensor) -> std::tuple<Tensor, int64_t> {return {};});
+    }, "Type mismatch in return 2: specified float but inferred int"
   );
 
-  EXPECT_THROW(
+  expectThrows<c10::Error>([] {
     RegisterOperators()
         .op(FunctionSchema(
             "_test::mismatch",
             "",
             (std::vector<Argument>{Argument("arg")}),
             (std::vector<Argument>{Argument("ret1", IntType::get()), Argument("ret2", IntType::get())})
-        ), [] (Tensor) -> std::tuple<Tensor, int64_t> {return {};}),
-    c10::Error
+        ), [] (Tensor) -> std::tuple<Tensor, int64_t> {return {};});
+    }, "Type mismatch in return 1: specified int but inferred Tensor"
   );
 }
 
