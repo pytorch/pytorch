@@ -2983,15 +2983,19 @@
     CUDA: dense_to_sparse
 
 - func: quantize_linear(Tensor self, float scale, int zero_point) -> Tensor
+  matches_jit_signature: True
   variants: function, method
 
 - func: dequantize(Tensor self) -> Tensor
+  matches_jit_signature: True
   variants: function, method
 
 - func: q_scale(Tensor self) -> Scalar
+  matches_jit_signature: True
   variants: function, method
 
 - func: q_zero_point(Tensor self) -> Scalar
+  matches_jit_signature: True
   variants: function, method
 
 # to(Device) must not exist because all constructors of Device also works for

@@ -5,7 +5,6 @@
 #include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Device.h>
-//#include <c10/core/QScheme.h>
 
 #include <c10/util/Optional.h>
 #include <c10/util/C++17.h>
@@ -104,7 +103,6 @@ struct C10_API TensorOptions {
     , has_device_(false)
     , has_dtype_(false)
     , has_layout_(false)
-//    , has_qscheme(false)
     , has_requires_grad_(false)
     , has_is_variable_(false)
     {}
@@ -145,10 +143,6 @@ struct C10_API TensorOptions {
     this->set_dtype(dtype);
   }
 
-  // /* implicit */ TensorOptions(QuantScheme qscheme): TensorOptions() {
-  //   this->set_qscheme(qscheme);
-  // }
-
   /// True if all elements of the `TensorOptions` match that of the other.
   bool operator==(const TensorOptions& other) const noexcept {
     return
@@ -160,7 +154,6 @@ struct C10_API TensorOptions {
         (!has_dtype_ || dtype_ == other.dtype_) &&
         (!has_layout_ || layout_ == other.layout_) &&
         (!has_device_ || device_ == other.device_) &&
-//        (!has_qscheme_ || qscheme_ == other.qscheme_) &&
         (!requires_grad_ || requires_grad_ == other.requires_grad_) &&
         (!is_variable_ || is_variable_ == other.is_variable_);
   }
@@ -238,13 +231,6 @@ struct C10_API TensorOptions {
     r.set_is_variable(is_variable);
     return r;
   }
-
-  // /// Sets the quantization scheme of the `TensorOptions`.
-  // C10_NODISCARD TensorOptions qscheme(c10::optional<QScheme> qscheme) const noexcept {
-  //   TensorOptions r = *this;
-  //   r.set_qcheme(qscheme);
-  //   return r;
-  // }
 
   /// Returns the device of the `TensorOptions`.
   Device device() const noexcept {
@@ -331,22 +317,6 @@ struct C10_API TensorOptions {
   c10::optional<bool> is_variable_opt() const noexcept {
     return has_is_variable_ ? c10::make_optional(is_variable_) : c10::nullopt;
   }
-
-  // /// Returns the `qscheme` property of the `TensorOptions`.
-  // bool qscheme() const noexcept {
-  //   return has_qscheme_ ? qcheme_ : kPerLayerAffine8Bit;
-  // }
-
-  // /// Returns whether the `qcheme` is specified.
-  // bool has_qcheme() const noexcept {
-  //   return has_qcheme_;
-  // }
-
-  // /// Returns the `qscheme` property of the `TensorOptions`, or
-  // /// `c10::nullopt` if `qcheme` is not specified.
-  // c10::optional<QScheme> qcheme_opt() const noexcept {
-  //   return has_qscheme_ ? c10::make_optional(qscheme_) : c10::nullopt;
-  // }
 
   // Resolves the ATen backend specified by the current construction axes.
   Backend backend() const noexcept {
@@ -468,16 +438,6 @@ struct C10_API TensorOptions {
     }
   }
 
-  // void set_qscheme(c10::optional<QScheme> qscheme) & noexcept {
-  //   if (qcheme) {
-  //     qscheme_ = *qscheme;
-  //     has_qscheme_ = true;
-  //   } else {
-  //     has_scheme_ = false;
-  //   }
-  // }
-
-
   // WARNING: If you edit TensorOptions to add more options, you
   // must adjust the implementation of Tensor::options
 
@@ -487,7 +447,6 @@ struct C10_API TensorOptions {
   caffe2::TypeMeta dtype_ = caffe2::TypeMeta::Make<float>(); // 64-bit
   Device device_ = at::kCPU; // 32-bit
   Layout layout_ = at::kStrided; // 8-bit
-//  QScheme qscheme_ = at::kPerLayerAffine8Bit; // 32-bit(can do 16-bit if we put PerLayer setting into QType)
 
   // Bitmask required here to get this to fit inside 32 bits (or even 64 bits,
   // for that matter)
@@ -498,7 +457,6 @@ struct C10_API TensorOptions {
   bool has_device_        : 1;
   bool has_dtype_         : 1;
   bool has_layout_        : 1;
-//  bool has_qscheme_       : 1;
   bool has_requires_grad_ : 1;
   bool has_is_variable_   : 1;
 };
