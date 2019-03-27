@@ -310,3 +310,6 @@ def compiled_with_cxx11_abi():
 
 # Import the ops "namespace"
 from torch._ops import ops
+
+# Import the quasi random sampler
+import torch.quasirandom
