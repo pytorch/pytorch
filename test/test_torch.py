@@ -1770,9 +1770,8 @@ class _TestTorchMixin(object):
             run_test(ms, batch, cast)
 
         # Info should be positive for rank deficient matrices
-        a = cast(fullrank(3, 5))
+        a = cast(torch.ones(5, 3, 3))
         if not (a.is_cuda and any(x in torch.version.cuda for x in ['8.0', '9.2'])):
-            a[0, 1] = 2 * a[0, 0]  # Row 2 of a[0] is 2 times Row 1 of a[0], thereby causing a rank deficiency
             self.assertGreater(a.lu(get_infos=True)[2][0], 0)
 
         # Error checking, no pivoting variant on CPU
