@@ -629,7 +629,7 @@ class NamedAnyModule {
 inline torch::OrderedDict<std::string, AnyModule> modules_ordered_dict(
   std::initializer_list<NamedAnyModule> named_modules) {
   torch::OrderedDict<std::string, AnyModule> dict;
-  for (auto& named_module : named_modules) {
+  for (auto named_module : named_modules) {
     dict.insert(named_module.name(), std::move(named_module.module()));
   }
   return dict;
