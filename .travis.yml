@@ -24,7 +24,10 @@ matrix:
         python: "3.7"
         dist: xenial    # required for Python 3.7 (travis-ci/travis-ci#9069)
         sudo: required  # required for Python 3.7 (travis-ci/travis-ci#9069)
-        install: pip install flake8-mypy flake8-bugbear
+        install:
+          - pip install flake8-mypy
+          # Apparently Facebook runs master (not released)
+          - pip install git+https://github.com/PyCQA/flake8-bugbear.git@d9444713a51a9fb6ee8cd2d88fca85e9ff0c2d58
         script: flake8
       - name: "MyPy typecheck"
         python: "3.6"

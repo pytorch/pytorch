@@ -4,7 +4,5 @@ namespace c10 {
 
 RegisterOperators::RegisterOperators() = default;
 RegisterOperators::~RegisterOperators() = default;
-RegisterOperators::RegisterOperators(RegisterOperators&&) noexcept = default;
-RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept = default;
 
 }
