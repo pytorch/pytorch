@@ -708,7 +708,7 @@ class TestDataLoader(TestCase):
             self.assertEqual(d, i)
 
         # multiprocessing loading
-        p = ErrorTrackingProcess(target=test_iterable_dataset_multiprocessing)
+        p = ErrorTrackingProcess(target=test_iterable_dataset_multiprocessing, disable_stderr=False)
         p.start()
         p.join(JOIN_TIMEOUT)
         try:
