@@ -109,6 +109,8 @@ C10_DECLARE_TENSOR_TYPE(HIPTensorId); // PyTorch/Caffe2 supported
 C10_DECLARE_TENSOR_TYPE(SparseHIPTensorId); // PyTorch only
 C10_DECLARE_TENSOR_TYPE(MSNPUTensorId); // PyTorch only
 C10_DECLARE_TENSOR_TYPE(XLATensorId); // PyTorch only
+C10_DECLARE_TENSOR_TYPE(AffineCPUTensorId); // PyTorch only
+C10_DECLARE_TENSOR_TYPE(PerChannelAffineCPUTensorId); // PyTorch only
 
 } // namespace c10
 

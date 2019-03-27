@@ -2985,10 +2985,16 @@
 - func: quantize_linear(Tensor self, float scale, int zero_point) -> Tensor
   matches_jit_signature: True
   variants: function, method
+  dispatch:
+    CPU: quantize_linear_cpu
 
 - func: dequantize(Tensor self) -> Tensor
   matches_jit_signature: True
   variants: function, method
+  dispatch:
+    CPU: dequantize_
+    AffineCPU: dequantize_
+    PerChannelAffineCPU: dequantize_
 
 - func: q_scale(Tensor self) -> Scalar
   matches_jit_signature: True

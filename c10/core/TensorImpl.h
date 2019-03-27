@@ -344,6 +344,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return tid == SparseCPUTensorId() || tid == SparseCUDATensorId() || tid == SparseHIPTensorId();
   }
 
+  bool is_quantized() const {
+    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    auto tid = type_id();
+    // NB: At the moment, variables have the same TensorTypeId as their
+    // corresponding tensor, but if this ever changes, we need to modify this.
+    return tid == AffineCPUTensorId() || tid == PerChannelAffineCPUTensorId();
+  }
+
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     auto tid = type_id();
@@ -363,7 +371,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   int64_t get_device() const {
     // NB: This method is not virtual and tries to avoid dispatches in the common case for perf.
     const auto tid = type_id();
-    if (tid == CUDATensorId() || tid == HIPTensorId() || tid == MSNPUTensorId() || tid == XLATensorId()) {
+    if (tid == CUDATensorId() || tid == HIPTensorId() || tid == MSNPUTensorId() || tid == XLATensorId() || tid == AffineCPUTensorId() || tid == PerChannelAffineCPUTensorId()) {
       // TODO: #12934 investigate caching device on TensorImpl to avoid this vdispatch.
       return storage().device().index();
     }
@@ -376,7 +384,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // caching device on TensorImpl (#12934) to speed up device() calls in all cases.
     const auto tid = type_id();
     if (tid == CPUTensorId() || tid == CUDATensorId() || tid == HIPTensorId() || tid == MSNPUTensorId() ||
-        tid == XLATensorId()) {
+        tid == XLATensorId() || tid == AffineCPUTensorId() || tid == PerChannelAffineCPUTensorId()) {
       // NB: storage(), not storage_, b/c of Variable.
       const auto& mystorage = storage();
       if (mystorage) {

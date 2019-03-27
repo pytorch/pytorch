@@ -36,7 +36,7 @@ inline QTensor new_qtensor(
     /*resizable=*/true);
   auto quantizer = make_per_tensor_affine_quantizer(scale, zero_point);
   auto tensor = detail::make_tensor<QTensorImpl>(
-      storage_impl, at::CPUTensorId(), false, std::move(quantizer));
+      storage_impl, at::AffineCPUTensorId(), false, std::move(quantizer));
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   return tensor;
 }

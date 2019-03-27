@@ -83,6 +83,8 @@ enum class TypeID {
   SparseCUDALong,
   SparseCUDAShort,
   SparseCUDAQInt8,
+  AffineCPUQInt8,
+  PerChannelAffineCPUQInt8,
   MSNPUBool,
   MSNPUByte,
   MSNPUChar,

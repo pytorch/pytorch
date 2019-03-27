@@ -7,12 +7,12 @@
 namespace at {
 namespace native {
 
-QTensor quantize_linear(const RealTensor& self, double scale, int64_t zero_point) {
+QTensor quantize_linear_cpu(const RealTensor& self, double scale, int64_t zero_point) {
   auto quantizer = make_per_tensor_affine_quantizer(scale, zero_point);
   return quantizer->quantize(self);
 }
 
-RealTensor dequantize(const QTensor& self) {
+RealTensor dequantize_(const QTensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 

@@ -174,7 +174,15 @@ generators = {
     },
 }
 
-backends = ['CPU', 'CUDA']
+backends = ['CPU', 'CUDA', 'AffineCPU', 'PerChannelAffineCPU']
+dense_backends = {
+    'CPU': 'CPU',
+    'CUDA': 'CUDA',
+    'AffineCPU': 'CPU',
+    'PerChannelAffineCPU': 'CPU',
+}
+
+quantized_backends = ['AffineCPU', 'PerChannelAffineCPU']
 densities = ['Dense', 'Sparse']
 extension_backends = ['MSNPU', 'XLA']
 
@@ -189,6 +197,10 @@ scalar_types = [
     ('Long', 'int64_t', 'Long', False),
     ('Short', 'int16_t', 'Long', False),
     ('Half', 'Half', 'Double', True),
+    ('QInt8', 'qint8', 'Long', False),
+]
+
+quantized_scalar_types = [
     ('QInt8', 'qint8', 'Long', False),
 ]
 
@@ -267,9 +279,10 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     env['isFloatingType'] = is_floating_type
     env['isIntegralType'] = not is_floating_type
     env['Type'] = "{}{}{}Type".format(density_tag, backend, scalar_name)
-    env['DenseTensor'] = "{}{}Tensor".format(backend, scalar_name)
+    dense_backend = dense_backends[backend]
+    env['DenseTensor'] = "{}{}Tensor".format(dense_backend, scalar_name)
     env['Backend'] = density_tag + backend
-    env['DenseBackend'] = backend
+    env['DenseBackend'] = dense_backend
     env['storage_tensor_headers'] = []
     if density != 'Sparse':
         env['storage_tensor_headers'] = ['#include <c10/core/TensorImpl.h>']
@@ -349,9 +362,10 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     else:
         fm.write(env['Type'] + ".cpp", SPARSE_TYPE_DERIVED_CPP, env)
     fm.write(env['Type'] + ".h", TYPE_DERIVED_H, env)
+    sys.stderr.write('"' + env['Type'] + '.h",\n')
 
     type_register = TYPE_REGISTER.substitute(backend=env['Backend'], scalar_type=scalar_name, type_name=env['Type'])
-    if env['DenseBackend'] == 'CPU':
+    if 'CPU' in env['DenseBackend']:
         top_env['cpu_type_registrations'].append(type_register)
         top_env['cpu_type_headers'].append(
             '#include "ATen/{}.h"'.format(env['Type']))
@@ -424,7 +438,13 @@ def iterate_types():
                 if density == 'Sparse' and scalar_type[0] == 'Half':
                     # THS does not do half type yet.
                     continue
-                yield (backend, density, scalar_type)
+                if backend in quantized_backends:
+                    if density == 'Dense' and scalar_type in quantized_scalar_types:
+                            yield (backend, density, scalar_type)
+                    else:
+                        continue
+                else:
+                    yield (backend, density, scalar_type)
 
 
 ###################
