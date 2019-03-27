@@ -22,9 +22,63 @@
 namespace torch {
 namespace nn {
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ NamedAnyModule ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-// yf225 TODO: add docs for this class
+/// Stores a type erased `Module` with name.
+///
+/// The `NamedAnyModule` class and the `modules_ordered_dict(...)` function enables
+/// the following API for constructing `nn::Sequential` with named submodules:
+/// \rst
+/// .. code-block:: cpp
+///
+///   struct M : torch::nn::Module {
+///     explicit M(int value_) : value(value_) {}
+///     int value;
+///     int forward() {
+///       return value;
+///     }
+///   };
+///
+///   Sequential sequential(modules_ordered_dict({
+///     {"m1", std::make_shared<M>(1)},  // shared pointer to `Module` is supported
+///     {std::string("m2"), M(2)},  // `Module` is supported
+///     {"linear1", Linear(10, 3)}  // `ModuleHolder` is supported
+///   }));
+/// \endrst
+///
+/// Specifically, we design the signature of `modules_ordered_dict(...)` to be
+/// `modules_ordered_dict(std::initializer_list<NamedAnyModule> named_modules)`, as
+/// a result of evaluating the following possible approaches:
+///
+/// Approach 1:
+/// `modules_ordered_dict(std::initializer_list<
+///   torch::OrderedDict<std::string, ModuleType>::Item> named_modules)`
+///
+/// Why it doens't work:
+/// When we pass in a braced-init list such as
+/// `modules_ordered_dict({{"m1", M(1)}, {"m2", M(2)}})`, at the template argument
+/// deduction step the compiler is not able to deduce the type of `ModuleType` to
+/// the type of `M(1)` or `M(2)`, since the compiler doesn't actually look into the
+/// braced-init list `{"m1", M(1)}` and figure out what the types of its elements are.
+///
+/// Approach 2:
+/// `modules_ordered_dict(std::initializer_list<
+///   std::pair<std::string, AnyModule> named_modules)`
+///
+/// Why it doens't work:
+/// When we pass in a braced-init list such as
+/// `modules_ordered_dict({{"m1", M(1)}, {"m2", M(2)}})`, the compiler is not able to
+/// match `std::initializer_list<std::pair<std::string, AnyModule>>` to the nested
+/// braced-init list `{{"m1", M(1)}, {"m2", M(2)}}`, and results in a "could not
+/// convert" error.
+///
+/// Approach 3:
+/// `modules_ordered_dict(std::initializer_list<NamedAnyModule> named_modules)`
+///
+/// Why it works:
+/// When we pass in a braced-init list such as
+/// `modules_ordered_dict({{"m1", M(1)}, {"m2", M(2)}})`, the compiler is passing the
+/// braced-init lists {"m1", M(1)} and {"m2", M(2)} to the `NamedAnyModule`
+/// constructors, and the constructors are able to figure out the types of the
+/// braced-init lists' elements and match to the correct module type.
 
 class NamedAnyModule {
  public:
@@ -69,22 +123,6 @@ class NamedAnyModule {
   AnyModule module_;
 };
 
-// NOTE: We might wonder why we need to have the `NamedAnyModule` class and have
-// the `modules_ordered_dict()` function signature be
-// `modules_ordered_dict(std::initializer_list<NamedAnyModule> named_modules)`,
-// instead of
-// `modules_ordered_dict(std::initializer_list<torch::OrderedDict<
-//    std::string, ModuleType>::Item> named_modules)`.
-// The reason is that when we pass in a braced-init list such as
-// `modules_ordered_dict({{"m1", M(1)}, {"m2", M(2)}})`,
-// if we use the second signature, at the template argument deduction step
-// the compiler is not able to deduce the type of `ModuleType` to the type of
-// `M(1)` or `M(2)`, since the compiler doesn't actually look into the
-// braced-init list `{"m1", M(1)}` and figure out what the types of its
-// elements are. Instead, we have to pass the braced-init list as a whole to
-// the `NamedAnyModule` constructors, and let the constructors do the job of
-// figuring out the types of its elements and do the matching to the correct
-// module type.
 torch::OrderedDict<std::string, AnyModule> modules_ordered_dict(
   std::initializer_list<NamedAnyModule> named_modules);
 
