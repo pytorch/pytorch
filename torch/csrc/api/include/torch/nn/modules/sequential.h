@@ -341,7 +341,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   void push_back(std::string name, AnyModule any_module) {
     modules_.push_back(std::move(any_module));
     const auto index = modules_.size() - 1;
-    register_module(name, modules_[index].ptr());
+    register_module(std::move(name), modules_[index].ptr());
   }
 
   /// The base case, when the list of modules is empty.

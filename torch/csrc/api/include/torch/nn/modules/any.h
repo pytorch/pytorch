@@ -11,6 +11,7 @@
 
 #include <ATen/Device.h>
 
+#include <initializer_list>
 #include <memory>
 #include <type_traits>
 #include <typeinfo>
@@ -569,9 +570,6 @@ ModuleType& AnyModule::get_(
 
 class NamedAnyModule {
  public:
-  /// We don't allow constructing an empty `NamedAnyModule`.
-  NamedAnyModule() = delete;
-
   /// Creates a `NamedAnyModule` from a (boxed) `Module`.
   template <typename ModuleType>
   NamedAnyModule(std::string name, std::shared_ptr<ModuleType> module_ptr)
@@ -595,7 +593,7 @@ class NamedAnyModule {
       : NamedAnyModule(std::move(name), module_holder.ptr()) {}
 
   /// Returns a reference to the name.
-  std::string name() const noexcept {
+  const std::string& name() const noexcept {
     return name_;
   }
 
@@ -606,10 +604,7 @@ class NamedAnyModule {
 
  private:
   /// Creates a `NamedAnyModule` from a type-erased `AnyModule`.
-  NamedAnyModule(std::string name, AnyModule any_module) {
-    name_ = std::move(name);
-    module_ = std::move(any_module);
-  }
+  NamedAnyModule(std::string name, AnyModule any_module) : name_(std::move(name)), module_(std::move(any_module)) {}
 
   std::string name_;
   AnyModule module_;
@@ -634,7 +629,7 @@ class NamedAnyModule {
 inline torch::OrderedDict<std::string, AnyModule> modules_ordered_dict(
   std::initializer_list<NamedAnyModule> named_modules) {
   torch::OrderedDict<std::string, AnyModule> dict;
-  for (auto named_module : named_modules) {
+  for (auto& named_module : named_modules) {
     dict.insert(named_module.name(), std::move(named_module.module()));
   }
   return dict;
