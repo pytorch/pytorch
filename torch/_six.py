@@ -80,7 +80,8 @@ else:
 
 if PY3:
     import builtins
-    exec_ = getattr(builtins, "exec")
+    # See https://github.com/PyCQA/flake8-bugbear/issues/64
+    exec_ = getattr(builtins, "exec")  # noqa: B009
 else:
     def exec_(_code_, _globs_=None, _locs_=None):
         """Execute code in a namespace."""

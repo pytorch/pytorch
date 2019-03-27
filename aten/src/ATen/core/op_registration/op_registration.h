@@ -10,7 +10,7 @@
 #include <ATen/core/op_registration/kernel_stackbased.h>
 #include <ATen/core/op_registration/kernel_functor.h>
 #include <ATen/core/op_registration/kernel_function.h>
-#include <ATen/core/op_registration/kernel_function_legacy.h>
+#include <ATen/core/op_registration/kernel_lambda.h>
 #include <ATen/core/op_registration/infer_schema.h>
 
 namespace c10 {
@@ -111,7 +111,7 @@ public:
    op(FunctionSchema schema, FuncType* func) && {
     // We intentionally don't extend this deprecated API to support dispatch keys
     // and the like to push people towards using the new API.
-    return std::move(*this).op(std::move(schema), kernel<detail::WrapKernelFunctionRuntime<FuncType>>(func));
+    return std::move(*this).op(std::move(schema), kernel<detail::WrapRuntimeKernelFunctor<FuncType*>>(func));
    }
 
   // TODO Add deprecated lambda-based API
