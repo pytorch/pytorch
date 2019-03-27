@@ -123,7 +123,7 @@ class NamedAnyModule {
   AnyModule module_;
 };
 
-torch::OrderedDict<std::string, AnyModule> modules_ordered_dict(
+TORCH_API torch::OrderedDict<std::string, AnyModule> modules_ordered_dict(
   std::initializer_list<NamedAnyModule> named_modules);
 
 } // namespace nn
