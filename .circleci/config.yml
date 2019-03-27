@@ -818,6 +818,7 @@ binary_linux_test: &binary_linux_test
   steps:
   - run:
       <<: *setup_linux_system_environment
+  - checkout
   - run:
       <<: *setup_ci_environment
   - attach_workspace:
@@ -884,6 +885,7 @@ binary_linux_upload: &binary_linux_upload
   steps:
   - run:
       <<: *setup_linux_system_environment
+  - checkout
   - run:
       <<: *setup_ci_environment
   - attach_workspace:
@@ -1071,6 +1073,7 @@ smoke_linux_test: &smoke_linux_test
       <<: *setup_linux_system_environment
   - run:
       <<: *install_official_git_client
+  - checkout
   - run:
       <<: *setup_ci_environment
   - run:
@@ -1346,6 +1349,7 @@ jobs:
     steps:
     - run:
         <<: *setup_linux_system_environment
+    - checkout
     - run:
         <<: *setup_ci_environment
     - run:
@@ -1377,6 +1381,7 @@ jobs:
     steps:
     - run:
         <<: *setup_linux_system_environment
+    - checkout
     - run:
         <<: *setup_ci_environment
     - run:
