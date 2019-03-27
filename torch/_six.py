@@ -80,7 +80,7 @@ else:
 
 if PY3:
     import builtins
-    exec_ = getattr(builtins, "exec")
+    exec_ = builtins.exec
 else:
     def exec_(_code_, _globs_=None, _locs_=None):
         """Execute code in a namespace."""
