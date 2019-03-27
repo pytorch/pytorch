@@ -2138,7 +2138,7 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_det_logdet_slogdet(self):
-        _TestTorchMixin._test_det_logdet_slogdet(self, lambda t: t.cuda())
+        _TestTorchMixin._test_det_logdet_slogdet(self, 'cuda')
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_solve(self):

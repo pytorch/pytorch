@@ -6,7 +6,7 @@ This module encapsulates dependencies on pygraphviz
 
 import colorsys
 
-import cimodel.conf_tree as conf_tree
+import cimodel.lib.conf_tree as conf_tree
 
 
 def rgb2hex(rgb_tuple):
@@ -16,6 +16,25 @@ def rgb2hex(rgb_tuple):
     return "#" + "".join(map(to_hex, list(rgb_tuple)))
 
 
+def handle_missing_graphviz(f):
+    """
+    If the user has not installed pygraphviz, this causes
+    calls to the draw() method of the returned object to do nothing.
+    """
+    try:
+        import pygraphviz
+        return f
+
+    except ModuleNotFoundError:
+
+        class FakeGraph:
+            def draw(self, *args, **kwargs):
+                pass
+
+        return lambda _: FakeGraph()
+
+
+@handle_missing_graphviz
 def generate_graph(toplevel_config_node):
     """
     Traverses the graph once first just to find the max depth
@@ -27,9 +46,9 @@ def generate_graph(toplevel_config_node):
     for config in config_list:
         max_depth = max(max_depth, config.get_depth())
 
-    from pygraphviz import AGraph
-
     # color the nodes using the max depth
+
+    from pygraphviz import AGraph
     dot = AGraph()
 
     def node_discovery_callback(node, sibling_index, sibling_count):

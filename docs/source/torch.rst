@@ -107,6 +107,13 @@ There are a few more in-place random sampling functions defined on Tensors as we
 - :func:`torch.Tensor.random_` - numbers sampled from the discrete uniform distribution
 - :func:`torch.Tensor.uniform_` - numbers sampled from the continuous uniform distribution
 
+Quasi-random sampling
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: torch.quasirandom.SobolEngine
+    :members:
+    :exclude-members: MAXBIT, MAXDIM
+    :undoc-members:
 
 Serialization
 ----------------------------------

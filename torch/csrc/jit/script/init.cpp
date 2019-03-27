@@ -987,7 +987,16 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<ClassTypePtr> classes;
         PythonPrint(oss, m, constants, classes, true);
         return std::make_pair(oss.str(), std::move(constants));
-      });
+      })
+      .def_property_readonly(
+          "code",
+          [](Method& self) {
+            std::ostringstream ss;
+            std::vector<at::Tensor> tensors;
+            std::vector<ClassTypePtr> classes;
+            PythonPrint(ss, self, tensors, classes, false);
+            return ss.str();
+          });
 
   m.def(
       "_jit_script_compile",
