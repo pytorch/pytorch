@@ -200,7 +200,7 @@ public:
     impl->is_contiguous_ = is_contiguous_;
     impl->is_wrapped_number_ = is_wrapped_number_;
     impl->reserved_ = reserved_;
-    impl->set_version_counter(version_counter());
+    // impl->set_version_counter(version_counter());
 
     // Sparse-specific fields
     impl->sparse_dim_ = sparse_dim();

@@ -894,7 +894,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     impl->storage_offset_ = storage_offset_;
     impl->is_wrapped_number_ = is_wrapped_number_;
     impl->reserved_ = reserved_;
-    impl->set_version_counter(version_counter());
+    // impl->set_version_counter(version_counter());
     impl->refresh_numel();
     impl->refresh_contiguous();
     return impl;
