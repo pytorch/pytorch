@@ -184,6 +184,7 @@ public:
   // make it happen
   void set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values);
 
+  // yf225 TODO: fix comment
   // NOTE: `shallow_copy_and_detach()` does not copy the following TensorImpl fields:
   // 1. the AutogradMeta pointer, because it is unique for each Variable.
   // 2. the version counter, because we should decide whether the new TensorImpl should share version
@@ -203,6 +204,7 @@ public:
     impl->is_contiguous_ = is_contiguous_;
     impl->is_wrapped_number_ = is_wrapped_number_;
     impl->reserved_ = reserved_;
+    impl->set_version_counter(version_counter());
 
     // Sparse-specific fields
     impl->sparse_dim_ = sparse_dim();

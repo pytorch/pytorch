@@ -882,6 +882,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return std::move(autograd_meta_);
   }
 
+  // yf225 TODO: fix comment
   // NOTE: `shallow_copy_and_detach()` does not copy the following TensorImpl fields:
   // 1. the AutogradMeta pointer, because it is unique for each Variable.
   // 2. the version counter, because we should decide whether the new TensorImpl should share version
@@ -897,6 +898,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     impl->storage_offset_ = storage_offset_;
     impl->is_wrapped_number_ = is_wrapped_number_;
     impl->reserved_ = reserved_;
+    impl->set_version_counter(version_counter());
     impl->refresh_numel();
     impl->refresh_contiguous();
     return impl;
