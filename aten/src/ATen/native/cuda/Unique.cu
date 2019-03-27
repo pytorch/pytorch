@@ -78,7 +78,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
     const bool return_inverse,
     const bool return_counts) {
 
-    Tensor output = self.contiguous().reshape(-1).clone();
+    Tensor output = self.clone().reshape(-1);
     int64_t num_inp = output.numel();
     scalar_t* output_data = output.data<scalar_t>();
 
@@ -95,11 +95,58 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
 }
 
 template <typename scalar_t>
+class UniqueDimLess {
+  scalar_t *data;
+  int64_t n;
+public:
+  UniqueDimLess(scalar_t *data, int64_t n): data(data), n(n) {}
+  __device__ bool operator()(int64_t a, int64_t b) {
+    for (int64_t i = 0; i < n; ++i) {
+      scalar_t lhs = data[i + a * n];
+      scalar_t rhs = data[i + b * n];
+      if (lhs < rhs) {
+        return true;
+      } else if (lhs > rhs) {
+        return false;
+      }
+    }
+    return false;
+  }
+};
+
+template <typename scalar_t>
+class UniqueDimEqual {
+  scalar_t *data;
+  int64_t n;
+public:
+  UniqueDimEqual(scalar_t *data, int64_t n): data(data), n(n) {}
+  __device__ bool operator()(int64_t a, int64_t b) {
+    for (int64_t i = 0; i < n; ++i) {
+      scalar_t lhs = data[i + a * n];
+      scalar_t rhs = data[i + b * n];
+      if (lhs != rhs) {
+        return false;
+      }
+    }
+    return true;
+  }
+};
+
+template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
     const Tensor& self,
     const int64_t dim,
     const bool return_inverse,
     const bool return_counts) {
+
+    /**
+     * The idea for implementing this is basically the same as unique.
+     * For unique_dim, we are taking the unique with respect to a index
+     * tensor, but during the processes, we override the compare and equal
+     * operator by checking the data underlying it instead. After the
+     * algorithm, we would use index_select to map the resulting indicies
+     * to the result on the actual data.
+     */
 
     int64_t num_inp = self.size(0);
     Tensor input_flat = self.transpose(dim, 0).contiguous().view({num_inp, -1});
@@ -112,29 +159,10 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
     Tensor inverse_indices, counts;
     int64_t num_out;
     std::tie(inverse_indices, counts, num_out) = compute_unique(
-      indices_data, num_inp, return_inverse, return_counts, self.options().dtype(kLong),
-      [=] __device__ (int64_t a, int64_t b) -> bool {
-        for (int64_t i = 0; i < numel; ++i) {
-          scalar_t lhs = input_flat_ptr[i + a * numel];
-          scalar_t rhs = input_flat_ptr[i + b * numel];
-          if (lhs < rhs) {
-            return true;
-          } else if (lhs > rhs) {
-            return false;
-          }
-        }
-        return false;
-      },
-      [=] __device__ (int64_t a, int64_t b) -> bool {
-        for (int64_t i = 0; i < numel; ++i) {
-          scalar_t lhs = input_flat_ptr[i + a * numel];
-          scalar_t rhs = input_flat_ptr[i + b * numel];
-          if (lhs != rhs) {
-            return false;
-          }
-        }
-        return true;
-      }
+      indices_data, num_inp, return_inverse, return_counts,
+      self.options().dtype(kLong),
+      UniqueDimLess<scalar_t>(input_flat_ptr, numel),
+      UniqueDimEqual<scalar_t>(input_flat_ptr, numel)
     );
     indices.resize_(num_out);
 
