@@ -102,7 +102,7 @@ Value* getValueTrace(const IValue& var) {
     }
 
     // Didn't find it. Bake in a constant
-    if (ten.requires_grad()) {
+    if (ten.is_variable() && ten.requires_grad()) {
       std::ostringstream oss;
       oss << "Cannot insert a Tensor that requires grad as a constant. "
           << "Consider making it a parameter or input, or detaching the gradient\n";
