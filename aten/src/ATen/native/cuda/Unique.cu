@@ -84,7 +84,12 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
 
     Tensor inverse_indices, counts;
     int64_t num_out;
-    std::tie(inverse_indices, counts, num_out) = compute_unique(output_data, num_inp, return_inverse, return_counts, self.options().dtype(kLong));
+    std::tie(inverse_indices, counts, num_out) =
+    compute_unique<scalar_t, thrust::less<scalar_t>, thrust::equal_to<scalar_t>>(
+        output_data, num_inp, return_inverse, return_counts,
+        self.options().dtype(kLong),
+        thrust::less<scalar_t>(),
+        thrust::equal_to<scalar_t>());
     output.resize_(num_out);
 
     if (return_inverse) {
@@ -158,7 +163,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
 
     Tensor inverse_indices, counts;
     int64_t num_out;
-    std::tie(inverse_indices, counts, num_out) = compute_unique(
+    std::tie(inverse_indices, counts, num_out) =
+    compute_unique<int64_t, UniqueDimLess<scalar_t>, UniqueDimEqual<scalar_t>>(
       indices_data, num_inp, return_inverse, return_counts,
       self.options().dtype(kLong),
       UniqueDimLess<scalar_t>(input_flat_ptr, numel),
