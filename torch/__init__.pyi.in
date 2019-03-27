@@ -35,7 +35,10 @@ _int = builtins.int
 _float = builtins.float
 
 class device:
-   def __init__(self, device: Union[_int, str, None]=None) -> None: ...
+    type: str
+    index: _int
+    
+    def __init__(self, device: Union[_int, str, None]=None) -> None: ...
 
 class Generator: ...
 
