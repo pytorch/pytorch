@@ -44,6 +44,9 @@ find_library(TORCH_LIBRARY torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
 add_library(torch UNKNOWN IMPORTED)
 set(TORCH_LIBRARIES torch ${Caffe2_MAIN_LIBS})
 
+find_library(C10_LIBRARY c10 PATHS "${TORCH_INSTALL_PREFIX}/lib")
+list(APPEND TORCH_LIBRARIES ${C10_LIBRARY})
+
 if (@USE_CUDA@)
   if(MSVC)
     set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
@@ -68,6 +71,8 @@ if (@USE_CUDA@)
       ${LIBNVTOOLSEXT}
       ${CUDA_LIBRARIES})
   endif()
+  find_library(C10_CUDA_LIBRARY c10_cuda PATHS "${TORCH_INSTALL_PREFIX}/lib")
+  list(APPEND TORCH_CUDA_LIBRARIES ${C10_CUDA_LIBRARY})
   list(APPEND TORCH_LIBRARIES ${TORCH_CUDA_LIBRARIES})
 endif()
 
