@@ -11698,6 +11698,15 @@ EXCLUDE_SCRIPT = {
     'test_nn_fold',
 }
 
+# chunk returns a list in scripting and we don't unpack the list,
+# Thus it won't be replaced by ConstantChunk and run AD.
+# It's explicitly checked in test_chunk_constant_script_ad
+EXCLUDE_SCRIPT_AD_CHECK = {
+    'test_chunk',
+    'test_chunk_dim',
+    'test_chunk_dim_neg0',
+}
+
 EXCLUDE_PYTHON_PRINT = {
     # no support for BroadcastingList in python printer
     'test_nn_max_unpool1d',
@@ -11739,8 +11748,6 @@ def create_traced_fn(self, fn,
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         traced = torch.jit.trace(fn_tensors, inputs_tensors)
-        import pdb
-        pdb.set_trace()
         self.assertExportImport(traced.graph, inputs_tensors)
         if disable_autodiff_subgraph_inlining:
             traced.debug_disable_autodiff_subgraph_inlining()
@@ -12139,6 +12146,18 @@ class TestFuser(JitTestCase):
 
         ge = self.checkScript(fn, inputs)
         self.assertAllFused(ge.graph_for(*inputs))
+
+    def test_chunk_constant_script_ad(self):
+
+        @torch.jit.script
+        def func(x):
+            x1, x2 = torch.chunk(x, 2)
+            return (x1, x2)
+
+        input = torch.rand(6, 10).requires_grad_()
+        func.debug_disable_autodiff_subgraph_inlining()
+        output = func(input)
+        self.assertGraphContains(func.graph_for(input), "prim::DifferentiableGraph")
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -13351,8 +13370,6 @@ def add_autograd_test(
                     if test_name not in EXCLUDE_TRACED:
                         traced_fn = create_traced_fn(self, fn, disable_autodiff_subgraph_inlining=True)
 
-                        import pdb
-                        pdb.set_trace()
                         check_against_reference(self, traced_fn,
                                                 fn, (self_variable,) + args_variable, kwargs_variable,
                                                 check_types=check_types)
@@ -13365,9 +13382,7 @@ def add_autograd_test(
                         check_against_reference(self, script_fn,
                                                 fn, (self_variable,) + args_variable, kwargs_variable,
                                                 check_types=check_types)
-                        import pdb
-                        pdb.set_trace()
-                        if check_ad:
+                        if check_ad and test_name not in EXCLUDE_SCRIPT_AD_CHECK:
                             self.assertGraphContains(script_fn.last_graph, "prim::DifferentiableGraph")
 
                 # functional interface tests
