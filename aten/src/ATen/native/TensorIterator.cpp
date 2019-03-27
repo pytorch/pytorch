@@ -66,7 +66,7 @@ void TensorIterator::reorder_dimensions() {
 }
 
 template <typename F>
-static std::tuple<ScalarType, Backend>
+static TypeProperties
 compute_result_type(at::ArrayRef<OperandInfo> operands, const F& predicate) {
   auto result_type = ScalarType::Undefined;
   auto backend = Backend::Undefined;
@@ -81,80 +81,76 @@ compute_result_type(at::ArrayRef<OperandInfo> operands, const F& predicate) {
         ? op.tensor.type().backend()
         : backend);
   }
-  return std::make_tuple(result_type, backend);
+  return TypeProperties(backend, result_type);
 }
 
 void TensorIterator::compute_types() {
   bool missing_dtypes = false;
   for (auto& op : operands_) {
-    if (!op.tensor.defined() && !op.type) {
+    if (!op.tensor.defined() && !op.type.is_defined()) {
       missing_dtypes = true;
     }
   }
 
   if (missing_dtypes || compute_common_dtype_) {
-    auto& type = compute_common_type();
+    auto type = compute_common_type();
     for (auto& op : operands_) {
-      auto& op_tensor_type = at::globalContext().getNonVariableType(op.tensor.type().backend(), op.tensor.scalar_type());
-      if (!op.type) {
-        op.type = &type;
-      } else if (compute_common_dtype_ && op.type != &type) {
+      auto op_tensor_type = op.tensor.type();
+      if (!op.type.is_defined()) {
+        op.type = type;
+      } else if (compute_common_dtype_ && op.type != type) {
         if (allow_cpu_scalars_ && op.tensor.defined() && op.tensor.dim() == 0 &&
             type.device_type() == kCUDA && op_tensor_type.device_type() == kCPU) {
           // don't cast CPU scalars in CUDA ops that directly support them
-          op.type = &op_tensor_type;
+          op.type = op_tensor_type;
         } else if (promote_gpu_output_dtypes_ && op.tensor.defined() &&
-            !op.is_output && op_tensor_type.scalarType() == kHalf &&
-            type.scalarType() == kFloat && type.device_type() == kCUDA &&
+            !op.is_output && op_tensor_type.scalar_type() == kHalf &&
+            type.scalar_type() == kFloat && type.device_type() == kCUDA &&
             op_tensor_type.device_type() == kCUDA) {
           // allow input tensor type upcasting for fp16 to fp32 in fused kernel
           // on GPU
-          op.type = &op_tensor_type;
+          op.type = op_tensor_type;
         } else {
-          op.type = &type;
+          op.type = type;
         }
       }
     }
   }
 
   for (auto& op : operands_) {
-    auto& op_tensor_type = at::globalContext().getNonVariableType(op.tensor.type().backend(), op.tensor.scalar_type());
-    if (op.tensor.defined() && op_tensor_type != *op.type) {
+    auto op_tensor_type = op.tensor.type();
+    if (op.tensor.defined() && op_tensor_type != op.type) {
       if (op.is_output) {
         AT_ERROR("output with type ", op_tensor_type.toString(),
-                 " doesn't match the desired type ", op.type->toString());
+                 " doesn't match the desired type ", op.type.toString());
       } else if (op.tensor.dim() == 0) {
-        op.tensor = op.tensor.to(*op.type);
+        op.tensor = op.tensor.to(at::device(op.type.device_type()).dtype(op.type.typeMeta()));
       } else {
-        AT_ERROR("expected type ", op.type->toString(), " but got ",
+        AT_ERROR("expected type ", op.type.toString(), " but got ",
             op_tensor_type.toString());
       }
     }
   }
 }
 
-Type& TensorIterator::compute_common_type() {
+TypeProperties TensorIterator::compute_common_type() {
   // See [Result type computation] in TensorIterator.h
-  auto result_type = ScalarType::Undefined;
-  auto backend = Backend::Undefined;
-  std::tie(result_type, backend) = compute_result_type(operands_, [](const Tensor& t) {
+  TypeProperties type = compute_result_type(operands_, [](const Tensor& t) {
     return t.dim() > 0;
   });
-  if (result_type == ScalarType::Undefined) {
-    std::tie(result_type, backend) = compute_result_type(operands_, [](const Tensor& t) {
+  if (type.scalar_type() == ScalarType::Undefined) {
+    type = compute_result_type(operands_, [](const Tensor& t) {
       return !t.unsafeGetTensorImpl()->is_wrapped_number();
     });
   }
-  if (result_type == ScalarType::Undefined) {
-    std::tie(result_type, backend) = compute_result_type(operands_, [](const Tensor& t) {
+  if (type.scalar_type() == ScalarType::Undefined) {
+    type = compute_result_type(operands_, [](const Tensor& t) {
       return true;
     });
   }
 
-  AT_ASSERT(result_type != ScalarType::Undefined);
-  AT_ASSERT(backend != Backend::Undefined);
-
-  return at::globalContext().getNonVariableType(backend, result_type);
+  AT_ASSERT(type.is_defined());
+  return type;
 }
 
 DimVector TensorIterator::compatible_stride(int element_size) const {
@@ -182,8 +178,8 @@ void TensorIterator::allocate_outputs() {
   for (int i = 0; i < num_outputs_; i++) {
     auto& op = operands_[i];
     if (!op.tensor.defined()) {
-      AT_ASSERTM(op.type, "no type for operand", i);
-      int element_size = op.type->typeMeta().itemsize();
+      AT_ASSERTM(op.type.is_defined(), "no type for operand", i);
+      int element_size = op.type.typeMeta().itemsize();
       op.stride_bytes = compatible_stride(element_size);
 
       auto tensor_shape = invert_perm(shape_);
@@ -191,7 +187,10 @@ void TensorIterator::allocate_outputs() {
       for (int dim = 0; dim < ndim(); dim++) {
         tensor_stride[dim] /= element_size;
       }
-      op.tensor = at::empty_strided(tensor_shape, tensor_stride, op.type->options());
+      op.tensor = at::empty_strided(
+          tensor_shape,
+          tensor_stride,
+          at::device(op.type.device_type()).dtype(op.type.typeMeta()));
     }
   }
 }

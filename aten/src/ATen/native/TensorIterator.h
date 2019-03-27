@@ -66,10 +66,10 @@ struct DimCounter {
 };
 struct CAFFE2_API OperandInfo {
   OperandInfo() {}
-  OperandInfo(const Tensor& t, const Type* type=nullptr)
-    : tensor(t), type(const_cast<Type*>(type)) {
-      if (t.defined() && !type) {
-        this->type = &t.dispatch_type();
+  OperandInfo(const Tensor& t, const TypeProperties type=TypeProperties())
+    : tensor(t), type(type) {
+      if (t.defined() && !type.is_defined()) {
+        this->type = t.type();
       }
   }
 
@@ -85,7 +85,7 @@ struct CAFFE2_API OperandInfo {
   /// input should be converted to this type if necessary. For outputs, this
   /// specifies which type to allocate. Note that there is very limited support
   /// for type conversions currently: they are only allowed for zero-dim tensors.
-  Type* type = nullptr;
+  TypeProperties type;
 
   /// The data pointer. This may be different from tensor.data_ptr() if the
   /// iterator is split.
@@ -148,11 +148,11 @@ struct CAFFE2_API TensorIterator {
   /// Accessors for each operand
   IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
   void* data_ptr(int arg) const;
-  const Type& type(int arg=0) const {
-    AT_ASSERT(operands_[arg].type);
-    return *operands_[arg].type;
+  const TypeProperties type(int arg=0) const {
+    AT_ASSERT(operands_[arg].type.is_defined());
+    return operands_[arg].type;
   }
-  ScalarType dtype(int arg=0) const { return type(arg).scalarType(); }
+  ScalarType dtype(int arg=0) const { return type(arg).scalar_type(); }
   DeviceType device_type(int arg=0) const { return type(arg).device_type(); }
   int64_t element_size(int arg) const { return type(arg).typeMeta().itemsize(); }
   bool is_scalar(int arg) const;
@@ -237,7 +237,7 @@ protected:
   void reorder_dimensions();
   void permute_dimensions(IntArrayRef perm);
   void compute_types();
-  Type& compute_common_type();
+  TypeProperties compute_common_type();
   void allocate_outputs();
   void coalesce_dimensions();
 
@@ -261,12 +261,12 @@ struct TensorIterator::Builder {
 
   Builder() : iter_(new TensorIterator()) {};
 
-  void add_output(const Tensor& output, const Type* type=nullptr) {
+  void add_output(const Tensor& output, const TypeProperties type=TypeProperties()) {
     iter_->operands_.emplace_back(output, type);
     iter_->num_outputs_++;
   }
 
-  void add_input(const Tensor& input, const Type* type=nullptr) {
+  void add_input(const Tensor& input, const TypeProperties type=TypeProperties()) {
     iter_->operands_.emplace_back(input, type);
   }
 
