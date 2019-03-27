@@ -57,7 +57,7 @@
 	url = https://github.com/onnx/onnx.git
 [submodule "third_party/onnx-tensorrt"]
 	path = third_party/onnx-tensorrt
-	url = https://github.com/onnx/onnx-tensorrt
+	url = https://github.com/bddppq/onnx-tensorrt
 [submodule "third_party/sleef"]
 	path = third_party/sleef
 	url = https://github.com/zdevito/sleef

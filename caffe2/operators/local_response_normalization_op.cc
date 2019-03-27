@@ -40,12 +40,9 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
                                  &context_);
     // Create the first channel scale
     for (int c = 0; c < size_; ++c) {
-      math::Axpy<float, float, CPUContext>(
-          H * W,
-          alpha_over_size,
-          padded_square_data + c * H * W,
-          scale_data + image_size * n,
-          &context_);
+      math::Axpy<float, CPUContext>(
+          H * W, alpha_over_size, padded_square_data + c * H * W,
+          scale_data + image_size * n, &context_);
     }
     for (int c = 1; c < C; ++c) {
       float* this_scale_slice = scale_data + n * image_size + c * H * W;
@@ -53,19 +50,13 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
       context_.CopyFromCPU<float>(
           H * W, this_scale_slice - H * W, this_scale_slice);
       // add head
-      math::Axpy<float, float, CPUContext>(
-          H * W,
-          alpha_over_size,
-          padded_square_data + (c + size_ - 1) * H * W,
-          this_scale_slice,
-          &context_);
+      math::Axpy<float, CPUContext>(
+          H * W, alpha_over_size, padded_square_data + (c + size_ - 1) * H * W,
+          this_scale_slice, &context_);
       // subtract tail
-      math::Axpy<float, float, CPUContext>(
-          H * W,
-          -alpha_over_size,
-          padded_square_data + (c - 1) * H * W,
-          this_scale_slice,
-          &context_);
+      math::Axpy<float, CPUContext>(
+          H * W, -alpha_over_size, padded_square_data + (c - 1) * H * W,
+          this_scale_slice, &context_);
     }
   }
   math::Powx<float, CPUContext>(
@@ -170,12 +161,9 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
                                  &context_);
     // Create the first channel scale
     for (int c = 0; c < size_; ++c) {
-      math::Axpy<float, float, CPUContext>(
-          H * W,
-          alpha_over_size,
-          padded_ratio_data + c * H * W,
-          scale_data + image_size * n,
-          &context_);
+      math::Axpy<float, CPUContext>(
+          H * W, alpha_over_size, padded_ratio_data + c * H * W,
+          scale_data + image_size * n, &context_);
     }
     for (int c = 1; c < C; ++c) {
       float* this_scale_slice = scale_data + n * image_size + c * H * W;
@@ -183,19 +171,13 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
       context_.CopyFromCPU<float>(
           H * W, this_scale_slice - H * W, this_scale_slice);
       // add head
-      math::Axpy<float, float, CPUContext>(
-          H * W,
-          alpha_over_size,
-          padded_ratio_data + (c + size_ - 1) * H * W,
-          this_scale_slice,
-          &context_);
+      math::Axpy<float, CPUContext>(
+          H * W, alpha_over_size, padded_ratio_data + (c + size_ - 1) * H * W,
+          this_scale_slice, &context_);
       // subtract tail
-      math::Axpy<float, float, CPUContext>(
-          H * W,
-          -alpha_over_size,
-          padded_ratio_data + (c - 1) * H * W,
-          this_scale_slice,
-          &context_);
+      math::Axpy<float, CPUContext>(
+          H * W, -alpha_over_size, padded_ratio_data + (c - 1) * H * W,
+          this_scale_slice, &context_);
     }
   }
 
@@ -221,8 +203,9 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     math::Set<float, CPUContext>(
         accum_ratio.numel(), 0., accum_ratio_data, &context_);
     for (int c = 0; c < size_ - 1; ++c) {
-      math::Axpy<float, float, CPUContext>(
-          H * W, 1, padded_ratio_data + c * H * W, accum_ratio_data, &context_);
+      math::Axpy<float, CPUContext>(H * W, 1,
+                                    padded_ratio_data + c * H * W,
+                                    accum_ratio_data, &context_);
     }
     for (int c = 0; c < C; ++c) {
       for (int hw = 0; hw < H * W; ++hw) {

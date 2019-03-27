@@ -2,7 +2,6 @@
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAException.h>
-#include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/UniqueVoidPtr.h>
 
 #include <cuda_runtime_api.h>
@@ -625,8 +624,9 @@ std::mutex* getFreeMutex()
 }
 
 static inline void assertValidDevice(int device) {
-  int device_num = device_count();
-  AT_ASSERTM(0 <= device && device < device_num, "Invalid device argument.");
+  int device_count;
+  C10_CUDA_CHECK(cudaGetDeviceCount(&device_count));
+  AT_ASSERTM(0 <= device && device < device_count, "Invalid device argument.");
 }
 
 uint64_t currentMemoryAllocated(int device)

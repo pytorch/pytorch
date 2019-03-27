@@ -76,18 +76,6 @@
   dispatch:
      CUDA: masked_scale_cuda
 
-- func: _sobol_engine_draw(Tensor quasi, int n, Tensor sobolstate, int dimension, int num_generated, ScalarType? dtype) -> (Tensor, Tensor)
-  matches_jit_signature: True
-
-- func: _sobol_engine_ff_(Tensor(a!) self, int n, Tensor sobolstate, int dimension, int num_generated) -> Tensor(a!)
-  matches_jit_signature: True
-
-- func: _sobol_engine_scramble_(Tensor(a!) self, Tensor ltm, int dimension) -> Tensor(a!)
-  matches_jit_signature: True
-
-- func: _sobol_engine_initialize_state_(Tensor(a!) self, int dimension) -> Tensor(a!)
-  matches_jit_signature: True
-
 - func: _reshape_from_tensor(Tensor self, Tensor shape) -> Tensor
   matches_jit_signature: True
 
@@ -1990,7 +1978,7 @@
   variants: function, method
   device_guard: False
 
-- func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
+- func: slogdet(Tensor self) -> (Tensor, Tensor)
   matches_jit_signature: True
   variants: function, method
 
@@ -3774,11 +3762,11 @@
     CPU: _cholesky_solve_helper_cpu
     CUDA: _cholesky_solve_helper_cuda
 
-- func: solve(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
+- func: solve(Tensor self, Tensor A) -> (Tensor, Tensor)
   matches_jit_signature: True
   variants: function, method
 
-- func: solve(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) lu) -> (Tensor(a!) solution, Tensor(b!) LU)
+- func: solve(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) lu) -> (Tensor(a!), Tensor(b!))
   matches_jit_signature: True
 
 - func: _solve_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
@@ -4028,10 +4016,10 @@
     CPU: median_cpu
     CUDA: median_cuda
 
-- func: sort(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+- func: sort(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   matches_jit_signature: True
 
-- func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
+- func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor, Tensor)
   matches_jit_signature: True
   variants: method, function
 
@@ -4039,10 +4027,10 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!) values, Tensor(b!) indices)
+- func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   matches_jit_signature: True
 
-- func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
+- func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor, Tensor)
   matches_jit_signature: True
   variants: method, function
 

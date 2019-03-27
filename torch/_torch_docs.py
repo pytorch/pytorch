@@ -2024,18 +2024,18 @@ torch.solve(B, A, out=None) -> (Tensor, Tensor)
 
 This function returns the solution to the system of linear
 equations represented by :math:`AX = B` and the LU factorization of
-A, in order as a namedtuple `solution, LU`.
+A, in order as a tuple `X, LU`.
 
 `LU` contains `L` and `U` factors for LU factorization of `A`.
 
 `torch.solve(B, A)` can take in 2D inputs `B, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
-batched outputs `solution, LU`.
+batched outputs `X, LU`.
 
 .. note::
 
     Irrespective of the original strides, the returned matrices
-    `solution` and `LU` will be transposed, i.e. with strides like
+    `X` and `LU` will be transposed, i.e. with strides like
     `B.contiguous().transpose(-1, -2).strides()` and
     `A.contiguous().transpose(-1, -2).strides()` respectively.
 
@@ -4353,9 +4353,8 @@ If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 If :attr:`descending` is ``True`` then the elements are sorted in descending
 order by value.
 
-A namedtuple of (values, indices) is returned, where the `values` are the
-sorted values and `indices` are the indices of the elements in the original
-`input` tensor.
+A tuple of (sorted_tensor, sorted_indices) is returned, where the
+sorted_indices are the indices of the elements in the original `input` tensor.
 
 Args:
     input (Tensor): the input tensor
@@ -5019,7 +5018,7 @@ If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 
 If :attr:`largest` is ``False`` then the `k` smallest elements are returned.
 
-A namedtuple of `(values, indices)` is returned, where the `indices` are the indices
+A tuple of `(values, indices)` is returned, where the `indices` are the indices
 of the elements in the original `input` tensor.
 
 The boolean option :attr:`sorted` if ``True``, will make sure that the returned
@@ -5042,7 +5041,7 @@ Example::
     >>> x
     tensor([ 1.,  2.,  3.,  4.,  5.])
     >>> torch.topk(x, 3)
-    torch.return_types.topk(values=tensor([5., 4., 3.]), indices=tensor([4, 3, 2]))
+    (tensor([ 5.,  4.,  3.]), tensor([ 4,  3,  2]))
 """)
 
 add_docstr(torch.trace,
@@ -5801,22 +5800,18 @@ Arguments:
     A (Tensor): The input 2D square tensor
 
 Returns:
-    A namedtuple (sign, logabsdet) containing the sign of the determinant, and the log
-    value of the absolute determinant.
+    A tuple containing the sign of the determinant, and the log value of the
+    absolute determinant.
 
 Example::
 
     >>> A = torch.randn(3, 3)
-    >>> A
-    tensor([[ 0.0032, -0.2239, -1.1219],
-            [-0.6690,  0.1161,  0.4053],
-            [-1.6218, -0.9273, -0.0082]])
     >>> torch.det(A)
-    tensor(-0.7576)
+    tensor(-4.8215)
     >>> torch.logdet(A)
     tensor(nan)
     >>> torch.slogdet(A)
-    torch.return_types.slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))
+    (tensor(-1.), tensor(1.5731))
 """)
 
 add_docstr(torch.pinverse,

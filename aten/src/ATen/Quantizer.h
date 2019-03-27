@@ -186,13 +186,13 @@ struct CAFFE2_API PerChannelAffineQuantizer: public AffineQuantizer {
 // setters/getters for QTensorImpl fields; otherwise, you should use
 // the low level setters/getters that were implemented using this.
 // This may be called repeatedly, so make sure it's pretty cheap.
-QTensorImpl* get_qtensorimpl(const QTensor& self);
+CAFFE2_API QTensorImpl* get_qtensorimpl(const QTensor& self);
 
-qint8 QuantizeUint8(float scale, uint8_t zero_point, float value);
+CAFFE2_API qint8 QuantizeUint8(float scale, uint8_t zero_point, float value);
 
 // double and int64_t are because of the native function API, we only have these argument
 // types right now in native functions
-std::shared_ptr<Quantizer> make_per_layer_affine_quantizer(double scale, int64_t zero_point);
+CAFFE2_API std::shared_ptr<Quantizer> make_per_layer_affine_quantizer(double scale, int64_t zero_point);
 QTensor new_qtensor(
     IntArrayRef sizes, const TensorOptions& options, float scale, int8_t zero_point);
 

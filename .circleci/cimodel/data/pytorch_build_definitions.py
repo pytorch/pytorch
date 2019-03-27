@@ -83,7 +83,7 @@ class Conf(object):
         if self.pyver:
             env_dict["PYTHON_VERSION"] = miniutils.quote(self.pyver)
 
-        if build_or_test == "test" and self.gpu_resource:
+        if build_or_test == "test" and self.cuda_version:
             env_dict["USE_CUDA_DOCKER_RUNTIME"] = miniutils.quote("1")
 
         d = {
@@ -143,7 +143,6 @@ def gen_dependent_configs(xenial_parent_config):
         (["NO_AVX2"], "medium"),
         (["NO_AVX", "NO_AVX2"], "medium"),
         (["slow"], "medium"),
-        (["nogpu"], None),
     ]
 
     configs = []

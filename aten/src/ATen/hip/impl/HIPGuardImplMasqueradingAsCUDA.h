@@ -89,7 +89,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     setCurrentHIPStreamMasqueradingAsCUDA(cs);
     return old_stream.unwrap();
   }
-  DeviceIndex deviceCount() const noexcept override {
+  DeviceIndex deviceCount() const override {
     int deviceCnt;
     C10_HIP_CHECK(hipGetDeviceCount(&deviceCnt));
     return deviceCnt;

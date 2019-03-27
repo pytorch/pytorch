@@ -486,7 +486,7 @@ void TensorRTTransformer::Transform(
   auto trt_builder = tensorrt::TrtObject(nvinfer1::createInferBuilder(logger));
   auto trt_network = tensorrt::TrtObject(trt_builder->createNetwork());
   auto importer =
-      tensorrt::TrtObject(nvonnxparser::createParser(*trt_network, logger));
+      tensorrt::TrtObject(nvonnxparser::createParser(trt_network.get(), logger));
 
   // function to tell whether TensorRT supports a given C2 op or not
   auto supports =

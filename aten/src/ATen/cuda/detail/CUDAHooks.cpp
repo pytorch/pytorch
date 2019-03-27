@@ -46,7 +46,12 @@ std::unique_ptr<Generator> CUDAHooks::initCUDAGenerator(
 }
 
 bool CUDAHooks::hasCUDA() const {
-  return at::cuda::is_available();
+  int count;
+  cudaError_t err = cudaGetDeviceCount(&count);
+  if (err == cudaErrorInsufficientDriver) {
+    return false;
+  }
+  return true;
 }
 
 bool CUDAHooks::hasMAGMA() const {
@@ -147,7 +152,15 @@ void CUDAHooks::cuFFTClearPlanCache() const {
 }
 
 int CUDAHooks::getNumGPUs() const {
-  return at::cuda::device_count();
+  int count;
+  auto err = cudaGetDeviceCount(&count);
+  if (err == cudaErrorNoDevice) {
+    return 0;
+  } else if (err != cudaSuccess) {
+    AT_ERROR(
+        "CUDA error (", static_cast<int>(err), "): ", cudaGetErrorString(err));
+  }
+  return count;
 }
 
 // Sigh, the registry doesn't support namespaces :(

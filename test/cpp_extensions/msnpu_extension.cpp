@@ -122,7 +122,7 @@ struct MSNPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   Stream exchangeStream(Stream s) const noexcept override {
     return Stream(Stream::DEFAULT, Device(DeviceType::MSNPU, 0));
   }
-  DeviceIndex deviceCount() const noexcept override {
+  DeviceIndex deviceCount() const override {
     return 1;
   }
 };

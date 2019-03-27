@@ -5,7 +5,6 @@
 
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAStream.h>
-#include <c10/cuda/CUDAFunctions.h>
 
 #include <cuda_runtime_api.h>
 
@@ -55,8 +54,10 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     setCurrentCUDAStream(cs);
     return old_stream.unwrap();
   }
-  DeviceIndex deviceCount() const noexcept override {
-    return device_count();
+  DeviceIndex deviceCount() const override {
+    int deviceCnt;
+    C10_CUDA_CHECK(cudaGetDeviceCount(&deviceCnt));
+    return deviceCnt;
   }
 };
 

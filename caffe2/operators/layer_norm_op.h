@@ -4,6 +4,8 @@
 #include <array>
 #include <vector>
 
+#include <ATen/core/dispatch/OpSchemaRegistration.h>
+
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
