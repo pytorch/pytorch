@@ -871,7 +871,7 @@
 - name: uniform_(Tensor self, double from, double to, Generator generator)
   self: zeros_like(grad)
 
-- name: _unique(Tensor self, bool sorted, bool return_inverse, bool return_counts)
+- name: _unique(Tensor self, bool sorted, bool return_inverse)
   self: not_implemented("_unique")
 
 - name: _unsafe_view(Tensor self, IntArrayRef size)
