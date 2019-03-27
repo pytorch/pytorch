@@ -120,6 +120,7 @@ class SubgraphSlicer {
     }
     // when a node which has writers is moved into a subgraph it may lose
     // context and CSE could merge it with another node that has writers
+    // TODO: @eellison Fix problem more generally in CSE, land PR #18500
     if (aliasDb.hasWriters(node)) {
       return false;
     }
