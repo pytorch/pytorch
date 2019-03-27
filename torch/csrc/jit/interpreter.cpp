@@ -683,13 +683,20 @@ struct CodeImpl {
   std::vector<bool> bool_data;
 };
 
+struct Frame {
+  Frame(const std::shared_ptr<CodeImpl>& fun)
+      : pc_(0), function_(fun), registers_(fun->register_size) {}
+
+  size_t pc_;
+  std::shared_ptr<CodeImpl> function_;
+  std::vector<IValue> registers_;
+};
+
 // InterpreterState state that and used to compute a Code
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
-  InterpreterStateImpl(const Code& code)
-      : function(code.pImpl),
-        int_data_(function->int_data.data()),
-        bool_data_(function->bool_data),
-        registers_(function->register_size) {}
+  InterpreterStateImpl(const Code& code) {
+    pushFrame(code.pImpl);
+  }
 
  private:
   c10::intrusive_ptr<InterpreterStateImpl> intrusive_from_this() {
@@ -698,23 +705,23 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   bool runImpl(Stack& stack) {
-    auto& instructions = function->instructions;
+    auto& instructions = frame().function_->instructions;
     size_t last = instructions.size();
 
-    while (pc < last) {
+    while (pc() < last) {
       // std::cout << "executing " << pc << ": ";
       // function->dumpInstruction(std::cout, pc);
       // std::cout << "\n";
-      auto& inst = instructions[pc];
+      auto& inst = instructions[pc()];
       try {
         loadTensorsFromRegisters(inst.inputs, stack);
-        size_t new_pc = pc + 1 + inst.callback(stack);
+        size_t new_pc = pc() + 1 + inst.callback(stack);
         for (int i = inst.outputs.size - 1; i >= 0; --i) {
           int reg = get(inst.outputs, i);
           registers()[reg] = pop(stack);
           // std::cout << "pop reg[" << reg << "];\n" << registers()[reg] << "\n";
         }
-        pc = new_pc;
+        pc() = new_pc;
       } catch (Suspend& e) {
         // wait() expects a single input
         AT_ASSERT(inst.inputs.values.size == 1);
@@ -744,9 +751,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       } catch (std::exception& e) {
         // Error from the current thread
         bool is_jit_exception = dynamic_cast<JITException*>(&e);
-        if (instructions[pc].debug_location) {
+        if (instructions[pc()].debug_location) {
           handleError(
-              instructions[pc].debug_location->wrapException(
+              instructions[pc()].debug_location->wrapException(
                   e, "operation failed in interpreter"),
               is_jit_exception);
         } else {
@@ -756,7 +763,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       }
     }
     if (future) {
-      auto num_outputs = function->preprocess.n_outputs;
+      auto num_outputs = frame().function_->preprocess.n_outputs;
       if (num_outputs == 1) {
         future->markCompleted(stack.back());
       } else {
@@ -796,7 +803,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     if (runImpl(stack)) {
       future->wait();
 
-      auto num_outputs = function->preprocess.n_outputs;
+      auto num_outputs = frame().function_->preprocess.n_outputs;
       if (num_outputs == 1) {
         push(stack, future->value());
       } else {
@@ -827,14 +834,17 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   // pc is critical for the interperter to pick up the progress from suspend
-  size_t pc = 0;
+  size_t& pc() {
+    return frame().pc_;
+  }
   c10::intrusive_ptr<Future> future;
-  std::shared_ptr<CodeImpl> function; // keep function alive
-  // these are just copies of function to prevent indirections in interpreter
-  int* int_data_;
-  int* int_data() {return int_data_; }
-  const std::vector<bool>& bool_data_;
-  const std::vector<bool>& bool_data() { return bool_data_; }
+
+  std::vector<int>& int_data() {
+    return frame().function_->int_data;
+  }
+  const std::vector<bool>& bool_data() {
+    return frame().function_->bool_data;
+  }
 
   // this holds all the tensors for this interpreter run
   // we don't bother minimizing the size of this vector, since the extra
@@ -846,11 +856,27 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // in the case where it is true, then the interpreter and this array get
   // copied if this every becomes a bottleneck then we _should_ consider
   // minimizing the total number or register
-  std::vector<IValue> registers_;
-  std::vector<IValue>& registers() { return registers_; }
+
+  std::vector<IValue>& registers() {
+    return frame().registers_;
+  }
   // single buffer for input/output calls to ATen functions, so that we do not
   // reallocate
   Stack stack;
+
+  void pushFrame(const std::shared_ptr<CodeImpl>& function) {
+    frames.emplace_back(function);
+  }
+
+  Frame& frame() {
+    return frames.back();
+  }
+
+  void popFrame() {
+    frames.pop_back();
+  }
+
+  std::vector<Frame> frames;
 };
 
 std::ostream& operator<<(std::ostream& out, const Code& code) {
