@@ -18,8 +18,9 @@ namespace {
 
 template <
   typename scalar_t,
-  typename less_t = thrust::less<scalar_t>,
-  typename equal_t = thrust::equal_to<scalar_t>
+  typename less_t,
+  typename equal_t,
+  typename not_equal_t
 >
 std::tuple<Tensor, Tensor, int64_t> compute_unique(
   scalar_t *data,
@@ -27,8 +28,9 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
   const bool return_inverse,
   const bool return_counts,
   TensorOptions options,
-  less_t less = thrust::less<scalar_t>(),
-  equal_t equal = thrust::equal_to<scalar_t>()
+  less_t less,
+  equal_t equal,
+  not_equal_t not_equal
 ) {
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
@@ -47,7 +49,7 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
       inverse_indices = at::empty({num_inp}, options);
       int64_t* inv_loc_ptr = inv_loc.data<int64_t>();
       int64_t* inverse_indices_ptr = inverse_indices.data<int64_t>();
-      thrust::adjacent_difference(policy, data, data + num_inp, inv_loc_ptr, [=] __device__ (scalar_t a, scalar_t b) -> int64_t { if (a != b) {return 1;} else { return 0; }});
+      thrust::adjacent_difference(policy, data, data + num_inp, inv_loc_ptr, not_equal);
       inv_loc[0] = 0;
       thrust::inclusive_scan(policy, inv_loc_ptr, inv_loc_ptr + num_inp, inv_loc_ptr);
       thrust::scatter(policy, inv_loc_ptr, inv_loc_ptr + num_inp, sorted_indices_ptr, inverse_indices_ptr);
@@ -85,11 +87,15 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
     Tensor inverse_indices, counts;
     int64_t num_out;
     std::tie(inverse_indices, counts, num_out) =
-    compute_unique<scalar_t, thrust::less<scalar_t>, thrust::equal_to<scalar_t>>(
+    compute_unique<scalar_t, thrust::less<scalar_t>, thrust::equal_to<scalar_t>,
+                   thrust::not_equal_to<scalar_t>>
+      (
         output_data, num_inp, return_inverse, return_counts,
         self.options().dtype(kLong),
         thrust::less<scalar_t>(),
-        thrust::equal_to<scalar_t>());
+        thrust::equal_to<scalar_t>(),
+        thrust::not_equal_to<scalar_t>()
+      );
     output.resize_(num_out);
 
     if (return_inverse) {
@@ -138,6 +144,24 @@ public:
 };
 
 template <typename scalar_t>
+class UniqueDimNotEqual {
+  scalar_t *data;
+  int64_t n;
+public:
+  UniqueDimNotEqual(scalar_t *data, int64_t n): data(data), n(n) {}
+  __device__ int64_t operator()(int64_t a, int64_t b) {
+    for (int64_t i = 0; i < n; ++i) {
+      scalar_t lhs = data[i + a * n];
+      scalar_t rhs = data[i + b * n];
+      if (lhs != rhs) {
+        return 1;
+      }
+    }
+    return 0;
+  }
+};
+
+template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
     const Tensor& self,
     const int64_t dim,
@@ -153,7 +177,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
      * to the result on the actual data.
      */
 
-    int64_t num_inp = self.size(0);
+    int64_t num_inp = self.size(dim);
     Tensor input_flat = self.transpose(dim, 0).contiguous().view({num_inp, -1});
     int64_t numel = input_flat.size(1);
     scalar_t *input_flat_ptr = input_flat.data<scalar_t>();
@@ -164,11 +188,14 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
     Tensor inverse_indices, counts;
     int64_t num_out;
     std::tie(inverse_indices, counts, num_out) =
-    compute_unique<int64_t, UniqueDimLess<scalar_t>, UniqueDimEqual<scalar_t>>(
+    compute_unique<int64_t, UniqueDimLess<scalar_t>, UniqueDimEqual<scalar_t>,
+                   UniqueDimNotEqual<scalar_t>>
+    (
       indices_data, num_inp, return_inverse, return_counts,
       self.options().dtype(kLong),
       UniqueDimLess<scalar_t>(input_flat_ptr, numel),
-      UniqueDimEqual<scalar_t>(input_flat_ptr, numel)
+      UniqueDimEqual<scalar_t>(input_flat_ptr, numel),
+      UniqueDimNotEqual<scalar_t>(input_flat_ptr, numel)
     );
     indices.resize_(num_out);
 
