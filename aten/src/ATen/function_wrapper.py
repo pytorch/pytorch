@@ -623,6 +623,8 @@ def emit_version_increment(option):
         arg_type = formal['type']
         if NATIVE_DYNAMIC_TYPE.get(arg_type, arg_type) == 'Tensor' and 'const' not in arg_type:
             version_increment_stmts.append(VERSION_INCREMENT_TEMPLATE.substitute(tensor_name=formal['name']))
+    if not version_increment_stmts:
+        version_increment_stmts.append("// Version increment omitted")
     return version_increment_stmts
 
 
