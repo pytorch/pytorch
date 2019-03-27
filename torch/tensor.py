@@ -300,12 +300,14 @@ class Tensor(torch._C._TensorBase):
     def resize(self, *sizes):
         warnings.warn("non-inplace resize is deprecated")
         from torch.autograd._functions import Resize
-        return Resize.apply(self, sizes)
+        new_tensor = Resize.apply(self, sizes)
+        return torch.Tensor._make_subclass(self.__class__, new_tensor.data, new_tensor.requires_grad)
 
     def resize_as(self, tensor):
         warnings.warn("non-inplace resize_as is deprecated")
         from torch.autograd._functions import Resize
-        return Resize.apply(self, tensor.size())
+        new_tensor = Resize.apply(self, tensor.size())
+        return torch.Tensor._make_subclass(self.__class__, new_tensor.data, new_tensor.requires_grad)
 
     def split(self, split_size, dim=0):
         r"""See :func:`torch.split`
