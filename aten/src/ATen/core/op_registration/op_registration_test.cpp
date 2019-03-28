@@ -9,7 +9,6 @@
 
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/Functions.h>
 
 using c10::RegisterOperators;
 using c10::OperatorKernel;
