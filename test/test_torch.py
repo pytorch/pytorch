@@ -3883,6 +3883,71 @@ class _TestTorchMixin(object):
         self.assertEqual(res1.numel(), 0)
         self.assertEqual(res2.numel(), 0)
 
+    def test_choice(self):
+        x = torch.arange(100)
+        w = torch.arange(100).float()
+
+        ############## Reproducibility ##############
+
+        # 1 - UNIFORM Sampling WITHOUT replacement
+        _RNGState = torch.get_rng_state()
+        res1 = torch.choice(x, replace=False, k=25)
+        torch.set_rng_state(_RNGState)
+        res2 = torch.choice(x, replace=False, k=25)
+        self.assertEqual(res1, res2, 0)
+
+        # 2 - UNIFORM Sampling WITH replacement
+        x = torch.arange(100)
+        _RNGState = torch.get_rng_state()
+        res1 = torch.choice(x, replace=True, k=25)
+        torch.set_rng_state(_RNGState)
+        res2 = torch.choice(x, replace=True, k=25)
+        self.assertEqual(res1, res2, 0)
+
+        # 3 - WEIGHTED Sampling WITHOUT replacement
+        x = torch.arange(100)
+        _RNGState = torch.get_rng_state()
+        res1 = torch.choice(x, w, replace=False, k=25)
+        torch.set_rng_state(_RNGState)
+        res2 = torch.choice(x, w, replace=False, k=25)
+        self.assertEqual(res1, res2, 0)
+
+        # 4 - WEIGHTED Sampling WITH replacement
+        x = torch.arange(100)
+        _RNGState = torch.get_rng_state()
+        res1 = torch.choice(x, w, replace=True, k=25)
+        torch.set_rng_state(_RNGState)
+        res2 = torch.choice(x, w, replace=True, k=25)
+        self.assertEqual(res1, res2, 0)
+
+        ############### Corner cases ################
+
+        # 1 - Squashed weights
+        # This setup only works for sampling WITH replacement
+        w = torch.cat(torch.ones(1), torch.zeros(99))
+        res = torch.choice(x, w, replace=True, k=25)
+        self.assertEqual((res == 0).all())
+
+        # 2 - Squashed weights
+        w = torch.cat(torch.ones(25), torch.zeros(75))
+        res = torch.choice(x, w, replace=True, k=25)
+        self.assertTrue((res < 25).all())
+
+        w = torch.cat(torch.ones(25), torch.zeros(75))
+        res = torch.choice(x, w, replace=False, k=25)
+        self.assertTrue((res < 25).all())
+
+        ############### Correctness ################
+
+        # 1 - UNIFORM Sampling WITHOUT replacement - Different values
+        res = torch.choice(x, replace=False, k=95)
+        self.assertTrue((res[:, None] == res).sum() == 95)
+
+        # 1 - WEIGHTED Sampling WITHOUT replacement - Different values
+        w = torch.arange(100).float()
+        res = torch.choice(x, w, replace=False, k=95)
+        self.assertTrue((res[:, None] == res).sum() == 95)
+
     def test_random(self):
         # This test is flaky with p<=(2/(ub-lb))^200=6e-36
         t = torch.FloatTensor(200)
