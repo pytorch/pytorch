@@ -9,8 +9,8 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAEvent.h>
-#include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include <cstddef>
 #include <memory>

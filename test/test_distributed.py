@@ -1461,6 +1461,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     setattr(cls, attr, cls.manager_join(fn))
 
         def setUp(self):
+            super(TestDistBackend, self).setUp()
             # Adding this hack until we fix the FileStore to delete its
             # content at the end
             global INIT_METHOD
@@ -1475,6 +1476,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 self.processes.append(self._spawn_process(rank))
 
         def tearDown(self):
+            super(TestDistBackend, self).tearDown()
             for p in self.processes:
                 p.terminate()
 

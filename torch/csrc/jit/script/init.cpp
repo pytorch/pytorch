@@ -169,6 +169,14 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     return ss.str();
   }
 
+  void checkForAddToConstantsError(std::stringstream& ss) {
+    auto nn = py::module::import("torch.nn");
+    if (py::isinstance(self, nn.attr("ModuleList")) ||
+        py::isinstance(self, nn.attr("Sequential"))) {
+      ss << ". Did you forget to add it to __constants__? ";
+    }
+  }
+
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
       Method& m,
@@ -176,11 +184,18 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     const std::string type_str = typeString(self);
     std::stringstream ss;
     ss << kind() << " cannot be used as a tuple";
-    auto nn = py::module::import("torch.nn");
-    if (py::isinstance(self, nn.attr("ModuleList")) ||
-        py::isinstance(self, nn.attr("Sequential"))) {
-      ss << ". Did you forget to add it to __constants__? ";
-    }
+    checkForAddToConstantsError(ss);
+    throw ErrorReport(loc) << ss.str();
+  }
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Method& m,
+      const std::string& field) override {
+    const std::string type_str = typeString(self);
+    std::stringstream ss;
+    ss << "attribute lookup is not defined on " << kind();
+    checkForAddToConstantsError(ss);
     throw ErrorReport(loc) << ss.str();
   }
 
@@ -525,15 +540,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       throw ErrorReport()
           << "Attempted to inline a Module with parameters. "
              "Stateful modules to be inlined must be submodules of the callee.";
-    }
-    const auto script_class_type =
-        py::module::import("torch.jit").attr("ScriptClass");
-    const bool is_class_type = py::isinstance(obj, script_class_type);
-    if (is_class_type) {
-      const auto classname = py::cast<std::string>(py::getattr(obj, "_name"));
-      auto classType = ClassType::get(classname);
-      AT_ASSERT(classType);
-      return std::make_shared<ClassValue>(std::move(classType));
     }
     return std::make_shared<ModuleValue>(mod);
   } else if (py::isinstance<py::module>(obj)) {
@@ -981,7 +987,16 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<ClassTypePtr> classes;
         PythonPrint(oss, m, constants, classes, true);
         return std::make_pair(oss.str(), std::move(constants));
-      });
+      })
+      .def_property_readonly(
+          "code",
+          [](Method& self) {
+            std::ostringstream ss;
+            std::vector<at::Tensor> tensors;
+            std::vector<ClassTypePtr> classes;
+            PythonPrint(ss, self, tensors, classes, false);
+            return ss.str();
+          });
 
   m.def(
       "_jit_script_compile",
