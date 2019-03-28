@@ -3673,9 +3673,13 @@
   variants: method, function
 
 - func: nonzero(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  cpu_bool: True
+  cuda_bool: True
   matches_jit_signature: True
 
 - func: nonzero(Tensor self) -> Tensor
+  cpu_bool: True
+  cuda_bool: True
   matches_jit_signature: True
   variants: method, function
 

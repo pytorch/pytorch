@@ -36,6 +36,32 @@ class TestIndexing(TestCase):
         self.assertEqual(v[0].tolist(), [0, 3, 0, 4])
         self.assertEqual(v[1:].sum(), 0)
 
+    def test_bool_indices(self):
+        v = torch.randn(5, 7, 3)
+        boolIndices = torch.tensor([True, False, True, True, False], dtype=torch.bool)
+        self.assertEqual(v[boolIndices].shape, (3, 7, 3))
+        self.assertEqual(v[boolIndices], torch.stack([v[0], v[2], v[3]]))
+
+        v = torch.tensor([True, False, True], dtype=torch.bool)
+        boolIndices = torch.tensor([True, False, False], dtype=torch.bool)
+        intIndices = torch.tensor([1, 0, 0], dtype=torch.uint8)
+        self.assertEqual(v[boolIndices].shape, v[intIndices].shape)
+        self.assertEqual(v[boolIndices], v[intIndices])
+        self.assertEqual(v[boolIndices], tensor([True], dtype=torch.bool))
+
+    def test_bool_indices_accumulate(self):
+        mask = torch.zeros(size=(10, ), dtype=torch.bool)
+        y = torch.ones(size=(10, 10))
+        y.index_put_((mask, ), y[mask], accumulate=True)
+        self.assertEqual(y, torch.ones(size=(10, 10)))
+
+    def test_multiple_bool_indices(self):
+        v = torch.randn(5, 7, 3)
+        # note: these broadcast together and are transposed to the first dim
+        mask1 = torch.tensor([1, 0, 1, 1, 0], dtype=torch.bool)
+        mask2 = torch.tensor([1, 1, 1], dtype=torch.bool)
+        self.assertEqual(v[mask1, :, mask2].shape, (3, 7))
+
     def test_byte_mask(self):
         v = torch.randn(5, 7, 3)
         mask = torch.ByteTensor([1, 0, 1, 1, 0])
@@ -64,6 +90,7 @@ class TestIndexing(TestCase):
         num_ones = (c > 0).sum()
         r = v[c > 0]
         self.assertEqual(r.shape, (num_ones, 3))
+        self.assertEqual(r.dtype, torch.float64)
 
     def test_int_indices(self):
         v = torch.randn(5, 7, 3)
