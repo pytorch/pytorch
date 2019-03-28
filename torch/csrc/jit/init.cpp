@@ -122,7 +122,12 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
       .def(
           "_jit_pass_insert_observers",
-          [](std::shared_ptr<Graph>& g) { return InsertObserverNodes(g); })
+          [](std::shared_ptr<Graph>& g, py::function pp) {
+            Node* new_node =
+                g->createPythonOp(THPObjectPtr(pp.release().ptr()), "dd", {});
+            InsertObserverNodes(g, new_node);
+            new_node->destroy();
+          })
       .def(
           "_jit_pass_insert_fakequant",
           [](std::shared_ptr<Graph>& g) { return InsertFakeQuantNodes(g); })

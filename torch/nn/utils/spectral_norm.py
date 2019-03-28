@@ -48,9 +48,9 @@ class SpectralNorm(object):
         #     broadcast and used!
         #
         #     Therefore, to make the change propagate back, we rely on two
-        #     important bahaviors (also enforced via tests):
+        #     important behaviors (also enforced via tests):
         #       1. `DataParallel` doesn't clone storage if the broadcast tensor
-        #          is alreay on correct device; and it makes sure that the
+        #          is already on correct device; and it makes sure that the
         #          parallelized module is already on `device[0]`.
         #       2. If the out tensor in `out=` kwarg has correct shape, it will
         #          just fill in the values.

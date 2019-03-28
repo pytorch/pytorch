@@ -106,56 +106,6 @@ static THTensor *THTensor_(cloneColumnMajor)(THTensor *self, THTensor *src)
   return THTensor_(cloneColumnMajorNrows)(self, src, src->size(0));
 }
 
-void THTensor_(trtrs)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a,
-                      const char *uplo, const char *trans, const char *diag)
-{
-  int free_b = 0;
-  if (a == NULL) a = ra_;
-  if (b == NULL) b = rb_;
-  THArgCheck(THTensor_nDimensionLegacyAll(a) == 2, 2, "A should have 2 dimensions, but has %d",
-      THTensor_nDimensionLegacyAll(a));
-  THArgCheck(THTensor_nDimensionLegacyAll(b) == 1 || THTensor_nDimensionLegacyAll(b) == 2, 1, "B should have 1 or 2 "
-      "dimensions, but has %d", THTensor_nDimensionLegacyAll(b));
-  THArgCheck(a->size(0) == a->size(1), 2, "A should be square, but is %ldx%ld",
-      a->size(0), a->size(1));
-  THArgCheck(a->size(0) == b->size(0), 2, "A,B size incompatible - A has %ld "
-      "rows, B has %ld", a->size(0), b->size(0));
-
-  if (THTensor_nDimensionLegacyAll(b) == 1) {
-    b = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(b), b->storage_offset(), b->size(0),
-            b->stride(0), 1, 0);
-    free_b = 1;
-  }
-
-  int n, nrhs, lda, ldb, info;
-  THTensor *ra__; // working version of A matrix to be passed into lapack TRTRS
-  THTensor *rb__; // working version of B matrix to be passed into lapack TRTRS
-
-  ra__ = THTensor_(cloneColumnMajor)(ra_, a);
-  rb__ = THTensor_(cloneColumnMajor)(rb_, b);
-
-  n    = (int)ra__->size(0);
-  nrhs = (int)rb__->size(1);
-  lda  = n;
-  ldb  = n;
-
-  THLapack_(trtrs)(uplo[0], trans[0], diag[0], n, nrhs,
-                   ra__->data<scalar_t>(), lda,
-                   rb__->data<scalar_t>(), ldb, &info);
-
-
-  THLapackCheckWithCleanup("Lapack Error in %s : A(%d,%d) is zero, singular A",
-                           THCleanup(
-                              c10::raw::intrusive_ptr::decref(ra__);
-                              c10::raw::intrusive_ptr::decref(rb__);
-                              if (free_b) c10::raw::intrusive_ptr::decref(b);),
-                           "trtrs", info, info);
-
-  THTensor_(freeCopyTo)(ra__, ra_);
-  THTensor_(freeCopyTo)(rb__, rb_);
-  if (free_b) c10::raw::intrusive_ptr::decref(b);
-}
-
 void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 {
   int free_b = 0;
