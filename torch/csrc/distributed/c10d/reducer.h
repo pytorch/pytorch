@@ -31,7 +31,8 @@ class Reducer {
   // and the user wishes to reduce gradients in the backwards pass.
   // If they don't, and wish to accumulate gradients before reducing them,
   // a call to this function can simply be omitted.
-  void prepare_for_backward(const torch::autograd::Variable& output);
+  void prepare_for_backward(
+      const std::vector<torch::autograd::Variable>& outputs);
 
   // Returns the relative time in nanoseconds when gradients were ready,
   // with respect to the time `prepare_for_backward` was called. The outer
@@ -117,9 +118,9 @@ class Reducer {
   // in any of the vector fields in the bucket replica.
   struct BucketIndex {
     // Index into the `buckets_` variable.
-    int bucket_index;
+    size_t bucket_index;
     // Index of parameter in single bucket replica.
-    int intra_bucket_index;
+    size_t intra_bucket_index;
   };
 
   // Maps variable index to bucket indices. Bucketing across replicas is

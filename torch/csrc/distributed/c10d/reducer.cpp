@@ -306,7 +306,7 @@ void Reducer::initialize_buckets(std::vector<std::vector<size_t>> indices) {
 
       // Allocate bucket contents tensor.
       replica.contents = torch::autograd::make_variable_consuming(
-          at::empty({offset}, options));
+          at::empty({static_cast<long>(offset)}, options));
 
       // Add bucket replica to enclosing bucket.
       bucket.replicas.push_back(std::move(replica));
@@ -337,10 +337,11 @@ void Reducer::initialize_buckets(std::vector<std::vector<size_t>> indices) {
 //
 // Rough copy of torch::autograd::Engine::compute_dependencies.
 //
-void Reducer::prepare_for_backward(const torch::autograd::Variable& output) {
+void Reducer::prepare_for_backward(
+    const std::vector<torch::autograd::Variable>& outputs) {
   std::lock_guard<std::mutex> lock(mutex_);
   std::unordered_set<torch::autograd::Function*> seen;
-  std::vector<torch::autograd::Function*> queue{output.grad_fn().get()};
+  std::vector<torch::autograd::Function*> queue;
 
   // Reset accounting.
   has_queued_final_callback_ = false;
@@ -352,6 +353,14 @@ void Reducer::prepare_for_backward(const torch::autograd::Variable& output) {
       replica.pending = replica.variables.size();
     }
     bucket.pending = bucket.replicas.size();
+  }
+
+  // Seed queue with the grad functions of all outputs.
+  for (const auto& output : outputs) {
+    auto grad_fn = output.grad_fn();
+    if (grad_fn) {
+      queue.push_back(grad_fn.get());
+    }
   }
 
   // Traverse the autograd graph starting at the specified output.
