@@ -83,7 +83,7 @@ void expectCallsDecrement(TensorTypeId type_id) {
 }
 
 TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators().op(opSchema, kernel<IncrementKernel>(), dispatchKey(TensorType1()));
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", kernel<IncrementKernel>(), dispatchKey(TensorType1()));
   expectCallsIncrement(TensorType1());
 }
 

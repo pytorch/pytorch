@@ -71,6 +71,15 @@ public:
     op_(std::move(schema), std::forward<ConfigParameters>(configParameters)...);
     return std::move(*this);
   }
+  template<class... ConfigParameters>
+  RegisterOperators op(const std::string& schema, ConfigParameters&&... configParameters) && {
+    static_assert(guts::conjunction<detail::is_registration_config_parameter<guts::decay_t<ConfigParameters>>...>::value,
+      "Invalid argument passed to op(). Examples for valid arguments are c10::kernel(...) for defining a kernel "
+      " and c10::dispatchKey(...) for defining a dispatch key. Please see the documentation for registering c10 operators.");
+
+    op_(schema, std::forward<ConfigParameters>(configParameters)...);
+    return std::move(*this);
+  }
 
   template<class FuncType>
   C10_DEPRECATED_MESSAGE("Registering kernels via passing arguments to RegisterOperators(...) is deprecated. " \
@@ -183,6 +192,10 @@ private:
   void op_(FunctionSchema&& schema, ConfigParameters&&... configParameters) {
     registerOp_(std::move(schema), detail::make_registration_config(std::forward<ConfigParameters>(configParameters)...));
   }
+  template<class... ConfigParameters>
+  void op_(const std::string& schema, ConfigParameters&&... configParameters) {
+    registerOp_(schema, detail::make_registration_config(std::forward<ConfigParameters>(configParameters)...));
+  }
 
   template<class FuncType>
   void legacyAPIOp_(FunctionSchema&& schema, FuncType&& func) {
@@ -190,6 +203,7 @@ private:
   }
 
   void registerOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config);
+  void registerOp_(const std::string& schema, detail::KernelRegistrationConfig&& config);
 
   class OperatorRegistrar;
 
