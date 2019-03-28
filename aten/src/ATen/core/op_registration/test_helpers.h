@@ -4,8 +4,8 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/Functions.h>
 #include <ATen/core/ivalue.h>
+#include <c10/core/CPUAllocator.h>
 
 template<class... Inputs>
 inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
@@ -13,7 +13,7 @@ inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
 }
 
 inline at::Tensor dummyTensor(c10::TensorTypeId dispatch_key) {
-  auto* allocator = at::getCPUAllocator();
+  auto* allocator = c10::GetCPUAllocator();
   int64_t nelements = 1;
   auto dtype = caffe2::TypeMeta::Make<float>();
   auto storage_impl = c10::make_intrusive<c10::StorageImpl>(

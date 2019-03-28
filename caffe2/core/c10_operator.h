@@ -106,7 +106,6 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
 inline std::unique_ptr<c10::KernelCache> noCache() {
   return nullptr;
 }
-
 }
 }
 
@@ -181,9 +180,11 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
   static auto registry_##OperatorName##_##__COUNTER__ =                      \
       ::c10::RegisterOperators().op(                                         \
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
-          ::c10::kernel(&::caffe2::detail::call_caffe2_op_from_c10<          \
-                        ::caffe2::_c10_ops::schema_##OperatorName,           \
-                        OperatorClass>, &::caffe2::detail::noCache),         \
+          ::c10::kernel(                                                     \
+              &::caffe2::detail::call_caffe2_op_from_c10<                    \
+                  ::caffe2::_c10_ops::schema_##OperatorName,                 \
+                  OperatorClass>,                                            \
+              &::caffe2::detail::noCache),                                   \
           ::c10::dispatchKey(::c10::CPUTensorId()));
 
 #define C10_REGISTER_CAFFE2_OPERATOR_CUDA(OperatorName, OperatorClass)       \
@@ -191,23 +192,27 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
   static auto registry_##OperatorName##_##__COUNTER__ =                      \
       ::c10::RegisterOperators().op(                                         \
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
-          ::c10::kernel(&::caffe2::detail::call_caffe2_op_from_c10<          \
-                        ::caffe2::_c10_ops::schema_##OperatorName,           \
-                        OperatorClass>, &::caffe2::detail::noCache),         \
+          ::c10::kernel(                                                     \
+              &::caffe2::detail::call_caffe2_op_from_c10<                    \
+                  ::caffe2::_c10_ops::schema_##OperatorName,                 \
+                  OperatorClass>,                                            \
+              &::caffe2::detail::noCache),                                   \
           ::c10::dispatchKey(::c10::CUDATensorId()));
 
 // You should never manually call the C10_REGISTER_CAFFE2_OPERATOR_HIP macro.
 // The C10_REGISTER_CAFFE2_OPERATOR_CUDA macro from above will be automatically
 // rewritten to C10_REGISTER_CAFFE2_OPERATOR_HIP by hipify.
-#define C10_REGISTER_CAFFE2_OPERATOR_HIP(OperatorName, OperatorClass)              \
-  /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */       \
-  static auto registry_##OperatorName##_##__COUNTER__ = ::c10::RegisterOperators() \
-    .op(::caffe2::_c10_ops::schema_##OperatorName(),                               \
-        ::c10::kernel(&::caffe2::detail::call_caffe2_op_from_c10<                  \
-            ::caffe2::_c10_ops::schema_##OperatorName,                             \
-            OperatorClass>, &::caffe2::detail::noCache),                           \
-        ::c10::dispatchKey(::c10::HIPTensorId()                                    \
-    );
+#define C10_REGISTER_CAFFE2_OPERATOR_HIP(OperatorName, OperatorClass)        \
+  /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */ \
+  static auto registry_##OperatorName##_##__COUNTER__ =                      \
+      ::c10::RegisterOperators().op(                                         \
+          ::caffe2::_c10_ops::schema_##OperatorName(),                       \
+          ::c10::kernel(                                                     \
+              &::caffe2::detail::call_caffe2_op_from_c10<                    \
+                  ::caffe2::_c10_ops::schema_##OperatorName,                 \
+                  OperatorClass>,                                            \
+              &::caffe2::detail::noCache),                                   \
+          ::c10::dispatchKey(::c10::HIPTensorId()));
 
 #else
 // Don't use c10 dispatcher on mobile because of binary size
