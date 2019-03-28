@@ -42,3 +42,16 @@ TEST_F(AutogradTest, CanPassCustomGradientInputs) {
   z.sum().backward(torch::ones({}) * 2);
   ASSERT_TRUE(x.grad().allclose(y * 2));
 }
+
+TEST_F(AutogradTest, CannotModifyVersionInVarTypeMode) {
+  y.add_(1);
+  ASSERT_THROWS_WITH(z.sum().backward(), "modified by an inplace operation");
+}
+
+TEST_F(AutogradTest, CannotModifyVersionInNonVarTypeMode) {
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    y.add_(1);  // This uses non-Variable type dispatch
+  }
+  ASSERT_THROWS_WITH(z.sum().backward(), "modified by an inplace operation");
+}
