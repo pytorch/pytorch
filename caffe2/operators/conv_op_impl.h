@@ -21,7 +21,6 @@ template <typename T, class Context>
 bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(INPUT);
   const auto& filter = Input(FILTER);
-  auto* Y = Output(0);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int G = group_;
@@ -44,10 +43,11 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     CAFFE_ENFORCE_EQ(filter.dim32(i + 2), kernel_[i]);
     kernel_size *= kernel_[i];
   }
-  ConvPoolOpBase<Context>::SetOutputSize(X, Y, M);
+
+  auto output_sizes = ConvPoolOpBase<Context>::GetOutputSize(X, M);
+  auto* Y = Output(0, output_sizes, at::dtype<T>());
 
   if (N == 0) {
-    Y->template mutable_data<T>();
     return true;
   }
 
@@ -196,7 +196,6 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       "Only 1-3d convolution is supported for NHWC storage type");
   const Tensor& X = Input(INPUT);
   const auto& filter = Input(FILTER);
-  Tensor* Y = Output(0);
   const int N = X.dim32(0), C = X.dim32(X.dim() - 1);
   const int G = group_;
   CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
@@ -218,13 +217,13 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     CAFFE_ENFORCE_EQ(filter.dim32(i + 1), kernel_[i]);
     kernel_size *= kernel_[i];
   }
-  ConvPoolOpBase<Context>::SetOutputSize(X, Y, M);
+
+  auto output_sizes = ConvPoolOpBase<Context>::GetOutputSize(X, M);
+  auto* Y = Output(0, output_sizes, at::dtype<T>());
 
   if (N == 0) {
-    Y->template mutable_data<T>();
     return true;
   }
-
   const vector<int> Y_dims = GetDims(*Y);
   const int X_HxW = X.numel() / (N * C);
   const int Y_HxW = Y->numel() / (N * M);
