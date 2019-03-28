@@ -2917,6 +2917,9 @@ class TestAutograd(TestCase):
         a = torch.rand(1, requires_grad=True)
         b = torch.rand(1, requires_grad=True)
 
+        # Increase the next function sequence number.
+        a + 1 + 2 + 3 + 4 + 5
+
         a = Log.apply(a, 'a')
         b = checkpoint(lambda b: Log.apply(b, 'b'), b)
         out = torch.cat((a, b)).sum()
