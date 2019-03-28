@@ -2921,15 +2921,15 @@ class TestAutograd(TestCase):
         b = checkpoint(lambda b: Log.apply(b, 'b'), b)
         out = torch.cat((a, b)).sum()
 
-        #           +--> Log --> a
-        # Sum --> Cat
-        #           +--> Checkpoint(Log) --> b
+        #                 +--> Log[a] --> a
+        # Sum --> Cat[a, b]
+        #                 +--> Checkpoint(Log[b]) --> b
         out.backward()
 
         assert timeline == \
             ['a:forward', 'b:forward', 'b:forward', 'b:backward', 'a:backward']
         #    |----------------------|  |-----------------------|  |----------|
-        #          forward pass             b's checkpoint        a's backward
+        #          forward pass            Checkpoint(Log[b])        Log[a]
 
 
 def index_variable(shape, max_indices):
