@@ -878,7 +878,7 @@ class TestDataLoader(TestCase):
         arr = [True, False]
         collated = _utils.collate.default_collate(arr)
         self.assertEqual(collated, torch.tensor(arr))
-        self.assertEqual(collated.dtype, torch.bool)
+        self.assertEqual(collated.dtype, torch.uint8)
 
         # Should be a no-op
         arr = ['a', 'b', 'c']

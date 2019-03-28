@@ -2808,14 +2808,6 @@ class _TestTorchMixin(object):
         b = torch.tensor([-1, -1.1, 0, 1, 1.1], dtype=torch.bool)
         self.assertEqual(a, b)
 
-        # test boolean tensor creating without dtype specification
-        c = torch.tensor([True])
-        self.assertEqual(c.dtype, torch.bool)
-
-        d = torch.tensor([True, True, False, True, True])
-        self.assertEqual(a, d)
-        self.assertEqual(d.dtype, torch.bool)
-
     def test_tensor_factory_copy_var(self):
 
         def check_copy(copy, is_leaf, requires_grad, data_ptr=None):
@@ -2849,7 +2841,7 @@ class _TestTorchMixin(object):
             self.assertIs(default_dtype, torch.tensor(()).dtype)
             self.assertIs(default_dtype, torch.tensor(5.).dtype)
             self.assertIs(torch.int64, torch.tensor(5).dtype)
-            self.assertIs(torch.bool, torch.tensor(True).dtype)
+            self.assertIs(torch.uint8, torch.tensor(True).dtype)
             self.assertIs(torch.int32, torch.tensor(5, dtype=torch.int32).dtype)
             self.assertIs(default_dtype, torch.tensor(((7, 5), (9, 5.))).dtype)
             self.assertIs(default_dtype, torch.tensor(((5., 5), (3, 5))).dtype)
@@ -9918,7 +9910,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_to_numpy_bool(self):
-        x = torch.tensor([True, False])
+        x = torch.tensor([True, False], dtype=torch.bool)
         self.assertEqual(x.dtype, torch.bool)
 
         y = x.numpy()
@@ -9927,7 +9919,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(x[i], y[i])
 
         # test for a scalar case
-        x = torch.tensor([True])
+        x = torch.tensor([True], dtype=torch.bool)
         self.assertEqual(x.dtype, torch.bool)
 
         y = x.numpy()
