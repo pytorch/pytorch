@@ -54,6 +54,11 @@ PyObject* c10d_init(PyObject* _unused) {
           "prepare_for_backward",
           &::c10d::Reducer::prepare_for_backward,
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "prepare_for_backward",
+          [](::c10d::Reducer& reducer, const torch::autograd::Variable& output)
+              -> void { reducer.prepare_for_backward({output}); },
+          py::call_guard<py::gil_scoped_release>())
       .def("get_backward_stats", &::c10d::Reducer::get_backward_stats);
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
