@@ -741,7 +741,7 @@ void generate_keys(
 
   for(int i = 0; i < n; i++){
     scalar_t u = THRandom_standard_uniform(generator);
-    keys[i] = (scalar_t) std::pow(u, 1/weights[i]);
+    keys[i] = weights[i] > 0? (scalar_t) std::pow(u, 1/weights[i]):-1;
   }
 
 }

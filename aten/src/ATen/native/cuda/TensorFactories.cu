@@ -10,6 +10,7 @@
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
 #include <THC/THCGenerator.hpp>
+#include <THC/THCTensorRandom.h>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #include <thrust/execution_policy.h>
@@ -21,7 +22,6 @@
 #include <cstddef>
 #include <cmath>
 
-THCGenerator* THCRandom_getGenerator(THCState* state);
 int const threadsPerBlock = 512;
 
 namespace at {
@@ -438,7 +438,7 @@ __global__ void generate_keys(
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
   float u = curand_uniform(state);
-  keys[thread_id] = (scalar_t) __powf(u, (float) 1/weights[thread_id]);
+  keys[thread_id] = weights[thread_id] > 0? (scalar_t) __powf(u, (float) 1/weights[thread_id]):-1;
 }
 
 __global__ void generate_reservoir(
@@ -482,7 +482,7 @@ Tensor reservoir_sampling_cuda(
   dim3 threads(threadsPerBlock);
 
   THCState *state = at::globalContext().getTHCState();
-  THCGenerator *generator = THCRandom_getGenerator(state);
+  curandStateMtgp32 *gen_states = THCRandom_generatorStates(state);
 
   if (weights.numel() == 0){
     Tensor indices_n = at::arange({n}, options);
@@ -507,7 +507,7 @@ Tensor reservoir_sampling_cuda(
     generate_samples<<<blocks, threads>>>(
       samples.data<int64_t>(),
       split,
-      generator->state.gen_states
+      gen_states
     );
 
     generate_reservoir<<<1, 1>>>(
@@ -559,7 +559,7 @@ Tensor reservoir_sampling_cuda(
       generate_keys<scalar_t><<<all_blocks, threads>>>(
         keys.data<scalar_t>(),
         weights.data<scalar_t>(),
-        generator->state.gen_states
+        gen_states
       );
     });
 
