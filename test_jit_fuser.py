@@ -888,6 +888,3 @@ class TestFuser(JitTestCase):
         ge = self.checkScript(scaleshift, inputs)
         self.assertGraphContainsExactly(
             ge.graph_for(*inputs), 'prim::FusionGroup', 0, consider_subgraphs=True)
-
-    def test_failure(self):
-        self.assertTrue(false)
