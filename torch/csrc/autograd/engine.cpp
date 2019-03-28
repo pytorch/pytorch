@@ -43,6 +43,26 @@ static thread_local int worker_device = NO_DEVICE;
 // gradient checkpointing feature only.
 static thread_local bool checkpoint_valid = true;
 
+// This counter is used to sort tasks with aware of the reentrant backwards
+// problem. Newly created tasks in a nested backward will be evaluated prior to
+// the already queued tasks as expected.
+static thread_local uint16_t BackwardsEntered_depth_ = 0;
+
+// Counts how deeply nested backwards.
+struct BackwardsEntered {
+  BackwardsEntered() {
+    BackwardsEntered_depth_++;
+  }
+
+  ~BackwardsEntered() {
+    BackwardsEntered_depth_--;
+  }
+
+  static uint16_t depth() {
+    return BackwardsEntered_depth_;
+  }
+};
+
 // XXX: Changes to the way multithreading works in execute should be done with
 // great care. Right now the implementation guarantees that a single function's
 // apply will never be entered concurrently (even if multiple graphs are
@@ -57,24 +77,31 @@ struct FunctionTask {
   // gradients flowing here.  Once all the dependencies are finished, we
   // use the contents of this buffer to run the function.
   InputBuffer inputs;
+  uint16_t depth;
 
   FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs)
     : base(base)
     , fn(std::move(fn))
-    , inputs(std::move(inputs)) {}
+    , inputs(std::move(inputs))
+    , depth(BackwardsEntered::depth()) {}
 };
 
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
-// Empty FunctionTask are first.
 struct CompareFunctionTaskTime {
   bool operator()(FunctionTask const & t1, FunctionTask const & t2) {
+    // Empty FunctionTask are first.
     if (!t1.fn) {
       return false;
     } else if (!t2.fn) {
       return true;
-    } else {
-      return t1.fn->sequence_nr() < t2.fn->sequence_nr();
     }
+
+    // A task created in backwards is first.
+    if (t1.depth < t2.depth) {
+      return true;
+    }
+
+    return t1.fn->sequence_nr() < t2.fn->sequence_nr();
   }
 };
 
@@ -569,6 +596,9 @@ auto Engine::execute(const edge_list& roots,
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
   });
+
+  // Increases the backwards entrance counter.
+  BackwardsEntered _;
 
   // Callbacks are only valid for the duration of this run and should always be cleared
   ClearCallbacks _cb_guard(final_callbacks, post_callbacks_lock);
