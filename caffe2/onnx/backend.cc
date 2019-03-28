@@ -362,8 +362,7 @@ Caffe2Backend::get_special_operators() const {
               {"Dropout", &Caffe2Backend::CreateDropout},
               {"LRN", &Caffe2Backend::CreateLRN},
               {"DynamicSlice", &Caffe2Backend::CreateDynamicSlice},
-              {"RandomNormal", &Caffe2Backend::CreateRandomNormal},
-              {"Where", &Caffe2Backend::CreateWhereOp}};
+              {"RandomNormal", &Caffe2Backend::CreateRandomNormal}};
   return kSpecialOperators;
 }
 
@@ -579,21 +578,6 @@ Caffe2Ops Caffe2Backend::CreateRandomNormal(
     attributes.remove("scale");
   }
   return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
-}
-
-Caffe2Ops Caffe2Backend::CreateWhereOp(
-    OnnxNode* onnx_node,
-    const ConversionContext& ctx) {
-  // The native Caffe2 op doesn't support broadcasting, so we defer the handling
-  // of this op to the ATen library that does.
-  onnx::NodeProto converted;
-  converted.CopyFrom(onnx_node->node);
-  converted.set_op_type("ATen");
-  onnx::AttributeProto* attr = converted.add_attribute();
-  attr->set_name("operator");
-  attr->set_s("where");
-  OnnxNode new_node(converted);
-  return CommonOnnxNodeToCaffe2Ops(&new_node, ctx);
 }
 
 Caffe2Ops Caffe2Backend::CreateReciprocal(
