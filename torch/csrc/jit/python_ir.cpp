@@ -384,7 +384,7 @@ void initPythonIRBindings(PyObject* module_) {
             return node;
           })
       .VS(copyMetadata)
-      .VS(isTensor)
+      .VS(isCompleteTensor)
       .VS(requires_grad)
       .def("toIValue", [](Value& n) { return toIValue(&n); })
       .def("type", [](Value& v) { return v.type(); });
@@ -422,16 +422,8 @@ void initPythonIRBindings(PyObject* module_) {
           [](Block& b) {
             return py::make_iterator(b.outputs().begin(), b.outputs().end());
           })
-      .def(
-          "returnNode",
-          [](Block& b) {
-            return b.return_node();
-          })
-      .def(
-          "paramNode",
-          [](Block& b) {
-            return b.param_node();
-          });
+      .def("returnNode", [](Block& b) { return b.return_node(); })
+      .def("paramNode", [](Block& b) { return b.param_node(); });
 
 #define NS(name) def(#name, &Node ::name)
   py::class_<Node, std::unique_ptr<Node, py::nodelete>>(m, "Node")
