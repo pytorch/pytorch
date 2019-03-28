@@ -9,6 +9,7 @@
 #include <functional>
 #include <numeric>
 #include <vector>
+#include <limits>
 
 namespace at {
 namespace native {
@@ -26,7 +27,7 @@ static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor
   int int_info = info.squeeze_().item<int32_t>();
   AT_CHECK(int_info >= 0, "LU factorization (getrf) failed with info = ", int_info);
   auto n = self.size(0);
-  auto num_exchanges = (at::arange(1, n + 1, p.type()) != p).nonzero().size(0);
+  auto num_exchanges = (at::arange(1, n + 1, p.options()) != p).nonzero().size(0);
   if (num_exchanges % 2 == 1) {
     return std::make_tuple(-1., lu.diag(), int_info);
   } else {
@@ -44,7 +45,7 @@ Tensor det(const Tensor& self) {
   int info;
   std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
   if (info > 0) {
-    return at::zeros({}, self.type());
+    return at::zeros({}, self.options());
   } else {
     return diag_U.prod().mul_(det_P);
   }
@@ -56,16 +57,18 @@ Tensor logdet(const Tensor& self) {
            "logdet(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
            "of floating types");
   double det_P;
-  Tensor diag_U, det;
+  Tensor diag_U;
   int info;
   std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
   if (info > 0) {
-    det = at::zeros({}, self.type());
-  } else {
-    det = diag_U.prod().mul_(det_P);
+    return at::full({}, -std::numeric_limits<double>::infinity(), self.options());
   }
-  if (det.sign().item<double>() <= 0) {
-    return det.log_();  // in order to get proper -inf (det=0) or nan (det<0)
+  // `det_sign` is the sign of the determinant. We work on `diag_U.sign()` for
+  // numerical stability when diag_U has a lot small values.
+  auto det_sign = diag_U.sign().prod().mul_(det_P);
+  // This synchronizes on GPU, but `_lu_det_P_diag_U_info` above already synchronizes
+  if (det_sign.item<double>() <= 0) {
+    return det_sign.log_();  // get proper nan (det<0) or -inf (det=0)
   } else {
     return diag_U.abs_().log_().sum();
   }
@@ -77,15 +80,17 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
            "slogdet(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
            "of floating types");
   double det_P;
-  Tensor diag_U, det;
+  Tensor diag_U;
   int info;
   std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
   if (info > 0) {
     return std::make_tuple(at::zeros({}, self.options()),
-                           at::empty({}, self.options()).fill_(-INFINITY));
+                           at::full({}, -std::numeric_limits<double>::infinity(), self.options()));
   } else {
-    det = diag_U.prod().mul_(det_P);
-    return std::make_tuple(det.sign(), diag_U.abs_().log_().sum());
+    // `det_sign` is the sign of the determinant. We work on `diag_U.sign()` for
+    // numerical stability when diag_U has a lot small values.
+    auto det_sign = diag_U.sign().prod().mul_(det_P);
+    return std::make_tuple(det_sign, diag_U.abs_().log_().sum());
   }
 }
 
@@ -309,9 +314,9 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
         });
     }
   } else if (at::hasMKL() && at::native::is_floating_point(self_or_result)
-	     && batch_items_contiguous_or_transposed(batch1)
-	     && batch_items_contiguous_or_transposed(batch2)
-	     && self_or_result.is_contiguous()) {
+            && batch_items_contiguous_or_transposed(batch1)
+            && batch_items_contiguous_or_transposed(batch2)
+            && self_or_result.is_contiguous()) {
     at::native::_baddbmm_mkl_(self_or_result, batch1, batch2, beta, alpha);
   } else { // split along batch dimension
     if (is_bmm_out) {

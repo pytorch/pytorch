@@ -2024,18 +2024,18 @@ torch.solve(B, A, out=None) -> (Tensor, Tensor)
 
 This function returns the solution to the system of linear
 equations represented by :math:`AX = B` and the LU factorization of
-A, in order as a tuple `X, LU`.
+A, in order as a namedtuple `solution, LU`.
 
 `LU` contains `L` and `U` factors for LU factorization of `A`.
 
 `torch.solve(B, A)` can take in 2D inputs `B, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
-batched outputs `X, LU`.
+batched outputs `solution, LU`.
 
 .. note::
 
     Irrespective of the original strides, the returned matrices
-    `X` and `LU` will be transposed, i.e. with strides like
+    `solution` and `LU` will be transposed, i.e. with strides like
     `B.contiguous().transpose(-1, -2).strides()` and
     `A.contiguous().transpose(-1, -2).strides()` respectively.
 
@@ -2222,6 +2222,22 @@ Example::
     >>> z = torch.matmul(x, y)
     >>> torch.max(torch.abs(z - torch.eye(4).expand_as(x))) # Max non-zero
     tensor(1.9073e-06)
+""")
+
+add_docstr(torch.isnan,
+           r"""
+Returns a new tensor with boolean elements representing if each element is `NaN` or not.
+
+Arguments:
+    tensor (Tensor): A tensor to check
+
+Returns:
+    Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `NaN` elements.
+
+Example::
+
+    >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
+    tensor([ 0,  1,  0], dtype=torch.uint8)
 """)
 
 add_docstr(torch.is_floating_point,
@@ -4337,8 +4353,9 @@ If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 If :attr:`descending` is ``True`` then the elements are sorted in descending
 order by value.
 
-A tuple of (sorted_tensor, sorted_indices) is returned, where the
-sorted_indices are the indices of the elements in the original `input` tensor.
+A namedtuple of (values, indices) is returned, where the `values` are the
+sorted values and `indices` are the indices of the elements in the original
+`input` tensor.
 
 Args:
     input (Tensor): the input tensor
@@ -5002,7 +5019,7 @@ If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 
 If :attr:`largest` is ``False`` then the `k` smallest elements are returned.
 
-A tuple of `(values, indices)` is returned, where the `indices` are the indices
+A namedtuple of `(values, indices)` is returned, where the `indices` are the indices
 of the elements in the original `input` tensor.
 
 The boolean option :attr:`sorted` if ``True``, will make sure that the returned
@@ -5025,7 +5042,7 @@ Example::
     >>> x
     tensor([ 1.,  2.,  3.,  4.,  5.])
     >>> torch.topk(x, 3)
-    (tensor([ 5.,  4.,  3.]), tensor([ 4,  3,  2]))
+    torch.return_types.topk(values=tensor([5., 4., 3.]), indices=tensor([4, 3, 2]))
 """)
 
 add_docstr(torch.trace,
@@ -5071,6 +5088,59 @@ Example::
     tensor([[ 1.0028, -0.1669],
             [-0.9893,  0.7299],
             [ 0.5809,  0.4942]])
+""")
+
+add_docstr(torch.triangular_solve,
+           r"""
+triangular_solve(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
+
+Solves a system of equations with a triangular coefficient matrix :math:`A`
+and multiple right-hand sides :attr:`b`.
+
+In particular, solves :math:`AX = b` and assumes :math:`A` is upper-triangular
+with the default keyword arguments.
+
+`torch.triangular_solve(b, A)` can take in 2D inputs `b, A` or inputs that are
+batches of 2D matrices. If the inputs are batches, then returns
+batched outputs `X`
+
+.. note::
+
+    The :attr:`out` keyword only supports 2D matrix inputs, that is,
+    `b, A` must be 2D matrices.
+
+Args:
+    A (Tensor): the input triangular coefficient matrix of size :math:`(*, m, m)`
+                where :math:`*` is zero or more batch dimensions
+    b (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
+                :math:`*` is zero of more batch dimensions
+    upper (bool, optional): whether to solve the upper-triangular system
+        of equations (default) or the lower-triangular system of equations. Default: ``True``.
+    transpose (bool, optional): whether :math:`A` should be transposed before
+        being sent into the solver. Default: ``False``.
+    unitriangular (bool, optional): whether :math:`A` is unit triangular.
+        If True, the diagonal elements of :math:`A` are assumed to be
+        1 and not referenced from :math:`A`. Default: ``False``.
+
+Returns:
+    A tuple :math:`(X, M)` where :math:`M` is a clone of :math:`A` and :math:`X`
+    is the solution to :math:`AX = b` (or whatever variant of the system of
+    equations, depending on the keyword arguments.)
+
+Examples::
+
+    >>> A = torch.randn(2, 2).triu()
+    >>> A
+    tensor([[ 1.1527, -1.0753],
+            [ 0.0000,  0.7986]])
+    >>> b = torch.randn(2, 3)
+    >>> b
+    tensor([[-0.0210,  2.3513, -1.5492],
+            [ 1.5429,  0.7403, -1.0243]])
+    >>> torch.triangular_solve(b, A)
+    (tensor([[ 1.7840,  2.9045, -2.5405],
+            [ 1.9319,  0.9269, -1.2826]]), tensor([[ 1.1527, -1.0753],
+            [ 0.0000,  0.7986]]))
 """)
 
 add_docstr(torch.tril,
@@ -5290,59 +5360,6 @@ Example::
     tensor([[0, 0, 1],
             [1, 2, 2]])
 """.format(**factory_common_args))
-
-add_docstr(torch.trtrs,
-           r"""
-trtrs(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
-
-Solves a system of equations with a triangular coefficient matrix :math:`A`
-and multiple right-hand sides :attr:`b`.
-
-In particular, solves :math:`AX = b` and assumes :math:`A` is upper-triangular
-with the default keyword arguments.
-
-`torch.trtrs(b, A)` can take in 2D inputs `b, A` or inputs that are
-batches of 2D matrices. If the inputs are batches, then returns
-batched outputs `X`
-
-.. note::
-
-    The :attr:`out` keyword only supports 2D matrix inputs, that is,
-    `b, A` must be 2D matrices.
-
-Args:
-    A (Tensor): the input triangular coefficient matrix of size :math:`(*, m, m)`
-                where :math:`*` is zero or more batch dimensions
-    b (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
-                :math:`*` is zero of more batch dimensions
-    upper (bool, optional): whether to solve the upper-triangular system
-        of equations (default) or the lower-triangular system of equations. Default: ``True``.
-    transpose (bool, optional): whether :math:`A` should be transposed before
-        being sent into the solver. Default: ``False``.
-    unitriangular (bool, optional): whether :math:`A` is unit triangular.
-        If True, the diagonal elements of :math:`A` are assumed to be
-        1 and not referenced from :math:`A`. Default: ``False``.
-
-Returns:
-    A tuple :math:`(X, M)` where :math:`M` is a clone of :math:`A` and :math:`X`
-    is the solution to :math:`AX = b` (or whatever variant of the system of
-    equations, depending on the keyword arguments.)
-
-Examples::
-
-    >>> A = torch.randn(2, 2).triu()
-    >>> A
-    tensor([[ 1.1527, -1.0753],
-            [ 0.0000,  0.7986]])
-    >>> b = torch.randn(2, 3)
-    >>> b
-    tensor([[-0.0210,  2.3513, -1.5492],
-            [ 1.5429,  0.7403, -1.0243]])
-    >>> torch.trtrs(b, A)
-    (tensor([[ 1.7840,  2.9045, -2.5405],
-            [ 1.9319,  0.9269, -1.2826]]), tensor([[ 1.1527, -1.0753],
-            [ 0.0000,  0.7986]]))
-""")
 
 add_docstr(torch.trunc,
            r"""
@@ -5784,18 +5801,22 @@ Arguments:
     A (Tensor): The input 2D square tensor
 
 Returns:
-    A tuple containing the sign of the determinant, and the log value of the
-    absolute determinant.
+    A namedtuple (sign, logabsdet) containing the sign of the determinant, and the log
+    value of the absolute determinant.
 
 Example::
 
     >>> A = torch.randn(3, 3)
+    >>> A
+    tensor([[ 0.0032, -0.2239, -1.1219],
+            [-0.6690,  0.1161,  0.4053],
+            [-1.6218, -0.9273, -0.0082]])
     >>> torch.det(A)
-    tensor(-4.8215)
+    tensor(-0.7576)
     >>> torch.logdet(A)
     tensor(nan)
     >>> torch.slogdet(A)
-    (tensor(-1.), tensor(1.5731))
+    torch.return_types.slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))
 """)
 
 add_docstr(torch.pinverse,

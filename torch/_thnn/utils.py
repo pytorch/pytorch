@@ -95,14 +95,14 @@ def parse_header(path):
     generic_functions = []
     for l, c in lines:
         if l.startswith('TH_API void THNN_'):
-            fn_name = l.lstrip('TH_API void THNN_')
+            fn_name = l[len('TH_API void THNN_'):]
             if fn_name[0] == '(' and fn_name[-2] == ')':
                 fn_name = fn_name[1:-2]
             else:
                 fn_name = fn_name[:-1]
             generic_functions.append(Function(fn_name))
         elif l.startswith('THC_API void THNN_'):
-            fn_name = l.lstrip('THC_API void THNN_')
+            fn_name = l[len('THC_API void THNN_'):]
             if fn_name[0] == '(' and fn_name[-2] == ')':
                 fn_name = fn_name[1:-2]
             else:

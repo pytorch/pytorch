@@ -17,6 +17,7 @@
 
 #include <c10/util/Optional.h>
 
+#include <atomic>
 #include <climits>
 #include <set>
 
@@ -402,7 +403,8 @@ struct Environment {
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
-          {"rangelist", std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
+          {"rangelist",
+           std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
       };
       auto it = globals.find(ident);
       if (it != globals.end()) {
@@ -543,6 +545,7 @@ struct to_ir {
   Resolver resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
   std::unordered_map<double, Value*> fp_constants;
+  ScriptTypeParser typeParser_;
 
   // Singly-linked list of environments. This top element contains a member
   // `next` that points to the most immediate enclosing scope's value.
@@ -658,11 +661,12 @@ struct to_ir {
       c10::optional<int32_t> N;
 
       // BroadcastList list can only appear at the argument level
-      if (auto maybe_broad_list = parseBroadcastList(decl_arg.type())) {
+      if (auto maybe_broad_list =
+              typeParser_.parseBroadcastList(decl_arg.type())) {
         type = maybe_broad_list->first;
         N = maybe_broad_list->second;
       } else {
-        type = parseTypeFromExpr(decl_arg.type());
+        type = typeParser_.parseTypeFromExpr(decl_arg.type());
         N = c10::nullopt;
       }
       c10::optional<IValue> default_value = c10::nullopt;
@@ -688,10 +692,10 @@ struct to_ir {
     if (!decl.return_type().present())
       return {};
 
-    if (parseBroadcastList(decl.return_type().get()))
+    if (typeParser_.parseBroadcastList(decl.return_type().get()))
       throw ErrorReport(decl.return_type().range())
           << "Broadcastable lists cannot appear as a return type";
-    auto parsed_type = parseTypeFromExpr(decl.return_type().get());
+    auto parsed_type = typeParser_.parseTypeFromExpr(decl.return_type().get());
     return {Argument(
         "",
         parsed_type,
@@ -969,6 +973,50 @@ struct to_ir {
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
+  Value* emitListComprehension(const ListComp& lc) {
+    // this avoids a race condition where we would re-use the same temp name
+    static std::atomic<size_t> tmp_count{0};
+    const auto tmp_name =
+        std::string("___list_acc") + std::to_string(tmp_count++);
+    const auto list_value = emitExpr(lc.iter());
+    if (list_value->type()->kind() != TypeKind::ListType) {
+      // TODO: constraining iterators to be simple lists for now
+      // as it makes easy to get list's element type.
+      throw ErrorReport(lc.range())
+          << "iterator expression is expected to be a list";
+    }
+    auto elem_types = list_value->type()->containedTypes();
+    // TODO: users can easily change the type to (x,1) or float(x)
+    // as in `float(x) for x in my_list_of_ints`
+    // eventually, we would probably want to temporarily inject x
+    // so we can evaluate the generator expression (e.g. `float(x)`) depending
+    // on x
+
+    // given `[x*2 for x in my_list]` this generates the following AST:
+    // __list_acc = []
+    // for x in my_list:
+    //  __list_acc.append(x*2)
+    const auto n = graph->insertNode(
+        graph->createList(elem_types.at(0), at::ArrayRef<Value*>{}));
+    environment_stack->setVar(lc.range(), tmp_name, n->output());
+    const auto tmp_list_ident = Ident::create(lc.range(), tmp_name);
+    const auto tmp_list_var = Var::create(lc.range(), tmp_list_ident);
+    const auto append_ident = Ident::create(lc.range(), "append");
+    const auto dot_op = Select::create(lc.range(), tmp_list_var, append_ident);
+    const auto append_args_list = List<Expr>::create(lc.range(), {lc.elt()});
+    const auto append_attrs = List<Attribute>::create(lc.range(), {});
+    const auto apply_append =
+        Apply::create(lc.range(), dot_op, append_args_list, append_attrs);
+    const auto expr_stmt = ExprStmt::create(lc.range(), apply_append);
+    const auto stmt_list = List<Stmt>::create(lc.range(), {expr_stmt});
+    const auto iters_list = List<Expr>::create(lc.range(), {lc.iter()});
+    const auto targets_list = List<Expr>::create(lc.range(), {lc.target()});
+    const auto for_loop =
+        For::create(lc.range(), targets_list, iters_list, stmt_list);
+    emitFor(for_loop);
+    return n->output();
+  }
+
   // Insert subtyping refinements
   void insertRefinements(const Refinements& ref) {
     for (const auto& name_mappings : ref.mappings_) {
@@ -992,21 +1040,32 @@ struct to_ir {
     const auto first_bool_info = findRefinements(first_expr);
     Value* first_value = emitCond(Expr(first_expr));
 
+    // if the second expr in the short circuit is not evaluated,
+    // than the first expression is False if the short circuit
+    // is an `and` and True if the short circuit is an `or`.
+    // `False and expr` -> False, `True or expr` -> True
+    //
+    // inserting it as a constant makes optimization easier
+
+    Value* first_value_returned;
+
     const Refinements* first_expr_refinements;
     const Refinements* second_expr_refinements;
     // if it's an OR the first expr is emitted in the true branch
     // and the second expr in the false branch, if it's an AND the opposite
     if (is_or) {
+      first_value_returned = graph->insertConstant(true, nullptr, loc);
       first_expr_refinements = &first_bool_info.true_refinements_;
       second_expr_refinements = &first_bool_info.false_refinements_;
     } else {
+      first_value_returned = graph->insertConstant(false, nullptr, loc);
       first_expr_refinements = &first_bool_info.false_refinements_;
       second_expr_refinements = &first_bool_info.true_refinements_;
     }
 
     auto get_first_expr = [&] {
       insertRefinements(*first_expr_refinements);
-      return first_value;
+      return first_value_returned;
     };
 
     auto get_second_expr = [&] {
@@ -1962,7 +2021,7 @@ struct to_ir {
       return emitForkExpr(loc, forked, inputs, attributes);
     } else if (auto annotate_value = dynamic_cast<AnnotateValue*>(sv.get())) {
       checkApplyExpr(apply, loc);
-      TypePtr type = parseTypeFromExpr(apply.inputs()[0]);
+      TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
       Value* expr = tryConvertToType(
           apply.range(),
           *graph,
@@ -2011,7 +2070,7 @@ struct to_ir {
           }
           return false;
         }
-        auto type_name = parseBaseTypeName(classinfo);
+        auto type_name = typeParser_.parseBaseTypeName(classinfo);
         if (!type_name) {
           throw ErrorReport(classinfo.range())
               << "type must be a type identifier";
@@ -2029,7 +2088,7 @@ struct to_ir {
               << "Optional isinstance check is not supported, "
               << "consider use is/isnot None instead";
         } else {
-          TypePtr type = parseTypeFromExpr(classinfo);
+          TypePtr type = typeParser_.parseTypeFromExpr(classinfo);
           if (val->type()->isSubtypeOf(type)) {
             return true;
           }
@@ -2046,7 +2105,7 @@ struct to_ir {
         throw ErrorReport(loc) << "Only one argument to __new__ allowed";
       }
       return classNew->createObject(
-          apply.range(), method, Var(apply.inputs()[0]).name().name());;
+          apply.range(), method, Var(apply.inputs()[0]).name().name());
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());
@@ -2340,6 +2399,10 @@ struct to_ir {
         return graph
             ->insertNode(graph->createDict(key_type, value_type, keys, values))
             ->output();
+      } break;
+      case TK_LIST_COMP: {
+        auto lc = ListComp(tree);
+        return emitListComprehension(lc);
       } break;
       default:
         throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
