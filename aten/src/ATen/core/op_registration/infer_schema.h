@@ -33,7 +33,7 @@ template <typename... Ts, size_t... Is>
   , 0)...};
 
   // Arguments are named "_<index>"
-  return {Argument("_" + std::to_string(Is), getTypePtr<guts::decay_t<Ts>>())...};
+  return {Argument("_" + c10::guts::to_string(Is), getTypePtr<guts::decay_t<Ts>>())...};
 }
 
 /// Creates a vector of `Argument` from a list of C++ types that are specified
