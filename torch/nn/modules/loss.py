@@ -1252,18 +1252,26 @@ class CTCLoss(_Loss):
             | :math:`N = batch size`
             | :math:`S = max target length, if shape is (N, S)`.
 
-            Target sequences. Each element in the target sequence is a class index. Target index
-            cannot be blank (default=0). In the second form, the targets are assumed to be concatenated.
+            | Target sequences. Each element in the target sequence is a class index. Target index
+              cannot be blank (default=0).
+
+            | In the :math:`(N, S)` form, targets are padded to the length of the longest sequence, and stacked.
+            | In the :math:`(sum(target_lengths))` form, the targets are assumed to be un-padded and concatenated
+              within 1 dimension.
         **input_lengths**: Tuple or tensor of size :math:`(N)`.
             Lengths of the inputs (must each be :math:`\leq T`).
             Lengths are specified for each sequence to achieve masking under the
-            assumption that sequences are padded to equal lengths. In effect, length is the stop index
-            :math:`s_n` for each target sequence, such that :math:`target_n = targets[n,:s_n]` for
-            each target in a batch.
+            assumption that sequences are padded to equal lengths.
         **target_lengths**: Tuple or tensor of size  :math:`(N)`.
-            Lengths of the targets. Lengths are specified for each sequence to achieve masking under the
-            assumption that sequences are padded to equal lengths. If targets has shape :math:`(N, S)` then
-            lengths must each be :math:`\leq T`.
+            | Lengths of the targets. Lengths are specified for each sequence to achieve masking under the
+              assumption that sequences are padded to equal lengths.
+
+            | If target shape is :math:`(N,S)`, target_lengths are effectively the stop index
+              :math:`s_n` for each target sequence, such that ``target_n = targets[n,0:s_n]`` for
+              each target in a batch. Lengths must each be :math:`\leq T`
+
+            | If target shape is ``(sum(target_lengths))``, each length in target_lengths should equal its
+              respective target length, with a sum no greater than the total length of all targets.
 
     Example::
 
