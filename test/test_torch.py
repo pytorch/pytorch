@@ -9918,7 +9918,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         for i in range(len(x)):
             self.assertEqual(x[i], y[i])
 
-        # test for a scalar case
         x = torch.tensor([True], dtype=torch.bool)
         self.assertEqual(x.dtype, torch.bool)
 

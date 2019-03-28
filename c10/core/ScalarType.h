@@ -199,7 +199,7 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   static constexpr ScalarType _promoteTypesLookup
       [static_cast<int>(ScalarType::NumOptions)]
       [static_cast<int>(ScalarType::NumOptions)] = {
-            /* u1  i1  i2  i4  i8  f2  f4  f8  ud  ud  ud  b1 */
+            /* u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1 */
     /* u1 */ { u1, i2, i2, i4, i8, f2, f4, f8, ud, ud, ud, u1 },
     /* i1 */ { i2, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, i1 },
     /* i2 */ { i2, i2, i2, i4, i8, f2, f4, f8, ud, ud, ud, i2 },
@@ -208,9 +208,9 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
     /* f2 */ { f2, f2, f2, f2, f2, f2, f4, f8, ud, ud, ud, f2 },
     /* f4 */ { f4, f4, f4, f4, f4, f4, f4, f8, ud, ud, ud, f4 },
     /* f8 */ { f8, f8, f8, f8, f8, f8, f8, f8, ud, ud, ud, f8 },
-    /* ud */ { ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud },
-    /* ud */ { ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud },
-    /* ud */ { ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud },
+    /* c2 */ { ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud },
+    /* c4 */ { ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud },
+    /* c8 */ { ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud },
     /* b1 */ { u1, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, b1 },
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
