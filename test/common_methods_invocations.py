@@ -102,7 +102,7 @@ S = 5
 #   input size/constructing fn,
 #   args (tuple represents shape of a tensor arg),
 #   test variant name (will be used at test name suffix),    // optional
-#   True if op has a formula in autodiff,                    // optional
+#   (True, [nodes]) if op has a formula in autodiff,         // optional
 #   indices for possible dim arg,                            // optional
 #   fn mapping output to part that should be gradcheck'ed,   // optional
 # )

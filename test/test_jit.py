@@ -18,7 +18,7 @@ from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2, builtins
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
-    freeze_rng_state, set_rng_seed
+    freeze_rng_state, set_rng_seed, slowTest
 from common_nn import module_tests, new_module_tests, criterion_tests
 from textwrap import dedent
 from functools import wraps
@@ -43,7 +43,7 @@ from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from torch.testing import FileCheck
 from torch._C import TensorType, TupleType, FloatType, IntType, \
-    ListType, StringType, DictType
+    ListType, StringType, DictType, parse_ir
 from copy import deepcopy
 import random
 from typing import List, Dict, Optional, Tuple
@@ -2858,6 +2858,7 @@ class TestBatched(TestCase):
                          w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c)
         self.assertEqual(ys, ybs.examples())
 
+    @slowTest
     def test_greedy_search(self):
         def greedy(x, h, c, embed, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc,
                    b_i, b_f, b_o, b_c, w_hs, b_s, iter_num):
@@ -2921,6 +2922,7 @@ class TestBatched(TestCase):
                            w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c, w_hs, b_s, iter_num_batch)
         self.assertEqual(ys, ybs.examples())
 
+    @slowTest
     def test_beam_search(self):
         def beam(x, h, c, embed, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc,
                  b_i, b_f, b_o, b_c, w_hs, b_s, iter_num, idx):
@@ -6047,6 +6049,14 @@ a")
         m2.sub2.a.data.zero_()
         self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
 
+    def test_irparser(self):
+        graph_str = """graph(%0 : Double(5, 5)):
+          # CHECK: aten::relu
+          %1 : Double(5, 5) = aten::relu(%0)
+          return (%1)
+        """
+        FileCheck().run(graph_str, parse_ir(graph_str))
+
     def test_filecheck(self):
         def test_check():
             file = "232"
@@ -6138,6 +6148,59 @@ a")
             fb = FileCheck().check_count("2", 2).check_not("1").check_count("2", 2)
             with self.assertRaisesRegex(RuntimeError, 'Expected to not find "1"'):
                 fb.run("22 1 22")
+
+    def test_filecheck_parse(self):
+        def test_check():
+            file = """
+                # CHECK: 2
+                # CHECK: 3
+                # CHECK: 2
+                232
+                """
+            FileCheck().run(checks_file=file, test_file=file)
+            file = """
+                # CHECK: 232
+                232
+                """
+            FileCheck().run(file, "232")
+            with self.assertRaisesRegex(RuntimeError, 'Expected to find "232"'):
+                FileCheck().run(file, "22")
+            with self.assertRaisesRegex(RuntimeError, 'Expected to find "22"'):
+                FileCheck().run("# CHECK: 22", "23")
+        test_check()
+
+        def test_check_count():
+            file = "22222"
+            FileCheck().run("# CHECK-COUNT-5: 2", file)
+            FileCheck().run("# CHECK-COUNT-EXACTLY-5: 2", file)
+            FileCheck().run("# CHECK-COUNT-2: 22", file)
+            FileCheck().run("# CHECK-COUNT-1: 222", file)
+
+            with self.assertRaisesRegex(RuntimeError, 'Expected to not find'):
+                FileCheck().run("# CHECK-COUNT-EXACTLY-2: 2", file)
+        test_check_count()
+
+        def test_check_same():
+            file = "22\n33"
+            FileCheck().run("# CHECK-SAME: 22", file)
+
+            with self.assertRaisesRegex(RuntimeError, "Expected to not find"):
+                FileCheck().run("# CHECK-SAME: 33", file)
+
+            file = "22  1  3"
+
+            FileCheck().run("# CHECK: 2\n # CHECK-SAME: 3", file)
+            FileCheck().run("# CHECK-COUNT-2: 2\n # CHECK-SAME: 3", file)
+        test_check_same()
+
+        def test_bad_input():
+            with self.assertRaisesRegex(RuntimeError, "Check for bad input"):
+                FileCheck().run("", "1")
+
+            with self.assertRaisesRegex(RuntimeError, "Could not parse check"):
+                FileCheck().run("# CHECK1", "")
+
+        test_bad_input()
 
     def test_script_module_call_noscript(self):
         class M(torch.jit.ScriptModule):
@@ -7272,6 +7335,21 @@ a")
 
             self.checkScript(good_fn, (torch.ones(2, 2),), optimize=True)
 
+    def test_tensor_with_grad_as_constant(self):
+        param = torch.randn(3).requires_grad_()
+        x = torch.randn(3)
+
+        def f(x):
+            return x + param
+        with self.assertRaisesRegex(RuntimeError, "Cannot insert a Tensor that requires grad as a constant"):
+            torch.jit.trace(f, x)
+
+    def test_non_tensor_tracing(self):
+        def f(x):
+            return x + param
+        with self.assertRaisesRegex(RuntimeError, "inputs or outputs of traced functions, but instead got value of type int."):
+            torch.jit.trace(f, (1,))
+
     def test_type_annotation_module(self):
         class BaseModule(torch.jit.ScriptModule):
             def foo(self, x):
@@ -7468,6 +7546,7 @@ a")
         self.assertEqual(m_orig.doit3(input), m_import.doit3(input))
         self.assertEqual(m_orig.forward(input), m_import.forward(input))
 
+    @slowTest
     @skipIfNoTorchVision
     def test_script_module_trace_resnet18(self):
         x = torch.ones(1, 3, 224, 224)
@@ -7487,6 +7566,7 @@ a")
         self.assertEqual(output_orig, output_import)
         self.assertEqual(grad_orig, grad_import)
 
+    @slowTest
     @skipIfNoTorchVision
     def test_script_module_script_resnet(self):
         def conv1x1(in_planes, out_planes, stride=1):
@@ -12936,6 +13016,28 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         # the same group; they should each be a separate DiffGraph
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
 
+    def test_mutation_subgraph_inlining(self):
+        # cannot move a node which has writers into a differentiable subgraph,
+        # bc CSE might lose context that it has writers
+
+        def fn(x):
+            a = x.t()
+            a = a + 1
+            c = x.t()
+            c = c + 1
+            e = a + c
+            b = a.add_(x)
+            d = c.add_(x)
+            return e, b, d
+
+        fn_script = torch.jit.script(fn)
+        outs1 = fn_script(torch.tensor(0.5, requires_grad=True))
+        outs2 = fn(torch.tensor(0.5, requires_grad=True))
+        for i in range(len(outs1)):
+            self.assertEqual(outs1[i], outs2[i])
+        graph = fn_script.graph_for(torch.tensor(0.5, requires_grad=True))
+        FileCheck().check_not("DifferentiableGraph").run(graph)
+
 
 class TestCustomOperators(JitTestCase):
 
@@ -13125,7 +13227,7 @@ EXCLUDE_MODULE_EXPORT_IMPORT = {
 #   args (tuple represents shape of a tensor arg),
 #   test variant name(will be used at test name suffix,
 #       'inplace' skips grad tests),                         // optional
-#   True if op is enabled in autodiff                        // optional
+#   (True, [nodes]) if op has a formula in autodiff          // optional
 #   fn to determine if test should be skipped,               // optional
 #   fn mapping output to part that should be gradcheck'ed,   // optional
 #   kwargs for function,                                     // optional

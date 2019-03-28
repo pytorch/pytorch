@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/import_source.h>
+#include <torch/csrc/jit/irparser.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/passes/to_batch.h>
 #include <torch/csrc/jit/pybind_utils.h>
@@ -987,7 +988,16 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<ClassTypePtr> classes;
         PythonPrint(oss, m, constants, classes, true);
         return std::make_pair(oss.str(), std::move(constants));
-      });
+      })
+      .def_property_readonly(
+          "code",
+          [](Method& self) {
+            std::ostringstream ss;
+            std::vector<at::Tensor> tensors;
+            std::vector<ClassTypePtr> classes;
+            PythonPrint(ss, self, tensors, classes, false);
+            return ss.str();
+          });
 
   m.def(
       "_jit_script_compile",
@@ -1084,9 +1094,24 @@ void initJitScriptBindings(PyObject* module) {
           [](testing::FileCheck& f, const std::string& str) {
             return f.run(str);
           })
-      .def("run", [](testing::FileCheck& f, const Graph& g) {
-        return f.run(g);
-      });
+      .def(
+          "run", [](testing::FileCheck& f, const Graph& g) { return f.run(g); })
+      .def(
+          "run",
+          [](testing::FileCheck& f,
+             const std::string& input,
+             const std::string& output) { return f.run(input, output); },
+          "Run",
+          py::arg("checks_file"),
+          py::arg("test_file"))
+      .def(
+          "run",
+          [](testing::FileCheck& f, const std::string& input, const Graph& g) {
+            return f.run(input, g);
+          },
+          "Run",
+          py::arg("checks_file"),
+          py::arg("graph"));
 }
 } // namespace script
 } // namespace jit
