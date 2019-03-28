@@ -2,6 +2,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/source_range.h>
 #include <torch/csrc/utils/memory.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <algorithm>
 #include <clocale>
 #include <iostream>
