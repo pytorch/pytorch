@@ -39,6 +39,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_.*pool_.*same.*'  # Does not support pool same.
                      '|test_.*pool_.*ceil.*'  # Does not support pool same.
                      '|test_maxpool_with_argmax.*'  # MaxPool outputs indices in different format.
+                     '|test_maxpool.*dilation.*'  # MaxPool doesn't support dilation yet
                      '|test_convtranspose.*'  # ConvTranspose needs some more complicated translation
                      '|test_mvn.*'  # MeanVarianceNormalization is experimental and not supported.
                      '|test_dynamic_slice.*'  # MeanVarianceNormalization is experimental and not supported.
