@@ -1121,10 +1121,26 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(4, 4, requires_grad=True)
         self.run_model_test(ArgmaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    def test_argmax_none_dim(self):
+        class ArgmaxModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.argmax(input)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(ArgmaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
     def test_argmin(self):
         class ArgminModel(torch.nn.Module):
             def forward(self, input):
                 return torch.argmin(input, dim=1)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(ArgminModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_argmin_none_dim(self):
+        class ArgminModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.argmin(input)
 
         x = torch.randn(4, 4, requires_grad=True)
         self.run_model_test(ArgminModel(), train=False, input=x, batch_size=BATCH_SIZE)

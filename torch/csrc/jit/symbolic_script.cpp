@@ -383,6 +383,18 @@ const std::vector<std::string> functions = {
             return torch.matmul(self, other), backward
     )",
     R"(
+        def addcmul(self,
+                    tensor1,
+                    tensor2,
+                    *,
+                    value: float = 1.0):
+            def backward(grad_output):
+                grad = grad_output * value
+                grad_tensor1 = (grad * tensor2)._grad_sum_to_size(tensor1.size())
+                grad_tensor2 = (grad * tensor1)._grad_sum_to_size(tensor2.size())
+                return grad_output._grad_sum_to_size(self.size()), grad_tensor1, grad_tensor2, None
+            return torch.addcmul(self, tensor1, tensor2, value=value), backward
+
         def _dim_arange(like,
                         dim: int):
             def backward(grad_output):
@@ -438,6 +450,24 @@ const std::vector<std::string> functions = {
                 return None, None
 
             return torch.full_like(self, fill_value), backward
+
+        def lerp_0(self,
+                   end,
+                   weight: float):
+            def backward(grad_output):
+                grad_self = (grad_output * (1 - weight))._grad_sum_to_size(self.size())
+                grad_end = (grad_output * weight)._grad_sum_to_size(end.size())
+                return grad_self, grad_end, None
+            return torch.lerp(self, end, weight), backward
+
+        def lerp_1(self,
+                   end,
+                   weight):
+            def backward(grad_output):
+                grad_self = (grad_output * (1 - weight))._grad_sum_to_size(self.size())
+                grad_end = (grad_output * weight)._grad_sum_to_size(end.size())
+                return grad_self, grad_end, None
+            return torch.lerp(self, end, weight), backward
 
         def mul(self, other):
             def backward(grad_output):
@@ -691,15 +721,34 @@ const std::vector<std::string> functions = {
 
             return output, backward
 
+        def AD_fused_dropout_backward(grad,
+                                      mask,
+                                      p1m: float):
+            p1r = 1. / p1m
+            grad_input = grad * (mask.type_as(grad) * p1r)
+            return grad_input
+
         def dropout(input,
                     p: float,
                     train: bool):
-            mask = torch.empty_like(input)
-            mask.bernoulli_(1 - p)
-            res = mask * input / (1.0 - p)
+            use_cuda = input.is_cuda
+            # lowering is specialized for cuda because cuda fuser can efficiently fuse those operations
+            # for cpu backend, where fusions are disabled, a different lowering that is more efficient
+            # in the absence of fusion is used
+            p1m = 1. - p
+            if use_cuda:
+                mask = torch.rand_like(input) < p1m
+                res = mask.type_as(input) * input * (1./p1m)
+            else:
+                mask = torch.empty_like(input)
+                mask.bernoulli_(p1m)
+                res = mask * input / p1m
 
             def backward(grad_output):
-                grad_input = grad_output * mask / (1.0 - p)
+                if use_cuda:
+                    grad_input = AD_fused_dropout_backward(grad_output, mask, p1m)
+                else:
+                    grad_input = grad_output * mask / p1m
                 return grad_input, None, None
             return res, backward
 
@@ -870,6 +919,7 @@ std::string overloadedSchemaString(const FunctionSchema& schema) {
         schema_name.length(),
         schema_name.substr(0, pos));
   }
+
   return schema_string;
 }
 
@@ -950,6 +1000,15 @@ c10::optional<GradientPair> gradientInfoForSchema(
     return cache_it->second;
   } else {
     auto schema_str = canonicalSchemaString(schema);
+    // Specialize Scalar to float for the arg type of the node schema
+    // this is used to:
+    // 1. define scalar type as float in TorchScript autodiff formula
+    // 2. to make sure the input of any graph node does not contain scalar type
+    //    in its argument, all scalar arg should already be passed with float
+    //    value since scalar/int aren't differentiable either way.
+    //
+    c10::ReplaceAll(schema_str, "Scalar", "float");
+
     auto sym_script_it = schema_to_graphs.find(schema_str);
 
     if (sym_script_it != schema_to_graphs.end()) {

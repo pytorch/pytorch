@@ -75,6 +75,9 @@ DONT_REQUIRE_DERIVATIVE = {
     # These are only implemented on integral types
     '__and__', '__iand__', '__ilshift__', '__ior__', '__irshift__', '__ixor__',
     '__lshift__', '__or__', '__rshift__', '__xor__',
+    # These work on integral data types, and hence don't require derivative
+    '_sobol_engine_draw', '_sobol_engine_ff', '_sobol_engine_scramble_',
+    '_sobol_engine_initialize_state_',
     # This is an unsafe method that is meant to be out of reach of autograd.
     '_coalesced_',
 }
