@@ -22,11 +22,10 @@ class Upsample(Module):
     calculate the output size. (You cannot give both, as it is ambiguous)
 
     Args:
-        size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int],
-            optional): output spatial sizes
-        scale_factor (float or Tuple[float] or Tuple[float, float] or
-            Tuple[float, float, float], optional): multiplier for spatial size.
-            Has to match input size if it is a tuple.
+        size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int], optional):
+            output spatial sizes
+        scale_factor (float or Tuple[float] or Tuple[float, float] or Tuple[float, float, float], optional):
+            multiplier for spatial size. Has to match input size if it is a tuple.
         mode (str, optional): the upsampling algorithm: one of ``'nearest'``,
             ``'linear'``, ``'bilinear'``, ``'bicubic'`` and ``'trilinear'``.
             Default: ``'nearest'``

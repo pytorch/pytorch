@@ -107,6 +107,15 @@ TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 
+# Enables tests that are slow to run (disabled by default)
+TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
+
+# Disables non-slow tests (these tests enabled by default)
+# This is usually used in conjunction with TEST_WITH_SLOW to
+# run *only* slow tests.  (I could have done an enum, but
+# it felt a little awkward.
+TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
+
 if TEST_NUMPY:
     import numpy
 
@@ -128,6 +137,17 @@ def skipIfNoLapack(fn):
             raise unittest.SkipTest('PyTorch compiled without Lapack')
         else:
             fn(*args, **kwargs)
+    return wrapper
+
+
+def slowTest(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not TEST_WITH_SLOW:
+            raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
+        else:
+            fn(*args, **kwargs)
+    wrapper.__dict__['slow_test'] = True
     return wrapper
 
 
@@ -299,6 +319,10 @@ class TestCase(expecttest.TestCase):
         return types.MethodType(wrapper, self)
 
     def setUp(self):
+        if TEST_SKIP_FAST:
+            if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
+                raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
+
         set_rng_seed(SEED)
 
     def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
@@ -397,18 +421,17 @@ class TestCase(expecttest.TestCase):
                     if a.device.type == 'cpu' and a.dtype == torch.float16:
                         # CPU half tensors don't have the methods we need below
                         a = a.to(torch.float32)
-                    if TEST_WITH_ROCM:
-                        # Workaround for bug https://github.com/pytorch/pytorch/issues/16448
-                        # TODO: remove after the bug is resolved.
-                        b = b.to(a.dtype).to(a.device)
-                    else:
-                        b = b.to(a)
+                    b = b.to(a)
 
-                    if x.dtype == torch.bool and y.dtype == torch.bool:
-                        self.assertEqual(x.tolist(), y.tolist())
-                    elif x.dtype == torch.bool or y.dtype == torch.bool:
+                    if (a.dtype == torch.bool) != (b.dtype == torch.bool):
                         raise TypeError("Was expecting both tensors to be bool type.")
                     else:
+                        if a.dtype == torch.bool and b.dtype == torch.bool:
+                            # we want to respect precision but as bool doesn't support substraction,
+                            # boolean tensor has to be converted to int
+                            a = a.to(torch.int)
+                            b = b.to(torch.int)
+
                         diff = a - b
                         if a.is_floating_point():
                             # check that NaNs are in the same locations

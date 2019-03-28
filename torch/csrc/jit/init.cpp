@@ -26,6 +26,7 @@
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -112,6 +113,26 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_cse",
           [](std::shared_ptr<Graph>& g) {
             return EliminateCommonSubexpression(g); // overload resolution
+          })
+      .def(
+          "_jit_pass_expand_fakequant",
+          [](std::shared_ptr<Graph>& g) { return ExpandFakeQuantNodes(g); })
+      .def(
+          "_jit_pass_propagate_qinfo",
+          [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
+      .def(
+          "_jit_pass_insert_observers",
+          [](std::shared_ptr<Graph>& g) { return InsertObserverNodes(g); })
+      .def(
+          "_jit_pass_insert_fakequant",
+          [](std::shared_ptr<Graph>& g) { return InsertFakeQuantNodes(g); })
+      .def(
+          "_jit_pass_quantlint",
+          [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
+      .def(
+          "_jit_pass_fold_quant_inputs",
+          [](std::shared_ptr<Graph>& g) {
+            return FoldQuantNodesIntoInputsOutputs(g);
           })
       .def(
           "_jit_pass_remove_inplace_ops",
@@ -352,7 +373,8 @@ void initJITBindings(PyObject* module) {
       .def_property_readonly(
           "name", [](FunctionSchema& self) { return self.name(); })
       .def_property_readonly(
-          "overload_name", [](FunctionSchema& self) { return self.overload_name(); })
+          "overload_name",
+          [](FunctionSchema& self) { return self.overload_name(); })
       .def_property_readonly(
           "arguments", [](FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(

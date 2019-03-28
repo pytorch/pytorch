@@ -169,6 +169,14 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     return ss.str();
   }
 
+  void checkForAddToConstantsError(std::stringstream& ss) {
+    auto nn = py::module::import("torch.nn");
+    if (py::isinstance(self, nn.attr("ModuleList")) ||
+        py::isinstance(self, nn.attr("Sequential"))) {
+      ss << ". Did you forget to add it to __constants__? ";
+    }
+  }
+
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
       Method& m,
@@ -176,11 +184,18 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     const std::string type_str = typeString(self);
     std::stringstream ss;
     ss << kind() << " cannot be used as a tuple";
-    auto nn = py::module::import("torch.nn");
-    if (py::isinstance(self, nn.attr("ModuleList")) ||
-        py::isinstance(self, nn.attr("Sequential"))) {
-      ss << ". Did you forget to add it to __constants__? ";
-    }
+    checkForAddToConstantsError(ss);
+    throw ErrorReport(loc) << ss.str();
+  }
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Method& m,
+      const std::string& field) override {
+    const std::string type_str = typeString(self);
+    std::stringstream ss;
+    ss << "attribute lookup is not defined on " << kind();
+    checkForAddToConstantsError(ss);
     throw ErrorReport(loc) << ss.str();
   }
 
@@ -314,7 +329,7 @@ struct ModuleValue : public SugaredValue {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     } else if (NamedIValue* v = module->find_attribute(field)) {
       return std::make_shared<SimpleValue>(
-          m.get_or_add_attribute(v->type, v->slot()));
+          m.get_or_add_attribute(v->type(), v->slot()));
     }
 
     // This can also be a call to a non-script module, or a plain
@@ -526,15 +541,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
           << "Attempted to inline a Module with parameters. "
              "Stateful modules to be inlined must be submodules of the callee.";
     }
-    const auto script_class_type =
-        py::module::import("torch.jit").attr("ScriptClass");
-    const bool is_class_type = py::isinstance(obj, script_class_type);
-    if (is_class_type) {
-      const auto classname = py::cast<std::string>(py::getattr(obj, "_name"));
-      auto classType = ClassType::get(classname);
-      AT_ASSERT(classType);
-      return std::make_shared<ClassValue>(std::move(classType));
-    }
     return std::make_shared<ModuleValue>(mod);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
@@ -594,13 +600,13 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
 }
 
 static void gatherParametersAndBuffers(
-    std::vector<IValue*>& values,
+    std::vector<Slot>& values,
     const Module& m) {
   for (auto& param : m.get_parameters()) {
     values.push_back(param->slot());
   }
   for (auto& param : m.get_attributes()) {
-    if (param->type->isSubtypeOf(TensorType::get())) {
+    if (param->type()->isSubtypeOf(TensorType::get())) {
       values.push_back(param->slot());
     }
   }
@@ -788,7 +794,7 @@ void initJitScriptBindings(PyObject* module) {
               py::tuple r(3);
               IValue v = *buffer->slot();
               result[i] = std::make_tuple(
-                  buffer.key(), buffer->type, toPyObject(std::move(v)));
+                  buffer.key(), buffer->type(), toPyObject(std::move(v)));
             }
             return result;
           })
@@ -838,10 +844,10 @@ void initJitScriptBindings(PyObject* module) {
              bool force_outplace) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
-            std::vector<IValue*> parameters;
+            std::vector<Slot> parameters;
             gatherParametersAndBuffers(parameters, *self);
             Stack inputs = toStack(input_tuple);
-            for (IValue* param : parameters) {
+            for (const Slot& param : parameters) {
               inputs.emplace_back(*param);
             }
             auto graph = tracer::createGraphByTracing(
@@ -932,7 +938,7 @@ void initJitScriptBindings(PyObject* module) {
              std::vector<std::tuple<std::shared_ptr<Module>, std::string>>
                  params,
              std::shared_ptr<Module> orig) {
-            std::vector<IValue*> member_inputs;
+            std::vector<Slot> member_inputs;
             for (auto& p : params) {
               NamedIValue* np = std::get<0>(p)->find_parameter(std::get<1>(p));
               if (np == nullptr) {
@@ -961,7 +967,13 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "propagate_and_assign_input_and_output_shapes",
           &Method::propagate_and_assign_input_and_output_shapes)
-      .def("initial_ivalues", &Method::initial_ivalues)
+      .def("initial_ivalues",[](Method& m) {
+        std::vector<at::Tensor> tensors;
+        for (auto& t : m.initial_ivalues()) {
+          tensors.push_back(t->toTensor());
+        }
+        return tensors;
+      })
       .def(
           "graph_for",
           [](py::args args, py::kwargs kwargs) {
@@ -981,7 +993,16 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<ClassTypePtr> classes;
         PythonPrint(oss, m, constants, classes, true);
         return std::make_pair(oss.str(), std::move(constants));
-      });
+      })
+      .def_property_readonly(
+          "code",
+          [](Method& self) {
+            std::ostringstream ss;
+            std::vector<at::Tensor> tensors;
+            std::vector<ClassTypePtr> classes;
+            PythonPrint(ss, self, tensors, classes, false);
+            return ss.str();
+          });
 
   m.def(
       "_jit_script_compile",
