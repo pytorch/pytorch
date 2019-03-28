@@ -2640,21 +2640,22 @@ class _TestTorchMixin(object):
             self.assertEqual(queue.get(), "%s = func(%s, %s)" % (type(c), type(a), type(c)))
 
         # test ptype propagation with numpy ufuncs
-        np_func = np.add
-        self.assertIsInstance(np_func(a, 1), A)
-        self.assertIsInstance(np_func(1, a), A)
-        self.assertIsInstance(np_func(a, b), A)
-        self.assertIsInstance(np_func(b, a), B)
-        self.assertIsInstance(np_func(c, a), C)
-        self.assertIsInstance(np_func(a, c), C)
-        self.assertIsInstance(np_func(a, 1, out=out_a), A)
-        self.assertIsInstance(np_func(1, a, out=out_a), A)
-        self.assertIsInstance(np_func(a, b, out=out_a), A)
-        self.assertIsInstance(np_func(b, a, out=out_b), B)
-        self.assertIsInstance(np_func(c, a, out=out_c), C)
-        self.assertIsInstance(np_func(a, c, out=out_c), C)
+        if TEST_NUMPY:
+            np_func = np.add
+            self.assertIsInstance(np_func(a, 1), A)
+            self.assertIsInstance(np_func(1, a), A)
+            self.assertIsInstance(np_func(a, b), A)
+            self.assertIsInstance(np_func(b, a), B)
+            self.assertIsInstance(np_func(c, a), C)
+            self.assertIsInstance(np_func(a, c), C)
+            self.assertIsInstance(np_func(a, 1, out=out_a), A)
+            self.assertIsInstance(np_func(1, a, out=out_a), A)
+            self.assertIsInstance(np_func(a, b, out=out_a), A)
+            self.assertIsInstance(np_func(b, a, out=out_b), B)
+            self.assertIsInstance(np_func(c, a, out=out_c), C)
+            self.assertIsInstance(np_func(a, c, out=out_c), C)
 
-        # test ptype propatation with tensor
+        # test ptype propatation with tensor functions
         th_func = torch.add
         self.assertIsInstance(th_func(a, 1), A)
         self.assertIsInstance(th_func(a, b), A)

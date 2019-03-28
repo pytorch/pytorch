@@ -1607,6 +1607,11 @@ class TestNN(NNTestCase):
             self.assertIsInstance(l.weight.data, torch.cuda.FloatTensor)
             self.assertIsInstance(l.bias.data, torch.cuda.FloatTensor)
 
+    def test_ptype_non_propagation(self):
+        p = Parameter(torch.rand((3,), dtype=torch.double, requires_grad=False))
+        self.assertIs((p+1).__class__, torch.Tensor)
+        self.assertIsNot((p + 1).__class__, Parameter)
+
     def test_non_leaf_parameters(self):
         l1 = nn.Linear(10, 10)
         l2 = nn.Linear(10, 10)
