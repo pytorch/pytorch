@@ -603,5 +603,22 @@ void testMemoryDAG() {
     ASSERT_FALSE(t.mayAlias(foo, baz));
   }
 }
+
+void testAliasRegistration() {
+  auto opts = Operator::Options().aliasAnalysis(&AliasDb::analyzeCreator);
+  RegisterOperators reg({
+      createOperator(
+        "foo::rand", [](at::Tensor) -> at::Tensor {
+          return at::rand({2,2});
+         }, opts)
+      });
+  const auto rand_op = Symbol::fromQualString("foo::rand");
+  auto graph = std::make_shared<Graph>();
+  auto a = graph->addInput();
+  auto b = graph->insert(rand_op, {a});
+  AliasDb aliasDb(graph);
+  ASSERT_FALSE(aliasDb.mayAlias(a, b));
+}
+
 } // namespace jit
 } // namespace torch
