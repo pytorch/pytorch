@@ -13198,7 +13198,7 @@ nn_functional_tests = [
     ('adaptive_avg_pool1d', (S, S, S), (5,), '', (True,)),
     ('adaptive_avg_pool2d', (S, S, S, S), ([5, 7],), '', (True,)),
     ('adaptive_avg_pool3d', (S, S, S, S, S), ([3, 2, 2],), '', (True,)),
-    ('dropout', (S, S, S), (0.5,), '', (True, 'prim::FusionGroup')),
+    ('dropout', (S, S, S), (0.5,), '', (True, {'cpu': ['aten::mul', 'aten::div'], 'cuda': 'prim::FusionGroup'})),
     ('alpha_dropout', (S, S, S), (0.5,)),
     ('dropout2d', (S, S, S), (0.5,)),
     ('dropout3d', (S, S, S), (0.5,)),
@@ -13272,8 +13272,8 @@ nn_functional_tests = [
     ('unfold', (S, S, S, S), ([2, 3]),),
     ('fold', (1, 3 * 2 * 2, 12), ([4, 5], [2, 2]),),
     ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
-    ('gumbel_softmax', (S, S), (2.,), '', (True, ['prim::FusionGroup', 'aten::softmax'])),
-    ('gumbel_softmax', (S, S), (2., True,), 'hard', (True, ['prim::FusionGroup', 'aten::softmax'])),
+    ('gumbel_softmax', (S, S), (2.,), '', (True, {'cpu': ['aten::neg', 'aten::add', 'aten::div', 'aten::softmax'], 'cuda': ['prim::FusionGroup', 'aten::softmax']})),
+    ('gumbel_softmax', (S, S), (2., True,), 'hard', (True, {'cpu': ['aten::neg', 'aten::add', 'aten::div', 'aten::softmax'], 'cuda': ['prim::FusionGroup', 'aten::softmax']})),
     ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
     ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)),
                                    1, 1., non_differentiable(torch.randn(S))),),
@@ -13645,8 +13645,11 @@ def normalize_check_ad(check_ad, name):
     elif len(check_ad) != 2:
         raise Exception('Invalid check_ad, requires (bool, str|List[str])')
 
+    if isinstance(check_ad[1], dict):
+        check_ad = (check_ad[0], check_ad[1]['cuda' if torch.cuda.is_available() else 'cpu'])
     if isinstance(check_ad[1], str):
         check_ad = (check_ad[0], [check_ad[1]])
+
     return check_ad
 
 

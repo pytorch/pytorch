@@ -154,9 +154,9 @@ def method_tests():
         ('div', (S, S, S), (uniform_scalar(0.1),), 'scalar_broadcast_rhs', (True,)),
         ('div', (), (uniform_scalar(0.1),), 'scalar_broadcast_lhs', (True,)),
         ('div', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True,)),
-        ('__rdiv__', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True, 'prim::FusionGroup')),  # aten::mul, aten::reciprocal
+        ('__rdiv__', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True, {'cpu': ['aten::mul', 'aten::reciprocal'], 'cuda': 'prim::FusionGroup'})),
         ('div', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
-        ('__rdiv__', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True, 'prim::FusionGroup')),  # aten::mul, aten::reciprocal
+        ('__rdiv__', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True, {'cpu': ['aten::mul', 'aten::reciprocal'], 'cuda': 'prim::FusionGroup'})),
         ('pow', torch.rand(S, S, S) + 1e-3, (torch.rand(S, S, S) + 0.1,), '', (True,)),
         ('pow', torch.rand(S, S, S) + 1e-3, (torch.rand(1,) + 0.1,), 'broadcast_rhs', (True,)),
         ('pow', torch.rand(1,) + 1e-3, (torch.rand(S, S, S) + 0.1,), 'broadcast_lhs', (True,)),

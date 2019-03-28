@@ -1172,8 +1172,8 @@ When differentiating a graph, each node that has a symbolic gradient will be inc
 Adding/updating symbolic gradient functions must be tested carefully as it's easy to get CI green by comparing autograd result with itself, but potentially cause autodiff support regression.
 
 If your PR adds/updates a gradient formula for `torch`/`nn` functions, you **MUST** enable/update the corresponding tests in
-- `torch` functions: `method_tests` in [common_method_tests.py](common_method_tests.py)
-- `nn` functions: `nn_functional_tests` in [test_jit.py](test_jit.py)
+- `torch` functions: `method_tests` in [common_method_tests.py](../../../test/common_method_tests.py)
+- `nn` functions: `nn_functional_tests` in [test_jit.py](../../../test/test_jit.py)
 
 To turn on autodiff check, you can add an optional `check_ad(should_check_autodiff, autodiff_node)` tuple after the optional test variant name field.
 If `should_check_autodiff=True`, the differentiated traced/script forward graph must have a `prim::DifferentiableGraph` with all nodes in `autodiff_node` shows up in it.
@@ -1183,7 +1183,7 @@ To make writing test easier, you only need to write out `autodiff_node` if it's 
 ```python
 ('conv1d', ...), # No symbolic gradient formula
 ('avg_pool2d', ..., (True,)), # Has symbolic gradient formula, and node name is aten::avg_pool2d
-('dropout', ..., (True, 'prim::FusionGroup')), # Has a customized symbolic grdient, where some of its intermediate nodes are fused
+('dropout', ..., (True, {'cpu': ['aten::mul', 'aten::div'], 'cuda': 'prim::FusionGroup'})), # Some op are used when pytorch is compiled with cuda.
 ('nll_loss', ..., (True, 'aten::nll_loss_forward')), # Is replaced by a different node in its symbolic gradient formula
 ```
 
