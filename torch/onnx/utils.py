@@ -247,10 +247,6 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
 
     graph = _optimize_graph(graph, operator_export_type)
 
-    input_and_param_names = [val.uniqueName() for val in graph.inputs()]
-    param_names = input_and_param_names[len(input_and_param_names) - len(params):]
-    params_dict = dict(zip(param_names, params))
-
     # NB: ONNX requires complete information about output types, which might be
     # erased by some optimizations, so we need to set it explicitly again.
     if torch_out is not None:
@@ -258,7 +254,12 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
         for output, tensor in zip(graph.outputs(), output_tensors):
             output.inferTypeFrom(tensor)
 
-    _set_input_and_output_names(graph, input_names, output_names, params_dict)
+    _set_input_and_output_names(graph, input_names, output_names)
+
+    input_and_param_names = [val.uniqueName() for val in graph.inputs()]
+    param_names = input_and_param_names[len(input_and_param_names) - len(params):]
+    params_dict = dict(zip(param_names, params))
+
     if verbose:
         print(graph)
 
@@ -355,7 +356,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     return torch_out
 
 
-def _set_input_and_output_names(graph, input_names, output_names, params_dict):
+def _set_input_and_output_names(graph, input_names, output_names):
     def set_names(node_list, name_list, descriptor):
         if name_list is None:
             return
@@ -365,8 +366,6 @@ def _set_input_and_output_names(graph, input_names, output_names, params_dict):
                 % (descriptor, len(name_list), descriptor, len(node_list)))
         for name, node in zip(name_list, node_list):
             if node.uniqueName() != name:
-                if node.uniqueName() in params_dict:
-                    params_dict[name] = params_dict.pop(node.uniqueName())
                 node.setUniqueName(name)
     set_names(list(graph.inputs()), input_names, 'input')
     set_names(list(graph.outputs()), output_names, 'output')

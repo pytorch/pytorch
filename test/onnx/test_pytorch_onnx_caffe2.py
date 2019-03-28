@@ -235,6 +235,35 @@ class TestCaffe2Backend(unittest.TestCase):
         result = model_c2.run(input.numpy())
         np.testing.assert_almost_equal(output.data.cpu().numpy(), result[0], decimal=3)
 
+    def test_onnx_export_param_name_duplication(self):
+        class SimpleFcNet(nn.Module):
+            def __init__(self):
+                super(SimpleFcNet, self).__init__()
+                self.fc1 = nn.Linear(5, 10)
+
+            def forward(self, input):
+                return self.fc1(input)
+
+        model = SimpleFcNet()
+        input = torch.randn(7, 5)
+        output = model(input)
+
+        import io
+        f = io.BytesIO()
+        from torch.onnx import ExportTypes
+        # The export call explicitly sets the names of the input, and the first parameter.
+        # But note that the target first parameter name is the same as the second parameter name.
+        # This test checks that given this edge condition, the model can be loaded and executed
+        # in Caffe2 backend correctly.
+        torch.onnx._export(model, input, f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE,
+                           input_names=['input1', 'fc1.bias'], _retain_param_name=False)
+
+        f.seek(0)
+        import caffe2.python.onnx.backend as c2
+        model_c2 = c2.prepare_zip_archive(f)
+        result = model_c2.run(input.numpy())
+        np.testing.assert_almost_equal(output.data.cpu().numpy(), result[0], decimal=3)
+
     def test_lstm_cell(self):
         model = nn.LSTMCell(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE)
         input = torch.randn(BATCH_SIZE, RNN_INPUT_SIZE)
