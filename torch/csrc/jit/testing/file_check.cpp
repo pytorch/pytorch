@@ -136,17 +136,6 @@ void assertNotFind(
   }
 }
 
-size_t substringCount(
-    const std::shared_ptr<std::string>& file,
-    const std::string& sub) {
-  size_t occurances = 0;
-  std::string::size_type pos = 0;
-  while ((pos = file->find(sub, pos)) != std::string::npos) {
-    ++occurances;
-    pos += sub.length();
-  }
-  return occurances;
-}
 } // namespace
 
 struct FileCheckImpl {
