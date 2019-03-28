@@ -592,6 +592,8 @@ if (NOT BUILD_ATEN_MOBILE)
 	${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
 	${CUDA_LIBRARIES})
       target_include_directories(caffe2 PRIVATE "${NVTOOLEXT_HOME}/include")
+      target_include_directories(caffe2_gpu PRIVATE "${NVTOOLEXT_HOME}/include")
+
     elseif(APPLE)
       set(TORCH_CUDA_LIBRARIES
 	${CUDA_TOOLKIT_ROOT_DIR}/lib/libcudart.dylib
