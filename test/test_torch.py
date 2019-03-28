@@ -3924,16 +3924,16 @@ class _TestTorchMixin(object):
 
         # 1 - Squashed weights
         # This setup only works for sampling WITH replacement
-        w = torch.cat(torch.ones(1), torch.zeros(99))
+        w = torch.cat((torch.ones(1), torch.zeros(99)))
         res = torch.choice(x, w, replace=True, k=25)
         self.assertEqual((res == 0).all())
 
         # 2 - Squashed weights
-        w = torch.cat(torch.ones(25), torch.zeros(75))
+        w = torch.cat((torch.ones(25), torch.zeros(75)))
         res = torch.choice(x, w, replace=True, k=25)
         self.assertTrue((res < 25).all())
 
-        w = torch.cat(torch.ones(25), torch.zeros(75))
+        w = torch.cat((torch.ones(25), torch.zeros(75)))
         res = torch.choice(x, w, replace=False, k=25)
         self.assertTrue((res < 25).all())
 
