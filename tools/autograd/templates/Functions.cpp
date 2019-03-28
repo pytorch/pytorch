@@ -408,6 +408,20 @@ Tensor unbind_backward(const variable_list& grads, int64_t dim) {
   return at::stack(grads_tensors, dim);
 }
 
+Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, IntArrayRef dim, bool unbiased, bool keepdim, bool is_std) {
+  AT_CHECK(grads.size() > 0 && grads.size() <= 2, "grads size should be in interval [0,2]");
+  std::vector<Tensor> results;
+  if (grads[0].defined()) {
+    Tensor grad = is_std ? static_cast<Tensor>(grads[0]) / (r1 * 2) : static_cast<Tensor>(grads[0]);
+    results.push_back(at::var_backward(grad, self, dim, unbiased, keepdim));
+  }
+  if (grads[1].defined()) {
+    Tensor grad = static_cast<Tensor>(grads[1]);
+    results.push_back(at::sum_backward(grad, self.sizes(), dim, keepdim) / at::_safe_size(self.sizes(), dim));
+  }
+  return at::stack(results, 0);
+}
+
 std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, int64_t dim) {
   dim = at::legacy_cat_wrap_dim(dim, sizes);
   std::vector<Tensor> grad_inputs(sizes.size());

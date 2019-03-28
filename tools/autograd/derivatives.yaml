@@ -1436,3 +1436,9 @@
 # PackedSequence helpers
 - name: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first)
   input: _pack_padded_sequence_backward(grad, input.sizes(), result1, batch_first)
+
+- name: std_mean(Tensor self, IntArrayRef dim, bool unbiased, bool keepdim)
+  self: var_std_mean_backward(grads, self, result0, result1, dim, unbiased, keepdim, true)
+
+- name: var_mean(Tensor self, IntArrayRef dim, bool unbiased, bool keepdim)
+  self: var_std_mean_backward(grads, self, result0, result1, dim, unbiased, keepdim, false)
