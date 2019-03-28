@@ -9784,6 +9784,22 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(pinned, x)
         self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
 
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_pin_memory_from_contructor(self):
+        tensors = [
+            torch.randn(3, 5, pin_memory=True),
+            torch.rand(3, pin_memory=True),
+            # torch.randint(3,5, pin_memory=True), // VITALYF this need fix
+            torch.zeros(3, pin_memory=True),
+            torch.randperm(3, pin_memory=True),
+            torch.empty(6, pin_memory=True),
+            torch.ones(6, pin_memory=True),
+            torch.eye(6, pin_memory=True),
+            # torch.arange(3, 5, pin_memory=True), // VITALYF this need fix
+            ]
+        for x in tensors:
+            self.assertTrue(x.is_pinned())
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_unresizable(self):
         x = np.zeros((2, 2))

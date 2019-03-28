@@ -512,12 +512,6 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
         else:
             ns_op_name = n.kind()
 
-        print('---------------------------------------------------')
-        print(ns_op_name)
-        print(g)
-        print(n)
-        print('---------------------------------------------------')
-
         ns, op_name = ns_op_name.split("::")
 
         if ns == "onnx":

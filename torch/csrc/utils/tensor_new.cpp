@@ -196,8 +196,6 @@ Tensor internal_new_from_data(
     bool type_inference,
     bool pin_memory = false) {
 
-  std::cout << "Pin memory = " << pin_memory << "\n";
-
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
   }
