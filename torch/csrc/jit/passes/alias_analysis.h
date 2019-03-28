@@ -172,6 +172,10 @@ class AliasDb {
   void analyze(Block* block);
   void analyze(Node* node);
   void analyzeImpl(Node* node);
+  /**
+   * Exposed analysis methods for registration by custom operators.
+   */
+ public:
   void analyzeIf(Node* node);
   void analyzeLoop(Node* node);
   void analyzeSubgraph(Node* node);
@@ -182,6 +186,8 @@ class AliasDb {
   void analyzeFork(Node* node);
   void analyzeWait(Node* node);
   void analyzeSetAttr(Node* node);
+ private:
+  bool tryRegisteredAnalysis(Node* node);
 
   /**
    * Alias manipulation methods

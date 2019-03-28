@@ -170,7 +170,8 @@ FunctionSchema inferAndCheckSchema(const std::string& schemaOrName) {
 template <typename Implementation>
 Operator createOperator(
     const std::string& schemaOrName,
-    Implementation&& implementation) {
+    Implementation&& implementation,
+    Operator::Options options = Operator::Options()) {
   using Traits = c10::guts::infer_function_traits_t<Implementation>;
   using ArgumentTypes =
       c10::guts::typelist::map_t<decay_t, typename Traits::parameter_types>;
@@ -190,7 +191,7 @@ Operator createOperator(
         tuple,
         typename MakeIndices<kNumberOfArguments>::indices{});
     return 0;
-  });
+  }, std::move(options));
 }
 
 /// Registration class for new operators. Effectively calls
