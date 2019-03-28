@@ -529,6 +529,11 @@ Tensor reservoir_sampling_cuda(
   } else {
 
     AT_CHECK(
+      weights.device() == x.device(),
+      "The weights must share the same device as the inputs."
+    );
+
+    AT_CHECK(
       n == weights.numel(),
       "The weights must have the same number of elements as the input's first dimension."
     );
@@ -536,6 +541,16 @@ Tensor reservoir_sampling_cuda(
     AT_CHECK(
       weights.dim() == 1,
       "The weights must 1-dimensional."
+    );
+
+    AT_CHECK(
+      weights.nonzero().numel() >= k,
+      "Cannot have less non-zero weights than the number of samples."
+    );
+
+    AT_CHECK(
+      weights.min().item().toLong() >= 0,
+      "All the weights must be non-negative."
     );
 
     Tensor keys = at::empty({n}, weights.options());
