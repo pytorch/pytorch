@@ -154,7 +154,7 @@ struct Method {
     for (at::Tensor& i : inputs) {
       stack.emplace_back(std::move(i));
     }
-    for (auto inp : initial_ivalues_) {
+    for (const NamedIValue* inp : initial_ivalues_) {
       stack.push_back(*inp->slot());
     }
     const auto size = stack.size();
@@ -458,7 +458,9 @@ struct Module {
   }
 
   const NamedIValue* get_named_parameter(const std::string& name) const {
-    return parameters.find(name);
+    auto value = parameters.find(name);
+    AT_CHECK(value != nullptr, "Could not find parameter ", name);
+    return value;
   }
 
   void set_parameter(const std::string& name, at::Tensor v) {
