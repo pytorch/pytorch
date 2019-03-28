@@ -104,7 +104,7 @@ public:
    * >     .op("my_op", c10::kernel<my_kernel_cpu>());
    */
    template<class FuncType>
-   C10_DEPRECATED_MESSAGE("Registering kernels via passing runtime function pointers to op() is deprecated. " \
+   C10_DEPRECATED_MESSAGE("Registering kernels via passing function pointers to op() directly is deprecated. " \
                           "Please use the new c10::kernel() based API instead.")
    // enable_if: only enable it if FuncType is actually a function, but not a stack based KernelFunction.
    guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value, RegisterOperators>
