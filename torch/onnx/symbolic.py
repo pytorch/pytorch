@@ -104,6 +104,7 @@ def _maybe_get_scalar(value):
 
 def _get_const(value, desc, arg_name):
     if _is_value(value) and value.node().kind() != 'onnx::Constant':
+        print(value.node().kind())
         raise RuntimeError("ONNX symbolic expected a constant value of the {} argument".format(arg_name))
     return _parse_arg(value, desc)
 
@@ -1363,8 +1364,9 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 
 
 def to(g, self, *args):
+    print(args)
     # ONNX doesn't have a concept of a device, so we ignore device casts
-    if len(args) == 4:
+    if len(args) == 3:
         if args[0].type().isSubtypeOf(ListType.ofInts()):
             # aten::to(Tensor, Device, bool, bool, bool)
             return self
@@ -1372,11 +1374,11 @@ def to(g, self, *args):
             # aten::to(Tensor, ScalarType, bool, bool, bool)
             dtype = _get_const(args[0], 'i', 'dtype')
             return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
-    elif len(args) == 5:
+    elif len(args) == 4:
         # aten::to(Tensor, Device, ScalarType, bool, bool, bool)
         dtype = _get_const(args[1], 'i', 'dtype')
         return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
-    elif len(args) == 6:
+    elif len(args) == 5:
         # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool) -> Tensor
         dtype = _get_const(args[0], 'i', 'dtype')
         # Layout and device are ignored
