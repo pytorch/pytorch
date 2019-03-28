@@ -90,7 +90,6 @@ class TestIndexing(TestCase):
         num_ones = (c > 0).sum()
         r = v[c > 0]
         self.assertEqual(r.shape, (num_ones, 3))
-        self.assertEqual(r.dtype, torch.float64)
 
     def test_int_indices(self):
         v = torch.randn(5, 7, 3)
