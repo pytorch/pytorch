@@ -56,6 +56,10 @@ class CAFFE2_API CPUContext final : public BaseContext {
 
   using BaseContext::SwitchToDevice;
 
+  inline c10::Stream GetStream(int /*stream_id*/) override {
+    return c10::Stream{c10::Stream::DEFAULT, Device(DeviceType::CPU, -1)};
+  }
+
   inline void WaitEvent(const Event& ev) override {
     ev.Wait(CPU, this);
   }

@@ -12,6 +12,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 #include <c10/core/CopyBytes.h>
+#include <c10/core/Stream.h>
 
 namespace caffe2 {
 class Event;
@@ -43,6 +44,8 @@ class CAFFE2_API BaseContext {
   inline void SwitchToDevice() {
     SwitchToDevice(0);
   }
+
+  virtual Stream GetStream(int /*stream_id*/) = 0;
 
   virtual void WaitEvent(const caffe2::Event& ev) = 0;
 

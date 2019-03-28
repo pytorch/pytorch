@@ -10,6 +10,7 @@
 #include <typeinfo>
 #include <vector>
 
+#include "c10/core/StreamGuard.h"
 #include "c10/macros/Macros.h"
 #include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
@@ -825,7 +826,7 @@ class Operator : public OperatorBase {
     try {
       StartAllObservers();
 
-      context_.SwitchToDevice(stream_id);
+      c10::StreamGuard stream_guard{context_.GetStream(stream_id)};
 
       if (FLAGS_caffe2_operator_throw_if_fp_exceptions) {
         std::feclearexcept(FE_ALL_EXCEPT);
@@ -870,7 +871,8 @@ class Operator : public OperatorBase {
     try {
       StartAllObservers();
 
-      context_.SwitchToDevice(stream_id);
+      c10::StreamGuard stream_guard{context_.GetStream(stream_id)};
+
       auto result = RunOnDevice();
       if (result) {
         if (HasAsyncPart()) {

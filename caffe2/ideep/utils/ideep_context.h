@@ -26,6 +26,10 @@ class IDEEPContext final : public BaseContext {
   inline void SwitchToDevice(int /*stream_id*/) {}
   using BaseContext::SwitchToDevice;
 
+  inline Stream GetStream(int /*stream_id*/) override {
+    return Stream{Stream::DEFAULT, Device(DeviceType::CPU, -1)};
+  }
+
   inline void WaitEvent(const Event& ev) {
     ev.Wait(IDEEP, this);
   }

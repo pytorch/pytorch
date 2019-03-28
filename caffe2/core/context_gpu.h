@@ -190,6 +190,10 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   // void SwitchToDevice()
   using BaseContext::SwitchToDevice;
 
+  inline Stream GetStream(StreamId stream_id) override {
+    return getCudaObjects().GetCUDAStream(gpu_id_, stream_id);
+  }
+
   inline void WaitEvent(const Event& ev) override {
     ev.Wait(CUDA, this);
   }
