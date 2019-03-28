@@ -245,11 +245,11 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
                 if i >= user_input_num:
                     inp.setUniqueName(param_names[i - user_input_num])
 
+    graph = _optimize_graph(graph, operator_export_type)
+
     input_and_param_names = [val.uniqueName() for val in graph.inputs()]
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
     params_dict = dict(zip(param_names, params))
-
-    graph = _optimize_graph(graph, operator_export_type)
 
     # NB: ONNX requires complete information about output types, which might be
     # erased by some optimizations, so we need to set it explicitly again.
