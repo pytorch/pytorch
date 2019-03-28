@@ -169,9 +169,15 @@ struct GraphFuser {
   Block* block_;
   std::unique_ptr<AliasDb> aliasDb_;
   std::shared_ptr<Graph> graph_;
+  std::function<bool(Node*)> callback_ = nullptr;
+  Symbol kind_ = prim::FusionGroup;
 
   GraphFuser(Block* block, std::shared_ptr<Graph> graph)
       : block_(block), graph_(std::move(graph)) {}
+
+  // Custom passes require kind to specified
+  GraphFuser(Block* block, std::shared_ptr<Graph> graph, std::function<bool(Node*)> callback, Symbol kind)
+      : block_(block), graph_(std::move(graph)), callback_(callback), kind_(kind) {}
 
   value_list tensorInputs(Node* node) {
     return filter(node->inputs(), [](Value* v) {
@@ -187,7 +193,20 @@ struct GraphFuser {
   }
 
   bool isFusable(Node* node) {
+    if (callback_) {
+      return isFusableCallback(node);
+    }
     return isFusableMap(node) || isFusableBatchNorm(node);
+  }
+
+  bool isFusableCallback(Node* node) {
+    AT_ASSERT(callback_ != nullptr);
+    // Ever denoting a prim::Param as fusable is broken,
+    // this simply saves the user defined callback_ the effort.
+    if (node->kind() == prim::Param) {
+      return false;
+    }
+    return callback_(node);
   }
 
   bool isFusableMap(Node* node) {
@@ -240,7 +259,7 @@ struct GraphFuser {
   }
 
   Graph& getSubgraph(Node* n) {
-    AT_ASSERT(n->kind() == prim::FusionGroup);
+    AT_ASSERT(n->kind() == kind_);
     return *n->g(attr::Subgraph);
   }
 
@@ -436,7 +455,7 @@ struct GraphFuser {
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
   Node* createSingletonFusionGroup(Node* n) {
-    auto group = block_->owningGraph()->createFusionGroup();
+    auto group = block_->owningGraph()->createFusionGroup(kind_);
     // propogate position information for the new node so we can always
     // have a valid mapping
     group->insertBefore(n);
@@ -1338,6 +1357,12 @@ void FuseGraph(std::shared_ptr<Graph>& graph) {
     EliminateDeadCode(graph);
     // Improve the quality of shape propagation code that was left
     PeepholeOptimizeShapeExpressions(graph->block());
+  }
+}
+
+void CustomFuseGraph(std::shared_ptr<Graph>& graph, std::function<bool(Node*)> fn, Symbol kind) {
+  if (canFuseOnCPU() || canFuseOnGPU()) {
+    GraphFuser(graph->block(), graph, fn, kind).run();
   }
 }
 
