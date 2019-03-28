@@ -745,15 +745,15 @@
   self: slice_backward(grad, self.sizes(), dim, start, end, step)
 
 - name: slogdet(Tensor self)
-  self: slogdet_backward(grad, self, result0, result1)
+  self: slogdet_backward(grad, self, sign, logabsdet)
   output_differentiability: [false, true]
 
 - name: solve(Tensor self, Tensor A)
   self: solve_backward_self(grad, self, A)
-  A: solve_backward_A(grad, self, A, result0)
+  A: solve_backward_A(grad, self, A, solution)
 
 - name: sort(Tensor self, int64_t dim, bool descending)
-  self: index_select_backward(grad, dim, result1, self.sizes(), true)
+  self: index_select_backward(grad, dim, indices, self.sizes(), true)
 
 - name: split(Tensor self, int64_t split_size, int64_t dim)
   self: split_backward(grads, split_size, dim, self.sizes(), self.type())
@@ -839,7 +839,7 @@
   self: tanh_backward(grad, result)
 
 - name: topk(Tensor self, int64_t k, int64_t dim, bool largest, bool sorted)
-  self: index_select_backward(grad, dim, result1, self.sizes(), true)
+  self: index_select_backward(grad, dim, indices, self.sizes(), true)
 
 - name: trace(Tensor self)
   self: trace_backward(grad, self.sizes())
