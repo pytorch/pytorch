@@ -72,7 +72,7 @@ constexpr inline T&& forward(guts::remove_reference_t<T>&& t) noexcept {
 template <typename T, typename... Args>
 typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
 make_unique(Args&&... args) {
-  return std::unique_ptr<T>(new T(forward<Args>(args)...));
+  return std::unique_ptr<T>(new T(c10::guts::forward<Args>(args)...));
 }
 // Allows 'make_unique<T[]>(10)'. (N3690 s20.9.1.4 p3-4)
 template <typename T>
@@ -183,7 +183,7 @@ template<typename... Ts> using void_t = typename make_void<Ts...>::type;
 
 template <class F, class Tuple>
 inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
-  return std::apply(forward<F>(f), forward<Tuple>(t));
+  return std::apply(c10::guts::forward<F>(f), c10::guts::forward<Tuple>(t));
 }
 
 #else
