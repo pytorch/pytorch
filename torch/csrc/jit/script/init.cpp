@@ -671,6 +671,16 @@ void initJitScriptBindings(PyObject* module) {
   // follows.
   py::bind_map<ExtraFilesMap>(m, "ExtraFilesMap");
 
+  py::class_<NamedIValue, std::unique_ptr<NamedIValue, py::nodelete>>(
+      m, "NamedValue")
+      .def_property_readonly(
+          "slot",
+          [](NamedIValue& self) { return toPyObject(std::move(*self.slot())); })
+      .def_property_readonly(
+          "type", [](NamedIValue& self) { return self.type; })
+      .def_property_readonly(
+          "name", [](NamedIValue& self) { return self.name_; });
+
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
   // public.

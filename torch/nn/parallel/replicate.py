@@ -78,7 +78,8 @@ def _copy_scriptmodule_methods(modules, module_copies, module_indices):
         for method_name in module._method_names():
             method = module._get_method(method_name)
             param_list = []
-            for param in method.initial_ivalues():
+            params = [param.slot for param in method.initial_ivalues()]
+            for param in params:
                 param_list.append(param_dict[param])
             replica._copy_method(method_name, param_list, module)
 
