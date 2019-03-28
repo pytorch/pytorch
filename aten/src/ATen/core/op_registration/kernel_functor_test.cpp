@@ -648,7 +648,7 @@ FunctionSchema opWithConstructorArgsSchema(
 
 TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithConstructorArg_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op(opWithConstructorArgsSchema, kernel<KernelWithConstructorArg>(3), dispatchKey(TensorType1()))
+      .op(opWithConstructorArgsSchema, kernel<KernelWithConstructorArg>(2), dispatchKey(TensorType1()))
       .op(opWithConstructorArgsSchema, kernel<KernelWithConstructorArg>(4), dispatchKey(TensorType2()));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::offset_op", "");
