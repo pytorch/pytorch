@@ -482,7 +482,6 @@ Tensor reservoir_sampling_cuda(
   dim3 threads(threadsPerBlock);
 
   THCState *state = at::globalContext().getTHCState();
-  THCRandom_seed(state);
   THCGenerator *generator = THCRandom_getGenerator(state);
 
   if (weights.numel() == 0){

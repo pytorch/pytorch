@@ -787,7 +787,7 @@ Tensor reservoir_sampling_cpu(
   );
 
   auto options = x.options().dtype(at::kLong);
-  THGenerator* generator = THGenerator_new();
+  THGenerator* generator = get_generator(nullptr);
 
   if (weights.numel() == 0){
     Tensor indices_n = at::arange({n}, options);
@@ -808,7 +808,6 @@ Tensor reservoir_sampling_cpu(
       split,
       generator);
 
-      THGenerator_free(generator);
       return x.index_select(
         0,
         indices_n.index_select(
@@ -854,7 +853,6 @@ Tensor reservoir_sampling_cpu(
         generator);
     });
 
-    THGenerator_free(generator);
     return x.index_select(0, std::get<1>(keys.topk(k)));
   }
 
