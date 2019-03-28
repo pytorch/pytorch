@@ -102,7 +102,13 @@ class PredictorExporterTest(unittest.TestCase):
         extra_init_net.ConstantFill('data', 'data', value=1.0)
 
         global_init_net = core.Net('global_init')
-        global_init_net.ConstantFill(None, 'global_init_blob', value=1.0, shape=[1, 5])
+        global_init_net.ConstantFill(
+            [],
+            'global_init_blob',
+            value=1.0,
+            shape=[1, 5],
+            dtype=core.DataType.FLOAT
+        )
         pem = pe.PredictorExportMeta(
             predict_net=self.predictor_export_meta.predict_net,
             parameters=self.predictor_export_meta.parameters,

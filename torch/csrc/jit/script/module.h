@@ -8,6 +8,8 @@
 #include <torch/csrc/jit/named_value.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/script/slot.h>
+
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
@@ -55,15 +57,23 @@ using ModuleLookup = std::function<std::shared_ptr<Module>(
 struct NamedIValue {
   NamedIValue(std::string name, TypePtr type, IValue ivalue)
       : name_(name),
-        type(type),
-        ivalue(torch::make_unique<IValue>(std::move(ivalue))) {}
+        type_(type),
+        ivalue_(torch::make_unique<IValue>(std::move(ivalue))) {}
 
-  IValue* slot() const {
-    return ivalue.get();
+  Slot slot() const {
+    return Slot(ivalue_.get());
   }
+  const std::string& name() const {
+    return name_;
+  }
+  const TypePtr& type() const {
+    return type_;
+  }
+
+ private:
   const std::string name_;
-  const TypePtr type;
-  std::unique_ptr<IValue> ivalue;
+  const TypePtr type_;
+  std::unique_ptr<IValue> ivalue_;
 };
 
 struct Method {
@@ -142,7 +152,7 @@ struct Method {
     }
     initial_ivalues_.push_back(value);
     initial_ivalue_index[value] = graph()->inputs().size();
-    return graph()->addInput()->setType(value->type);
+    return graph()->addInput()->setType(value->type());
   }
 
   std::shared_ptr<Graph> propagate_shapes(
@@ -393,7 +403,7 @@ struct Module {
 
   void register_buffer(const std::string& name, autograd::Variable v) {
     if (auto b = attributes.find(name)) {
-      AT_ASSERT(b->type->isSubtypeOf(TensorType::get()));
+      AT_ASSERT(b->type()->isSubtypeOf(TensorType::get()));
       *b->slot() = v;
       return;
     }
@@ -453,7 +463,7 @@ struct Module {
     return *methods.insert(name, std::move(method));
   }
 
-  IValue* parameter_slot(const std::string& name) const {
+  Slot parameter_slot(const std::string& name) const {
     return parameters[name].slot();
   }
 
@@ -502,7 +512,7 @@ struct Module {
   }
   NamedIValue* find_buffer(const std::string& name) {
     auto b = attributes.find(name);
-    if (b && b->type->isSubtypeOf(TensorType::get())) {
+    if (b && b->type()->isSubtypeOf(TensorType::get())) {
       return b;
     }
     return nullptr;
@@ -612,7 +622,7 @@ struct Module {
       parameter_remap[&kv.value()] = curr->find_parameter(kv.key());
     }
     for (auto& kv : attributes) {
-      if (!kv.value().type->isSubtypeOf(TensorType::get())) {
+      if (!kv.value().type()->isSubtypeOf(TensorType::get())) {
         continue;
       }
       curr->register_buffer(

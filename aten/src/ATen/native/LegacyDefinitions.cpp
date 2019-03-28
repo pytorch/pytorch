@@ -650,10 +650,6 @@ Tensor max(const Tensor & self) {
   return at::legacy::th::_th_max(self);
 }
 
-Tensor median(const Tensor & self) {
-  return at::legacy::th::_th_median(self);
-}
-
 std::tuple<Tensor &,Tensor &> sort_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending) {
   return at::legacy::th::_th_sort_out(values, indices, self, dim, descending);
 }

@@ -1,25 +1,16 @@
 import torch
 import torch.nn.functional as F
 from torch._six import inf
-from torch._C import _add_docstr
-from operator import mul
-from functools import reduce
-from collections import Iterable
-from torch._utils import annotate
 from itertools import product
-import math
 import warnings
 
 __all__ = [
-    'argmax',
-    'argmin',
     'btriunpack',
     'chain_matmul',
     'einsum',
     'broadcast_tensors',
     'isfinite',
     'isinf',
-    'isnan',
     'norm',
     'meshgrid',
     'potrf',
@@ -29,6 +20,7 @@ __all__ = [
     'split',
     'stft',
     'tensordot',
+    'trtrs',
     'unique',
     'cartesian_prod',
 ]
@@ -382,22 +374,6 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
 
 
-isnan = _add_docstr(torch.isnan, r"""
-Returns a new tensor with boolean elements representing if each element is `NaN` or not.
-
-Arguments:
-    tensor (Tensor): A tensor to check
-
-Returns:
-    Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `NaN` elements.
-
-Example::
-
-    >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
-    tensor([ 0,  1,  0], dtype=torch.uint8)
-""")
-
-
 def unique(input, sorted=True, return_inverse=False, dim=None):
     r"""Returns the unique scalar elements of the input tensor as a 1-D tensor.
 
@@ -459,68 +435,6 @@ def unique(input, sorted=True, return_inverse=False, dim=None):
         return output, inverse_indices
     else:
         return output
-
-
-def argmax(input, dim=None, keepdim=False):
-    r"""Returns the indices of the maximum values of a tensor across a dimension.
-
-    This is the second value returned by :meth:`torch.max`. See its
-    documentation for the exact semantics of this method.
-
-    Args:
-        input (Tensor): the input tensor
-        dim (int): the dimension to reduce. If ``None``, the argmax of the
-            flattened input is returned.
-        keepdim (bool): whether the output tensors have :attr:`dim`
-            retained or not. Ignored if ``dim=None``.
-
-    Example::
-
-        >>> a = torch.randn(4, 4)
-        >>> a
-        tensor([[ 1.3398,  0.2663, -0.2686,  0.2450],
-                [-0.7401, -0.8805, -0.3402, -1.1936],
-                [ 0.4907, -1.3948, -1.0691, -0.3132],
-                [-1.6092,  0.5419, -0.2993,  0.3195]])
-
-
-        >>> torch.argmax(a, dim=1)
-        tensor([ 0,  2,  0,  1])
-    """
-    if dim is None:
-        return torch._argmax(input.contiguous().view(-1), dim=0, keepdim=False)
-    return torch._argmax(input, dim, keepdim)
-
-
-def argmin(input, dim=None, keepdim=False):
-    r"""Returns the indices of the minimum values of a tensor across a dimension.
-
-    This is the second value returned by :meth:`torch.min`. See its
-    documentation for the exact semantics of this method.
-
-    Args:
-        input (Tensor): the input tensor
-        dim (int): the dimension to reduce. If ``None``, the argmin of the
-            flattened input is returned.
-        keepdim (bool): whether the output tensors have :attr:`dim`
-            retained or not. Ignored if ``dim=None``.
-
-    Example::
-
-        >>> a = torch.randn(4, 4)
-        >>> a
-        tensor([[ 0.1139,  0.2254, -0.1381,  0.3687],
-                [ 1.0100, -1.1975, -0.0102, -0.4732],
-                [-0.9240,  0.1207, -0.7506, -1.0213],
-                [ 1.7809, -1.2960,  0.9384,  0.1438]])
-
-
-        >>> torch.argmin(a, dim=1)
-        tensor([ 2,  1,  3,  1])
-    """
-    if dim is None:
-        return torch._argmin(input.contiguous().view(-1), dim=0, keepdim=False)
-    return torch._argmin(input, dim, keepdim)
 
 
 def tensordot(a, b, dims=2):
@@ -828,3 +742,19 @@ def gesv(b, A, out=None):
     warnings.warn("torch.gesv is deprecated in favour of torch.solve and will be removed in the "
                   "next release. Please use torch.solve instead.", stacklevel=2)
     return torch.solve(b, A, out=out)
+
+
+def trtrs(b, A, upper=True, transpose=False, unitriangular=False, out=None):
+    r"""Solves a system of equations with a triangular coefficient matrix :math:`A`
+    and multiple right-hand sides :attr:`b`.
+
+    In particular, solves :math:`AX = b` and assumes :math:`A` is upper-triangular
+    with the default keyword arguments.
+
+    .. warning::
+        :func:`torch.trtrs` is deprecated in favour of :func:`torch.triangular_solve` and will be
+        removed in the next release. Please use :func:`torch.triangular_solve` instead.
+    """
+    warnings.warn("torch.trtrs is deprecated in favour of torch.triangular_solve and will be "
+                  "removed in the next release. Please use torch.triangular_solve instead.", stacklevel=2)
+    return torch.triangular_solve(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular, out=out)
