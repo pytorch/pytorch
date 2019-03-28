@@ -159,6 +159,12 @@ case ${key}: { // ${name}
 } break;
 """)
 
+ASSIGN_MULTI_RETURN_TEMPLATE = CT("""\
+for (int i = 0; i < OutputSize(); ++ i) {
+  ${assignment}
+}
+""")
+
 
 def get_output(o, i):
     if len(o['returns']) == 1:
@@ -196,6 +202,31 @@ def find_factory_methods(decls):
         if any(arg['dynamic_type'] == 'TensorOptions' for arg in o['arguments']):
             factory_methods[o['name']] = 0
     return factory_methods
+
+
+def same_output_type(o):
+    returns = o['returns']
+    ret_type = returns[0]['type']
+
+    for ret in returns:
+        if ret_type != ret['type']:
+            return False
+
+    return len(returns) > 1
+
+
+def emit_assignments(o, env):
+    if same_output_type(o):
+        ret = o['returns'][0]
+        ret_type = RETURN_MAP[ret['type'] if not value_is_tensor_type(ret) else 'Tensor']
+        assignment = CT(ret_type).substitute(env, offset='i', output=get_output(o, "i"))
+        env['assignments'] = ASSIGN_MULTI_RETURN_TEMPLATE.substitute(env, assignment=assignment)
+    else:
+        for i, r in enumerate(o['returns']):
+            t = RETURN_MAP[r['type'] if not value_is_tensor_type(r) else 'Tensor']
+            assignment = CT(t).substitute(env, offset=i, output=get_output(o, i))
+            env['assignments'].append(assignment)
+
 
 
 if __name__ == '__main__':
@@ -261,7 +292,6 @@ if __name__ == '__main__':
                         .format(arg['name'], real_inputs, static_tensor_inputs))
             elif value_is_tensor_type(arg):
                 # load tensor inputs from Caffe2
-
                 env['statements'].append(
                     'auto {} = peek({}, {});'.format(arg['name'], real_inputs, view_length))
                 real_inputs += 1
@@ -269,10 +299,7 @@ if __name__ == '__main__':
                 init = CT(ARGUMENT_MAP[arg['type']]).substitute(env, arg=arg['name'])
                 env['initialization'].append(init)
 
-        for i, r in enumerate(o['returns']):
-            t = RETURN_MAP[r['type'] if not value_is_tensor_type(r) else 'Tensor']
-            assignment = CT(t).substitute(env, offset=i, output=get_output(o, i))
-            env['assignments'].append(assignment)
+        emit_assignments(o, env)
 
         if 'namespace' in o['method_of']:
             env['invocation'] = CT("at::${name}(${arguments})").substitute(env)
