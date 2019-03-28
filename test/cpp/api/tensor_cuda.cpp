@@ -114,7 +114,7 @@ TEST(TensorTest, ToDeviceAndDtype_MultiCUDA) {
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kInt, at::kStrided);
 }
 
-TEST(TensorTest, MagmaInitializesCorrectlyCUDA) {
+TEST(TensorTest, MagmaInitializesCorrectly_CUDA) {
   auto tensor = at::arange(1, 17, at::TensorOptions(at::kFloat).device(at::Device("cuda")));
   tensor = tensor.view({4, 4});
   if (at::hasMAGMA()) {
