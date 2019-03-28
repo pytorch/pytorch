@@ -237,6 +237,11 @@ void initTreeViewBindings(PyObject* module) {
           [](const Expr& cond, const Expr& true_expr, const Expr& false_expr) {
             return TernaryIf::create(cond.range(), cond, true_expr, false_expr);
           }));
+  py::class_<ListComp, Expr>(m, "ListComp")
+      .def(py::init(
+          [](const SourceRange& range, const Expr& elt, const Expr& target, const Expr& iter) {
+            return ListComp::create(range, elt, target, iter);
+          }));
   py::class_<ListLiteral, Expr>(m, "ListLiteral")
       .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
         return ListLiteral::create(range, wrap_list(range, std::move(args)));
