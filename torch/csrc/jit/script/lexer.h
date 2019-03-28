@@ -111,8 +111,8 @@ enum TokenKind {
 #undef DEFINE_TOKEN
 };
 
-std::string kindToString(int kind);
-int stringToKind(const std::string& str);
+TORCH_API std::string kindToString(int kind);
+TORCH_API int stringToKind(const std::string& str);
 
 // nested hash tables that indicate char-by-char what is a valid token.
 struct TokenTrie;
