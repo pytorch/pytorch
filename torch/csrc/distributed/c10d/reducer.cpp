@@ -137,11 +137,9 @@ Reducer::Reducer(
     backward_stats_.resize(replica_count);
     const auto variable_count = inputs[0].size();
     std::for_each(
-      backward_stats_.begin(),
-      backward_stats_.end(),
-      [=](std::vector<int64_t>& v) {
-        v.resize(variable_count);
-      });
+        backward_stats_.begin(),
+        backward_stats_.end(),
+        [=](std::vector<int64_t>& v) { v.resize(variable_count); });
   }
 }
 
