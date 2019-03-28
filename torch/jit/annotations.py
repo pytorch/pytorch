@@ -114,8 +114,8 @@ def get_type_line(source):
     type_comment = '# type:'
 
     lines = source.split('\n')
-    lines = [(line_no, line) for line_no, line in enumerate(lines)]
-    lines = list(filter(lambda line: type_comment in line[1], lines))
+    lines = [(line_num, line) for line_num, line in enumerate(lines)]
+    type_lines = list(filter(lambda line: type_comment in line[1], lines))
 
     if len(lines) == 0:
         return None
@@ -127,24 +127,29 @@ def get_type_line(source):
     # lines (except for the return type, which is n + 2 after the last arg line)
     # according to PEP 484
     # https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code
-    last_line_no = None
+    prev_line_num = None
     return_line = None
     parameter_type_lines = []
-    for line_no, line in lines:
-        if last_line_no is not None and last_line_no + 1 != line_no:
-            # non-subsequent type line
-            if last_line_no == line_no - 2 and '# type: (...) -> ' in line:
-                # if it's the return line, it's supposed to be last_line_no + 2
-                # away
+    for line_num, line in type_lines:
+        if prev_line_num is not None:
+            difference = line_num - prev_line_num
+            if difference == 2:
+                # 2 lines since last type line, so this must be the return type
+                # line `(...) -> return_type`
                 return_line = line
                 break
-            raise RuntimeError("Could not parse multiline type annotation")
-        last_line_no = line_no
+            elif difference == 1:
+                # Expected case, it's another parameter type (fall through)
+                pass
+            else:
+                raise RuntimeError("Too many lines between '# type' annotations "
+                                   "on line '{}' (expected 1 or 2, found {})".format(line, difference))
+
         parameter_type_lines.append(line)
+        prev_line_num = line_num
 
     if not return_line:
-        # Did not find return type line (missing or not in the right place)
-        raise RuntimeError("Missing return type line on multiline type annotation")
+        raise RuntimeError("Did not find return type line on multiline type annotation")
 
     types = []
     # Get each individual type from each argument declaration
@@ -154,7 +159,7 @@ def get_type_line(source):
 
     parameter_types = ", ".join(types)
 
-    # Replace (...) with (`parameter_types`)
+    # Stitch together the parameter and return type pieces into 1 long type line
     line_parts = return_line.split("...")
     return line_parts[0] + parameter_types + line_parts[1]
 
