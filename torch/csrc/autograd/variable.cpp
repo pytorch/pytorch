@@ -168,6 +168,7 @@ void Variable::Impl::set_data(const at::Tensor &new_data) {
 
   // Updates metadata
   data_type_ = new_data.type().typeMeta();
+  device_opt_ = new_data.device();
   type_id_ = new_data.type().type_id();
   is_variable_ = true;
 
