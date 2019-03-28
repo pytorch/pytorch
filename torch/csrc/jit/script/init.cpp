@@ -677,14 +677,6 @@ void initJitScriptBindings(PyObject* module) {
   // follows.
   py::bind_map<ExtraFilesMap>(m, "ExtraFilesMap");
 
-  py::class_<NamedIValue, std::unique_ptr<NamedIValue, py::nodelete>>(
-      m, "NamedValue")
-      .def_property_readonly(
-          "value",
-          [](NamedIValue& self) { return toPyObject(std::move(*self.slot())); })
-      .def_property_readonly("type", &NamedIValue::type)
-      .def_property_readonly("name", &NamedIValue::name);
-
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
   // public.
@@ -975,7 +967,21 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "propagate_and_assign_input_and_output_shapes",
           &Method::propagate_and_assign_input_and_output_shapes)
-      .def("initial_ivalues", &Method::initial_ivalues)
+      .def("initial_ivalues", [](Method& m) {
+          std::vector<at::Tensor> result;
+          result.reserve(m.initial_ivalues().size());
+
+          for (auto named_ivalue : m.initial_ivalues()) {
+            AT_CHECK(
+                named_ivalue->slot()->isTensor(),
+                "Cannot get initial"
+                " IValues if any are not Tensors (found ",
+                named_ivalue->type()->python_str(),
+                ")");
+            result.push_back(named_ivalue->slot()->toTensor());
+          }
+          return result;
+      })
       .def(
           "graph_for",
           [](py::args args, py::kwargs kwargs) {
