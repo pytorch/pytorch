@@ -3316,6 +3316,35 @@ class TestNN(NNTestCase):
             self.assertEqual(replica(replica_input).data, expected_output)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_replicate_multi_gpu_module(self):
+        class MultiGpuModule(nn.Module):
+            def __init__(self):
+                super(MultiGpuModule, self).__init__()
+                self.net1 = torch.nn.Linear(10, 5).cuda(0)
+                self.net2 = torch.nn.Linear(5, 5).cuda(1)
+
+            def forward(self, x):
+                out = self.net1(x.cuda(self.net1.weight.get_device()))
+                return self.net2(out.cuda(self.net2.weight.get_device()))
+
+        module = MultiGpuModule()
+
+        input = torch.rand(2, 10).cuda(0)
+        expected_output = module(input).cpu()
+
+        replicas = dp.replicate(module, [[0, 1], [1, 0]])
+        for i, replica in enumerate(replicas):
+            self.assertEqual(replica.net1.weight.get_device(), i)
+            self.assertEqual(replica.net1.bias.get_device(), i)
+            self.assertEqual(replica.net2.weight.get_device(), 1 - i)
+            self.assertEqual(replica.net2.bias.get_device(), 1 - i)
+
+            replica_input = input.cuda(i)
+            replica_output = replica(replica_input)
+            self.assertEqual(replica_output.get_device(), 1 - i)
+            self.assertEqual(replica_output.cpu(), expected_output)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_replicate_buffers(self):
         net = nn.Module()
         net.bn = nn.BatchNorm2d(10)

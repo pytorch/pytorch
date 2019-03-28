@@ -56,6 +56,29 @@ def _replicatable_module(module, memo=None):
     return True
 
 
+def _to_device_index(devices):
+    if len(devices) <= 0:
+        raise RuntimeError("Cannot replicate using an empty device list.")
+
+    if isinstance(devices[0], list):
+        device_ids = []
+        for i, device in enumerate(devices):
+            assert len(device) == len(devices[0]), (
+                "Cannot replicate to unidentical number of devices, but got "
+                "device list {} and {} for replica {} and {}."
+            ).format(devices[0], devices[i], 0, i)
+
+            assert len(device) == len(set(device)), (
+                "Duplicated device ids {} for replica {}."
+            ).format(device, i)
+
+            device_ids.append(
+                list(map(lambda x: _get_device_index(x, True), device)))
+        return device_ids
+    else:
+        return list(map(lambda x: _get_device_index(x, True), devices))
+
+
 def _build_param_dict(modules, module_copies, module_indices):
     param_dict = {}
     for module in modules:
@@ -83,26 +106,106 @@ def _copy_scriptmodule_methods(modules, module_copies, module_indices):
             replica._copy_method(method_name, param_list, module)
 
 
+# group tensors on the same device together, which can later be broadcast to
+# a list of devices. For example,consider 5 tensors on 2 devices
+#   a = torch.Tensor(0).cuda(0)
+#   b = torch.Tensor(0).cuda(0)
+#   c = torch.Tensor(0).cuda(1)
+#   d = torch.Tensor(0).cuda(0)
+#   e = torch.Tensor(0).cuda(1).
+# Let inputs be
+#   tensors = [a, b, c, d, e] and
+#   devices = [[0, 1], [2, 3]].
+# Then, outputs will be:
+#   grouped_tensors = [[a, b, d], [c, e]],
+#   grouped_devices = [[0, 2], [1, 3]],
+#   original_index = [[0, 1, 3], [2, 4]],
+# meaning that grouped_tensors[i] will be broadcast to grouped_devices[i].
+def _group_by_device(tensors, devices):
+    if isinstance(devices[0], list):
+        # device id to output group index
+        dev_to_idx = {dev: i for i, dev in enumerate(
+            set([t.device.index for t in tensors]))}
+
+        grouped_tensors = [[] for _ in range(len(dev_to_idx))]
+        original_index = [[] for _ in range(len(dev_to_idx))]
+        for i, t in enumerate(tensors):
+            group_id = dev_to_idx[t.device.index]
+            original_index[group_id].append(i)
+            grouped_tensors[group_id].append(t)
+
+        grouped_devices = [[] for _ in range(len(dev_to_idx))]
+        transpose = list(zip(*devices))
+        for row in transpose:
+            if row[0] in dev_to_idx:
+                grouped_devices[dev_to_idx[row[0]]] = list(row)
+
+        return grouped_tensors, grouped_devices, original_index
+    else:
+        return [tensors], [devices], [list(range(len(tensors)))]
+
+
 def _broadcast_coalesced_reshape(tensors, devices, detach=False):
     from ._functions import Broadcast
-    if detach:
-        return comm.broadcast_coalesced(tensors, devices)
-    else:
-        # Use the autograd function to broadcast if not detach
-        if len(tensors) > 0:
-            tensor_copies = Broadcast.apply(devices, *tensors)
-            return [tensor_copies[i:i + len(tensors)]
-                    for i in range(0, len(tensor_copies), len(tensors))]
+
+    # group, replica, tensor
+    grouped_replicas = []
+    grouped_tensors, grouped_devices, original_index = \
+        _group_by_device(tensors, devices)
+    for tensor_group, device_group in zip(grouped_tensors, grouped_devices):
+        if detach:
+            grouped_replicas.append(
+                comm.broadcast_coalesced(tensor_group, device_group))
         else:
-            return []
+            if len(tensor_group) > 0:
+                # Use the autograd function to broadcast if not detach
+                tensor_copies = Broadcast.apply(device_group, *tensor_group)
+                grouped_replicas.append(
+                    [tensor_copies[i:i + len(tensor_group)]
+                        for i in range(
+                            0, len(tensor_copies), len(tensor_group))])
+            else:
+                grouped_replicas.append([])
+
+    if isinstance(devices[0], list):
+        flatten = [0 for _ in tensors]
+        for g_idx in range(len(original_index)):
+            for t_idx in range(len(original_index[g_idx])):
+                flatten[original_index[g_idx][t_idx]] = \
+                    [replica[t_idx] for replica in grouped_replicas[g_idx]]
+
+        return list(zip(*flatten))
+    else:
+        return grouped_replicas[0]
 
 
 def replicate(network, devices, detach=False):
+    r"""Replicate the input :attr:`network` to given :attr:`devices`. If
+    :attr:`network` resides on CPU or a single GPU, :attr:`devices` must be a 1D
+    list of destination devices. If :attr:`network` resides on multiple GPUs,
+    :attr:`devices` must be satisfy the following conditions:
+
+    1. :attr:`devices` must be a 2D list,
+    2. `devices[0]` must match the :attr:`network`'s devices, in any order.
+    3. All `devices[i]` must have the same length.
+
+    For example, :attr:`network` is a `Sequential` module with two `Linear`
+    layers stored on `cuda:0` and `cuda:1` respectively. Setting :attr:`devices`
+    to `[[0, 1], [2, 3], [4, 5]]` will replicate :attr:`network` three times
+    with replicas stored on devices `[cuda:0, cuda:1]`, `[cuda:2, cuda:3]`, and
+    `[cuda:4, cuda:5]` respectively.
+
+
+    Args:
+        network (Module): modules to be replicate
+        devices (1D or 2D list of int or torch.device): CUDA devices
+        detach (bool, optional): detached replicas from the current graph.
+    """
     if not _replicatable_module(network):
         raise RuntimeError("Cannot replicate network where python modules are "
                            "childrens of ScriptModule")
 
-    devices = list(map(lambda x: _get_device_index(x, True), devices))
+    devices = _to_device_index(devices)
     num_replicas = len(devices)
 
     params = list(network.parameters())
