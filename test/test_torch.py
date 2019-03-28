@@ -17,6 +17,7 @@ import gzip
 import types
 import textwrap
 import re
+from collections import OrderedDict
 from torch._utils_internal import get_file_path, get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
@@ -96,6 +97,47 @@ class BytesIOContext(io.BytesIO):
 
     def __exit__(self, *args):
         pass
+
+
+def _rebuild_subclass(type_, data, requires_grad, backward_hooks):
+    param = type_(data, requires_grad)
+    # NB: This line exists only for backwards compatibility; the
+    # general expectation is that backward_hooks is an empty
+    # OrderedDict.  See Note [Don't serialize hooks]
+    param._backward_hooks = backward_hooks
+
+    return param
+
+
+class TensorSubclass(torch.Tensor):
+
+    def __new__(cls, data=None, requires_grad=False):
+        if data is None:
+            data = torch.Tensor()
+        self = torch.Tensor._make_subclass(cls, data, requires_grad)
+        return self
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        else:
+            result = type(self)(self.data.clone(), self.requires_grad)
+            memo[id(self)] = result
+            return result
+
+    def __reduce_ex__(self, proto):
+        # See Note [Don't serialize hooks]
+        return _rebuild_subclass, (self.__class__, self.data, self.requires_grad, OrderedDict())
+
+
+class A(TensorSubclass):
+    pass
+
+class B(TensorSubclass):
+    pass
+
+class C(A, B):
+    pass
 
 
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
@@ -2547,6 +2589,78 @@ class _TestTorchMixin(object):
         do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cpu'))
         if torch.cuda.is_available():
             do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cuda:0'))
+
+    def test_ptype_propagation(self):
+
+        def sub_process_func(queue, *args):
+            result = torch.Tensor.add(*args)
+            queue.put("%s = func(%s, %s)" % (type(result), type(args[0]), type(args[1])))
+
+        a = A(torch.rand((3,), dtype=torch.double, requires_grad=False))
+        b = B(torch.rand((3,), dtype=torch.double, requires_grad=False))
+        c = C(torch.rand((3,), dtype=torch.double, requires_grad=False))
+
+        out_a = A(torch.rand((3,), dtype=torch.double, requires_grad=False))
+        out_b = B(torch.rand((3,), dtype=torch.double, requires_grad=False))
+        out_c = C(torch.rand((3,), dtype=torch.double, requires_grad=False))
+
+        # test subclass serialization
+        filename = "saved_state.p"
+        with open(filename, "wb") as file_id:
+            pickle.dump(c, file_id)
+        with open(filename, "rb") as file_id:
+            c = pickle.load(file_id)
+        os.remove(filename)
+        self.assertIsInstance(c, C)
+
+        # test deep copy
+        c_copy = copy.deepcopy(c)
+        self.assertEqual(c_copy, c)
+        self.assertNotEqual(id(c_copy), id(c))
+
+        # test boolean return
+        self.assertIsInstance(np.equal(a, c), torch.Tensor)
+        self.assertIs(np.equal(a, c).dtype, torch.uint8)
+        self.assertIsInstance(torch.equal(a, c), bool)
+
+        # test multi-process
+        num_processes = 4
+        # NOTE: this is required for the ``fork`` method to work
+        a.share_memory_()
+        c.share_memory_()
+        processes = []
+        queue = mp.Queue()
+        for rank in range(num_processes):
+            p = mp.Process(target=sub_process_func, args=(queue, a, c))
+            p.start()
+            processes.append(p)
+        for p in processes:
+            p.join()
+        for rank in range(num_processes):
+            self.assertEqual(queue.get(), "%s = func(%s, %s)" % (type(c), type(a), type(c)))
+
+        # test ptype propagation with numpy ufuncs
+        np_func = np.add
+        self.assertIsInstance(np_func(a, 1), A)
+        self.assertIsInstance(np_func(1, a), A)
+        self.assertIsInstance(np_func(a, b), A)
+        self.assertIsInstance(np_func(b, a), B)
+        self.assertIsInstance(np_func(c, a), C)
+        self.assertIsInstance(np_func(a, c), C)
+        self.assertIsInstance(np_func(a, 1, out=out_a), A)
+        self.assertIsInstance(np_func(1, a, out=out_a), A)
+        self.assertIsInstance(np_func(a, b, out=out_a), A)
+        self.assertIsInstance(np_func(b, a, out=out_b), B)
+        self.assertIsInstance(np_func(c, a, out=out_c), C)
+        self.assertIsInstance(np_func(a, c, out=out_c), C)
+
+        # test ptype propatation with tensor
+        th_func = torch.add
+        self.assertIsInstance(th_func(a, 1), A)
+        self.assertIsInstance(th_func(a, b), A)
+        self.assertIsInstance(th_func(b, a), B)
+        self.assertIsInstance(th_func(c, a), C)
+        self.assertIsInstance(th_func(a, c), C)
 
     def test_copy_dtypes(self):
         all_dtypes = torch.testing.get_all_dtypes()
@@ -9138,7 +9252,7 @@ class _TestTorchMixin(object):
 
         class OldTensorV2(OldTensorBase):
             def __reduce__(self):
-                return (_rebuild_tensor, self.__getstate__())
+                return (_rebuild_subclass, self.__getstate__())
 
         x = torch.randn(30).as_strided([2, 3], [9, 3], 2)
         for old_cls in [OldTensorV1, OldTensorV2]:
