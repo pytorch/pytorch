@@ -1300,6 +1300,13 @@ class TestJit(JitTestCase):
         inputs = (torch.randn(1), (torch.randn(1), torch.randn(1)))
         self.checkTrace(fn, inputs, flatten_inputs=False)
 
+    def test_input_dict_empty(self):
+        def test(d):
+            pass
+
+        with self.assertRaises(RuntimeError):
+            self.checkTrace(test, {})
+
     def test_input_dict_flattens(self):
         class Test(torch.nn.Module):
             def forward(self, d):

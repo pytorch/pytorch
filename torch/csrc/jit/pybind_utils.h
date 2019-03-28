@@ -124,7 +124,12 @@ inline TypedIValue toTypedIValue(py::handle input) {
     // Check to make sure we can generate useful input/output types
     auto dict = py::cast<py::dict>(input);
     at::ivalue::UnorderedMap elems;
-    elems.reserve(py::len(dict));
+
+    size_t len = py::len(dict);
+    if (!len) {
+      AT_ERROR("Dictionary inputs must have entries.");
+    }
+    elems.reserve(len);
 
     TypePtr keyType = nullptr;
     TypePtr valueType = nullptr;
