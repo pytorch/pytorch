@@ -3,7 +3,6 @@
 
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/Functions.h>
 
 /**
  * This file tests the legacy lambda-based API for registering kernels:
