@@ -329,7 +329,7 @@ struct ModuleValue : public SugaredValue {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     } else if (NamedIValue* v = module->find_attribute(field)) {
       return std::make_shared<SimpleValue>(
-          m.get_or_add_attribute(v->type, v->slot()));
+          m.get_or_add_attribute(v->type(), v->slot()));
     }
 
     // This can also be a call to a non-script module, or a plain
@@ -600,13 +600,13 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
 }
 
 static void gatherParametersAndBuffers(
-    std::vector<IValue*>& values,
+    std::vector<Slot>& values,
     const Module& m) {
   for (auto& param : m.get_parameters()) {
     values.push_back(param->slot());
   }
   for (auto& param : m.get_attributes()) {
-    if (param->type->isSubtypeOf(TensorType::get())) {
+    if (param->type()->isSubtypeOf(TensorType::get())) {
       values.push_back(param->slot());
     }
   }
@@ -794,7 +794,7 @@ void initJitScriptBindings(PyObject* module) {
               py::tuple r(3);
               IValue v = *buffer->slot();
               result[i] = std::make_tuple(
-                  buffer.key(), buffer->type, toPyObject(std::move(v)));
+                  buffer.key(), buffer->type(), toPyObject(std::move(v)));
             }
             return result;
           })
@@ -844,10 +844,10 @@ void initJitScriptBindings(PyObject* module) {
              bool force_outplace) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
-            std::vector<IValue*> parameters;
+            std::vector<Slot> parameters;
             gatherParametersAndBuffers(parameters, *self);
             Stack inputs = toStack(input_tuple);
-            for (IValue* param : parameters) {
+            for (const Slot& param : parameters) {
               inputs.emplace_back(*param);
             }
             auto graph = tracer::createGraphByTracing(
@@ -938,7 +938,7 @@ void initJitScriptBindings(PyObject* module) {
              std::vector<std::tuple<std::shared_ptr<Module>, std::string>>
                  params,
              std::shared_ptr<Module> orig) {
-            std::vector<IValue*> member_inputs;
+            std::vector<Slot> member_inputs;
             for (auto& p : params) {
               NamedIValue* np = std::get<0>(p)->find_parameter(std::get<1>(p));
               if (np == nullptr) {
@@ -967,7 +967,13 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "propagate_and_assign_input_and_output_shapes",
           &Method::propagate_and_assign_input_and_output_shapes)
-      .def("initial_ivalues", &Method::initial_ivalues)
+      .def("initial_ivalues",[](Method& m) {
+        std::vector<at::Tensor> tensors;
+        for (auto& t : m.initial_ivalues()) {
+          tensors.push_back(t->toTensor());
+        }
+        return tensors;
+      })
       .def(
           "graph_for",
           [](py::args args, py::kwargs kwargs) {
