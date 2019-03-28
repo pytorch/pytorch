@@ -156,6 +156,7 @@ def run_cmake(version,
         PYTHON_INCLUDE_DIR=escape_path(distutils.sysconfig.get_python_inc()),
         BUILDING_WITH_TORCH_LIBS="ON",
         TORCH_BUILD_VERSION=version,
+        CMAKE_VERBOSE_MAKEFILE="ON",
         CMAKE_BUILD_TYPE=build_type,
         BUILD_TORCH="ON",
         BUILD_PYTHON=build_python,
@@ -264,7 +265,7 @@ def build_caffe2(version,
                        cwd=build_dir, env=my_env)
     else:
         if USE_NINJA:
-            ninja_cmd = ['ninja', 'install']
+            ninja_cmd = ['ninja', 'install', '-v']
             if max_jobs is not None:
                 ninja_cmd += ['-j', max_jobs]
             check_call(ninja_cmd, cwd=build_dir, env=my_env)
