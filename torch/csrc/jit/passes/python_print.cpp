@@ -1125,7 +1125,13 @@ struct PythonPrintPass {
       const std::unordered_map<script::Slot, QualifiedNamePtr>& extra_ivalue_names) {
     std::vector<std::string> ivalue_names =
         fmap(method.initial_ivalues(), [&](const script::NamedIValue* value) {
-          return extra_ivalue_names.at(value->slot())->str();
+          auto entry = extra_ivalue_names.find(value->slot());
+          AT_CHECK(
+              entry != extra_ivalue_names.end(),
+              "Could not find named IValue '",
+              value->name(),
+              "' while pretty printing");
+          return entry->second->str();
         });
     const std::string& name = method.name();
     Graph& graph = *method.graph();
