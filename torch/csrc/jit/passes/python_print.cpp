@@ -130,14 +130,14 @@ struct QualifiedName : c10::intrusive_ptr_target {
 void createTensorToParameterNameMap(
     const script::Module& module,
     const QualifiedNamePtr& prefix,
-    std::unordered_map<IValue*, QualifiedNamePtr>& result) {
+    std::unordered_map<script::Slot, QualifiedNamePtr>& result) {
   for (const auto& elem : module.get_parameters()) {
     const script::NamedIValue& param = elem.value();
-    result[param.slot()] = QualifiedName::create(prefix, param.name_);
+    result[param.slot()] = QualifiedName::create(prefix, param.name());
   }
   for (const auto& elem : module.get_attributes()) {
     const script::NamedIValue& param = elem.value();
-    result[param.slot()] = QualifiedName::create(prefix, param.name_);
+    result[param.slot()] = QualifiedName::create(prefix, param.name());
   }
   for (const auto& elem : module.get_modules()) {
     createTensorToParameterNameMap(
@@ -1114,7 +1114,7 @@ struct PythonPrintPass {
     }
   }
   void printMethod(script::Method& method) {
-    std::unordered_map<IValue*, QualifiedNamePtr> extra_ivalue_names;
+    std::unordered_map<script::Slot, QualifiedNamePtr> extra_ivalue_names;
     createTensorToParameterNameMap(
         method.owner(), QualifiedName::create("self"), extra_ivalue_names);
     printMethod(method, /*is_class=*/false, extra_ivalue_names);
@@ -1122,10 +1122,10 @@ struct PythonPrintPass {
   void printMethod(
       script::Method& method,
       bool is_class,
-      const std::unordered_map<IValue*, QualifiedNamePtr>& extra_ivalue_names) {
+      const std::unordered_map<script::Slot, QualifiedNamePtr>& extra_ivalue_names) {
     std::vector<std::string> ivalue_names = fmap(
         method.initial_ivalues(),
-        [&](IValue* slot) { return extra_ivalue_names.at(slot)->str(); });
+        [&](const script::Slot& slot) { return extra_ivalue_names.at(slot)->str(); });
     const std::string& name = method.name();
     Graph& graph = *method.graph();
     auto defaults = fmap(
@@ -1134,7 +1134,7 @@ struct PythonPrintPass {
     printFunction(graph, name, is_class, defaults, ivalue_names);
   }
   void printModule(script::Module& module) {
-    std::unordered_map<IValue*, QualifiedNamePtr> extra_ivalue_names;
+    std::unordered_map<script::Slot, QualifiedNamePtr> extra_ivalue_names;
     createTensorToParameterNameMap(
         module, QualifiedName::create("self"), extra_ivalue_names);
     for (auto& method : module.get_methods()) {
@@ -1153,7 +1153,7 @@ struct PythonPrintPass {
     out << "class " << classType->name() << ":\n";
     {
       const auto guard = WithIndented();
-      std::unordered_map<IValue*, QualifiedNamePtr> extra_ivalue_names;
+      std::unordered_map<script::Slot, QualifiedNamePtr> extra_ivalue_names;
       for (auto& method : classType->methods()) {
         printMethod(*method, /*is_class=*/true, extra_ivalue_names);
       }
