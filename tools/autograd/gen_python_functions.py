@@ -118,7 +118,7 @@ PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
 {"${name}", (PyCFunction)${pycname}, ${flags}, NULL},""")
 
 PY_RETURN_DYNAMIC_DEF = CodeTemplate("""\
-PyTypeObject *ptype = THPVariable_result_ptype(self_, args);
+auto *ptype = THPVariable_result_ptype(self_, args);
 """)
 
 PY_RETURN_NAMEDTUPLE_DEF = CodeTemplate("""\

@@ -431,23 +431,31 @@ PyTypeObject *THPVariable_result_ptype(PyObject *self, PyObject *args) {
     HANDLE_TH_ERRORS
     PyTypeObject *ptype;
     PyObject *obj;
-    PyObject *base = THPVariableClass;
-    Py_INCREF(base);
+    
+    //Initialize on First Call
+    bool initialized = false;
+    static PyObject *base, *parameter;
+    if (!initialized){
+        base = THPVariableClass;
+        parameter = PyObject_GetAttrString(PyImport_ImportModule("torch.nn.parameter"), "Parameter");
+        if (parameter == NULL)
+            return NULL;
+        initialized = true;
+    }
 
     ptype = (PyTypeObject*)base;
     Py_INCREF(ptype);
-    if (self != NULL && PyObject_IsInstance(self, base) && PyObject_IsInstance(self, (PyObject*)ptype)){
+    if (self != NULL && PyObject_IsInstance(self, base) && !PyObject_IsInstance(self, parameter) && PyObject_IsInstance(self, (PyObject*)ptype)){
         ptype = self->ob_type;
     }
     if (args != NULL && PyTuple_Check(args)){
         for (int i = 0; i < PyTuple_GET_SIZE(args); ++i){
             obj = PyTuple_GET_ITEM(args, i);
-            if (PyObject_IsInstance(obj, base) && PyObject_IsInstance(obj, (PyObject*)ptype)){
+            if (PyObject_IsInstance(obj, base) && !PyObject_IsInstance(obj, parameter) && PyObject_IsInstance(obj, (PyObject*)ptype)){
                 ptype = obj->ob_type;
             }
         }
     }
-    Py_DECREF(base);
     /* obj are borrowed references */
     return ptype;
     END_HANDLE_TH_ERRORS
