@@ -14,7 +14,7 @@ namespace at {
 constexpr int MERSENNE_STATE_N = 624;
 constexpr int MERSENNE_STATE_M = 397;
 constexpr uint32_t MATRIX_A = 0x9908b0df;
-constexpr uint32_t UMASK = 0x80000000UL;
+constexpr uint32_t UMASK = 0x80000000;
 constexpr uint32_t LMASK = 0x7fffffff;
 
 class mt19937_engine {

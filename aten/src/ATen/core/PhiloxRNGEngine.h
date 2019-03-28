@@ -87,21 +87,31 @@ public:
     if(STATE == 0) {
       UINT4 counter_ = counter;
       UINT2 key_ = key;
-      for(int i = 0; i < 9; i++) {
-        counter_ = single_round(counter_, key_);
-        key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      }
+      
+      counter_ = single_round(counter_, key_);
+      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      counter_ = single_round(counter_, key_);
+      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      counter_ = single_round(counter_, key_);
+      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      counter_ = single_round(counter_, key_);
+      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      counter_ = single_round(counter_, key_);
+      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      counter_ = single_round(counter_, key_);
+      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      counter_ = single_round(counter_, key_);
+      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      counter_ = single_round(counter_, key_);
+      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+      counter_ = single_round(counter_, key_);
+      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+
       output = single_round(counter_, key_);
       incr();
     }
-    uint32_t ret;
-    switch(STATE) {
-      case 0: ret = output[0]; break;
-      case 1: ret = output[1]; break;
-      case 2: ret = output[2]; break;
-      case 3: ret = output[3]; break;
-    }
-    STATE = (STATE + 1) % 4;
+    uint32_t ret = output[STATE];
+    STATE = (STATE + 1) & 3;
     return ret;
   }
 

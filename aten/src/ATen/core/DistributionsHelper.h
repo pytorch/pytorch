@@ -7,6 +7,7 @@
 #endif
 
 #include <ATen/CPUGenerator.h>
+#include <ATen/core/Array.h>
 #include <type_traits>
 #include <limits>
 #include <cmath>
@@ -61,11 +62,11 @@ template <typename T>
 struct VectorType {  };
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-template <> struct VectorType<half> { using type = FLOAT2; };
+template <> struct VectorType<half> { using type = at::detail::Array<float, 2>; };
 #endif
-template <> struct VectorType<Half> { using type = FLOAT2; };
-template <> struct VectorType<float> { using type = FLOAT2; };
-template <> struct VectorType<double> { using type = DOUBLE2; };
+template <> struct VectorType<Half> { using type = at::detail::Array<float, 2>; };
+template <> struct VectorType<float> { using type = at::detail::Array<float, 2>; };
+template <> struct VectorType<double> { using type = at::detail::Array<double, 2>; };
 
 template <typename T>
 using vect_type = typename VectorType<T>::type;
