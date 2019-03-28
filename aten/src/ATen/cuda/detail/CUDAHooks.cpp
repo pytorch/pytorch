@@ -18,6 +18,7 @@
 
 #include <cuda.h>
 
+#include <sstream>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -103,6 +104,18 @@ long CUDAHooks::versionCuDNN() const {
 #else
   AT_ERROR("Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
 #endif
+}
+
+std::string CUDAHooks::detailedVersion() const {
+  std::ostringstream oss;
+  oss << "  - CUDA Runtime " << (CUDART_VERSION / 1000) << "." << (CUDART_VERSION / 10 % 100) << "." << (CUDART_VERSION % 10) << "\n";
+#if AT_CUDNN_ENABLED()
+  oss << "  - CuDNN " << CUDNN_MAJOR << "." << CUDNN_MINOR << "." << CUDNN_PATCHLEVEL << "\n";
+#endif
+#ifdef USE_MAGMA
+  oss << "  - Magma " << MAGMA_VERSION_MAJOR << "." << MAGMA_VERSION_MINOR << "." << MAGMA_VERSION_MICRO << "\n";
+#endif
+  return oss.str();
 }
 
 double CUDAHooks::batchnormMinEpsilonCuDNN() const {
