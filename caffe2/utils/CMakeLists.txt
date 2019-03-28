@@ -4,6 +4,7 @@ list(APPEND Caffe2_CPU_SRCS
   utils/math/broadcast.cc
   utils/math/elementwise.cc
   utils/math/reduce.cc
+  utils/math/transpose.cc
   utils/math/utils.cc
   utils/math_cpu.cc
   utils/murmur_hash3.cc
@@ -29,6 +30,7 @@ set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS}
         utils/math/broadcast.cu
         utils/math/elementwise.cu
         utils/math/reduce.cu
+        utils/math/transpose.cu
         utils/math_gpu.cu
         )
 
@@ -36,6 +38,7 @@ set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS}
         utils/math/hip/broadcast.hip
         utils/math/hip/elementwise.hip
         utils/math/hip/reduce.hip
+        utils/math/hip/transpose.hip
         utils/hip/math_gpu.hip
         )
 

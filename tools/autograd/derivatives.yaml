@@ -364,10 +364,6 @@
   self: grad.mv(vec2)
   vec2: grad.t().mv(self)
 
-- name: gesv(Tensor self, Tensor A)
-  self: gesv_backward_self(grad, self, A)
-  A: gesv_backward_A(grad, self, A, result0)
-
 - name: indices(Tensor self)
   output_differentiability: [False]
 
@@ -606,6 +602,16 @@
   self: not_implemented("_pdist_backward")
   pdist: not_implemented("_pdist_backward")
 
+- name: cdist(Tensor x1, Tensor x2, double p)
+  x1: _cdist_backward(grad, x1, x2, p, result)
+  x2: _cdist_backward(grad.t().contiguous(), x2, x1, p, result.t().contiguous())
+
+- name: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, double p, Tensor cdist)
+  grad: not_implemented("_cdist_backward")
+  x1: not_implemented("_cdist_backward")
+  x2: not_implemented("_cdist_backward")
+  cdist: not_implemented("_cdist_backward")
+
 - name: normal_(Tensor self, double mean, double std, Generator generator)
   self: zeros_like(grad)
 
@@ -739,11 +745,15 @@
   self: slice_backward(grad, self.sizes(), dim, start, end, step)
 
 - name: slogdet(Tensor self)
-  self: slogdet_backward(grad, self, result0, result1)
+  self: slogdet_backward(grad, self, sign, logabsdet)
   output_differentiability: [false, true]
 
+- name: solve(Tensor self, Tensor A)
+  self: solve_backward_self(grad, self, A)
+  A: solve_backward_A(grad, self, A, solution)
+
 - name: sort(Tensor self, int64_t dim, bool descending)
-  self: index_select_backward(grad, dim, result1, self.sizes(), true)
+  self: index_select_backward(grad, dim, indices, self.sizes(), true)
 
 - name: split(Tensor self, int64_t split_size, int64_t dim)
   self: split_backward(grads, split_size, dim, self.sizes(), self.type())
@@ -829,7 +839,7 @@
   self: tanh_backward(grad, result)
 
 - name: topk(Tensor self, int64_t k, int64_t dim, bool largest, bool sorted)
-  self: index_select_backward(grad, dim, result1, self.sizes(), true)
+  self: index_select_backward(grad, dim, indices, self.sizes(), true)
 
 - name: trace(Tensor self)
   self: trace_backward(grad, self.sizes())
@@ -840,14 +850,14 @@
 - name: transpose_(Tensor self, int64_t dim0, int64_t dim1)
   self: grad.transpose(dim0, dim1)
 
+- name: triangular_solve(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular)
+  self, A: triangular_solve_backward(grads[0], grads[1], self, A, result0, upper, transpose, unitriangular, grad_input_mask)
+
 - name: tril(Tensor self, int64_t diagonal)
   self: grad.tril(diagonal)
 
 - name: triu(Tensor self, int64_t diagonal)
   self: grad.triu(diagonal)
-
-- name: trtrs(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular)
-  self, A: trtrs_backward(grads[0], grads[1], self, A, result0, upper, transpose, unitriangular, grad_input_mask)
 
 - name: trunc(Tensor self)
   self: zeros_like(grad)
