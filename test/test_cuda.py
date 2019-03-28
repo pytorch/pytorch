@@ -1134,7 +1134,6 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     # Note: fails sometimes on the CI, passes on dual gfx906
-    @skipIfRocm
     def test_broadcast_coalesced(self):
         numel = 5
         num_bytes = numel * 8
