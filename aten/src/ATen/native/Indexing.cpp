@@ -87,7 +87,7 @@ static void checkIndexTensorTypes(TensorList indices) {
 }
 
 static std::vector<Tensor> expandTensors(const Tensor & self, TensorList indices) {
-  // Expands ByteTensor (masks) or BoolTensor into the equivalent indexing by LongTensors
+  // Expands ByteTensor (masks) or BoolTensor (masks) into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
   for (auto & index : indices) {
     if (index.scalar_type() == kByte || index.scalar_type() == kBool) {
@@ -244,7 +244,7 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
 
 static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) {
   checkIndexTensorTypes(orig);
-  // first expand BoolTensor or ByteTensor (masks) into 1 or more LongTensors
+  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
   // next broadcast all index tensors together
   indices = expand_outplace(indices);
@@ -378,7 +378,7 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
 
 static AdvancedIndex make_info(Tensor self, TensorList orig) {
   checkIndexTensorTypes(orig);
-  // first expand BoolTensor or ByteTensor (masks) into 1 or more LongTensors
+  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
   // next broadcast all index tensors together
   try {
