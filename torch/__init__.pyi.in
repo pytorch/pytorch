@@ -39,8 +39,12 @@ _float = builtins.float
 class device:
     type: str
     index: _int
-    
-    def __init__(self, device: Union[_int, str, None]=None) -> None: ...
+
+    @overload
+    def __init__(self, device: Union[_int, str]) -> None: ...
+
+    @overload
+    def __init__(self, type: str, index: _int) -> None: ...
 
 class Generator: ...
 
