@@ -5,7 +5,7 @@ namespace c10 {
 RegisterOperators::RegisterOperators() = default;
 RegisterOperators::~RegisterOperators() = default;
 RegisterOperators::RegisterOperators(RegisterOperators&&) noexcept = default;
-RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept = default;
+RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) = default;
 
 // OperatorRegistrar in its constructor registers an operator in the dispatch
 // table deregisters it in the destructor.
