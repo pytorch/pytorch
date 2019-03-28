@@ -122,10 +122,13 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
       .def(
           "_jit_pass_insert_observers",
-          [](std::shared_ptr<Graph>& g, py::function pp) {
-            Node* new_node =
-                g->createPythonOp(THPObjectPtr(pp.release().ptr()), "dd", {});
+          [](std::shared_ptr<Graph>& g, py::function pyObserverFunction) {
+            // Create a new node that would be used in the insert observer pass:
+            // all observer nodes will be cloned from this one.
+            Node* new_node = g->createPythonOp(
+                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
             InsertObserverNodes(g, new_node);
+            // We don't need this node anymore, don't forget to remove it.
             new_node->destroy();
           })
       .def(
