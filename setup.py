@@ -725,7 +725,10 @@ if __name__ == '__main__':
             'torch': [
                 'bin/*',
                 'test/*',
-                '**/*.pyi',
+                '__init__.pyi',
+                'cuda/*.pyi',
+                'optim/*.pyi',
+                'autograd/*.pyi',
                 'lib/*.so*',
                 'lib/*.dylib*',
                 'lib/*.dll',
