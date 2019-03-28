@@ -44,6 +44,9 @@ Reducer::Reducer(
       has_queued_final_callback_(false),
       next_bucket_(0),
       backward_stats_base_(0) {
+  AT_ASSERTM(inputs.size() >= 1, "Expected at least one model replica.");
+  AT_ASSERTM(inputs[0].size() >= 1, "Expected at least one parameter.");
+
   // Verify that all specified variables require gradients,
   // and that they have the same size across replicas.
   {
@@ -122,12 +125,8 @@ Reducer::Reducer(
   // autograd and reduction. The user is expected to override this with
   // something more clever, if applicable, by a call to `initialize_buckets`.
   {
-    std::vector<size_t> variable_indices;
-    const auto variable_count = variables_[0].size();
-    for (size_t variable_index = 0; variable_index < variable_count;
-         variable_index++) {
-      variable_indices.push_back(variable_index);
-    }
+    std::vector<size_t> variable_indices(variables_[0].size());
+    std::iota(std::begin(variable_indices), std::end(variable_indices), 0);
     initialize_buckets(
         std::vector<std::vector<size_t>>{std::move(variable_indices)});
   }
@@ -136,19 +135,21 @@ Reducer::Reducer(
   {
     const auto replica_count = inputs.size();
     backward_stats_.resize(replica_count);
-    for (size_t replica_index = 0; replica_index < replica_count;
-         replica_index++) {
-      const auto variable_count = inputs[replica_index].size();
-      backward_stats_[replica_index].resize(variable_count);
-    }
+    const auto variable_count = inputs[0].size();
+    std::for_each(
+      backward_stats_.begin(),
+      backward_stats_.end(),
+      [=](std::vector<int64_t>& v) {
+        v.resize(variable_count);
+      });
   }
 }
 
 // Called when the gradient for the specified variable is ready.
 // It can be called from two places:
 // - By an autograd thread after executing a gradient accumulator function.
-// - By the `Reducer::mark` function if the variable doesn't show up
-//   in the autograd graph (and it wouldn't be called by autograd).
+// - By the `Reducer::prepare_for_backward` function if the variable doesn't
+//   show up in the autograd graph (and it wouldn't be called by autograd).
 void Reducer::mark_variable_ready(size_t replica_index, size_t variable_index) {
   // Ignore if we don't expect to be called.
   // This may be the case if the user wants to accumulate gradients
@@ -202,7 +203,7 @@ void Reducer::mark_variable_ready(size_t replica_index, size_t variable_index) {
   }
 
   // Autograd callbacks can only be registered while the engine is running.
-  // Register this reducer's final callback once per backwards pass.
+  // Register this reducer's final callback once per backward pass.
   if (!has_queued_final_callback_) {
     has_queued_final_callback_ = true;
     torch::autograd::Engine::get_default_engine().queue_callback(
@@ -306,7 +307,7 @@ void Reducer::initialize_buckets(std::vector<std::vector<size_t>> indices) {
 
       // Allocate bucket contents tensor.
       replica.contents = torch::autograd::make_variable_consuming(
-          at::empty({static_cast<long>(offset)}, options));
+          at::empty({offset}, options));
 
       // Add bucket replica to enclosing bucket.
       bucket.replicas.push_back(std::move(replica));
@@ -337,11 +338,10 @@ void Reducer::initialize_buckets(std::vector<std::vector<size_t>> indices) {
 //
 // Rough copy of torch::autograd::Engine::compute_dependencies.
 //
-void Reducer::prepare_for_backward(
-    const std::vector<torch::autograd::Variable>& outputs) {
+void Reducer::prepare_for_backward(const torch::autograd::Variable& output) {
   std::lock_guard<std::mutex> lock(mutex_);
   std::unordered_set<torch::autograd::Function*> seen;
-  std::vector<torch::autograd::Function*> queue;
+  std::vector<torch::autograd::Function*> queue{output.grad_fn().get()};
 
   // Reset accounting.
   has_queued_final_callback_ = false;
@@ -353,14 +353,6 @@ void Reducer::prepare_for_backward(
       replica.pending = replica.variables.size();
     }
     bucket.pending = bucket.replicas.size();
-  }
-
-  // Seed queue with the grad functions of all outputs.
-  for (const auto& output : outputs) {
-    auto grad_fn = output.grad_fn();
-    if (grad_fn) {
-      queue.push_back(grad_fn.get());
-    }
   }
 
   // Traverse the autograd graph starting at the specified output.
