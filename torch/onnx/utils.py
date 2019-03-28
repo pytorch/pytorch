@@ -163,8 +163,6 @@ def _optimize_graph(graph, operator_export_type):
     torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_lint(graph)
 
-    print(graph)
-
     if operator_export_type != OperatorExportTypes.RAW:
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
         torch._C._jit_pass_lint(graph)
@@ -498,8 +496,6 @@ def _graph_op(g, opname, *raw_args, **kwargs):
 
 
 def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExportTypes.ONNX):
-
-
     # NB: Returning None means the node gets cloned as is into
     # the new graph
     try:
@@ -511,7 +507,6 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
             ns_op_name = n.kind()[:-1]
         else:
             ns_op_name = n.kind()
-
         ns, op_name = ns_op_name.split("::")
 
         if ns == "onnx":
