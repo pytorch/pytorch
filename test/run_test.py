@@ -20,46 +20,48 @@ from common_utils import TEST_WITH_ROCM
 import torch.distributed as dist
 
 TESTS = [
-    'autograd',
-    'cpp_extensions',
-    'c10d',
-    'cuda',
-    'cuda_primary_ctx',
-    'dataloader',
-    'distributed',
-    'distributions',
-    'docs_coverage',
-    'expecttest',
-    'indexing',
-    'indexing_cuda',
-    'jit',
-    'multiprocessing',
-    'multiprocessing_spawn',
-    'nccl',
-    'nn',
-    'numba_integration',
-    'optim',
-    'sparse',
-    'thd_distributed',
-    'torch',
-    'type_info',
-    'type_hints',
-    'utils',
-    'namedtuple_return_api',
+    'test_autograd',
+    'test_cpp_extensions',
+    'test_c10d',
+    'test_cuda',
+    'test_cuda_primary_ctx',
+    'test_dataloader',
+    'test_distributed',
+    'test_distributions',
+    'test_docs_coverage',
+    'test_expecttest',
+    'test_indexing',
+    'test_indexing_cuda',
+    'test_jit',
+    'test_multiprocessing',
+    'test_multiprocessing_spawn',
+    'test_nccl',
+    'test_nn',
+    'test_numba_integration',
+    'test_optim',
+    'test_sparse',
+    'test_thd_distributed',
+    'test_torch',
+    'test_type_info',
+    'test_type_hints',
+    'test_utils',
+    'test_namedtuple_return_api',
+    'jit/test_fuser',
 ]
 
+
 WINDOWS_BLACKLIST = [
-    'distributed',
-    'thd_distributed',
+    'test_distributed',
+    'test_thd_distributed',
 ]
 
 ROCM_BLACKLIST = [
-    'c10d',
-    'cpp_extensions',
-    'distributed',
-    'multiprocessing',
-    'nccl',
-    'thd_distributed',
+    'test_c10d',
+    'test_cpp_extensions',
+    'test_distributed',
+    'test_multiprocessing',
+    'test_nccl',
+    'test_thd_distributed',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {
@@ -256,9 +258,9 @@ def test_distributed(executable, test_module, test_directory, options):
 
 
 CUSTOM_HANDLERS = {
-    'cpp_extensions': test_cpp_extensions,
-    'distributed': test_distributed,
-    'thd_distributed': test_distributed,
+    'test_cpp_extensions': test_cpp_extensions,
+    'test_distributed': test_distributed,
+    'test_thd_distributed': test_distributed,
 }
 
 
@@ -352,7 +354,7 @@ def find_test_index(test, selected_tests, find_last_index=False):
     as part of the same test module, e.g.:
 
     ```
-    selected_tests = ['autograd', 'cuda', **'torch.TestTorch.test_acos',
+    selected_tests = ['test_autograd', 'cuda', **'torch.TestTorch.test_acos',
                      'torch.TestTorch.test_tan', 'torch.TestTorch.test_add'**, 'utils']
     ```
 
@@ -430,17 +432,16 @@ def main():
         shell(['coverage', 'erase'])
 
     for test in selected_tests:
-        test_name = 'test_{}'.format(test)
         test_module = parse_test_module(test)
 
         # Printing the date here can help diagnose which tests are slow
-        print_to_stderr('Running {} ... [{}]'.format(test_name, datetime.now()))
+        print_to_stderr('Running {} ... [{}]'.format(test, datetime.now()))
         handler = CUSTOM_HANDLERS.get(test_module, run_test)
-        return_code = handler(executable, test_name, test_directory, options)
+        return_code = handler(executable, test, test_directory, options)
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool), 'Return code should be an integer'
         if return_code != 0:
-            message = '{} failed!'.format(test_name)
+            message = '{} failed!'.format(test)
             if return_code < 0:
                 # subprocess.Popen returns the child process' exit signal as
                 # return code -N, where N is the signal number.
