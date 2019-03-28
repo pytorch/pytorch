@@ -1298,13 +1298,6 @@ Node* Graph::createDictIndex(Value* dict, Value* index) {
   return n;
 }
 
-Node* Graph::createStringIndex(Value* string, Value* index) {
-  AT_ASSERT(index->type()->isSubtypeOf(IntType::get()));
-  auto n = create(prim::StringIndex, {string, index});
-  n->output()->setType(StringType::get());
-  return n;
-}
-
 Node* Graph::createNumToTensor(Value* value) {
   auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
