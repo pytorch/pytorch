@@ -27,7 +27,7 @@ struct ModuleAccessorValue : public SugaredValue {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     } else if (script::NamedIValue* v = module->find_attribute(field)) {
       return std::make_shared<script::SimpleValue>(
-          m.get_or_add_attribute(v->type, v->slot()));
+          m.get_or_add_attribute(v->type(), v->slot()));
     } else if (Method* m = module->find_method(field)) {
       return std::make_shared<MethodValue>(shared_from_this(), *m);
     } else {
