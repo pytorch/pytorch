@@ -76,45 +76,77 @@ inline void findErrorInKwargs(const FunctionSchema& schema, py::kwargs kwargs) {
 }
 } // namespace detail
 
-inline IValue toDictKeyIValue(py::handle key) {
+using tracer::TypedStack;
+struct TypedIValue : public std::pair<IValue, TypePtr> {
+  using pair::pair;
+
+  IValue& ivalue() {
+    return this->first;
+  }
+  TypePtr& type() {
+    return this->second;
+  }
+};
+
+inline TypedIValue toDictKeyIValue(py::handle key) {
   if (py::isinstance<py::str>(key)) {
-    return ConstantString::create(py::cast<std::string>(key));
+    return TypedIValue(ConstantString::create(py::cast<std::string>(key)),
+                       StringType::create());
   } else if (PyLong_Check(key.ptr())) {
-    return py::cast<int64_t>(key);
+    return TypedIValue(py::cast<int64_t>(key), IntType::create());
   } else if (PyFloat_Check(key.ptr())) {
-    return py::cast<double>(key);
+    return TypedIValue(py::cast<double>(key), FloatType::create());
   } else {
     AT_ERROR("Dictionary inputs may only have string, int, or float keys");
   }
 }
 
-inline IValue toIValue(py::handle input) {
+inline TypedIValue toTypedIValue(py::handle input) {
   if (THPVariable_Check(input.ptr())) {
     auto ten = py::cast<at::Tensor>(input);
     if (ten.is_sparse()) {
       AT_ERROR("sparse tensors not supported");
     }
-    return ten;
+    return TypedIValue(ten, CompleteTensorType::create(ten));
   } else if (six::isTuple(input)) {
     py::tuple input_tuple = py::cast<py::tuple>(input);
     Stack s;
+    std::vector<TypePtr> t;
     s.reserve(input_tuple.size());
+    t.reserve(input_tuple.size());
     for (py::handle elem : input_tuple) {
-      s.push_back(toIValue(elem));
+      auto info = toTypedIValue(elem);
+      s.push_back(info.first);
+      t.push_back(info.second);
     }
-    return Tuple::create(s);
+    return TypedIValue(Tuple::create(s), TupleType::create(t));
   } else if (PyDict_Check(input.ptr())) {
     // Check to make sure we can generate useful input/output types
     auto dict = py::cast<py::dict>(input);
     at::ivalue::UnorderedMap elems;
     elems.reserve(py::len(dict));
 
-    // NB: This may not create a well-typed dict. Creators are expected to
-    //     verify any typing claims they wish to make.
+    TypePtr keyType = nullptr;
+    TypePtr valueType = nullptr;
     for (auto entry : dict) {
-      elems.insert(std::make_pair(toDictKeyIValue(entry.first), toIValue(entry.second)));
+      auto keyInfo = toDictKeyIValue(entry.first);
+      auto valInfo = toTypedIValue(entry.second);
+      if (!keyType) {
+        keyType = keyInfo.second;
+        valueType = valInfo.second;
+      } else {
+        auto unifiedKey = unifyTypes(keyType, keyInfo.second);
+        auto unifiedValue = unifyTypes(valueType, valInfo.second);
+        if (!unifiedKey || !unifiedValue) {
+          AT_ERROR("Dictionary inputs to traced functions must have consistent type");
+        }
+        keyType = *unifiedKey;
+        valueType = *unifiedValue;
+      }
+      elems.insert(std::make_pair(keyInfo.first, valInfo.first));
     }
-    return at::ivalue::GenericDict::create(std::move(elems));
+    return TypedIValue(at::ivalue::GenericDict::create(std::move(elems)),
+                       DictType::create(keyType, valueType));
   } else {
     AT_ERROR(
         "Only tensors and (possibly nested) tuples or dicts of tensors are supported "
@@ -122,8 +154,17 @@ inline IValue toIValue(py::handle input) {
   }
 }
 
+inline IValue toIValue(py::handle input) {
+    return toTypedIValue(input).ivalue();
+}
+
 inline Stack toStack(const py::tuple& inputs) {
   return toIValue(inputs).toTuple()->elements();
+}
+
+inline TypedStack toTypedStack(const py::tuple& inputs) {
+  auto info = toTypedIValue(inputs);
+  return TypedStack(info.ivalue().toTuple()->elements(), info.type()->expect<TupleType>());
 }
 
 inline IValue toIValue(

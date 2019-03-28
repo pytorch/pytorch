@@ -191,49 +191,10 @@ Value* getNestedOutputTrace(
   }
 }
 
-inline TypePtr typeForTraceInput(const IValue& input) {
-  if (input.isGenericDict()) {
-    auto dict = input.toGenericDict();
-    TypePtr keyType = nullptr;
-    TypePtr valueType = nullptr;
-    for (auto entry : dict->elements()) {
-      auto thisKeyType = typeForTraceInput(entry.first);
-      auto thisValueType = typeForTraceInput(entry.second);
-      if (!keyType) {
-        AT_ASSERT(!valueType);
-        keyType = thisKeyType;
-        valueType = thisValueType;
-      } else {
-        bool keyIsWellTyped = *keyType == *thisKeyType;
-        auto unify = unifyTypes(thisValueType, valueType);
-
-        if (!keyIsWellTyped || !unify) {
-          AT_ERROR(
-              "Dictionary inputs to traced functions must have consistent "
-              "key and value types");
-        }
-        valueType = *unify;
-      }
-    }
-    return DictType::create(keyType, valueType);
-  } else if (input.isTuple()) {
-    std::vector<TypePtr> types;
-
-    auto elements = input.toTuple()->elements();
-    types.reserve(elements.size());
-
-    for (auto element : elements) {
-      types.push_back(typeForTraceInput(element));
-    }
-    return TupleType::create(std::move(types));
-  } else {
-    return incompleteInferTypeFrom(input);
-  }
-}
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
-std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
+std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs) {
   if (isTracing()) {
     AT_ERROR("Tracing can't be nested");
   }
@@ -287,11 +248,13 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
           "inputs to traced functions");
     }
   };
-  for (IValue& input : inputs) {
+  size_t i = 0;
+  auto input_types = inputs.types()->elements();
+  for (IValue& input : inputs.stack()) {
     input = add_input(
-        input, typeForTraceInput(input), state->graph->addInput());
+        input, input_types[i++], state->graph->addInput());
   }
-  return std::make_pair(state, inputs);
+  return std::make_pair(state, inputs.stack());
 }
 
 // Exit a trace, treating 'outputs' as the outputs of the trace.  These

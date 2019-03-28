@@ -261,7 +261,7 @@ void initJITBindings(PyObject* module) {
                       bool optimize,
                       bool _force_outplace) {
             auto graph = tracer::createGraphByTracing(
-                func, toStack(inputs), var_name_lookup_fn, _force_outplace);
+                func, toTypedStack(inputs), var_name_lookup_fn, _force_outplace);
             return GraphExecutor(graph, optimize);
           }),
           py::arg("func"),

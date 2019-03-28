@@ -839,13 +839,19 @@ void initJitScriptBindings(PyObject* module) {
             // this was ensured in python before calling this function
             std::vector<IValue*> parameters;
             gatherParametersAndBuffers(parameters, *self);
-            Stack inputs = toStack(input_tuple);
-            for (IValue* param : parameters) {
-              inputs.emplace_back(*param);
+            auto typed_inputs = toTypedStack(input_tuple);
+            if (parameters.size() > 0) {
+              auto inputs = typed_inputs.stack();
+              auto input_types = typed_inputs.types()->elements().vec();
+              for (IValue* param : parameters) {
+                inputs.emplace_back(*param);
+                input_types.push_back(incompleteInferTypeFrom(*param));
+              }
+              typed_inputs = TypedStack(inputs, TupleType::create(input_types));
             }
             auto graph = tracer::createGraphByTracing(
                 func,
-                inputs,
+                typed_inputs,
                 var_lookup_fn,
                 force_outplace,
                 input_tuple.size());

@@ -1287,17 +1287,22 @@ class TestJit(JitTestCase):
 
         inputs = {'x': torch.rand(3, 4), 'y': torch.rand(3, 4)}
         module = torch.jit.trace(Test(), inputs)
-        self.assertExpectedGraph(module.graph)
+        FileCheck().check('aten::values').check('prim::ListUnpack').run(str(module.graph))
 
     def test_input_dict_flattens_recursive(self):
         class Test(torch.nn.Module):
             def forward(self, d):
-                a, b = d['x']
+                # Use both to avoid getting optimized away
+                a = d['x'][0]
+                b, c = d['y']
                 return a + b
 
-        inputs = {'x': (torch.rand(2, 2), torch.rand(2, 2))}
+        inputs = {'x': (torch.rand(2, 2), torch.rand(2, 2)), 'y': (torch.ones(1,1), torch.ones(2,1))}
         module = torch.jit.trace(Test(), inputs)
-        self.assertExpectedGraph(module.graph)
+        FileCheck().check('aten::values') \
+                   .check('prim::ListUnpack') \
+                   .check_count('prim::TupleUnpack', 2) \
+                   .run(str(module.graph))
 
     def test_input_dict_checkTrace_mut(self):
         def test(d):
