@@ -2900,6 +2900,37 @@ class TestAutograd(TestCase):
         # gpu thread ReadyQueue
         out.sum().backward()
 
+    def test_isolated_reentrant_backwards(self):
+        timeline = []
+        class Log(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, name):
+                ctx.name = name
+                timeline.append('%s:forward' % name)
+                return x
+            @staticmethod
+            def backward(ctx, grad_output):
+                name = ctx.name
+                timeline.append('%s:backward' % name)
+                return grad_output, None
+
+        a = torch.rand(1, requires_grad=True)
+        b = torch.rand(1, requires_grad=True)
+
+        a = Log.apply(a, 'a')
+        b = checkpoint(lambda b: Log.apply(b, 'b'), b)
+        out = torch.cat((a, b)).sum()
+
+        #           +--> Log --> a
+        # Sum --> Cat
+        #           +--> Checkpoint(Log) --> b
+        out.backward()
+
+        assert timeline == \
+            ['a:forward', 'b:forward', 'b:forward', 'b:backward', 'a:backward']
+        #    |----------------------|  |-----------------------|  |----------|
+        #          forward pass             b's checkpoint        a's backward
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
