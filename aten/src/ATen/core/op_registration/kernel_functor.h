@@ -74,6 +74,7 @@ namespace detail {
   private:
     template<size_t... indices>
     static void call_(std::tuple<OutputTypes...>&& output, Stack* stack, guts::index_sequence<indices...>) {
+      (void)(stack); // silence compiler warning of weird compilers somehow thinking this parameter is unused.
       // iterate over all outputs and push them
       (void)std::initializer_list<int>{(
         torch::jit::push(*stack, return_type_to_ivalue(std::move(std::get<indices>(output))))
