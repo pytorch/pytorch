@@ -99,17 +99,13 @@ template<class LambdaType, class C, class Result, class... Args>
 struct is_stateless_lambda__<LambdaType, Result (C::*)(Args...)> : std::is_convertible<LambdaType, Result(*)(Args...)> {};
 
 // case where LambdaType is not even a functor
-template<class LambdaType, class Enable = void> struct is_stateless_lambda_ final : std::false_type {
-  static_assert(std::is_same<LambdaType, guts::decay_t<LambdaType>>::value, "is_stateless_lambda cannot be used with reference types");
-};
+template<class LambdaType, class Enable = void> struct is_stateless_lambda_ final : std::false_type {};
 // case where LambdaType is a functor
 template<class LambdaType> struct is_stateless_lambda_<LambdaType, guts::enable_if_t<is_functor<LambdaType>::value>>
-: is_stateless_lambda__<LambdaType, decltype(&LambdaType::operator())> {
-  static_assert(std::is_same<LambdaType, guts::decay_t<LambdaType>>::value, "is_stateless_lambda cannot be used with reference types");
-};
+: is_stateless_lambda__<LambdaType, decltype(&LambdaType::operator())> {};
 }
 template<class T>
-using is_stateless_lambda = detail::is_stateless_lambda_<T>;
+using is_stateless_lambda = detail::is_stateless_lambda_<guts::decay_t<T>>;
 
 
 
