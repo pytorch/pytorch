@@ -680,7 +680,7 @@ void initJitScriptBindings(PyObject* module) {
   py::class_<NamedIValue, std::unique_ptr<NamedIValue, py::nodelete>>(
       m, "NamedValue")
       .def_property_readonly(
-          "slot",
+          "value",
           [](NamedIValue& self) { return toPyObject(std::move(*self.slot())); })
       .def_property_readonly("type", &NamedIValue::type)
       .def_property_readonly("name", &NamedIValue::name);
