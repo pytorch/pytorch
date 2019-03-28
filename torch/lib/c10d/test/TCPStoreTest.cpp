@@ -8,8 +8,10 @@
 #include <c10d/TCPStore.hpp>
 
 void testHelper(const std::string& prefix = "") {
+  const auto numThreads = 16;
+  const auto numWorkers = numThreads + 1;
   // server store
-  c10d::TCPStore serverTCPStore("127.0.0.1", 29500, true);
+  c10d::TCPStore serverTCPStore("127.0.0.1", 29500, numWorkers, true);
   c10d::PrefixStore serverStore(prefix, serverTCPStore);
 
   // Basic set/get on the server store
@@ -22,7 +24,6 @@ void testHelper(const std::string& prefix = "") {
 
   // Hammer on TCPStore
   std::vector<std::thread> threads;
-  const auto numThreads = 16;
   const auto numIterations = 1000;
   c10d::test::Semaphore sem1, sem2;
 
@@ -31,7 +32,7 @@ void testHelper(const std::string& prefix = "") {
   std::vector<std::unique_ptr<c10d::PrefixStore>> clientStores;
   for (auto i = 0; i < numThreads; i++) {
     clientTCPStores.push_back(std::unique_ptr<c10d::TCPStore>(
-        new c10d::TCPStore("127.0.0.1", 29500, false)));
+        new c10d::TCPStore("127.0.0.1", 29500, numWorkers, false)));
     clientStores.push_back(std::unique_ptr<c10d::PrefixStore>(
         new c10d::PrefixStore(prefix, *clientTCPStores[i])));
   }

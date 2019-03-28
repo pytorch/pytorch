@@ -1,20 +1,11 @@
 #pragma once
 
-#include "caffe2/core/tensor.h"
-#include <c10/util/Array.h>
+#include <ATen/core/dispatch/OpSchemaRegistration.h>
 
 namespace caffe2 {
 namespace ops {
 
-struct Relu final {
-  static constexpr const char* name = "relu";
-
-  using Signature =
-      void(const Tensor& input, Tensor* output);
-
-  static constexpr c10::guts::array<const char*, 2> parameter_names = {
-      {"input", "output"}};
-};
+C10_DECLARE_OP_SCHEMA(Relu);
 
 } // namespace ops
 } // namespace caffe2

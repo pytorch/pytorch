@@ -9,18 +9,19 @@ from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_
 
 class LogitRelaxedBernoulli(Distribution):
     r"""
-    Creates a LogitRelaxedBernoulli distribution parameterized by :attr:`probs` or :attr:`logits`
-    (but not both), which is the logit of a RelaxedBernoulli distribution.
+    Creates a LogitRelaxedBernoulli distribution parameterized by :attr:`probs`
+    or :attr:`logits` (but not both), which is the logit of a RelaxedBernoulli
+    distribution.
 
     Samples are logits of values in (0, 1). See [1] for more details.
 
     Args:
         temperature (Tensor): relaxation temperature
-        probs (Number, Tensor): the probabilty of sampling `1`
+        probs (Number, Tensor): the probability of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
 
-    [1] The Concrete Distribution: A Continuous Relaxation of Discrete Random Variables
-    (Maddison et al, 2017)
+    [1] The Concrete Distribution: A Continuous Relaxation of Discrete Random
+    Variables (Maddison et al, 2017)
 
     [2] Categorical Reparametrization with Gumbel-Softmax
     (Jang et al, 2017)
@@ -91,9 +92,10 @@ class LogitRelaxedBernoulli(Distribution):
 
 class RelaxedBernoulli(TransformedDistribution):
     r"""
-    Creates a RelaxedBernoulli distribution, parametrized by :attr:`temperature`, and either
-    :attr:`probs` or :attr:`logits` (but not both). This is a relaxed version of the `Bernoulli`
-    distribution, so the values are in (0, 1), and has reparametrizable samples.
+    Creates a RelaxedBernoulli distribution, parametrized by
+    :attr:`temperature`, and either :attr:`probs` or :attr:`logits`
+    (but not both). This is a relaxed version of the `Bernoulli` distribution,
+    so the values are in (0, 1), and has reparametrizable samples.
 
     Example::
 
@@ -104,7 +106,7 @@ class RelaxedBernoulli(TransformedDistribution):
 
     Args:
         temperature (Tensor): relaxation temperature
-        probs (Number, Tensor): the probabilty of sampling `1`
+        probs (Number, Tensor): the probability of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
     """
     arg_constraints = {'probs': constraints.unit_interval,

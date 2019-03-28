@@ -21,11 +21,10 @@ TEST(UtilsBoxesTest, TestBboxTransformRandom) {
       -0.08533806, -0.60335309, 0.79052375;
 
   EMatXf result_gt(5, 4);
-  result_gt << 206.94953073, -30.71519157, 298.3876512, 245.44846569,
-      143.8712194, -83.34289038, 291.50227513, 122.05339902, 177.43029521,
-      198.66623633, 197.29527254, 229.70308414, 152.25190373, 145.43156421,
-      388.21547899, 275.59425266, 5.06242193, 11.04094661, 67.32890274,
-      270.68622005;
+  result_gt << 206.949539, -30.715202, 297.387665, 244.448486, 143.871216,
+      -83.342888, 290.502289, 121.053398, 177.430283, 198.666245, 196.295273,
+      228.703079, 152.251892, 145.431564, 387.215454, 274.594238, 5.062420,
+      11.040955, 66.328903, 269.686218;
 
   const float BBOX_XFORM_CLIP = log(1000.0 / 16.0);
   auto result = utils::bbox_transform(
@@ -65,7 +64,6 @@ TEST(UtilsBoxesTest, TestBboxTransformRotated) {
       deltas.array(),
       std::vector<float>{1.0, 1.0, 1.0, 1.0},
       BBOX_XFORM_CLIP,
-      true, /* correct_transform_coords */
       false /* angle_bound_on */);
   EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-2);
 }
@@ -98,7 +96,6 @@ TEST(UtilsBoxesTest, TestBboxTransformRotatedNormalized) {
       deltas.array(),
       std::vector<float>{1.0, 1.0, 1.0, 1.0},
       BBOX_XFORM_CLIP,
-      true, /* correct_transform_coords */
       true, /* angle_bound_on */
       -90, /* angle_bound_lo */
       90 /* angle_bound_hi */);

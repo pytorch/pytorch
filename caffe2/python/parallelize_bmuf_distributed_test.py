@@ -25,7 +25,7 @@ def bmuf_process(filestore_dir, process_id, shared_results,
     dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
 
     if not cpu_device:
-        if not workspace.has_gpu_support and not workspace.has_hip_support:
+        if not workspace.has_gpu_support:
             log.info('No GPU support test is Ignored.')
             return
         if workspace.NumGpuDevices() < 4:

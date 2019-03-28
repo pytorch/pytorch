@@ -33,7 +33,7 @@ static inline int64_t get_target_prime(target_t* target, int64_t offset, int64_t
 // The function returns the loss and the alphas, the alphas are kept for the backward step. The wrapper (ctc_loss below) hides
 // the alphas from the user by only returning the loss.
 template<typename scalar_t, ScalarType target_scalar_type>
-std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const Tensor& targets, IntList input_lengths, IntList target_lengths, int64_t BLANK) {
+std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK) {
   // log_probs: input_len x batch_size x num_labels
   // targets [int64]: batch_size x target_length OR sum(target_lengths)
   constexpr scalar_t neginf = -std::numeric_limits<scalar_t>::infinity();
@@ -53,16 +53,15 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   AT_CHECK((int64_t) target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
 
   size_t tg_target_stride;
-  int64_t max_target_length;
+  int64_t max_target_length = 0;
   std::vector<int64_t> tg_batch_offsets(batch_size);
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
-    max_target_length = 0;
     for (int64_t i = 0; i < batch_size; i++) {
       tg_batch_offsets[i] = pos;
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
-	max_target_length = target_lengths[i];
+	 max_target_length = target_lengths[i];
     }
     tg_target_stride = targets.stride(0);
     checkSize(c, targets_arg, 0, pos);
@@ -72,9 +71,10 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
     int64_t tg_batch_stride = targets.stride(0);
     for (int64_t i = 0; i < batch_size; i++) {
       tg_batch_offsets[i] = i * tg_batch_stride;
+      if (max_target_length < target_lengths[i])
+        max_target_length = target_lengths[i];
     }
     tg_target_stride = targets.stride(1);
-    max_target_length = targets.size(1);
     checkSize(c, targets_arg, 0, batch_size);
     AT_CHECK(targets.size(1) >= max_target_length,
              "Expected tensor to have size at least ", max_target_length, " at dimension 1, but got size ", targets.size(1), " for ", targets_arg,
@@ -83,7 +83,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   int64_t max_input_length = log_probs.size(0);
   for (int64_t b = 0; b < batch_size; b++) {
     AT_CHECK(input_lengths[b] <= max_input_length,
-	     "Expected tensor to have size at least ", max_input_length, " at dimension 1, but got size ", targets.size(0), " for ", targets_arg,
+	     "Expected tensor to have size at least ", max_input_length, " at dimension 1, but got size ", input_lengths[b], " for ", log_probs_arg,
 	     " (while checking arguments for ", c, ")");
   }
 
@@ -161,8 +161,8 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
 // a) computing the beta analogous to the alphas in the forward (backward half of the forward-backward algorithm) (eq (10) and (11))
 // b) collecting the per-activation characters for all s and wrapping the gradient (eq (16), the collection is the sum)
 template<typename scalar_t, ScalarType target_scalar_type>
-Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_probs, const Tensor& targets, IntList input_lengths, IntList target_lengths,
-                                      const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK) {
+Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
+                                      const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK, bool zero_infinity) {
   constexpr scalar_t neginf = -std::numeric_limits<scalar_t>::infinity();
   using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
   int64_t max_input_length = log_probs.size(0);
@@ -207,6 +207,12 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
 
   #pragma omp parallel for
   for (int64_t b = 0; b < batch_size; b++) {
+    scalar_t nll = neg_log_likelihood.accessor<scalar_t, 1>()[b];
+    if (zero_infinity &&  nll == std::numeric_limits<scalar_t>::infinity()) {
+      grad.narrow(1, b, 1).zero_();
+      continue;
+    }
+
     auto log_probs_a = log_probs_a_global[b];
     auto log_alpha_a = log_alpha_a_global[b];
     auto log_beta_a = log_beta_a_global[b];
@@ -281,7 +287,6 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
     // now we wrap up the calculation by adding in the remaining items of eq (16)
     // this could be a great target for further vectorization.
     // grad is the output gradient, nll is the loss. Note that the likelihood -nll is the Z of eq (16)
-    scalar_t nll = neg_log_likelihood.accessor<scalar_t, 1>()[b];
     scalar_t gr =  grad_out.accessor<scalar_t, 1>()[b];
     for (int64_t t = 0; t < input_length; t++) { // or go for the full thing?
       for (int64_t c = 0; c < num_labels; c++) {
@@ -300,9 +305,10 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
 
 } // namespace
 
-std::tuple<Tensor, Tensor> ctc_loss_cpu(const Tensor& log_probs, const Tensor& targets, IntList input_lengths, IntList target_lengths, int64_t BLANK) {
-  return AT_DISPATCH_FLOATING_TYPES(log_probs.type(), "ctc_loss", [&] {
-      if (targets.type().scalarType() == kLong) {
+std::tuple<Tensor, Tensor> ctc_loss_cpu(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, bool zero_infinity) {
+  (void)zero_infinity; // only used for backwards
+  return AT_DISPATCH_FLOATING_TYPES(log_probs.scalar_type(), "ctc_loss_cpu", [&] {
+      if (targets.scalar_type() == kLong) {
 	return ctc_loss_cpu_template<scalar_t, kLong>(log_probs, targets, input_lengths, target_lengths, BLANK);
       } else {
 	return ctc_loss_cpu_template<scalar_t, kInt>(log_probs, targets, input_lengths, target_lengths, BLANK);
@@ -310,13 +316,13 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu(const Tensor& log_probs, const Tensor& t
   });
 }
 
-Tensor ctc_loss_backward_cpu(const Tensor& grad, const Tensor& log_probs, const Tensor& targets, IntList input_lengths, IntList target_lengths,
-                             const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK) {
-  return AT_DISPATCH_FLOATING_TYPES(log_probs.type(), "ctc_loss_backward", [&] {
-      if (targets.type().scalarType() == kLong) {
-	return ctc_loss_backward_cpu_template<scalar_t,kLong>(grad, log_probs, targets, input_lengths, target_lengths, neg_log_likelihood, log_alpha, BLANK);
+Tensor ctc_loss_backward_cpu(const Tensor& grad, const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
+                             const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK, bool zero_infinity) {
+  return AT_DISPATCH_FLOATING_TYPES(log_probs.scalar_type(), "ctc_loss_backward_cpu", [&] {
+      if (targets.scalar_type() == kLong) {
+	return ctc_loss_backward_cpu_template<scalar_t,kLong>(grad, log_probs, targets, input_lengths, target_lengths, neg_log_likelihood, log_alpha, BLANK, zero_infinity);
       } else {
-	return ctc_loss_backward_cpu_template<scalar_t,kInt>(grad, log_probs, targets, input_lengths, target_lengths, neg_log_likelihood, log_alpha, BLANK);
+	return ctc_loss_backward_cpu_template<scalar_t,kInt>(grad, log_probs, targets, input_lengths, target_lengths, neg_log_likelihood, log_alpha, BLANK, zero_infinity);
       }
   });
 }
@@ -324,7 +330,7 @@ Tensor ctc_loss_backward_cpu(const Tensor& grad, const Tensor& log_probs, const 
 // this wrapper function dispatches to the native and cudnn implementations and hides the alpha/grad from the user (by just returning the loss)
 // the gradient is implemented for _cudnn_ctc_loss (just in derivatives.yaml) and _ctc_loss and this function has automatic gradients
 // it also handles the reduction if desired
-Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntList input_lengths, IntList target_lengths, int64_t BLANK, int64_t reduction) {
+Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
   auto& ctx = at::globalContext();
 
   bool use_cudnn =
@@ -332,8 +338,8 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntList input_le
     (detail::getCUDAHooks().versionCuDNN() >= 7000) &&
     ctx.userEnabledCuDNN() &&
     (BLANK == 0) && (targets.dim()==1) &&
-    (log_probs.type().scalarType() == at::kFloat) &&
-    (targets.type().scalarType() == at::kInt) &&
+    (log_probs.scalar_type() == at::kFloat) &&
+    (targets.scalar_type() == at::kInt) &&
     (log_probs.type().backend() == Backend::CUDA);
 
   if (use_cudnn) {
@@ -343,15 +349,19 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntList input_le
       use_cudnn &= (input_lengths[b] == max_input_length);
     }
     for (int64_t b = 0; b < target_lengths.size(); b++) {
-      use_cudnn &= (target_lengths[b] <= 256);
+      // target length < 256 is documented, but we see illegal memory accesses when target lengths > input lengths for CuDNN
+      use_cudnn &= (target_lengths[b] <= 256) & (target_lengths[b] <= input_lengths[b]);
     }
   }
 
   Tensor res;
   if (use_cudnn) {
-    res = std::get<0>(at::_cudnn_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK, ctx.deterministicCuDNN()));
+    res = std::get<0>(at::_cudnn_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK, ctx.deterministicCuDNN(), zero_infinity));
   } else {
-    res = std::get<0>(at::_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK));
+    res = std::get<0>(at::_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK, zero_infinity));
+    if (zero_infinity) {
+      res = at::where(res == Scalar(std::numeric_limits<double>::infinity()), at::zeros({}, res.options()), res);
+    }
   }
   if (reduction == Reduction::Mean) {
     auto target_lengths_t = at::tensor(target_lengths, res.options().device(at::Device(at::Device::Type::CPU)).dtype(kLong)).toType(res.type());
@@ -363,12 +373,15 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntList input_le
 }
 
 // Convenience function accepting Tensors
-Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction) {
+Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+  AT_CHECK(isIntegralType(input_lengths.scalar_type()), "input_lenghts must be integral");
+  AT_CHECK(isIntegralType(target_lengths.scalar_type()), "target_lenghts must be integral");
+
   Tensor ilc = input_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();
   Tensor tlc = target_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();
-  IntList il(ilc.data<int64_t>(), ilc.numel());
-  IntList tl(tlc.data<int64_t>(), tlc.numel());
-  return at::native::ctc_loss(log_probs, targets, il, tl, BLANK, reduction);
+  IntArrayRef il(ilc.data<int64_t>(), ilc.numel());
+  IntArrayRef tl(tlc.data<int64_t>(), tlc.numel());
+  return at::native::ctc_loss(log_probs, targets, il, tl, BLANK, reduction, zero_infinity);
 }
 
 } } // at::native

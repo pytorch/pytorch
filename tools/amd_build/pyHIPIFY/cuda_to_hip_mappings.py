@@ -2231,9 +2231,33 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cuda::OptionalCUDAStreamGuard", ("hip::OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
     ("OptionalCUDAStreamGuard", ("OptionalHIPStreamGuardMasqueradingAsCUDA", API_PYTORCH)),
 
+    # Only get needs to be transformed this way; all the other ones can go
+    # straight to the normal versions hip::HIPCachingAllocator
+    ("cuda::CUDACachingAllocator::get", ("hip::HIPCachingAllocatorMasqueradingAsCUDA::get", API_PYTORCH)),
+    ("CUDACachingAllocator::get", ("HIPCachingAllocatorMasqueradingAsCUDA::get", API_PYTORCH)),
+    ("cuda::CUDACachingAllocator::recordStream", ("hip::HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA", API_PYTORCH)),
+    ("CUDACachingAllocator::recordStream", ("HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA", API_PYTORCH)),
+
+    ("cuda::CUDAStream", ("hip::HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
+    ("CUDAStream", ("HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
+
+    ("cuda::getStreamFromPool", ("hip::getStreamFromPoolMasqueradingAsCUDA", API_PYTORCH)),
+    ("getStreamFromPool", ("getStreamFromPoolMasqueradingAsCUDA", API_PYTORCH)),
+
+    ("cuda::getDefaultCUDAStream", ("hip::getDefaultHIPStreamMasqueradingAsCUDA", API_PYTORCH)),
+    ("getDefaultCUDAStream", ("getDefaultHIPStreamMasqueradingAsCUDA", API_PYTORCH)),
+
+    ("cuda::getCurrentCUDAStream", ("hip::getCurrentHIPStreamMasqueradingAsCUDA", API_PYTORCH)),
+    ("getCurrentCUDAStream", ("getCurrentHIPStreamMasqueradingAsCUDA", API_PYTORCH)),
+
+    ("cuda::setCurrentCUDAStream", ("hip::setCurrentHIPStreamMasqueradingAsCUDA", API_PYTORCH)),
+    ("setCurrentCUDAStream", ("setCurrentHIPStreamMasqueradingAsCUDA", API_PYTORCH)),
+
     # TODO: Undo this special-case; see the header for motivation behind this
     # hack.  It's VERY important this is only applied to PyTorch HIPify.
     ("c10/cuda/CUDAGuard.h", ("ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h", API_PYTORCH)),
+    ("c10/cuda/CUDACachingAllocator.h", ("ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h", API_PYTORCH)),
+    ("c10/cuda/CUDAStream.h", ("ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h", API_PYTORCH)),
 ])
 
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
@@ -2242,7 +2266,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("/common_gpu"  , ("/hip/common_gpu", API_CAFFE2)),
     ("/mixed_utils" , ("/hip/mixed_utils", API_CAFFE2)),
     ("/operator_fallback_gpu" , ("/hip/operator_fallback_gpu", API_CAFFE2)),
-    ("/spatial_batch_norm_op_gpu_impl" , ("/hip/spatial_batch_norm_op_gpu_impl", API_CAFFE2)),
+    ("/spatial_batch_norm_op_impl" , ("/hip/spatial_batch_norm_op_impl", API_CAFFE2)),
     ("/recurrent_network_executor_gpu" , ("/hip/recurrent_network_executor_gpu", API_CAFFE2)),
     ("/generate_proposals_op_util_nms_gpu" , ("/hip/generate_proposals_op_util_nms_gpu", API_CAFFE2)),
     ("/max_pool_with_index_gpu", ("/hip/max_pool_with_index_gpu", API_CAFFE2)),
@@ -2252,6 +2276,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("/GpuDefs", ("/hip/GpuDefs", API_CAFFE2)),
     ("/GpuScanUtils", ("/hip/GpuScanUtils", API_CAFFE2)),
     ("/GpuBitonicSort", ("/hip/GpuBitonicSort", API_CAFFE2)),
+    ("/math/reduce.cuh", ("/math/hip/reduce.cuh", API_CAFFE2)),
     ("/gather_op.cuh", ("/hip/gather_op.cuh", API_CAFFE2)),
     ("caffe2/core/common_cudnn.h", ("caffe2/core/hip/common_miopen.h", API_CAFFE2)),
     ("REGISTER_CUDA_OPERATOR" , ("REGISTER_HIP_OPERATOR", API_CAFFE2)),
@@ -2300,6 +2325,7 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
     ("c10/cuda/CUDAFunctions.h", ("c10/hip/HIPFunctions.h", API_C10)),
     ("c10/cuda/CUDAStream.h", ("c10/hip/HIPStream.h", API_C10)),
+    ("c10/cuda/CUDACachingAllocator.h", ("c10/hip/HIPCachingAllocator.h", API_C10)),
     ("c10/cuda/impl/CUDATest.h", ("c10/hip/impl/HIPTest.h", API_C10)),
     ("c10/cuda/impl/CUDAGuardImpl.h", ("c10/hip/impl/HIPGuardImpl.h", API_C10)),
     ("c10/cuda/impl/cuda_cmake_macros.h", ("c10/hip/impl/hip_cmake_macros.h", API_C10)),
@@ -2320,6 +2346,8 @@ C10_MAPPINGS = collections.OrderedDict([
     ("getCurrentCUDAStream", ("getCurrentHIPStream", API_C10)),
     ("cuda::setCurrentCUDAStream", ("hip::setCurrentHIPStream", API_C10)),
     ("setCurrentCUDAStream", ("setCurrentHIPStream", API_C10)),
+    ("cuda::CUDACachingAllocator", ("hip::HIPCachingAllocator", API_C10)),
+    ("CUDACachingAllocator", ("HIPCachingAllocator", API_C10)),
 ])
 
 # NB: C10 mappings are more specific than Caffe2 mappings, so run them

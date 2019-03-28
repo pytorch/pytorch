@@ -2,6 +2,9 @@
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/Config.h>
+#if AT_NNPACK_ENABLED()
+#include "nnpack.h"
+#endif
 
 static const int MIOPEN_DIM_MAX = 4;
 
@@ -24,20 +27,22 @@ struct ConvParams {
   bool is_output_padding_neg() const;
   bool is_output_padding_big() const;
   bool is_padding_neg() const;
+  bool is_stride_neg() const;
   void view1d_as_2d();
   bool use_cudnn(const at::Tensor& input) const;
   bool use_miopen(const at::Tensor& input) const;
   bool use_mkldnn(const at::Tensor& input) const;
+  bool use_nnpack(const at::Tensor& input) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
 std::ostream& operator<<(std::ostream & out, const ConvParams& params) {
   out << "ConvParams {"
-      << "  stride = " << IntList{params.stride}
-      << "  padding = " << IntList{params.padding}
-      << "  dilation = " << IntList{params.dilation}
+      << "  stride = " << IntArrayRef{params.stride}
+      << "  padding = " << IntArrayRef{params.padding}
+      << "  dilation = " << IntArrayRef{params.dilation}
       << "  transposed = " << params.transposed
-      << "  output_padding = " << IntList{params.output_padding}
+      << "  output_padding = " << IntArrayRef{params.output_padding}
       << "  groups = " << params.groups
       << "  benchmark = " << params.benchmark
       << "  deterministic = " << params.deterministic
@@ -94,6 +99,14 @@ auto ConvParams::is_padding_neg() const -> bool {
   return is_non_neg;
 }
 
+auto ConvParams::is_stride_neg() const -> bool {
+  bool is_non_neg = false;
+  for (int s : stride) {
+    is_non_neg |= (s < 0);
+  }
+  return is_non_neg;
+}
+
 
 auto ConvParams::view1d_as_2d() -> void {
   if (stride.size() == 1) {
@@ -123,24 +136,38 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
 
 auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
 
-  return ((input.type().scalarType() == at::kFloat) || (input.type().scalarType() == at::kHalf))
+  return ((input.scalar_type() == at::kFloat) || (input.scalar_type() == at::kHalf))
          && detail::getCUDAHooks().compiledWithMIOpen()
          && input.is_cuda()
          && input.dim() <= MIOPEN_DIM_MAX
          && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
          && !transposed
-         && (dilation.at(0) == dilation.at(1)) //MIOpen currently does not support assymetric dilation values.
-         && (stride.at(0) == stride.at(1)) //Line 549 & 635 (swapping stride and dilation values) leads to assymetric dilation values.
          ;
 }
 
 auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 #if AT_MKLDNN_ENABLED()
   return input.type().backend() == at::Backend::CPU &&
-         input.type().scalarType() == kFloat && // only on CPU Float Tensors
+         input.scalar_type() == kFloat && // only on CPU Float Tensors
          !is_dilated() && // doesn't support dilation
          !transposed && // or transposed tensors
          input.ndimension() == 4; // must be in NCHW format
+#endif
+  return false;
+}
+auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
+#if AT_NNPACK_ENABLED()
+  return at::_nnpack_available() &&
+         input.type().backend() == at::Backend::CPU &&
+         input.scalar_type() == kFloat && // only on CPU Float Tensors
+         !is_strided() && // doesn't support strides
+         !is_dilated() && // or dilation
+         !transposed &&   // or transposed tensors
+         input.ndimension() == 4 // must be in NCHW format
+#if !defined(C10_MOBILE) && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+         && input.size(0) >= 16 // ensure large enough batch size to ensure perf, tuneable
+#endif
+     ;
 #endif
   return false;
 }
@@ -158,11 +185,21 @@ auto ConvParams::is_depthwise(
          weight.size(0) % input.size(1) == 0; // output channels must be a multiple of input channels
 }
 
-static void check_input_shape_forward(const at::Tensor& input,
+static void check_shape_forward(const at::Tensor& input,
                                       const at::Tensor& weight, const at::Tensor& bias,
-                                      int64_t groups, bool transposed) {
+                                      const ConvParams& params) {
   int64_t k = input.ndimension();
   int64_t weight_dim = weight.ndimension();
+  int64_t groups = params.groups;
+  auto padding = params.padding;
+  auto output_padding = params.output_padding;
+  auto stride = params.stride;
+  auto dilation = params.dilation;
+  bool transposed = params.transposed;
+
+  AT_CHECK(!params.is_padding_neg(), "negative padding is not supported");
+  AT_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
+  AT_CHECK(!params.is_stride_neg(), "negative stride is not supported");
 
   AT_CHECK(weight_dim == k,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
@@ -177,6 +214,10 @@ static void check_input_shape_forward(const at::Tensor& input,
            " instead");
 
   if (!transposed) {
+    std::vector<int64_t> input_shape;
+    std::vector<int64_t> kernel_shape;
+    bool kernel_size_correct = true;
+
     AT_CHECK(input.size(1) == (weight.size(1) * groups),
              "Given groups=", groups, ", weight of size ", weight.sizes(),
              ", expected input", input.sizes(), " to have ",
@@ -186,6 +227,34 @@ static void check_input_shape_forward(const at::Tensor& input,
              "Given weight of size ", weight.sizes(),
              ", expected bias to be 1-dimensional with ", weight.size(0), " elements",
              ", but got bias of size ", bias.sizes(), " instead");
+
+    for (int i = 2; i < k; ++i) {
+      input_shape.push_back(input.size(i) + 2 * padding[i-2]);
+      // log new kernel size considering dilation
+      kernel_shape.push_back(dilation[i-2] * (weight.size(i)-1) + 1);
+      if (input_shape.back() < kernel_shape.back()) {
+        kernel_size_correct = false;
+      }
+    }
+
+    AT_CHECK(input_shape.size() == kernel_shape.size(), "Inconsistent shape between Input and Kernel");
+
+    if (!kernel_size_correct) {
+      // If kernel size is incorrect
+      std::ostringstream input_ss;
+      std::ostringstream kernel_ss;
+      std::ostringstream output_ss;
+      std::string separator = "";
+
+      for (int i = 0, len = input_shape.size(); i < len; ++i) {
+        input_ss << separator << input_shape[i];
+        kernel_ss << separator << kernel_shape[i];
+        separator = " x ";
+      }
+
+      AT_ERROR("Calculated padded input size per channel: (", input_ss.str(), "). "
+               "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
+    }
   } else { // transposed
     AT_CHECK(input.size(1) == weight.size(0),
              "Given transposed=", transposed, ", weight of size ", weight.sizes(),
@@ -224,50 +293,50 @@ static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
 
 at::Tensor conv1d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList dilation, int64_t groups) {
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {0}, groups);
 }
 
 at::Tensor conv2d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList dilation, int64_t groups) {
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {{0, 0}}, groups);
 }
 
 at::Tensor conv3d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList dilation, int64_t groups) {
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {{0, 0, 0}}, groups);
 }
 
 at::Tensor conv_transpose1d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList output_padding, int64_t groups, IntList dilation) {
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          true, output_padding, groups);
 }
 
 at::Tensor conv_transpose2d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList output_padding, int64_t groups, IntList dilation) {
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          true, output_padding, groups);
 }
 
 at::Tensor conv_transpose3d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList output_padding, int64_t groups, IntList dilation) {
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          true, output_padding, groups);
 }
 
 at::Tensor convolution(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList dilation,
-    bool transposed, IntList output_padding, int64_t groups) {
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+    bool transposed, IntArrayRef output_padding, int64_t groups) {
   auto& ctx = at::globalContext();
   return at::_convolution(input, weight, bias, stride, padding, dilation,
                           transposed, output_padding, groups,
@@ -275,7 +344,7 @@ at::Tensor convolution(
 }
 
 static inline std::vector<int64_t> convolution_expand_param_if_needed(
-  IntList list_param, const char *param_name, int64_t expected_dim) {
+  IntArrayRef list_param, const char *param_name, int64_t expected_dim) {
   if (list_param.size() == 1) {
     return std::vector<int64_t>(expected_dim, list_param[0]);
   } else if ((int64_t) list_param.size() != expected_dim) {
@@ -291,8 +360,8 @@ static inline std::vector<int64_t> convolution_expand_param_if_needed(
 
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
-    IntList stride_, IntList padding_, IntList dilation_,
-    bool transposed_, IntList output_padding_, int64_t groups_,
+    IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
+    bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled) {
 
   auto input = input_r.contiguous();
@@ -301,7 +370,7 @@ at::Tensor _convolution(
   auto k = weight.ndimension();
   int64_t dim = k - 2;
 
-  AT_CHECK(dim > 0, "weight should at least have at least two dimensions");
+  AT_CHECK(dim > 0, "weight should have at least three dimensions");
 
   ConvParams params;
   params.stride = convolution_expand_param_if_needed(stride_, "stride", dim);
@@ -314,10 +383,7 @@ at::Tensor _convolution(
   params.deterministic = deterministic;
   params.cudnn_enabled = cudnn_enabled;
 
-  AT_CHECK(!params.is_padding_neg(), "negative padding is not supported");
-  AT_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
-
-  check_input_shape_forward(input, weight, bias, params.groups, params.transposed);
+  check_shape_forward(input, weight, bias, params);
 
   if (k == 3) {
     params.view1d_as_2d();
@@ -334,7 +400,6 @@ at::Tensor _convolution(
       auto stride = params.stride;
       auto padding = params.padding;
       auto dilation = params.dilation;
-
       output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
   } else if (params.use_cudnn(input)) {
     AT_CHECK(input.type() == weight.type(),
@@ -378,8 +443,8 @@ at::Tensor _convolution(
     AT_CHECK(!bias.defined() || (input.type() == bias.type()),
              "Input type (", input.type().toString(), ") and bias type (", bias.type().toString(),
              ") should be the same");
-
-    output = at::mkldnn_convolution(input, weight, bias, params.padding, params.stride, params.dilation, params.groups);
+    output = at::mkldnn_convolution(input, weight.contiguous(), bias.defined() ? bias.contiguous() : bias,
+                                    params.padding, params.stride, params.dilation, params.groups);
 #endif
   } else {
     if (params.groups == 1) {
@@ -409,8 +474,8 @@ at::Tensor _convolution(
 // natively implement groups (e.g., not CuDNN).
 at::Tensor _convolution_nogroup(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
-    IntList stride, IntList padding, IntList dilation,
-    bool transposed, IntList output_padding) {
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+    bool transposed, IntArrayRef output_padding) {
 
   ConvParams params;
   params.stride = stride.vec();
@@ -444,11 +509,18 @@ at::Tensor _convolution_nogroup(
             input, weight, kernel_size, bias,
             stride, padding, dilation);
       } else {  /* dim == 4, non-dilated */
-        /* CPU implementation has specialized MM kernels
-           for non-dilated case here */
-        return at::thnn_conv2d(
-            input, weight, kernel_size, bias,
-            stride, padding);
+        if (params.use_nnpack(input)) {
+#if AT_NNPACK_ENABLED()
+          return at::_nnpack_spatial_convolution(
+              input, weight, bias, padding);
+#endif
+        } else {
+          /* CPU implementation has specialized MM kernels
+             for non-dilated case here */
+          return at::thnn_conv2d(
+              input, weight, kernel_size, bias,
+              stride, padding);
+        }
       }
     } else if (dim == 5 && (input.is_cuda() || dilated)) {
       return at::thnn_conv_dilated3d(
@@ -475,8 +547,8 @@ static Tensor subvariable(const Tensor& var, int dim, int groups, int g) {
 std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
     const Tensor& ggI, const Tensor& ggW_r, const Tensor& ggb,
     const Tensor& gO_r, const Tensor& weight_r, const Tensor& input,
-    IntList stride_, IntList padding_, IntList dilation_,
-    bool transposed_, IntList output_padding_, int64_t groups_,
+    IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
+    bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled,
     std::array<bool, 3> output_mask) {
 

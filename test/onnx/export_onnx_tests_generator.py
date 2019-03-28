@@ -93,8 +93,6 @@ def convert_tests(testcases, sets=1):
         test_name = get_test_name(t)
         module = gen_module(t)
         module_name = str(module).split("(")[0]
-        if (module_name != "LogSoftmax"):
-            continue
         if (module_name == "FunctionalModule"):
             FunctionalModule_nums += 1
         else:

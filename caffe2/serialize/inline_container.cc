@@ -8,12 +8,17 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/Backend.h>
 
+#include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/serialize/file_adapter.h"
 #include "caffe2/serialize/inline_container.h"
+#include "caffe2/serialize/istream_adapter.h"
+#include "caffe2/serialize/read_adapter_interface.h"
 
 #include "miniz.h"
 
-namespace torch { namespace jit {
+namespace caffe2 {
+namespace serialize {
 
 size_t istream_read_func(void *pOpaque, mz_uint64 file_ofs, void *pBuf, size_t n) {
   auto self = static_cast<PyTorchStreamReader*>(pOpaque);
@@ -42,27 +47,33 @@ static std::string basename(const std::string& name) {
 }
 
 size_t PyTorchStreamReader::read(uint64_t pos, char* buf, size_t n) {
-  in_->seekg(pos);
-  if(!*in_)
-    return 0;
-  in_->read(static_cast<char*>(buf), n);
-  if(!*in_)
-    return 0;
-  return n;
+  return in_->read(pos, buf, n, "reading file");
 }
 
-PyTorchStreamReader::PyTorchStreamReader(std::string file_name, std::istream* in)
-: ar_(new mz_zip_archive), in_(in) {
+PyTorchStreamReader::PyTorchStreamReader(const std::string& file_name)
+    : ar_(caffe2::make_unique<mz_zip_archive>()),
+      in_(caffe2::make_unique<FileAdapter>(file_name)) {
+  init();
+}
+
+PyTorchStreamReader::PyTorchStreamReader(std::istream* in)
+    : ar_(caffe2::make_unique<mz_zip_archive>()),
+      in_(caffe2::make_unique<IStreamAdapter>(in)) {
+  init();
+}
+
+PyTorchStreamReader::PyTorchStreamReader(
+    std::unique_ptr<ReadAdapterInterface> in)
+    : ar_(caffe2::make_unique<mz_zip_archive>()), in_(std::move(in)) {
+  init();
+}
+
+void PyTorchStreamReader::init() {
+  AT_ASSERT(in_ != nullptr);
+  AT_ASSERT(ar_ != nullptr);
   memset(ar_.get(), 0, sizeof(mz_zip_archive));
 
-  if (!in_) {
-    file_stream_.open(file_name, std::ifstream::in | std::ifstream::binary);
-    in_ = &file_stream_;
-    valid("opening archive");
-  }
-
-  in_->seekg(0, in_->end);
-  size_t size = in_->tellg();
+  size_t size = in_->size();
 
   // check for the old magic number,
   constexpr size_t kMagicValueLength = 8;
@@ -80,7 +91,6 @@ PyTorchStreamReader::PyTorchStreamReader(std::string file_name, std::istream* in
 
   mz_zip_reader_init(ar_.get(), size, 0);
   valid("reading zip archive");
-
 
   // figure out the archive_name (i.e. the zip folder all the other files are in)
   // all lookups to getRecord will be prefixed by this folder
@@ -125,9 +135,6 @@ void PyTorchStreamReader::valid(const char* what) {
   auto err = mz_zip_get_last_error(ar_.get());
   if (err != MZ_ZIP_NO_ERROR) {
     CAFFE_THROW("PytorchStreamReader failed ", what, ": ", mz_zip_get_error_string(err));
-  }
-  if (!*in_) {
-    CAFFE_THROW("PytorchStreamReader failed ", what, ".");
   }
 }
 
@@ -191,11 +198,12 @@ size_t PyTorchStreamReader::getRecordOffset(const std::string& name) {
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), getFileID(name), &stat);
   valid("retriving file meta-data");
-  in_->seekg(stat.m_local_header_ofs);
-  valid("seeking to file header");
   uint8_t local_header[MZ_ZIP_LOCAL_DIR_HEADER_SIZE];
-  in_->read(reinterpret_cast<char*>(local_header), MZ_ZIP_LOCAL_DIR_HEADER_SIZE);
-  valid("reading file header");
+  in_->read(
+      stat.m_local_header_ofs,
+      local_header,
+      MZ_ZIP_LOCAL_DIR_HEADER_SIZE,
+      "reading file header");
   size_t filename_len = read_le_16(local_header + MZ_ZIP_LDH_FILENAME_LEN_OFS);
   size_t extra_len = read_le_16(local_header + MZ_ZIP_LDH_EXTRA_LEN_OFS);
   return stat.m_local_header_ofs + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_len + extra_len;
@@ -226,8 +234,12 @@ size_t ostream_write_func(void *pOpaque, mz_uint64 file_ofs, const void *pBuf, s
   return n;
 }
 
-PyTorchStreamWriter::PyTorchStreamWriter(std::string file_name, std::ostream* out)
-: ar_(new mz_zip_archive), archive_name_(basename(file_name)), out_(out) {
+PyTorchStreamWriter::PyTorchStreamWriter(
+    std::string file_name,
+    std::ostream* out)
+    : ar_(caffe2::make_unique<mz_zip_archive>()),
+      archive_name_(basename(file_name)),
+      out_(out) {
   memset(ar_.get(), 0, sizeof(mz_zip_archive));
 
   if (archive_name_.size() == 0) {
@@ -302,4 +314,5 @@ PyTorchStreamWriter::~PyTorchStreamWriter() {
   }
 }
 
-}}  // namespace torch::jit
+} // namespace serialize
+} // namespace caffe2

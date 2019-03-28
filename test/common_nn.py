@@ -372,8 +372,7 @@ def bce_with_logistic_no_reduce_scalar_test():
         input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
         check_gradgrad=False,
-        pickle=False,
-        decorator=skipIfRocm
+        pickle=False
     )
 
 
@@ -832,6 +831,44 @@ def multimarginloss_weights_no_reduce_test():
         pickle=False)
 
 
+def fractional_max_pool2d_test(test_case):
+    random_samples = torch.DoubleTensor(1, 3, 2).uniform_()
+    if test_case == 'ratio':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool2d(
+                2, output_ratio=0.5, _random_samples=random_samples),
+            input_size=(1, 3, 5, 7),
+            fullname='FractionalMaxPool2d_ratio')
+    elif test_case == 'size':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool2d((2, 3), output_size=(
+                4, 3), _random_samples=random_samples),
+            input_size=(1, 3, 7, 6),
+            fullname='FractionalMaxPool2d_size')
+
+
+def fractional_max_pool3d_test(test_case):
+    random_samples = torch.DoubleTensor(2, 4, 3).uniform_()
+    if test_case == 'ratio':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool3d(
+                2, output_ratio=0.5, _random_samples=random_samples),
+            input_size=(2, 4, 5, 5, 5),
+            fullname='FractionalMaxPool3d_ratio')
+    elif test_case == 'size':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool3d((2, 2, 2), output_size=(
+                4, 4, 4), _random_samples=random_samples),
+            input_size=(2, 4, 7, 7, 7),
+            fullname='FractionalMaxPool3d_size')
+    elif test_case == 'asymsize':
+        return dict(
+            constructor=lambda: nn.FractionalMaxPool3d((4, 2, 3), output_size=(
+                10, 3, 2), _random_samples=random_samples),
+            input_size=(2, 4, 16, 7, 5),
+            fullname='FractionalMaxPool3d_asymsize')
+
+
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
@@ -874,6 +911,11 @@ new_module_tests = [
     multimarginloss_p_no_reduce_test(),
     multimarginloss_margin_no_reduce_test(),
     multimarginloss_weights_no_reduce_test(),
+    fractional_max_pool2d_test('ratio'),
+    fractional_max_pool2d_test('size'),
+    fractional_max_pool3d_test('ratio'),
+    fractional_max_pool3d_test('size'),
+    fractional_max_pool3d_test('asymsize'),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),
@@ -881,7 +923,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine',
-        skip_double=TEST_WITH_ROCM,
         test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
@@ -891,8 +932,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input',
-        skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -901,7 +940,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine_simple_average',
-        skip_double=TEST_WITH_ROCM,
         test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
@@ -911,8 +949,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -921,7 +957,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
-        skip_double=TEST_WITH_ROCM,
         test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
@@ -931,8 +966,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input_not_affine',
-        skip_double=TEST_WITH_ROCM,
-        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm2d',
@@ -940,7 +973,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         check_eval=True,
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm2d',
@@ -949,7 +981,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_simple_average',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm2d',
@@ -958,7 +989,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm2d',
@@ -967,7 +997,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm2d',
@@ -976,7 +1005,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm3d',
@@ -1023,7 +1051,6 @@ new_module_tests = [
         input_size=(4, 3, 15),
         cudnn=True,
         check_eval=True,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='InstanceNorm1d',
@@ -1032,7 +1059,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='InstanceNorm2d',
@@ -1071,7 +1097,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_elementwise_affine',
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LayerNorm',
@@ -1080,7 +1105,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_elementwise_affine',
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LayerNorm',
@@ -1089,7 +1113,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_elementwise_affine',
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LayerNorm',
@@ -1098,7 +1121,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_no_elementwise_affine',
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -1107,7 +1129,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_affine',
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -1116,7 +1137,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_affine_IN',  # this setting is equivalent with InstanceNormi
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -1125,7 +1145,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='1d_no_affine_LN',  # this setting is equivalent with LayerNorm
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -1134,7 +1153,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_affine',
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -1143,7 +1161,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_no_affine_IN',  # this setting is equivalent with InstanceNorm
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='GroupNorm',
@@ -1152,14 +1169,12 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_no_affine_LN',  # this setting is equivalent with LayerNorm
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Conv1d',
         constructor_args=(4, 5, 3),
         input_size=(2, 4, 10),
         cudnn=True,
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='Conv1d',
@@ -1167,7 +1182,6 @@ new_module_tests = [
         input_size=(2, 4, 10),
         cudnn=True,
         desc='stride',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='Conv1d',
@@ -1175,7 +1189,6 @@ new_module_tests = [
         input_size=(2, 4, 10),
         cudnn=True,
         desc='pad1',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='Conv1d',
@@ -1183,7 +1196,6 @@ new_module_tests = [
         input_size=(2, 4, 10),
         cudnn=True,
         desc='pad2',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='Conv1d',
@@ -1191,7 +1203,6 @@ new_module_tests = [
         input_size=(1, 4, 1),
         cudnn=True,
         desc='pad1size1',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='Conv1d',
@@ -1199,21 +1210,17 @@ new_module_tests = [
         input_size=(1, 4, 1),
         cudnn=True,
         desc='pad2size1',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         fullname='Conv1d_dilated',
         constructor=lambda: nn.Conv1d(4, 5, kernel_size=3, dilation=2),
         input_size=(2, 4, 10),
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         fullname='Conv1d_groups',
         constructor=lambda: nn.Conv1d(4, 6, kernel_size=3, groups=2),
         input_size=(2, 4, 6),
         cudnn=True,
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         fullname='ConvTranspose1d',
@@ -1264,8 +1271,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         desc='strided',
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         module_name='Conv2d',
@@ -1273,8 +1278,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         desc='padding',
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         module_name='Conv2d',
@@ -1295,14 +1298,11 @@ new_module_tests = [
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
         cudnn=True,
-        decorator=skipIfRocm
     ),
     dict(
         fullname='Conv2d_groups_thnn',
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -1613,8 +1613,6 @@ new_module_tests = [
         jacobian_input=False,
         check_gradgrad=False,
         desc='mean',
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         module_name='EmbeddingBag',
@@ -1623,8 +1621,6 @@ new_module_tests = [
         jacobian_input=False,
         check_gradgrad=False,
         desc='sum',
-        test_cuda=(not TEST_WITH_ROCM),
-        decorator=skipIfRocm
     ),
     dict(
         module_name='EmbeddingBag',
@@ -1640,8 +1636,6 @@ new_module_tests = [
         input_fn=lambda: torch.randperm(2).repeat(1, 2),
         jacobian_input=False,
         check_gradgrad=False,
-        decorator=skipIfRocm,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=lambda: nn.Embedding(4, 3, sparse=True),
@@ -1649,20 +1643,6 @@ new_module_tests = [
         jacobian_input=False,
         fullname='Embedding_sparse',
         check_gradgrad=False,
-        test_cuda=(not TEST_WITH_ROCM)
-    ),
-    dict(
-        constructor=lambda: nn.FractionalMaxPool2d(
-            2, output_ratio=0.5, _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
-        input_size=(1, 3, 5, 5),
-        fullname='FractionalMaxPool2d_ratio',
-    ),
-    dict(
-        constructor=lambda: nn.FractionalMaxPool2d((2, 2), output_size=(
-            4, 4), _random_samples=torch.DoubleTensor(1, 3, 2).uniform_()),
-        input_size=(1, 3, 7, 7),
-        fullname='FractionalMaxPool2d_size',
-        test_cuda=False,
     ),
     dict(
         module_name='PixelShuffle',
@@ -1670,213 +1650,217 @@ new_module_tests = [
         input_size=(1, 9, 4, 4),
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(12, None, 'nearest'),
+        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         input_size=(1, 2, 4),
-        desc='nearest_1d',
+        fullname='interpolate_nearest_1d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=((12, ), None, 'nearest'),
+        constructor=wrap_functional(F.interpolate, size=(12, ), scale_factor=None, mode='nearest'),
         input_size=(1, 2, 3),
-        desc='nearest_tuple_1d',
+        fullname='interpolate_nearest_tuple_1d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(None, 4., 'nearest'),
+        constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
         input_size=(1, 2, 4),
-        desc='nearest_scale_1d',
+        fullname='interpolate_nearest_scale_1d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(12, None, 'linear', False),
+        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=False),
         input_size=(1, 2, 4),
-        desc='linear_1d',
+        fullname='interpolate_linear_1d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=((4, ), None, 'linear', False),
+        constructor=wrap_functional(F.interpolate, size=(4, ), scale_factor=None, mode='linear', align_corners=False),
         input_size=(1, 2, 3),
-        desc='linear_tuple_1d',
+        fullname='interpolate_linear_tuple_1d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(None, 4., 'linear', False),
+        constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='linear', align_corners=False),
         input_size=(1, 2, 4),
-        desc='linear_scale_1d',
+        fullname='interpolate_linear_scale_1d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(12, None, 'linear', True),
+        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=True),
         input_size=(1, 2, 4),
-        desc='linear_1d_align_corners',
+        fullname='interpolate_linear_1d_align_corners',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(None, 4., 'linear', True),
+        constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='linear', align_corners=True),
         input_size=(1, 2, 4),
-        desc='linear_scale_1d_align_corners',
+        fullname='interpolate_linear_scale_1d_align_corners',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(12, None, 'nearest'),
+        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         input_size=(1, 2, 4, 4),
-        desc='nearest_2d',
+        fullname='interpolate_nearest_2d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=((12, 16), None, 'nearest'),
+        constructor=wrap_functional(F.interpolate, size=(12, 16), scale_factor=None, mode='nearest'),
         input_size=(1, 2, 3, 4),
-        desc='nearest_tuple_2d',
+        fullname='interpolate_nearest_tuple_2d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(None, 4., 'nearest'),
+        constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
         input_size=(1, 2, 4, 4),
-        desc='nearest_scale_2d',
+        fullname='interpolate_nearest_scale_2d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(12, None, 'bilinear', False),
+        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bilinear', align_corners=False),
         input_size=(1, 2, 4, 4),
-        desc='bilinear_2d',
+        fullname='interpolate_bilinear_2d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=((4, 6), None, 'bilinear', False),
+        constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None,
+                                    mode='bilinear', align_corners=False),
         input_size=(1, 2, 2, 3),
-        desc='bilinear_tuple_2d',
+        fullname='interpolate_bilinear_tuple_2d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(None, 4., 'bilinear', False),
+        constructor=wrap_functional(F.interpolate, size=None, scale_factor=4.,
+                                    mode='bilinear', align_corners=False),
         input_size=(1, 2, 4, 4),
-        desc='bilinear_scale_2d',
+        fullname='interpolate_bilinear_scale_2d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(None, (2., 2.), 'bilinear', False),
+        constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 2.),
+                                    mode='bilinear', align_corners=False),
         input_size=(1, 2, 4, 4),
-        desc='bilinear_scale_tuple_shared_2d',
+        fullname='interpolate_bilinear_scale_tuple_shared_2d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(None, (2., 1.), 'bilinear', False),
+        constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
+                                    mode='bilinear', align_corners=False),
         input_size=(1, 2, 4, 4),
-        desc='bilinear_scale_tuple_skewed_2d',
+        fullname='interpolate_bilinear_scale_tuple_skewed_2d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=((4, 6), None, 'bilinear', True),
+        constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None, mode='bilinear', align_corners=True),
         input_size=(1, 2, 4, 4),
-        desc='bilinear_tuple_2d_align_corners',
+        fullname='interpolate_bilinear_tuple_2d_align_corners',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(None, (2., 1.), 'bilinear', True),
+        constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
+                                    mode='bilinear', align_corners=True),
         input_size=(1, 2, 4, 4),
-        desc='bilinear_scale_tuple_skewed_2d_align_corners',
+        fullname='interpolate_bilinear_scale_tuple_skewed_2d_align_corners',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(12, None, 'bicubic', False),
+        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bicubic', align_corners=False),
         input_size=(1, 2, 4, 4),
-        desc='bicubic_2d',
-        decorator=skipIfRocm
+        fullname='interpolate_bicubic_2d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=((4, 6), None, 'bicubic', False),
+        constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None,
+                                    mode='bicubic', align_corners=False),
         input_size=(1, 2, 2, 3),
-        desc='bicubic_tuple_2d',
-        decorator=skipIfRocm
+        fullname='interpolate_bicubic_tuple_2d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(None, 4., 'bicubic', False),
+        constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='bicubic', align_corners=False),
         input_size=(1, 2, 4, 4),
-        desc='bicubic_scale_2d',
-        decorator=skipIfRocm
+        fullname='interpolate_bicubic_scale_2d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(None, (2., 2.), 'bicubic', False),
+        constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 2.),
+                                    mode='bicubic', align_corners=False),
         input_size=(1, 2, 4, 4),
-        desc='bicubic_scale_tuple_shared_2d',
-        decorator=skipIfRocm
+        fullname='interpolate_bicubic_scale_tuple_shared_2d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(None, (2., 1.), 'bicubic', False),
+        constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
+                                    mode='bicubic', align_corners=False),
         input_size=(1, 2, 4, 4),
-        desc='bicubic_scale_tuple_skewed_2d',
-        decorator=skipIfRocm
+        fullname='interpolate_bicubic_scale_tuple_skewed_2d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=((4, 6), None, 'bicubic', True),
+        constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None, mode='bicubic', align_corners=True),
         input_size=(1, 2, 4, 4),
-        desc='bicubic_tuple_2d_align_corners',
-        decorator=skipIfRocm
+        fullname='interpolate_bicubic_tuple_2d_align_corners',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(None, (2., 1.), 'bicubic', True),
+        constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
+                                    mode='bicubic', align_corners=True),
         input_size=(1, 2, 4, 4),
-        desc='bicubic_scale_tuple_skewed_2d_align_corners',
-        decorator=skipIfRocm
+        fullname='interpolate_bicubic_scale_tuple_skewed_2d_align_corners',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(12, None, 'nearest'),
+        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         input_size=(1, 2, 4, 4, 4),
-        desc='nearest_3d',
+        fullname='interpolate_nearest_3d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=((12, 16, 16), None, 'nearest'),
+        constructor=wrap_functional(F.interpolate, size=(12, 16, 16), scale_factor=None, mode='nearest'),
         input_size=(1, 2, 3, 4, 4),
-        desc='nearest_tuple_3d',
+        fullname='interpolate_nearest_tuple_3d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(None, 4., 'nearest'),
+        constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
         input_size=(1, 2, 4, 4, 4),
-        desc='nearest_scale_3d',
+        fullname='interpolate_nearest_scale_3d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(12, None, 'trilinear', False),
+        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='trilinear', align_corners=False),
         input_size=(1, 2, 4, 4, 4),
-        desc='trilinear_3d',
+        fullname='interpolate_trilinear_3d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=((4, 6, 6), None, 'trilinear', False),
+        constructor=wrap_functional(F.interpolate, size=(4, 6, 6),
+                                    scale_factor=None, mode='trilinear', align_corners=False),
         input_size=(1, 2, 2, 3, 3),
-        desc='trilinear_tuple_3d',
+        fullname='interpolate_trilinear_tuple_3d',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(None, 3., 'trilinear', False),
+        constructor=wrap_functional(F.interpolate, size=None, scale_factor=3., mode='trilinear', align_corners=False),
         input_size=(1, 2, 3, 4, 4),
-        desc='trilinear_scale_3d',
+        fullname='interpolate_trilinear_scale_3d',
         # See https://github.com/pytorch/pytorch/issues/5006
         precision=3e-4,
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=((4, 6, 6), None, 'trilinear', True),
+        constructor=wrap_functional(F.interpolate, size=(4, 6, 6), scale_factor=None,
+                                    mode='trilinear', align_corners=True),
         input_size=(1, 2, 2, 3, 3),
-        desc='trilinear_tuple_3d_align_corners',
+        fullname='interpolate_trilinear_tuple_3d_align_corners',
+        pickle=False,
     ),
     dict(
-        module_name='Upsample',
-        constructor_args=(None, 3., 'trilinear', True),
+        constructor=wrap_functional(F.interpolate, size=None, scale_factor=3., mode='trilinear', align_corners=True),
         input_size=(1, 2, 3, 4, 4),
-        desc='trilinear_scale_3d_align_corners',
+        fullname='interpolate_trilinear_scale_3d_align_corners',
         # See https://github.com/pytorch/pytorch/issues/5006
         precision=3e-4,
+        pickle=False,
     ),
     dict(
         module_name='AdaptiveMaxPool1d',
@@ -1937,10 +1921,22 @@ new_module_tests = [
         input_fn=lambda: torch.rand(1, 3, 5),
     ),
     dict(
+        module_name='AdaptiveAvgPool1d',
+        constructor_args=(1,),
+        input_fn=lambda: torch.rand(1, 3, 5),
+        desc='one_output',
+    ),
+    dict(
         module_name='AdaptiveAvgPool2d',
         constructor_args=(3,),
         input_fn=lambda: torch.rand(1, 3, 5, 6),
         desc='single',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool2d',
+        constructor_args=(1,),
+        input_fn=lambda: torch.rand(1, 3, 5, 6),
+        desc='single_1x1output',
     ),
     dict(
         module_name='AdaptiveAvgPool2d',
@@ -2246,6 +2242,107 @@ new_module_tests = [
         input_size=(),
         desc='scalar',
     ),
+    dict(
+        fullname='Padding12_1dcircular',
+        constructor=wrap_functional(F.pad, pad=(1, 2), mode='circular'),
+        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 2, 3]),
+        reference_fn=lambda i, _: padding1d_circular(i, (1, 2)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding31_1dcircular',
+        constructor=wrap_functional(F.pad, pad=(3, 1), mode='circular'),
+        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 2, 3]),
+        reference_fn=lambda i, _: padding1d_circular(i, (3, 1)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding33_1dcircular',
+        constructor=wrap_functional(F.pad, pad=(3, 3), mode='circular'),
+        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 2, 3]),
+        reference_fn=lambda i, _: padding1d_circular(i, (3, 3)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding1221_2dcircular',
+        constructor=wrap_functional(F.pad, pad=(1, 2, 2, 1), mode='circular'),
+        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 1, 2, 3]),
+        reference_fn=lambda i, _: padding2d_circular(i, (1, 2, 2, 1)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding2322_2dcircular',
+        constructor=wrap_functional(F.pad, pad=(2, 3, 2, 2), mode='circular'),
+        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 1, 2, 3]),
+        reference_fn=lambda i, _: padding2d_circular(i, (2, 3, 2, 2)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding3331_2dcircular',
+        constructor=wrap_functional(F.pad, pad=(3, 3, 3, 1), mode='circular'),
+        input_fn=lambda: torch.arange(9, out=torch.DoubleTensor()).reshape([1, 1, 3, 3]),
+        reference_fn=lambda i, _: padding2d_circular(i, (3, 3, 3, 1)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding122112_3dcircular',
+        constructor=wrap_functional(F.pad, pad=(1, 2, 2, 1, 1, 2), mode='circular'),
+        input_fn=lambda: torch.arange(12, out=torch.DoubleTensor()).reshape([1, 1, 2, 2, 3]),
+        reference_fn=lambda i, _: padding3d_circular(i, (1, 2, 2, 1, 1, 2)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding322112_3dcircular',
+        constructor=wrap_functional(F.pad, pad=(3, 2, 2, 1, 1, 2), mode='circular'),
+        input_fn=lambda: torch.arange(12, out=torch.DoubleTensor()).reshape([1, 1, 2, 2, 3]),
+        reference_fn=lambda i, _: padding3d_circular(i, (3, 2, 2, 1, 1, 2)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding332122_3dcircular',
+        constructor=wrap_functional(F.pad, pad=(3, 3, 2, 1, 2, 2), mode='circular'),
+        input_fn=lambda: torch.arange(12, out=torch.DoubleTensor()).reshape([1, 1, 2, 2, 3]),
+        reference_fn=lambda i, _: padding3d_circular(i, (3, 3, 2, 1, 2, 2)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+
+    dict(
+        module_name='Conv1d',
+        constructor_args=(3, 4, 2, 2, (1,), 1, 1, True, 'circular'),
+        input_size=(2, 3, 5,),
+        cudnn=True,
+        desc='stride1_pad1circular',
+    ),
+    dict(
+        module_name='Conv1d',
+        constructor_args=(3, 4, 2, 2, (2,), 1, 1, True, 'circular'),
+        input_size=(2, 3, 5,),
+        cudnn=True,
+        desc='stride1_pad2circular',
+    ),
+    dict(
+        module_name='Conv2d',
+        constructor_args=(3, 4, (3, 3), (2, 2), (1, 2), 1, 1, True, 'circular'),
+        input_size=(2, 3, 3, 3),
+        cudnn=True,
+        desc='pad2circular'
+    ),
+    dict(
+        module_name='Conv3d',
+        constructor_args=(3, 4, 2, 2, (1, 2, 3), 1, 1, True, 'circular'),
+        input_size=(2, 3, 3, 3, 3),
+        cudnn=True,
+        desc='stride_pad1circular',
+    ),
 ]
 
 
@@ -2486,6 +2583,78 @@ def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0
         return output.sum()
     output = output.to(dt)
     return output
+
+
+def padding1d_circular(input, pad):
+    r""" input:
+            [[[0., 1., 2.],
+              [3., 4., 5.]]]
+          pad: (1, 2)
+          output:
+            [[[2., 0., 1., 2., 0., 1.],
+              [5., 3., 4., 5., 3., 4.]]]
+    """
+    return torch.cat([input[:, :, -pad[0]:], input,
+                      input[:, :, 0:pad[1]]], dim=2)
+
+
+def padding2d_circular(input, pad):
+    r"""input:
+             [[[[0., 1., 2],
+                [3., 4., 5.]]]]
+            pad: (1, 2, 2, 1)
+    output:
+        [[[[2., 0., 1., 2., 0., 1.],
+           [5., 3., 4., 5., 3., 4.],
+           [2., 0., 1., 2., 0., 1.],
+           [5., 3., 4., 5., 3., 4.],
+           [2., 0., 1., 2., 0., 1.]]]]
+    """
+    input = torch.cat([input[:, :, -pad[2]:], input, input[:, :, 0:pad[3]]], dim=2)
+    return torch.cat([input[:, :, :, -pad[0]:], input, input[:, :, :, 0:pad[1]]], dim=3)
+
+
+def padding3d_circular(input, pad):
+    r"""input:
+            [[[[[ 0.,  1.,  2.],
+                [ 3.,  4.,  5.]],
+               [[ 6.,  7.,  8.],
+                [ 9., 10., 11.]]]]]
+        pad: (1, 2, 2, 1, 1, 2)
+        output: [[[[[ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.]],
+
+              [[ 2.,  0.,  1.,  2.,  0.,  1.],
+               [ 5.,  3.,  4.,  5.,  3.,  4.],
+               [ 2.,  0.,  1.,  2.,  0.,  1.],
+               [ 5.,  3.,  4.,  5.,  3.,  4.],
+               [ 2.,  0.,  1.,  2.,  0.,  1.]],
+
+              [[ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.]],
+
+              [[ 2.,  0.,  1.,  2.,  0.,  1.],
+               [ 5.,  3.,  4.,  5.,  3.,  4.],
+               [ 2.,  0.,  1.,  2.,  0.,  1.],
+               [ 5.,  3.,  4.,  5.,  3.,  4.],
+               [ 2.,  0.,  1.,  2.,  0.,  1.]],
+
+              [[ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.]]]]]
+    """
+    input = torch.cat([input[:, :, -pad[4]:], input, input[:, :, 0:pad[5]]], dim=2)
+    input = torch.cat([input[:, :, :, -pad[2]:], input, input[:, :, :, 0:pad[3]]], dim=3)
+    return torch.cat([input[:, :, :, :, -pad[0]:], input, input[:, :, :, :, 0:pad[1]]], dim=4)
+
 
 loss_reference_fns = {
     'KLDivLoss': kldivloss_reference,
@@ -3064,7 +3233,7 @@ class ModuleTest(TestBase):
             test_case.assertEqual(cpu_output, gpu_output, self.precision)
 
             # Run backwards on CPU and GPU and compare results
-            for i in range(5):
+            for _ in range(5):
                 cpu_gradOutput = cpu_output.clone().normal_()
                 gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
                 cpu_gradInput = test_case._backward(cpu_module, cpu_input, cpu_output, cpu_gradOutput)

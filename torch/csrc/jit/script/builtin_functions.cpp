@@ -53,7 +53,7 @@ struct BuiltinFunctionRegistry {
       loadBuiltinFunctions();
       state = INITIALIZED;
     }
-    JIT_ASSERT(state == INITIALIZED);
+    AT_ASSERT(state == INITIALIZED);
     auto it = builtins_by_name.find(name);
     if (it == builtins_by_name.end())
       return empty;
@@ -64,7 +64,7 @@ struct BuiltinFunctionRegistry {
   void loadSource(const std::string& source) {
     auto module = std::make_shared<script::Module>();
     defineMethodsInModule(
-        module, source, script::nativeResolver, /*self=*/nullptr);
+        module, source, script::nativeResolver, /*self=*/c10::nullopt);
     modules.push_back(module);
     for (auto& method : module->get_methods()) {
       builtins_by_name[Symbol::fromQualString("aten::" + method.key())]

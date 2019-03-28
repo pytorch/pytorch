@@ -37,6 +37,7 @@ const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt) {
   static std::map<TensorProto::DataType, TypeMeta> type_meta_map{
       {TensorProto_DataType_FLOAT, TypeMeta::Make<float>()},
       {TensorProto_DataType_INT32, TypeMeta::Make<int>()},
+      {TensorProto_DataType_BYTE, TypeMeta::Make<uint8_t>()},
       {TensorProto_DataType_STRING, TypeMeta::Make<std::string>()},
       {TensorProto_DataType_BOOL, TypeMeta::Make<bool>()},
       {TensorProto_DataType_UINT8, TypeMeta::Make<uint8_t>()},

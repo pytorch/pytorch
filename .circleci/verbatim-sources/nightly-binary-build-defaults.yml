@@ -1,0 +1,214 @@
+
+##############################################################################
+# Binary build (nightlies nightly build) defaults
+# The binary builds use the docker executor b/c at time of writing the machine
+# executor is limited to only two cores and is painfully slow (4.5+ hours per
+# GPU build). But the docker executor cannot be run with --runtime=nvidia, and
+# so the binary test/upload jobs must run on a machine executor. The package
+# built in the build job is persisted to the workspace, which the test jobs
+# expect. The test jobs just run a few quick smoke tests (very similar to the
+# second-round-user-facing smoke tests above) and then upload the binaries to
+# their final locations. The upload part requires credentials that should only
+# be available to org-members.
+##############################################################################
+binary_populate_env: &binary_populate_env
+  name: Set up env
+  command: |
+    set -ex
+    export TZ=UTC
+
+    # We need to write an envfile to persist these variables to following
+    # steps, but the location of the envfile depends on the circleci executor
+    if [[ "$(uname)" == Darwin ]]; then
+      # macos executor (builds and tests)
+      workdir="/Users/distiller/project"
+    elif [[ -d "/home/circleci/project" ]]; then
+      # machine executor (binary tests)
+      workdir="/home/circleci/project"
+    else
+      # docker executor (binary builds)
+      workdir="/"
+    fi
+    envfile="$workdir/env"
+    touch "$envfile"
+    chmod +x "$envfile"
+
+    # Parse the BUILD_ENVIRONMENT to package type, python, and cuda
+    configs=($BUILD_ENVIRONMENT)
+    export PACKAGE_TYPE="${configs[0]}"
+    export DESIRED_PYTHON="${configs[1]}"
+    export DESIRED_CUDA="${configs[2]}"
+    if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
+      export BUILD_PYTHONLESS=1
+    fi
+
+    # Pick docker image
+    if [[ "$PACKAGE_TYPE" == conda ]]; then
+      export DOCKER_IMAGE="soumith/conda-cuda"
+    elif [[ "$DESIRED_CUDA" == cpu ]]; then
+      export DOCKER_IMAGE="soumith/manylinux-cuda80"
+    else
+      export DOCKER_IMAGE="soumith/manylinux-cuda${DESIRED_CUDA:2}"
+    fi
+
+    # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
+    export DATE="$(date -u +%Y%m%d)"
+    export PYTORCH_BUILD_VERSION="1.0.0.dev$DATE"
+    export PYTORCH_BUILD_NUMBER=1
+
+    cat >>"$envfile" <<EOL
+    # =================== The following code will be executed inside Docker container ===================
+    export TZ=UTC
+    echo "Running on $(uname -a) at $(date)"
+
+    export PACKAGE_TYPE="$PACKAGE_TYPE"
+    export DESIRED_PYTHON="$DESIRED_PYTHON"
+    export DESIRED_CUDA="$DESIRED_CUDA"
+    export LIBTORCH_VARIANT="$LIBTORCH_VARIANT"
+    export BUILD_PYTHONLESS="$BUILD_PYTHONLESS"
+
+    export DATE="$DATE"
+    export NIGHTLIES_DATE_PREAMBLE=1.0.0.dev
+    export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
+    export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
+    export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
+
+    export TORCH_PACKAGE_NAME='torch-nightly'
+    export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
+
+    export NO_FBGEMM=1
+    export PIP_UPLOAD_FOLDER='nightly/'
+    export DOCKER_IMAGE="$DOCKER_IMAGE"
+
+    export workdir="$workdir"
+    export MAC_PACKAGE_WORK_DIR="$workdir"
+    export PYTORCH_ROOT="$workdir/pytorch"
+    export BUILDER_ROOT="$workdir/builder"
+    export MINICONDA_ROOT="$workdir/miniconda"
+    export PYTORCH_FINAL_PACKAGE_DIR="$workdir/final_pkgs"
+
+    export CIRCLE_TAG="$CIRCLE_TAG"
+    export CIRCLE_SHA1="$CIRCLE_SHA1"
+    export CIRCLE_PR_NUMBER="$CIRCLE_PR_NUMBER"
+    export CIRCLE_BRANCH="$CIRCLE_BRANCH"
+    # =================== The above code will be executed inside Docker container ===================
+    EOL
+
+    echo 'retry () {' >> "$envfile"
+    echo '    $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)' >> "$envfile"
+    echo '}' >> "$envfile"
+    echo 'export -f retry' >> "$envfile"
+
+    cat "$envfile"
+
+binary_checkout: &binary_checkout
+  name: Checkout
+  command: |
+    set -ex
+    # This step runs on multiple executors with different envfile locations
+    if [[ "$(uname)" == Darwin ]]; then
+      source "/Users/distiller/project/env"
+    elif [[ -d "/home/circleci/project" ]]; then
+      # machine executor (binary tests)
+      source "/home/circleci/project/env"
+    else
+      # docker executor (binary builds)
+      source "/env"
+    fi
+
+    # Clone the Pytorch branch
+    git clone https://github.com/pytorch/pytorch.git "$PYTORCH_ROOT"
+    pushd "$PYTORCH_ROOT"
+    if [[ -n "$CIRCLE_PR_NUMBER" ]]; then
+      # "smoke" binary build on PRs
+      git fetch --force origin "pull/${CIRCLE_PR_NUMBER}/head:remotes/origin/pull/${CIRCLE_PR_NUMBER}"
+      git reset --hard "$CIRCLE_SHA1"
+      git checkout -q -B "$CIRCLE_BRANCH"
+      git reset --hard "$CIRCLE_SHA1"
+    elif [[ -n "$CIRCLE_SHA1" ]]; then
+      # "smoke" binary build on master on PR merges
+      git reset --hard "$CIRCLE_SHA1"
+      git checkout -q -B master
+    else
+      # nightly binary builds. These run at 05:05 UTC every day. 
+      last_commit="$(git rev-list --before "$(date -u +%Y-%m-%d) 05:00" --max-count 1 HEAD)"
+      git checkout "$last_commit"
+    fi
+    git submodule update --init --recursive --quiet
+    echo "Using Pytorch from "
+    git --no-pager log --max-count 1
+    popd
+
+    # Clone the Builder master repo
+    git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
+    pushd "$BUILDER_ROOT"
+    git fetch origin
+    git reset origin/master --hard
+    echo "Using builder from "
+    git --no-pager log --max-count 1
+    popd
+
+binary_install_miniconda: &binary_install_miniconda
+  name: Install miniconda
+  no_output_timeout: "1h"
+  command: |
+    set -ex
+    # This step runs on multiple executors with different envfile locations
+    if [[ "$(uname)" == Darwin ]]; then
+      source "/Users/distiller/project/env"
+    elif [[ -d "/home/circleci/project" ]]; then
+      # machine executor (binary tests)
+      source "/home/circleci/project/env"
+    else
+      # docker executor (binary builds)
+      source "/env"
+    fi
+
+    conda_sh="$workdir/install_miniconda.sh"
+    if [[ "$(uname)" == Darwin ]]; then
+      curl -o "$conda_sh" https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+    else
+      curl -o "$conda_sh" https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh
+    fi
+    chmod +x "$conda_sh"
+    "$conda_sh" -b -p "$MINICONDA_ROOT"
+    rm -f "$conda_sh"
+    export PATH="$MINICONDA_ROOT/bin:$PATH"
+    source "$MINICONDA_ROOT/bin/activate"
+    # We can't actually add miniconda to the PATH in the envfile, because that
+    # breaks 'unbuffer' in Mac jobs. This is probably because conda comes with
+    # a tclsh, which then gets inserted before the tclsh needed in /usr/bin
+
+
+# This section is used in the binary_test and smoke_test jobs. It expects
+# 'binary_populate_env' to have populated /home/circleci/project/env and it
+# expects another section to populate /home/circleci/project/ci_test_script.sh
+# with the code to run in the docker
+binary_run_in_docker: &binary_run_in_docker
+  name: Run in docker
+  command: |
+    # Expect all needed environment variables to be written to this file
+    source /home/circleci/project/env
+    echo "Running the following code in Docker"
+    cat /home/circleci/project/ci_test_script.sh
+    set -ex
+
+    # Expect actual code to be written to this file
+    chmod +x /home/circleci/project/ci_test_script.sh
+
+    # Run the docker and copy pkgs/env/script into it
+    if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
+      export id=$(docker run --runtime=nvidia -t -d "${DOCKER_IMAGE}")
+    else
+      export id=$(docker run -t -d "${DOCKER_IMAGE}")
+    fi
+    docker cp /home/circleci/project/. "$id:/circleci_stuff"
+    if [[ -d "/home/circleci/project/final_pkgs" ]]; then
+      docker cp /home/circleci/project/final_pkgs "$id:/final_pkgs"
+    fi
+
+    # Execute the test script that was populated by an earlier section
+    export COMMAND='((echo "source /circleci_stuff/env && /circleci_stuff/ci_test_script.sh") | docker exec -i "$id" bash) 2>&1'
+    echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+
+

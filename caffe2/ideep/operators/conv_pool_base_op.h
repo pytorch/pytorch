@@ -1,14 +1,17 @@
-#pragma once
+#ifndef CAFFE2_IDEEP_OPERATORS_CONV_POOL_BASE_OP_H_
+#define CAFFE2_IDEEP_OPERATORS_CONV_POOL_BASE_OP_H_
 
-#include <caffe2/ideep/ideep_utils.h>
-#include <caffe2/operators/conv_pool_op_base.h>
+#include <vector>
+
+#include "caffe2/ideep/ideep_utils.h"
+#include "caffe2/operators/conv_pool_op_base.h"
 
 namespace caffe2 {
 
 class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
  public:
   IDEEPConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
-     : ConvPoolOpBase<IDEEPContext>(operator_def, ws) {
+      : ConvPoolOpBase<IDEEPContext>(operator_def, ws) {
     OPERATOR_NEEDS_FEATURE(
         order_ == StorageOrder::NCHW, "Unsupported storage order.");
   }
@@ -21,11 +24,11 @@ class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
     return OperatorBase::template Output<ideep::tensor>(index);
   }
 
-  ideep::tensor::dims pad_tl() {
+  ideep::tensor::dims pad_tl() const {
     return {pad_t(), pad_l()};
   }
 
-  ideep::tensor::dims pad_br() {
+  ideep::tensor::dims pad_br() const {
     return {pad_b(), pad_r()};
   }
 
@@ -33,34 +36,21 @@ class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
       const ideep::tensor& input,
       int output_channel) {
     CAFFE_ENFORCE(input.get_descriptor().get_size() > 0);
-
-    bool channel_first;
-    int N = input.get_dim(0);
     ideep::tensor::dims output_dims;
-
-    auto input_dims = input.get_dims();
-    vector<int64_t> input_Tdims (input_dims.begin(), input_dims.end());
+    const auto input_dims = input.get_dims();
+    std::vector<std::int64_t> input_Tdims(
+        input_dims.cbegin(), input_dims.cend());
     InferOutputSize(
         input_Tdims,
         output_channel,
         order_,
         global_pooling_,
         legacy_pad_,
-        N,
-        kernel_,
-        output_dims,
         dilation_,
         stride_,
-        pads_,
-        channel_first);
-
-    if (channel_first) {
-      output_dims.insert(output_dims.begin(), {N, output_channel});
-    } else {
-      output_dims.insert(output_dims.begin(), N);
-      output_dims.push_back(output_channel);
-    }
-
+        &kernel_,
+        &pads_,
+        &output_dims);
     return output_dims;
   }
 
@@ -80,9 +70,11 @@ class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
   }
 };
 
-#define USE_IDEEP_CONV_POOL_BASE_FUNCTIONS()                                   \
-  USE_OPERATOR_BASE_FUNCTIONS;                                                 \
-  /* using override */ using IDEEPConvPoolOpBase::Input;                       \
+#define USE_IDEEP_CONV_POOL_BASE_FUNCTIONS()             \
+  USE_OPERATOR_BASE_FUNCTIONS;                           \
+  /* using override */ using IDEEPConvPoolOpBase::Input; \
   /* using override */ using IDEEPConvPoolOpBase::Output;
 
 } // namespace caffe2
+
+#endif // CAFFE2_IDEEP_OPERATORS_CONV_POOL_BASE_OP_H_

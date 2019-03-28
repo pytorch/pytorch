@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/tempfile.h>
+
 #include <torch/nn/modules/functional.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
@@ -54,7 +56,7 @@ TEST(SerializeTest, BasicToFile) {
 
   auto x = torch::randn({5, 5});
 
-  auto tempfile = torch::utils::make_tempfile();
+  auto tempfile = c10::make_tempfile();
   torch::save(x, tempfile.name);
 
   torch::Tensor y;
@@ -135,7 +137,7 @@ TEST(SerializeTest, XOR) {
     epoch++;
   }
 
-  auto tempfile = torch::utils::make_tempfile();
+  auto tempfile = c10::make_tempfile();
   torch::save(model, tempfile.name);
   torch::load(model2, tempfile.name);
 
@@ -149,7 +151,7 @@ TEST(SerializeTest, Optim) {
   auto model3 = Linear(5, 2);
 
   // Models 1, 2, 3 will have the same parameters.
-  auto model_tempfile = torch::utils::make_tempfile();
+  auto model_tempfile = c10::make_tempfile();
   torch::save(model1, model_tempfile.name);
   torch::load(model2, model_tempfile.name);
   torch::load(model3, model_tempfile.name);
@@ -194,7 +196,7 @@ TEST(SerializeTest, Optim) {
   // Do 2 steps of model 3 while saving the optimizer
   step(optim3, model3);
 
-  auto optim_tempfile = torch::utils::make_tempfile();
+  auto optim_tempfile = c10::make_tempfile();
   torch::save(optim3, optim_tempfile.name);
   torch::load(optim3_2, optim_tempfile.name);
   step(optim3_2, model3);
@@ -253,7 +255,7 @@ TEST(SerializeTest, XOR_CUDA) {
     epoch++;
   }
 
-  auto tempfile = torch::utils::make_tempfile();
+  auto tempfile = c10::make_tempfile();
   torch::save(model, tempfile.name);
   torch::load(model2, tempfile.name);
 
@@ -264,7 +266,7 @@ TEST(SerializeTest, XOR_CUDA) {
   loss = getLoss(model2, 100, true);
   ASSERT_LT(loss.item<float>(), 0.1);
 
-  auto tempfile2 = torch::utils::make_tempfile();
+  auto tempfile2 = c10::make_tempfile();
   torch::save(model2, tempfile2.name);
   torch::load(model3, tempfile2.name);
 

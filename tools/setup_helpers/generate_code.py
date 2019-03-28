@@ -4,7 +4,7 @@ import sys
 
 source_files = {'.py', '.cpp', '.h'}
 
-DECLARATIONS_PATH = 'torch/lib/tmp_install/share/ATen/Declarations.yaml'
+DECLARATIONS_PATH = 'torch/share/ATen/Declarations.yaml'
 
 
 # TODO: This is a little inaccurate, because it will also pick
@@ -22,7 +22,7 @@ def all_generator_source():
 inputs = [
     'torch/lib/THNN.h',
     'torch/lib/THCUNN.h',
-    'torch/lib/tmp_install/share/ATen/Declarations.yaml',
+    'torch/share/ATen/Declarations.yaml',
     'tools/autograd/derivatives.yaml',
     'tools/autograd/deprecated.yaml',
 ]
@@ -50,34 +50,10 @@ outputs = [
 ]
 
 
-def generate_code_ninja(w):
-    all_inputs = all_generator_source() + inputs
-    cmd = "{} {}".format(sys.executable, 'tools/setup_helpers/generate_code.py')
-    w.writer.build(
-        outputs, 'do_cmd', all_inputs,
-        variables={
-            'cmd': cmd,
-            # Note [Unchanging results for ninja]
-            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            # generate_code.py will avoid bumping the timestamp on its
-            # output files if the contents of the generated file did not
-            # change.  To let Ninja take advantage of this, it must stat
-            # the output files after the build.  See
-            # https://groups.google.com/forum/#!topic/ninja-build/rExDmgDL2oc
-            # for a more detailed discussion.
-            'restat': True,
-        })
-
-
 def generate_code(ninja_global=None,
                   declarations_path=None,
                   nn_path=None,
                   install_dir=None):
-    # if ninja is enabled, we just register this file as something
-    # ninja will need to call if needed
-    if ninja_global is not None:
-        return generate_code_ninja(ninja_global)
-
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)

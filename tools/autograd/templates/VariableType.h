@@ -20,7 +20,7 @@ struct Variable;
 using at::Context;
 using at::Device;
 using at::Generator;
-using at::IntList;
+using at::IntArrayRef;
 using at::Scalar;
 using at::ScalarType;
 using at::SparseTensorRef;
@@ -43,7 +43,6 @@ struct TORCH_API VariableType final : public at::TypeDefault {
   std::unique_ptr<at::Generator> generator() const override;
   const char * toString() const override;
   at::TypeID ID() const override;
-  size_t elementSizeInBytes() const override;
   at::Type & toBackend(at::Backend b) const override;
   at::Type & toScalarType(at::ScalarType s) const override;
   Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;

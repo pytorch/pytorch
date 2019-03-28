@@ -1,21 +1,15 @@
 #include <torch/csrc/jit/fuser/codegen.h>
 
 #include <ATen/ATen.h>
-#include <torch/csrc/jit/assertions.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/code_template.h>
 #include <torch/csrc/jit/fuser/compiler.h>
-#include <torch/csrc/jit/fuser/config.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/tensor_info.h>
 #include <torch/csrc/jit/ir.h>
 
-#if USE_CUDA_FUSER
-#include <torch/csrc/jit/fuser/cuda/resource_strings.h>
-#endif
-
-#if USE_CPU_FUSER
 #include <torch/csrc/jit/fuser/cpu/resource_strings.h>
-#endif
+#include <torch/csrc/jit/fuser/cuda/resource_strings.h>
 
 #include <cmath>
 #include <cstdint>
@@ -97,8 +91,8 @@ static std::string variableType(const std::shared_ptr<c10::Type>& t) {
     return "float";
   } else if (t->kind() == TypeKind::BoolType) {
     return "bool";
-  } else if (t->kind() == TypeKind::TensorType) {
-    auto const tt = t->cast<TensorType>();
+  } else if (t->kind() == TypeKind::DimensionedTensorType) {
+    auto const tt = t->cast<DimensionedTensorType>();
     return calcScalarTypeName(tt->scalarType());
   }
   // something went wrong with the type analysis during shape propagation
@@ -120,8 +114,8 @@ static std::string typeCastedValueName(
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
     return vn;
-  } else if (t->kind() == TypeKind::TensorType) {
-    auto const tt = t->cast<TensorType>();
+  } else if (t->kind() == TypeKind::DimensionedTensorType) {
+    auto const tt = t->cast<DimensionedTensorType>();
     if (tt->scalarType() != outtype) {
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
@@ -132,6 +126,36 @@ static std::string typeCastedValueName(
       "unknown scalar type during JIT fusion code generation");
 }
 
+// Writes RHS of special handling "simple mappable" ops
+static std::string encodeSpecialRHS(const Node* n, TemplateEnv& env) {
+  // special case for clamp fusion on missing min/max inputs
+  // Note: It may seem unusual to have the bounds as the first case below,
+  // this is so that if min or max is NaN, they are "ignored"
+  // and when the input is NaN, the output is, too
+  if (n->kind() == aten::clamp) {
+    const auto min = n->input(1);
+    const auto max = n->input(2);
+    env.s("0", valueName(n->input(0)));
+
+    if (!min->node()->mustBeNone() && !max->node()->mustBeNone()) {
+      env.s("1", valueName(min));
+      env.s("2", valueName(max));
+      return format("(${0} < ${1} ? ${1} : (${0} > ${2}? ${2} : ${0}))", env);
+    } else if (min->node()->mustBeNone()) {
+      env.s("1", valueName(max));
+      return format("(${0} > ${1} ? ${1} : ${0})", env);
+    } else if (max->node()->mustBeNone()) {
+      env.s("1", valueName(min));
+      return format("(${0} < ${1} ? ${1} : ${0})", env);
+    } else {
+      throw std::runtime_error(
+          "At least one of 'min' or 'max' must not be None");
+    }
+  } else {
+    throw std::runtime_error("Cannot encode RHS of the node, op not supported");
+  }
+}
+
 // Writes "simple mappable" ops
 static std::string encodeRHS(const Node* n) {
   static std::unordered_map<NodeKind, std::string> simple_map_ops = {
@@ -140,6 +164,8 @@ static std::string encodeRHS(const Node* n) {
       {aten::abs, "fabs(${0})"},
       {aten::sigmoid, "1.f / (1.f + expf(-${0}))"},
       {aten::relu, "${0} < 0 ? 0.f : ${0} "},
+      {aten::threshold,
+       "${0} <= ${1} ? static_cast<decltype(${0})>(${2}) : ${0} "},
       {aten::log, "logf(${0})"},
       {aten::log10, "log10f(${0})"},
       {aten::log1p, "log1pf(${0})"},
@@ -182,6 +208,7 @@ static std::string encodeRHS(const Node* n) {
       {aten::__or__, "${0} || ${1}"},
       {aten::__rshift__, "${0} >> ${1}"},
       {aten::__xor__, "${0} ^ ${1}"},
+      {aten::addcmul, "${cast_0} + ${cast_3} * ${cast_1} * ${cast_2}"},
       {aten::div, "${cast_0} / ${cast_1}"},
       {aten::eq, "${0} == ${1}"},
       {aten::fmod, "fmodf(${cast_0}, ${cast_1})"},
@@ -189,6 +216,7 @@ static std::string encodeRHS(const Node* n) {
       {aten::gt, "${0} > ${1}"},
       {aten::le, "(${0} <= ${1})"},
       {aten::lt, "${0} < ${1}"},
+      {aten::lerp, "${cast_0} + ${cast_2} * (${cast_1} - ${cast_0})"},
       {aten::type_as, "(${cast_0})"},
       {aten::mul, "${cast_0} * ${cast_1}"},
       {aten::ne, "${0} != ${1}"},
@@ -199,12 +227,6 @@ static std::string encodeRHS(const Node* n) {
       {aten::add, "${cast_0} + ${cast_2}*${cast_1}"},
       {aten::sub, "(${cast_0} - ${cast_2}*${cast_1})"},
       {aten::rand_like, "uniform(rnd())"},
-
-      // min, max
-      // It may seem unusual to have the bounds as the first case below,
-      // this is so that if min or max is NaN, they are "ignored"
-      // and when the input is NaN, the output is, too
-      {aten::clamp, "(${0}<${1}?${1}:(${0}>${2}?${2}:${0}))"},
 
       // where
       {aten::where, "(${0} ? ${1} : ${2})"},
@@ -221,40 +243,35 @@ static std::string encodeRHS(const Node* n) {
     } else if (val.isBool()) {
       return scalarValue(val.toBool());
     } else {
-      JIT_ASSERT(val.isInt());
+      AT_ASSERT(val.isInt());
       return scalarValue(val.toInt());
     }
   }
 
   TemplateEnv env;
-  size_t i = 0;
-  auto outtype =
-      n->output()->type()->expect<c10::TensorType const>()->scalarType();
-  for (auto in : n->inputs()) {
-    // PyTorch converts (scalar) argument types to result before applying the
-    // operator e.g. 1.4-torch.tensor(3) = -2
-    env.s(std::to_string(i), valueName(in));
-    env.s(
-        std::string("cast_") + std::to_string(i),
-        typeCastedValueName(in->type(), outtype, valueName(in)));
-    i++;
-  }
 
-  const auto& str = simple_map_ops.at(n->kind());
-  return format(str, env);
-}
+  if (simple_map_ops.find(n->kind()) == simple_map_ops.end()) {
+    return encodeSpecialRHS(n, env);
+  } else {
+    size_t i = 0;
+    auto outtype = n->output()
+                       ->type()
+                       ->expect<c10::DimensionedTensorType const>()
+                       ->scalarType();
 
-// If there is a single user of a node and it's a chunk operation, returns
-//  that user. Returns nullptr otherwise.
-static Node* usedInFusedChunk(const Value* input) {
-  auto uses = input->uses();
-  if (uses.size() == 1) {
-    Node* user = uses[0].user;
-    if (user->kind() == prim::ConstantChunk) {
-      return user;
+    for (auto in : n->inputs()) {
+      // PyTorch converts (scalar) argument types to result before applying the
+      // operator e.g. 1.4-torch.tensor(3) = -2
+      env.s(std::to_string(i), valueName(in));
+      env.s(
+          std::string("cast_") + std::to_string(i),
+          typeCastedValueName(in->type(), outtype, valueName(in)));
+      i++;
     }
+
+    const auto& str = simple_map_ops.at(n->kind());
+    return format(str, env);
   }
-  return nullptr;
 }
 
 static void emitIndexingFor(
@@ -282,16 +299,11 @@ static void emitIndexingFor(
 }
 
 // TODO: handle cases where we need to generate > 2^32 element tensors
-std::tuple<
-    std::string,
-    std::vector<PartitionDesc>,
-    std::vector<PartitionDesc>,
-    bool>
-generateKernel(
+std::string generateKernel(
     const std::string& name,
     const Graph& graph,
-    const std::vector<TensorDesc>& input_desc,
-    const std::vector<TensorDesc>& output_desc,
+    const std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>>& inputs,
+    const std::vector<std::pair<const Value*, const TensorDesc>>& outputs,
     const bool use_cuda) {
   TemplateEnv env;
   env.s("kernelName", name);
@@ -306,75 +318,65 @@ generateKernel(
 
   // Lambda for writing arguments
   auto emitFormal = [&](const Value* n, const TensorDesc& desc) {
-    std::string tensor =
-        "t" +
-        std::to_string(
-            formals.size()); // can't be unique() because Param may be an output
-    const auto nDim = desc.nDim();
-    emitIndexingFor(tensorOffsets, tensor, nDim, desc.lastIsContiguous());
-    env.s("tensor", tensor);
     env.d(
         "formal_index",
         formals.size() +
             1); // + 1 because the first argument is the linearIndex
-    env.d("nDim", nDim);
-    env.s("scalar_type", scalarTypeName(desc.scalar_type));
-    formals.push_back(
-        format("TensorInfo<${scalar_type},${nDim}> ${tensor}", env));
-    argument_loads.push_back(format(
-        "*static_cast<TensorInfo<${scalar_type},${nDim}>*>(args[${formal_index}])",
-        env));
+      std::string tensor =
+          "t" +
+          std::to_string(
+              formals.size()); // can't be unique() because Param may be an output
+      const auto nDim = desc.nDim();
+      emitIndexingFor(tensorOffsets, tensor, nDim, desc.lastIsContiguous());
+      env.s("tensor", tensor);
+      env.d("nDim", nDim);
+      env.s("scalar_type", scalarTypeName(desc.scalar_type));
+      formals.push_back(
+          format("const TensorInfo<${scalar_type},${nDim}> ${tensor}", env));
+      argument_loads.push_back(format(
+          "*static_cast<TensorInfo<${scalar_type},${nDim}>*>(args[${formal_index}])",
+          env));
   };
 
-  // Writes input parameters and creates flattened inputs
-  std::vector<PartitionDesc> chunk_desc;
-  std::vector<std::pair<const Value*, const TensorDesc&>> flat_inputs;
-  {
-    size_t input_index = 0;
-    for (const auto& p : graph.inputs()) {
-      if (const Node* chunk = usedInFusedChunk(p)) {
-        int64_t dim = chunk->i(attr::dim);
-        int64_t chunks = chunk->i(attr::chunks);
-        chunk_desc.emplace_back(input_desc[input_index++], chunks, dim);
-        for (const auto* o : chunk->outputs()) {
-          flat_inputs.emplace_back(o, *chunk_desc.back().subTensorDesc());
-        }
-      } else {
-        chunk_desc.emplace_back();
-        flat_inputs.emplace_back(p, input_desc[input_index++]);
-      }
-    }
-    for (const auto& input : flat_inputs) {
-      emitFormal(input.first, input.second);
+  auto emitScalarFormal = [&](const Value* n){
+    env.d(
+        "formal_index",
+        formals.size() +
+            1); // + 1 because the first argument is the linearIndex
+    std::string scalar =
+        "s" +
+        std::to_string(
+            formals.size()); // can't be unique() because Param may be an output
+    env.d(
+        "formal_index",
+        formals.size() +
+            1); // + 1 because the first argument is the linearIndex
+    env.s("scalar", scalar);
+    env.s("scalar_type", variableType(n->type()));
+    formals.push_back(format("${scalar_type} ${scalar}", env));
+    argument_loads.push_back(format(
+    "*static_cast<${scalar_type}*>(args[${formal_index}])", env));
+  };
+
+
+  // Writes input parameters
+  for (const auto& input : inputs) {
+    if (input.second.has_value()){
+      emitFormal(input.first, *input.second);
+    } else {
+      emitScalarFormal(input.first);
     }
   }
 
-  // Writes output parameters and creates flattened outputs
-  std::vector<PartitionDesc> concat_desc;
-  std::vector<std::pair<const Value*, TensorDesc>> flat_output_nodes;
-  {
-    size_t i = 0;
-    for (const auto& o : graph.outputs()) {
-      const auto& desc = output_desc[i++];
-      if (o->node()->kind() != prim::FusedConcat) {
-        emitFormal(o, desc);
-        concat_desc.emplace_back();
-        flat_output_nodes.emplace_back(o, desc);
-      } else {
-        const auto cat = o->node();
-        concat_desc.emplace_back(desc, cat->inputs().size(), cat->i(attr::dim));
-        for (const auto& c : cat->inputs()) {
-          emitFormal(c, *concat_desc.back().subTensorDesc());
-          flat_output_nodes.emplace_back(c, desc);
-        }
-      }
-    }
+  // Writes output parameters
+  for (const auto& output : outputs) {
+    emitFormal(output.first, output.second);
   }
 
   // Acquires input values
   bool has_half_tensor = false;
   size_t formal_count = 0;
-  for (const auto input : flat_inputs) {
+  for (const auto& input : inputs) {
     auto p = input.first;
     env.s("node", valueName(p));
     env.d("formal", formal_count++);
@@ -383,18 +385,24 @@ generateKernel(
     // Note: conversion from half is only supported for CUDA kernels.
     //  The conversion immediately converts fp16 inputs to float.
     //  Access for other types is common to CUDA and CPU kernels.
-    const auto is_half = (input.second.scalar_type == at::ScalarType::Half);
-    if (is_half) {
-      JIT_ASSERT(use_cuda);
-      env.s(
-          "access",
-          format("__half2float(t${formal}.data[t${formal}_offset])", env));
-      has_half_tensor = true;
+    if (input.second.has_value()) {
+      const auto is_half = input.second.has_value() && ((*input.second).scalar_type == at::ScalarType::Half);
+      if (is_half) {
+        AT_ASSERT(use_cuda);
+        env.s(
+            "access",
+            format("__half2float(t${formal}.data[t${formal}_offset])", env));
+        has_half_tensor = true;
+      } else if (use_cuda) {
+        env.s("access", format("__ldg(&t${formal}.data[t${formal}_offset])", env));
+      } else {
+        env.s("access", format("t${formal}.data[t${formal}_offset]", env));
+      }
+      env.s("lhs_type", calcScalarTypeName(input.second.value().scalar_type));
     } else {
-      env.s("access", format("t${formal}.data[t${formal}_offset]", env));
+      env.s("access", format("s${formal}", env));
+      env.s("lhs_type", variableType(input.first->type()));
     }
-    env.s("lhs_type", calcScalarTypeName(input.second.scalar_type));
-
     body << format("${lhs_type} ${node} = ${access};\n", env);
   }
 
@@ -402,6 +410,8 @@ generateKernel(
   // Generates code for intermediate nodes
   // Note: Concat and Chunk are implicitly generated
   // Note: Random number generation is only supported for CUDA kernels.
+  // Note: Constant None node is ignored and we will handle it in the
+  //       places where the constant None node is used
   for (const auto& n : graph.nodes()) {
     // Note: FusedConcat nodes work by narrowing the output Tensors before the
     // kernel runs
@@ -409,10 +419,13 @@ generateKernel(
       continue;
     if (n->kind() == prim::ConstantChunk)
       continue;
+    if (n->mustBeNone())
+      continue;
     if (n->kind() == aten::rand_like) {
-      JIT_ASSERT(use_cuda);
+      AT_ASSERT(use_cuda);
       has_random = true;
     }
+
     env.s("node", valueName(n->output()));
     env.s("rhs", encodeRHS(n));
     env.s("lhs_type", variableType(n->output()->type()));
@@ -420,17 +433,16 @@ generateKernel(
   }
 
   // Generates writes to output tensors
-  for (const auto& output : flat_output_nodes) {
-    const auto& o = output.first;
+  for (const auto& output : outputs) {
     env.d("formal", formal_count++);
     env.s("access", format("t${formal}.data[t${formal}_offset]", env));
-    env.s("node", valueName(o));
+    env.s("node", valueName(output.first));
 
     // Acquires and converts (if needed) outputs
     // Note: conversion to half is only supported for CUDA kernels.
     const auto is_half = (output.second.scalar_type == at::ScalarType::Half);
     if (is_half) {
-      JIT_ASSERT(use_cuda);
+      AT_ASSERT(use_cuda);
       body << format("${access} = __float2half(${node});\n", env);
       has_half_tensor = true;
     } else {
@@ -438,9 +450,8 @@ generateKernel(
     }
   }
 
-// Includes headers
-// Note: CUDA kernels support halfs and random generation, CPU kernels do not
-#if USE_CUDA_FUSER
+  // Includes headers
+  // Note: CUDA kernels support halfs and random generation, CPU kernels do not
   if (has_half_tensor) {
     env.s("HalfHeader", cuda::half_support_literal);
   } else {
@@ -456,7 +467,6 @@ generateKernel(
     env.s("RandParam", "");
     env.s("RandInit", "");
   }
-#endif // USE_CUDA_FUSER
 
   // Insantiates the CUDA or CPU-specific templates
   env.s("tensorOffsets", tensorOffsets.str());
@@ -465,26 +475,17 @@ generateKernel(
   env.v("argument_loads", argument_loads);
   std::string code_string;
   if (use_cuda) {
-#if USE_CUDA_FUSER
     env.s("type_declarations", cuda::type_declarations_template.format(env));
     code_string = cuda::cuda_compilation_unit_template.format(env);
-#else
-    throw std::runtime_error("CUDA Fusion requested but not supported.");
-#endif // USE_CUDA_FUSER
   } else {
-#if USE_CPU_FUSER
     env.s("type_declarations", cpu::type_declarations_template.format(env));
     code_string = cpu::cpu_compilation_unit_template.format(env);
-#else
-    throw std::runtime_error("CPU Fusion requested but not supported");
-#endif // USE_CPU_FUSER
   }
 
   if (debugFuser()) {
     std::cerr << "fusion code:" << code_string << std::endl;
   }
-  return std::make_tuple(
-      code_string, std::move(chunk_desc), std::move(concat_desc), has_random);
+  return code_string;
 }
 
 } // namespace fuser

@@ -24,8 +24,8 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, int64_t new_size) 
 
 inline TensorImpl* resize_impl_cpu_(
     TensorImpl* self,
-    IntList size,
-    c10::optional<IntList> stride) {
+    IntArrayRef size,
+    c10::optional<IntArrayRef> stride) {
   if (self->sizes() == size && (!stride || self->strides() == stride)) {
     return self;
   }
@@ -52,7 +52,7 @@ inline TensorImpl* resize_impl_cpu_(
   return self;
 }
 
-static inline int64_t computeStorageSize(IntList sizes, IntList strides) {
+static inline int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides) {
   int64_t storage_size = 1;
   for (size_t dim = 0; dim < sizes.size(); ++dim) {
     if (sizes[dim] == 0) {
@@ -64,8 +64,8 @@ static inline int64_t computeStorageSize(IntList sizes, IntList strides) {
 }
 
 static inline void checkInBoundsForStorage(
-    IntList size,
-    IntList stride,
+    IntArrayRef size,
+    IntArrayRef stride,
     int64_t storage_offset,
     const Storage& new_storage) {
   int64_t storage_size = computeStorageSize(size, stride);
@@ -88,8 +88,8 @@ static inline void checkInBoundsForStorage(
  */
 inline void setStrided(
     const Tensor& self,
-    IntList size,
-    IntList stride,
+    IntArrayRef size,
+    IntArrayRef stride,
     int64_t storage_offset) {
   auto* self_ = self.unsafeGetTensorImpl();
   checkInBoundsForStorage(size, stride, storage_offset, self_->storage());

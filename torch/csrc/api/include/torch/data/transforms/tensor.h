@@ -50,6 +50,28 @@ class TensorLambda : public TensorTransform<Target> {
  private:
   FunctionType function_;
 };
+
+/// Normalizes input tensors by subtracting the supplied mean and dividing by
+/// the given standard deviation.
+template <typename Target = Tensor>
+struct Normalize : public TensorTransform<Target> {
+  /// Constructs a `Normalize` transform. The mean and standard deviation can be
+  /// anything that is broadcastable over the input tensors (like single
+  /// scalars).
+  Normalize(ArrayRef<double> mean, ArrayRef<double> stddev)
+      : mean(torch::tensor(mean, torch::kFloat32)
+                 .unsqueeze(/*dim=*/1)
+                 .unsqueeze(/*dim=*/2)),
+        stddev(torch::tensor(stddev, torch::kFloat32)
+                   .unsqueeze(/*dim=*/1)
+                   .unsqueeze(/*dim=*/2)) {}
+
+  torch::Tensor operator()(Tensor input) {
+    return input.sub(mean).div(stddev);
+  }
+
+  torch::Tensor mean, stddev;
+};
 } // namespace transforms
 } // namespace data
 } // namespace torch

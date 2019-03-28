@@ -9,7 +9,7 @@ from ..._jit_internal import weak_module, weak_script_method
 
 @weak_module
 class Threshold(Module):
-    r"""Thresholds each element of the input Tensor
+    r"""Thresholds each element of the input Tensor.
 
     Threshold is defined as:
 
@@ -58,10 +58,9 @@ class Threshold(Module):
 
 @weak_module
 class ReLU(Threshold):
-    r"""Applies the rectified linear unit function element-wise
-    :math:`\text{ReLU}(x)= \max(0, x)`
+    r"""Applies the rectified linear unit function element-wise:
 
-    .. image:: scripts/activation_images/ReLU.png
+    :math:`\text{ReLU}(x)= \max(0, x)`
 
     Args:
         inplace: can optionally do the operation in-place. Default: ``False``
@@ -71,11 +70,20 @@ class ReLU(Threshold):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: scripts/activation_images/ReLU.png
+
     Examples::
 
         >>> m = nn.ReLU()
         >>> input = torch.randn(2)
         >>> output = m(input)
+
+
+      An implementation of CReLU - https://arxiv.org/abs/1603.05201
+
+        >>> m = nn.ReLU()
+        >>> input = torch.randn(2).unsqueeze(0)
+        >>> output = torch.cat((m(input),m(-input)))
     """
 
     def __init__(self, inplace=False):
@@ -159,8 +167,6 @@ class Hardtanh(Module):
     The range of the linear region :math:`[-1, 1]` can be adjusted using
     :attr:`min_val` and :attr:`max_val`.
 
-    .. image:: scripts/activation_images/Hardtanh.png
-
     Args:
         min_val: minimum value of the linear region range. Default: -1
         max_val: maximum value of the linear region range. Default: 1
@@ -173,6 +179,8 @@ class Hardtanh(Module):
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/Hardtanh.png
 
     Examples::
 
@@ -387,8 +395,6 @@ class SELU(Module):
     with :math:`\alpha = 1.6732632423543772848170429916717` and
     :math:`\text{scale} = 1.0507009873554804934193349852946`.
 
-    .. image:: scripts/activation_images/SELU.png
-
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
     Args:
@@ -398,6 +404,8 @@ class SELU(Module):
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/SELU.png
 
     Examples::
 
@@ -426,15 +434,15 @@ class SELU(Module):
 class GLU(Module):
     r"""Applies the gated linear unit function
     :math:`{GLU}(a, b)= a \otimes \sigma(b)` where :math:`a` is the first half
-    of the input vector and :math:`b` is the second half.
+    of the input matrices and :math:`b` is the second half.
 
     Args:
         dim (int): the dimension on which to split the input. Default: -1
 
     Shape:
-        - Input: :math:`(*, N, *)` where `*` means, any number of additional
+        - Input: :math:`(\ast_1, N, \ast_2)` where `*` means, any number of additional
           dimensions
-        - Output: :math:`(*, N / 2, *)`
+        - Output: :math:`(\ast_1, M, \ast_2)` where :math:`M=N/2`
 
     Examples::
 
@@ -552,7 +560,8 @@ class LeakyReLU(Module):
 class LogSigmoid(Module):
     r"""Applies the element-wise function:
 
-    .. math:`\text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)`
+    .. math::
+        \text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -700,8 +709,7 @@ class PReLU(Module):
         - Output: :math:`(N, *)`, same shape as the input
 
     Attributes:
-        weight (Tensor): the learnable weights of shape (attr:`num_parameters`).
-            The attr:`dtype` is default to
+        weight (Tensor): the learnable weights of shape (:attr:`num_parameters`).
 
     .. image:: scripts/activation_images/PReLU.png
 
@@ -781,14 +789,17 @@ class Tanhshrink(Module):
 class Softmin(Module):
     r"""Applies the Softmin function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
-    lie in the range `(0, 1)` and sum to 1
+    lie in the range `[0, 1]` and sum to 1.
+
+    Softmin is defined as:
 
     .. math::
         \text{Softmin}(x_{i}) = \frac{\exp(-x_i)}{\sum_j \exp(-x_j)}
 
     Shape:
-        - Input: any shape
-        - Output: same as input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(*)`, same shape as the input
 
     Arguments:
         dim (int): A dimension along which Softmin will be computed (so every slice
@@ -819,7 +830,7 @@ class Softmin(Module):
 class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
-    lie in the range (0,1) and sum to 1
+    lie in the range [0,1] and sum to 1.
 
     Softmax is defined as:
 
@@ -827,8 +838,9 @@ class Softmax(Module):
         \text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
 
     Shape:
-        - Input: any shape
-        - Output: same as input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(*)`, same shape as the input
 
     Returns:
         a Tensor of the same dimension and shape as the input with
@@ -903,12 +915,12 @@ class LogSoftmax(Module):
         \text{LogSoftmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
 
     Shape:
-        - Input: any shape
-        - Output: same as input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(*)`, same shape as the input
 
     Arguments:
-        dim (int): A dimension along which Softmax will be computed (so every slice
-            along dim will sum to 1).
+        dim (int): A dimension along which LogSoftmax will be computed.
 
     Returns:
         a Tensor of the same dimension and shape as the input with

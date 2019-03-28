@@ -196,6 +196,9 @@ def generate_convnd_inputs(
     assume(all(sizes[d] >= dilations[d] * (kernels[d] - 1) + 1 for d in range(dim)))
     input_channels = input_channels_per_group * group
     output_channels = output_channels_per_group * group
+    depthwise_convolution = (
+        input_channels_per_group == 1 and output_channels_per_group == 1
+    )
 
     assert input_channels > 1
     assert output_channels > 1
@@ -203,16 +206,70 @@ def generate_convnd_inputs(
     # X and W have scale 1, so exactly represented after quantization
     X_min = 0 if preserve_activation_sparsity else -77
     X_max = X_min + 255
+    X_range = X_max - X_min
+    if depthwise_convolution and groupwise_quantization:
+        # For depthwise convolution, it's not enough to set input channel 0
+        # to all X_min to avoid overflow from vpmaddubsw
+        X_range /= 2
     X = np.round(
-        np.random.rand(*((batch_size,) + tuple(sizes) + (input_channels,)))
-        * (X_max - X_min)
+        np.random.rand(*((batch_size,) + tuple(sizes) + (input_channels,))) * X_range
         + X_min
     )
     X = X.astype(np.float32)
-    # input channel 0 is all X_min to avoid overflow from vpmaddubsw when
-    # multiplied with W_min and W_max
-    X[..., 0] = X_min
-    X[(0,) * (X.ndim - 1) + (1,)] = X_max
+    if (
+        depthwise_convolution
+        and groupwise_quantization
+        and not preserve_activation_sparsity
+    ):
+        # Put X_max in a position not to be paired with any padded value.
+        # Put X_min to all positions that can be paired with the X_max value.
+        #
+        # This is an example of a pattern for 3x3x3
+        #  .   .   .   .   .
+        #  .   .   .   .   .
+        #  .   .   .   .   .
+        #  .   .   .   .   .
+        #  .   .   .   .  min
+        #
+        #  .   .   .   .   .
+        #  .   .   .   .  min
+        #  .  min max min  .
+        # min  .   .   .   .
+        #  .   .   .   .   .
+        #
+        # min  .   .   .   .
+        #  .   .   .   .   .
+        #  .   .   .   .   .
+        #  .   .   .   .   .
+        #  .   .   .   .   .
+
+        # Make sure we have enough dimension
+        assert X.shape[1] >= 3
+        assert all(X.shape[d + 1] >= kernels[d] + 2 for d in range(1, dim))
+
+        # Take subtensor we want to manipulate
+        X_sub = X[(0,) * (X.ndim - dim - 1) + (slice(None),) * dim + (0,)]
+
+        # Put X_max in the middle of the subtensor
+        X_sub[(1,) + tuple(kernels[d] // 2 + 1 for d in range(1, dim))] = X_max
+
+        # Put X_min to the positions that can be paired with X_max across
+        # the slowest moving dimension
+        X_sub[[[0, 2]] + [[kernels[d] + 1, 0] for d in range(1, dim)]] = X_min
+
+        # Put X_min to other positions that can be paired with X_max
+        for d1 in range(1, dim):
+            X_sub[
+                [[1]]
+                + [[kernels[d2] // 2 + 1] for d2 in range(1, d1)]
+                + [[kernels[d1] // 2, kernels[d1] // 2 + 2]]
+                + [[kernels[d2] + 1, 0] for d2 in range(d1 + 1, dim)]
+            ] = X_min
+    else:
+        # input channel 0 is all X_min to avoid overflow from vpmaddubsw when
+        # multiplied with W_min and W_max
+        X[..., 0] = X_min
+        X[(0,) * (X.ndim - 1) + (1,)] = X_max
 
     if preserve_weight_sparsity:
         W_min = -128
@@ -229,10 +286,13 @@ def generate_convnd_inputs(
     )
     W = W.astype(np.float32)
     if groupwise_quantization:
-        assert output_channels_per_group > 1
         for g in range(group):
             W[(g * output_channels_per_group,) + (0,) * (W.ndim - 1)] = W_min
-            W[(g * output_channels_per_group + 1,) + (0,) * (W.ndim - 1)] = W_max
+            if depthwise_convolution:
+                W[(g * output_channels_per_group, 1) + (0,) * (W.ndim - 2)] = W_max
+            else:
+                assert output_channels_per_group > 1
+                W[(g * output_channels_per_group + 1,) + (0,) * (W.ndim - 1)] = W_max
 
             # Make sure each group has different ranges to really see the effect
             # of group-wise quantization.

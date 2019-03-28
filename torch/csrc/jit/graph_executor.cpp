@@ -1,13 +1,13 @@
 #include <torch/csrc/jit/graph_executor.h>
 
+#include <ATen/core/ivalue.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/argument_spec.h>
-#include <torch/csrc/jit/assertions.h>
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/ivalue.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -24,7 +24,8 @@
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/passes/specialize_undef.h>
+#include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/symbolic_variable.h>
 #include <torch/csrc/jit/tracer.h>
 
@@ -101,12 +102,14 @@ struct DifferentiableGraphBackward : public autograd::Function {
     }
 
     executor.run(stack);
-    JIT_ASSERT(stack.size() == num_outputs());
+    AT_ASSERT(stack.size() == num_outputs());
 
     variable_list outputs;
     outputs.reserve(num_outputs());
     for (size_t i = 0; i < num_outputs(); ++i) {
-      if (should_compute_output(i)) {
+      // Input grad can also be None even if it requires grad
+      // Example: `other` in expand_as(self, other)
+      if (should_compute_output(i) && !stack[i].isNone()) {
         auto output = std::move(stack[i]).toTensor();
         const auto& edge = next_edge(i);
         if (output.defined()) {
@@ -193,11 +196,16 @@ struct DifferentiableGraphOp {
         // Note: we have to set this up in place, or we have to throw away and
         // reallocate variables that were already created in wrapTensors. We
         // should add an API for this.
-        Variable output = outputs[idx].toTensor();
+
+        // XXX: undefined tensor syntax in autograd
+        Variable output;
+        if (!outputs[idx].isNone()) {
+          output = outputs[idx].toTensor();
+        }
         // NB: since our requires_grad setting is only a heuristic we might end
         // up wanting to differentiate through integral tensors, which is
         // generally a hard error in autograd.
-        if (at::isFloatingType(output.type().scalarType())) {
+        if (at::isFloatingType(output.scalar_type())) {
           autograd::create_gradient_edge(output, grad_fn);
           output.set_requires_grad(true);
         } else {
@@ -256,7 +264,7 @@ struct DifferentiableGraphOp {
 };
 
 void packGradient(Gradient gradient, Node* dnode) {
-  JIT_ASSERT(dnode->kind() == prim::DifferentiableGraph);
+  AT_ASSERT(dnode->kind() == prim::DifferentiableGraph);
   dnode->g_(attr::Subgraph, gradient.f)
       ->g_(attr::ReverseSubgraph, gradient.df)
       ->i_(attr::f_real_outputs, gradient.f_real_outputs)
@@ -271,7 +279,7 @@ void packGradient(Gradient gradient, Node* dnode) {
 }
 
 Gradient getGradient(const Node* n) {
-  JIT_ASSERT(n->kind() == prim::DifferentiableGraph);
+  AT_ASSERT(n->kind() == prim::DifferentiableGraph);
   Gradient grad;
   grad.f = n->g(attr::Subgraph);
   grad.df = n->g(attr::ReverseSubgraph);
@@ -284,7 +292,6 @@ Gradient getGradient(const Node* n) {
   grad.df_output_vjps = fmap<size_t>(n->is(attr::df_output_vjps));
   return grad;
 }
-
 } // anonymous namespace
 
 RegisterOperators reg_graph_executor_ops(
@@ -300,7 +307,6 @@ GraphExecutor* getGradExecutor(Operation& op) {
   }
   return nullptr;
 }
-
 } // namespace detail
 
 // a Graph can be created via tracing, or via a language-based frontend
@@ -377,7 +383,7 @@ struct GraphExecutorImpl {
   }
 
   std::shared_ptr<Graph> graphFor(const Stack& stack) const {
-    JIT_ASSERT(stack.size() >= num_inputs);
+    AT_ASSERT(stack.size() >= num_inputs);
     auto inputs = last(stack, num_inputs);
     ArgumentSpec spec(
         autograd::GradMode::is_enabled(), inputs, num_flat_inputs);
@@ -497,6 +503,7 @@ struct GraphExecutorImpl {
     ConstantPooling(graph);
 
     PeepholeOptimize(graph);
+    ConstantPropagation(graph);
 
     // Unroll small loops, and eliminate expressions that are the same at every
     // iteration.
@@ -626,7 +633,7 @@ void GraphExecutor::debugDisableAutodiffSubgraphInlining() {
 }
 
 void runRequiredPasses(const std::shared_ptr<Graph>& g) {
-  specializeUndef(*g);
+  specializeAutogradZero(*g);
   LowerGradOf(*g);
   // implicit inserted expand nodes are not necessarily always valid
   // when used inside script methods that might have unstable shapes
@@ -636,6 +643,5 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g) {
   CanonicalizeOps(g);
   EliminateDeadCode(g);
 }
-
 } // namespace jit
 } // namespace torch

@@ -15,12 +15,9 @@ THC_API accreal THCTensor_(varall)(THCState *state, THCTensor *self, int biased)
 
 #endif
 
-THC_API void THCTensor_(sum)(THCState *state, THCTensor *self, THCTensor *src, int dim, int keepdim);
 THC_API void THCTensor_(prod)(THCState *state, THCTensor *self, THCTensor *src, int dim, int keepdim);
-THC_API void THCTensor_(mean)(THCState *state, THCTensor *self, THCTensor *src, int dim, int keepdim);
 
 THC_API accreal THCTensor_(sumall)(THCState *state, THCTensor *self);
-THC_API accreal THCTensor_(prodall)(THCState *state, THCTensor *self);
 THC_API accreal THCTensor_(meanall)(THCState *state, THCTensor *self);
 
 THC_API void THCTensor_(min)(THCState *state,

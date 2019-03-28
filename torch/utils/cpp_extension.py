@@ -318,10 +318,10 @@ class BuildExtension(build_ext, object):
                             '/wd4819', '-Xcompiler', '/MD'
                         ] + include_list + cflags
                     elif isinstance(self.cflags, dict):
-                        cflags = self.cflags['cxx']
+                        cflags = self.cflags['cxx'] + ['/MD']
                         cmd += cflags
                     elif isinstance(self.cflags, list):
-                        cflags = self.cflags
+                        cflags = self.cflags + ['/MD']
                         cmd += cflags
 
                 return original_spawn(cmd)
@@ -417,7 +417,7 @@ def CppExtension(name, sources, *args, **kwargs):
                     CppExtension(
                         name='extension',
                         sources=['extension.cpp'],
-                        extra_compile_args=['-g'])),
+                        extra_compile_args=['-g']),
                 ],
                 cmdclass={
                     'build_ext': BuildExtension
@@ -508,7 +508,7 @@ def include_paths(cuda=False):
     '''
     here = os.path.abspath(__file__)
     torch_path = os.path.dirname(os.path.dirname(here))
-    lib_include = os.path.join(torch_path, 'lib', 'include')
+    lib_include = os.path.join(torch_path, 'include')
     paths = [
         lib_include,
         # Remove this once torch/torch.h is officially no longer supported for C++ extensions.
@@ -519,7 +519,11 @@ def include_paths(cuda=False):
         os.path.join(lib_include, 'THC')
     ]
     if cuda:
-        paths.append(_join_cuda_home('include'))
+        cuda_home_include = _join_cuda_home('include')
+        # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
+        # but gcc dosn't like having /usr/include passed explicitly
+        if cuda_home_include != '/usr/include':
+            paths.append(cuda_home_include)
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, 'include'))
     return paths

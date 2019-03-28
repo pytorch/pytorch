@@ -156,7 +156,7 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   auto& T = Input(1); // Labels / targets
 
   const auto canonical_axis = X.canonical_axis_index(axis_);
-  int N, D;
+  int64_t N, D;
   N = X.size_to_dim(canonical_axis); // batch size
   D = X.size_from_dim(canonical_axis);
   auto* P =
@@ -178,14 +178,25 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
     }
   }
 
-  if (sum_multiplier_.numel() != D) {
+  if (!sum_multiplier_.defined()) {
+    sum_multiplier_ = caffe2::empty({D}, at::dtype<float>().device(CPU));
+    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
+  } else if (sum_multiplier_.numel() != D) {
     sum_multiplier_.Resize(D);
-    math::Set<float, CPUContext>(
-        D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
+    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
   }
 
-  rowmax_.Resize(N);
-  losses_.Resize(N);
+  if (!losses_.defined()) {
+    losses_ = caffe2::empty({N}, at::dtype<float>().device(CPU));
+  } else if (losses_.numel() != N) {
+    losses_.Resize(N);
+  }
+
+  if (!rowmax_.defined()) {
+    rowmax_ = caffe2::empty({N}, at::dtype<float>().device(CPU));
+  } else if (rowmax_.numel() != N) {
+    rowmax_.Resize(N);
+  }
 
   SoftmaxCPU(
       context_,

@@ -136,8 +136,7 @@ class TestMiniAlexNet(test_util.TestCase):
         )
         self.assertEqual(ret, True)
 
-    @unittest.skipIf(not workspace.has_gpu_support
-                    and not workspace.has_hip_support,
+    @unittest.skipIf(not workspace.has_gpu_support,
                      "No GPU support. Skipping test.")
     def testMiniAlexNetNCHW(self):
         self._testMiniAlexNet("NCHW")

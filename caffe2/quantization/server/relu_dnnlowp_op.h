@@ -10,6 +10,7 @@ namespace caffe2 {
 template <typename T>
 class ReluDNNLowPOp final : public Operator<CPUContext> {
  public:
+  USE_OPERATOR_FUNCTIONS(CPUContext);
   ReluDNNLowPOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
         qfactory_(dnnlowp::GetQuantizationFactoryOf(this)) {}

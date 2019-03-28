@@ -103,22 +103,16 @@ inline bool Tensor::allclose(const Tensor & other, double rtol, double atol, boo
 inline Tensor Tensor::any(int64_t dim, bool keepdim) const {
     return type().any(*this, dim, keepdim);
 }
-inline Tensor Tensor::argmax(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::argmax(c10::optional<int64_t> dim, bool keepdim) const {
     return type().argmax(*this, dim, keepdim);
 }
-inline Tensor Tensor::argmax() const {
-    return type().argmax(*this);
-}
-inline Tensor Tensor::argmin(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::argmin(c10::optional<int64_t> dim, bool keepdim) const {
     return type().argmin(*this, dim, keepdim);
 }
-inline Tensor Tensor::argmin() const {
-    return type().argmin(*this);
-}
-inline Tensor Tensor::as_strided(IntList size, IntList stride, c10::optional<int64_t> storage_offset) const {
+inline Tensor Tensor::as_strided(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset) const {
     return type().as_strided(*this, size, stride, storage_offset);
 }
-inline Tensor & Tensor::as_strided_(IntList size, IntList stride, c10::optional<int64_t> storage_offset) {
+inline Tensor & Tensor::as_strided_(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset) {
     return type().as_strided_(*this, size, stride, storage_offset);
 }
 inline Tensor Tensor::asin() const {
@@ -238,7 +232,7 @@ inline Tensor & Tensor::div_(Scalar other) {
 inline Tensor Tensor::dot(const Tensor & tensor) const {
     return type().dot(*this, tensor);
 }
-inline Tensor & Tensor::resize_(IntList size) {
+inline Tensor & Tensor::resize_(IntArrayRef size) {
     return type().resize_(*this, size);
 }
 inline Tensor Tensor::erf() const {
@@ -265,7 +259,7 @@ inline Tensor Tensor::expm1() const {
 inline Tensor & Tensor::expm1_() {
     return type().expm1_(*this);
 }
-inline Tensor Tensor::expand(IntList size, bool implicit) const {
+inline Tensor Tensor::expand(IntArrayRef size, bool implicit) const {
     return type().expand(*this, size, implicit);
 }
 inline Tensor Tensor::expand_as(const Tensor & other) const {
@@ -289,9 +283,6 @@ inline Tensor & Tensor::floor_() {
 inline Tensor Tensor::ger(const Tensor & vec2) const {
     return type().ger(*this, vec2);
 }
-inline std::tuple<Tensor,Tensor> Tensor::gesv(const Tensor & A) const {
-    return type().gesv(*this, A);
-}
 inline Tensor Tensor::fft(int64_t signal_ndim, bool normalized) const {
     return type().fft(*this, signal_ndim, normalized);
 }
@@ -301,7 +292,7 @@ inline Tensor Tensor::ifft(int64_t signal_ndim, bool normalized) const {
 inline Tensor Tensor::rfft(int64_t signal_ndim, bool normalized, bool onesided) const {
     return type().rfft(*this, signal_ndim, normalized, onesided);
 }
-inline Tensor Tensor::irfft(int64_t signal_ndim, bool normalized, bool onesided, IntList signal_sizes) const {
+inline Tensor Tensor::irfft(int64_t signal_ndim, bool normalized, bool onesided, IntArrayRef signal_sizes) const {
     return type().irfft(*this, signal_ndim, normalized, onesided, signal_sizes);
 }
 inline Tensor Tensor::index(TensorList indices) const {
@@ -310,11 +301,14 @@ inline Tensor Tensor::index(TensorList indices) const {
 inline Tensor & Tensor::index_copy_(int64_t dim, const Tensor & index, const Tensor & source) {
     return type().index_copy_(*this, dim, index, source);
 }
-inline Tensor Tensor::index_put(TensorList indices, const Tensor & values, bool accumulate) const {
-    return type().index_put(*this, indices, values, accumulate);
+inline Tensor Tensor::index_copy(int64_t dim, const Tensor & index, const Tensor & source) const {
+    return type().index_copy(*this, dim, index, source);
 }
 inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values, bool accumulate) {
     return type().index_put_(*this, indices, values, accumulate);
+}
+inline Tensor Tensor::index_put(TensorList indices, const Tensor & values, bool accumulate) const {
+    return type().index_put(*this, indices, values, accumulate);
 }
 inline Tensor Tensor::inverse() const {
     return type().inverse(*this);
@@ -376,7 +370,7 @@ inline Tensor Tensor::log_softmax(int64_t dim, ScalarType dtype) const {
 inline Tensor Tensor::log_softmax(int64_t dim) const {
     return type().log_softmax(*this, dim);
 }
-inline Tensor Tensor::logsumexp(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::logsumexp(IntArrayRef dim, bool keepdim) const {
     return type().logsumexp(*this, dim, keepdim);
 }
 inline Tensor Tensor::matmul(const Tensor & other) const {
@@ -388,7 +382,7 @@ inline Tensor Tensor::matrix_power(int64_t n) const {
 inline std::tuple<Tensor,Tensor> Tensor::max(int64_t dim, bool keepdim) const {
     return type().max(*this, dim, keepdim);
 }
-inline Tensor Tensor::max_values(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::max_values(IntArrayRef dim, bool keepdim) const {
     return type().max_values(*this, dim, keepdim);
 }
 inline Tensor Tensor::mean(ScalarType dtype) const {
@@ -397,13 +391,13 @@ inline Tensor Tensor::mean(ScalarType dtype) const {
 inline Tensor Tensor::mean() const {
     return type().mean(*this);
 }
-inline Tensor Tensor::mean(IntList dim, bool keepdim, ScalarType dtype) const {
+inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim, ScalarType dtype) const {
     return type().mean(*this, dim, keepdim, dtype);
 }
-inline Tensor Tensor::mean(IntList dim, bool keepdim) const {
+inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim) const {
     return type().mean(*this, dim, keepdim);
 }
-inline Tensor Tensor::mean(IntList dim, ScalarType dtype) const {
+inline Tensor Tensor::mean(IntArrayRef dim, ScalarType dtype) const {
     return type().mean(*this, dim, dtype);
 }
 inline std::tuple<Tensor,Tensor> Tensor::median(int64_t dim, bool keepdim) const {
@@ -412,7 +406,7 @@ inline std::tuple<Tensor,Tensor> Tensor::median(int64_t dim, bool keepdim) const
 inline std::tuple<Tensor,Tensor> Tensor::min(int64_t dim, bool keepdim) const {
     return type().min(*this, dim, keepdim);
 }
-inline Tensor Tensor::min_values(int64_t dim, bool keepdim) const {
+inline Tensor Tensor::min_values(IntArrayRef dim, bool keepdim) const {
     return type().min_values(*this, dim, keepdim);
 }
 inline Tensor Tensor::mm(const Tensor & mat2) const {
@@ -448,7 +442,7 @@ inline Tensor Tensor::narrow_copy(int64_t dim, int64_t start, int64_t length) co
 inline Tensor Tensor::narrow(int64_t dim, int64_t start, int64_t length) const {
     return type().narrow(*this, dim, start, length);
 }
-inline Tensor Tensor::permute(IntList dims) const {
+inline Tensor Tensor::permute(IntArrayRef dims) const {
     return type().permute(*this, dims);
 }
 inline Tensor Tensor::pin_memory() const {
@@ -457,10 +451,10 @@ inline Tensor Tensor::pin_memory() const {
 inline Tensor Tensor::pinverse(double rcond) const {
     return type().pinverse(*this, rcond);
 }
-inline Tensor Tensor::repeat(IntList repeats) const {
+inline Tensor Tensor::repeat(IntArrayRef repeats) const {
     return type().repeat(*this, repeats);
 }
-inline Tensor Tensor::reshape(IntList shape) const {
+inline Tensor Tensor::reshape(IntArrayRef shape) const {
     return type().reshape(*this, shape);
 }
 inline Tensor Tensor::reshape_as(const Tensor & other) const {
@@ -544,7 +538,7 @@ inline Tensor Tensor::softmax(int64_t dim) const {
 inline std::vector<Tensor> Tensor::split(int64_t split_size, int64_t dim) const {
     return type().split(*this, split_size, dim);
 }
-inline std::vector<Tensor> Tensor::split_with_sizes(IntList split_sizes, int64_t dim) const {
+inline std::vector<Tensor> Tensor::split_with_sizes(IntArrayRef split_sizes, int64_t dim) const {
     return type().split_with_sizes(*this, split_sizes, dim);
 }
 inline Tensor Tensor::squeeze() const {
@@ -574,16 +568,16 @@ inline Tensor Tensor::sum(ScalarType dtype) const {
 inline Tensor Tensor::sum() const {
     return type().sum(*this);
 }
-inline Tensor Tensor::sum(IntList dim, bool keepdim, ScalarType dtype) const {
+inline Tensor Tensor::sum(IntArrayRef dim, bool keepdim, ScalarType dtype) const {
     return type().sum(*this, dim, keepdim, dtype);
 }
-inline Tensor Tensor::sum(IntList dim, bool keepdim) const {
+inline Tensor Tensor::sum(IntArrayRef dim, bool keepdim) const {
     return type().sum(*this, dim, keepdim);
 }
-inline Tensor Tensor::sum(IntList dim, ScalarType dtype) const {
+inline Tensor Tensor::sum(IntArrayRef dim, ScalarType dtype) const {
     return type().sum(*this, dim, dtype);
 }
-inline Tensor Tensor::sum_to_size(IntList size) const {
+inline Tensor Tensor::sum_to_size(IntArrayRef size) const {
     return type().sum_to_size(*this, size);
 }
 inline Tensor Tensor::sqrt() const {
@@ -595,7 +589,7 @@ inline Tensor & Tensor::sqrt_() {
 inline Tensor Tensor::std(bool unbiased) const {
     return type().std(*this, unbiased);
 }
-inline Tensor Tensor::std(IntList dim, bool unbiased, bool keepdim) const {
+inline Tensor Tensor::std(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return type().std(*this, dim, unbiased, keepdim);
 }
 inline Tensor Tensor::prod(ScalarType dtype) const {
@@ -637,13 +631,13 @@ inline Tensor Tensor::transpose(int64_t dim0, int64_t dim1) const {
 inline Tensor & Tensor::transpose_(int64_t dim0, int64_t dim1) {
     return type().transpose_(*this, dim0, dim1);
 }
-inline Tensor Tensor::flip(IntList dims) const {
+inline Tensor Tensor::flip(IntArrayRef dims) const {
     return type().flip(*this, dims);
 }
-inline Tensor Tensor::roll(IntList shifts, IntList dims) const {
+inline Tensor Tensor::roll(IntArrayRef shifts, IntArrayRef dims) const {
     return type().roll(*this, shifts, dims);
 }
-inline Tensor Tensor::rot90(int64_t k, IntList dims) const {
+inline Tensor Tensor::rot90(int64_t k, IntArrayRef dims) const {
     return type().rot90(*this, k, dims);
 }
 inline Tensor Tensor::trunc() const {
@@ -664,7 +658,7 @@ inline Tensor & Tensor::unsqueeze_(int64_t dim) {
 inline Tensor Tensor::var(bool unbiased) const {
     return type().var(*this, unbiased);
 }
-inline Tensor Tensor::var(int64_t dim, bool unbiased, bool keepdim) const {
+inline Tensor Tensor::var(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return type().var(*this, dim, unbiased, keepdim);
 }
 inline Tensor Tensor::view_as(const Tensor & other) const {
@@ -673,10 +667,16 @@ inline Tensor Tensor::view_as(const Tensor & other) const {
 inline Tensor Tensor::where(const Tensor & condition, const Tensor & other) const {
     return type().where(condition, *this, other);
 }
+inline Tensor Tensor::norm(c10::optional<Scalar> p, ScalarType dtype) const {
+    return type().norm(*this, p, dtype);
+}
 inline Tensor Tensor::norm(Scalar p) const {
     return type().norm(*this, p);
 }
-inline Tensor Tensor::norm(c10::optional<Scalar> p, int64_t dim, bool keepdim) const {
+inline Tensor Tensor::norm(c10::optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) const {
+    return type().norm(*this, p, dim, keepdim, dtype);
+}
+inline Tensor Tensor::norm(c10::optional<Scalar> p, IntArrayRef dim, bool keepdim) const {
     return type().norm(*this, p, dim, keepdim);
 }
 inline Tensor Tensor::clone() const {
@@ -709,10 +709,10 @@ inline Tensor Tensor::addmm(const Tensor & mat1, const Tensor & mat2, Scalar bet
 inline Tensor & Tensor::addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) {
     return type().addmm_(*this, mat1, mat2, beta, alpha);
 }
-inline Tensor & Tensor::sparse_resize_(IntList size, int64_t sparse_dim, int64_t dense_dim) {
+inline Tensor & Tensor::sparse_resize_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) {
     return type().sparse_resize_(*this, size, sparse_dim, dense_dim);
 }
-inline Tensor & Tensor::sparse_resize_and_clear_(IntList size, int64_t sparse_dim, int64_t dense_dim) {
+inline Tensor & Tensor::sparse_resize_and_clear_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) {
     return type().sparse_resize_and_clear_(*this, size, sparse_dim, dense_dim);
 }
 inline Tensor Tensor::sparse_mask(SparseTensorRef mask) const {
@@ -790,7 +790,7 @@ inline void* Tensor::data_ptr() const {
 inline Tensor & Tensor::set_(Storage source) {
     return type().set_(*this, source);
 }
-inline Tensor & Tensor::set_(Storage source, int64_t storage_offset, IntList size, IntList stride) {
+inline Tensor & Tensor::set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
     return type().set_(*this, source, storage_offset, size, stride);
 }
 inline Tensor & Tensor::set_(const Tensor & source) {
@@ -805,13 +805,22 @@ inline bool Tensor::is_set_to(const Tensor & tensor) const {
 inline Tensor & Tensor::masked_fill_(const Tensor & mask, Scalar value) {
     return type().masked_fill_(*this, mask, value);
 }
+inline Tensor Tensor::masked_fill(const Tensor & mask, Scalar value) const {
+    return type().masked_fill(*this, mask, value);
+}
 inline Tensor & Tensor::masked_fill_(const Tensor & mask, const Tensor & value) {
     return type().masked_fill_(*this, mask, value);
+}
+inline Tensor Tensor::masked_fill(const Tensor & mask, const Tensor & value) const {
+    return type().masked_fill(*this, mask, value);
 }
 inline Tensor & Tensor::masked_scatter_(const Tensor & mask, const Tensor & source) {
     return type().masked_scatter_(*this, mask, source);
 }
-inline Tensor Tensor::view(IntList size) const {
+inline Tensor Tensor::masked_scatter(const Tensor & mask, const Tensor & source) const {
+    return type().masked_scatter(*this, mask, source);
+}
+inline Tensor Tensor::view(IntArrayRef size) const {
     return type().view(*this, size);
 }
 inline Tensor & Tensor::put_(const Tensor & index, const Tensor & source, bool accumulate) {
@@ -820,20 +829,38 @@ inline Tensor & Tensor::put_(const Tensor & index, const Tensor & source, bool a
 inline Tensor & Tensor::index_add_(int64_t dim, const Tensor & index, const Tensor & source) {
     return type().index_add_(*this, dim, index, source);
 }
+inline Tensor Tensor::index_add(int64_t dim, const Tensor & index, const Tensor & source) const {
+    return type().index_add(*this, dim, index, source);
+}
 inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, Scalar value) {
     return type().index_fill_(*this, dim, index, value);
+}
+inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, Scalar value) const {
+    return type().index_fill(*this, dim, index, value);
 }
 inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, const Tensor & value) {
     return type().index_fill_(*this, dim, index, value);
 }
+inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, const Tensor & value) const {
+    return type().index_fill(*this, dim, index, value);
+}
 inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, const Tensor & src) {
     return type().scatter_(*this, dim, index, src);
+}
+inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, const Tensor & src) const {
+    return type().scatter(*this, dim, index, src);
 }
 inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, Scalar value) {
     return type().scatter_(*this, dim, index, value);
 }
+inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, Scalar value) const {
+    return type().scatter(*this, dim, index, value);
+}
 inline Tensor & Tensor::scatter_add_(int64_t dim, const Tensor & index, const Tensor & src) {
     return type().scatter_add_(*this, dim, index, src);
+}
+inline Tensor Tensor::scatter_add(int64_t dim, const Tensor & index, const Tensor & src) const {
+    return type().scatter_add(*this, dim, index, src);
 }
 inline Tensor & Tensor::lt_(Scalar other) {
     return type().lt_(*this, other);
@@ -973,6 +1000,9 @@ inline Tensor & Tensor::pow_(const Tensor & exponent) {
 inline Tensor & Tensor::lerp_(const Tensor & end, Scalar weight) {
     return type().lerp_(*this, end, weight);
 }
+inline Tensor & Tensor::lerp_(const Tensor & end, const Tensor & weight) {
+    return type().lerp_(*this, end, weight);
+}
 inline Tensor & Tensor::sign_() {
     return type().sign_(*this);
 }
@@ -1090,8 +1120,8 @@ inline Tensor Tensor::masked_select(const Tensor & mask) const {
 inline Tensor Tensor::nonzero() const {
     return type().nonzero(*this);
 }
-inline Tensor Tensor::gather(int64_t dim, const Tensor & index) const {
-    return type().gather(*this, dim, index);
+inline Tensor Tensor::gather(int64_t dim, const Tensor & index, bool sparse_grad) const {
+    return type().gather(*this, dim, index, sparse_grad);
 }
 inline Tensor Tensor::addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value) const {
     return type().addcmul(*this, tensor1, tensor2, value);
@@ -1102,8 +1132,8 @@ inline Tensor Tensor::addcdiv(const Tensor & tensor1, const Tensor & tensor2, Sc
 inline std::tuple<Tensor,Tensor> Tensor::gels(const Tensor & A) const {
     return type().gels(*this, A);
 }
-inline std::tuple<Tensor,Tensor> Tensor::trtrs(const Tensor & A, bool upper, bool transpose, bool unitriangular) const {
-    return type().trtrs(*this, A, upper, transpose, unitriangular);
+inline std::tuple<Tensor,Tensor> Tensor::triangular_solve(const Tensor & A, bool upper, bool transpose, bool unitriangular) const {
+    return type().triangular_solve(*this, A, upper, transpose, unitriangular);
 }
 inline std::tuple<Tensor,Tensor> Tensor::symeig(bool eigenvectors, bool upper) const {
     return type().symeig(*this, eigenvectors, upper);
@@ -1119,6 +1149,9 @@ inline Tensor Tensor::cholesky(bool upper) const {
 }
 inline Tensor Tensor::cholesky_solve(const Tensor & input2, bool upper) const {
     return type().cholesky_solve(*this, input2, upper);
+}
+inline std::tuple<Tensor,Tensor> Tensor::solve(const Tensor & A) const {
+    return type().solve(*this, A);
 }
 inline Tensor Tensor::potri(bool upper) const {
     return type().potri(*this, upper);
@@ -1180,6 +1213,9 @@ inline Tensor Tensor::atan2(const Tensor & other) const {
 inline Tensor Tensor::lerp(const Tensor & end, Scalar weight) const {
     return type().lerp(*this, end, weight);
 }
+inline Tensor Tensor::lerp(const Tensor & end, const Tensor & weight) const {
+    return type().lerp(*this, end, weight);
+}
 inline Tensor Tensor::histc(int64_t bins, Scalar min, Scalar max) const {
     return type().histc(*this, bins, min, max);
 }
@@ -1215,6 +1251,9 @@ inline Tensor Tensor::median() const {
 }
 inline std::tuple<Tensor,Tensor> Tensor::sort(int64_t dim, bool descending) const {
     return type().sort(*this, dim, descending);
+}
+inline Tensor Tensor::argsort(int64_t dim, bool descending) const {
+    return type().argsort(*this, dim, descending);
 }
 inline std::tuple<Tensor,Tensor> Tensor::topk(int64_t k, int64_t dim, bool largest, bool sorted) const {
     return type().topk(*this, k, dim, largest, sorted);
@@ -1297,11 +1336,11 @@ inline bool is_sparse(Tensor self) {
   template <>                                    \
   inline T* Tensor::data() const {               \
     AT_CHECK(                                    \
-        type().scalarType() == ScalarType::name, \
+        scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
         #name,                                   \
         " but found ",                           \
-        c10::toString(type().scalarType()));     \
+        c10::toString(scalar_type()));           \
     return static_cast<T*>(this->data_ptr());    \
   }
 

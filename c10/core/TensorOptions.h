@@ -4,8 +4,7 @@
 #include <c10/core/Backend.h>
 #include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
-#include <c10/core/ScalarTypeUtils.h>
-#include <c10/Device.h>
+#include <c10/core/Device.h>
 
 #include <c10/util/Optional.h>
 #include <c10/util/C++17.h>
@@ -133,11 +132,6 @@ struct C10_API TensorOptions {
             typename = c10::guts::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
    /* implicit */ TensorOptions(Args&&... args)
     : TensorOptions(Device(std::forward<Args>(args)...)) {}
-
-  /// Constructs a `TensorOptions` object from a backend, forwarded to the
-  /// `Device` constructor.
-  /* implicit */ TensorOptions(Backend backend)
-      : TensorOptions(Device(backendToDeviceType(backend))) {}
 
   /// Constructs a `TensorOptions` object with the given dtype.
   /* implicit */ TensorOptions(caffe2::TypeMeta dtype) : TensorOptions() {
@@ -326,13 +320,48 @@ struct C10_API TensorOptions {
 
   // Resolves the ATen backend specified by the current construction axes.
   Backend backend() const noexcept {
-    Backend backend;
-    if (device().type() == Device::Type::CPU) {
-      backend = (layout() == kStrided) ? Backend::CPU : Backend::SparseCPU;
-    } else {
-      backend = (layout() == kStrided) ? Backend::CUDA : Backend::SparseCUDA;
+    return at::tensorTypeIdToBackend(computeTensorTypeId());
+  }
+
+  inline TensorTypeId computeTensorTypeId() const {
+    switch (layout()) {
+      case Layout::Strided:
+        switch (device().type()) {
+          case DeviceType::CPU:
+            return CPUTensorId();
+          case DeviceType::CUDA:
+            return CUDATensorId();
+          case DeviceType::MKLDNN:
+            return MKLDNNTensorId();
+          case DeviceType::OPENGL:
+            return OpenGLTensorId();
+          case DeviceType::OPENCL:
+            return OpenCLTensorId();
+          case DeviceType::IDEEP:
+            return IDEEPTensorId();
+          case DeviceType::HIP:
+            return HIPTensorId();
+          case DeviceType::MSNPU:
+            return MSNPUTensorId();
+          case DeviceType::XLA:
+            return XLATensorId();
+          default:
+            AT_ERROR("Unsupported device type for dense layout: ", device().type());
+        }
+      case Layout::Sparse:
+        switch (device().type()) {
+          case DeviceType::CPU:
+            return SparseCPUTensorId();
+          case DeviceType::CUDA:
+            return SparseCUDATensorId();
+          case DeviceType::HIP:
+            return SparseHIPTensorId();
+          default:
+            AT_ERROR("Unsupported device type for sparse layout: ", device().type());
+        }
+      default:
+        AT_ERROR("Unsupported layout: ", layout());
     }
-    return backend;
   }
 
  private:
@@ -490,40 +519,7 @@ inline TensorOptions dtype() {
 // TensorOptions.  WARNING: If you do this, you need to fix the calls
 // to computeTensorTypeId in caffe2/tensor.h
 inline TensorTypeId computeTensorTypeId(TensorOptions options) {
-  switch (options.layout()) {
-    case Layout::Strided:
-      switch (options.device().type()) {
-        case DeviceType::CPU:
-          return CPUTensorId();
-        case DeviceType::CUDA:
-          return CUDATensorId();
-        case DeviceType::MKLDNN:
-          return MKLDNNTensorId();
-        case DeviceType::OPENGL:
-          return OpenGLTensorId();
-        case DeviceType::OPENCL:
-          return OpenCLTensorId();
-        case DeviceType::IDEEP:
-          return IDEEPTensorId();
-        case DeviceType::HIP:
-          return HIPTensorId();
-        default:
-          AT_ERROR("Unsupported device type for dense layout: ", options.device().type());
-      }
-    case Layout::Sparse:
-      switch (options.device().type()) {
-        case DeviceType::CPU:
-          return SparseCPUTensorId();
-        case DeviceType::CUDA:
-          return SparseCUDATensorId();
-        case DeviceType::HIP:
-          return SparseHIPTensorId();
-        default:
-          AT_ERROR("Unsupported device type for sparse layout: ", options.device().type());
-      }
-    default:
-      AT_ERROR("Unsupported layout: ", options.layout());
-  }
+  return options.computeTensorTypeId();
 }
 
 inline DeviceType computeDeviceType(TensorTypeId tid) {
@@ -543,6 +539,10 @@ inline DeviceType computeDeviceType(TensorTypeId tid) {
     return DeviceType::IDEEP;
   } else if (tid == HIPTensorId()) {
     return DeviceType::HIP;
+  } else if (tid == MSNPUTensorId()) {
+    return DeviceType::MSNPU;
+  } else if (tid == XLATensorId()) {
+    return DeviceType::XLA;
   } else if (tid == SparseCPUTensorId()) {
     return DeviceType::CPU;
   } else if (tid == SparseCUDATensorId()) {

@@ -126,7 +126,10 @@ bool FullyConnectedFakeLowpFPOp<Q, Context, Engine, TransposeWeight>::
   // Add bias term
   if (bias_multiplier_.size() != M) {
     // If the helper bias multiplier is not M, reshape and fill it with one.
-    bias_multiplier_.Resize(M);
+    ReinitializeTensor(
+        &bias_multiplier_,
+        {M},
+        at::dtype<T_B>().device(Context::GetDeviceType()));
     math::Set<T_B, Context>(
         M,
         convert::To<float, T_B>(1),
@@ -245,7 +248,10 @@ bool FullyConnectedGradientFakeLowpFPOp<Q, Context, Engine, TransposeWeight>::
   if (bias_multiplier_.size() != M) {
     // If the helper bias multiplier is not M, reshape and fill it
     // with one.
-    bias_multiplier_.Resize(M);
+    ReinitializeTensor(
+        &bias_multiplier_,
+        {M},
+        at::dtype<T_B>().device(Context::GetDeviceType()));
     math::Set<T_B, Context>(
         M,
         convert::To<float, T_B>(1),

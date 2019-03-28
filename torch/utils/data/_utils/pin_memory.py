@@ -51,7 +51,11 @@ def pin_memory_batch(batch):
         return batch
     elif isinstance(batch, container_abcs.Mapping):
         return {k: pin_memory_batch(sample) for k, sample in batch.items()}
+    elif isinstance(batch, tuple) and hasattr(batch, '_fields'):  # namedtuple
+        return type(batch)(*(pin_memory_batch(sample) for sample in batch))
     elif isinstance(batch, container_abcs.Sequence):
         return [pin_memory_batch(sample) for sample in batch]
+    elif hasattr(batch, "pin_memory"):
+        return batch.pin_memory()
     else:
         return batch

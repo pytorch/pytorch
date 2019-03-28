@@ -24,30 +24,30 @@ AllocInfo get_alloc_info(const char* filename) {
 
 void start_manager() {
   int pipe_ends[2];
-  SYSCHECK(pipe(pipe_ends));
+  SYSCHECK_ERR_RETURN_NEG1(pipe(pipe_ends));
 
   pid_t pid;
-  SYSCHECK(pid = fork());
+  SYSCHECK_ERR_RETURN_NEG1(pid = fork());
   if (!pid) {
-    close(pipe_ends[0]);
-    dup2(pipe_ends[1], 1); // Replace stdout
-    close(pipe_ends[1]);
+    SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[0]));
+    SYSCHECK_ERR_RETURN_NEG1(dup2(pipe_ends[1], 1)); // Replace stdout
+    SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[1]));
     execl(manager_executable_path.c_str(), "torch_shm_manager", NULL);
     exit(1);
   }
-  SYSCHECK(close(pipe_ends[1]));
+  SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[1]));
 
   ssize_t bytes_read;
   char buffer[1000];
   std::string handle;
   for (;;) {
-    SYSCHECK(bytes_read = read(pipe_ends[0], buffer, sizeof(buffer)));
+    SYSCHECK_ERR_RETURN_NEG1(bytes_read = read(pipe_ends[0], buffer, sizeof(buffer)));
     handle.append(buffer, bytes_read);
     if (bytes_read == 0 || handle[handle.length() - 1] == '\n') {
       break;
     }
   }
-  SYSCHECK(close(pipe_ends[0]));
+  SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[0]));
   if (handle.length() == 0) {
     std::string msg("error executing torch_shm_manager at \"");
     msg += manager_executable_path;

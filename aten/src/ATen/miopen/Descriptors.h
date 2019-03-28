@@ -89,7 +89,7 @@ public:
   }
 
   void set(const at::Tensor &t, size_t pad = 0);
-  void set(miopenDataType_t dataType, IntList sizes, IntList strides, size_t pad = 0);
+  void set(miopenDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad = 0);
 
   void print();
 
@@ -121,8 +121,8 @@ struct ConvolutionDescriptor
                       &miopenCreateConvolutionDescriptor,
                       &miopenDestroyConvolutionDescriptor>
 {
-  void set(miopenDataType_t dataType, int dim, int* pad, int* stride, int * upscale /* aka dilation */, int groups) {
-    MIOPEN_CHECK(miopenInitConvolutionDescriptor(mut_desc(), miopenConvolution, pad[0], pad[1], stride[0], stride[1], upscale[0], upscale[1]));
+  void set(miopenDataType_t dataType, miopenConvolutionMode_t c_mode,  int dim, int* pad, int* stride, int * upscale /* aka dilation */, int groups) {
+    MIOPEN_CHECK(miopenInitConvolutionDescriptor(mut_desc(), c_mode, pad[0], pad[1], stride[0], stride[1], upscale[0], upscale[1]));
     MIOPEN_CHECK(miopenSetConvolutionGroupCount(mut_desc(), groups));
   }
 };

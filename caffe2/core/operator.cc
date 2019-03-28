@@ -25,6 +25,11 @@ C10_DEFINE_bool(
     false,
     "If set, disable implicit engine preferences. This is useful for unit "
     "testing and debugging cases.");
+C10_DEFINE_bool(
+    caffe2_operator_throw_if_fp_exceptions,
+    false,
+    "If set, throws if floating point exceptions (FE_DIVBYZERO, FE_INVALID, "
+    "FE_OVERFLOW) are detected when running any operator.");
 
 namespace caffe2 {
 
@@ -34,6 +39,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
       device_option_(
           operator_def.has_device_option() ? operator_def.device_option()
                                            : DeviceOption()),
+      input_size_(operator_def.input_size()),
       event_(caffe2::make_unique<Event>(device_option_)) {
   static GlobalInitIsCalledGuard guard;
   for (const string& input_str : operator_def.input()) {
@@ -56,14 +62,45 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   type_ = operator_def.type();
 }
 
+namespace {
+int compute_input_size_(const std::vector<c10::IValue>& inputs) {
+  if (inputs.empty()) {
+    return 0;
+  }
+  if (inputs[0].isTensorList()) {
+    // if the first input is a tensor list, we get input tensors by indexing
+    // into that list. currently, this means that only tensors from that list
+    // are accessible as inputs. any hypothetical input tensors that come after
+    // the list are not accessible.
+    return inputs[0].toTensorListRef().size();
+  }
+  // it's not a tensor list. Count the number of tensor inputs and return them.
+  size_t num_tensor_inputs = 0;
+  bool found_nontensor = false;
+  for (const auto& input : inputs) {
+    if (input.isTensor()) {
+      AT_ASSERTM(
+          !found_nontensor,
+          "All tensor arguments must come before non-tensor arguments");
+      ++num_tensor_inputs;
+    } else {
+      found_nontensor = true;
+    }
+  }
+  return num_tensor_inputs;
+}
+} // namespace
+
 OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
-    const std::vector<c10::IValue>& inputs,
-    const std::vector<c10::IValue*>& outputs)
-    : fn_schema_(make_unique<c10::FunctionSchema>(fn_schema)),
-      ivalue_inputs_(inputs),
-      ivalue_outputs_(outputs) {
-  output_tensors_.resize(ivalue_outputs_.size());
+    std::vector<c10::IValue> inputs,
+    std::vector<at::Tensor> outputs)
+    : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
+      newstyle_inputs_(std::move(inputs)),
+      newstyle_outputs_(std::move(outputs)),
+      input_size_(compute_input_size_(newstyle_inputs_)) {
+  input_tensors_.resize(input_size_);
+  output_tensors_.resize(newstyle_outputs_.size());
 }
 
 vector<TensorShape> OperatorBase::InputTensorShapes() const {
@@ -87,7 +124,7 @@ GlobalEnginePrefType& g_global_engine_pref() {
   return *g_global_engine_pref_;
 }
 
-unique_ptr<OperatorBase> TryCreateC2Operator(
+unique_ptr<OperatorBase> TryCreateOperator(
     const string& key,
     const OperatorDef& operator_def,
     Workspace* ws) {
@@ -108,24 +145,6 @@ unique_ptr<OperatorBase> TryCreateC2Operator(
                  << err.what()
                  << ". Proto is: " << ProtoDebugString(operator_def);
     return nullptr;
-  }
-}
-
-unique_ptr<OperatorBase> TryCreateC10Operator(
-    const string& key,
-    const OperatorDef& operator_def,
-    Workspace* ws) {
-  return C10OperatorRegistry()->Create(key, operator_def, ws);
-}
-
-unique_ptr<OperatorBase> TryCreateOperator(
-    const string& key,
-    const OperatorDef& operator_def,
-    Workspace* ws) {
-  if (auto op = TryCreateC10Operator(key, operator_def, ws)) {
-    return op;
-  } else {
-    return TryCreateC2Operator(key, operator_def, ws);
   }
 }
 
@@ -353,15 +372,6 @@ C10_DEFINE_REGISTRY(
     GradientMakerBase,
     const OperatorDef&,
     const vector<GradientWrapper>&);
-
-C10_DEFINE_REGISTRY(
-    FunctionSchemaOperatorRegistry,
-    OperatorBase,
-    const c10::FunctionSchema,
-    const std::vector<c10::IValue>&,
-    const std::vector<c10::IValue*>&);
-
-C10_DEFINE_REGISTRY(FunctionSchemaRegistry, FunctionSchemaStorageBase);
 
 GradientOpsMeta GetGradientForOp(
     const OperatorDef& def, const vector<GradientWrapper>& g_output) {
@@ -700,16 +710,6 @@ std::set<std::string> GetRegisteredOperators() {
 
   // HIP operators
   for (const auto& name : HIPOperatorRegistry()->Keys()) {
-    all_keys.emplace(name);
-  }
-
-  // C10 operators
-  for (const auto& name : C10OperatorRegistry()->Keys()) {
-    all_keys.emplace(name);
-  }
-
-  // FunctionSchema registered operators
-  for (const auto& name : FunctionSchemaOperatorRegistry()->Keys()) {
     all_keys.emplace(name);
   }
 

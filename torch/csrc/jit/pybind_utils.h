@@ -1,15 +1,16 @@
 #pragma once
 
+#include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
+#include <ATen/core/stack.h>
 #include <torch/csrc/Device.h>
-#include <torch/csrc/jit/function_schema.h>
-#include <torch/csrc/jit/ivalue.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/module.h>
-#include <torch/csrc/jit/stack.h>
-#include <torch/csrc/jit/type.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/six.h>
 
+#include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -29,6 +30,9 @@
 namespace torch {
 namespace jit {
 namespace detail {
+
+using ::c10::Argument;
+using ::c10::FunctionSchema;
 
 // error reporting: when reporting user-caused errors, these functions should
 // not use AT_ERROR macros, since these macros add stack trace information
@@ -79,7 +83,7 @@ inline IValue toIValue(py::handle input) {
       AT_ERROR("sparse tensors not supported");
     }
     return ten;
-  } else if (py::isinstance<py::tuple>(input)) {
+  } else if (six::isTuple(input)) {
     py::tuple input_tuple = py::cast<py::tuple>(input);
     Stack s;
     s.reserve(input_tuple.size());
@@ -88,9 +92,14 @@ inline IValue toIValue(py::handle input) {
     }
     return Tuple::create(s);
   } else {
-    AT_ERROR(
-        "Only tensors and (possibly nested) tuples of tensors are supported "
-        "as inputs or outputs of traced functions");
+    throw std::runtime_error(c10::str(
+        "Only tensors and (possibly nested) tuples of tensors are supported ",
+        "as inputs or outputs of traced functions",
+        ", but instead got value of type ",
+        py::str(input.get_type().attr("__name__")),
+        ".",
+        "\nValue: ",
+        py::repr(input)));
   }
 }
 
@@ -111,14 +120,27 @@ inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   return List<IValue>::create(std::move(elems));
 }
 
+inline IValue createGenericDict(
+    py::handle obj,
+    const TypePtr& key_type,
+    const TypePtr& value_type) {
+  at::ivalue::UnorderedMap elems;
+  elems.reserve(py::len(obj));
+  for (auto key : obj) {
+    elems.insert(std::make_pair(
+        toIValue(key, key_type), toIValue(obj[key], value_type)));
+  }
+  return at::ivalue::GenericDict::create(std::move(elems));
+}
+
 inline IValue toIValue(
     py::handle obj,
     const TypePtr& type,
     c10::optional<int32_t> N) {
   switch (type->kind()) {
-    case TypeKind::DynamicType:
     case TypeKind::TensorType:
-    case TypeKind::UndefinedTensorType:
+    case TypeKind::AutogradZeroTensorType:
+    case TypeKind::DimensionedTensorType:
     case TypeKind::CompleteTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
@@ -180,26 +202,43 @@ inline IValue toIValue(
             std::vector<double> repeated(*N, value);
             return repeated;
           }
+        case TypeKind::DimensionedTensorType:
         case TypeKind::TensorType:
-        case TypeKind::DynamicType:
           return py::cast<std::vector<at::Tensor>>(obj);
         default:
           return createGenericList(obj, elem_type);
       }
     }
+    case TypeKind::DictType: {
+      const auto& dict_type = type->expect<DictType>();
+      return createGenericDict(
+          obj, dict_type->getKeyType(), dict_type->getValueType());
+    }
     case TypeKind::OptionalType: {
-      const auto& elem_type = type->expect<OptionalType>()->getElementType();
       // check if it's a none obj since optional accepts NoneType
       if (obj == Py_None) {
-        if (elem_type->isSubtypeOf(DynamicType::get())) {
-          // return undefined tensor for Optional[Tensor]
-          return at::Tensor();
-        } else {
-          // for other optional types, return an IValue() to denote a None
-          return {};
-        }
+        // check if it's a none obj since optional accepts NoneType
+        // return an IValue() to denote a NoneType
+        return {};
       }
       return toIValue(obj, type->expect<OptionalType>()->getElementType());
+    }
+    case TypeKind::ClassType: {
+      auto classType = type->expect<ClassType>();
+      // 1. create a bare ivalue
+      const auto name = Symbol::user(classType->name());
+      const size_t numAttrs = classType->numAttributes();
+      auto userObj = c10::ivalue::Object::create(name, numAttrs);
+
+      // 2. copy all the contained types
+      for (size_t slot = 0; slot < numAttrs; slot++) {
+        const auto& attrType = classType->getAttribute(slot);
+        const auto& attrName = classType->getAttributeName(slot);
+
+        const auto& contained = py::getattr(obj, attrName.c_str());
+        userObj->setSlot(slot, toIValue(contained, attrType));
+      }
+      return userObj;
     }
     case TypeKind::NumberType:
     case TypeKind::GeneratorType:
@@ -286,7 +325,7 @@ inline py::object toPyObject(IValue&& ivalue) {
     for (size_t i = 0; i < elements.size(); ++i) {
       t[i] = toPyObject(IValue{elements[i]});
     }
-    return t;
+    return std::move(t);
   } else if (ivalue.isTuple()) {
     auto tuple = ivalue.toTuple();
     const auto& elements = tuple->elements();
@@ -294,9 +333,33 @@ inline py::object toPyObject(IValue&& ivalue) {
     for (size_t i = 0; i < elements.size(); ++i) {
       t[i] = toPyObject(IValue{elements[i]});
     }
-    return t;
+    return std::move(t);
   } else if (ivalue.isDevice()) {
     return py::cast<py::object>(THPDevice_New(ivalue.toDevice()));
+  } else if (ivalue.isGenericDict()) {
+    auto dict = ivalue.toGenericDict();
+    const auto& elements = dict->elements();
+    py::dict py_dict;
+    for (auto pair : elements) {
+      py_dict[toPyObject(IValue{pair.first})] = toPyObject(IValue{pair.second});
+    }
+    return std::move(py_dict);
+  } else if (ivalue.isObject()) {
+    const auto obj = ivalue.toObject();
+    const auto classType = ClassType::get(obj->name().toUnqualString());
+    AT_ASSERT(classType);
+    auto pyClass = py::module::import("torch.jit")
+                       .attr("_get_script_class")(obj->name().toUnqualString());
+    auto pyObj = pyClass.attr("__new__")(pyClass);
+
+
+    const auto numAttrs = classType->numAttributes();
+
+    for (size_t slot = 0; slot < numAttrs; slot++) {
+      const auto& attrName = classType->getAttributeName(slot);
+      py::setattr(pyObj, attrName.c_str(), toPyObject(obj->getSlot(slot)));
+    }
+    return pyObj;
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }
@@ -310,16 +373,16 @@ struct VISIBILITY_HIDDEN tuple_slice {
   tuple_slice(py::tuple tup_, int64_t b_, int64_t e_)
       : tup(std::move(tup_)), b(b_), e(e_) {}
   py::detail::tuple_iterator begin() const {
-    return {tup, b};
+    return {tup, static_cast<pybind11::ssize_t>(b)};
   }
   py::detail::tuple_iterator end() const {
-    return {tup, e};
+    return {tup, static_cast<pybind11::ssize_t>(e)};
   }
   size_t size() const {
     return e - b;
   }
   py::detail::tuple_accessor operator[](size_t index) const {
-    return {tup, b + index};
+    return {tup, static_cast<size_t>(b + index)};
   }
 
  private:
@@ -396,7 +459,7 @@ inline py::object createPyObjectForStack(Stack&& stack) {
     return_values[ret] = toPyObject(std::move(stack[ret]));
   }
 
-  return return_values;
+  return std::move(return_values);
 }
 
 // TODO: Remove once we clean up the GraphExecutor usage.

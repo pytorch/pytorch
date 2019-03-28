@@ -50,21 +50,25 @@ class RandomSampler(Sampler):
     def __init__(self, data_source, replacement=False, num_samples=None):
         self.data_source = data_source
         self.replacement = replacement
-        self.num_samples = num_samples
+        self._num_samples = num_samples
 
-        if self.num_samples is not None and replacement is False:
+        if self._num_samples is not None and replacement is False:
             raise ValueError("With replacement=False, num_samples should not be specified, "
                              "since a random permute will be performed.")
 
-        if self.num_samples is None:
-            self.num_samples = len(self.data_source)
-
         if not isinstance(self.num_samples, int) or self.num_samples <= 0:
-            raise ValueError("num_samples should be a positive integeral "
+            raise ValueError("num_samples should be a positive integer "
                              "value, but got num_samples={}".format(self.num_samples))
         if not isinstance(self.replacement, bool):
             raise ValueError("replacement should be a boolean value, but got "
                              "replacement={}".format(self.replacement))
+
+    @property
+    def num_samples(self):
+        # dataset size might change at runtime
+        if self._num_samples is None:
+            return len(self.data_source)
+        return self._num_samples
 
     def __iter__(self):
         n = len(self.data_source)
@@ -73,7 +77,7 @@ class RandomSampler(Sampler):
         return iter(torch.randperm(n).tolist())
 
     def __len__(self):
-        return len(self.data_source)
+        return self.num_samples
 
 
 class SubsetRandomSampler(Sampler):
@@ -96,23 +100,29 @@ class SubsetRandomSampler(Sampler):
 class WeightedRandomSampler(Sampler):
     r"""Samples elements from [0,..,len(weights)-1] with given probabilities (weights).
 
-    Arguments:
+    Args:
         weights (sequence)   : a sequence of weights, not necessary summing up to one
         num_samples (int): number of samples to draw
         replacement (bool): if ``True``, samples are drawn with replacement.
             If not, they are drawn without replacement, which means that when a
             sample index is drawn for a row, it cannot be drawn again for that row.
+
+    Example:
+        >>> list(WeightedRandomSampler([0.1, 0.9, 0.4, 0.7, 3.0, 0.6], 5, replacement=True))
+        [0, 0, 0, 1, 0]
+        >>> list(WeightedRandomSampler([0.9, 0.4, 0.05, 0.2, 0.3, 0.1], 5, replacement=False))
+        [0, 1, 4, 3, 2]
     """
 
     def __init__(self, weights, num_samples, replacement=True):
         if not isinstance(num_samples, _int_classes) or isinstance(num_samples, bool) or \
                 num_samples <= 0:
-            raise ValueError("num_samples should be a positive integeral "
+            raise ValueError("num_samples should be a positive integer "
                              "value, but got num_samples={}".format(num_samples))
         if not isinstance(replacement, bool):
             raise ValueError("replacement should be a boolean value, but got "
                              "replacement={}".format(replacement))
-        self.weights = torch.tensor(weights, dtype=torch.double)
+        self.weights = torch.as_tensor(weights, dtype=torch.double)
         self.num_samples = num_samples
         self.replacement = replacement
 
@@ -146,7 +156,7 @@ class BatchSampler(Sampler):
                              .format(sampler))
         if not isinstance(batch_size, _int_classes) or isinstance(batch_size, bool) or \
                 batch_size <= 0:
-            raise ValueError("batch_size should be a positive integeral value, "
+            raise ValueError("batch_size should be a positive integer value, "
                              "but got batch_size={}".format(batch_size))
         if not isinstance(drop_last, bool):
             raise ValueError("drop_last should be a boolean value, but got "

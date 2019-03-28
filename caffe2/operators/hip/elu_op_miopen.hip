@@ -34,9 +34,9 @@ class MIOPENActivationOp<miopenActivationELU> final
       Y->template mutable_data<T>();
       return true;
     }
-    if (X.dims() != mio_dims_) {
+    if (X.sizes() != mio_dims_) {
       VLOG(1) << "Setting descriptors.";
-      mio_dims_ = X.dims().vec();
+      mio_dims_ = X.sizes().vec();
       int C = 1, H = 1, W = 1;
       if (X.ndim() == 4) {
         // Normal 4-dimensional tensors for images.
@@ -98,9 +98,9 @@ class MIOPENActivationGradientOp<miopenActivationELU> final
       dX->template mutable_data<T>();
       return true;
     }
-    if (Y.dims() != mio_dims_) {
+    if (Y.sizes() != mio_dims_) {
       VLOG(1) << "Setting descriptors.";
-      mio_dims_ = Y.dims().vec();
+      mio_dims_ = Y.sizes().vec();
       int C = 1, H = 1, W = 1;
       if (Y.ndim() == 4) {
         // Normal 4-dimensional tensors for images.

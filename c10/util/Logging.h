@@ -168,7 +168,7 @@ class C10_API EnforceFailMessage {
   }
 
  private:
-  std::string* msg_;
+  std::string* msg_{};
 };
 
 #define BINARY_COMP_HELPER(name, op)                         \

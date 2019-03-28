@@ -15,14 +15,14 @@ class Linear(Module):
     Args:
         in_features: size of each input sample
         out_features: size of each output sample
-        bias: If set to False, the layer will not learn an additive bias.
+        bias: If set to ``False``, the layer will not learn an additive bias.
             Default: ``True``
 
     Shape:
-        - Input: :math:`(N, *, \text{in\_features})` where :math:`*` means any number of
-          additional dimensions
-        - Output: :math:`(N, *, \text{out\_features})` where all but the last dimension
-          are the same shape as the input.
+        - Input: :math:`(N, *, H_{in})` where :math:`*` means any number of
+          additional dimensions and :math:`H_{in} = \text{in\_features}`
+        - Output: :math:`(N, *, H_{out})` where all but the last dimension
+          are the same shape as the input and :math:`H_{out} = \text{out\_features}`.
 
     Attributes:
         weight: the learnable weights of the module of shape
@@ -85,18 +85,19 @@ class Bilinear(Module):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(N, *, \text{in1\_features})`, :math:`(N, *, \text{in2\_features})`
-          where :math:`*` means any number of additional dimensions. All but the last
-          dimension of the inputs should be the same.
-        - Output: :math:`(N, *, \text{out\_features})` where all but the last dimension
-          are the same shape as the input.
+        - Input1: :math:`(N, *, H_{in1})` where :math:`H_{in1}=\text{in1\_features}` and
+          :math:`*` means any number of additional dimensions. All but the last dimension
+          of the inputs should be the same.
+        - Input2: :math:`(N, *, H_{in2})` where :math:`H_{in2}=\text{in2\_features}`.
+        - Output: :math:`(N, *, H_{out})` where :math:`H_{out}=\text{out\_features}`
+          and all but the last dimension are the same shape as the input.
 
     Attributes:
         weight: the learnable weights of the module of shape
-            :math:`(\text{out\_features} x \text{in1\_features} x \text{in2\_features})`.
+            :math:`(\text{out\_features}, \text{in1\_features}, \text{in2\_features})`.
             The values are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
             :math:`k = \frac{1}{\text{in1\_features}}`
-        bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`
+        bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`.
                 If :attr:`bias` is ``True``, the values are initialized from
                 :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
                 :math:`k = \frac{1}{\text{in1\_features}}`

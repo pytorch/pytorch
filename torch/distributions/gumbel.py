@@ -45,6 +45,13 @@ class Gumbel(TransformedDistribution):
         new.scale = self.scale.expand(batch_shape)
         return super(Gumbel, self).expand(batch_shape, _instance=new)
 
+    # Explicitly defining the log probability function for Gumbel due to precision issues
+    def log_prob(self, value):
+        if self._validate_args:
+            self._validate_sample(value)
+        y = (self.loc - value) / self.scale
+        return (y - y.exp()) - self.scale.log()
+
     @property
     def mean(self):
         return self.loc + self.scale * euler_constant

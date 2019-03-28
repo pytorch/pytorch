@@ -19,12 +19,14 @@
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/jit/tracer.h>
 
 #include <ATen/ATen.h>
+#include <pybind11/pybind11.h>
 
 #include <structmember.h>
 #include <memory>
@@ -34,6 +36,8 @@
 using namespace at;
 using namespace torch;
 using namespace torch::autograd;
+
+namespace py = pybind11;
 
 PyObject *THPVariableClass = nullptr;
 
@@ -184,6 +188,7 @@ PyObject *THPVariable_get_grad_fn(THPVariable *self)
 static int THPVariable_set_grad_fn(THPVariable *self, PyObject *obj)
 {
   HANDLE_TH_ERRORS
+  THPUtils_assertRet(-1, obj, "Deletion of _grad_fn not allowed. Detach tensor instead!");
   THPUtils_assertRet(-1, obj == Py_None, "_grad_fn can be only set to None");
   self->cdata.detach_();
   return 0;
@@ -216,9 +221,11 @@ static PyObject * THPVariable_get_data(THPVariable *self)
 int THPVariable_set_data(THPVariable *self, PyObject *data)
 {
   HANDLE_TH_ERRORS
+  THPUtils_assertRet(-1, data, "Deleting tensor data is not allowed. Delete tensor instead!");
   if (!THPVariable_Check(data)) {
     throw torch::TypeError("Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
   }
+
   self->cdata.set_data(THPVariable_UnpackData(data));
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -235,7 +242,7 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
 {
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
-  if (py_grad == Py_None) {
+  if (!py_grad || py_grad == Py_None) {
     var.grad().reset();
     return 0;
   }
@@ -248,10 +255,11 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
   auto& grad = ((THPVariable*)py_grad)->cdata;
   bool gradIsSparse = false;
   auto backend = var.is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU;
-  auto typeOpt = at::globalContext().getNonVariableTypeOpt(backend, var.type().scalarType());
+  auto typeOpt = at::globalContext().getNonVariableTypeOpt(backend, var.scalar_type());
   if (typeOpt) {
-       auto& sparseType = at::globalContext().getNonVariableType(backend, var.type().scalarType());
-       gradIsSparse = grad.type() == sparseType;
+       auto& sparseType = at::globalContext().getNonVariableType(backend, var.scalar_type());
+       auto& gradType = at::globalContext().getNonVariableType(grad.type().backend(), grad.scalar_type());
+       gradIsSparse = gradType == sparseType;
   }
 
   THPUtils_assertRet(-1, grad.type() == var.type() || gradIsSparse,
@@ -298,7 +306,7 @@ PyObject *THPVariable_get_requires_grad(THPVariable *self)
 int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
 {
   HANDLE_TH_ERRORS
-  THPUtils_assertRet(-1, PyBool_Check(obj), "requires_grad must be a bool");
+  THPUtils_assertRet(-1, obj && PyBool_Check(obj), "requires_grad must be a bool");
   auto& var = self->cdata;
   auto requires_grad = (obj == Py_True);
   if (!var.is_leaf()) {
@@ -335,6 +343,7 @@ PyObject *THPVariable_get_backwards_hooks(THPVariable *self)
 int THPVariable_set_backwards_hooks(THPVariable *self, PyObject *obj)
 {
   HANDLE_TH_ERRORS
+  THPUtils_assertRet(-1, obj, "Deletion of _backwards_hooks not allowed!");
   if (obj == Py_None) {
     obj = nullptr;
   }
@@ -386,7 +395,7 @@ static PyObject *THPVariable_dtype(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
-  return torch::autograd::utils::wrap(torch::getDtype(self_.type().scalarType()));
+  return torch::autograd::utils::wrap(torch::getDtype(self_.scalar_type()));
   END_HANDLE_TH_ERRORS
 }
 
@@ -399,7 +408,7 @@ static PyObject * THPVariable_layout(THPVariable* self) {
 
 static PyObject * THPVariable_device(THPVariable* self) {
   HANDLE_TH_ERRORS
-  return THPDevice_New(torch::tensors::getDevice(self->cdata));
+  return THPDevice_New(self->cdata.device());
   END_HANDLE_TH_ERRORS
 }
 
@@ -484,6 +493,25 @@ namespace torch { namespace autograd {
 extern PyMethodDef variable_methods[];
 extern void initTorchFunctions(PyObject *module);
 
+void initTensorImplConversion(PyObject* module) {
+  auto m = py::handle(module).cast<py::module>();
+  m.def("_wrap_tensor_impl", [](void* ptr) {
+    auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::
+        unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
+    AT_CHECK(p.defined(), "Can't wrap undefined tensor");
+    AT_CHECK(!p->is_variable(), "Can wrap only non-variable tensor");
+    auto tensor = at::Tensor::wrap_tensor_impl(std::move(p));
+    return py::cast(torch::autograd::Variable(
+        torch::autograd::make_variable(std::move(tensor), false)));
+  });
+  // set on the module level to avoid mixing pybind and plain CPython extensions
+  m.def("_tensor_impl_raw_handle", [](torch::autograd::Variable* t) -> void* {
+    auto p = t->data().getIntrusivePtr();
+    // We return a raw non-owning pointer here, we rely on surrounding
+    // code to keep the original tensor alive
+    return p.get();
+  });
+}
 }}
 
 bool THPVariable_initModule(PyObject *module)
@@ -497,5 +525,6 @@ bool THPVariable_initModule(PyObject *module)
   Py_INCREF(&THPVariableType);
   PyModule_AddObject(module, "_TensorBase",   (PyObject *)&THPVariableType);
   torch::autograd::initTorchFunctions(module);
+  torch::autograd::initTensorImplConversion(module);
   return true;
 }

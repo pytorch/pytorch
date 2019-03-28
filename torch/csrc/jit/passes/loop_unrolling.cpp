@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 
-#include <torch/csrc/jit/assertions.h>
-#include <torch/csrc/jit/interned_strings.h>
+#include <c10/util/Exception.h>
+#include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/symbolic_variable.h>
 
 #include <torch/csrc/jit/constants.h>
@@ -108,7 +108,7 @@ void repeatBody(Block* body, int64_t times) {
     // Update loop-carried values
     // NB: note that we don't need to worry about the loop counter, because
     // we've replaced it with a loop-carried variable
-    JIT_ASSERT(body->inputs().size() == body->outputs().size());
+    AT_ASSERT(body->inputs().size() == body->outputs().size());
     for (size_t i = 1; i < body->inputs().size(); ++i) {
       value_map[body->inputs()[i]] = get_value(body->outputs()[i]);
     }

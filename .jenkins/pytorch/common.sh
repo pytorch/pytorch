@@ -25,6 +25,8 @@ set -ex
 # system; to find out more, grep for this string in ossci-job-dsl.
 echo "ENTERED_USER_LAND"
 
+export IS_PYTORCH_CI=1
+
 # compositional trap taken from https://stackoverflow.com/a/7287873/23845
 
 # note: printf is used instead of echo to avoid backslash
@@ -61,11 +63,27 @@ declare -f -t trap_add
 
 trap_add cleanup EXIT
 
+function assert_git_not_dirty() {
+    # TODO: we should add an option to `build_amd.py` that reverts the repo to
+    #       an unmodified state.
+    if ([[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]]) ; then
+        git_status=$(git status --porcelain)
+        if [[ $git_status ]]; then
+            echo "Build left local git repository checkout dirty"
+            echo "git status --porcelain:"
+            echo "${git_status}"
+            exit 1
+        fi
+    fi
+}
+
 if which sccache > /dev/null; then
   # Save sccache logs to file
   sccache --stop-server || true
   rm ~/sccache_error.log || true
-  SCCACHE_ERROR_LOG=~/sccache_error.log RUST_LOG=sccache::server=error sccache --start-server
+  # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
+  # https://github.com/pytorch/pytorch/pull/16645
+  SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
 
   # Report sccache stats for easier debugging
   sccache --zero-stats
@@ -113,7 +131,8 @@ else
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3 ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]]; then
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch_macos* ]]; then
   BUILD_TEST_LIBTORCH=1
 else
   BUILD_TEST_LIBTORCH=0
@@ -122,7 +141,7 @@ fi
 # Use conda cmake in some CI build. Conda cmake will be newer than our supported
 # min version 3.5, so we only do it in two builds that we know should use conda.
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
-  if [[ "$BUILD_ENVIRONMENT" == *cuda8-cudnn6-py2* ]] || \
+  if [[ "$BUILD_ENVIRONMENT" == *cuda8-cudnn7-py2* ]] || \
      [[ "$BUILD_ENVIRONMENT" == *cuda9-cudnn7-py3* ]]; then
     if ! which conda; then
       echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
@@ -138,3 +157,11 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
     fi
   fi
 fi
+
+function get_exit_code() {
+  set +e
+  "$@"
+  retcode=$?
+  set -e
+  return $retcode
+}

@@ -104,7 +104,8 @@ class HistogramNetObserver final : public NetObserver {
       NetBase* subject,
       const std::string& out_file_name,
       int nbins,
-      int dump_freq = -1);
+      int dump_freq = -1,
+      bool mul_nets = false);
   ~HistogramNetObserver();
 
  private:
@@ -114,6 +115,11 @@ class HistogramNetObserver final : public NetObserver {
       bool print_total_min_max = false);
 
   int dump_freq_, cnt_;
+
+  /** If multiple nets exist and are attached with the observers, the histogram
+   * files for the nets will be appended with netbase addresses.
+   */
+  bool mul_nets_;
   const std::string out_file_name_;
   std::vector<std::shared_ptr<HistogramObserver::Info>> hist_infos_;
 };

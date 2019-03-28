@@ -1,14 +1,14 @@
 #include <torch/csrc/jit/passes/batch_mm.h>
 
-#include <torch/csrc/jit/assertions.h>
+#include <ATen/core/functional.h>
+#include <ATen/core/interned_strings.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/interned_strings.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/symbolic_variable.h>
-#include <torch/csrc/utils/functional.h>
 
 #include <ATen/ATen.h>
 #include <algorithm>
@@ -102,8 +102,8 @@ RegisterOperators mm_tree_reduction_reg(
         }
         drop(stack, num_inputs);
 
-        JIT_ASSERT(inputs.size() > 0);
-        JIT_ASSERT(inputs.size() % 2 == 0);
+        AT_ASSERT(inputs.size() > 0);
+        AT_ASSERT(inputs.size() % 2 == 0);
         size_t side_num_elems = inputs.size() / 2;
         auto lhs_inputs = at::TensorList(inputs).slice(0, side_num_elems);
         auto rhs_inputs = at::TensorList(inputs).slice(side_num_elems);
@@ -188,7 +188,7 @@ struct TreeToken {
         matmuls.push_back(n);
       } else if (n->matches("aten::t(Tensor self) -> Tensor")) {
         Node* input_node = n->input()->node();
-        JIT_ASSERT(input_node->matches(
+        AT_ASSERT(input_node->matches(
             "aten::mm(Tensor self, Tensor mat2) -> Tensor"));
         // (AB)^T == B^TA^T
         WithInsertPoint insert_guard{input_node};
@@ -329,7 +329,7 @@ RegisterOperators mm_batch_side_reg(
 
 std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
     Value* value,
-    const AliasDb& alias_db) {
+    AliasDb& alias_db) {
   const auto postprocess = [&](std::vector<Node*> mms) {
     if (mms.size() == 0) {
       return mms;
@@ -346,12 +346,12 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
       for (size_t j = i + 1; j < mms.size(); ++j) {
         if (mms[j] == nullptr)
           continue;
-        if (!mms[j]->couldMoveBeforeTopologically(mms[i], alias_db)) {
+        if (!alias_db.couldMoveBeforeTopologically(mms[j], mms[i])) {
           mms[j] = nullptr;
         }
       }
     }
-    return filter(mms, [](Node* n) { return n != nullptr; });
+    return c10::filter(mms, [](Node* n) { return n != nullptr; });
   };
 
   Block* block = value->node()->owningBlock();
@@ -370,14 +370,14 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
   return std::make_pair(postprocess(lhses), postprocess(rhses));
 }
 
-void BatchMMSide(Block* block, const AliasDb& alias_db) {
+void BatchMMSide(Block* block, AliasDb& alias_db) {
   // NB: 8 is the current loop unrolling factor
   static constexpr size_t how_many_is_many = 8;
   const auto batch_side = [&](std::vector<Node*>& mms, Side side) {
-    JIT_ASSERT(!mms.empty());
+    AT_ASSERT(!mms.empty());
     for (int64_t i = static_cast<int64_t>(mms.size()) - 2; i >= 0; --i) {
-      bool move_ok = mms[i]->moveBeforeTopologicallyValid(mms[i + 1], alias_db);
-      JIT_ASSERT(move_ok);
+      bool move_ok = alias_db.moveBeforeTopologicallyValid(mms[i], mms[i + 1]);
+      AT_ASSERT(move_ok);
     }
     WithInsertPoint insert_guard{mms[0]};
     Graph* graph = mms[0]->owningGraph();
@@ -435,7 +435,7 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
     // TODO(suo): make BatchMM mutability-safe
     return;
   }
-  const auto alias_db = AliasAnalysis(graph);
+  AliasDb alias_db(graph);
   BatchMMTreeReduce(graph->block());
   BatchMMSide(graph->block(), alias_db);
   EliminateDeadCode(graph);

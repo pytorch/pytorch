@@ -1,5 +1,5 @@
 import torch
-from torch._six import container_abcs
+from torch._six import container_abcs, istuple
 import torch.testing
 import sys
 from itertools import product
@@ -150,7 +150,7 @@ def get_analytical_jacobian(input, output):
 
 
 def _as_tuple(x):
-    if isinstance(x, tuple):
+    if istuple(x):
         return x
     elif isinstance(x, list):
         return tuple(x)

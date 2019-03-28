@@ -25,8 +25,14 @@ bool PercentileOp<CPUContext>::RunOnDevice() {
       num_values,
       "Sum of lengths should be equal to the total number of samples");
 
-  values_tensor.Resize(num_values);
-  percentiles_tensor.Resize(num_values);
+  ReinitializeTensor(
+      &values_tensor,
+      {num_values},
+      at::dtype<float>().device(CPU));
+  ReinitializeTensor(
+      &percentiles_tensor,
+      {num_values},
+      at::dtype<float>().device(CPU));
   float* values_tensor_data = values_tensor.template mutable_data<float>();
   float* percentiles_tensor_data =
       percentiles_tensor.template mutable_data<float>();

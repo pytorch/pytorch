@@ -27,7 +27,7 @@ namespace native {
 
 inline Tensor from_blob(
     void* data,
-    IntList sizes,
+    IntArrayRef sizes,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
   return at::getType(options).tensorFromBlob(data, sizes, deleter);
@@ -35,8 +35,8 @@ inline Tensor from_blob(
 
 inline Tensor from_blob(
     void* data,
-    IntList sizes,
-    IntList strides,
+    IntArrayRef sizes,
+    IntArrayRef strides,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
   return at::getType(options).tensorFromBlob(data, sizes, strides, deleter);

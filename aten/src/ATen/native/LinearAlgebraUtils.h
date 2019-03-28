@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <limits>
+#include <sstream>
 
 namespace at { namespace native {
 
@@ -41,6 +42,28 @@ static inline int64_t matrixStride(const Tensor& batched_matrices) {
   return batched_matrices.size(-1) * batched_matrices.size(-2);
 }
 
+/* Checks a necessary property for the triu and tril implementations, hence the name.
+ * Here batch contiguity is checked for tensors with greater than 4 dimensions.
+ * Contiguous tensors and tensors with less than 3 dimensions pass this check
+ */ 
+static inline bool checkTrilTriuBatchContiguous(const Tensor& tensor) {
+  // Complete contiguity is the most desired property, which is why
+  // we return true if the tensor is contiguous
+  if (tensor.is_contiguous()) return true;
+
+  int64_t dims = tensor.dim();
+
+  // Tensors with dimension less than 4 are handled by default
+  if (dims <= 3) return true;
+
+  int64_t expected_stride = tensor.size(-1) * tensor.size(-2);
+  for (int64_t i = dims - 3; i >= 0; i--) {
+    if (expected_stride != tensor.stride(i)) return false;
+    expected_stride *= tensor.size(i);
+  }
+  return true;
+}
+
 // Returns the epsilon value for floating types except half
 static inline double _get_epsilon(const ScalarType& sc_type) {
   switch (sc_type) {
@@ -53,8 +76,29 @@ static inline double _get_epsilon(const ScalarType& sc_type) {
   }
 }
 
-// Validates input shapes for linear solve methods (gesv, cholesky_solve)
+// Validates input shapes and devices for linear solve methods (gesv, cholesky_solve)
 static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A) {
+  int64_t self_is_cuda = self.is_cuda();
+  int64_t A_is_cuda = A.is_cuda();
+
+  std::stringstream ss;
+  if (self_is_cuda != A_is_cuda) {
+    ss << "Expected b and A to be on the same device, but found b on ";
+    if (self_is_cuda) {
+      ss << "GPU";
+    } else {
+      ss << "CPU";
+    }
+    ss << " and A on ";
+    if (A_is_cuda) {
+      ss << "GPU";
+    } else {
+      ss << "CPU";
+    }
+    ss << " instead.";
+    AT_ERROR(ss.str());
+  }
+
   AT_CHECK(A.size(-1) == A.size(-2),
            "A must be batches of square matrices, "
            "but they are ", A.size(-1), " by ", A.size(-2), " matrices");
@@ -89,6 +133,23 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
 }
 
 /*
+ * This is an overloaded case of the previous function for a tensor of infos.
+ */
+static inline void batchCheckErrors(const Tensor& infos, const char* name) {
+  auto batch_size = infos.numel();
+  auto infos_cpu = infos.to(at::kCPU);
+  auto infos_data = infos_cpu.data<int>();
+  for (size_t i = 0; i < batch_size; i++) {
+    auto info = infos_data[i];
+    if (info < 0) {
+      AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
+    } else if (info > 0) {
+      AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
+    }
+  }
+}
+
+/*
  * Given a info int, obtained after a single operation, this function check if the computation
  * has been successful (info = 0) or not, and report in case of the latter.
  */
@@ -111,8 +172,8 @@ static inline std::tuple<Tensor,Tensor> _linear_solve_broadcast_args(const Tenso
   linearSolveCheckInputs(arg1, arg2);
 
   // broadcast the batch dimensions of arg1 and arg2.
-  IntList arg1_batch_sizes(arg1.sizes().data(), arg1.ndimension() - 2);
-  IntList arg2_batch_sizes(arg2.sizes().data(), arg2.ndimension() - 2);
+  IntArrayRef arg1_batch_sizes(arg1.sizes().data(), arg1.ndimension() - 2);
+  IntArrayRef arg2_batch_sizes(arg2.sizes().data(), arg2.ndimension() - 2);
   std::vector<int64_t> expand_batch_portion = infer_size(arg1_batch_sizes, arg2_batch_sizes);
 
   std::vector<int64_t> arg1_expand_size({expand_batch_portion});

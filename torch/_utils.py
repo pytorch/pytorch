@@ -309,3 +309,13 @@ def _take_tensors(tensors, size_limit):
     for buf, _ in buf_dict.values():
         if len(buf) > 0:
             yield buf
+
+
+# annotation decorator to get annotations in a way that is compatible
+# with both Python 2 and 3
+def annotate(ret, **kwargs):
+    def dec(fun):
+        fun.__annotations__ = dict(kwargs)
+        fun.__annotations__['return'] = ret
+        return fun
+    return dec

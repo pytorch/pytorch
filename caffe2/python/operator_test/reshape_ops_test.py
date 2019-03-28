@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 import numpy as np
 import six
+from numpy.testing import assert_array_equal
 
 from caffe2.python import core, workspace
 from caffe2.python.test_util import TestCase
@@ -16,7 +17,7 @@ class TestLengthsToShapeOps(TestCase):
         workspace.RunOperatorOnce(core.CreateOperator(
             'LengthsToShape', ['l'], ['s']))
         workspace.FeedBlob('res', np.array([3, 200], dtype=np.int32))
-        assert ((workspace.FetchBlob('s') == workspace.FetchBlob('res')).all())
+        assert_array_equal(workspace.FetchBlob('s'), workspace.FetchBlob('res'))
 
     def test_reshape_ops(self):
         workspace.FeedBlob('res', np.array([[0, 0, 0, 0]], dtype=np.float32))
@@ -24,8 +25,8 @@ class TestLengthsToShapeOps(TestCase):
         workspace.FeedBlob('input', np.zeros((2, 2), dtype=np.float32))
         workspace.RunOperatorOnce(core.CreateOperator(
             'Reshape', ['input', 'shape'], ['output', 'old_shape']))
-        assert ((workspace.FetchBlob('output') ==
-                 workspace.FetchBlob('res')).all())
+        assert_array_equal(workspace.FetchBlob('output'),
+                           workspace.FetchBlob('res'))
 
     def test_basic_reshape(self):
         _test_reshape(old_shape=(4, 2, 1), new_shape=(2, 4))

@@ -465,7 +465,7 @@ class Task(object):
             with ops.task_instance_exit():
                 ops.Add([globl, local], [globl])
             with ops.task_exit():
-                ops.Mul([globl, globl], [blobl])
+                ops.Mul([globl, globl], [globl])
 
     The task above will create 2 instances that will run in parallel.
     Each instance will copy `local` to `globl` 100 times, Then Add `local`

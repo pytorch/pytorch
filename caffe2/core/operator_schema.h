@@ -14,6 +14,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/filler.h"
+#include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
 
@@ -186,6 +187,10 @@ class CAFFE2_API OpSchema {
   inline vector<TensorShape> InferTensor(
       const OperatorDef& def,
       const vector<TensorShape>& input_type_shape) const {
+    CAFFE_ENFORCE(
+        Verify(def),
+        "(InferTensor) Operator def did not pass schema checking: ",
+        ProtoDebugString(def));
     return tensor_inference_function_(def, input_type_shape);
   }
 
@@ -521,7 +526,7 @@ inline TensorShape CreateTensorShape(
     vector<T_I> dims,
     ::caffe2::TensorProto_DataType dt) {
   TensorShape ts;
-  for (int d : dims) {
+  for (T_I d : dims) {
     ts.add_dims(d);
   }
   ts.set_data_type(dt);
@@ -583,7 +588,7 @@ OpSchema::Cost PointwiseCostInference(
   const TensorShape X = inputs[0];
   uint64_t nElemX = nElemFromDim(X);
   uint64_t nElemRead = 0;
-  for (int i = 0; i < inputs.size(); ++i) {
+  for (size_t i = 0; i < inputs.size(); ++i) {
     nElemRead += nElemFromDim(inputs[i]);
   }
 

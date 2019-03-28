@@ -1,10 +1,10 @@
 def graph(self,
-    a_1: Tensor,
-    i_1: Tensor) -> Tensor:
-  a, i = a_1, i_1
-  _0 = bool(torch.lt(i_1, 3))
+    a: Tensor,
+    i: Tensor) -> Tensor:
+  a0, i0 = a, i
+  _0 = bool(torch.lt(i, 3))
   while _0:
-    a_2 = torch.mul_(a, a)
-    i_2 = torch.add_(i, 1, 1)
-    _0, a, i = bool(torch.lt(i_2, 3)), a_2, i_2
-  return a
+    a1 = torch.mul_(a0, a0)
+    i1 = torch.add_(i0, 1, 1)
+    _0, a0, i0 = bool(torch.lt(i1, 3)), a1, i1
+  return a0

@@ -4,6 +4,7 @@
 
 #include <THCUNN/common.h>
 #include <THCUNN/generic/pooling_shape.h>
+#include <ATen/cuda/CUDAContext.h>
 
 static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
                          THCState *state,
@@ -175,8 +176,8 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   grid.x = blocks;
   grid.y = batchSize;
   grid.z = nInputPlane;
-  uint64_t maxGridY = THCState_getCurrentDeviceProperties(state)->maxGridSize[1];
-  uint64_t maxGridZ = THCState_getCurrentDeviceProperties(state)->maxGridSize[2];
+  uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
+  uint64_t maxGridZ = at::cuda::getCurrentDeviceProperties()->maxGridSize[2];
   if (maxGridY < grid.y) grid.y = maxGridY;
   if (maxGridZ < grid.z) grid.z = maxGridZ;
   MaxPoolBackward<scalar_t, accreal> <<< grid, BACKWARD_THREADS, 0, THCState_getCurrentStream(state) >>>

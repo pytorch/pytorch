@@ -93,7 +93,12 @@ def validate_cuda_device(location):
 def _cuda_deserialize(obj, location):
     if location.startswith('cuda'):
         device = validate_cuda_device(location)
-        return obj.cuda(device)
+        if getattr(obj, "_torch_load_uninitialized", False):
+            storage_type = getattr(torch.cuda, type(obj).__name__)
+            with torch.cuda.device(device):
+                return storage_type(obj.size())
+        else:
+            return obj.cuda(device)
 
 
 register_package(10, _cpu_tag, _cpu_deserialize)
@@ -366,7 +371,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         # Map tensors from GPU 1 to GPU 0
         >>> torch.load('tensors.pt', map_location={'cuda:1':'cuda:0'})
         # Load tensor from io.BytesIO object
-        >>> with open('tensor.pt') as f:
+        >>> with open('tensor.pt', 'rb') as f:
                 buffer = io.BytesIO(f.read())
         >>> torch.load(buffer)
     """
@@ -525,8 +530,9 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
             data_type, root_key, location, size, view_metadata = data
             location = maybe_decode_ascii(location)
             if root_key not in deserialized_objects:
-                deserialized_objects[root_key] = restore_location(
-                    data_type(size), location)
+                obj = data_type(size)
+                obj._torch_load_uninitialized = True
+                deserialized_objects[root_key] = restore_location(obj, location)
             storage = deserialized_objects[root_key]
             if view_metadata is not None:
                 view_key, offset, view_size = view_metadata

@@ -5,8 +5,8 @@ namespace jit {
 
 void FixupONNXLoops(Block* block) {
   for (auto* node : block->nodes()) {
-    if (node->kind() == torch::jit::onnx::Loop) {
-      JIT_ASSERT(node->blocks().size() == 1);
+    if (node->kind() == ::c10::onnx::Loop) {
+      AT_ASSERT(node->blocks().size() == 1);
       auto* sub_block = node->blocks()[0];
       sub_block->insertInput(1, "cond");
     }

@@ -359,7 +359,7 @@ class RNNDescriptor(object):
 
 
 def check_error(status):
-    if status is not 0:
+    if status != 0:
         raise CuDNNError(status)
 
 

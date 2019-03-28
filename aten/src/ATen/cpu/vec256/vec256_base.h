@@ -8,6 +8,7 @@
 
 #include <ATen/Utils.h>
 #include <ATen/native/Copy.h>
+#include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
 
 #if defined(__GNUC__)
@@ -221,7 +222,7 @@ public:
     return map([](T x) { return -x; });
   }
   Vec256<T> round() const {
-    return map(std::round);
+    return map(std::nearbyint);
   }
   Vec256<T> sin() const {
     return map(std::sin);
@@ -257,7 +258,7 @@ public:
 #define DEFINE_COMP(binary_pred)                                              \
   Vec256<T> operator binary_pred(const Vec256<T> &other) const {              \
     Vec256<T> vec;                                                            \
-    for (int64_t i = 0; i != size(); i++) {                                     \
+    for (int64_t i = 0; i != size(); i++) {                                   \
       if (values[i] binary_pred other.values[i]) {                            \
         std::memset(static_cast<void*>(vec.values + i), 0xFF, sizeof(T));     \
       } else {                                                                \
@@ -273,6 +274,7 @@ public:
   DEFINE_COMP(>)
   DEFINE_COMP(<)
 #undef DEFINE_COMP
+
 };
 
 template <class T> Vec256<T> inline operator+(const Vec256<T> &a, const Vec256<T> &b) {
@@ -307,13 +309,22 @@ template <class T> Vec256<T> inline operator/(const Vec256<T> &a, const Vec256<T
   return c;
 }
 
+template <class T> Vec256<T> inline operator||(
+    const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = a[i] || b[i];
+  }
+  return c;
+}
+
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
 template <class T> Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = (a[i] > b[i]) ? a[i] : b[i];
-    if (std::is_floating_point<T>::value && std::isnan(a[i])) {
+    if (_isnan(a[i])) {
       // If either input is NaN, propagate a NaN.
       // NOTE: The case where b[i] was NaN is handled correctly by the naive
       // ternary operator above.
@@ -326,7 +337,7 @@ template <class T> Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> 
 template <typename T>
 inline T maximum(const T& a, const T& b) {
   T c = (a > b) ? a : b;
-  if (std::is_floating_point<T>::value && std::isnan(a)) {
+  if (_isnan(a)) {
     c = a;
   }
   return c;
@@ -338,7 +349,7 @@ template <class T> Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> 
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = (a[i] < b[i]) ? a[i] : b[i];
-    if (std::is_floating_point<T>::value && std::isnan(a[i])) {
+    if (_isnan(a[i])) {
       // If either input is NaN, propagate a NaN.
       // NOTE: The case where b[i] was NaN is handled correctly by the naive
       // ternary operator above.
@@ -351,7 +362,7 @@ template <class T> Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> 
 template <typename T>
 inline T minimum(const T& a, const T& b) {
   T c = (a < b) ? a : b;
-  if (std::is_floating_point<T>::value && std::isnan(a)) {
+  if (_isnan(a)) {
     c = a;
   }
   return c;
@@ -362,8 +373,8 @@ inline T minimum(const T& a, const T& b) {
 template <class T>                                                          \
 Vec256<T> inline operator op(const Vec256<T> &a, const Vec256<T> &b) {      \
   using iT = int_same_size_t<T>;                                            \
-  iT buffer[Vec256<T>::size()];                                               \
-  for (int64_t i = 0; i != Vec256<T>::size(); i++) {                          \
+  iT buffer[Vec256<T>::size()];                                             \
+  for (int64_t i = 0; i != Vec256<T>::size(); i++) {                        \
     auto a_val = a[i];                                                      \
     auto b_val = b[i];                                                      \
     iT *i_a_ptr = reinterpret_cast<iT*>(&a_val);                            \
@@ -510,8 +521,8 @@ interleave2(const Vec256<T>& a, const Vec256<T>& b) {
 
 template <typename src_T, typename dst_T>
 void convert(const src_T *src, dst_T *dst, int64_t n) {
-#ifndef _MSC_VER  
-# pragma unroll  
+#ifndef _MSC_VER
+# pragma unroll
 #endif
   for (int64_t i = 0; i < n; i++) {
     *dst = static_cast<dst_T>(

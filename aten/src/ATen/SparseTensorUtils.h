@@ -17,7 +17,7 @@ using SparseType = Type;
 //
 // This may be called repeatedly, so make sure it's pretty cheap.
 inline SparseTensorImpl* get_sparse_impl(const SparseTensor& self) {
-  AT_ASSERTM(!self.is_variable(), "_internal_get_SparseTensorImpl: should not be a variable");
+  AT_ASSERTM(!self.is_variable(), "_internal_get_SparseTensorImpl: should not be a variable");  // TODO: remove this when Variable and Tensor are merged
   AT_ASSERTM(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
   return static_cast<SparseTensorImpl*>(self.unsafeGetTensorImpl());
 }
@@ -66,7 +66,7 @@ inline Tensor new_values_with_size_of(const Tensor& values, int64_t nnz) {
 // the flattened tensor `t.reshape( prod(full_size[:indices.size(0)]), -1 )`.
 // if forceClone is true, the result will forced to be a clone of self.
 // if force_clone is true, the result will forced to be a clone of self.
-inline LongTensor flatten_indices(const Tensor& indices, IntList full_size, bool force_clone = false) {
+inline LongTensor flatten_indices(const Tensor& indices, IntArrayRef full_size, bool force_clone = false) {
   int64_t sparse_dim = indices.size(0);
   if (sparse_dim == 1) {
     if (force_clone) {
@@ -113,7 +113,7 @@ inline LongTensor flatten_indices(const Tensor& indices, IntList full_size, bool
 // Ex2:
 //   dims_to_flatten = [1]
 //   new_indices = [ 3, 1, 3 ]  # uncoalesced
-inline LongTensor flatten_indices_by_dims(const LongTensor& indices, const IntList& sizes, const IntList& dims_to_flatten){
+inline LongTensor flatten_indices_by_dims(const LongTensor& indices, const IntArrayRef& sizes, const IntArrayRef& dims_to_flatten){
   LongTensor new_indices = at::zeros({indices.size(1)}, indices.options());
   for (auto d : dims_to_flatten) {
     new_indices.mul_(sizes[d]);

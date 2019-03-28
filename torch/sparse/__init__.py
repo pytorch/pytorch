@@ -70,12 +70,12 @@ def mm(mat1, mat2):
 def sum(input, dim=None, dtype=None):
     r"""
     Returns the sum of each row of SparseTensor :attr:`input` in the given
-    dimensions :attr:`dim`. If :attr::`dim` is a list of dimensions,
+    dimensions :attr:`dim`. If :attr:`dim` is a list of dimensions,
     reduce over all of them. When sum over all ``sparse_dim``, this method
     returns a Tensor instead of SparseTensor.
 
     All summed :attr:`dim` are squeezed (see :func:`torch.squeeze`), resulting an output
-    tensor having :attr::`dim` fewer dimensions than :attr:`input`.
+    tensor having :attr:`dim` fewer dimensions than :attr:`input`.
 
     During backward, only gradients at ``nnz`` locations of :attr:`input`
     will propagate back. Note that the gradients of :attr:`input` is coalesced.
@@ -123,12 +123,12 @@ def sum(input, dim=None, dtype=None):
         tensor([-2.6596, -1.1450])
     """
     if dtype is None:
-        if dim:
+        if dim is not None:
             return torch._sparse_sum(input, dim)
         else:
             return torch._sparse_sum(input)
     else:
-        if dim:
+        if dim is not None:
             return torch._sparse_sum(input, dim, dtype=dtype)
         else:
             return torch._sparse_sum(input, dtype=dtype)

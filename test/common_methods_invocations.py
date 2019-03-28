@@ -1,7 +1,8 @@
 import torch
-from torch._six import inf, nan
+from torch._six import inf, nan, istuple
 from functools import reduce, wraps
 from operator import mul, itemgetter
+import collections
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.testing import make_non_contiguous
 from common_utils import (skipIfNoLapack,
@@ -72,9 +73,7 @@ def prod_zeros(dim_size, dim_select):
     return result
 
 
-class non_differentiable(object):
-    def __init__(self, tensor):
-        self.tensor = tensor
+non_differentiable = collections.namedtuple('non_differentiable', ['tensor'])
 
 
 class dont_convert(tuple):
@@ -209,6 +208,7 @@ def method_tests():
         ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1'),
         ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
         ('expand', (), (1, 3, 2), 'scalar_to_dims'),
+        ('expand_as', (S, 1, 1), (torch.rand(S, S, S),)),
         ('exp', (S, S, S), NO_ARGS),
         ('exp', (), NO_ARGS, 'scalar'),
         ('expm1', (S, S, S), NO_ARGS),
@@ -291,7 +291,7 @@ def method_tests():
         ('remainder', (S, 1, S), (non_differentiable(torch.rand(S, S) + 1.5),), 'tensor_broadcast_all'),
         ('remainder', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
         ('remainder', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
-        ('lerp', (S, S, S), ((S, S, S), 0.4)),
+        ('lerp', (S, S, S), ((S, S, S), 0.4), 'scalar_no_broadcast'),
         ('lerp', (S, S, S), ((S,), 0.4), 'broadcast_rhs'),
         ('lerp', (S,), ((S, S, S), 0.4), 'broadcast_lhs'),
         ('lerp', (S, 1, S), ((S, S), 0.4), 'broadcast_all'),
@@ -569,8 +569,14 @@ def method_tests():
         ('diagonal', (M, M, M), (-2, 0, 1), '3d_3'),
         ('tril', (M, M), NO_ARGS),
         ('tril', (M, M), (2,), 'idx'),
+        ('tril', (S, M, M), NO_ARGS, 'batched'),
+        ('tril', (S, M, M), (2,), 'batched_idx'),
+        ('tril', (3, 3, S, S), NO_ARGS, 'more_batched'),
         ('triu', (M, M), NO_ARGS),
         ('triu', (M, M), (2,), 'idx'),
+        ('triu', (S, M, M), NO_ARGS, 'batched'),
+        ('triu', (S, M, M), (2,), 'batched_idx'),
+        ('triu', (3, 3, S, S), NO_ARGS, 'more_batched'),
         ('trace', (M, M), NO_ARGS),
         ('cross', (S, 3), ((S, 3),)),
         ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
@@ -578,15 +584,13 @@ def method_tests():
         ('index_select', (), (0, torch.tensor([0], dtype=torch.int64)), 'scalar_mixed_dim', [0]),
         ('index_select', (), (0, torch.tensor(0, dtype=torch.int64)), 'scalar_dim', [0]),
         ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'dim', [0]),
-        ('index_add', (), (0, torch.tensor([0], dtype=torch.int64), torch.tensor([2.])), 'scalar_input_dim', [0]),
-        ('index_add', (), (0, torch.tensor(0, dtype=torch.int64), torch.tensor(2.)), 'scalar_all_dim', [0]),
+        ('index_add', (), (0, torch.tensor([0], dtype=torch.int64), (1,)), 'scalar_input_dim', [0]),
+        ('index_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim', [0]),
         ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', [0]),
-        ('index_copy', (), (0, torch.tensor([0], dtype=torch.int64), torch.tensor([2.])), 'scalar_input_dim', [0]),
-        ('index_copy', (), (0, torch.tensor(0, dtype=torch.int64), torch.tensor(2.)), 'scalar_all_dim', [0]),
+        ('index_copy', (), (0, torch.tensor([0], dtype=torch.int64), (1,)), 'scalar_input_dim', [0]),
+        ('index_copy', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim', [0]),
         ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', [0]),
-        # FIXME: we should compute the derivative w.r.t torch.tensor(2)
-        ('index_fill', (S, S), (0, index_variable(2, S), non_differentiable(torch.tensor(2))),
-            'variable_dim', [0]),
+        ('index_fill', (S, S), (0, index_variable(2, S), ()), 'variable_dim', [0]),
         ('index_fill', (S, S), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_index_dim', [0]),
         ('index_fill', (), (0, torch.tensor([0], dtype=torch.int64), 2), 'scalar_input_dim', [0]),
         ('index_fill', (), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_both_dim', [0]),
@@ -644,20 +648,19 @@ def method_tests():
          'tall_all', NO_ARGS, [skipIfNoLapack], lambda usv: (usv[0][:, :(S - 2)], usv[1], usv[2])),
         ('svd', lambda: random_fullrank_matrix_distinct_singular_value(M), NO_ARGS,
          'large', NO_ARGS, [skipIfNoLapack]),
-        ('gesv', (S, S), (random_fullrank_matrix_distinct_singular_value(
+        ('solve', (S, S), (random_fullrank_matrix_distinct_singular_value(
             S, silent=True),), '', NO_ARGS, [skipIfNoLapack]),
-        ('gesv', (S, S, S), (random_fullrank_matrix_distinct_singular_value(S, S, silent=True),),
+        ('solve', (S, S, S), (random_fullrank_matrix_distinct_singular_value(S, S, silent=True),),
          'batched', NO_ARGS, [skipIfNoLapack]),
-        ('gesv', (2, 3, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 3, silent=True),),
+        ('solve', (2, 3, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 3, silent=True),),
          'batched_dims', NO_ARGS, [skipIfNoLapack]),
-        ('gesv', (2, 2, S, S), (random_fullrank_matrix_distinct_singular_value(S, 1, silent=True),),
+        ('solve', (2, 2, S, S), (random_fullrank_matrix_distinct_singular_value(S, 1, silent=True),),
          'batched_broadcast_A', NO_ARGS, [skipIfNoLapack]),
-        ('gesv', (1, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 2, silent=True),),
+        ('solve', (1, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 2, silent=True),),
          'batched_broadcast_b', NO_ARGS, [skipIfNoLapack]),
         ('fill_', (S, S, S), (1,), 'number'),
         ('fill_', (), (1,), 'number_scalar'),
-        # FIXME: we should compute the derivative w.r.t torch.tensor(1)
-        ('fill_', (S, S, S), (non_differentiable(torch.tensor(1)),), 'variable'),
+        ('fill_', (S, S, S), ((),), 'variable'),
         ('eq_', (S, S, S), ((S, S, S),)),
         ('eq_', (S, S, S), ((1,),), 'broadcast_rhs'),
         ('eq_', (), ((),), 'scalar'),
@@ -724,7 +727,8 @@ def method_tests():
         ('gather', (), (0, torch.tensor(0, dtype=torch.int64)), 'scalar_both', [0]),
         ('scatter', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', [0]),
         ('scatter', (M, S), (1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', [0]),
-        ('scatter', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim0', [0]),
+        ('scatter', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalartensor_all_dim0', [0]),
+        ('scatter', (), (0, torch.tensor(0, dtype=torch.int64), 2.5), 'scalar_all_dim0', [0]),
         ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', [0]),
         ('scatter_add', (M, S), (1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', [0]),
         ('scatter_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim0', [0]),
@@ -737,15 +741,17 @@ def method_tests():
         ('masked_select', (M, M), (torch.tensor(1, dtype=torch.uint8),), 'scalar_broadcast_rhs'),
         ('masked_select', (), (mask_not_all_zeros((M, M)),), 'scalar_broadcast_lhs'),
         ('masked_fill', (M, M), (torch.ByteTensor(M, M).bernoulli_(), 10)),
-        ('masked_fill', (M, M), (torch.ByteTensor(M, M).bernoulli_(), torch.tensor(10)), 'tensor'),
-        # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
+        ('masked_fill', (M, M), (torch.ByteTensor(M, M).bernoulli_(), ()), 'tensor'),
+        ('masked_fill', (M,), (torch.ByteTensor(M, M).bernoulli_(), 10), 'broadcast_lhs'),
         ('masked_fill', (M, M), (torch.ByteTensor(M,).bernoulli_(), 10), 'broadcast_rhs'),
-        ('masked_fill', (), (torch.tensor(0, dtype=torch.uint8, requires_grad=False).bernoulli_(), 10), 'scalar'),
-        ('masked_fill', (), (torch.tensor(0, dtype=torch.uint8, requires_grad=False).bernoulli_(), torch.tensor(10)),
+        ('masked_fill', (), (torch.tensor(0, dtype=torch.uint8).bernoulli_(), 10), 'scalar'),
+        ('masked_fill', (), (torch.tensor(0, dtype=torch.uint8).bernoulli_(), ()),
          'scalar_variable'),
-        ('masked_fill', (M, M), (torch.tensor(0, dtype=torch.uint8, requires_grad=False).bernoulli_(), 10),
+        ('masked_fill', (M, M), (torch.tensor(0, dtype=torch.uint8).bernoulli_(), 10),
          'scalar_broadcast_rhs'),
         ('masked_scatter', (M, M), (torch.ByteTensor(M, M).bernoulli_(), (M, M))),
+        ('masked_scatter', (M,), (torch.ByteTensor(M, M).bernoulli_(), (M, M)),
+         'broadcast_lhs'),
         ('masked_scatter', (M, M), (torch.ByteTensor(M,).bernoulli_(), (M, M)),
          'broadcast_rhs'),
         ('masked_scatter', (M, M), (bernoulli_scalar(), (M, M)), 'scalar'),
@@ -939,12 +945,12 @@ tri_tests_args = [
 ]
 
 tri_large_tests_args = [
-    (1, 268435455),
     # Large test cases below are deliberately commented out to speed up CI
     # tests and to avoid OOM error. When modifying implementations of
     # tril_indices and triu_indices, please enable these tests and make sure
     # they pass.
     #
+    # (1, 268435455),
     # (5000, 5000),
     # (10000, 10000),
     # (268435455, 1),
@@ -982,7 +988,7 @@ def run_additional_tri_tests(self, device):
 
 
 def unpack_variables(args):
-    if isinstance(args, tuple):
+    if istuple(args):
         return tuple(unpack_variables(elem) for elem in args)
     else:
         return args
@@ -1017,12 +1023,15 @@ EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
     'test_det_dim2_null',
     'test_det_rank1',
     'test_det_rank2',
+    # `other` expand_as(self, other) is not used in autograd.
+    'test_expand_as',
     'test_logdet',
     'test_logdet_1x1',
     'test_logdet_symmetric',
     'test_slogdet_1x1_neg_det',
     'test_slogdet_neg_det',
     'test_slogdet_symmetric',
+    'test_cdist',
 }
 
 

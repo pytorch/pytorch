@@ -12,18 +12,19 @@
 namespace caffe2 {
 
 // TODO(azzolini): support sizes larger than int32
-template<class T>
-class IndexCreateOp: public Operator<CPUContext> {
+template <class T>
+class IndexCreateOp : public Operator<CPUContext> {
  public:
-  IndexCreateOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws),
+  template <class... Args>
+  explicit IndexCreateOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...),
         maxElements_(OperatorBase::GetSingleArgument<int>(
             "max_elements",
             std::numeric_limits<int>::max())) {}
 
   bool RunOnDevice() override {
     *OperatorBase::Output<std::unique_ptr<IndexBase>>(0) =
-      std::unique_ptr<IndexBase>(new Index<T>(maxElements_));
+        std::unique_ptr<IndexBase>(new Index<T>(maxElements_));
     return true;
   }
 
@@ -31,10 +32,10 @@ class IndexCreateOp: public Operator<CPUContext> {
   int64_tValue maxElements_;
 };
 
-class IndexGetOp: public Operator<CPUContext> {
+class IndexGetOp : public Operator<CPUContext> {
  public:
-  IndexGetOp(const OperatorDef& operator_def, Workspace* ws)
-   : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit IndexGetOp(Args&&... args) : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<IndexKeyTypes>::call(this, Input(1));
@@ -55,10 +56,11 @@ class IndexGetOp: public Operator<CPUContext> {
   }
 };
 
-class IndexLoadOp: public Operator<CPUContext> {
+class IndexLoadOp : public Operator<CPUContext> {
  public:
-  IndexLoadOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws),
+  template <class... Args>
+  explicit IndexLoadOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...),
         skipFirstEntry_(
             OperatorBase::GetSingleArgument<int>("skip_first_entry", 0)) {}
 
@@ -85,10 +87,11 @@ class IndexLoadOp: public Operator<CPUContext> {
   bool skipFirstEntry_;
 };
 
-class IndexStoreOp: public Operator<CPUContext> {
+class IndexStoreOp : public Operator<CPUContext> {
  public:
-  IndexStoreOp(const OperatorDef& operator_def, Workspace* ws)
-   : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit IndexStoreOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& base = OperatorBase::Input<std::unique_ptr<IndexBase>>(0);
@@ -104,10 +107,11 @@ class IndexStoreOp: public Operator<CPUContext> {
   }
 };
 
-class IndexFreezeOp: public Operator<CPUContext> {
+class IndexFreezeOp : public Operator<CPUContext> {
  public:
-  IndexFreezeOp(const OperatorDef& operator_def, Workspace* ws)
-   : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit IndexFreezeOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& base = OperatorBase::Input<std::unique_ptr<IndexBase>>(0);
@@ -118,8 +122,9 @@ class IndexFreezeOp: public Operator<CPUContext> {
 
 class IndexSizeOp : public Operator<CPUContext> {
  public:
-  IndexSizeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit IndexSizeOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& base = OperatorBase::Input<std::unique_ptr<IndexBase>>(0);
@@ -141,47 +146,51 @@ REGISTER_CPU_OPERATOR(IndexFreeze, IndexFreezeOp);
 REGISTER_CPU_OPERATOR(IndexSize, IndexSizeOp);
 
 OPERATOR_SCHEMA(IntIndexCreate)
-  .NumInputs(0)
-  .NumOutputs(1)
-  .SetDoc(R"DOC(
+    .NumInputs(0)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
 Creates a dictionary that maps int32 keys to consecutive integers
 from 1 to max_elements. Zero is reserved for unknown keys.
 )DOC")
-  .Arg("max_elements", "Max number of elements, including the zero entry.")
-  .Output(0, "handler", "Pointer to an Index instance.");
+    .Arg("max_elements", "Max number of elements, including the zero entry.")
+    .Output(0, "handler", "Pointer to an Index instance.")
+    .ScalarType(TensorProto_DataType_UNDEFINED);
 
 OPERATOR_SCHEMA(LongIndexCreate)
-  .NumInputs(0)
-  .NumOutputs(1)
-  .SetDoc(R"DOC(
+    .NumInputs(0)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
 Creates a dictionary that maps int64 keys to consecutive integers
 from 1 to max_elements. Zero is reserved for unknown keys.
 )DOC")
-  .Arg("max_elements", "Max number of elements, including the zero entry.")
-  .Output(0, "handler", "Pointer to an Index instance.");
+    .Arg("max_elements", "Max number of elements, including the zero entry.")
+    .Output(0, "handler", "Pointer to an Index instance.")
+    .ScalarType(TensorProto_DataType_UNDEFINED);
 
 OPERATOR_SCHEMA(StringIndexCreate)
-  .NumInputs(0)
-  .NumOutputs(1)
-  .SetDoc(R"DOC(
+    .NumInputs(0)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
 Creates a dictionary that maps string keys to consecutive integers
 from 1 to max_elements. Zero is reserved for unknown keys.
 )DOC")
-  .Arg("max_elements", "Max number of elements, including the zero entry.")
-  .Output(0, "handle", "Pointer to an Index instance.");
+    .Arg("max_elements", "Max number of elements, including the zero entry.")
+    .Output(0, "handle", "Pointer to an Index instance.")
+    .ScalarType(TensorProto_DataType_UNDEFINED);
 
 OPERATOR_SCHEMA(IndexGet)
-  .NumInputs(2)
-  .NumOutputs(1)
-  .SetDoc(R"DOC(
+    .NumInputs(2)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
 Given an index handle and a tensor of keys, return an Int tensor of same shape
 containing the indices for each of the keys. If the index is frozen, unknown
 entries are given index 0. Otherwise, new entries are added into the index.
 If an insert is necessary but max_elements has been reached, fail.
 )DOC")
-  .Input(0, "handle", "Pointer to an Index instance.")
-  .Input(1, "keys", "Tensor of keys to be looked up.")
-  .Output(0, "indices", "Indices for each of the keys.");
+    .Input(0, "handle", "Pointer to an Index instance.")
+    .Input(1, "keys", "Tensor of keys to be looked up.")
+    .Output(0, "indices", "Indices for each of the keys.")
+    .ScalarType(TensorProto::INT64);
 
 OPERATOR_SCHEMA(IndexFreeze)
     .NumInputs(1)
@@ -192,7 +201,8 @@ Should not be called concurrently with IndexGet.
 )DOC")
     .Input(0, "handle", "Pointer to an Index instance.")
     .Output(0, "handle", "The input handle.")
-    .EnforceInplace({{0, 0}});
+    .EnforceInplace({{0, 0}})
+    .ScalarType(TensorProto_DataType_UNDEFINED);
 
 OPERATOR_SCHEMA(IndexLoad)
     .NumInputs(2)
@@ -209,17 +219,18 @@ consecutive indexes starting at 1. Fails if tensor contains repeated elements.
         "skip_first_entry",
         "If set, skips the first entry of the tensor. This allows "
         "to load tensors that are aligned with an embedding, where the first "
-        "entry corresponds to the default 0 index entry.");
+        "entry corresponds to the default 0 index entry.")
+    .ScalarType(TensorProto_DataType_UNDEFINED);
 
 OPERATOR_SCHEMA(IndexStore)
-  .NumInputs(1)
-  .NumOutputs(1)
-  .SetDoc(R"DOC(
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
 Stores the keys of this index in a 1-D tensor. Since element 0 is reserved
 for unknowns, the first element of the output tensor will be element of index 1.
 )DOC")
-  .Input(0, "handle", "Pointer to an Index instance.")
-  .Output(0, "items", "1-D tensor with elements starting with index 1.");
+    .Input(0, "handle", "Pointer to an Index instance.")
+    .Output(0, "items", "1-D tensor with elements starting with index 1.");
 
 OPERATOR_SCHEMA(IndexSize)
     .NumInputs(1)
@@ -242,7 +253,7 @@ SHOULD_NOT_DO_GRADIENT(IndexSize);
 class IndexSerializer : public BlobSerializerBase {
  public:
   IndexSerializer() {}
-  ~IndexSerializer() {}
+  ~IndexSerializer() override {}
 
   void Serialize(
       const void* pointer,
@@ -341,4 +352,4 @@ REGISTER_BLOB_DESERIALIZER(
     std::unique_ptr<caffe2::IndexBase>,
     IndexDeserializer);
 
-}  // namespace caffe2
+} // namespace caffe2

@@ -6,6 +6,7 @@ Tensors
 ----------------------------------
 .. autofunction:: is_tensor
 .. autofunction:: is_storage
+.. autofunction:: is_floating_point
 .. autofunction:: set_default_dtype
 .. autofunction:: get_default_dtype
 .. autofunction:: set_default_tensor_type
@@ -106,6 +107,13 @@ There are a few more in-place random sampling functions defined on Tensors as we
 - :func:`torch.Tensor.random_` - numbers sampled from the discrete uniform distribution
 - :func:`torch.Tensor.uniform_` - numbers sampled from the continuous uniform distribution
 
+Quasi-random sampling
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: torch.quasirandom.SobolEngine
+    :members:
+    :exclude-members: MAXBIT, MAXDIM
+    :undoc-members:
 
 Serialization
 ----------------------------------
@@ -258,6 +266,8 @@ Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: bincount
 .. autofunction:: broadcast_tensors
+.. autofunction:: cartesian_prod
+.. autofunction:: combinations
 .. autofunction:: cross
 .. autofunction:: diag
 .. autofunction:: diag_embed
@@ -274,7 +284,9 @@ Other Operations
 .. autofunction:: tensordot
 .. autofunction:: trace
 .. autofunction:: tril
+.. autofunction:: tril_indices
 .. autofunction:: triu
+.. autofunction:: triu_indices
 
 
 BLAS and LAPACK Operations
@@ -316,8 +328,10 @@ BLAS and LAPACK Operations
 .. autofunction:: potrs
 .. autofunction:: pstrf
 .. autofunction:: qr
+.. autofunction:: solve
 .. autofunction:: svd
 .. autofunction:: symeig
+.. autofunction:: triangular_solve
 .. autofunction:: trtrs
 
 Utilities

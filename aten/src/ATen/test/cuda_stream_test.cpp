@@ -217,7 +217,7 @@ TEST(TestStream, CUDAEventSyncTest) {
   const auto stream = at::cuda::getStreamFromPool();
   at::cuda::CUDAEvent event;
 
-  ASSERT_FALSE(event.happened());
+  ASSERT_TRUE(event.query());
 
   event.recordOnce(stream);
 
@@ -228,7 +228,7 @@ TEST(TestStream, CUDAEventSyncTest) {
   event.block(wait_stream1);
 
   cudaStreamSynchronize(wait_stream0);
-  ASSERT_TRUE(event.happened());
+  ASSERT_TRUE(event.query());
 }
 
 // Cross-Device Events
@@ -249,10 +249,10 @@ TEST(TestStream, CrossDeviceTest) {
 
   event0 = std::move(event1);
 
-  ASSERT_EQ_CUDA(event0.device(), 1);
+  ASSERT_EQ_CUDA(event0.device(), at::Device(at::kCUDA, 1));
 
   event0.block(stream0);
 
   cudaStreamSynchronize(stream0);
-  ASSERT_TRUE(event0.happened());
+  ASSERT_TRUE(event0.query());
 }
