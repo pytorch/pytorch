@@ -60,11 +60,11 @@ with warnings.catch_warnings(record=True) as warns:
 class FilelikeMock(object):
     def __init__(self, data, has_fileno=True, has_readinto=False):
         if has_readinto:
-            setattr(self, 'readinto', self.readinto_opt)
+            self.readinto = self.readinto_opt
         if has_fileno:
             # Python 2's StringIO.StringIO has no fileno attribute.
             # This is used to test that.
-            setattr(self, 'fileno', self.fileno_opt)
+            self.fileno = self.fileno_opt
 
         self.calls = set()
         self.bytesio = io.BytesIO(data)
@@ -186,20 +186,17 @@ class _TestTorchMixin(object):
                        'as_strided_',
                        re.compile('^clamp_(min|max)_?$'),
                        'coalesce',
-                       'index_put',
                        'is_coalesced',
                        'is_distributed',
                        'is_complex',
                        'is_nonzero',
                        'is_same_size',
-                       'is_signed',
                        'isclose',
                        'lgamma',
                        'lgamma_',
                        'log_softmax',
                        'map2_',
                        'new',
-                       'pin_memory',
                        'polygamma',
                        'polygamma_',
                        'record_stream',
@@ -213,8 +210,6 @@ class _TestTorchMixin(object):
                        'softmax',
                        'split_with_sizes',
                        'sspaddmm',
-                       'storage_type',
-                       'tan',
                        'to_dense',
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
@@ -1057,7 +1052,7 @@ class _TestTorchMixin(object):
             "std", "sum", "var", "max", "min"]
 
         def normfn_attr(t, dim, keepdim=False, out=None):
-            attr = getattr(torch, "norm")
+            attr = torch.norm
             return attr(t, 2, dim, keepdim, out=out)
 
         for fn_name in dim_red_fns:
@@ -3466,6 +3461,10 @@ class _TestTorchMixin(object):
                 RuntimeError, "overflow",
                 lambda: torch.arange(1.175494351e-38, 3.402823466e+38, device=device))
 
+            # check that it holds a consistent output shape on precision-cornered step sizes
+            d = torch.arange(-4.0, 4.0, 0.01, dtype=torch.float32, device=device)
+            self.assertEqual(d.shape[0], 800)
+
     def test_arange_inference(self):
         saved_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.float32)
@@ -3839,14 +3838,14 @@ class _TestTorchMixin(object):
 
             for lhs in lhsTensors:
                 lhs_expanded = lhs.expand(*(torch.Size(full_batch_dims) + torch.Size(lhs_mat_dims)))
-                lhs_expanded_matmul_fn = getattr(lhs_expanded, "matmul")
+                lhs_expanded_matmul_fn = lhs_expanded.matmul
                 for rhs in rhsTensors:
                     rhs_expanded = ((rhs if len(rhs_dims) != 1 else rhs.unsqueeze(-1)).
                                     expand(*(torch.Size(full_batch_dims) + torch.Size(rhs_mat_dims))))
                     truth = maybe_squeeze_result(lhs_expanded, rhs_expanded, lhs_expanded_matmul_fn(rhs_expanded))
                     for l in (lhs, lhs_expanded):
                         for r in (rhs, rhs_expanded):
-                            l_matmul_fn = getattr(l, "matmul")
+                            l_matmul_fn = l.matmul
                             result = maybe_squeeze_result(l, r, l_matmul_fn(r))
                             self.assertEqual(truth, result)
                             # test torch.matmul function as well
@@ -5528,47 +5527,60 @@ class _TestTorchMixin(object):
         self._test_chain_matmul(self, cast=lambda x: x)
 
     @staticmethod
-    def _test_det_logdet_slogdet(self, conv_fn):
-        def reference_det(M):
-            # naive row reduction
-            M = M.clone()
-            l = M.size(0)
-            multiplier = 1
-            for i in range(l):
-                if M[i, 0] != 0:
-                    if i != 0:
-                        M[0], M[i] = M[i], M[0]
-                        multiplier = -1
-                    break
+    def _test_det_logdet_slogdet(self, device):
+        def reference_slogdet(M):
+            if TEST_NUMPY:
+                sdet, logabsdet = np.linalg.slogdet(M.detach().cpu().numpy())
+                return M.new_tensor(sdet), M.new_tensor(logabsdet)
             else:
-                return 0
-            for i in range(1, l):
-                row = M[i]
-                for j in range(i):
-                    row -= row[j] / M[j, j] * M[j]
-                M[i] = row
-            return M.diag().prod() * multiplier
+                # naive row reduction
+                M = M.clone()
+                l = M.size(0)
+                multiplier = 1
+                for i in range(l):
+                    if M[i, 0].item() != 0:
+                        if i != 0:
+                            M[0], M[i] = M[i], M[0]
+                            multiplier = -1
+                        break
+                else:
+                    return 0
+                for i in range(1, l):
+                    row = M[i]
+                    for j in range(i):
+                        row -= row[j] / M[j, j] * M[j]
+                    M[i] = row
+            sdet = M.diag().sign().prod()
+            logabsdet = M.diag().abs_().log_().sum().add_(math.log(multiplier))
+            return sdet, logabsdet
 
         def test_single_det(M, target, desc):
+            target_sdet, target_logabsdet = target
+
             det = M.det()
             logdet = M.logdet()
             sdet, logabsdet = M.slogdet()
-            self.assertEqual(det, target, 1e-7, '{} (det)'.format(desc))
-            if det.item() < 0:
-                self.assertTrue(logdet.item() != logdet.item(), '{} (logdet negative case)'.format(desc))
-                self.assertTrue(sdet.item() == -1, '{} (slogdet sign negative case)'.format(desc))
-                self.assertEqual(logabsdet.exp(), det.abs(), 1e-7, '{} (slogdet logabsdet negative case)'.format(desc))
-            elif det.item() == 0:
-                self.assertEqual(logdet.exp().item(), 0, 1e-7, '{} (logdet zero case)'.format(desc))
-                self.assertTrue(sdet.item() == 0, '{} (slogdet sign zero case)'.format(desc))
-                self.assertEqual(logabsdet.exp().item(), 0, 1e-7, '{} (slogdet logabsdet zero case)'.format(desc))
-            else:
-                self.assertEqual(logdet.exp(), det, 1e-7, '{} (logdet positive case)'.format(desc))
-                self.assertTrue(sdet.item() == 1, '{} (slogdet sign  positive case)'.format(desc))
-                self.assertEqual(logabsdet.exp(), det, 1e-7, '{} (slogdet logabsdet positive case)'.format(desc))
 
-        eye = conv_fn(torch.eye(5))
-        test_single_det(eye, torch.tensor(1, dtype=eye.dtype), 'identity')
+            # Test det
+            self.assertEqual(det, target_sdet * target_logabsdet.exp(), 1e-7, '{} (det)'.format(desc))
+
+            # Test slogdet
+            # Compare the overall value rather than individual parts because of
+            # precision issues when det is near zero.
+            self.assertEqual(sdet * logabsdet.exp(), target_sdet * target_logabsdet.exp(), 1e-7, '{} (slogdet)'.format(desc))
+
+            # Test logdet
+            # Compare logdet against our own pytorch slogdet because they should
+            # be consistent, while it may behave slightly differently with other
+            # slogdet implementations when det is near zero due to precision
+            # issues.
+            if sdet.item() < 0:
+                self.assertTrue(logdet.item() != logdet.item(), '{} (logdet negative case)'.format(desc))
+            else:
+                self.assertEqual(logdet.exp(), target_logabsdet.exp(), 1e-7, '{} (logdet non-negative case)'.format(desc))
+
+        eye = torch.eye(5, device=device)
+        test_single_det(eye, (torch.ones((), device=device), torch.zeros((), device=device)), 'identity')
 
         # TODO: Remove when MAGMA 2.5.0 is built for CUDA 8 and CUDA 9.2
         is_cuda_8_92 = False
@@ -5577,22 +5589,29 @@ class _TestTorchMixin(object):
 
         def test(M):
             assert M.size(0) >= 5, 'this helper fn assumes M to be at least 5x5'
-            M = conv_fn(M)
+            M = M.to(device)
 
             if M.is_cuda and is_cuda_8_92:
                 return
 
-            M_det = M.det()
-            ref_M_det = reference_det(M)
+            ref_M_sdet, ref_M_logabsdet = reference_slogdet(M)
 
-            test_single_det(M, ref_M_det, 'basic')
-            if abs(ref_M_det.item()) >= 1e-10:  # skip singular
-                test_single_det(M, M.inverse().det().pow_(-1), 'inverse')
-            test_single_det(M, M.t().det(), 'transpose')
+            test_single_det(M, (ref_M_sdet, ref_M_logabsdet), 'basic')
+            if ref_M_logabsdet.exp().item() >= 1e-6:  # skip singular
+                M_inv = M.inverse()
+                test_single_det(M_inv, reference_slogdet(M_inv), 'inverse')
+
+            test_single_det(M, (ref_M_sdet, ref_M_logabsdet), 'transpose')
 
             for x in [0, 2, 4]:
                 for scale in [-2, -0.1, 0, 10]:
-                    target = M_det * scale
+                    if scale > 0:
+                        target = ref_M_sdet, ref_M_logabsdet + math.log(scale)
+                    elif scale == 0:
+                        target = torch.zeros_like(ref_M_sdet), torch.full_like(ref_M_logabsdet, -inf)
+                    else:
+                        target = ref_M_sdet.neg(), ref_M_logabsdet + math.log(-scale)
+
                     # dim 0
                     M_clone = M.clone()
                     M_clone[:, x] *= scale
@@ -5604,7 +5623,7 @@ class _TestTorchMixin(object):
 
             for x1, x2 in [(0, 3), (4, 1), (3, 2)]:
                 assert x1 != x2, 'x1 and x2 needs to be different for this test'
-                target = M_det.clone().zero_()
+                target = torch.zeros_like(ref_M_sdet), torch.full_like(ref_M_logabsdet, -inf)
                 # dim 0
                 M_clone = M.clone()
                 M_clone[:, x2] = M_clone[:, x1]
@@ -5615,7 +5634,14 @@ class _TestTorchMixin(object):
                 test_single_det(M_clone, target, 'two columns are same')
 
                 for scale1, scale2 in [(0.3, -1), (0, 2), (10, 0.1)]:
-                    target = -M_det * scale1 * scale2
+                    det_scale = scale1 * scale2 * -1
+                    if det_scale > 0:
+                        target = ref_M_sdet, ref_M_logabsdet + math.log(det_scale)
+                    elif det_scale == 0:
+                        target = torch.zeros_like(ref_M_sdet), torch.full_like(ref_M_logabsdet, -inf)
+                    else:
+                        target = ref_M_sdet.neg(), ref_M_logabsdet + math.log(-det_scale)
+
                     # dim 0
                     M_clone = M.clone()
                     t = M_clone[:, x1] * scale1
@@ -5645,39 +5671,51 @@ class _TestTorchMixin(object):
             #   scale by sqrt( (n-1)! )^(-1/n) = ( (n-1)! )^(-1/(2n))
             #
             # source: https://arxiv.org/pdf/1112.0752.pdf
+
+            # TODO: technically we need subexponential distn for this to hold,
+            #       but we mostly use gaussian entries below. Consider switching
+            #       to Chi-sq if this turns out not stable enough, since Chi-sq
+            #       is easy enough to sample from.
             return math.factorial(n - 1) ** (-1.0 / (2 * n))
 
         for n in [5, 10, 25]:
             scale = get_random_mat_scale(n)
-            test(torch.randn(n, n) * scale)
-            r = torch.randn(n, n) * scale
+            test(torch.randn(n, n, device=device) * scale)
+            r = torch.randn(n, n, device=device) * scale
             # symmetric psd
             test(r.mm(r.t()))
             # symmetric pd
-            r = torch.randn(n, n) * scale
-            test(r.mm(r.t()) + torch.eye(n) * 1e-6)
+            r = torch.randn(n, n, device=device) * scale
+            test(r.mm(r.t()) + torch.eye(n, device=device) * 1e-6)
             # symmetric
-            r = torch.randn(n, n) * scale
+            r = torch.randn(n, n, device=device) * scale
             for i in range(n):
                 for j in range(i):
                     r[i, j] = r[j, i]
             test(r)
             # non-contiguous
-            test((torch.randn(n, n, n + 1) * scale)[:, 2, 1:])
+            test((torch.randn(n, n, n + 1, device=device) * scale)[:, 2, 1:])
             # det = 0
-            r = torch.randn(n, n) * scale
+            r = torch.randn(n, n, device=device) * scale
             u, s, v = r.svd()
-            if reference_det(u) < 0:
+            if reference_slogdet(u)[0] < 0:
                 u = -u
-            if reference_det(v) < 0:
+            if reference_slogdet(v)[0] < 0:
                 v = -v
             s[0] *= -1
             s[-1] = 0
             test(u.mm(s.diag()).mm(v))
 
+        # Small values to test numerical stability. Note that we don't scale
+        # this matrix.
+        r = torch.randn(512, 512, device=device)
+        u, s, v = r.svd()
+        s.fill_(1. / (100 * s.numel()))
+        test(u.mm(s.diag()).mm(v))
+
     @skipIfNoLapack
     def test_det_logdet_slogdet(self):
-        self._test_det_logdet_slogdet(self, lambda x: x)
+        self._test_det_logdet_slogdet(self, 'cpu')
 
     @staticmethod
     def _test_fft_ifft_rfft_irfft(self, device='cpu'):
@@ -10320,7 +10358,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         x = torch.LongTensor([1, 2, 3, 2, 8, 5, 2, 3])
         expected_unique = torch.LongTensor([1, 2, 3, 5, 8])
         expected_inverse = torch.LongTensor([0, 1, 2, 1, 4, 3, 1, 2])
-        expected_counts = torch.LongTensor([1, 3, 2, 1, 1])
 
         x_unique = torch.unique(x)
         self.assertEqual(
@@ -10334,19 +10371,10 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         x_unique = x.unique(sorted=True)
         self.assertEqual(expected_unique, x_unique)
 
-        x_unique, x_counts = x.unique(sorted=True, return_counts=True)
-        self.assertEqual(expected_counts, x_counts)
-
         x_unique, x_inverse = torch.unique(
             x, sorted=True, return_inverse=True)
         self.assertEqual(expected_unique, x_unique)
         self.assertEqual(expected_inverse, x_inverse)
-
-        x_unique, x_inverse, x_counts = torch.unique(
-            x, sorted=True, return_inverse=True, return_counts=True)
-        self.assertEqual(expected_unique, x_unique)
-        self.assertEqual(expected_inverse, x_inverse)
-        self.assertEqual(expected_counts, x_counts)
 
         # Tests per-element unique on a higher rank tensor.
         y = x.view(2, 2, 2)
@@ -10354,42 +10382,27 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(expected_unique, y_unique)
         self.assertEqual(expected_inverse.view(y.size()), y_inverse)
 
-        y_unique, y_inverse, y_counts = y.unique(
-            sorted=True, return_inverse=True, return_counts=True)
-        self.assertEqual(expected_unique, y_unique)
-        self.assertEqual(expected_inverse.view(y.size()), y_inverse)
-        self.assertEqual(expected_counts, y_counts)
-
         # Tests unique on other types.
-        int_unique, int_inverse, int_counts = torch.unique(
-            torch.IntTensor([2, 1, 2]),
-            sorted=True,
-            return_inverse=True,
-            return_counts=True
-        )
+        int_unique, int_inverse = torch.unique(
+            torch.IntTensor([2, 1, 2]), sorted=True, return_inverse=True)
         self.assertEqual(torch.IntTensor([1, 2]), int_unique)
         self.assertEqual(torch.LongTensor([1, 0, 1]), int_inverse)
-        self.assertEqual(torch.LongTensor([1, 2]), int_counts)
 
-        double_unique, double_inverse, double_counts = torch.unique(
+        double_unique, double_inverse = torch.unique(
             torch.DoubleTensor([2., 1.5, 2.1, 2.]),
             sorted=True,
             return_inverse=True,
-            return_counts=True
         )
         self.assertEqual(torch.DoubleTensor([1.5, 2., 2.1]), double_unique)
         self.assertEqual(torch.LongTensor([1, 0, 2, 1]), double_inverse)
-        self.assertEqual(torch.LongTensor([1, 2, 1]), double_counts)
 
-        byte_unique, byte_inverse, byte_counts = torch.unique(
+        byte_unique, byte_inverse = torch.unique(
             torch.ByteTensor([133, 7, 7, 7, 42, 128]),
             sorted=True,
             return_inverse=True,
-            return_counts=True
         )
         self.assertEqual(torch.ByteTensor([7, 42, 128, 133]), byte_unique)
         self.assertEqual(torch.LongTensor([3, 0, 0, 0, 1, 2]), byte_inverse)
-        self.assertEqual(torch.LongTensor([3, 1, 1, 1]), byte_counts)
 
     def test_unique_dim(self):
         def run_test(dtype=torch.float):
@@ -10406,7 +10419,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                                                   [2., 1.],
                                                   [0., 1.]]], dtype=dtype)
             expected_inverse_dim0 = torch.tensor([0, 0])
-            expected_counts_dim0 = torch.tensor([2])
             expected_unique_dim1 = torch.tensor([[[0., 1.],
                                                   [1., 1.],
                                                   [2., 1.]],
@@ -10414,7 +10426,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                                                   [1., 1.],
                                                   [2., 1.]]], dtype=dtype)
             expected_inverse_dim1 = torch.tensor([1, 0, 2, 0])
-            expected_counts_dim1 = torch.tensor([2, 1, 1])
             expected_unique_dim2 = torch.tensor([[[1., 1.],
                                                   [0., 1.],
                                                   [2., 1.],
@@ -10424,94 +10435,30 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                                                   [2., 1.],
                                                   [0., 1.]]], dtype=dtype)
             expected_inverse_dim2 = torch.tensor([0, 1])
-            expected_counts_dim2 = torch.tensor([1, 1])
 
             # dim0
             x_unique = torch.unique(x, dim=0)
             self.assertEqual(expected_unique_dim0, x_unique)
 
-            x_unique, x_inverse = torch.unique(
-                x,
-                return_inverse=True,
-                return_counts=False,
-                dim=0)
+            x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=0)
             self.assertEqual(expected_unique_dim0, x_unique)
             self.assertEqual(expected_inverse_dim0, x_inverse)
-
-            x_unique, x_counts = torch.unique(
-                x,
-                return_inverse=False,
-                return_counts=True,
-                dim=0)
-            self.assertEqual(expected_unique_dim0, x_unique)
-            self.assertEqual(expected_counts_dim0, x_counts)
-
-            x_unique, x_inverse, x_counts = torch.unique(
-                x,
-                return_inverse=True,
-                return_counts=True,
-                dim=0)
-            self.assertEqual(expected_unique_dim0, x_unique)
-            self.assertEqual(expected_inverse_dim0, x_inverse)
-            self.assertEqual(expected_counts_dim0, x_counts)
 
             # dim1
             x_unique = torch.unique(x, dim=1)
             self.assertEqual(expected_unique_dim1, x_unique)
 
-            x_unique, x_inverse = torch.unique(
-                x,
-                return_inverse=True,
-                return_counts=False,
-                dim=1)
+            x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=1)
             self.assertEqual(expected_unique_dim1, x_unique)
             self.assertEqual(expected_inverse_dim1, x_inverse)
-
-            x_unique, x_counts = torch.unique(
-                x,
-                return_inverse=False,
-                return_counts=True,
-                dim=1)
-            self.assertEqual(expected_unique_dim1, x_unique)
-            self.assertEqual(expected_counts_dim1, x_counts)
-
-            x_unique, x_inverse, x_counts = torch.unique(
-                x,
-                return_inverse=True,
-                return_counts=True,
-                dim=1)
-            self.assertEqual(expected_unique_dim1, x_unique)
-            self.assertEqual(expected_inverse_dim1, x_inverse)
-            self.assertEqual(expected_counts_dim1, x_counts)
 
             # dim2
             x_unique = torch.unique(x, dim=2)
             self.assertEqual(expected_unique_dim2, x_unique)
 
-            x_unique, x_inverse = torch.unique(
-                x,
-                return_inverse=True,
-                return_counts=False,
-                dim=2)
+            x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=2)
             self.assertEqual(expected_unique_dim2, x_unique)
             self.assertEqual(expected_inverse_dim2, x_inverse)
-
-            x_unique, x_counts = torch.unique(
-                x,
-                return_inverse=False,
-                return_counts=True,
-                dim=2)
-            self.assertEqual(expected_unique_dim2, x_unique)
-            self.assertEqual(expected_counts_dim2, x_counts)
-
-            x_unique, x_inverse, x_counts = torch.unique(
-                x,
-                return_inverse=True,
-                return_counts=True,
-                dim=2)
-            self.assertEqual(expected_unique_dim2, x_unique)
-            self.assertEqual(expected_inverse_dim2, x_inverse)
-            self.assertEqual(expected_counts_dim2, x_counts)
 
         run_test(torch.float)
         run_test(torch.double)
