@@ -944,12 +944,12 @@ void initJitScriptBindings(PyObject* module) {
              std::shared_ptr<Module> orig) {
             std::vector<const NamedIValue*> member_inputs;
             for (auto& p : params) {
-              auto np = std::get<0>(p)->find_parameter(std::get<1>(p));
-              if (np == nullptr) {
-                np = std::get<0>(p)->find_buffer(std::get<1>(p));
+              auto named_param = std::get<0>(p)->find_parameter(std::get<1>(p));
+              if (named_param == nullptr) {
+                named_param = std::get<0>(p)->find_buffer(std::get<1>(p));
               }
-              AT_ASSERT(np != nullptr);
-              member_inputs.push_back(np);
+              AT_ASSERT(named_param != nullptr);
+              member_inputs.push_back(named_param);
             }
 
             Method* orig_method = orig->find_method(name);

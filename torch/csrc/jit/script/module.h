@@ -457,12 +457,6 @@ struct Module {
     return parameters[name].slot();
   }
 
-  const NamedIValue* get_named_parameter(const std::string& name) const {
-    auto value = parameters.find(name);
-    AT_CHECK(value != nullptr, "Could not find parameter ", name);
-    return value;
-  }
-
   void set_parameter(const std::string& name, at::Tensor v) {
     *parameter_slot(name) = std::move(v);
   }
@@ -615,7 +609,7 @@ struct Module {
           kv.key(),
           kv.value().slot()->toTensor(),
           /*is_buffer=*/false);
-      parameter_remap[&kv.value()] = curr->get_named_parameter(kv.key());
+      parameter_remap[&kv.value()] = curr->find_parameter(kv.key());
     }
     for (auto& kv : attributes) {
       if (!kv.value().type->isSubtypeOf(TensorType::get())) {
