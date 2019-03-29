@@ -210,7 +210,8 @@ public:
     impl->refresh_numel();
     return impl;
   }
-
+private:
+    explicit SparseTensorImpl(at::TensorTypeId, const caffe2::TypeMeta&, at::Tensor indices, at::Tensor values);
 };
 
 } // namespace at
