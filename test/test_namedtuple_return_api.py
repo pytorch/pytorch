@@ -65,6 +65,16 @@ class TestNamedTupleAPI(unittest.TestCase):
             op(operators=['gels'], input=(a,), names=('solution', 'QR'), hasout=True),
         ]
 
+        for op in operators:
+            for f in op.operators:
+                ret = getattr(a, f)(*op.input)
+                for i, name in enumerate(op.names):
+                    self.assertIs(getattr(ret, name), ret[i])
+                if op.hasout:
+                    ret1 = getattr(torch, f)(a, *op.input, out=tuple(ret))
+                    for i, name in enumerate(op.names):
+                        self.assertIs(getattr(ret, name), ret[i])
+
         all_covered_operators = set([x for y in operators for x in y.operators])
         all_covered_operators |= {
             # operators manually covered below
@@ -75,16 +85,6 @@ class TestNamedTupleAPI(unittest.TestCase):
         The set of covered operators does not match the `all_operators_with_namedtuple_return` of
         test_namedtuple_return_api.py. Do you forget to add test for that operator?
         '''))
-
-        for op in operators:
-            for f in op.operators:
-                ret = getattr(a, f)(*op.input)
-                for i, name in enumerate(op.names):
-                    self.assertIs(getattr(ret, name), ret[i])
-                if op.hasout:
-                    ret1 = getattr(torch, f)(a, *op.input, out=tuple(ret))
-                    for i, name in enumerate(op.names):
-                        self.assertIs(getattr(ret, name), ret[i])
 
         # test pstrf
         b = torch.mm(a, a.t())
