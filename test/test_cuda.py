@@ -2361,8 +2361,8 @@ class TestCuda(TestCase):
 
     @skipIfRocm
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_btrifact(self):
-        _TestTorchMixin._test_btrifact(self, lambda t: t.cuda())
+    def test_lu(self):
+        _TestTorchMixin._test_lu(self, lambda t: t.cuda())
 
     @skipIfRocm
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
