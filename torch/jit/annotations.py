@@ -2,7 +2,8 @@ import sys
 import ast
 import inspect
 import torch
-from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict
+from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
+    BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType
 from textwrap import dedent
@@ -179,3 +180,33 @@ def ann_to_type(ann):
     elif ann is str:
         return StringType.get()
     raise ValueError("Unknown type annotation: '{}'".format(ann.__name__))
+
+
+__all__ = [
+    'List',
+    'BroadcastingList1',
+    'BroadcastingList2',
+    'BroadcastingList3',
+    'Tuple',
+    'is_tuple',
+    'is_list',
+    'Dict',
+    'is_dict',
+    'TensorType',
+    'TupleType',
+    'FloatType',
+    'IntType',
+    'ListType',
+    'StringType',
+    'DictType',
+    'Module',
+    # TODO: Consider not exporting these during wildcard import (reserve
+    # that for the types; for idiomatic typing code.)
+    'get_signature',
+    'get_num_params',
+    'parse_type_line',
+    'get_type_line',
+    'split_type_line',
+    'try_real_annotations',
+    'ann_to_type',
+]
