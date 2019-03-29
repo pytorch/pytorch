@@ -322,6 +322,9 @@ inline bool Tensor::is_distributed() const {
 inline bool Tensor::is_floating_point() const {
     return type().is_floating_point(*this);
 }
+inline bool Tensor::is_contiguous() const {
+    return type().is_contiguous(*this);
+}
 inline bool Tensor::is_complex() const {
     return type().is_complex(*this);
 }

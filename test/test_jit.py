@@ -3223,6 +3223,19 @@ a")
         def tuple_call():
             return foo((1, 2))
 
+    def test_contiguous(self):
+        @torch.jit.script
+        def foo(x):
+            return 3 + x.contiguous()
+
+        x = torch.tensor(1.0, dtype=torch.float, requires_grad=True)
+        output = foo(x)
+        self.assertEqual(output, 3.0)
+
+
+
+
+
     def test_advancedindex(self):
         def consec(size, start=0):
             numel = torch.tensor(size).prod().item()

@@ -417,6 +417,7 @@ class CAFFE2_API Tensor {
   Tensor isclose(const Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const;
   bool is_distributed() const;
   bool is_floating_point() const;
+  bool is_contiguous() const;
   bool is_complex() const;
   bool is_nonzero() const;
   bool is_same_size(const Tensor & other) const;

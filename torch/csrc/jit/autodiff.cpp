@@ -796,7 +796,7 @@ static std::vector<Value*> linearGradientForNode(
   WithInsertPoint guard(block);
   auto results = GradientHelper(node).gradient(grad_values);
   return fmap(results, [block, linear](Value* grad) -> Value* {
-    if (!grad)
+    if (!grad || grad->mustBeNone())
       return nullptr;
     block->registerOutput(grad);
     return linear->addOutput()->copyMetadata(grad);
