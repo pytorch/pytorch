@@ -278,7 +278,7 @@ struct ReduceOp {
   InputCalculator input_calc;
   OutputCalculator output_calc;
   const void* src;
-  char* dst[2];
+  char* dst[2]; //TODO: make it accept more then two destinations
   void* buffer;
   int* semaphores;
   bool accumulate;
@@ -292,12 +292,11 @@ struct ReduceOp {
     , input_calc(input_calc)
     , output_calc(output_calc)
     , src(src)
-    //, dst(dst)
     , buffer(buffer)
     , semaphores(semaphores)
     , ident(ident)
     , noutputs(noutputs) {
-    for (int i = 0; i < noutputs; i++) {
+    for (int i = 0; i < 2; i++) {
       dst[i] = dst_[i];
     }
   }
@@ -531,7 +530,7 @@ static void launch_reduce_kernel(const ReduceConfig& config, const R& reduction)
 template <typename scalar_t, typename out_scalar_t, typename ops_t, typename ident_t=double>
 inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t ident=0) {
   //AT_ASSERT(iter.numel() > 0 && iter.ntensors() == 2);
-  AT_ASSERT(iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
+  AT_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
 
   using traits = binary_function_traits<decltype(&ops_t::reduce)>;
   using arg_t = typename traits::arg1_t;
