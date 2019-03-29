@@ -47,7 +47,14 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
         X.get_dim(1), " is not equal to kernel channels * group:",
         filter.get_dim(1), "*", group_);
 
-    if (cached_weights_descriptor_ != filter.get_descriptor()) {
+    bool input_changed = (cached_X_descriptor_ != X.get_descriptor());
+    if (input_changed) {
+      op_key_.clear();
+      cached_X_descriptor_ = X.dup_descriptor();
+    }
+
+    bool weights_changed = (cached_weights_descriptor_ != filter.get_descriptor());
+    if (weights_changed || (input_changed && algo_ == ialgo::convolution_winograd)) {
       op_key_.clear();
       cached_weights_descriptor_ = filter.dup_descriptor();
       CAFFE_ENFORCE(filter.get_data_type() == idtype::s8 && filter.has_scale());
@@ -87,11 +94,6 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
         bias_.set_scale(bias_scales);
         bias_.feed_from(bias);
       }
-    }
-
-    if (cached_X_descriptor_ != X.get_descriptor()) {
-      op_key_.clear();
-      cached_X_descriptor_ = X.dup_descriptor();
     }
 
     if (InputSize() > last_input_) {
