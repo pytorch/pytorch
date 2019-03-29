@@ -2644,7 +2644,6 @@ class _TestTorchMixin(object):
         scale = 1.0
         zero_point = 2
         qr = r.quantize_linear(scale, zero_point)
-        # sys.stderr.write(str(qr.dtype))
         self.assertEqual(qr.q_scale(), scale)
         self.assertEqual(qr.q_zero_point(), zero_point)
         rqr = qr.dequantize()

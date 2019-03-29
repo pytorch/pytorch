@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/Quantizer.h>
-#include <ATen/QTensorImpl.h>
+#include <ATen/quantized/Quantizer.h>
+#include <ATen/quantized/QTensorImpl.h>
 
 
 namespace at {

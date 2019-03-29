@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
-#include <ATen/Quantizer.h>
-#include <ATen/QTensorImpl.h>
+#include <ATen/quantized/Quantizer.h>
+#include <ATen/quantized/QTensorImpl.h>
 #include <ATen/Type.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorFactories.h>

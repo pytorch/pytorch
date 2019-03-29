@@ -7,7 +7,8 @@
 #include <cmath>
 #include <type_traits>
 #include <ATen/test/test_assert.h>
-#include <ATen/Quantizer.h>
+// For quantize_uint8
+#include <ATen/quantized/Quantizer.h>
 
 using namespace at;
 

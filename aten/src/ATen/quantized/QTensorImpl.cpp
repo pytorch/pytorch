@@ -1,4 +1,4 @@
-#include <ATen/QTensorImpl.h>
+#include <ATen/quantized/QTensorImpl.h>
 
 namespace at {
 

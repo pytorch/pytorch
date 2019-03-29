@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/core/TensorImpl.h>
-#include <ATen/Quantizer.h>
 #include <c10/util/Exception.h>
+#include <ATen/quantized/Quantizer.h>
 
 namespace at {
 
