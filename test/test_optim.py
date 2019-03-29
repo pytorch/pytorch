@@ -11,7 +11,8 @@ from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, \
-    ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, _LRScheduler
+    ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, _LRScheduler, \
+    CyclicLR
 from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -790,6 +791,165 @@ class TestLRScheduler(TestCase):
         schedulers[1] = CosineAnnealingLR(self.opt, epochs, eta_min)
         self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
 
+    def test_cycle_lr_invalid_mode(self):
+        with self.assertRaises(ValueError):
+            scheduler = CyclicLR(self.opt, base_lr=0, max_lr=0, mode="CATS")
+
+    def test_cycle_lr_triangular_mode_one_lr(self):
+        lr_target = [1, 2, 3, 4, 5, 4, 3, 2, 1, 2, 3]
+        momentum_target = [5, 4, 3, 2, 1, 2, 3, 4, 5, 4, 3]
+        lr_targets = [lr_target, lr_target]
+        momentum_targets = [momentum_target, momentum_target]
+        scheduler = CyclicLR(self.opt, base_lr=1, max_lr=5, step_size_up=4,
+                             cycle_momentum=True, base_momentum=1, max_momentum=5,
+                             mode='triangular')
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, len(lr_target))
+
+    def test_cycle_lr_triangular_mode_one_lr_no_momentum(self):
+        lr_target = [1, 2, 3, 4, 5, 4, 3, 2, 1, 2, 3]
+        lr_targets = [lr_target, lr_target]
+        momentum_target = [self.opt.defaults['momentum']] * len(lr_target)
+        momentum_targets = [momentum_target, momentum_target]
+        scheduler = CyclicLR(self.opt, base_lr=1, max_lr=5, step_size_up=4,
+                             cycle_momentum=False, mode='triangular')
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, len(lr_target))
+
+    def test_cycle_lr_triangular2_mode_one_lr(self):
+        lr_target = [1, 2, 3, 4, 5, 4, 3, 2, 1, 1.5, 2.0, 2.5, 3.0, 2.5, 2.0, 1.5,
+                     1, 1.25, 1.50, 1.75, 2.00, 1.75]
+        momentum_target = [5.0, 4.0, 3.0, 2.0, 1.0, 2.0, 3.0, 4.0, 5.0, 4.5, 4.0,
+                           3.5, 3.0, 3.5, 4.0, 4.5, 5.0, 4.75, 4.5, 4.25, 4.0, 4.25]
+        lr_targets = [lr_target, lr_target]
+        momentum_targets = [momentum_target, momentum_target]
+        scheduler = CyclicLR(self.opt, base_lr=1, max_lr=5, step_size_up=4,
+                             cycle_momentum=True, base_momentum=1, max_momentum=5,
+                             mode='triangular2')
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, len(lr_target))
+
+    def test_cycle_lr_exp_range_mode_one_lr(self):
+        base_lr, max_lr = 1, 5
+        diff_lr = max_lr - base_lr
+        gamma = 0.9
+        xs = [0, 0.25, 0.5, 0.75, 1, 0.75, 0.50, 0.25, 0, 0.25, 0.5, 0.75, 1]
+        lr_target = list(map(lambda x: base_lr + x[1] * diff_lr * gamma**x[0], enumerate(xs)))
+        momentum_target = list(map(lambda x: max_lr - x[1] * diff_lr * gamma**x[0], enumerate(xs)))
+        lr_targets = [lr_target, lr_target]
+        momentum_targets = [momentum_target, momentum_target]
+        scheduler = CyclicLR(self.opt, base_lr=base_lr,
+                             max_lr=max_lr, step_size_up=4,
+                             cycle_momentum=True, base_momentum=base_lr, max_momentum=max_lr,
+                             mode='exp_range', gamma=gamma)
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, len(lr_target))
+
+    def test_cycle_lr_triangular_mode(self):
+        lr_target_1 = [1, 2, 3, 4, 5, 4, 3, 2, 1, 2, 3]
+        lr_target_2 = list(map(lambda x: x + 1, lr_target_1))
+        lr_targets = [lr_target_1, lr_target_2]
+        momentum_target_1 = [5, 4, 3, 2, 1, 2, 3, 4, 5, 4, 3]
+        momentum_target_2 = list(map(lambda x: x + 1, momentum_target_1))
+        momentum_targets = [momentum_target_1, momentum_target_2]
+        scheduler = CyclicLR(self.opt, base_lr=[1, 2], max_lr=[5, 6], step_size_up=4,
+                             cycle_momentum=True, base_momentum=[1, 2], max_momentum=[5, 6],
+                             mode='triangular')
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, len(lr_target_1))
+
+    def test_cycle_lr_triangular2_mode(self):
+        lr_target_1 = [1, 2, 3, 4, 5, 4, 3, 2, 1, 1.5, 2.0, 2.5, 3.0, 2.5, 2.0, 1.5, 1,
+                       1.25, 1.50, 1.75, 2.00, 1.75]
+        lr_target_2 = list(map(lambda x: x + 2, lr_target_1))
+        lr_targets = [lr_target_1, lr_target_2]
+        momentum_target_1 = [5.0, 4.0, 3.0, 2.0, 1.0, 2.0, 3.0, 4.0, 5.0, 4.5, 4.0, 3.5,
+                             3.0, 3.5, 4.0, 4.5, 5.0, 4.75, 4.5, 4.25, 4.0, 4.25]
+        momentum_target_2 = list(map(lambda x: x + 2, momentum_target_1))
+        momentum_targets = [momentum_target_1, momentum_target_2]
+        scheduler = CyclicLR(self.opt, base_lr=[1, 3], max_lr=[5, 7], step_size_up=4,
+                             cycle_momentum=True, base_momentum=[1, 3], max_momentum=[5, 7],
+                             mode='triangular2')
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, len(lr_target_1))
+
+    def test_cycle_lr_exp_range_mode(self):
+        base_lr_1, max_lr_1 = 1, 5
+        base_lr_2, max_lr_2 = 5, 12
+
+        diff_lr_1 = max_lr_1 - base_lr_1
+        diff_lr_2 = max_lr_2 - base_lr_2
+
+        gamma = 0.9
+        xs = [0, 0.25, 0.5, 0.75, 1, 0.75, 0.50, 0.25, 0, 0.25, 0.5, 0.75, 1]
+        lr_target_1 = list(map(lambda x: base_lr_1 + x[1] * diff_lr_1 * gamma**x[0], enumerate(xs)))
+        lr_target_2 = list(map(lambda x: base_lr_2 + x[1] * diff_lr_2 * gamma**x[0], enumerate(xs)))
+        lr_targets = [lr_target_1, lr_target_2]
+        momentum_target_1 = list(map(lambda x: max_lr_1 - x[1] * diff_lr_1 * gamma**x[0], enumerate(xs)))
+        momentum_target_2 = list(map(lambda x: max_lr_2 - x[1] * diff_lr_2 * gamma**x[0], enumerate(xs)))
+        momentum_targets = [momentum_target_1, momentum_target_2]
+        scheduler = CyclicLR(self.opt, base_lr=[base_lr_1, base_lr_2],
+                             max_lr=[max_lr_1, max_lr_2], step_size_up=4,
+                             cycle_momentum=True, base_momentum=[base_lr_1, base_lr_2],
+                             max_momentum=[max_lr_1, max_lr_2],
+                             mode='exp_range', gamma=gamma)
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, len(lr_target_1))
+
+    def test_cycle_lr_triangular_mode_step_size_up_down(self):
+        lr_target = [1.0, 2.0, 3.0, 4.0, 5.0, 13.0 / 3, 11.0 / 3, 9.0 / 3, 7.0 / 3, 5.0 / 3, 1.0]
+        lr_targets = [lr_target, lr_target]
+        momentum_target = [5.0, 4.0, 3.0, 2.0, 1.0, 5.0 / 3, 7.0 / 3, 3.0, 11.0 / 3, 13.0 / 3, 5.0]
+        momentum_targets = [momentum_target, momentum_target]
+
+        scheduler = CyclicLR(self.opt, base_lr=1, max_lr=5,
+                             step_size_up=4,
+                             step_size_down=6,
+                             cycle_momentum=True,
+                             base_momentum=1, max_momentum=5,
+                             mode='triangular')
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, len(lr_target))
+
+    def test_cycle_lr_triangular2_mode_step_size_up_down(self):
+        lr_base_target = ([
+            1.0, 3.0, 5.0, 13.0 / 3, 11.0 / 3, 9.0 / 3, 7.0 / 3, 5.0 / 3, 1.0, 2.0, 3.0, 8.0 / 3,
+            7.0 / 3, 6.0 / 3, 5.0 / 3, 4.0 / 3, 1.0, 3.0 / 2, 2.0, 11.0 / 6, 10.0 / 6, 9.0 / 6,
+            8.0 / 6, 7.0 / 6
+        ])
+        momentum_base_target = ([
+            5.0, 3.0, 1.0, 5.0 / 3, 7.0 / 3, 3.0, 11.0 / 3, 13.0 / 3, 5.0, 4.0, 3.0, 10.0 / 3,
+            11.0 / 3, 4.0, 13.0 / 3, 14.0 / 3, 5.0, 4.5, 4.0, 25.0 / 6, 13.0 / 3, 4.5, 14.0 / 3,
+            29.0 / 6
+        ])
+        deltas = [2 * i for i in range(0, 2)]
+        base_lrs = [1 + delta for delta in deltas]
+        max_lrs = [5 + delta for delta in deltas]
+        lr_targets = [[x + delta for x in lr_base_target] for delta in deltas]
+        momentum_targets = [[x + delta for x in momentum_base_target] for delta in deltas]
+        scheduler = CyclicLR(
+            self.opt,
+            base_lr=base_lrs,
+            max_lr=max_lrs,
+            step_size_up=2,
+            step_size_down=6,
+            cycle_momentum=True,
+            base_momentum=base_lrs,
+            max_momentum=max_lrs,
+            mode='triangular2')
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, len(lr_base_target))
+
+    def test_cycle_lr_exp_range_mode_step_size_up_down(self):
+        base_lr, max_lr = 1, 5
+        diff_lr = max_lr - base_lr
+        gamma = 0.9
+        xs = ([
+            0.0, 0.5, 1.0, 5.0 / 6, 4.0 / 6, 3.0 / 6, 2.0 / 6, 1.0 / 6, 0.0, 0.5, 1.0, 5.0 / 6,
+            4.0 / 6
+        ])
+        lr_target = [base_lr + x * diff_lr * gamma**i for i, x in enumerate(xs)]
+        lr_targets = [lr_target, lr_target]
+        momentum_target = [max_lr - x * diff_lr * gamma**i for i, x in enumerate(xs)]
+        momentum_targets = [momentum_target, momentum_target]
+        scheduler = CyclicLR(self.opt, base_lr=base_lr, max_lr=max_lr,
+                             step_size_up=2, step_size_down=6,
+                             cycle_momentum=True, base_momentum=base_lr,
+                             max_momentum=max_lr,
+                             mode='exp_range', gamma=gamma)
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, len(lr_target))
+
     def test_lambda_lr(self):
         epochs = 10
         self.opt.param_groups[0]['lr'] = 0.05
@@ -904,6 +1064,22 @@ class TestLRScheduler(TestCase):
                 self.assertAlmostEqual(target[epoch], param_group['lr'],
                                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                            epoch, target[epoch], param_group['lr']), delta=1e-5)
+
+    def _test_cycle_lr(self, scheduler, lr_targets, momentum_targets, batch_iterations, verbose=False):
+        for batch_num in range(batch_iterations):
+            scheduler.step(batch_num)
+            if verbose:
+                print('batch{}:\tlr={},momentum={}'.format(batch_num, self.opt.param_groups[0]['lr'],
+                                                           self.opt.param_groups[0]['momentum']))
+            for param_group, lr_target, momentum_target in zip(self.opt.param_groups, lr_targets, momentum_targets):
+                self.assertAlmostEqual(
+                    lr_target[batch_num], param_group['lr'],
+                    msg='LR is wrong in batch_num {}: expected {}, got {}'.format(
+                        batch_num, lr_target[batch_num], param_group['lr']), delta=1e-5)
+                self.assertAlmostEqual(
+                    momentum_target[batch_num], param_group['momentum'],
+                    msg='Momentum is wrong in batch_num {}: expected {}, got {}'.format(
+                        batch_num, momentum_target[batch_num], param_group['momentum']), delta=1e-5)
 
 if __name__ == '__main__':
     run_tests()
