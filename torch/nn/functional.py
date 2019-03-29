@@ -10,6 +10,7 @@ from . import _reduction as _Reduction
 from .modules import utils
 from ._functions import vision
 from .modules.utils import _single, _pair, _triple, _list_with_default
+from . import grad  # noqa: F401
 from . import _VF
 from .._jit_internal import weak_script, List
 
