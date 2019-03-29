@@ -900,9 +900,9 @@ class TestCaffe2Backend(unittest.TestCase):
     def test_softmax_dtype(self):
         class SoftmaxModel(torch.nn.Module):
             def forward(self, input):
-                return nn.functional.softmax(input, dim=0, dtype=torch.float32)
+                return nn.functional.softmax(input, dim=0, dtype=torch.float64)
 
-        x = torch.randn(1, 2, 3, requires_grad=True, dtype=torch.float64)
+        x = torch.randn(1, 2, 3, requires_grad=True, dtype=torch.float32)
         self.run_model_test(SoftmaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_logsoftmax(self):
