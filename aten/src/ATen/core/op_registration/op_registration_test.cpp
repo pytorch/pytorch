@@ -12,8 +12,6 @@
 
 using c10::RegisterOperators;
 using c10::OperatorKernel;
-using c10::FunctionSchema;
-using c10::Argument;
 using c10::kernel;
 using c10::dispatchKey;
 using c10::Dispatcher;
@@ -39,15 +37,8 @@ struct MockKernel final : OperatorKernel {
 private:
   bool* called_;
 };
-
-FunctionSchema dummySchema(
-    "_test::dummy",
-    "",
-    (std::vector<Argument>{Argument("dummy")}),
-    (std::vector<Argument>{}));
-
 TEST(OperatorRegistrationTest, givenOpWithoutFallbackKernel_whenCallingOpWithWrongDispatchKey_thenFails) {
-  auto registrar = c10::RegisterOperators().op(dummySchema, kernel<DummyKernel>(), dispatchKey(TensorType1()));
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>(), dispatchKey(TensorType1()));
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value());
@@ -57,9 +48,9 @@ TEST(OperatorRegistrationTest, givenOpWithoutFallbackKernel_whenCallingOpWithWro
 }
 
 TEST(OperatorRegistrationTest, givenOpWithFallbackKernelOutOfScope_whenCallingOpWithWrongDispatchKey_thenFails) {
-  auto registrar = c10::RegisterOperators().op(dummySchema, kernel<DummyKernel>(), dispatchKey(TensorType1()));
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>(), dispatchKey(TensorType1()));
   {
-    auto inner_registrar = c10::RegisterOperators().op(dummySchema, kernel<DummyKernel>());
+    auto inner_registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>());
     // this registered a fallback kernel, but now that registration goes out of scope and deregisters it
   }
 
@@ -72,7 +63,7 @@ TEST(OperatorRegistrationTest, givenOpWithFallbackKernelOutOfScope_whenCallingOp
 
 TEST(OperatorRegistrationTest, givenOpWithOnlyFallbackKernel_whenCallingOp_thenCallsFallbackKernel) {
   bool called = false;
-  auto registrar = c10::RegisterOperators().op(dummySchema, kernel<MockKernel>(&called)); // note: no dispatch key means this is the fallback kernel
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called)); // note: no dispatch key means this is the fallback kernel
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value());
@@ -84,9 +75,9 @@ TEST(OperatorRegistrationTest, givenOpWithOnlyFallbackKernel_whenCallingOp_thenC
 TEST(OperatorRegistrationTest, givenOpWithOnlyFallbackKernelAndOtherKernelOutOfScope_whenCallingOp_thenCallsFallbackKernel) {
   bool called = false;
   bool other_called = false;
-  auto registrar = c10::RegisterOperators().op(dummySchema, kernel<MockKernel>(&called)); // note: no dispatch key means this is the fallback kernel
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called)); // note: no dispatch key means this is the fallback kernel
   {
-    auto inner_registrar = c10::RegisterOperators().op(dummySchema, kernel<MockKernel>(&other_called), dispatchKey(TensorType2()));
+    auto inner_registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&other_called), dispatchKey(TensorType2()));
   }
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
@@ -101,8 +92,8 @@ TEST(OperatorRegistrationTest, givenOpWithFirstFallbackAndThenOtherKernel_whenCa
   bool called_kernel = false;
   bool called_fallback = false;
   auto registrar = c10::RegisterOperators()
-    .op(dummySchema, kernel<MockKernel>(&called_fallback)) // note: no dispatch key means this is the fallback kernel
-    .op(dummySchema, kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()));
+    .op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_fallback)) // note: no dispatch key means this is the fallback kernel
+    .op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()));
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value());
@@ -117,8 +108,8 @@ TEST(OperatorRegistrationTest, givenOpWithFirstFallbackAndThenOtherKernel_whenCa
   bool called_kernel = false;
   bool called_fallback = false;
   auto registrar = c10::RegisterOperators()
-    .op(dummySchema, kernel<MockKernel>(&called_fallback)) // note: no dispatch key means this is the fallback kernel
-    .op(dummySchema, kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()));
+    .op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_fallback)) // note: no dispatch key means this is the fallback kernel
+    .op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()));
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value());
@@ -134,8 +125,8 @@ TEST(OperatorRegistrationTest, givenOpWithFirstOtherAndThenFallbackKernel_whenCa
   bool called_kernel = false;
   bool called_fallback = false;
   auto registrar = c10::RegisterOperators()
-    .op(dummySchema, kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()))
-    .op(dummySchema, kernel<MockKernel>(&called_fallback)); // note: no dispatch key means this is the fallback kernel
+    .op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()))
+    .op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_fallback)); // note: no dispatch key means this is the fallback kernel
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value());
@@ -150,8 +141,8 @@ TEST(OperatorRegistrationTest, givenOpWithFirstOtherAndThenFallbackKernel_whenCa
   bool called_kernel = false;
   bool called_fallback = false;
   auto registrar = c10::RegisterOperators()
-    .op(dummySchema, kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()))
-    .op(dummySchema, kernel<MockKernel>(&called_fallback)); // note: no dispatch key means this is the fallback kernel
+    .op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()))
+    .op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_fallback)); // note: no dispatch key means this is the fallback kernel
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value());
@@ -163,7 +154,7 @@ TEST(OperatorRegistrationTest, givenOpWithFirstOtherAndThenFallbackKernel_whenCa
 }
 
 TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegistering_thenOnlyRegistersSchema) {
-  auto registrar = c10::RegisterOperators().op(dummySchema);
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()");
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -174,7 +165,7 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegistering_thenOnlyReg
 
 TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRunningOutOfScope_thenSchemaIsGone) {
   {
-    auto registrar = c10::RegisterOperators().op(dummySchema);
+    auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()");
   }
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
@@ -182,10 +173,10 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRunningOutOfScope_thenS
 }
 
 TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringKernelAfterwards_thenCanBeCalled) {
-  auto registrar1 = c10::RegisterOperators().op(dummySchema);
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()");
 
   bool called_kernel = false;
-  auto registrar2 = c10::RegisterOperators().op(dummySchema, kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()));
+  auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()));
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -194,10 +185,10 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringKernelAfterw
 }
 
 TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringKernelAfterwardsAndRunsOutOfScope_thenSchemaIsStillThereButCannotBeCalledAnymore) {
-  auto registrar1 = c10::RegisterOperators().op(dummySchema);
+  auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()");
 
   {
-    auto registrar2 = c10::RegisterOperators().op(dummySchema, kernel<DummyKernel>(), dispatchKey(TensorType1()));
+    auto registrar2 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", kernel<DummyKernel>(), dispatchKey(TensorType1()));
   }
 
   auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
