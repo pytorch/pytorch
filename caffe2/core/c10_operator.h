@@ -1,5 +1,7 @@
 #pragma once
 
+#ifndef C10_MOBILE
+
 #include <ATen/core/function_schema.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <vector>
@@ -154,7 +156,6 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
  * - If your operator has a variable number of input tensors, make the first (!)
  *   input an input of type TensorList. There must be no other tensor inputs.
  */
-#ifndef C10_MOBILE
 #define C10_DECLARE_CAFFE2_OPERATOR(OperatorName)                  \
   namespace caffe2 {                                               \
   namespace _c10_ops {                                             \
