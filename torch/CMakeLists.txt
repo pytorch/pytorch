@@ -243,6 +243,7 @@ if (NOT NO_API)
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/embedding.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/named_any.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
