@@ -764,23 +764,23 @@ class TestJit(JitTestCase):
             test_input(func, torch.tensor(0.5, dtype=torch.int64), 2)
         test_dtype()
 
-        if not RUN_CUDA:
-            return
-
         def test_device():
             @torch.jit.script
             def func(x):
-                if x.dtype == torch.device('cuda:0'):
+                if x.dtype == torch.double:
                     a = 0
                 else:
                     a = 1
-                if x.is_cuda():
+                if x.device == torch.device('cuda:0'):
                     a += 1
-                else:
-                    a += 2
+                if x.is_cuda:
+                    a += 1
+                return a
 
-            test_input(func, torch.tensor(0.5).cuda(), 1)
-            test_input(func, torch.tensor(0.5), 3)
+            test_input(func, torch.tensor(0.5), 0)
+            if RUN_CUDA:
+                test_input(func, torch.tensor(0.5).cuda(), 3)
+
         test_device()
 
     def test_index(self):
