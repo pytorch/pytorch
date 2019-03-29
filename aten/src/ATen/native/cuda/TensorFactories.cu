@@ -9,6 +9,8 @@
 
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
+#include <THC/THCGenerator.hpp>
+#include <THC/THCTensorRandom.h>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #include <thrust/execution_policy.h>
@@ -17,6 +19,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cmath>
+
+int const threadsPerBlock = 512;
 
 namespace at {
 namespace native {
@@ -411,6 +415,189 @@ Tensor triu_indices_cuda(
   }
 
   return tensor;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ choice ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+__global__ void generate_samples(
+  int64_t *samples,
+  int64_t k,
+  int64_t n,
+  curandStateMtgp32 *state
+){
+  int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  if (thread_id < n){
+    samples[thread_id] = curand(state) % (thread_id + k + 1);
+  }
+}
+
+template <typename scalar_t>
+__global__ void generate_keys(
+  scalar_t *keys,
+  scalar_t *weights,
+  int64_t n,
+  curandStateMtgp32 *state
+){
+  int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  if(thread_id < n){
+    float u = curand_uniform(state);
+    keys[thread_id] = weights[thread_id] > 0? (scalar_t) __powf(u, (float) 1/weights[thread_id]):-1;
+  }
+}
+
+__global__ void generate_reservoir(
+  int64_t *indices,
+  int64_t *samples,
+  int64_t nb_iterations,
+  int64_t k
+){
+  for(int i = 0; i < nb_iterations; i++){
+    int64_t z = samples[i];
+    if (z < k) {
+      thrust::swap(indices[z], indices[i + k]);
+    }
+  }
+}
+
+Tensor reservoir_sampling_cuda(
+  const Tensor& x,
+  const Tensor& weights,
+  int64_t k
+){
+
+  AT_CHECK(
+    weights.dtype() == kFloat,
+    "The sampling weights must be Float, got", weights.dtype()
+  );
+
+  AT_CHECK(
+    weights.is_contiguous(),
+    "The sampling weights must be contiguous."
+  );
+
+  int n = x.size(0);
+
+  AT_CHECK(
+    n >= k,
+    "Cannot take a larger sample than population when 'replace=False'"
+  );
+
+  auto options = x.options().dtype(at::kLong);
+  dim3 threads(threadsPerBlock);
+
+  THCState *state = at::globalContext().getTHCState();
+  curandStateMtgp32 *gen_states = THCRandom_generatorStates(state);
+
+  if (weights.numel() == 0){
+    Tensor indices_n = at::arange({n}, options);
+
+    int split, begin, end;
+
+    if(2 * k < n){
+      split = n - k;
+      begin = n - k;
+      end = n;
+    } else {
+      split = k;
+      begin = 0;
+      end = k;
+    }
+
+    int nb_iterations = std::min(k, n - k);
+    dim3 blocks((nb_iterations + threadsPerBlock - 1)/threadsPerBlock);
+
+    Tensor samples = at::arange({nb_iterations}, options);
+
+    generate_samples<<<blocks, threads>>>(
+      samples.data<int64_t>(),
+      split,
+      n,
+      gen_states
+    );
+
+    generate_reservoir<<<1, 1>>>(
+      indices_n.data<int64_t>(),
+      samples.data<int64_t>(),
+      nb_iterations,
+      split
+    );
+
+    return x.index_select(
+      0,
+      indices_n.index_select(
+        0,
+        at::arange(begin, end, options)
+      )
+    );
+
+  } else {
+
+    AT_CHECK(
+      weights.device() == x.device(),
+      "The weights must share the same device as the inputs."
+    );
+
+    AT_CHECK(
+      n == weights.numel(),
+      "The weights must have the same number of elements as the input's first dimension."
+    );
+
+    AT_CHECK(
+      weights.dim() == 1,
+      "The weights must 1-dimensional."
+    );
+
+    AT_CHECK(
+      weights.nonzero().numel() >= k,
+      "Cannot have less non-zero weights than the number of samples."
+    );
+
+    AT_CHECK(
+      weights.min().item().toLong() >= 0,
+      "All the weights must be non-negative."
+    );
+
+    Tensor keys = at::empty({n}, weights.options());
+    dim3 all_blocks((n + threadsPerBlock - 1)/threadsPerBlock);
+
+    AT_DISPATCH_FLOATING_TYPES(weights.scalar_type(), "generate keys", [&] {
+      generate_keys<scalar_t><<<all_blocks, threads>>>(
+        keys.data<scalar_t>(),
+        weights.data<scalar_t>(),
+        n,
+        gen_states
+      );
+    });
+
+    return x.index_select(0, std::get<1>(keys.topk(k)));
+  }
+
+}
+
+Tensor choice_cuda(
+  const Tensor& input,
+  const Tensor& weights,
+  bool replace,
+  int64_t k
+){
+  if (replace){
+    return native::sampling_with_replacement(input, weights, k);
+  } else {
+    return reservoir_sampling_cuda(input, weights, k);
+  }
+}
+
+Tensor choice_cuda(
+  const Tensor& input,
+  bool replace,
+  int64_t k
+){
+  at::Tensor weights = at::empty({0}, input.options().dtype(at::kFloat));
+  if (replace){
+    return native::sampling_with_replacement(input, weights, k);
+  } else {
+    return reservoir_sampling_cuda(input, weights, k);
+  }
 }
 
 }} // namespace at::native

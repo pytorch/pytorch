@@ -727,5 +727,182 @@ Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
   }
 AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
 #undef TENSOR
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ choice ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename scalar_t>
+void generate_keys(
+  scalar_t *keys,
+  scalar_t *weights,
+  int n,
+  THGenerator* generator
+){
+  std::lock_guard<std::mutex> lock(generator->mutex);
+
+  for(int i = 0; i < n; i++){
+    scalar_t u = THRandom_standard_uniform(generator);
+    keys[i] = weights[i] > 0? (scalar_t) std::pow(u, 1/weights[i]):-1;
+  }
+
+}
+
+void reservoir_generator_cpu(
+  int64_t *indices,
+  int64_t n,
+  int64_t k,
+  THGenerator* generator
+){
+  std::lock_guard<std::mutex> lock(generator->mutex);
+
+  for(int i = k; i < n; i++){
+    int64_t z = THRandom_random(generator) % (i + 1);
+    if (z < k) {
+        std::swap(indices[z], indices[i]);
+    }
+  }
+
+}
+
+Tensor reservoir_sampling_cpu(
+  const Tensor& x,
+  const Tensor& weights,
+  int64_t k
+){
+
+  AT_CHECK(
+    weights.dtype() == kFloat,
+    "The sampling weights must be Float, got", weights.dtype()
+  );
+
+  AT_CHECK(
+    weights.is_contiguous(),
+    "The sampling weights must be contiguous."
+  );
+
+  int n = x.size(0);
+
+  AT_CHECK(
+    n >= k,
+    "Cannot take a larger sample than population when 'replace=False'"
+  );
+
+  auto options = x.options().dtype(at::kLong);
+  THGenerator* generator = get_generator(nullptr);
+
+  if (weights.numel() == 0){
+    Tensor indices_n = at::arange({n}, options);
+    int split, begin, end;
+    if(2 * k < n){
+      split = n - k;
+      begin = n - k;
+      end = n;
+    } else {
+      split = k;
+      begin = 0;
+      end = k;
+    }
+
+    reservoir_generator_cpu(
+      indices_n.data<int64_t>(),
+      n,
+      split,
+      generator);
+
+      return x.index_select(
+        0,
+        indices_n.index_select(
+          0,
+          at::arange(begin, end, options)
+        )
+      );
+
+  } else {
+
+    AT_CHECK(
+      weights.device() == x.device(),
+      "The weights must share the same device as the inputs."
+    );
+
+    AT_CHECK(
+      n == weights.numel(),
+      "The weights must have the same number of elements as the input's first dimension."
+    );
+
+    AT_CHECK(
+      weights.dim() == 1,
+      "The weights must 1-dimensional."
+    );
+
+    AT_CHECK(
+      weights.nonzero().numel() >= k,
+      "Cannot have less non-zero weights than the number of samples."
+    );
+
+    AT_CHECK(
+      weights.min().item().toLong() >= 0,
+      "All the weights must be non-negative."
+    );
+
+    Tensor keys = at::empty({n}, weights.options());
+
+    AT_DISPATCH_FLOATING_TYPES(weights.scalar_type(), "generate keys", [&] {
+      generate_keys<scalar_t>(
+        keys.data<scalar_t>(),
+        weights.data<scalar_t>(),
+        n,
+        generator);
+    });
+
+    return x.index_select(0, std::get<1>(keys.topk(k)));
+  }
+
+}
+
+Tensor sampling_with_replacement(
+  const Tensor& x,
+  const Tensor& weights,
+  int64_t k
+){
+  int n = x.numel();
+  Tensor samples;
+
+  if (weights.numel() == 0){
+    samples = at::randint(0, n, {k}, x.options().dtype(at::kLong));
+  } else {
+    Tensor uniform_samples = at::rand({k}, weights.options());
+    Tensor cdf = weights.cumsum(0);
+    cdf /= cdf[-1];
+    samples = (uniform_samples.unsqueeze(1) > cdf.unsqueeze(0)).sum(1);
+  }
+
+  return x.index_select(0, samples);
+}
+
+Tensor choice_cpu(
+  const Tensor& input,
+  const Tensor& weights,
+  bool replace,
+  int64_t k
+){
+  if (replace){
+    return native::sampling_with_replacement(input, weights, k);
+  } else {
+    return reservoir_sampling_cpu(input, weights, k);
+  }
+}
+
+Tensor choice_cpu(
+  const Tensor& input,
+  bool replace,
+  int64_t k
+){
+  at::Tensor weights = at::empty({0}, input.options().dtype(at::kFloat));
+  if (replace){
+    return native::sampling_with_replacement(input, weights, k);
+  } else {
+    return reservoir_sampling_cpu(input, weights, k);
+  }
+}
+
 } // namespace native
 } // namespace at
