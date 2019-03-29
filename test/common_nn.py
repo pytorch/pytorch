@@ -923,7 +923,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine',
-        skip_double=TEST_WITH_ROCM,
         test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
@@ -933,7 +932,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm1d',
@@ -942,7 +940,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine_simple_average',
-        skip_double=TEST_WITH_ROCM,
         test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
@@ -952,7 +949,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm1d',
@@ -961,7 +957,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
-        skip_double=TEST_WITH_ROCM,
         test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
@@ -971,7 +966,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input_not_affine',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm2d',
@@ -979,7 +973,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         check_eval=True,
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm2d',
@@ -988,7 +981,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_simple_average',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm2d',
@@ -997,7 +989,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm2d',
@@ -1006,7 +997,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm2d',
@@ -1015,7 +1005,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm3d',
@@ -1186,7 +1175,6 @@ new_module_tests = [
         constructor_args=(4, 5, 3),
         input_size=(2, 4, 10),
         cudnn=True,
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='Conv1d',
@@ -1194,7 +1182,6 @@ new_module_tests = [
         input_size=(2, 4, 10),
         cudnn=True,
         desc='stride',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='Conv1d',
@@ -1202,7 +1189,6 @@ new_module_tests = [
         input_size=(2, 4, 10),
         cudnn=True,
         desc='pad1',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='Conv1d',
@@ -1210,7 +1196,6 @@ new_module_tests = [
         input_size=(2, 4, 10),
         cudnn=True,
         desc='pad2',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='Conv1d',
@@ -1218,7 +1203,6 @@ new_module_tests = [
         input_size=(1, 4, 1),
         cudnn=True,
         desc='pad1size1',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='Conv1d',
@@ -1226,13 +1210,11 @@ new_module_tests = [
         input_size=(1, 4, 1),
         cudnn=True,
         desc='pad2size1',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         fullname='Conv1d_dilated',
         constructor=lambda: nn.Conv1d(4, 5, kernel_size=3, dilation=2),
         input_size=(2, 4, 10),
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         fullname='Conv1d_groups',
