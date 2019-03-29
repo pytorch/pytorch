@@ -10,7 +10,6 @@
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
 #include <THC/THCGenerator.hpp>
-#include <THC/THCTensorRandom.h>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #include <thrust/execution_policy.h>
@@ -22,10 +21,13 @@
 #include <cstddef>
 #include <cmath>
 
-int const threadsPerBlock = 512;
+THCGenerator* THCRandom_getGenerator(THCState* state);
 
 namespace at {
 namespace native {
+
+constexpr uint32_t AT_APPLY_THREADS_PER_BLOCK = 512;
+
 
 Tensor& eye_out_cuda(Tensor& result, int64_t n) {
   return at::native::eye_out_cuda(result, n, /*m=*/-1);
@@ -424,21 +426,27 @@ Tensor triu_indices_cuda(
 __global__ void generate_samples(
   int64_t *samples,
   int64_t k,
+  int64_t n,
   curandStateMtgp32 *state
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-  samples[thread_id] = curand(state) % (thread_id + k + 1);
+  if(thread_id < n){
+    samples[thread_id] = curand(state) % (thread_id + k + 1);
+  }
 }
 
 template <typename scalar_t>
 __global__ void generate_keys(
   scalar_t *keys,
   scalar_t *weights,
+  int64_t n,
   curandStateMtgp32 *state
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-  float u = curand_uniform(state);
-  keys[thread_id] = weights[thread_id] > 0? (scalar_t) __powf(u, (float) 1/weights[thread_id]):-1;
+  if (thread_id < n){
+    float u = curand_uniform(state);
+    keys[thread_id] = weights[thread_id] > 0? (scalar_t) __powf(u, (float) 1/weights[thread_id]):-1;
+  }
 }
 
 __global__ void generate_reservoir(
@@ -479,10 +487,10 @@ Tensor reservoir_sampling_cuda(
   );
 
   auto options = x.options().dtype(at::kLong);
-  dim3 threads(threadsPerBlock);
+  dim3 threads(AT_APPLY_THREADS_PER_BLOCK);
 
   THCState *state = at::globalContext().getTHCState();
-  curandStateMtgp32 *gen_states = THCRandom_generatorStates(state);
+  THCGenerator *generator = THCRandom_getGenerator(state);
 
   if (weights.numel() == 0){
     Tensor indices_n = at::arange({n}, options);
@@ -499,15 +507,16 @@ Tensor reservoir_sampling_cuda(
       end = k;
     }
 
-    int nb_iterations = std::min(k, n - k);
-    dim3 blocks((nb_iterations + threadsPerBlock - 1)/threadsPerBlock);
+    int nb_iterations = n - split;
+    dim3 blocks((nb_iterations + AT_APPLY_THREADS_PER_BLOCK - 1)/AT_APPLY_THREADS_PER_BLOCK);
 
     Tensor samples = at::arange({nb_iterations}, options);
 
     generate_samples<<<blocks, threads>>>(
       samples.data<int64_t>(),
       split,
-      gen_states
+      n,
+      generator->state.gen_states
     );
 
     generate_reservoir<<<1, 1>>>(
@@ -517,6 +526,7 @@ Tensor reservoir_sampling_cuda(
       split
     );
 
+    THCudaCheck(cudaGetLastError());
     return x.index_select(
       0,
       indices_n.index_select(
@@ -553,16 +563,18 @@ Tensor reservoir_sampling_cuda(
     );
 
     Tensor keys = at::empty({n}, weights.options());
-    dim3 all_blocks((n + threadsPerBlock - 1)/threadsPerBlock);
+    dim3 all_blocks((n + AT_APPLY_THREADS_PER_BLOCK - 1)/AT_APPLY_THREADS_PER_BLOCK);
 
     AT_DISPATCH_FLOATING_TYPES(weights.scalar_type(), "generate keys", [&] {
       generate_keys<scalar_t><<<all_blocks, threads>>>(
         keys.data<scalar_t>(),
         weights.data<scalar_t>(),
-        gen_states
+        n,
+        generator->state.gen_states
       );
     });
 
+    THCudaCheck(cudaGetLastError());
     return x.index_select(0, std::get<1>(keys.topk(k)));
   }
 

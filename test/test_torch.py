@@ -3943,7 +3943,7 @@ class _TestTorchMixin(object):
             self.assertTrue((res[:, None] == res).sum() == 95)
 
             # 1 - WEIGHTED Sampling WITHOUT replacement - Different values
-            w = torch.arange(100).float()
+            w = torch.arange(100).float().to(device)
             res = torch.choice(x, w, replace=False, k=95)
             self.assertTrue((res[:, None] == res).sum() == 95)
 
