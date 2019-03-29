@@ -306,6 +306,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: long
    .. automethod:: lt
    .. automethod:: lt_
+   .. automethod:: lu
    .. automethod:: map_
    .. automethod:: masked_scatter_
    .. automethod:: masked_scatter

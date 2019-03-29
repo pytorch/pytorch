@@ -6,23 +6,26 @@ import warnings
 
 __all__ = [
     'btriunpack',
+    'broadcast_tensors',
+    'btrifact',
+    'btrifact_with_info',
+    'cartesian_prod',
     'chain_matmul',
     'einsum',
-    'broadcast_tensors',
+    'gesv',
     'isfinite',
     'isinf',
+    'lu',
     'norm',
     'meshgrid',
     'potrf',
     'pstrf',
     'potrs',
-    'gesv',
     'split',
     'stft',
     'tensordot',
     'trtrs',
     'unique',
-    'cartesian_prod',
 ]
 
 
@@ -81,7 +84,7 @@ def split(tensor, split_size_or_sections, dim=0):
 
 
 def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
-    r"""Unpacks the data and pivots from a batched LU factorization (btrifact) of a tensor.
+    r"""Unpacks the data and pivots from a LU factorization of a tensor.
 
     Returns a tuple of tensors as ``(the pivots, the L tensor, the U tensor)``.
 
@@ -94,7 +97,7 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     Example::
 
         >>> A = torch.randn(2, 3, 3)
-        >>> A_LU, pivots = A.btrifact()
+        >>> A_LU, pivots = A.lu()
         >>> P, A_L, A_U = torch.btriunpack(A_LU, pivots)
         >>>
         >>> # can recover A from factorization
@@ -111,13 +114,20 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         L = U = None
 
     if unpack_pivots:
-        P = torch.eye(sz, device=LU_data.device, dtype=LU_data.dtype).expand_as(LU_data).clone()
-        LU_pivots = LU_pivots - 1
-        for idx in product(*map(lambda x: list(range(x)), LU_data.shape[:-2])):
+        LU_pivots_zero_idx = LU_pivots - 1
+        if LU_data.dim() > 2:
+            P = torch.eye(sz, device=LU_data.device, dtype=LU_data.dtype).expand_as(LU_data).clone()
+            for idx in product(*map(lambda x: list(range(x)), LU_data.shape[:-2])):
+                final_order = list(range(sz))
+                for k, j in enumerate(LU_pivots_zero_idx[idx]):
+                    final_order[k], final_order[j] = final_order[j], final_order[k]
+                P[idx] = P[idx].index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
+        else:
+            P = torch.eye(sz, device=LU_data.device, dtype=LU_data.dtype)
             final_order = list(range(sz))
-            for k, j in enumerate(LU_pivots[idx]):
+            for k, j, in enumerate(LU_pivots_zero_idx):
                 final_order[k], final_order[j] = final_order[j], final_order[k]
-            P[idx] = P[idx].index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
+            P = P.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
     else:
         P = None
 
@@ -751,6 +761,8 @@ def trtrs(b, A, upper=True, transpose=False, unitriangular=False, out=None):
     In particular, solves :math:`AX = b` and assumes :math:`A` is upper-triangular
     with the default keyword arguments.
 
+    For more information regarding :func:`torch.trtrs`, please check :func:`torch.triangular_solve`.
+
     .. warning::
         :func:`torch.trtrs` is deprecated in favour of :func:`torch.triangular_solve` and will be
         removed in the next release. Please use :func:`torch.triangular_solve` instead.
@@ -758,3 +770,112 @@ def trtrs(b, A, upper=True, transpose=False, unitriangular=False, out=None):
     warnings.warn("torch.trtrs is deprecated in favour of torch.triangular_solve and will be "
                   "removed in the next release. Please use torch.triangular_solve instead.", stacklevel=2)
     return torch.triangular_solve(b, A, upper=upper, transpose=transpose, unitriangular=unitriangular, out=out)
+
+
+def btrifact(A, pivot=True, out=None):
+    r"""Returns a tuple containing the LU factorization and pivots of :attr:`A`.
+    Pivoting is done if :attr:`pivot` is set.
+
+    For more information regarding :func:`torch.btrifact`, please check :func:`torch.lu`.
+
+    .. warning::
+        :func:`torch.btrifact` is deprecated in favour of :func:`torch.lu` and will be
+        removed in the next release. Please use :func:`torch.lu` instead.
+    """
+    warnings.warn("torch.btrifact is deprecated in favour of torch.lu and will be "
+                  "removed in the next release. Please use torch.lu instead.", stacklevel=2)
+    return lu(A, pivot=pivot, get_infos=False, out=out)
+
+
+def btrifact_with_info(A, pivot=True, out=None):
+    r"""Performs LU factorization and returns additional status information along with the LU
+    factorization and pivots.
+
+    For more information regarding :func:`torch.btrifact_with_info`, please check :func:`torch.lu`.
+
+    .. warning::
+        :func:`torch.btrifact_with_info` is deprecated in favour of :func:`torch.lu` and will
+        be removed in the next release. Please use :func:`torch.lu` with the :attr:`get_infos`
+        argument set to ``True`` instead.
+    """
+    warnings.warn("torch.btrifact_with_info is deprecated in favour of torch.lu and will be "
+                  "removed in the next release. Please use torch.lu with the get_infos argument "
+                  "set to True instead.",
+                  stacklevel=2)
+    return lu(A, pivot=pivot, get_infos=True, out=out)
+
+
+def lu(A, pivot=True, get_infos=False, out=None):
+    r"""Computes the LU factorization of a square matrix or batches of square matrices
+    :attr:`A`. Returns a tuple containing the LU factorization and pivots of :attr:`A`.
+    Pivoting is done if :attr:`pivot` is set to ``True``.
+
+    .. note::
+        The pivots returned by the function are 1-indexed. If :attr:`pivot` is ``False``,
+        then the returned pivots is a tensor filled with zeros of the appropriate size.
+
+    .. note::
+        LU factorization with :attr:`pivot` = ``False`` is not available for CPU, and attempting
+        to do so will throw an error. However, LU factorization with :attr:`pivot` = ``False`` is
+        available for CUDA.
+
+    .. note::
+        This function does not check if the factorization was successful or not if
+        :attr:`get_infos` is ``True`` since the status of the factorization is present in the
+        third element of the return tuple.
+
+    Arguments:
+        A (Tensor): the tensor to factor of size :math:`(*, m, m)`
+        pivot (bool, optional): controls whether pivoting is done. Default: ``True``
+        get_infos (bool, optional): if set to ``True``, returns an info IntTensor.
+                                    Default: ``False``
+        out (tuple, optional): optional output tuple. If :attr:`get_infos` is ``True``,
+                               then the elements in the tuple are Tensor, IntTensor,
+                               and IntTensor. If :attr:`get_infos` is ``False``, then the
+                               elements in the tuple are Tensor, IntTensor. Default: ``None``
+
+    Returns:
+        (Tensor, IntTensor, IntTensor (optional)): A tuple of tensors containing
+
+            - **factorization** (*Tensor*): the factorization of size :math:`(*, m, m)`
+
+            - **pivots** (*IntTensor*): the pivots of size :math:`(*, m)`
+
+            - **infos** (*IntTensor*, *optional*): if :attr:`get_infos` is ``True``, this is a tensor of
+              size :math:`(*)` where non-zero values indicate whether factorization for the matrix or
+              each minibatch has succeeded or failed
+
+    Example::
+
+        >>> A = torch.randn(2, 3, 3)
+        >>> A_LU, pivots = torch.lu(A)
+        >>> A_LU
+        tensor([[[ 1.3506,  2.5558, -0.0816],
+                 [ 0.1684,  1.1551,  0.1940],
+                 [ 0.1193,  0.6189, -0.5497]],
+
+                [[ 0.4526,  1.2526, -0.3285],
+                 [-0.7988,  0.7175, -0.9701],
+                 [ 0.2634, -0.9255, -0.3459]]])
+        >>> pivots
+        tensor([[ 3,  3,  3],
+                [ 3,  3,  3]], dtype=torch.int32)
+        >>> A_LU, pivots, info = torch.lu(A, get_infos=True)
+        >>> if info.nonzero().size(0) == 0:
+        ...   print('LU factorization succeeded for all samples!')
+        LU factorization succeeded for all samples!
+    """
+    # If get_infos is True, then we don't need to check for errors and vice versa
+    result = torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
+    if out is not None:
+        if not isinstance(out, (tuple, list)):
+            raise TypeError("argument 'out' must be tuple of Tensors, not {}"
+                            .format(type(out).__name__))
+        if len(out) - int(get_infos) != 2:
+            raise TypeError("expected tuple of {} elements but got {}"
+                            .format(2 + int(get_infos), len(out)))
+        return (out[i].resize_as_(result[i]).copy_(result[i]) for i in range(len(out)))
+    if get_infos:
+        return result  # A_LU, pivots, infos
+    else:
+        return result[0], result[1]  # A_LU, pivots

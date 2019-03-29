@@ -12,9 +12,12 @@ namespace at {
 // serves as a replacement return value for Tensor::type(). Previously,
 // Tensor::type() returned Type&, but we are changing Type to not be
 // dtype-specific.
-class TypeProperties {
+class DeprecatedTypeProperties {
  public:
-  TypeProperties(Backend backend=Backend::Undefined, ScalarType scalar_type=ScalarType::Undefined)
+  DeprecatedTypeProperties()
+    : backend_(Backend::Undefined), scalar_type_(ScalarType::Undefined) {}
+
+  DeprecatedTypeProperties(Backend backend, ScalarType scalar_type)
     : backend_(backend), scalar_type_(scalar_type) {}
 
   Backend backend() const {
@@ -45,19 +48,11 @@ class TypeProperties {
     return backend_ != Backend::Undefined && scalar_type_ != ScalarType::Undefined;
   }
 
-  TypeProperties& operator=(const TypeProperties& other) {
-    if (this != &other) {
-      backend_ = other.backend();
-      scalar_type_ = other.scalar_type();
-    }
-    return *this;
-  }
-
-  bool operator==(const TypeProperties& other) const {
+  bool operator==(const DeprecatedTypeProperties& other) const {
     return backend_ == other.backend() && scalar_type_ == other.scalar_type();
   }
 
-  bool operator!=(const TypeProperties& other) const {
+  bool operator!=(const DeprecatedTypeProperties& other) const {
     return !(*this == other);
   }
 
