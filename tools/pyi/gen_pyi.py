@@ -245,9 +245,9 @@ def generate_type_hints(fname, decls, is_tensor=False):
                     render_kw_only_separator = False
                 try:
                     python_args.append(arg_to_type_hint(a))
-                except Exception as e:
+                except Exception:
                     print("Error while processing function %s" % fname)
-                    raise e
+                    raise
 
         if is_tensor:
             if 'self: Tensor' in python_args:

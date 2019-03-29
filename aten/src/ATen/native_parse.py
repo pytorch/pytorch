@@ -230,7 +230,6 @@ def parse_arguments(args, func_variants, declaration, func_return):
         return None
 
     def is_tensor_option(argument):
-        # return argument['name'] in ['dtype', 'layout', 'device']
         return argument['name'] in ['dtype', 'layout', 'device', 'pin_memory']
 
     new_arguments = []

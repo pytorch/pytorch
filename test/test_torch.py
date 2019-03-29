@@ -9785,7 +9785,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    def test_pin_memory_from_contructor(self):
+    def test_pin_memory_from_constructor(self):
 
         def _get_like(t, **kwargs):
             return [

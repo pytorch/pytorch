@@ -2990,12 +2990,6 @@
   variants: method
   device_guard: False
 
-
-# - func: to(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool non_blocking=False, bool copy=False) -> Tensor
-#   matches_jit_signature: True
-#   variants: method
-#   device_guard: False
-
 - func: to(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False) -> Tensor
   matches_jit_signature: True
   variants: method
