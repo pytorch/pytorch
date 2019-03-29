@@ -11,7 +11,7 @@ namespace {
   }
 }
 
-void assertSchemasHaveSameSignature(const FunctionSchema& inferred, const FunctionSchema& specified) {
+C10_EXPORT void assertSchemasHaveSameSignature(const FunctionSchema& inferred, const FunctionSchema& specified) {
   if (inferred.arguments().size() != specified.arguments().size()) {
     AT_ERROR("In operator registration: Specified function schema [", serialize_schema(specified), "] ",
              "doesn't match inferred function schema [", serialize_schema(inferred), "]. ",
