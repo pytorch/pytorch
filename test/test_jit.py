@@ -8898,17 +8898,13 @@ a")
         self.assertEqual(some_func(x), x)
 
     def test_file_format_serialization(self):
-        import tempfile
         filename = tempfile.mktemp()
         writer = torch._C.PyTorchFileWriter(filename)
-        import os
-        import random
         buffers = [os.urandom(size) for size in [random.randint(1, 100) for i in range(20)]]
         offsets = []
         for i, buf in enumerate(buffers):
             writer.write_record(str(i), buf, len(buf))
             offsets.append(i)
-        import pickle
         serialized_offsets = pickle.dumps(offsets)
         writer.write_record("meta", serialized_offsets, len(serialized_offsets))
         writer.write_end_of_file()
