@@ -29,14 +29,13 @@ graph {
   initializer {
     dims: 2
     data_type: 1
-    name: "weight"
-    raw_data: "\340e\355<\246\305\315>"
-  }
-  initializer {
-    dims: 2
-    data_type: 1
     name: "bias"
     raw_data: "\000\000\000\000\000\000\000\000"
+  }
+  initializer {
+    data_type: 7
+    name: "num_batches_tracked"
+    raw_data: "\001\000\000\000\000\000\000\000"
   }
   initializer {
     dims: 2
@@ -51,9 +50,10 @@ graph {
     raw_data: "fff?fff?"
   }
   initializer {
-    data_type: 7
-    name: "num_batches_tracked"
-    raw_data: "\001\000\000\000\000\000\000\000"
+    dims: 2
+    data_type: 1
+    name: "weight"
+    raw_data: "\340e\355<\246\305\315>"
   }
   input {
     name: "input"
