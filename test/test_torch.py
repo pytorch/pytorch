@@ -7415,16 +7415,21 @@ class _TestTorchMixin(object):
         self.assertEqual(val1, val2, 1e-8, 'absolute value')
 
     def test_namedtuple_return(self):
+        a = torch.randn(5, 5)
+
         op = namedtuple('op', ['operators', 'input', 'names', 'hasout'])
         operators = [
-            op(operators=['max', 'min', 'median', 'mode'], input=(0,),
+            op(operators=['max', 'min', 'median', 'mode', 'sort', 'topk'], input=(0,),
                names=('values', 'indices'), hasout=True),
             op(operators=['kthvalue'], input=(1, 0),
                names=('values', 'indices'), hasout=True),
             op(operators=['svd'], input=(), names=('U', 'S', 'V'), hasout=True),
+            op(operators=['slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
+            op(operators=['qr'], input=(), names=('Q', 'R'), hasout=True),
+            op(operators=['gesv'], input=(a,), names=('solution', 'LU'), hasout=True),
+            op(operators=['symeig', 'eig'], input=(True,), names=('eigenvalues', 'eigenvectors'), hasout=True),
         ]
 
-        a = torch.randn(5, 5)
         for op in operators:
             for f in op.operators:
                 ret = getattr(a, f)(*op.input)
@@ -7434,53 +7439,6 @@ class _TestTorchMixin(object):
                     ret1 = getattr(torch, f)(a, *op.input, out=tuple(ret))
                     for i, name in enumerate(op.names):
                         self.assertEqual(getattr(ret, name), ret[i])
-
-        # test gesv
-        ret = a.gesv(a)
-        self.assertEqual(ret.solution, ret[0])
-        self.assertEqual(ret.LU, ret[1])
-        ret1 = torch.gesv(a, a, out=tuple(ret))
-        self.assertEqual(ret1.solution, ret1[0])
-        self.assertEqual(ret1.LU, ret1[1])
-        self.assertEqual(ret1.solution, ret[0])
-        self.assertEqual(ret1.LU, ret[1])
-
-        # test slogdet
-        ret = a.slogdet()
-        self.assertEqual(ret.sign, ret[0])
-        self.assertEqual(ret.logabsdet, ret[1])
-
-        # test sort
-        ret = a.sort(dim=0)
-        self.assertEqual(ret.values, ret[0])
-        self.assertEqual(ret.indices, ret[1])
-        ret1 = torch.sort(a, dim=0, out=tuple(ret))
-        self.assertEqual(ret1.values, ret1[0])
-        self.assertEqual(ret1.indices, ret1[1])
-        self.assertEqual(ret1.values, ret[0])
-        self.assertEqual(ret1.indices, ret[1])
-
-        # test topk
-        ret = a.topk(2)
-        self.assertEqual(ret.values, ret[0])
-        self.assertEqual(ret.indices, ret[1])
-        ret1 = torch.topk(a, 2, out=tuple(ret))
-        self.assertEqual(ret1.values, ret1[0])
-        self.assertEqual(ret1.indices, ret1[1])
-        self.assertEqual(ret1.values, ret[0])
-        self.assertEqual(ret1.indices, ret[1])
-
-        # test symeig, eig
-        fn = ['symeig', 'eig']
-        for f in fn:
-            ret = getattr(torch, f)(a, eigenvectors=True)
-            self.assertEqual(ret.eigenvalues, ret[0])
-            self.assertEqual(ret.eigenvectors, ret[1])
-            ret1 = getattr(torch, f)(a, out=tuple(ret))
-            self.assertEqual(ret1.eigenvalues, ret[0])
-            self.assertEqual(ret1.eigenvectors, ret[1])
-            self.assertEqual(ret1.eigenvalues, ret1[0])
-            self.assertEqual(ret1.eigenvectors, ret1[1])
 
         # test pstrf
         b = torch.mm(a, a.t())
@@ -7495,14 +7453,6 @@ class _TestTorchMixin(object):
         self.assertEqual(ret1.pivot, ret1[1])
         self.assertEqual(ret1.u, ret[0])
         self.assertEqual(ret1.pivot, ret[1])
-
-        # test qr
-        ret = a.qr()
-        self.assertEqual(ret.Q, ret[0])
-        self.assertEqual(ret.R, ret[1])
-        ret1 = torch.qr(a, out=tuple(ret))
-        self.assertEqual(ret1.Q, ret1[0])
-        self.assertEqual(ret1.R, ret1[1])
 
         # test geqrf
         ret = a.geqrf()
