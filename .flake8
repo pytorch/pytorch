@@ -1,8 +1,5 @@
 [flake8]
-# Notably, P is not included here; this is the Facebook internal
-# code for 'plow' (custom lint rules); they're not supported in OSS
-# and so we don't enforce them.
-select = B,C,E,F,T4,W,B9
+select = B,C,E,F,P,T4,W,B9
 max-line-length = 120
 # C408 ignored because we like the dict keyword argument syntax
 # E501 is not flexible enough, we're using B950 instead
@@ -12,4 +9,4 @@ ignore =
     B007,B008,
     # these ignores are from flake8-comprehensions; please fix!
     C400,C401,C402,C403,C404,C405,C407,C411,
-exclude = docs/src,venv,third_party,caffe2,scripts,docs/caffe2,tools/amd_build/pyHIPIFY,torch/lib/include,torch/lib/tmp_install,build,torch/include,torch/__init__.pyi
+exclude = docs/src,venv,third_party,caffe2,scripts,docs/caffe2,tools/amd_build/pyHIPIFY,torch/lib/include,torch/lib/tmp_install,build,torch/include,*.pyi
