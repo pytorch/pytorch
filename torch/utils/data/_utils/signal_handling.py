@@ -32,7 +32,7 @@ multiprocessing data loading robust to errors.
 
 import signal
 import threading
-from torch._C import _error_if_any_worker_fails
+from torch._C import _set_worker_pids, _remove_worker_pids, _error_if_any_worker_fails, _set_worker_signal_handlers  # noqa: F401
 from . import IS_WINDOWS
 
 
