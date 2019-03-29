@@ -494,6 +494,7 @@ struct GraphExecutorImpl {
       for (Node* dnode : diff_nodes) {
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
         Gradient gradient = differentiate(diff_graph);
+        gradient.df->dump();
         runNondiffOptimization(gradient.f);
         packGradient(gradient, dnode);
       }
