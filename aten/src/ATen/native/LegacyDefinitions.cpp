@@ -496,11 +496,11 @@ Tensor ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, 
   return at::legacy::th::_th_ormqr(self, input2, input3, left, transpose);
 }
 
-std::tuple<Tensor,Tensor> multinomial_alias_setup(const Tensor & probs) {
+std::tuple<Tensor,Tensor> _multinomial_alias_setup(const Tensor & probs) {
   return at::legacy::th::_th_multinomial_alias_setup(probs);
 }
 
-Tensor multinomial_alias_draw(const Tensor & q, const Tensor & J, int64_t num_samples, Generator * generator) {
+Tensor _multinomial_alias_draw(const Tensor & q, const Tensor & J, int64_t num_samples, Generator * generator) {
   return at::legacy::th::_th_multinomial_alias_draw(q, J, num_samples, generator);
 }
 

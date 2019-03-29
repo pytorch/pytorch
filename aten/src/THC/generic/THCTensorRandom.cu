@@ -303,6 +303,9 @@ void THCTensor_(multinomial)(struct THCState *state,
 }
 
 void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCudaLongTensor *_J, THCTensor *_q){
+  THArgCheck(_probs->dim() == 1, 1,
+             "expected 1-D probability tensor, got %d-D probability tensor instead",
+             _probs->dim());
   THAssert(THCTensor_(isContiguous)(state, _q));
   THAssert(THCudaLongTensor_isContiguous(state, _J));
   THCTensor *probs = THCTensor_(newContiguous)(state, _probs);
@@ -360,6 +363,12 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
 }
 
 void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, THCTensor *_q, THCudaLongTensor *_J, int n_sample){
+  THArgCheck(_q->dim() == 1, 1,
+             "expected 1-D probability table, got %d-D probability table instead",
+             _q->dim());
+  THArgCheck(_J->dim() == 1, 2,
+             "expected 1-D alias table, got %d-D alias table instead",
+             _J->dim());
   THArgCheck(n_sample > 0, 3, "cannot sample <= 0 samples");
   THAssert(THCTensor_(isContiguous)(state, _q));
   THAssert(THCudaLongTensor_isContiguous(state, _J));

@@ -132,6 +132,9 @@ void THTensor_(logNormal)(THTensor *self, THGenerator *_generator, double mean, 
 void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor *q)
 {
   int64_t inputsize = THTensor_(nElement)(probs);
+  THArgCheck(probs->dim() == 1, 1,
+             "expected 1-D probability tensor, got %d-D probability tensor instead",
+             probs->dim());
   int64_t i = 0;
   THLongTensor *smaller = THLongTensor_newWithSize1d(inputsize);
   THLongTensor *larger = THLongTensor_newWithSize1d(inputsize);
@@ -219,6 +222,12 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
 void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator, THTensor *q, THLongTensor *J, int n_sample)
 {
   std::lock_guard<std::mutex> lock(_generator->mutex);
+  THArgCheck(q->dim() == 1, 1,
+             "expected 1-D probability table, got %d-D probability table instead",
+             q->dim());
+  THArgCheck(J->dim() == 1, 2,
+             "expected 1-D alias table, got %d-D alias table instead",
+             J->dim());
   THArgCheck(n_sample > 0, 3, "cannot sample <= 0 samples");
   int64_t K = THLongTensor_nElement(J);
   int64_t i = 0, _mask=0;
