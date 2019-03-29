@@ -64,6 +64,7 @@ binary_linux_test: &binary_linux_test
   steps:
   - run:
       <<: *setup_linux_system_environment
+  - checkout
   - run:
       <<: *setup_ci_environment
   - attach_workspace:
@@ -130,6 +131,7 @@ binary_linux_upload: &binary_linux_upload
   steps:
   - run:
       <<: *setup_linux_system_environment
+  - checkout
   - run:
       <<: *setup_ci_environment
   - attach_workspace:

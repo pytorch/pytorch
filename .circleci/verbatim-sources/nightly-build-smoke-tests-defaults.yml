@@ -11,6 +11,7 @@ smoke_linux_test: &smoke_linux_test
       <<: *setup_linux_system_environment
   - run:
       <<: *install_official_git_client
+  - checkout
   - run:
       <<: *setup_ci_environment
   - run:

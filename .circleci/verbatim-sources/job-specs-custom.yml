@@ -10,6 +10,7 @@
     steps:
     - run:
         <<: *setup_linux_system_environment
+    - checkout
     - run:
         <<: *setup_ci_environment
     - run:
@@ -41,6 +42,7 @@
     steps:
     - run:
         <<: *setup_linux_system_environment
+    - checkout
     - run:
         <<: *setup_ci_environment
     - run:
