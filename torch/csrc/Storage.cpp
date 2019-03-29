@@ -16,6 +16,7 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/copy_utils.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/CudaIPCTypes.h>
 
 #include <torch/csrc/generic/Storage.cpp>
 #include <TH/THGenerateAllTypes.h>

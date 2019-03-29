@@ -556,6 +556,21 @@ class TestOperators(TestCase):
         y = torch.randn(2, 3).float()
         self.assertONNX(lambda x, y: x + y, (x, y), opset_version=10)
 
+    def test_retain_param_name_disabled(self):
+        class MyModule(Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.fc1 = nn.Linear(4, 5, bias=False)
+                self.fc1.weight.data.fill_(2.)
+                self.fc2 = nn.Linear(5, 6, bias=False)
+                self.fc2.weight.data.fill_(3.)
+
+            def forward(self, x):
+                return self.fc2(self.fc1(x))
+
+        x = torch.randn(3, 4).float()
+        self.assertONNX(MyModule(), (x,), _retain_param_name=False)
+
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'

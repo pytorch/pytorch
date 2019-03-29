@@ -57,7 +57,6 @@ _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 _jit_script_class_compile = torch._C._jit_script_class_compile
-BatchTensor = torch._C._jit.BatchTensor
 
 Future = torch._C.Future
 _fork = torch._C.fork
@@ -724,17 +723,27 @@ def _try_compile_weak_script(fn):
         return entry["compiled_fn"]
 
 
+# ScriptClasses must be new-style classes because we construct them using their
+# __new__ method.
+def _is_new_style_class(cls):
+    if hasattr(cls, '__class__'):
+        return ('__dict__' in dir(cls) or hasattr(cls, '__slots__'))
+
+
 def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
         return obj
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
+    mod = ScriptModule()
     if inspect.isclass(obj):
-        mod = ScriptClass(obj.__name__)
+        if not _is_new_style_class(obj):
+            raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
         ast = get_jit_class_def(obj)
         _jit_script_class_compile(mod, ast, _rcb)
+        _add_script_class(obj, obj.__name__)
+        return obj
     else:
-        mod = ScriptModule()
         ast = get_jit_def(obj)
         _jit_script_compile(mod, ast, _rcb, get_default_args(obj))
     # Forward docstrings
@@ -788,38 +797,6 @@ def _is_weak_type(cls):
     Check if a type has been annotated with `weak_module`
     """
     return cls in _jit_internal.weak_types
-
-
-def batch(batch_size=1, optimize=True, _frames_up=0):
-    def decorator(fn):
-        if not _enabled:
-            return fn
-        import torch.jit.batchop
-        mod = script(fn, optimize, _frames_up)
-        res_graph = torch.to_batch_graph(mod.graph)
-        res_mod = ScriptModule()
-        res_mod._create_method_from_graph('forward', res_graph)
-
-        def wrapper(*args):
-            new_args = []
-            for arg in args:
-                if isinstance(arg, torch.Tensor):
-                    arg = BatchTensor(arg, batch_size)
-                if isinstance(arg, BatchTensor):
-                    new_args.extend([arg.get_data(), arg.get_mask(), arg.get_dims()])
-                else:
-                    new_args.append(arg)
-            res = res_mod(*new_args)
-            assert len(res) % 3 == 0
-            if len(res) % 3 != 0:
-                raise "non-batched-tensor output is not supported yet"
-            result = [BatchTensor(*res[i * 3: i * 3 + 3]) for i in range(len(res) // 3)]
-            if len(result) == 1:
-                return result[0]
-            return result
-        wrapper.__doc__ = fn.__doc__
-        return wrapper
-    return decorator
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
@@ -979,21 +956,23 @@ class ScriptMeta(type(torch._C.ScriptModule)):
     # this has to inherit from pybind11's metaclass otherwise we get
     # issues because ScriptModule inherits from torch._C.ScriptModule,
     # a pybind11 type
-    def __init__(cls, name, bases, attrs):
+    def __init__(self, name, bases, attrs):
         # find all the script methods
-        cls._original_methods = {}
+        self._original_methods = {}
         methods = []
         for k, v in sorted(attrs.items()):
             if isinstance(v, ScriptMethodStub):
-                delattr(cls, k)
+                delattr(self, k)
                 methods.append(v)
-                cls._original_methods[v.original_method.__name__] = v.original_method
+                self._original_methods[v.original_method.__name__] = v.original_method
         # after the user's __init__ register all the script methods
         # with the module
-        original_init = getattr(cls, '__init__', lambda self: None)
-        super_constants = getattr(super(cls), '_constants_set', set())
-        cls._constants_set = set(getattr(cls, '__constants__', ())).union(super_constants)
-        cls._overloads = dict(getattr(cls, '__overloads__', {}))
+        original_init = getattr(self, '__init__', lambda self: None)
+        super_constants = getattr(super(self), '_constants_set', set())
+        self._constants_set = set(getattr(self, '__constants__', ())).union(super_constants)
+        self._overloads = dict(getattr(self, '__overloads__', {}))
+
+        cls = self
 
         @functools.wraps(original_init)
         def init_then_register(self, *args, **kwargs):
@@ -1005,8 +984,8 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             original_init(self, *args, **kwargs)
             _create_methods_from_stubs(self, methods)
 
-        cls.__init__ = init_then_register
-        return super(ScriptMeta, cls).__init__(name, bases, attrs)
+        self.__init__ = init_then_register
+        return super(ScriptMeta, self).__init__(name, bases, attrs)
 
 
 if _enabled:
@@ -1290,19 +1269,10 @@ if _enabled:
                                      "weak script module once it has been "
                                      "created".format(attr))
 
-    class ScriptClass(ScriptModule):
-        def __init__(self, name):
-            super(ScriptClass, self).__init__()
-            self._name = name
-
 else:
     class ScriptModule(torch.nn.Module):
         def __init__(self, optimize=True):
             super(ScriptModule, self).__init__()
-
-    class ScriptClass(ScriptModule):
-        def __init__(self, name):
-            super(ScriptClass, self).__init__()
 
 
 def _get_weak_stubs(cls):
@@ -1542,6 +1512,21 @@ def _find_builtin(fn):
 _register_builtin(len, 'aten::len')
 _register_builtin(_wait, 'aten::wait')
 
+_script_classes = {}
+
+
+def _add_script_class(cls, name):
+    global _script_classes
+    _script_classes[name] = cls
+
+
+def _get_script_class(name):
+    global _script_classes
+    if name not in _script_classes:
+        raise RuntimeError("Unknown reference to ScriptClass '{}'. "
+                           "Did you forget to import it?".format(name))
+    return _script_classes[name]
+
 # torch.jit.Error
 Error = torch._C.JITException
 
@@ -1562,10 +1547,7 @@ def annotate(the_type, the_value):
     return the_value
 
 
-class Attribute(object):
-    def __init__(self, value, the_type):
-        self.value = value
-        self.type = the_type
+Attribute = collections.namedtuple('Attribute', ['value', 'type'])
 
 
 if not torch._C._jit_init():

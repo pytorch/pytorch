@@ -80,6 +80,13 @@ class AliasInfo {
   bool isWrite_ = false;
 };
 
+inline bool operator==(const AliasInfo& lhs, const AliasInfo& rhs) {
+  return lhs.isWrite() == rhs.isWrite()
+      && lhs.beforeSets() == rhs.beforeSets()
+      && lhs.afterSets() == rhs.afterSets()
+      && lhs.containedTypes() == rhs.containedTypes();
+}
+
 // DEBUG ONLY; this does not match the way things are represented in the schema
 inline std::ostream& operator<<(std::ostream& out, const AliasInfo& aliasInfo) {
   out << "(";

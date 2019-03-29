@@ -475,7 +475,7 @@ def view(g, self, size):
     if _is_value(size):
         shape = size
     else:
-        if self.isTensor():
+        if self.isCompleteTensor():
             self_sizes = self.type().sizes()
             if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
                 return g.op("Flatten", self, axis_i=1)
@@ -546,6 +546,14 @@ def prelu(g, self, weight):
 
 def relu(g, input):
     return g.op("Relu", input)
+
+
+def ceil(g, input):
+    return g.op("Ceil", input)
+
+
+def floor(g, input):
+    return g.op("Floor", input)
 
 
 @parse_args('v', 't', 't')
@@ -922,7 +930,7 @@ def le(g, input, other):
 
 
 def where(g, condition, self, other):
-    return g.op("ATen", condition, self, other, operator_s="where")
+    return g.op("Where", condition, self, other)
 
 
 @parse_args('v', 'i', 'i')
@@ -1061,10 +1069,10 @@ def index_put(g, self, indices_list_value, values, accumulate):
 
 
 def type_as(g, self, other):
-    if self.isTensor() and other.isTensor() and self.type().scalarType() == other.type().scalarType():
+    if self.isCompleteTensor() and other.isCompleteTensor() and self.type().scalarType() == other.type().scalarType():
         return self
 
-    if other.isTensor():
+    if other.isCompleteTensor():
         other_type_name = other.type().scalarType()
         return g.op("Cast", self, to_i=cast_pytorch_to_onnx[other_type_name])
     else:
@@ -1280,27 +1288,27 @@ scalar_type_to_onnx = [
 def zeros(g, sizes, dtype, layout, device):
     # NOTE: no way to set device and layout in ONNX, so we ignore it
     return g.op("ConstantOfShape", sizes,
-                value_t=torch.tensor(0, dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v')
 def zeros_like(g, input, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor(0, dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v')
 def ones(g, sizes, dtype, layout, device):
     return g.op("ConstantOfShape", sizes,
-                value_t=torch.tensor(1, dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v')
 def ones_like(g, input, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor(1, dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 def full(g, sizes, value, dtype, layout, device):
@@ -1311,14 +1319,14 @@ def full(g, sizes, value, dtype, layout, device):
     else:
         dtype = _get_const(dtype, 'i', 'dtype')
         return g.op("ConstantOfShape", sizes,
-                    value_t=torch.tensor(const_value, dtype=scalar_type_to_pytorch_type[dtype]))
+                    value_t=torch.tensor([const_value], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'f', 'i', 'v', 'v')
 def full_like(g, input, fill_value, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor(fill_value, dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([fill_value], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'v', 'v', 'v', 'i')
@@ -1390,7 +1398,7 @@ def repeat(g, self, repeats):
         repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
     const_repeats = _maybe_get_const(repeats, 'is')
 
-    if self.isTensor() and not _is_value(const_repeats):
+    if self.isCompleteTensor() and not _is_value(const_repeats):
         sizes = self.type().sizes()
         diff_dims = len(const_repeats) - len(sizes)
         if diff_dims > 0:
@@ -1606,7 +1614,7 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     if not lengths.type().isSubtypeOf(torch._C.TensorType.get()):
         raise RuntimeError("Lengths must be a Tensor for ONNX export")
     # We know it's a TensorType so this check is now safe.
-    # It's really only necessary beacuse those operators expand to something that
+    # It's really only necessary because those operators expand to something that
     # only works with int32 types in Caffe2...
     if lengths.type().scalarType() != 'Int':
         lengths = _cast_Int(g, lengths, False)
@@ -1689,11 +1697,21 @@ def narrow(g, input, dim, start, length):
     return g.op("Slice", input, axes_i=[dim], starts_i=[start], ends_i=[start + length])
 
 
-@parse_args('v', 'i', 'i')
-def _argmax(g, input, dim, keepdim):
-    return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim)
+def argmax(g, input, dim, keepdim):
+    if dim.node().mustBeNone():
+        flattened = reshape(g, input, (-1,))
+        return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False)
+    else:
+        dim = _parse_arg(dim, 'i')
+        keepdim = _parse_arg(keepdim, 'i')
+        return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim)
 
 
-@parse_args('v', 'i', 'i')
-def _argmin(g, input, dim, keepdim):
-    return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)
+def argmin(g, input, dim, keepdim):
+    if dim.node().mustBeNone():
+        flattened = reshape(g, input, (-1,))
+        return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False)
+    else:
+        dim = _parse_arg(dim, 'i')
+        keepdim = _parse_arg(keepdim, 'i')
+        return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)
