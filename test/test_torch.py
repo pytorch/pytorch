@@ -2591,7 +2591,6 @@ class _TestTorchMixin(object):
             do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cuda:0'))
 
     def test_ptype_propagation(self):
-
         a = A(torch.rand((3,), dtype=torch.double, requires_grad=False))
         b = B(torch.rand((3,), dtype=torch.double, requires_grad=False))
         c = C(torch.rand((3,), dtype=torch.double, requires_grad=False))
