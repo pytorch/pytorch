@@ -2592,10 +2592,6 @@ class _TestTorchMixin(object):
 
     def test_ptype_propagation(self):
 
-        def sub_process_func(queue, *args):
-            result = torch.Tensor.add(*args)
-            queue.put("%s = func(%s, %s)" % (type(result), type(args[0]), type(args[1])))
-
         a = A(torch.rand((3,), dtype=torch.double, requires_grad=False))
         b = B(torch.rand((3,), dtype=torch.double, requires_grad=False))
         c = C(torch.rand((3,), dtype=torch.double, requires_grad=False))
@@ -2622,22 +2618,6 @@ class _TestTorchMixin(object):
         self.assertIsInstance(np.equal(a, c), torch.Tensor)
         self.assertIs(np.equal(a, c).dtype, torch.uint8)
         self.assertIsInstance(torch.equal(a, c), bool)
-
-        # test multi-process
-        num_processes = 4
-        # NOTE: this is required for the ``fork`` method to work
-        a.share_memory_()
-        c.share_memory_()
-        processes = []
-        queue = mp.Queue()
-        for rank in range(num_processes):
-            p = mp.Process(target=sub_process_func, args=(queue, a, c))
-            p.start()
-            processes.append(p)
-        for p in processes:
-            p.join()
-        for rank in range(num_processes):
-            self.assertEqual(queue.get(), "%s = func(%s, %s)" % (type(c), type(a), type(c)))
 
         # test ptype propagation with numpy ufuncs
         if TEST_NUMPY:
@@ -9253,7 +9233,7 @@ class _TestTorchMixin(object):
 
         class OldTensorV2(OldTensorBase):
             def __reduce__(self):
-                return (_rebuild_subclass, self.__getstate__())
+                return (_rebuild_tensor, self.__getstate__())
 
         x = torch.randn(30).as_strided([2, 3], [9, 3], 2)
         for old_cls in [OldTensorV1, OldTensorV2]:
