@@ -1214,6 +1214,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       }
       storage_.set_numel(numel_);
       AT_ASSERT(storage_offset_ == 0); // because we just reallocated
+      device_opt_ = storage_.device();
       return storage_.data();
     }
   }
