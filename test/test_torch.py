@@ -23,7 +23,6 @@ from torch._utils import _rebuild_tensor
 from torch._six import inf, nan, string_classes, istuple
 from itertools import product, combinations, combinations_with_replacement
 from functools import reduce
-from collections import namedtuple
 from torch import multiprocessing as mp
 from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
     _compare_trilu_indices
