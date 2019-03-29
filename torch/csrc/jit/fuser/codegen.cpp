@@ -208,6 +208,7 @@ static std::string encodeRHS(const Node* n) {
       {aten::__or__, "${0} || ${1}"},
       {aten::__rshift__, "${0} >> ${1}"},
       {aten::__xor__, "${0} ^ ${1}"},
+      {aten::addcmul, "${cast_0} + ${cast_3} * ${cast_1} * ${cast_2}"},
       {aten::div, "${cast_0} / ${cast_1}"},
       {aten::eq, "${0} == ${1}"},
       {aten::fmod, "fmodf(${cast_0}, ${cast_1})"},
@@ -215,6 +216,7 @@ static std::string encodeRHS(const Node* n) {
       {aten::gt, "${0} > ${1}"},
       {aten::le, "(${0} <= ${1})"},
       {aten::lt, "${0} < ${1}"},
+      {aten::lerp, "${cast_0} + ${cast_2} * (${cast_1} - ${cast_0})"},
       {aten::type_as, "(${cast_0})"},
       {aten::mul, "${cast_0} * ${cast_1}"},
       {aten::ne, "${0} != ${1}"},
@@ -330,7 +332,7 @@ std::string generateKernel(
       env.d("nDim", nDim);
       env.s("scalar_type", scalarTypeName(desc.scalar_type));
       formals.push_back(
-          format("TensorInfo<${scalar_type},${nDim}> ${tensor}", env));
+          format("const TensorInfo<${scalar_type},${nDim}> ${tensor}", env));
       argument_loads.push_back(format(
           "*static_cast<TensorInfo<${scalar_type},${nDim}>*>(args[${formal_index}])",
           env));
@@ -391,6 +393,8 @@ std::string generateKernel(
             "access",
             format("__half2float(t${formal}.data[t${formal}_offset])", env));
         has_half_tensor = true;
+      } else if (use_cuda) {
+        env.s("access", format("__ldg(&t${formal}.data[t${formal}_offset])", env));
       } else {
         env.s("access", format("t${formal}.data[t${formal}_offset]", env));
       }
