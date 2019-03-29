@@ -2774,7 +2774,7 @@ def pad(input, pad, mode='constant', value=0):
             elif mode == 'replicate':
                 ret = torch._C._nn.replication_pad1d(input, pad)
             elif mode == 'circular':
-                ret = pad_circular(input, pad)
+                ret = _pad_circular(input, pad)
             else:
                 ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
@@ -2786,7 +2786,7 @@ def pad(input, pad, mode='constant', value=0):
             elif mode == 'replicate':
                 ret = torch._C._nn.replication_pad2d(input, pad)
             elif mode == 'circular':
-                ret = pad_circular(input, pad)
+                ret = _pad_circular(input, pad)
             else:
                 ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
@@ -2799,7 +2799,7 @@ def pad(input, pad, mode='constant', value=0):
             elif mode == 'replicate':
                 ret = torch._C._nn.replication_pad3d(input, pad)
             elif mode == 'circular':
-                ret = pad_circular(input, pad)
+                ret = _pad_circular(input, pad)
             else:
                 ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
@@ -3033,7 +3033,7 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
 
 
 @weak_script
-def pad_circular(input, padding):
+def _pad_circular(input, padding):
     # type: (Tensor, List[int]) -> Tensor
     """
     Arguments
