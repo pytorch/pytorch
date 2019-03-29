@@ -593,19 +593,19 @@ def softmax(g, input, dim, dtype=None):
     # their semantics are equivalent.
     # So use softmax when dim and axis both equal to ndim - 1
     # otherwise compute softmax using a subgraph with other operators
-    if dim < 0 and input.type().kind() != "Tensor":
-        dim = input.type().dim() + dim
+    if input.type().kind() == "CompleteTensorType" or input.type().kind() == "DimensionedTensorType":
+        if dim < 0:
+            dim = input.type().dim() + dim
         if input.type().dim() == dim + 1:
             softmax = g.op('Softmax', input, axis_i=dim)
             if dtype:
-                softmax = g.op("Cast", return_op, to_i=scalar_type_to_onnx[dtype])
+                softmax = g.op("Cast", softmax, to_i=scalar_type_to_onnx[dtype])
             return softmax
-        return sotmax
     exp = g.op('Exp', input)
     sum = g.op('ReduceSum', exp, axes_i=[dim])
     softmax = g.op('Div', exp, sum)
     if dtype:
-        softmax = g.op("Cast", return_op, to_i=scalar_type_to_onnx[dtype])
+        softmax = g.op("Cast", softmax, to_i=scalar_type_to_onnx[dtype])
     return softmax
 
 

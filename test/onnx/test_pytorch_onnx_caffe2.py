@@ -897,6 +897,14 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(1, 2, 3, requires_grad=True)
         self.run_model_test(SoftmaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    def test_softmax_dtype(self):
+        class SoftmaxModel(torch.nn.Module):
+            def forward(self, input):
+                return nn.functional.softmax(input, dim=0, dtype=torch.float32)
+
+        x = torch.randn(1, 2, 3, requires_grad=True, dtype=torch.float64)
+        self.run_model_test(SoftmaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
     def test_logsoftmax(self):
         for i in range(7)[2:]:
             model = nn.LogSoftmax(dim=i - 1)
