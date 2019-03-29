@@ -2900,7 +2900,7 @@ class TestAutograd(TestCase):
         # gpu thread ReadyQueue
         out.sum().backward()
 
-    def test_isolated_reentrant_backwards(self):
+    def test_isolated_reentrant_backwards(self, device='cpu'):
         timeline = []
         class Log(torch.autograd.Function):
             @staticmethod
@@ -2908,14 +2908,15 @@ class TestAutograd(TestCase):
                 ctx.name = name
                 timeline.append('%s:forward' % name)
                 return x
+
             @staticmethod
             def backward(ctx, grad_output):
                 name = ctx.name
                 timeline.append('%s:backward' % name)
                 return grad_output, None
 
-        a = torch.rand(1, requires_grad=True)
-        b = torch.rand(1, requires_grad=True)
+        a = torch.rand(1, requires_grad=True, device=device)
+        b = torch.rand(1, requires_grad=True, device=device)
 
         # Increase the next function sequence number.
         a + 1 + 2 + 3 + 4 + 5
@@ -2933,6 +2934,10 @@ class TestAutograd(TestCase):
             ['a:forward', 'b:forward', 'b:forward', 'b:backward', 'a:backward']
         #    |----------------------|  |-----------------------|  |----------|
         #          forward pass            Checkpoint(Log[b])        Log[a]
+
+    @unittest.skipIf(not TEST_CUDA, 'Requires cuda for multi device')
+    def test_isolated_reentrant_backwards_cuda(self):
+        self.test_isolated_reentrant_backwards(device='cuda')
 
 
 def index_variable(shape, max_indices):
