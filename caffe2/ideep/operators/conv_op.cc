@@ -52,9 +52,15 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
         "*",
         group_);
 
-    bool weights_changed =
-        (cached_weights_descriptor_ != filter.get_descriptor());
-    if (weights_changed && !training_mode_) {
+    bool input_changed = (cached_X_descriptor_ != X.get_descriptor());
+    if (input_changed) {
+      op_key_.clear();
+      cached_X_descriptor_ = X.dup_descriptor();
+    }
+
+    bool weights_changed = (cached_weights_descriptor_ != filter.get_descriptor());
+    if (!training_mode_ &&
+        (weights_changed || (input_changed && algo_ == ialgo::convolution_winograd))) {
       op_key_.clear();
       cached_weights_descriptor_ = filter.dup_descriptor();
       auto filter_in = filter.as_weights();
@@ -79,11 +85,6 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
       } else {
         filter_ = filter_in;
       }
-    }
-
-    if (cached_X_descriptor_ != X.get_descriptor()) {
-      op_key_.clear();
-      cached_X_descriptor_ = X.dup_descriptor();
     }
 
     if (InputSize() > last_input_) {
