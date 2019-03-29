@@ -1,5 +1,14 @@
 #pragma once
 
+namespace caffe2 {
+namespace detail {
+
+constexpr const char* PREALLOCATED_OUTPUT_ARGNAME =
+    "_caffe2_preallocated_outputs";
+
+}
+}
+
 #ifndef C10_MOBILE
 
 #include <ATen/core/function_schema.h>
@@ -9,9 +18,6 @@
 
 namespace caffe2 {
 namespace detail {
-
-constexpr const char* PREALLOCATED_OUTPUT_ARGNAME =
-    "_caffe2_preallocated_outputs";
 
 using _CallCaffe2OpFunc = std::vector<at::Tensor>(
     const c10::FunctionSchema& schema,
