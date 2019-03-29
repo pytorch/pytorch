@@ -758,27 +758,6 @@ endif()
 
 
 
-if(USE_ROCM)
-
-  # XXX kostmo
-#  target_link_libraries(caffe2 PUBLIC caffe2_hip_library)
-
-  target_compile_definitions(caffe2 PRIVATE
-    USE_ROCM
-    __HIP_PLATFORM_HCC__
-    )
-  target_include_directories(caffe2 PRIVATE
-    /opt/rocm/include
-    /opt/rocm/hcc/include
-    /opt/rocm/rocblas/include
-    /opt/rocm/hipsparse/include
-    )
-endif()
-
-
-
-
-
 if (NOT WIN32)
   # FIXME kostmo - removed to allow the "torch" .cpp files to be linked
   # properly
