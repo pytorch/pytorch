@@ -7,7 +7,8 @@
 #include <cmath>
 #include <type_traits>
 #include <ATen/test/test_assert.h>
-#include <ATen/Quantizer.h>
+// For quantize_uint8
+#include <ATen/quantized/Quantizer.h>
 
 using namespace at;
 
@@ -29,7 +30,7 @@ TEST(TestQTensor, First) {
   auto r_data = r.data<float>();
   auto qr_data = qr.data<qint8>();
   for (auto i = 0; i < num_elements; ++i) {
-    ASSERT_EQ(QuantizeUint8(scale, zero_point, r_data[i]), qr_data[i]);
+    ASSERT_EQ(quantize_uint8(scale, zero_point, r_data[i]), qr_data[i]);
   }
 
   // Check for correct dequantization

@@ -1,14 +1,14 @@
 #include <ATen/ATen.h>
-#include <ATen/Quantizer.h>
-#include <ATen/QTensorImpl.h>
+#include <ATen/quantized/Quantizer.h>
+#include <ATen/quantized/QTensorImpl.h>
 #include <ATen/Type.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorFactories.h>
 
 namespace at {
 
-std::shared_ptr<Quantizer> make_per_tensor_affine_quantizer(double scale, int64_t zero_point) {
-  return std::make_shared<PerTensorAffineQuantizer>(static_cast<float>(scale), static_cast<uint8_t>(zero_point));
+QuantizerPtr make_per_tensor_affine_quantizer(double scale, int64_t zero_point) {
+  return c10::make_intrusive<PerTensorAffineQuantizer>(static_cast<float>(scale), static_cast<uint8_t>(zero_point));
 }
 
 QTensorImpl* get_qtensorimpl(const QTensor& self) {
@@ -20,7 +20,7 @@ QTensorImpl* get_qtensorimpl(const QTensor& self) {
 }
 
 inline QTensor new_qtensor(
-    IntArrayRef sizes, const TensorOptions& options, float scale, uint8_t zero_point) {
+    IntArrayRef sizes, const TensorOptions& options, bool is_variable, QuantizerPtr quantizer) {
   AT_ASSERT(options.device().is_cpu());
 
   native::check_size_nonnegative(sizes);
@@ -34,14 +34,13 @@ inline QTensor new_qtensor(
     allocator->allocate(nelements * dtype.itemsize()),
     allocator,
     /*resizable=*/true);
-  auto quantizer = make_per_tensor_affine_quantizer(scale, zero_point);
   auto tensor = detail::make_tensor<QTensorImpl>(
-      storage_impl, at::AffineCPUTensorId(), false, std::move(quantizer));
+      storage_impl, at::AffineCPUTensorId(), is_variable, quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   return tensor;
 }
 
-qint8 QuantizeUint8(float scale, uint8_t zero_point, float value) {
+qint8 quantize_uint8(float scale, uint8_t zero_point, float value) {
   const int32_t qmin = std::numeric_limits<uint8_t>::min();
   const int32_t qmax = std::numeric_limits<uint8_t>::max();
 
@@ -60,11 +59,14 @@ qint8 QuantizeUint8(float scale, uint8_t zero_point, float value) {
 
 QTensor PerTensorAffineQuantizer::quantize(RealTensor tensor) {
   IntArrayRef sizes = tensor.sizes();
-  QTensor qv = new_qtensor(sizes, tensor.options().dtype(at::kQInt8), scale_, zero_point_);
+  // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the quantizer that
+  // can be reused, so I'm using intrusive_from_this here
+  QTensor qv = new_qtensor(sizes, tensor.options().dtype(at::kQInt8), tensor.is_variable(), intrusive_from_this());
   auto qvd = qv.data<qint8>();
+  tensor.contiguous();
   const float* svd = tensor.data<float>();
   for (int i = 0; i < tensor.numel(); ++i) {
-    qvd[i] = QuantizeUint8(scale_, zero_point_, svd[i]);
+    qvd[i] = quantize_uint8(scale_, zero_point_, svd[i]);
   }
   return qv;
 }
@@ -74,6 +76,7 @@ RealTensor PerTensorAffineQuantizer::dequantize(QTensor tensor) {
   at::TensorOptions real_options = tensor.options().dtype(at::kFloat);
 
   RealTensor rv = at::empty(sizes, real_options);
+  tensor.contiguous();
   const auto* qvd = tensor.data<qint8>();
   float* rvd = rv.data<float>();
   for (auto i = 0; i < tensor.numel(); ++i) {

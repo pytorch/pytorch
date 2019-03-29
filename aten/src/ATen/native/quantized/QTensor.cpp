@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/Quantizer.h>
-#include <ATen/QTensorImpl.h>
+#include <ATen/quantized/Quantizer.h>
+#include <ATen/quantized/QTensorImpl.h>
 
 
 namespace at {
@@ -19,17 +19,17 @@ RealTensor dequantize_(const QTensor& self) {
 Scalar q_scale_(const QTensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   AT_ASSERT(quantizer->qscheme() == kPerTensorAffine);
-  return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer)->scale());
+  return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer.get())->scale());
 }
 
 Scalar q_zero_point_(const QTensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   AT_ASSERT(quantizer->qscheme() == kPerTensorAffine);
-  return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer)->zero_point());
+  return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer.get())->zero_point());
 }
 
 Quantizer* quantizer(const QTensor& self) {
-  return get_qtensorimpl(self)->quantizer();
+  return get_qtensorimpl(self)->quantizer().get();
 }
 
 } // namespace native
