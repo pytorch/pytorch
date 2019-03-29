@@ -7414,54 +7414,6 @@ class _TestTorchMixin(object):
         val2 = rec.select(-1, -1).data.abs()[0][0][0].sum()
         self.assertEqual(val1, val2, 1e-8, 'absolute value')
 
-    def test_namedtuple_return(self):
-        a = torch.randn(5, 5)
-
-        op = namedtuple('op', ['operators', 'input', 'names', 'hasout'])
-        operators = [
-            op(operators=['max', 'min', 'median', 'mode', 'sort', 'topk'], input=(0,),
-               names=('values', 'indices'), hasout=True),
-            op(operators=['kthvalue'], input=(1, 0),
-               names=('values', 'indices'), hasout=True),
-            op(operators=['svd'], input=(), names=('U', 'S', 'V'), hasout=True),
-            op(operators=['slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
-            op(operators=['qr'], input=(), names=('Q', 'R'), hasout=True),
-            op(operators=['gesv'], input=(a,), names=('solution', 'LU'), hasout=True),
-            op(operators=['symeig', 'eig'], input=(True,), names=('eigenvalues', 'eigenvectors'), hasout=True),
-        ]
-
-        for op in operators:
-            for f in op.operators:
-                ret = getattr(a, f)(*op.input)
-                for i, name in enumerate(op.names):
-                    self.assertEqual(getattr(ret, name), ret[i])
-                if op.hasout:
-                    ret1 = getattr(torch, f)(a, *op.input, out=tuple(ret))
-                    for i, name in enumerate(op.names):
-                        self.assertEqual(getattr(ret, name), ret[i])
-
-        # test pstrf
-        b = torch.mm(a, a.t())
-        # add a small number to the diagonal to make the matrix numerically positive semidefinite
-        for i in range(a.size(0)):
-            b[i][i] = b[i][i] + 1e-7
-        ret = b.pstrf()
-        self.assertEqual(ret.u, ret[0])
-        self.assertEqual(ret.pivot, ret[1])
-        ret1 = torch.pstrf(b, out=tuple(ret))
-        self.assertEqual(ret1.u, ret1[0])
-        self.assertEqual(ret1.pivot, ret1[1])
-        self.assertEqual(ret1.u, ret[0])
-        self.assertEqual(ret1.pivot, ret[1])
-
-        # test geqrf
-        ret = a.geqrf()
-        self.assertEqual(ret.a, ret[0])
-        self.assertEqual(ret.tau, ret[1])
-        ret1 = torch.geqrf(a, out=tuple(ret))
-        self.assertEqual(ret1.a, ret1[0])
-        self.assertEqual(ret1.tau, ret1[1])
-
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
         float_types = [
