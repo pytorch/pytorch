@@ -117,6 +117,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/grad_mode.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/input_buffer.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/record_function.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/variable.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
@@ -166,9 +167,11 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/utils/subgraph_utils.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/utils/check_alias_annotation.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/utils/memory_dag.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/quantization.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/register_quantized_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
@@ -488,6 +491,7 @@ if (BUILD_PYTHON)
   endif()
 
   set(TORCH_PYTHON_SRCS
+    ${TORCH_SRC_DIR}/csrc/CudaIPCTypes.cpp
     ${TORCH_SRC_DIR}/csrc/DataLoader.cpp
     ${TORCH_SRC_DIR}/csrc/Device.cpp
     ${TORCH_SRC_DIR}/csrc/Dtype.cpp
@@ -516,13 +520,11 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/python_variable_indexing.cpp
     ${TORCH_SRC_DIR}/csrc/byte_order.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/batched/BatchTensor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/init.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_loop.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/peephole.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/to_batch.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_arg_flatten.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_interpreter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/python_ir.cpp

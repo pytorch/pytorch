@@ -55,12 +55,6 @@ void THTensor_(cappedRandom)(THTensor *self, THGenerator *_generator, int64_t ma
   THTensor_(clampedRandom)(self, _generator, 0, max);
 }
 
-void THTensor_(geometric)(THTensor *self, THGenerator *_generator, double p)
-{
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)THRandom_geometric(_generator, p););
-}
-
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
 #if defined(TH_REAL_IS_FLOAT)

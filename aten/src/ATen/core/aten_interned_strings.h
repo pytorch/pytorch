@@ -88,6 +88,7 @@ _(aten, _log10) \
 _(aten, _log1p) \
 _(aten, _log2) \
 _(aten, _logspace) \
+_(aten, _lu_with_info) \
 _(aten, _masked_scale) \
 _(aten, _mm) \
 _(aten, _mv) \
@@ -224,8 +225,6 @@ _(aten, bincount) \
 _(aten, blackman_window) \
 _(aten, bmm) \
 _(aten, broadcast_tensors) \
-_(aten, btrifact) \
-_(aten, btrifact_with_info) \
 _(aten, btrisolve) \
 _(aten, cartesian_prod) \
 _(aten, cat) \
@@ -671,10 +670,10 @@ _(aten, to_dense) \
 _(aten, topk) \
 _(aten, trace) \
 _(aten, transpose) \
+_(aten, triangular_solve) \
 _(aten, tril) \
 _(aten, triplet_margin_loss) \
 _(aten, triu) \
-_(aten, trtrs) \
 _(aten, trunc) \
 _(aten, type_as) \
 _(aten, unbind) \

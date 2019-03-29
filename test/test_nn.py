@@ -587,7 +587,8 @@ class TestNN(NNTestCase):
                 self.par = nn.ParameterList()
                 self.par.append(nn.Parameter(torch.randn(10)))
 
-            def forward(inp):
+            def forward(self, inp):
+                # NB: dead code
                 return inp.clone()
 
         net = Net()
@@ -1794,7 +1795,6 @@ class TestNN(NNTestCase):
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
-    @skipIfRocm
     def test_spectral_norm(self):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
@@ -2050,6 +2050,25 @@ class TestNN(NNTestCase):
         embedding(input).sum().backward()
         self.assertTrue(embedding.weight.grad.is_sparse)
         self.assertEqual(embedding.weight.grad.shape, embedding.weight.shape)
+
+    def test_embedding_sparse_backward(self):
+        embedding = nn.Embedding(10, 3, sparse=True)
+        embedding.zero_grad()
+        embedding(torch.LongTensor([7, 1, 3])).sum().backward()
+        self.assertEqual(embedding.weight.grad._indices(), torch.LongTensor([[7, 1, 3]]))
+        self.assertEqual(embedding.weight.grad._values(), torch.tensor(1.).expand(3, 3))
+
+        embedding.zero_grad()
+        embedding(torch.LongTensor([7, 1, 3])).sum().backward()
+        embedding(torch.LongTensor([7, 1, 3])).sum().backward()
+        self.assertEqual(embedding.weight.grad._indices(), torch.LongTensor([[7, 1, 3, 7, 1, 3]]))
+        self.assertEqual(embedding.weight.grad._values(), torch.tensor(1.).expand(6, 3))
+
+        embedding.zero_grad()
+        embedding(torch.LongTensor([7, 1, 3])).sum().backward()
+        embedding(torch.LongTensor([8, 1, 3])).sum().backward()
+        self.assertEqual(embedding.weight.grad._indices(), torch.LongTensor([[7, 1, 3, 8, 1, 3]]))
+        self.assertEqual(embedding.weight.grad._values(), torch.tensor(1.).expand(6, 3))
 
     def test_embedding_padding_idx(self):
         embedding = nn.Embedding(10, 20, padding_idx=0)
@@ -3255,7 +3274,6 @@ class TestNN(NNTestCase):
             _ = dp.gather(inputs, target_device=0)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_broadcast_double_backwards_gpu(self):
         tensors = (torch.randn(4, 4, device='cuda', requires_grad=True),
                    torch.randn(4, 4, device='cuda', requires_grad=True),
@@ -3350,7 +3368,6 @@ class TestNN(NNTestCase):
                 self.assertEqual(out.data, expected)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_data_parallel_multiple_input(self):
         class TestModule(nn.Module):
 
@@ -4342,6 +4359,18 @@ class TestNN(NNTestCase):
 
     def test_loss_equal_input_target_shape(self):
         self._test_loss_equal_input_target_shape(lambda x: x)
+
+    def test_mse_loss_size_warning(self):
+        i = torch.randn((10, 1), requires_grad=True)
+        t = torch.randn((10,))
+        with warnings.catch_warnings(record=True) as w:
+            # Ensure warnings are being shown
+            warnings.simplefilter("always")
+            # Trigger Warning
+            F.mse_loss(i, t)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertIn('Please ensure they have the same size.', str(w[0]))
 
     def test_nll_loss_mismatched_batch(self):
         x = torch.randn((10, 3), requires_grad=True)
@@ -5969,6 +5998,13 @@ class TestNN(NNTestCase):
         vv2 = torch.tensor(list([float(i) for i in range(84)])).unsqueeze(0)
         out = F.cosine_similarity(vv1, vv2)
         self.assertLessEqual(out, 1.0)
+
+        # Check dividing by 0.
+        input1 = torch.randn(10).requires_grad_()
+        input2 = torch.zeros_like(input1).requires_grad_()
+        torch.cosine_similarity(input1, input2, 0).sum().backward()
+        self.assertEqual(input1.grad, torch.zeros_like(input1))
+        self.assertEqual(input2.grad, input1 * 1e8)
 
     def test_grid_sample_error_checking(self):
         input = torch.empty(1, 1, 2, 2)
