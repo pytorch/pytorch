@@ -2992,7 +2992,6 @@ class _TestTorchMixin(object):
             self.assertEqual((1, 1, 0), torch.tensor([[[]]], device=device).shape)
             self.assertEqual((1, 1, 0), torch.as_tensor([[[]]], device=device).shape)
 
-
     def test_new_tensor(self):
         expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
         # test data
