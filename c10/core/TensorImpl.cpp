@@ -49,6 +49,8 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::Ty
       device_opt_(device_opt),
       type_id_(type_id),
       is_variable_(is_variable) {
+  AT_ASSERT(type_id == UndefinedTensorId() || data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
+            (device_opt_.has_value() && ((*device_opt).has_index() || (*device_opt).is_cpu())));
   strides_.push_back(1);
 }
 
