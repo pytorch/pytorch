@@ -45,6 +45,7 @@ libtorch_sources = [
     "torch/csrc/autograd/grad_mode.cpp",
     "torch/csrc/autograd/input_buffer.cpp",
     "torch/csrc/autograd/profiler.cpp",
+    "torch/csrc/autograd/record_function.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
     "torch/csrc/Exceptions.cpp",
