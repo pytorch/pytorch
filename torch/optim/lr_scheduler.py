@@ -1,6 +1,5 @@
 import types
 import math
-import torch
 from torch._six import inf
 from collections import Counter
 from functools import partial

@@ -13,10 +13,7 @@ from torch._six import container_abcs
 import contextlib
 import numbers
 import warnings
-import functools
-import types
 from torch._six import string_classes
-from torch.autograd import Function, function
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
 from torch._C import ListType

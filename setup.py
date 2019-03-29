@@ -142,7 +142,7 @@
 #     we will search for libraries in these paths
 
 from __future__ import print_function
-from setuptools import setup, Extension, distutils, Command, find_packages
+from setuptools import setup, Extension, distutils, find_packages
 from distutils import core, dir_util
 from distutils.core import Distribution
 from distutils.errors import DistutilsArgError
@@ -151,7 +151,6 @@ import setuptools.command.install
 import distutils.command.clean
 import distutils.sysconfig
 import filecmp
-import platform
 import subprocess
 import shutil
 import sys

@@ -1,5 +1,4 @@
 import torch
-from torch.jit import BatchTensor
 
 
 # TODO: there are some commented raise statements

@@ -1,9 +1,6 @@
 import warnings
 
-import torch
 from .module import Module
-from .container import Sequential
-from .activation import LogSoftmax
 from .. import functional as F
 from .. import _reduction as _Reduction
 from ..._jit_internal import weak_module, weak_script_method

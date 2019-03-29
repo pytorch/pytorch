@@ -3,7 +3,7 @@ import warnings
 from torch._six import string_classes
 from datetime import timedelta
 
-from .rendezvous import rendezvous, register_rendezvous_handler
+from .rendezvous import rendezvous
 from . import BroadcastOptions, AllreduceOptions, ReduceOptions, \
     ScatterOptions, GatherOptions
 from . import ReduceOp

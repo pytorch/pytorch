@@ -2,7 +2,6 @@
 
 from __future__ import absolute_import, division, print_function
 import os
-import sys
 import subprocess
 import argparse
 from functools import reduce

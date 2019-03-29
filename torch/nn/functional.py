@@ -3,16 +3,13 @@ from __future__ import division
 
 import warnings
 import math
-import types
 
 import torch
 from torch._C import _infer_size, _add_docstr
 from . import _reduction as _Reduction
-from . import _functions
 from .modules import utils
 from ._functions import vision
 from .modules.utils import _single, _pair, _triple, _list_with_default
-from . import grad
 from . import _VF
 from .._jit_internal import weak_script, List
 
@@ -2466,7 +2463,6 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
     .. include:: cuda_deterministic_backward.rst
     """
-    from numbers import Integral
     from .modules.utils import _ntuple
 
     def _check_size_scale_factor(dim):
