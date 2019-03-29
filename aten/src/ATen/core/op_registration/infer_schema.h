@@ -98,6 +98,6 @@ FunctionSchema inferFunctionSchema(std::string name, std::string overload_name) 
   return detail::createFunctionSchemaFromTraits<guts::infer_function_traits_t<FuncType>>(std::move(name), std::move(overload_name));
 }
 
-void assertSchemasHaveSameSignature(const FunctionSchema& inferred, const FunctionSchema& specified);
+C10_API void assertSchemasHaveSameSignature(const FunctionSchema& inferred, const FunctionSchema& specified);
 
 }
