@@ -996,8 +996,47 @@ class TestJit(JitTestCase):
     def test_expand_propagate_qinfo(self):
         pass
 
-    def test_expand_insert_observers(self):
-        pass
+    def test_insert_observers(self):
+        x1 = torch.tensor([0.4, 0.3])
+        y1 = torch.tensor([0.7, 0.5])
+        x2 = torch.tensor([0.1, 0.9])
+        y2 = torch.tensor([1.1, 1.9])
+
+        # Function that we will use as a graph
+        def fn(x, y):
+            p = x + y
+            z = x - y
+            return p * z
+
+        # Custom observer function
+        value_stats = {}
+
+        def observe(x, name):
+            if name not in value_stats:
+                value_stats[name] = []
+            value_stats[name].append(x)
+            return x
+
+        m = torch.jit.script(fn)
+        # Insert observers
+        torch._C._jit_pass_insert_observers(m.graph, observe)
+
+        # Collect statistics
+        m.forward(x1, y1)
+
+        # Check what we collected
+        self.assertTrue('p' in value_stats and 'z' in value_stats)
+        self.assertEqual(len(value_stats['p']), 1)
+        self.assertEqual(len(value_stats['z']), 1)
+        self.assertEqual(value_stats['p'][0], x1 + y1)
+        self.assertEqual(value_stats['z'][0], x1 - y1)
+
+        # Run one more time and check the updated statistics
+        m.forward(x2, y2)
+        self.assertEqual(len(value_stats['p']), 2)
+        self.assertEqual(len(value_stats['z']), 2)
+        self.assertEqual(value_stats['p'][1], x2 + y2)
+        self.assertEqual(value_stats['z'][1], x2 - y2)
 
     def test_expand_insert_fakequant(self):
         pass
