@@ -1268,10 +1268,10 @@ class CTCLoss(_Loss):
 
             | If target shape is :math:`(N,S)`, target_lengths are effectively the stop index
               :math:`s_n` for each target sequence, such that ``target_n = targets[n,0:s_n]`` for
-              each target in a batch. Lengths must each be :math:`\leq T`
+              each target in a batch. Lengths must each be :math:`\leq S`
 
-            | If target shape is ``(sum(target_lengths))``, each length in target_lengths should equal its
-              respective target length, with a sum no greater than the total length of all targets.
+            | If the targets are given as a 1d tensor that is the concatenation of individual targets,
+              the target_lengths must add up to the total length of the tensor.
 
     Example::
 
