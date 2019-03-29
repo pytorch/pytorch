@@ -201,7 +201,7 @@ Tensor internal_new_from_data(
   }
 
   if (THPVariable_Check(data)) {
-    AT_ASSERTM(!pin_memory, "Can't pin tensor constructed from a variable");
+    AT_CHECK(!pin_memory, "Can't pin tensor constructed from a variable");
     auto var = reinterpret_cast<THPVariable*>(data)->cdata;
     if (copy_variables) {
       var = var.detach();
@@ -217,7 +217,7 @@ Tensor internal_new_from_data(
 
 #ifdef USE_NUMPY
   if (PyArray_Check(data)) {
-    AT_ASSERTM(!pin_memory, "Can't pin tensor constructed from numpy");
+    AT_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
     auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
     const auto& scalar_type = type_inference ? tensor.scalar_type() : type.scalarType();
     auto device = device_opt.has_value() ? *device_opt : at::Device(type.device_type());
