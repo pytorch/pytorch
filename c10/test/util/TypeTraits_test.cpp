@@ -128,13 +128,13 @@ namespace test_lambda_is_stateless {
     auto stateless_lambda = [] (int a) {return a;};
     static_assert(is_stateless_lambda<decltype(stateless_lambda)>::value, "");
 
-    auto stateful_lambda_1 = [&] (int a) {return a;};
+    int b = 4;
+    auto stateful_lambda_1 = [&] (int a) {return a + b;};
     static_assert(!is_stateless_lambda<decltype(stateful_lambda_1)>::value, "");
 
-    auto stateful_lambda_2 = [=] (int a) {return a;};
+    auto stateful_lambda_2 = [=] (int a) {return a + b;};
     static_assert(!is_stateless_lambda<decltype(stateful_lambda_2)>::value, "");
 
-    int b = 0;
     auto stateful_lambda_3 = [b] (int a) {return a + b;};
     static_assert(!is_stateless_lambda<decltype(stateful_lambda_3)>::value, "");
 
