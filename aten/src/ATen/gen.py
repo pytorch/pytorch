@@ -13,6 +13,7 @@ import nn_parse
 import native_parse
 import preprocess_declarations
 import function_wrapper
+from function_wrapper import scalar_types
 
 from code_template import CodeTemplate
 
@@ -178,19 +179,6 @@ backends = ['CPU', 'CUDA']
 densities = ['Dense', 'Sparse']
 extension_backends = ['MSNPU', 'XLA']
 
-# scalar_name, c_type, accreal, is_floating_type
-scalar_types = [
-    ('Bool', 'uint8_t', 'BoolAccrealNotDefined', False),
-    ('Byte', 'uint8_t', 'Long', False),
-    ('Char', 'int8_t', 'Long', False),
-    ('Double', 'double', 'Double', True),
-    ('Float', 'float', 'Double', True),
-    ('Int', 'int', 'Long', False),
-    ('Long', 'int64_t', 'Long', False),
-    ('Short', 'int16_t', 'Long', False),
-    ('Half', 'Half', 'Double', True),
-]
-
 # shared environment for non-derived base classes Type.h Tensor.h Storage.h
 top_env = {
     'cpu_type_registrations': [],
@@ -256,15 +244,12 @@ def format_yaml(data):
 
 
 def generate_storage_type_and_tensor(backend, density, scalar_type, declarations):
-    scalar_name, c_type, accreal, is_floating_type = scalar_type
+    scalar_name, c_type, _, _ = scalar_type
     env = {}
     density_tag = 'Sparse' if density == 'Sparse' else ''
     env['Density'] = density
     env['ScalarName'] = scalar_name
     env['ScalarType'] = c_type
-    env['AccScalarName'] = accreal
-    env['isFloatingType'] = is_floating_type
-    env['isIntegralType'] = not is_floating_type
     env['Type'] = "{}{}{}Type".format(density_tag, backend, scalar_name)
     env['DenseTensor'] = "{}{}Tensor".format(backend, scalar_name)
     env['Backend'] = density_tag + backend
@@ -304,10 +289,6 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
             env['extra_cuda_headers'].append('#include <ATen/cuda/CUDADevice.h>')
             env['extra_cuda_headers'].append('#include <ATen/cuda/CUDATypeDefault.h>')
         sname = '' if scalar_name == "Float" else scalar_name
-        env['THType'] = 'Cuda{}'.format(sname)
-        env['THStorage'] = 'THCuda{}Storage'.format(sname)
-        env['THTensor'] = 'THCuda{}Tensor'.format(sname)
-        env['THIndexTensor'] = 'THCudaLongTensor'
         env['state'] = ['globalContext().getTHCState()']
         env['isCUDA'] = 'true'
         env['storage_device'] = 'return storage->device;'
@@ -320,10 +301,6 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
             '#undef THNN_',
         ]
         env['extra_cuda_headers'] = []
-        env['THType'] = scalar_name
-        env['THStorage'] = "TH{}Storage".format(scalar_name)
-        env['THTensor'] = 'TH{}Tensor'.format(scalar_name)
-        env['THIndexTensor'] = 'THLongTensor'
         env['state'] = []
         env['isCUDA'] = 'false'
         env['storage_device'] = 'throw std::runtime_error("CPU storage has no device");'
