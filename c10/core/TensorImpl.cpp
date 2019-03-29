@@ -50,7 +50,9 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::Ty
       type_id_(type_id),
       is_variable_(is_variable) {
   AT_ASSERT(type_id == UndefinedTensorId() || data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
-            (device_opt_.has_value() && ((*device_opt).has_index() || (*device_opt).is_cpu())));
+            device_opt_.has_value());
+  // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
+  // Storages with default devices.
   strides_.push_back(1);
 }
 
