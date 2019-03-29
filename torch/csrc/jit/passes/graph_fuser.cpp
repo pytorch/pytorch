@@ -201,10 +201,6 @@ struct GraphFuser {
       //   but this is checked later
       return isFusable(node->inputs()[0]->node());
     }
-    if( (node->inputs().size() + node->outputs().size()) >
-        fusion_kernel_args_limit ) {
-      return false;
-    }
     return node->kind() == prim::FusionGroup || isSimpleMap(node);
   }
 
@@ -214,12 +210,11 @@ struct GraphFuser {
     if (!node->is_constant(attr::dim))
       return false;
 
-    Node* list_construct = node->namedInput(attr::tensors)->node();
-    if( (list_construct->inputs().size() + node->outputs().size()) >
+    auto tensors_node = node->namedInput(attr::tensors)->node();
+    if( (tensors_node->inputs().size() + node->outputs().size()) >
         fusion_kernel_args_limit ) {
       return false;
     }
-    auto tensors_node = node->namedInput(attr::tensors)->node();
     if (tensors_node->kind() != prim::ListConstruct)
       return false;
     // NB: Note that technically other uses of the list aren't a big problem for
