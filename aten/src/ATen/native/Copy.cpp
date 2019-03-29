@@ -5,6 +5,8 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cpu/CopyKernel.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
 
 namespace {
 
@@ -115,13 +117,13 @@ void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
     } else {
 #ifdef _OPENMP
       if (!in_parallel_region()) {
+        auto iter = TensorIterator::unary_op(self, src);
         AT_DISPATCH_ALL_TYPES_AND(
-          at::ScalarType::Half, self.scalar_type(), "_copy_same_type_", [&]() {
-            at::CPU_tensor_parallel_apply2<scalar_t, scalar_t>(
-                self, src, [](scalar_t& self_val, const scalar_t& src_val) {
-                  self_val = src_val;
-                });
-          });
+            at::ScalarType::Half, self.scalar_type(), "_copy_same_type_", [&] {
+              unary_kernel(
+                  *iter,
+                  [=](scalar_t a) -> scalar_t { return a; });
+            });
       } else {
         serial_path = true;
       }
@@ -134,12 +136,12 @@ void _copy_same_type__cpu(Tensor& self, const Tensor& src) {
   }
 
   if (serial_path) {
+    auto iter = TensorIterator::unary_op(self, src);
     AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::Half, self.scalar_type(), "_copy_same_type_", [&]() {
-        at::CPU_tensor_apply2<scalar_t, scalar_t>(
-            self, src, [](scalar_t& self_val, const scalar_t& src_val) {
-              self_val = src_val;
-            });
+        at::ScalarType::Half, self.scalar_type(), "_copy_same_type_", [&] {
+          unary_kernel(
+              *iter,
+              [=](scalar_t a) -> scalar_t { return a; });
         });
   }
 }
