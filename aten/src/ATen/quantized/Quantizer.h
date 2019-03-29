@@ -19,8 +19,8 @@ using QTensor = Tensor;
 using RealTensor = Tensor;
 
 struct Quantizer;
-//using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
-using QuantizerPtr = std::shared_ptr<Quantizer>;
+using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
+//using QuantizerPtr = std::shared_ptr<Quantizer>;
 
 
 /**
@@ -47,20 +47,20 @@ using QuantizerPtr = std::shared_ptr<Quantizer>;
  * QTensor holds an intrusive_ptr to Quantizer, and multiple Tensor can
  * share the same Quantizer.
  */
-struct CAFFE2_API Quantizer {
+struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
   QScheme qscheme_;
   Quantizer() {}
   Quantizer(QScheme qscheme) : qscheme_(qscheme) {}
   virtual ~Quantizer();
 
   // Copied from torch/csrc/jit/scope.h
-  // QuantizerPtr intrusive_from_this() {
-  //   c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
-  //                                          // from a raw `this` pointer
-  //                                          // so we need to bump the refcount
-  //                                          // to account for this ownership
-  //   return c10::intrusive_ptr<Quantizer>::reclaim(this);
-  // }
+  QuantizerPtr intrusive_from_this() {
+    c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
+                                           // from a raw `this` pointer
+                                           // so we need to bump the refcount
+                                           // to account for this ownership
+    return c10::intrusive_ptr<Quantizer>::reclaim(this);
+  }
 
   virtual QScheme qscheme() {
     return qscheme_;

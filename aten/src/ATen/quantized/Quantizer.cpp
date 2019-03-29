@@ -8,8 +8,7 @@
 namespace at {
 
 QuantizerPtr make_per_tensor_affine_quantizer(double scale, int64_t zero_point) {
-  //return c10::make_intrusive<PerTensorAffineQuantizer>(static_cast<float>(scale), static_cast<uint8_t>(zero_point));
-  return std::make_shared<PerTensorAffineQuantizer>(static_cast<float>(scale), static_cast<uint8_t>(zero_point));
+  return c10::make_intrusive<PerTensorAffineQuantizer>(static_cast<float>(scale), static_cast<uint8_t>(zero_point));
 }
 
 QTensorImpl* get_qtensorimpl(const QTensor& self) {
@@ -62,8 +61,7 @@ QTensor PerTensorAffineQuantizer::quantize(RealTensor tensor) {
   IntArrayRef sizes = tensor.sizes();
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the quantizer that
   // can be reused, so I'm using intrusive_from_this here
-  auto quantizer = make_per_tensor_affine_quantizer(scale_, zero_point_);
-  QTensor qv = new_qtensor(sizes, tensor.options().dtype(at::kQInt8), tensor.is_variable(), quantizer);
+  QTensor qv = new_qtensor(sizes, tensor.options().dtype(at::kQInt8), tensor.is_variable(), intrusive_from_this());
   auto qvd = qv.data<qint8>();
   tensor.contiguous();
   const float* svd = tensor.data<float>();
