@@ -206,9 +206,12 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     if any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)) and not check_sparse_nnz:
         fail_test('gradcheck expects all tensor inputs '
                   'are dense when check_sparse_nnz is set to False.')
+        return False
+
 
     # Make sure that gradients are saved for all inputs
     any_input_requiring_grad = False
+    some_input_not_requiring_grad = False
     for inp in tupled_inputs:
         if isinstance(inp, torch.Tensor):
             if inp.requires_grad:
@@ -219,11 +222,17 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                         'This check will likely fail if all the inputs are '
                         'not of double precision floating point. ')
                 any_input_requiring_grad = True
+            else:
+                some_input_not_requiring_grad = True
             inp.retain_grad()
     if not any_input_requiring_grad:
         raise ValueError(
             'gradcheck expects at least one input tensor to require gradient, '
             'but none of the them have requires_grad=True.')
+        if some_input_not_requiring_grad:
+            raise ValueError(
+                'gradcheck expects if at least one input tensor is required gradient, '
+                'then all other inputs should have requires_grad=True.')
 
     func_out = func(*tupled_inputs)
     output = _differentiable_outputs(func_out)
@@ -236,6 +245,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
             for n in numerical:
                 if len(torch.nonzero(n)) > 0:
                     fail_test('Numerical gradient for function expected to be zero')
+                    return False
         return True
 
     for i, o in enumerate(output):

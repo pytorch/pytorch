@@ -2285,7 +2285,7 @@ class TestAutograd(TestCase):
         _test_complex((1, 2, 3, 4, 2), 2)
         _test_complex((2, 1, 3, 4, 3, 2), 3)
 
-    def test_gradcheck(self):
+    def test_gradcheck_fail_when_no_differentiable_outputs_and_num_grad_not_zero(self):
         def autograd_fn(input):
             output = torch.detach(input)
             self.assertFalse(output.requires_grad)
