@@ -717,11 +717,11 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 if weight is not None and bias is not None:
                     grad_bn_out = grad_output * weight
-                    grad_weight = grad_output * bn_out
-                    grad_bias = grad_output
+                    grad_weight = (grad_output * bn_out)._grad_sum_to_size(weight.size())
+                    grad_bias = grad_output._grad_sum_to_size(bias.size())
                 elif weight is not None:
                     grad_bn_out = grad_output * weight
-                    grad_weight = grad_output * bn_out
+                    grad_weight = (grad_output * bn_out)._grad_sum_to_size(weight.size())
                     grad_bias = None
                 elif bias is not None:
                     grad_bn_out = grad_output
