@@ -43,8 +43,8 @@ inline at::ScalarType scalar_type(at::ScalarType s) {
 
 C10_DEPRECATED_MESSAGE("passing at::Type to an AT_DISPATCH macro is deprecated, " \
                        "pass an at::ScalarType instead")
-inline at::ScalarType scalar_type(const at::Type &t) {
-  return t.scalarType();
+inline at::ScalarType scalar_type(const at::TypeProperties &t) {
+  return t.scalar_type();
 }
 
 C10_DEPRECATED_MESSAGE("AT_DISPATCH_ALL_TYPES_AND_HALF is deprecated, " \
