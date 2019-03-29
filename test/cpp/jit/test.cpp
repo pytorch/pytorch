@@ -63,7 +63,8 @@ namespace jit {
   _(ATenNativeBatchNorm)           \
   _(NoneSchemaMatch)               \
   _(ClassParser)                   \
-  _(PeepholeOptimize)
+  _(PeepholeOptimize)              \
+  _(RecordFunction)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
