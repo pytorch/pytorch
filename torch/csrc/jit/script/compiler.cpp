@@ -1,3 +1,5 @@
+#include <torch/csrc/jit/script/compiler.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -5,17 +7,17 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
-#include <torch/csrc/jit/script/type_parser.h>
+#include <torch/csrc/jit/script/script_type_parser.h>
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <torch/csrc/jit/constants.h>
 
 #include <c10/util/Optional.h>
 
+#include <atomic>
 #include <climits>
 #include <set>
 
@@ -400,10 +402,19 @@ struct Environment {
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
+          {"rangelist",
+           std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
       };
       auto it = globals.find(ident);
-      if (it != globals.end())
+      if (it != globals.end()) {
         retval = it->second;
+      }
+    }
+
+    if (!retval) {
+      if (auto class_type = ClassType::get(ident)) {
+        retval = std::make_shared<script::ClassValue>(class_type);
+      }
     }
 
     if (!retval) {
@@ -505,7 +516,7 @@ struct to_ir {
   to_ir(
       const Def& def,
       Resolver resolver_,
-      const SugaredValuePtr& self,
+      const c10::optional<Self>& self,
       Method& method) // method being constructed
       : method(method),
         graph(method.graph()),
@@ -533,6 +544,7 @@ struct to_ir {
   Resolver resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
   std::unordered_map<double, Value*> fp_constants;
+  ScriptTypeParser typeParser_;
 
   // Singly-linked list of environments. This top element contains a member
   // `next` that points to the most immediate enclosing scope's value.
@@ -563,9 +575,10 @@ struct to_ir {
 
   FunctionSchema emitDef(
       const Def& def,
-      const SugaredValuePtr& self,
+      const c10::optional<Self>& self,
       Block* block) {
     auto schema = extractSchemaFromDef(def, self);
+    // TODO need guards on init returning none
     if (schema.returns().size() == 1) {
       def_stack_.back().declared_return_type_ = schema.returns().at(0).type();
     }
@@ -576,7 +589,7 @@ struct to_ir {
     auto stmts_list = moveAllReturnsToEnd(def.statements());
     emitStatements(stmts_list.begin(), stmts_list.end());
     std::vector<Argument> returns = {emitOutput(def.range(), schema, block)};
-    return {def.name().name(), std::move(arguments), std::move(returns)};
+    return {def.name().name(), "", std::move(arguments), std::move(returns)};
   }
 
   std::vector<IValue> evaluateDefaults(
@@ -609,7 +622,7 @@ struct to_ir {
         blank_decl,
         List<Stmt>::create(r, {ret}));
     auto m = std::make_shared<Module>();
-    defineMethodsInModule(m, {def}, {resolver}, nullptr);
+    defineMethodsInModule(m, {def}, {resolver}, c10::nullopt);
     Stack stack;
     m->get_method("defaults").run(stack);
     return stack.at(0).toTuple()->elements();
@@ -617,11 +630,12 @@ struct to_ir {
 
   std::vector<Argument> parseArgsFromDecl(
       const Decl& decl,
-      const SugaredValuePtr& self) {
+      const c10::optional<Self>& self) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
-    if (self)
+    if (self) {
       ++params_begin;
+    }
     std::vector<Argument> retval;
 
     std::vector<Expr> default_types;
@@ -646,11 +660,12 @@ struct to_ir {
       c10::optional<int32_t> N;
 
       // BroadcastList list can only appear at the argument level
-      if (auto maybe_broad_list = parseBroadcastList(decl_arg.type())) {
+      if (auto maybe_broad_list =
+              typeParser_.parseBroadcastList(decl_arg.type())) {
         type = maybe_broad_list->first;
         N = maybe_broad_list->second;
       } else {
-        type = parseTypeFromExpr(decl_arg.type());
+        type = typeParser_.parseTypeFromExpr(decl_arg.type());
         N = c10::nullopt;
       }
       c10::optional<IValue> default_value = c10::nullopt;
@@ -662,7 +677,7 @@ struct to_ir {
           type,
           N,
           default_value,
-          /*kwarg_only =*/false);
+          decl_arg.kwarg_only());
       retval.push_back(arg);
     }
     return retval;
@@ -676,10 +691,10 @@ struct to_ir {
     if (!decl.return_type().present())
       return {};
 
-    if (parseBroadcastList(decl.return_type().get()))
+    if (typeParser_.parseBroadcastList(decl.return_type().get()))
       throw ErrorReport(decl.return_type().range())
           << "Broadcastable lists cannot appear as a return type";
-    auto parsed_type = parseTypeFromExpr(decl.return_type().get());
+    auto parsed_type = typeParser_.parseTypeFromExpr(decl.return_type().get());
     return {Argument(
         "",
         parsed_type,
@@ -689,25 +704,27 @@ struct to_ir {
   }
   FunctionSchema extractSchemaFromDef(
       const Def& def,
-      const SugaredValuePtr& self) {
-    auto name = def.name().name();
+      const c10::optional<Self>& self) {
+    const auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
     std::vector<Argument> returns = parseReturnFromDecl(def.decl());
     return FunctionSchema(
-        name, std::move(args), std::move(returns), false, false);
+        name, "", std::move(args), std::move(returns), false, false);
   }
 
   std::vector<Argument> emitFormalArguments(
       const Def& def,
-      const SugaredValuePtr& self,
+      const c10::optional<Self>& self,
       const FunctionSchema& schema,
       Block* block) {
     std::vector<Argument> arguments; // for schema
     // inputs
     auto it = def.decl().params().begin();
     auto end = def.decl().params().end();
-    auto expected_annotation_size =
-        self ? def.decl().params().size() - 1 : def.decl().params().size();
+    auto expected_annotation_size = def.decl().params().size();
+    if (self) {
+      expected_annotation_size--;
+    }
     if (schema.arguments().size() != expected_annotation_size) {
       throw ErrorReport(def.decl().params().range())
           << "Number of type annotations for"
@@ -715,9 +732,18 @@ struct to_ir {
           << " does not match the number of parameters on the function ("
           << expected_annotation_size << ")!";
     }
+
     if (self) {
       AT_ASSERT(it != end);
-      environment_stack->setSugaredVar(def.range(), (*it).ident().name(), self);
+      const auto& name = (*it).ident().name();
+      if (auto type = self->asFirstClass()) {
+        Value* new_input =
+            block->addInput()->setUniqueName(name)->setType(type);
+        environment_stack->setVar((*it).ident().range(), name, new_input);
+        arguments.emplace_back(name, type);
+      } else {
+        environment_stack->setSugaredVar(def.range(), name, self->asSugared());
+      }
       ++it;
     }
     size_t arg_annotation_idx = 0;
@@ -803,7 +829,7 @@ struct to_ir {
       pushFrame(block, /*starts_def=*/true);
       emitDef(
           def,
-          nullptr,
+          c10::nullopt,
           block); // ignore schema return, we just wont use it for now since we
                   // never create a Method for the closure
       popFrame(/*ends_def=*/true);
@@ -946,6 +972,50 @@ struct to_ir {
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
+  Value* emitListComprehension(const ListComp& lc) {
+    // this avoids a race condition where we would re-use the same temp name
+    static std::atomic<size_t> tmp_count{0};
+    const auto tmp_name =
+        std::string("___list_acc") + std::to_string(tmp_count++);
+    const auto list_value = emitExpr(lc.iter());
+    if (list_value->type()->kind() != TypeKind::ListType) {
+      // TODO: constraining iterators to be simple lists for now
+      // as it makes easy to get list's element type.
+      throw ErrorReport(lc.range())
+          << "iterator expression is expected to be a list";
+    }
+    auto elem_types = list_value->type()->containedTypes();
+    // TODO: users can easily change the type to (x,1) or float(x)
+    // as in `float(x) for x in my_list_of_ints`
+    // eventually, we would probably want to temporarily inject x
+    // so we can evaluate the generator expression (e.g. `float(x)`) depending
+    // on x
+
+    // given `[x*2 for x in my_list]` this generates the following AST:
+    // __list_acc = []
+    // for x in my_list:
+    //  __list_acc.append(x*2)
+    const auto n = graph->insertNode(
+        graph->createList(elem_types.at(0), at::ArrayRef<Value*>{}));
+    environment_stack->setVar(lc.range(), tmp_name, n->output());
+    const auto tmp_list_ident = Ident::create(lc.range(), tmp_name);
+    const auto tmp_list_var = Var::create(lc.range(), tmp_list_ident);
+    const auto append_ident = Ident::create(lc.range(), "append");
+    const auto dot_op = Select::create(lc.range(), tmp_list_var, append_ident);
+    const auto append_args_list = List<Expr>::create(lc.range(), {lc.elt()});
+    const auto append_attrs = List<Attribute>::create(lc.range(), {});
+    const auto apply_append =
+        Apply::create(lc.range(), dot_op, append_args_list, append_attrs);
+    const auto expr_stmt = ExprStmt::create(lc.range(), apply_append);
+    const auto stmt_list = List<Stmt>::create(lc.range(), {expr_stmt});
+    const auto iters_list = List<Expr>::create(lc.range(), {lc.iter()});
+    const auto targets_list = List<Expr>::create(lc.range(), {lc.target()});
+    const auto for_loop =
+        For::create(lc.range(), targets_list, iters_list, stmt_list);
+    emitFor(for_loop);
+    return n->output();
+  }
+
   // Insert subtyping refinements
   void insertRefinements(const Refinements& ref) {
     for (const auto& name_mappings : ref.mappings_) {
@@ -969,21 +1039,32 @@ struct to_ir {
     const auto first_bool_info = findRefinements(first_expr);
     Value* first_value = emitCond(Expr(first_expr));
 
+    // if the second expr in the short circuit is not evaluated,
+    // than the first expression is False if the short circuit
+    // is an `and` and True if the short circuit is an `or`.
+    // `False and expr` -> False, `True or expr` -> True
+    //
+    // inserting it as a constant makes optimization easier
+
+    Value* first_value_returned;
+
     const Refinements* first_expr_refinements;
     const Refinements* second_expr_refinements;
     // if it's an OR the first expr is emitted in the true branch
     // and the second expr in the false branch, if it's an AND the opposite
     if (is_or) {
+      first_value_returned = graph->insertConstant(true, nullptr, loc);
       first_expr_refinements = &first_bool_info.true_refinements_;
       second_expr_refinements = &first_bool_info.false_refinements_;
     } else {
+      first_value_returned = graph->insertConstant(false, nullptr, loc);
       first_expr_refinements = &first_bool_info.false_refinements_;
       second_expr_refinements = &first_bool_info.true_refinements_;
     }
 
     auto get_first_expr = [&] {
       insertRefinements(*first_expr_refinements);
-      return first_value;
+      return first_value_returned;
     };
 
     auto get_second_expr = [&] {
@@ -1796,6 +1877,9 @@ struct to_ir {
       case TK_TUPLE_LITERAL:
         emitTupleAssign(TupleLiteral(stmt.lhs()), stmt.rhs());
         break;
+      case '.':
+        emitSelectAssign(stmt);
+        break;
       case TK_SUBSCRIPT:
         emitSubscriptAssign(stmt.range(), Subscript(stmt.lhs()), stmt.rhs());
         break;
@@ -1803,6 +1887,15 @@ struct to_ir {
         throw ErrorReport(stmt.lhs())
             << "unexpected expression on left-hand side of assignment.";
     }
+  }
+
+  void emitSelectAssign(const Assign& stmt) {
+    const auto lhs = Select(stmt.lhs());
+    const auto basename = Var(lhs.value()).name();
+    const auto rhsValue =
+        emitSugaredExpr(stmt.rhs(), 1)->asValue(stmt.rhs().range(), method);
+    auto userObject = environment_stack->getSugaredVar(basename);
+    userObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -1927,7 +2020,7 @@ struct to_ir {
       return emitForkExpr(loc, forked, inputs, attributes);
     } else if (auto annotate_value = dynamic_cast<AnnotateValue*>(sv.get())) {
       checkApplyExpr(apply, loc);
-      TypePtr type = parseTypeFromExpr(apply.inputs()[0]);
+      TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
       Value* expr = tryConvertToType(
           apply.range(),
           *graph,
@@ -1976,7 +2069,7 @@ struct to_ir {
           }
           return false;
         }
-        auto type_name = parseBaseTypeName(classinfo);
+        auto type_name = typeParser_.parseBaseTypeName(classinfo);
         if (!type_name) {
           throw ErrorReport(classinfo.range())
               << "type must be a type identifier";
@@ -1991,9 +2084,10 @@ struct to_ir {
           return true;
         } else if (val->type()->cast<OptionalType>()) {
           throw ErrorReport(loc)
-              << "Optional isinstance check is not supported, consider use is/isnot None instead";
+              << "Optional isinstance check is not supported, "
+              << "consider use is/isnot None instead";
         } else {
-          TypePtr type = parseTypeFromExpr(classinfo);
+          TypePtr type = typeParser_.parseTypeFromExpr(classinfo);
           if (val->type()->isSubtypeOf(type)) {
             return true;
           }
@@ -2005,6 +2099,12 @@ struct to_ir {
           isInstanceCheck(apply.inputs()[0], apply.inputs()[1]);
       return std::make_shared<SimpleValue>(
           graph->insertConstant(is_instance_val, nullptr, loc));
+    } else if (auto classNew = dynamic_cast<ClassNewMethod*>(sv.get())) {
+      if (apply.inputs().size() != 1) {
+        throw ErrorReport(loc) << "Only one argument to __new__ allowed";
+      }
+      return classNew->createObject(
+          apply.range(), method, Var(apply.inputs()[0]).name().name());
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());
@@ -2243,6 +2343,15 @@ struct to_ir {
         } else if (!values.empty()) {
           elem_type = values.at(0)->type();
         }
+
+        // Tensors are special because they have dymnamic properties. So any
+        // list containing tensors should be typed with the unified typeof all
+        // the elements.
+        if (elem_type->isSubtypeOf(TensorType::get())) {
+          for (const auto& value : values) {
+            elem_type = unifyTypes(elem_type, value->type()).value();
+          }
+        }
         for (auto v : values) {
           if (!v->type()->isSubtypeOf(elem_type)) {
             throw ErrorReport(tree)
@@ -2289,6 +2398,10 @@ struct to_ir {
         return graph
             ->insertNode(graph->createDict(key_type, value_type, keys, values))
             ->output();
+      } break;
+      case TK_LIST_COMP: {
+        auto lc = ListComp(tree);
+        return emitListComprehension(lc);
       } break;
       default:
         throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
@@ -2340,7 +2453,8 @@ struct to_ir {
     // aten::slice, we should separate it from this function.
     if (dim) {
       AT_ASSERT(input->type()->isSubtypeOf(TensorType::get()));
-      args.emplace_back(loc, "dim", graph->insertConstant(dim.value(), nullptr, loc));
+      args.emplace_back(
+          loc, "dim", graph->insertConstant(dim.value(), nullptr, loc));
     } else {
       AT_ASSERT(!input->type()->isSubtypeOf(TensorType::get()));
     }
@@ -2357,7 +2471,8 @@ struct to_ir {
         return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
       }
     }
-    NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, nullptr, loc));
+    NamedValue step =
+        NamedValue(loc, "step", graph->insertConstant(1, nullptr, loc));
     return emitBuiltinCall(
         loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }
@@ -2599,7 +2714,8 @@ struct to_ir {
     } else {
       throw ErrorReport(loc)
           << "Indexing only supported on lists, dictionaries, "
-             "tensors, and tuples";
+             "tensors, and tuples, but got type '"
+          << gatherable->type()->str() << "'";
     }
   }
 };
@@ -2608,7 +2724,7 @@ void defineMethodsInModule(
     const std::shared_ptr<Module>& m,
     const std::vector<Def>& definitions,
     const std::vector<Resolver>& resolvers,
-    const SugaredValuePtr& self) {
+    const c10::optional<Self>& self) {
   AT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
@@ -2643,14 +2759,17 @@ void defineMethodsInModule(
   for (Method* method : methods) {
     method->ensure_defined();
   }
-  didFinishEmitModule(m);
+  if (!self || !self->asFirstClass()) {
+    // Disable module hooks if the module is only used to store a class's code.
+    didFinishEmitModule(m);
+  }
 }
 
 void defineMethodsInModule(
     const std::shared_ptr<Module>& m,
     const std::string& source,
     const Resolver& resolver,
-    const SugaredValuePtr& self) {
+    const c10::optional<Self>& self) {
   Parser p(source);
   std::vector<Def> definitions;
   std::vector<Resolver> resolvers;
@@ -2684,7 +2803,6 @@ void lambdaLiftFork(Node* fork_node) {
   fork_node->g_(attr::Subgraph, forked_graph);
   fork_node->eraseBlock(0);
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch

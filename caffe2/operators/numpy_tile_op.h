@@ -14,8 +14,9 @@ template <class Context>
 class NumpyTileOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  NumpyTileOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit NumpyTileOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   ~NumpyTileOp() {}
 
   bool RunOnDevice() override {

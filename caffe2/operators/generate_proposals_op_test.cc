@@ -6,10 +6,6 @@
 
 #include "caffe2/operators/generate_proposals_op_util_boxes.h"
 
-#ifdef CAFFE2_USE_OPENCV
-#include <opencv2/opencv.hpp>
-#endif // CAFFE2_USE_OPENCV
-
 namespace caffe2 {
 
 static void AddConstInput(
@@ -417,7 +413,6 @@ TEST(GenerateProposalsTest, TestRealDownSampled) {
       1e-4);
 }
 
-#if defined(CV_MAJOR_VERSION) && (CV_MAJOR_VERSION >= 3)
 TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
   // Similar to TestRealDownSampled but for rotated boxes with angle info.
   const float angle = 0;
@@ -526,7 +521,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
   ERMatXf rois_gt(rois_gt_xyxy.rows(), 6);
   // Batch ID
   rois_gt.block(0, 0, rois_gt.rows(), 1) =
-      rois_gt_xyxy.block(0, 0, rois_gt.rows(), 0);
+      rois_gt_xyxy.block(0, 0, rois_gt.rows(), 1);
   // rois_gt in [x_ctr, y_ctr, w, h] format
   rois_gt.block(0, 1, rois_gt.rows(), 4) = utils::bbox_xyxy_to_ctrwh(
       rois_gt_xyxy.block(0, 1, rois_gt.rows(), 4).array());
@@ -725,6 +720,5 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
     EXPECT_LE(std::abs(rois_data(i, 5) - expected_angle), 1e-4);
   }
 }
-#endif // CV_MAJOR_VERSION >= 3
 
 } // namespace caffe2

@@ -10,10 +10,11 @@
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/CUDAStream.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 #endif
 
 #include <gloo/rendezvous/context.h>
@@ -150,6 +151,11 @@ void initializeStreamsEvents(
         /* isHighPriority */ true, tensors[i].device().index()));
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
+
+    // `tensors` are created on a different stream. Hence, they must record
+    // new streams in this Work to prevent being freed before the Work finishes.
+    c10::cuda::CUDACachingAllocator::recordStream(
+      tensors[i].storage().data(), streams[i]);
   }
 }
 
@@ -187,6 +193,14 @@ void initializeStreamsEvents(
         /* isHighPriority */ true, tensors[i][0].device().index()));
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
+
+    for (at::Tensor& tensor : tensors[i]) {
+      // `tensors` are created on a different stream. Hence, they must record
+      // new streams in this Work to prevent being freed before the Work
+      // finishes.
+      c10::cuda::CUDACachingAllocator::recordStream(
+        tensor.storage().data(), streams[i]);
+    }
   }
 }
 
@@ -239,8 +253,7 @@ void ProcessGroupGloo::RecvWork::wait() {
 
 ProcessGroupGloo::Options::Options()
     : timeout(std::chrono::milliseconds(10 * 1000)),
-      threads(2),
-      cacheNumAlgorithmEntries(1) {}
+      threads(2) {}
 
 ProcessGroupGloo::ProcessGroupGloo(
     const std::shared_ptr<Store>& store,
@@ -1011,7 +1024,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
   void gather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs) {
-    const auto scalarType = inputs[0].type().scalarType();
+    const auto scalarType = inputs[0].scalar_type();
     gloo::GatherOptions opts(context);
     opts.setRoot(root);
     opts.setTag(tag);
@@ -1208,7 +1221,7 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
   void scatter(
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs) {
-    const auto scalarType = outputs[0].type().scalarType();
+    const auto scalarType = outputs[0].scalar_type();
     gloo::ScatterOptions opts(context);
     opts.setRoot(root);
     opts.setTag(tag);
@@ -1390,7 +1403,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
-  auto size = tensor.numel() * tensor.type().elementSizeInBytes();
+  auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
@@ -1409,7 +1422,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
-  auto size = tensor.numel() * tensor.type().elementSizeInBytes();
+  auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
@@ -1427,7 +1440,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
-  auto size = tensor.numel() * tensor.type().elementSizeInBytes();
+  auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];

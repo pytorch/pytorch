@@ -175,6 +175,27 @@ class CAFFE2_API Tensor {
   bool is_contiguous() const {
     return impl_->is_contiguous();
   }
+
+  // Total bytes consumed by the "view" of elements of the array.  Does not
+  // include size of metadata.  The number reported here does not necessarily
+  // correspond to the true physical memory consumed by a tensor; instead,
+  // it reports the memory the tensor would take *if* it were contiguous.
+  // Defined to be numel() * itemsize()
+  size_t nbytes() const {
+    return impl_->numel() * impl_->itemsize();
+  }
+
+  // Length of one array element in bytes.  This is the traditional
+  // Numpy naming.
+  size_t itemsize() const {
+    return impl_->itemsize();
+  }
+
+  // Same as itemsize().  This is the PyTorch naming.
+  size_t element_size() const {
+    return impl_->itemsize();
+  }
+
   Type & type() const {
     return legacyTensorType(*impl_);
   }
@@ -323,10 +344,8 @@ class CAFFE2_API Tensor {
   Tensor all(int64_t dim, bool keepdim=false) const;
   bool allclose(const Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const;
   Tensor any(int64_t dim, bool keepdim=false) const;
-  Tensor argmax(int64_t dim, bool keepdim=false) const;
-  Tensor argmax() const;
-  Tensor argmin(int64_t dim, bool keepdim=false) const;
-  Tensor argmin() const;
+  Tensor argmax(c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false) const;
+  Tensor argmin(c10::optional<int64_t> dim=c10::nullopt, bool keepdim=false) const;
   Tensor as_strided(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset=c10::nullopt) const;
   Tensor & as_strided_(IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset=c10::nullopt);
   Tensor asin() const;
@@ -385,7 +404,6 @@ class CAFFE2_API Tensor {
   Tensor floor() const;
   Tensor & floor_();
   Tensor ger(const Tensor & vec2) const;
-  std::tuple<Tensor,Tensor> gesv(const Tensor & A) const;
   Tensor fft(int64_t signal_ndim, bool normalized=false) const;
   Tensor ifft(int64_t signal_ndim, bool normalized=false) const;
   Tensor rfft(int64_t signal_ndim, bool normalized=false, bool onesided=true) const;
@@ -625,6 +643,7 @@ class CAFFE2_API Tensor {
   Tensor & pow_(Scalar exponent);
   Tensor & pow_(const Tensor & exponent);
   Tensor & lerp_(const Tensor & end, Scalar weight);
+  Tensor & lerp_(const Tensor & end, const Tensor & weight);
   Tensor & sign_();
   Tensor & fmod_(Scalar other);
   Tensor & fmod_(const Tensor & other);
@@ -664,24 +683,23 @@ class CAFFE2_API Tensor {
   Tensor index_select(int64_t dim, const Tensor & index) const;
   Tensor masked_select(const Tensor & mask) const;
   Tensor nonzero() const;
-  Tensor gather(int64_t dim, const Tensor & index) const;
+  Tensor gather(int64_t dim, const Tensor & index, bool sparse_grad=false) const;
   Tensor addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   Tensor addcdiv(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   std::tuple<Tensor,Tensor> gels(const Tensor & A) const;
-  std::tuple<Tensor,Tensor> trtrs(const Tensor & A, bool upper=true, bool transpose=false, bool unitriangular=false) const;
+  std::tuple<Tensor,Tensor> triangular_solve(const Tensor & A, bool upper=true, bool transpose=false, bool unitriangular=false) const;
   std::tuple<Tensor,Tensor> symeig(bool eigenvectors=false, bool upper=true) const;
   std::tuple<Tensor,Tensor> eig(bool eigenvectors=false) const;
   std::tuple<Tensor,Tensor,Tensor> svd(bool some=true, bool compute_uv=true) const;
   Tensor cholesky(bool upper=false) const;
   Tensor cholesky_solve(const Tensor & input2, bool upper=false) const;
+  std::tuple<Tensor,Tensor> solve(const Tensor & A) const;
   Tensor potri(bool upper=true) const;
   std::tuple<Tensor,Tensor> pstrf(bool upper=true, Scalar tol=-1) const;
   std::tuple<Tensor,Tensor> qr() const;
   std::tuple<Tensor,Tensor> geqrf() const;
   Tensor orgqr(const Tensor & input2) const;
   Tensor ormqr(const Tensor & input2, const Tensor & input3, bool left=true, bool transpose=false) const;
-  std::tuple<Tensor,Tensor> btrifact(bool pivot=true) const;
-  std::tuple<Tensor,Tensor,Tensor> btrifact_with_info(bool pivot=true) const;
   Tensor btrisolve(const Tensor & LU_data, const Tensor & LU_pivots) const;
   Tensor multinomial(int64_t num_samples, bool replacement=false, Generator * generator=nullptr) const;
   Tensor lgamma() const;
@@ -694,6 +712,7 @@ class CAFFE2_API Tensor {
   Tensor neg() const;
   Tensor atan2(const Tensor & other) const;
   Tensor lerp(const Tensor & end, Scalar weight) const;
+  Tensor lerp(const Tensor & end, const Tensor & weight) const;
   Tensor histc(int64_t bins=100, Scalar min=0, Scalar max=0) const;
   Tensor sign() const;
   Tensor fmod(Scalar other) const;
@@ -706,6 +725,7 @@ class CAFFE2_API Tensor {
   Tensor max() const;
   Tensor median() const;
   std::tuple<Tensor,Tensor> sort(int64_t dim=-1, bool descending=false) const;
+  Tensor argsort(int64_t dim=-1, bool descending=false) const;
   std::tuple<Tensor,Tensor> topk(int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true) const;
   Tensor all() const;
   Tensor any() const;

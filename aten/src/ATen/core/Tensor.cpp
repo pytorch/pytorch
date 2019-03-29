@@ -14,12 +14,18 @@ void Tensor::enforce_invariants() {
   // supported by ATen
   scalar_type();
   if (defined()) {
-    AT_ASSERTM(
-        impl_->dtype_initialized(),
-        "Partially-initialized tensor not supported by at::Tensor");
-    AT_ASSERTM(
-        impl_->storage_initialized(),
-        "Partially-initialized tensor not supported by at::Tensor");
+    // If it's a variable - we definitely not in C2 land
+    if (!is_variable()) {
+      AT_ASSERTM(
+          impl_->dtype_initialized(),
+          "Partially-initialized tensor not supported by at::Tensor");
+      AT_ASSERTM(
+          !impl_->is_sparse(),
+          "Sparse Tensors are supported by at::Tensor, but invariant checking isn't implemented.  Please file a bug.");
+      AT_ASSERTM(
+          impl_->storage_initialized(),
+          "Partially-initialized tensor not supported by at::Tensor");
+    }
     // Ensure LegacyTypeDispatch is initialized. In ATen it's done in tensor
     // factory functions, but when we get a tensor from Caffe2 we might bypass
     // those factory functions.

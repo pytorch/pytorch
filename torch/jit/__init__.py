@@ -3,7 +3,7 @@ from torch import Tensor
 from torch.autograd import Variable, function
 from torch.serialization import validate_cuda_device
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
-from torch.jit.frontend import get_jit_ast, get_default_args
+from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
@@ -56,7 +56,7 @@ _enabled = _parse_env('PYTORCH_JIT', True, "> Using PyTorch JIT", "> PyTorch JIT
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
-BatchTensor = torch._C._jit.BatchTensor
+_jit_script_class_compile = torch._C._jit_script_class_compile
 
 Future = torch._C.Future
 _fork = torch._C.fork
@@ -188,10 +188,11 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
         f.write(ret)
 
 
-def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False):
+def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_inputs=False):
     """
     Trace a function or model, returning a tuple consisting of the both the
-    *trace* of an execution, as well as the original return value.
+    *trace* of an execution, as well as the original return value. If return_inputs,
+    also returns the trace inputs as part of the tuple
 
     Tracing is guaranteed not to change the semantics of the function/module
     that is traced.
@@ -214,7 +215,7 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False):
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return LegacyTracedModule(f, _force_outplace)(*args, **kwargs)
+    return LegacyTracedModule(f, _force_outplace, return_inputs)(*args, **kwargs)
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -251,13 +252,14 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
 
 
 class LegacyTracedModule(Module):
-    def __init__(self, inner, force_outplace=False):
+    def __init__(self, inner, force_outplace=False, return_inputs=False):
         super(LegacyTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
         self.inner = inner
         self._force_outplace = force_outplace
+        self._return_inputs = return_inputs
 
     def forward(self, *args):
         in_vars, in_desc = _flatten(args)
@@ -265,6 +267,7 @@ class LegacyTracedModule(Module):
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
         trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
+        ret_inputs = tuple(x.clone() for x in all_trace_inputs)
         torch._C._tracer_set_force_outplace(self._force_outplace)
         torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
         try:
@@ -275,7 +278,10 @@ class LegacyTracedModule(Module):
         except Exception:
             torch._C._tracer_abandon()
             raise
-        return trace, out
+        if self._return_inputs:
+            return trace, out, ret_inputs
+        else:
+            return trace, out
 
 
 def _clone_inputs(args):
@@ -533,7 +539,8 @@ def _check_trace(check_inputs, func, executor_options, module, check_tolerance, 
             has_warned[0] = True
             nondeterm_ops = [op for op in module.graph.nodes() if op.isNondeterministic()]
             if len(nondeterm_ops) > 0:
-                nondeterministic_ops_warning = "Trace had nondeterministic nodes. Nodes:\n"
+                nondeterministic_ops_warning = "Trace had nondeterministic nodes. "
+                nondeterministic_ops_warning += "Did you forget call .eval() on your model? Nodes:\n"
                 nondeterministic_ops_warning += "\n".join([indent(str(op)) for op in nondeterm_ops][:20])
                 nondeterministic_ops_warning += "\nThis may cause errors in trace checking. To disable trace checking,"\
                                                 " pass check_trace=False to torch.jit.trace()"
@@ -584,7 +591,8 @@ def trace(func,
           check_trace=True,
           check_inputs=None,
           check_tolerance=1e-5,
-          _force_outplace=False):
+          _force_outplace=False,
+          _module_class=None):
     """
     Trace a function and return an executable trace that will be optimized
     using just-in-time compilation.
@@ -650,7 +658,10 @@ def trace(func,
     # done primarily so that weird iterables fail here and not pybind11 code
     elif not isinstance(example_inputs, tuple):
         example_inputs = tuple(example_inputs)
-    module = TopLevelTracedModule(func, **executor_options)
+    if _module_class:
+        module = _module_class(func, **executor_options)
+    else:
+        module = TopLevelTracedModule(func, **executor_options)
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
     module._create_method_from_trace('forward', func, example_inputs,
                                      var_lookup_fn, _force_outplace)
@@ -712,17 +723,33 @@ def _try_compile_weak_script(fn):
         return entry["compiled_fn"]
 
 
-def script(fn, optimize=True, _frames_up=0, _rcb=None):
+# ScriptClasses must be new-style classes because we construct them using their
+# __new__ method.
+def _is_new_style_class(cls):
+    if hasattr(cls, '__class__'):
+        return ('__dict__' in dir(cls) or hasattr(cls, '__slots__'))
+
+
+def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
-        return fn
+        return obj
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-    ast = get_jit_ast(fn, is_method=False)
     mod = ScriptModule()
-    _jit_script_compile(mod, ast, _rcb, get_default_args(fn))
+    if inspect.isclass(obj):
+        if not _is_new_style_class(obj):
+            raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
+        ast = get_jit_class_def(obj)
+        _jit_script_class_compile(mod, ast, _rcb)
+        _add_script_class(obj, obj.__name__)
+        return obj
+    else:
+        ast = get_jit_def(obj)
+        _jit_script_compile(mod, ast, _rcb, get_default_args(obj))
     # Forward docstrings
-    mod.__doc__ = fn.__doc__
+    mod.__doc__ = obj.__doc__
     return mod
+
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
@@ -744,7 +771,7 @@ def script_method(fn, _rcb=None):
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(frames_up=2)
-    ast = get_jit_ast(fn, is_method=True)
+    ast = get_jit_def(fn, self_name="ScriptModule")
     return ScriptMethodStub(_rcb, ast, fn)
 
 
@@ -770,38 +797,6 @@ def _is_weak_type(cls):
     Check if a type has been annotated with `weak_module`
     """
     return cls in _jit_internal.weak_types
-
-
-def batch(batch_size=1, optimize=True, _frames_up=0):
-    def decorator(fn):
-        if not _enabled:
-            return fn
-        import torch.jit.batchop
-        mod = script(fn, optimize, _frames_up)
-        res_graph = torch.to_batch_graph(mod.graph)
-        res_mod = ScriptModule()
-        res_mod._create_method_from_graph('forward', res_graph)
-
-        def wrapper(*args):
-            new_args = []
-            for arg in args:
-                if isinstance(arg, torch.Tensor):
-                    arg = BatchTensor(arg, batch_size)
-                if isinstance(arg, BatchTensor):
-                    new_args.extend([arg.get_data(), arg.get_mask(), arg.get_dims()])
-                else:
-                    new_args.append(arg)
-            res = res_mod(*new_args)
-            assert len(res) % 3 == 0
-            if len(res) % 3 != 0:
-                raise "non-batched-tensor output is not supported yet"
-            result = [BatchTensor(*res[i * 3: i * 3 + 3]) for i in range(len(res) // 3)]
-            if len(result) == 1:
-                return result[0]
-            return result
-        wrapper.__doc__ = fn.__doc__
-        return wrapper
-    return decorator
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
@@ -886,9 +881,7 @@ class OrderedParameterDict(OrderedDictWrapper):
         super(OrderedParameterDict, self).__init__(module)
 
     def items(self):
-        return [(name, param) for name, param, is_buffer
-                in self.module._get_parameters()
-                if not is_buffer]
+        return [(name, param) for name, param in self.module._get_parameters()]
 
     def __setitem__(self, k, v):
         self.module._register_parameter(k, v, False)
@@ -907,12 +900,11 @@ class OrderedBufferDict(OrderedDictWrapper):
         super(OrderedBufferDict, self).__init__(module)
 
     def items(self):
-        return [(name, param) for name, param, is_buffer
-                in self.module._get_parameters()
-                if is_buffer]
+        return [(name, param) for name, _, param in
+                self.module._get_attributes() if isinstance(param, torch.Tensor)]
 
     def __setitem__(self, k, v):
-        self.module._register_parameter(k, v, True)
+        self.module._register_buffer(k, v)
 
     def __contains__(self, k):
         return self.module._has_buffer(k)
@@ -920,7 +912,7 @@ class OrderedBufferDict(OrderedDictWrapper):
     def __getitem__(self, k):
         if k not in self:
             raise KeyError(k)
-        return self.module._get_parameter(k)
+        return self.module._get_buffer(k)
 
 # base types that can be constants
 # in addition, tuples and lists of these base types are also considered constants
@@ -964,21 +956,23 @@ class ScriptMeta(type(torch._C.ScriptModule)):
     # this has to inherit from pybind11's metaclass otherwise we get
     # issues because ScriptModule inherits from torch._C.ScriptModule,
     # a pybind11 type
-    def __init__(cls, name, bases, attrs):
+    def __init__(self, name, bases, attrs):
         # find all the script methods
-        cls._original_methods = {}
+        self._original_methods = {}
         methods = []
         for k, v in sorted(attrs.items()):
             if isinstance(v, ScriptMethodStub):
-                delattr(cls, k)
+                delattr(self, k)
                 methods.append(v)
-                cls._original_methods[v.original_method.__name__] = v.original_method
+                self._original_methods[v.original_method.__name__] = v.original_method
         # after the user's __init__ register all the script methods
         # with the module
-        original_init = getattr(cls, '__init__', lambda self: None)
-        super_constants = getattr(super(cls), '_constants_set', set())
-        cls._constants_set = set(getattr(cls, '__constants__', ())).union(super_constants)
-        cls._overloads = dict(getattr(cls, '__overloads__', {}))
+        original_init = getattr(self, '__init__', lambda self: None)
+        super_constants = getattr(super(self), '_constants_set', set())
+        self._constants_set = set(getattr(self, '__constants__', ())).union(super_constants)
+        self._overloads = dict(getattr(self, '__overloads__', {}))
+
+        cls = self
 
         @functools.wraps(original_init)
         def init_then_register(self, *args, **kwargs):
@@ -990,8 +984,8 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             original_init(self, *args, **kwargs)
             _create_methods_from_stubs(self, methods)
 
-        cls.__init__ = init_then_register
-        return super(ScriptMeta, cls).__init__(name, bases, attrs)
+        self.__init__ = init_then_register
+        return super(ScriptMeta, self).__init__(name, bases, attrs)
 
 
 if _enabled:
@@ -1048,9 +1042,8 @@ if _enabled:
                     + Tracing will not record any control-flow like if statements or loops. When
                       this control-flow is constant across your module, this is fine and it often
                       just inlines configuration decisions. But sometimes the control-flow is
-                      actually part of the model itself. For instance, a beam search in
-                      sequence-to-sequence translation is a loop over the (varying) sequence
-                      length of inputs.
+                      actually part of the model itself. For instance, a recurrent network is
+                      a loop over the (possibly dynamic) length of an input sequence.
 
                     + In the returned ``ScriptModule``, operations that have different behaviors
                       in ``training`` and ``eval`` modes will always behave as if it is in the
@@ -1148,8 +1141,16 @@ if _enabled:
                 if attr == 'training':
                     if self._has_buffer('training'):
                         self.__dict__['training'] = value
-                        self._get_parameter('training').fill_(int(value))
+                        self._get_buffer('training').fill_(int(value))
                         return
+                if isinstance(value, Attribute):
+                    the_type = torch.jit.annotations.ann_to_type(value.type)
+                    try:
+                        self._register_attribute(attr, the_type, value.value)
+                    except RuntimeError:
+                        raise RuntimeError("Could not register attribute '{}' of type '{}' for a value of type '{}'"
+                                           .format(attr, value.type, type(value.value)))
+                    return
                 return super(ScriptModule, self).__setattr__(attr, value)
 
             if hasattr(self, attr):
@@ -1495,6 +1496,7 @@ def _get_builtin_table():
     _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
     _builtin_table[id(torch.nn.functional.upsample_bilinear)] = "aten::__upsample_bilinear"
     _builtin_table[id(torch.nn.functional.assert_int_or_pair)] = "aten::_assert_int_or_pair"
+    _builtin_table[id(torch.nn.utils.rnn.get_packed_sequence)] = "aten::_pack_sequence"
 
     return _builtin_table
 
@@ -1509,6 +1511,21 @@ def _find_builtin(fn):
 
 _register_builtin(len, 'aten::len')
 _register_builtin(_wait, 'aten::wait')
+
+_script_classes = {}
+
+
+def _add_script_class(cls, name):
+    global _script_classes
+    _script_classes[name] = cls
+
+
+def _get_script_class(name):
+    global _script_classes
+    if name not in _script_classes:
+        raise RuntimeError("Unknown reference to ScriptClass '{}'. "
+                           "Did you forget to import it?".format(name))
+    return _script_classes[name]
 
 # torch.jit.Error
 Error = torch._C.JITException
@@ -1528,6 +1545,10 @@ class _disable_tracing(object):
 def annotate(the_type, the_value):
     # noop in python
     return the_value
+
+
+Attribute = collections.namedtuple('Attribute', ['value', 'type'])
+
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

@@ -31,50 +31,57 @@
 
 namespace at { namespace native {
 
-template <typename scalar_t>
+template <typename scalar_t, typename index_t, typename combine_t>
 struct WelfordData {
   scalar_t mean;
   scalar_t m2;
-  int64_t n;
-  C10_HOST_DEVICE WelfordData() : mean(0), m2(0), n(0)  {}
-  C10_DEVICE WelfordData(scalar_t mean, scalar_t m2, int64_t n) : mean(mean), m2(m2), n(n) {}
+  index_t n;
+  combine_t nf;
+  C10_HOST_DEVICE WelfordData() : mean(0), m2(0), n(0), nf(0)  {}
+  C10_DEVICE WelfordData(scalar_t mean, scalar_t m2, index_t n, combine_t nf) : mean(mean), m2(m2), n(n), nf(nf) {}
 };
 
 
-template <typename scalar_t, typename acc_scalar_t>
+template <typename scalar_t, typename acc_scalar_t, typename index_t, typename combine_t>
 struct WelfordOps {
   bool unbiased;
   bool take_sqrt;
  public:
-  using acc_t = WelfordData<acc_scalar_t>;
+  using acc_t = WelfordData<acc_scalar_t, index_t, combine_t>;
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data) const {
     acc_scalar_t delta = data - acc.mean;
-    acc_scalar_t new_mean = acc.mean + delta / (acc.n + 1);
+    // using acc.nf(combine_t) here, as acc.n(index_t) would still be converted
+    // accumulation in reduce is done through index_T
+    acc_scalar_t new_mean = acc.mean + delta / (acc.nf + 1);
     acc_scalar_t new_delta = data - new_mean;
     return {
       new_mean,
       acc.m2 + delta * new_delta,
-      acc.n + 1
+      acc.n + 1,
+      combine_t(acc.n + 1), // accumulate for combine_t uses index_t
     };
   }
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
-    if (a.n == 0) {
+    if (a.nf == 0) {
       return b;
     }
-    if (b.n == 0) {
+    if (b.nf == 0) {
       return a;
     }
     acc_scalar_t delta = b.mean - a.mean;
-    int64_t new_count = a.n + b.n;
-    acc_scalar_t nb_over_n = (scalar_t)b.n / new_count;
+    combine_t new_count = a.nf + b.nf;
+    acc_scalar_t nb_over_n = b.nf / new_count;
     return {
       a.mean + delta * nb_over_n,
-      a.m2 + b.m2 + delta * delta * a.n * nb_over_n,
+      a.m2 + b.m2 + delta * delta * a.nf * nb_over_n,
+      // setting acc.n as -1 since acc.n might not be able to represent the count
+      // correctly within its range, setting it to -1 to avoid confusion
+      -1,
       new_count
     };
   }
   inline C10_DEVICE scalar_t project(acc_t acc) const {
-    int64_t divisor = unbiased ? (acc.n - 1) : acc.n;
+    combine_t divisor = unbiased ? (acc.nf - 1) : acc.nf;
     auto ret = (divisor > 0) ?
       (take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor))
       : NAN;
@@ -86,6 +93,7 @@ struct WelfordOps {
       WARP_SHFL_DOWN(acc.mean, offset)
       , WARP_SHFL_DOWN(acc.m2, offset)
       , WARP_SHFL_DOWN(acc.n, offset)
+      , WARP_SHFL_DOWN(acc.nf, offset)
     };
   }
 #endif

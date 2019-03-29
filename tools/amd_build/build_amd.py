@@ -6,6 +6,7 @@ import sys
 import subprocess
 import argparse
 from functools import reduce
+from itertools import chain
 
 from pyHIPIFY import hipify_python
 
@@ -29,6 +30,12 @@ parser.add_argument(
     help="The Directory to Store the Hipified Project",
     required=False)
 
+# Hipify using HIP-Clang launch.
+parser.add_argument(
+    '--hip-clang-launch',
+    action='store_true',
+    help=argparse.SUPPRESS)
+
 args = parser.parse_args()
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
@@ -49,6 +56,7 @@ includes = [
     "caffe2/video/*",
     "caffe2/distributed/*",
     "caffe2/queue/*",
+    "caffe2/contrib/aten/*",
     "binaries/*",
     "caffe2/**/*_test*",
     "caffe2/core/*",
@@ -56,6 +64,7 @@ includes = [
     "caffe2/utils/*",
     "c10/cuda/*",
     "c10/cuda/test/CMakeLists.txt",
+    "modules/*",
     # PyTorch paths
     # Keep this synchronized with is_pytorch_file in hipify_python.py
     "aten/src/ATen/cuda/*",
@@ -70,6 +79,7 @@ includes = [
     "aten/src/THC/CMakeLists.txt",
     "aten/src/THCUNN/CMakeLists.txt",
     "torch/*",
+    "tools/autograd/templates/python_variable_methods.cpp",
 ]
 
 ignores = [
@@ -97,11 +107,11 @@ if not args.out_of_place_only:
         # These files use nvrtc, hip doesn't have equivalent
         "csrc/autograd/profiler.h",
         "csrc/autograd/profiler.cpp",
-        "csrc/cuda/cuda_check.h",
         # These files are compatible with both cuda and hip
         "csrc/autograd/engine.cpp"
     ]
-    for root, _directories, files in os.walk(os.path.join(proj_dir, "torch")):
+    paths = ("torch", "tools")
+    for root, _directories, files in chain.from_iterable(os.walk(path) for path in paths):
         for filename in files:
             if filename.endswith(".cpp") or filename.endswith(".h"):
                 source = os.path.join(root, filename)
@@ -125,4 +135,5 @@ hipify_python.hipify(
     includes=includes,
     ignores=ignores,
     out_of_place_only=args.out_of_place_only,
-    json_settings=json_settings)
+    json_settings=json_settings,
+    hip_clang_launch=args.hip_clang_launch)

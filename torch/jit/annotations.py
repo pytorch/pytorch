@@ -5,7 +5,7 @@ import inspect
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict
-from torch._C import DynamicType, TupleType, FloatType, IntType, \
+from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType
 from textwrap import dedent
 
@@ -163,9 +163,9 @@ def try_real_annotations(fn):
 
 def ann_to_type(ann):
     if ann is None:
-        return DynamicType.get()
+        return TensorType.get()
     elif ann is torch.Tensor:
-        return DynamicType.get()
+        return TensorType.get()
     elif is_tuple(ann):
         return TupleType([ann_to_type(a) for a in ann.__args__])
     elif is_list(ann):

@@ -53,13 +53,9 @@ TypeID ${Type}::ID() const {
   return ${TypeID};
 }
 
-size_t ${Type}::elementSizeInBytes() const {
-  return sizeof(${ScalarType});
-}
-
 /* example
 Tensor * ${Type}::add(Tensor & a, Tensor & b) {
-  std::cout << "add ${Tensor}\n";
+  std::cout << "add Tensor with backend ${Backend}\n";
   return &a;
 }
 */

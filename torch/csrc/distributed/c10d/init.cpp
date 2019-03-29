@@ -337,10 +337,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<>())
       .def_readwrite("devices", &::c10d::ProcessGroupGloo::Options::devices)
       .def_readwrite("timeout", &::c10d::ProcessGroupGloo::Options::timeout)
-      .def_readwrite("threads", &::c10d::ProcessGroupGloo::Options::threads)
-      .def_readwrite(
-          "cacheNumAlgorithmEntries",
-          &::c10d::ProcessGroupGloo::Options::cacheNumAlgorithmEntries);
+      .def_readwrite("threads", &::c10d::ProcessGroupGloo::Options::threads);
 
   processGroupGloo.def_static(
       "create_tcp_device",

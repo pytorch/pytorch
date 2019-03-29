@@ -92,9 +92,14 @@ inline IValue toIValue(py::handle input) {
     }
     return Tuple::create(s);
   } else {
-    AT_ERROR(
-        "Only tensors and (possibly nested) tuples of tensors are supported "
-        "as inputs or outputs of traced functions");
+    throw std::runtime_error(c10::str(
+        "Only tensors and (possibly nested) tuples of tensors are supported ",
+        "as inputs or outputs of traced functions",
+        ", but instead got value of type ",
+        py::str(input.get_type().attr("__name__")),
+        ".",
+        "\nValue: ",
+        py::repr(input)));
   }
 }
 
@@ -134,8 +139,8 @@ inline IValue toIValue(
     c10::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType:
+    case TypeKind::AutogradZeroTensorType:
     case TypeKind::DimensionedTensorType:
-    case TypeKind::UndefinedTensorType:
     case TypeKind::CompleteTensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
@@ -217,6 +222,23 @@ inline IValue toIValue(
         return {};
       }
       return toIValue(obj, type->expect<OptionalType>()->getElementType());
+    }
+    case TypeKind::ClassType: {
+      auto classType = type->expect<ClassType>();
+      // 1. create a bare ivalue
+      const auto name = Symbol::user(classType->name());
+      const size_t numAttrs = classType->numAttributes();
+      auto userObj = c10::ivalue::Object::create(name, numAttrs);
+
+      // 2. copy all the contained types
+      for (size_t slot = 0; slot < numAttrs; slot++) {
+        const auto& attrType = classType->getAttribute(slot);
+        const auto& attrName = classType->getAttributeName(slot);
+
+        const auto& contained = py::getattr(obj, attrName.c_str());
+        userObj->setSlot(slot, toIValue(contained, attrType));
+      }
+      return userObj;
     }
     case TypeKind::NumberType:
     case TypeKind::GeneratorType:
@@ -322,7 +344,22 @@ inline py::object toPyObject(IValue&& ivalue) {
       py_dict[toPyObject(IValue{pair.first})] = toPyObject(IValue{pair.second});
     }
     return std::move(py_dict);
+  } else if (ivalue.isObject()) {
+    const auto obj = ivalue.toObject();
+    const auto classType = ClassType::get(obj->name().toUnqualString());
+    AT_ASSERT(classType);
+    auto pyClass = py::module::import("torch.jit")
+                       .attr("_get_script_class")(obj->name().toUnqualString());
+    auto pyObj = pyClass.attr("__new__")(pyClass);
 
+
+    const auto numAttrs = classType->numAttributes();
+
+    for (size_t slot = 0; slot < numAttrs; slot++) {
+      const auto& attrName = classType->getAttributeName(slot);
+      py::setattr(pyObj, attrName.c_str(), toPyObject(obj->getSlot(slot)));
+    }
+    return pyObj;
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }
@@ -336,16 +373,16 @@ struct VISIBILITY_HIDDEN tuple_slice {
   tuple_slice(py::tuple tup_, int64_t b_, int64_t e_)
       : tup(std::move(tup_)), b(b_), e(e_) {}
   py::detail::tuple_iterator begin() const {
-    return {tup, b};
+    return {tup, static_cast<pybind11::ssize_t>(b)};
   }
   py::detail::tuple_iterator end() const {
-    return {tup, e};
+    return {tup, static_cast<pybind11::ssize_t>(e)};
   }
   size_t size() const {
     return e - b;
   }
   py::detail::tuple_accessor operator[](size_t index) const {
-    return {tup, b + index};
+    return {tup, static_cast<size_t>(b + index)};
   }
 
  private:

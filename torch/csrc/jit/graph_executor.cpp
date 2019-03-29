@@ -8,8 +8,6 @@
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/resource_guard.h>
-#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -26,7 +24,8 @@
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/passes/specialize_undef.h>
+#include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/symbolic_variable.h>
 #include <torch/csrc/jit/tracer.h>
 
@@ -206,7 +205,7 @@ struct DifferentiableGraphOp {
         // NB: since our requires_grad setting is only a heuristic we might end
         // up wanting to differentiate through integral tensors, which is
         // generally a hard error in autograd.
-        if (at::isFloatingType(output.type().scalarType())) {
+        if (at::isFloatingType(output.scalar_type())) {
           autograd::create_gradient_edge(output, grad_fn);
           output.set_requires_grad(true);
         } else {
@@ -293,7 +292,6 @@ Gradient getGradient(const Node* n) {
   grad.df_output_vjps = fmap<size_t>(n->is(attr::df_output_vjps));
   return grad;
 }
-
 } // anonymous namespace
 
 RegisterOperators reg_graph_executor_ops(
@@ -309,7 +307,6 @@ GraphExecutor* getGradExecutor(Operation& op) {
   }
   return nullptr;
 }
-
 } // namespace detail
 
 // a Graph can be created via tracing, or via a language-based frontend
@@ -506,6 +503,7 @@ struct GraphExecutorImpl {
     ConstantPooling(graph);
 
     PeepholeOptimize(graph);
+    ConstantPropagation(graph);
 
     // Unroll small loops, and eliminate expressions that are the same at every
     // iteration.
@@ -635,7 +633,7 @@ void GraphExecutor::debugDisableAutodiffSubgraphInlining() {
 }
 
 void runRequiredPasses(const std::shared_ptr<Graph>& g) {
-  specializeUndef(*g);
+  specializeAutogradZero(*g);
   LowerGradOf(*g);
   // implicit inserted expand nodes are not necessarily always valid
   // when used inside script methods that might have unstable shapes
@@ -645,6 +643,5 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g) {
   CanonicalizeOps(g);
   EliminateDeadCode(g);
 }
-
 } // namespace jit
 } // namespace torch

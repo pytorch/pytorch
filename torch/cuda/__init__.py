@@ -321,12 +321,21 @@ def stream(stream):
     if stream is None:
         yield
         return
-    prev_stream = current_stream()
+    src_prev_stream = current_stream()
+
+    if src_prev_stream.device != stream.device:
+        # The given stream is on a different device; have to restore the
+        # current_stream on that device on exit as well
+        with device(stream.device):
+            dst_prev_stream = current_stream()
+
     torch._C._cuda_setStream(stream._cdata)
     try:
         yield
     finally:
-        torch._C._cuda_setStream(prev_stream._cdata)
+        if src_prev_stream.device != stream.device:
+            torch._C._cuda_setStream(dst_prev_stream._cdata)
+        torch._C._cuda_setStream(src_prev_stream._cdata)
 
 
 def device_count():
@@ -347,6 +356,19 @@ def synchronize():
     r"""Waits for all kernels in all streams on current device to complete."""
     _lazy_init()
     return torch._C._cuda_synchronize()
+
+
+def ipc_collect():
+    r"""Force collects GPU memory after it has been released by CUDA IPC.
+
+    .. note::
+        Checks if any sent CUDA tensors could be cleaned from the memory. Force
+        closes shared memory file used for reference counting if there is no
+        active counters. Useful when the producer process stopped actively sending
+        tensors and want to release unused memory.
+    """
+    _lazy_init()
+    return torch._C._cuda_ipc_collect()
 
 
 def current_stream(device=None):

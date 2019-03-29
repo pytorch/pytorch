@@ -18,7 +18,7 @@
 #include <sstream>
 #include <string>
 
-#include <torch/csrc/jit/passes/python_print.h>
+#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
@@ -85,8 +85,8 @@ size_t assertFind(
     const Check& check) {
   auto pos = search_range.file_ptr()->find(sub, search_range.start());
   if (pos == std::string::npos || (pos + sub.size()) > search_range.end()) {
-    auto found_range = SourceRange(search_range.file_ptr(),search_range.start(),
-        sub.size());
+    auto found_range =
+        SourceRange(search_range.file_ptr(), search_range.start(), sub.size());
     std::stringstream ss;
     ss << "Expected to find ";
     printQuotedString(ss, sub);
@@ -112,7 +112,8 @@ void assertNotFind(
     const Check& check) {
   auto pos = search_range.file_ptr()->find(sub, search_range.start());
   if (pos != std::string::npos && (pos + sub.size()) <= search_range.end()) {
-    auto found_range = SourceRange(search_range.file_ptr(), pos, sub.size() + pos);
+    auto found_range =
+        SourceRange(search_range.file_ptr(), pos, sub.size() + pos);
     std::stringstream ss;
     ss << "Expected to not find ";
     printQuotedString(ss, sub);
@@ -154,6 +155,8 @@ struct FileCheckImpl {
   }
 
   bool has_run = false;
+
+  friend std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc);
 
  private:
   void doCheckNot(
@@ -280,15 +283,30 @@ struct FileCheckImpl {
 
 FileCheck::FileCheck() : fcImpl(new FileCheckImpl()){};
 
+std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc) {
+  out << "FileCheck checks:\n";
+  for (const Check& c : fc.checks) {
+    out << "\t" << c << "\n";
+  }
+  return out;
+};
+
 FileCheck::~FileCheck() {
   if (!fcImpl->has_run) {
     std::cout << "You have not run this instance of FileCheck!\n";
+    std::cout << *fcImpl;
   }
   fcImpl.reset();
 };
 
 void FileCheck::run(const std::string& test_file) {
   fcImpl->run(test_file);
+};
+
+void FileCheck::run(const Graph& graph) {
+  std::stringstream graph_str;
+  graph_str << graph;
+  fcImpl->run(graph_str.str());
 };
 
 FileCheck* FileCheck::check(const std::string& str) {
@@ -311,8 +329,14 @@ FileCheck* FileCheck::check_next(const std::string& str) {
   return this;
 }
 
-FileCheck* FileCheck::check_count(const std::string& str, size_t count) {
+FileCheck* FileCheck::check_count(
+    const std::string& str,
+    size_t count,
+    bool exactly) {
   fcImpl->addCheck(CHECK_COUNT, str, count);
+  if (exactly) {
+    fcImpl->addCheck(CHECK_NOT, str);
+  }
   return this;
 }
 
@@ -320,7 +344,6 @@ FileCheck* FileCheck::check_dag(const std::string& str) {
   fcImpl->addCheck(CHECK_DAG, str);
   return this;
 }
-
 } // namespace testing
 } // namespace jit
 } // namespace torch

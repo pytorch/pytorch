@@ -2,12 +2,12 @@
 
 If you are interested in contributing to PyTorch, your contributions will fall
 into two categories:
-1. You want to propose a new Feature and implement it
+
+1. You want to propose a new feature and implement it.
     - Post about your intended feature, and we shall discuss the design and
     implementation. Once we agree that the plan looks good, go ahead and implement it.
-2. You want to implement a feature or bug-fix for an outstanding issue
-    - Look at the outstanding issues here: https://github.com/pytorch/pytorch/issues
-    - Especially look at the Low Priority and Medium Priority issues.
+2. You want to implement a feature or bug-fix for an outstanding issue.
+    - Search for your issue here: https://github.com/pytorch/pytorch/issues
     - Pick an issue and comment on the task that you want to work on this feature.
     - If you need more context on a particular issue, please ask and we shall provide.
 
@@ -17,7 +17,6 @@ https://github.com/pytorch/pytorch
 If you are not familiar with creating a Pull Request, here are some guides:
 - http://stackoverflow.com/questions/14680711/how-to-do-a-github-pull-request
 - https://help.github.com/articles/creating-a-pull-request/
-
 
 ## Developing PyTorch
 
@@ -54,12 +53,10 @@ with
 python setup.py develop
 ```
 
-This is especially useful if you are only changing Python files.
-
-This mode will symlink the Python files from the current local source tree into the
-Python install.
-
-Hence, if you modify a Python file, you do not need to reinstall PyTorch again and again.
+This mode will symlink the Python files from the current local source
+tree into the Python install.  Hence, if you modify a Python file, you
+do not need to reinstall PyTorch again and again.  This is especially
+useful if you are only changing Python files.
 
 For example:
 - Install local PyTorch in `develop` mode
@@ -225,25 +222,14 @@ will want to keep in mind:
 
 ### Build only what you need.
 
-`python setup.py build` will build everything, but since our build system is
-not very optimized for incremental rebuilds, this will actually be very slow.
-Far better is to only request rebuilds of the parts of the project you are
-working on:
-
-- Working on the Python bindings? Run `python setup.py develop` to rebuild
-  (NB: no `build` here!)
-
-- Working on `torch/csrc` or `aten`? Run `python setup.py rebuild_libtorch` to
-  rebuild and avoid having to rebuild other dependent libraries we
-  depend on.
-
-- Working on one of the other dependent libraries? The other valid
-  targets are listed in `dep_libs` in `setup.py`. prepend `build_` to
-  get a target, and run as e.g. `python setup.py build_gloo`.
+`python setup.py build` will build everything by default, but sometimes you are
+only interested in a specific component.
 
 - Working on a test binary? Run `(cd build && ninja bin/test_binary_name)` to
   rebuild only that test binary (without rerunning cmake). (Replace `ninja` with
   `make` if you don't have ninja installed).
+- Don't need Caffe2?  Pass `BUILD_CAFFE2_OPS=0` to disable build of
+  Caffe2 operators.
 
 On the initial build, you can also speed things up with the environment
 variables `DEBUG` and `NO_CUDA`.
@@ -271,11 +257,12 @@ information for the code in `torch/csrc`. More information at:
 ### Make no-op build fast.
 
 #### Use Ninja
-Python `setuptools` is pretty dumb, and always rebuilds every C file in a
-project. If you install the ninja build system with `pip install ninja`,
-then PyTorch will use it to track dependencies correctly.
-If PyTorch was already built, you will need to run `python setup.py clean` once
-after installing ninja for builds to succeed.
+
+By default, cmake will use its Makefile generator to generate your build
+system.  You can get faster builds if you install the ninja build system
+with `pip install ninja`.  If PyTorch was already built, you will need
+to run `python setup.py clean` once after installing ninja for builds to
+succeed.
 
 #### Use CCache
 
@@ -283,9 +270,13 @@ Even when dependencies are tracked with file modification,
 there are many situations where files get rebuilt when a previous
 compilation was exactly the same.
 
-Using ccache in a situation like this is a real time-saver. However, by
-default, ccache does not properly support CUDA stuff, so here are the
-instructions for installing a custom ccache fork that has CUDA support:
+Using ccache in a situation like this is a real time-saver. The ccache manual
+describes [two ways to use ccache](https://ccache.samba.org/manual/latest.html#_run_modes).
+In the PyTorch project, currently only the latter method of masquerading as
+the compiler via symlinks works for CUDA compilation.
+
+Here are the instructions for installing ccache from source (tested at commit
+`7abac8f` of the `ccache` repo):
 
 ```bash
 # install and export ccache
@@ -297,7 +288,7 @@ then
     mkdir -p ~/ccache
     pushd /tmp
     rm -rf ccache
-    git clone https://github.com/colesbury/ccache -b ccbin
+    git clone https://github.com/ccache/ccache.git
     pushd ccache
     ./autogen.sh
     ./configure
@@ -320,6 +311,35 @@ export PATH=~/ccache/lib:$PATH
 export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
 ```
 
+Alternatively, `ccache` provided by newer Linux distributions (e.g. Debian/sid)
+also works, but the `nvcc` symlink to `ccache` as described above is still required.
+
+Note that the original `nvcc` binary (typically at `/usr/local/cuda/bin`) must
+be on your `PATH`, otherwise `ccache` will emit the following error:
+
+    ccache: error: Could not find compiler "nvcc" in PATH
+
+For example, here is how to install/configure `ccache` on Ubuntu:
+
+```bash
+# install ccache
+sudo apt install ccache
+
+# update symlinks and create/re-create nvcc link
+sudo /usr/sbin/update-ccache-symlinks
+sudo ln -s /usr/bin/ccache /usr/lib/ccache/nvcc
+
+# config: cache dir is ~/.ccache, conf file ~/.ccache/ccache.conf
+# max size of cache
+ccache -M 25Gi  # -M 0 for unlimited
+# unlimited number of files
+ccache -F 0
+
+# deploy (and add to ~/.bashrc for later)
+export PATH="/usr/lib/ccache:$PATH"
+export CUDA_NVCC_EXECUTABLE=/usr/lib/ccache/nvcc
+```
+
 ## CUDA Development tips
 
 If you are working on the CUDA code, here are some useful CUDA debugging tips:
@@ -334,6 +354,9 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
 Hope this helps, and thanks for considering to contribute.
 
 ## Windows development tips
+
+For building from source on Windows, consult
+[our documentation](https://pytorch.org/docs/stable/notes/windows.html) on it.
 
 Occasionally, you will write a patch which works on Linux, but fails CI on Windows.
 There are a few aspects in which MSVC (the Windows compiler toolchain we use) is stricter
@@ -472,11 +495,12 @@ which is in PyTorch's `requirements.txt`.
 
 ### Pre-commit Tidy/Linting Hook
 
-We use clang-tidy and flake8 to perform additional formatting and semantic checking
-of code. We provide a pre-commit git hook for performing these checks, before
-a commit is created:
+We use clang-tidy and flake8 (installed with flake-mypy) to perform additional
+formatting and semantic checking of code. We provide a pre-commit git hook for
+performing these checks, before a commit is created:
 
   ```bash
+  pip install flake8-mypy
   ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
   ```
 
