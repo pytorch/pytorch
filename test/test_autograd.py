@@ -2102,6 +2102,70 @@ class TestAutograd(TestCase):
                               lambda a, b: torch.cat((a, b)),
                               True, f_args_variable, f_args_tensor)
 
+
+    def test_std_backward_in_std_mean(self):
+        dim = 1
+        input1 = torch.randn(5, 7, 3, requires_grad=True)
+        input2 = deepcopy(input1)
+        std1, mean1 = torch.std_mean(input1, dim = dim)
+        std2 = input2.std(dim = dim)
+        grad = torch.randn(5, 3, requires_grad=True)
+        torch.autograd.backward(std1, grad)
+        torch.autograd.backward(std2, grad)
+        self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.01))
+
+    def test_mean_backward_in_std_mean(self):
+        dim = 0
+        input1 = torch.randn(5, 3, requires_grad=True)
+        input2 = deepcopy(input1)
+        std1, mean1 = torch.std_mean(input1, dim = dim)
+        mean2 = input2.mean(dim = dim)
+        grad = torch.randn(5, 3, requires_grad=True)
+        torch.autograd.backward(mean1, grad)
+        torch.autograd.backward(mean2, grad)
+        self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
+
+    def test_var_backward_in_var_mean(self):
+        dim = 0
+        input1 = torch.randn(4, 3, requires_grad=True)
+        input2 = deepcopy(input1)
+        var1, mean1 = torch.var_mean(input1, dim = dim)
+        var2 = input2.var(dim = dim)
+        grad = torch.randn(4, 3, requires_grad=True)
+        torch.autograd.backward(var1, grad)
+        torch.autograd.backward(var2, grad)
+        self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
+
+    def test_mean_backward_in_var_mean(self):
+        dim = 2
+        input1 = torch.randn(3, 4, 6, requires_grad=True)
+        input2 = deepcopy(input1)
+        var1, mean1 = torch.var_mean(input1, dim = dim)
+        mean2 = input2.mean(dim = dim)
+        grad = torch.randn(3, 4, requires_grad=True)
+        torch.autograd.backward(mean1, grad)
+        torch.autograd.backward(mean2, grad)
+        self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
+
+    def test_std_mean_forking_splitting(self):
+        dim = [2, 4]
+        keepdim = False
+        input1 = torch.randn(3, 4, 5, 6, 2, 3, requires_grad=True)
+        input2 = deepcopy(input1)
+        std1, mean1 = torch.std_mean(input1, dim=dim, keepdim=keepdim)
+        std2 = input2.std(dim=dim, keepdim=keepdim)
+        mean2 = input2.mean(dim=dim, keepdim=keepdim)
+        grad = torch.randn(3, 4, 6, 3, requires_grad=True)
+
+        r1 = std1 * std1 * mean1 * mean1
+        r2 = std2 * std2 * mean2 * mean2
+        self.assertTrue(torch.allclose(r1, r2, rtol=0.01, atol=0.0))
+
+        torch.autograd.backward(r1, grad)
+        torch.autograd.backward(r2, grad)
+        self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
+
+
     @skipIfNoLapack
     def test_cholesky(self):
         def func(root):

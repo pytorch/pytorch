@@ -73,15 +73,7 @@ struct WelfordOps {
       new_count
     };
   }
-  inline C10_DEVICE scalar_t project(acc_t acc) const {
-    int64_t divisor = unbiased ? (acc.n - 1) : acc.n;
-    auto ret = (divisor > 0) ?
-      (take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor))
-      : NAN;
-    return (scalar_t) ret;
-  }
-
-  inline C10_DEVICE scalar_t project2(acc_t acc, int value = 0) const {
+  inline C10_DEVICE scalar_t project(acc_t acc, int value = 0) const {
     //AT_ASSERT(value == 0 || value == 1);
     if (value == 1) {
       return acc.mean;
@@ -118,11 +110,7 @@ struct MeanOps {
     return reduce(a, b);
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
-    return a * factor;
-  }
-
-  inline C10_DEVICE acc_t project2(acc_t a, int value = 0) const {
+  inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
     //AT_ASSERT(value == 0);
     return a * factor;
   }
@@ -148,11 +136,7 @@ struct AbsMinOps {
     return MIN(a, b);
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
-    return a;
-  }
-
-  inline C10_DEVICE acc_t project2(acc_t a, int value = 0) const {
+  inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
     //AT_ASSERT(value == 0);
     return a;
   }
@@ -175,11 +159,7 @@ struct AbsMaxOps {
     return MAX(a, b);
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
-    return a;
-  }
-
-  inline C10_DEVICE acc_t project2(acc_t a, int value = 0) const {
+  inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
     //AT_ASSERT(value == 0);
     return a;
   }
@@ -203,11 +183,7 @@ struct NormOps {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
-    return compat_pow(a, acc_t(1.0)/norm);
-  }
-
-  inline C10_DEVICE acc_t project2(acc_t a, int value = 0) const {
+  inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
     //AT_ASSERT(value == 0);
     return compat_pow(a, acc_t(1.0)/norm);
   }
@@ -232,11 +208,7 @@ struct NormZeroOps {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
-    return a;
-  }
-
-  inline C10_DEVICE acc_t project2(acc_t a, int value = 0) const {
+  inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
     //AT_ASSERT(value == 0);
     return a;
   }
@@ -258,11 +230,7 @@ struct NormOneOps {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
-    return a;
-  }
-
-  inline C10_DEVICE acc_t project2(acc_t a, int value = 0) const {
+  inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
     //AT_ASSERT(value == 0);
     return a;
   }

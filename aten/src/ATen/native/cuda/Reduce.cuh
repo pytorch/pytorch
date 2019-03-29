@@ -238,10 +238,7 @@ struct func_wrapper_t {
   using arg_t = typename binary_function_traits<func_t>::arg2_t;
   func_t reduce;
   func_t combine;
-  static inline __device__ out_scalar_t project(arg_t arg) {
-    return (out_scalar_t) arg;
-  }
-  static inline __device__ out_scalar_t project2(arg_t arg, int val) {
+  static inline __device__ out_scalar_t project(arg_t arg, int val) {
     return (out_scalar_t) arg;
   }
   static inline __device__ arg_t warp_shfl_down(arg_t arg, int offset) {
@@ -437,7 +434,7 @@ struct ReduceOp {
     int index,
     typename std::enable_if<can_acc>::type* = nullptr
   ) const {
-    return final_output ? (out_scalar_t)ops.project2(value, index) : (out_scalar_t)value;
+    return final_output ? (out_scalar_t)ops.project(value, index) : (out_scalar_t)value;
   }
 
 
@@ -460,7 +457,7 @@ struct ReduceOp {
     typename std::enable_if<!can_acc>::type* = nullptr
   ) const {
     assert(final_output);
-    return ops.project2(value, index);
+    return ops.project(value, index);
   }
 
   C10_DEVICE arg_t global_reduce(arg_t value, char* shared_memory) const {

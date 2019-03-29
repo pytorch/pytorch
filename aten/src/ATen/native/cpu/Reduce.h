@@ -121,7 +121,7 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
 
     for (int i = 0; i < num_outputs; i++) {
       char *out = (char *)sub_iter.data_ptr(i);
-      *(data_t*)out = ops.project2(total_acc, i);
+      *(data_t*)out = ops.project(total_acc, i);
     }
   });
 }
