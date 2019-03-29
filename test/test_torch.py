@@ -1763,7 +1763,7 @@ class _TestTorchMixin(object):
                 a_LU_info_nopiv, nopiv, info_nopiv = a.lu(pivot=False, get_infos=True)
                 self.assertEqual(nopiv, cast(torch.zeros(a.shape[:-1], dtype=torch.int32)))
                 self.assertEqual(info_, info_nopiv)
-            P, L, U = torch.btriunpack(a_LU, pivots)
+            P, L, U = torch.lu_unpack(a_LU, pivots)
             self.assertEqual(P.matmul(L.matmul(U)), a)
 
         for ms, batch in product([3, 5, 7], [(), (2,), (3,), (3, 5)]):
@@ -1807,11 +1807,11 @@ class _TestTorchMixin(object):
         self._test_btrisolve(self, lambda t: t)
 
     @staticmethod
-    def _test_btriunpack(self, cast):
+    def _test_lu_unpack(self, cast):
         def run_test(shape, cast):
             a = cast(torch.randn(*shape))
             a_lu, p = torch.lu(a)
-            p_ref, l_ref, u_ref = torch.btriunpack(a_lu, p)
+            p_ref, l_ref, u_ref = torch.lu_unpack(a_lu, p)
             self.assertEqual(p_ref.matmul(l_ref.matmul(u_ref)), a)
 
         run_test((3, 3), cast)
@@ -1820,8 +1820,8 @@ class _TestTorchMixin(object):
         run_test((7, 5, 3, 3, 3), cast)
 
     @skipIfNoLapack
-    def test_btriunpack(self):
-        self._test_btriunpack(self, lambda t: t)
+    def test_lu_unpack(self):
+        self._test_lu_unpack(self, lambda t: t)
 
     def test_bmm(self):
         num_batches = 10
@@ -7451,10 +7451,10 @@ class _TestTorchMixin(object):
         self.assertEqual(ret1.V, ret[2])
 
         # test gesv
-        ret = a.gesv(a)
+        ret = a.solve(a)
         self.assertEqual(ret.solution, ret[0])
         self.assertEqual(ret.LU, ret[1])
-        ret1 = torch.gesv(a, a, out=tuple(ret))
+        ret1 = torch.solve(a, a, out=tuple(ret))
         self.assertEqual(ret1.solution, ret1[0])
         self.assertEqual(ret1.LU, ret1[1])
         self.assertEqual(ret1.solution, ret[0])
