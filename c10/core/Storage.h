@@ -41,12 +41,11 @@ struct C10_API Storage {
   // that can be temporarily created with Caffe2 APIs. See the note on top of
   // TensorImpl.h for details.
   static Storage create_legacy(at::Device device, caffe2::TypeMeta data_type) {
-    auto allocator = GetAllocator(device.type());
     return Storage(c10::make_intrusive<StorageImpl>(
             data_type,
             0,
-            allocator->allocate(0), // materialize a non-default Device.
-            allocator,
+            at::DataPtr(nullptr, device),
+            GetAllocator(device.type()),
             true));
   }
 
