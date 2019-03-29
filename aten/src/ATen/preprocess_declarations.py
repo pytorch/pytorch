@@ -14,7 +14,8 @@ type_map = {
         'Char',
         'Short',
         'Int',
-        'Long'
+        'Long',
+        'Bool'
     ],
 }
 
@@ -24,11 +25,6 @@ type_map['all'] = all_types
 all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA']
 default_backends = ['CPU', 'CUDA']
 
-sparse_map = {
-    'CPU': 'SparseCPU',
-    'CUDA': 'SparseCUDA',
-}
-
 
 def process_types_and_backends(option):
     # if specific pairs were not listed, then enumerate them
@@ -36,8 +32,8 @@ def process_types_and_backends(option):
     # if backend or type is not defined, it is assumed to be all of them
     if 'backend_type_pairs' not in option:
         backends = option.get('backends', default_backends)
-        if option.get('aten_sparse', False):
-            backends.extend([sparse_map[p] for p in backends if p in sparse_map])
+        if isinstance(option.get('type_method_definition_dispatch'), dict):
+            backends = option.get('type_method_definition_dispatch').keys()
         backends = set(backends)
 
         types = option.get('types', all_types)
@@ -61,16 +57,22 @@ def process_types_and_backends(option):
         if arg['type'] == 'THSTensor*':
             pairs.discard(('CUDA', 'Half'))
 
-    # special case remove Half for cpu unless it is explicitly enabled,
+    # special case remove Half and Bool for cpu unless it is explicitly enabled,
     if not option.get('cpu_half', False):
         pairs.discard(('CPU', 'Half'))
+
+    if not option.get('cpu_bool', False):
+        pairs.discard(('CPU', 'Bool'))
+
+    # TODO: remove this hack once support for a bool tensor for CUDA is enabled
+    pairs.discard(('CUDA', 'Bool'))
 
     # sort the result for easy reading
     option['backend_type_pairs'] = sorted([p for p in pairs])
 
 
 def exclude(declaration):
-    return 'only_register' in declaration or declaration.get('python_name') == 'ndimension'
+    return 'only_register' in declaration or declaration.get('name') == 'ndimension'
 
 
 def add_variants(option):
@@ -220,8 +222,6 @@ def discover_sparse_tensor_operations(declaration):
 def is_extended_method(option):
     if 'method' in option['variants']:
         return False
-    elif not option['variants']:
-        return False
     else:
         return True
 
@@ -237,7 +237,9 @@ def run(declarations):
             allow_kwarg=False,
             type_to_signature=TYPE_FORMAL_GENERIC,
             remove_self=True)
+
         common_with_cwrap.sort_by_number_of_options(declaration)
+
         discover_zero_dim_tensor_operations(declaration)
         discover_sparse_tensor_operations(declaration)
 
@@ -251,7 +253,6 @@ def run(declarations):
                 non_extended_methods.add(option['api_name'])
         declaration['options'] = handle_outputs_taken_as_arguments(
             declaration['options'])
-
     # We (very unfortunately) have overloaded virtual methods. Because
     # of C++'s rules, we cannot move one overload without doing some
     # extra work to make sure that overload in a superclass and an

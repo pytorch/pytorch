@@ -14,9 +14,9 @@ class IsEmptyOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = Input(0);
-    auto* output = Output(0);
-    output->Resize(std::vector<int64_t>{});
-    *output->template mutable_data<bool>() = (input.size() == 0);
+
+    auto* output = Output(0, std::vector<int64_t>{}, at::dtype<bool>());
+    *output->template mutable_data<bool>() = (input.numel() == 0);
     return true;
   }
 };

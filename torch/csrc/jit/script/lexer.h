@@ -1,14 +1,15 @@
 #pragma once
+#include <c10/util/Exception.h>
+#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/utils/memory.h>
 #include <algorithm>
+#include <clocale>
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/source_range.h"
-#include <torch/csrc/utils/memory.h>
 
 namespace torch {
 namespace jit {
@@ -26,6 +27,7 @@ namespace script {
 #define TC_FORALL_TOKEN_KINDS(_)                 \
   _(TK_EOF, "eof", "")                           \
   _(TK_WHITESPACE, "whitespace", "")             \
+  _(TK_WHITESPACE_EOF, "whitespace_eof", "")     \
   _(TK_NUMBER, "number", "")                     \
   _(TK_NEWLINE, "newline", "")                   \
   _(TK_INDENT, "indent", "")                     \
@@ -37,6 +39,7 @@ namespace script {
   _(TK_STRINGLITERAL, "string_literal", "")      \
   _(TK_CONST, "const", "")                       \
   _(TK_LIST, "list", "")                         \
+  _(TK_DICT, "dict", "")                         \
   _(TK_OPTION, "option", "")                     \
   _(TK_APPLY, "apply", "")                       \
   _(TK_COMPREHENSION, "comprehension", "")       \
@@ -45,6 +48,7 @@ namespace script {
   _(TK_INFERRED, "inferred", "")                 \
   _(TK_ACCESS, "access", "")                     \
   _(TK_ASSIGN, "assign", "")                     \
+  _(TK_AUG_ASSIGN, "aug_assign", "")             \
   _(TK_ATTRIBUTE, "attribute", "")               \
   _(TK_IF, "if", "if")                           \
   _(TK_ELSE, "else", "else")                     \
@@ -52,10 +56,13 @@ namespace script {
   _(TK_WHILE, "while", "while")                  \
   _(TK_EXPR_STMT, "expression statement", "")    \
   _(TK_RETURN, "return", "return")               \
+  _(TK_IS, "is", "is")                           \
+  _(TK_ISNOT, "is not", "is not")                \
   _(TK_NE, "ne", "!=")                           \
   _(TK_EQ, "eq", "==")                           \
   _(TK_LE, "le", "<=")                           \
   _(TK_GE, "ge", ">=")                           \
+  _(TK_FLOOR_DIV, "floordiv", "//")              \
   _(TK_IF_EXPR, "if", "")                        \
   _(TK_TRUE, "True", "True")                     \
   _(TK_FALSE, "False", "False")                  \
@@ -73,6 +80,7 @@ namespace script {
   _(TK_SUBSCRIPT, "subscript", "")               \
   _(TK_VAR, "variable", "")                      \
   _(TK_NOTHING, "nothing", "")                   \
+  _(TK_DICT_LITERAL, "dict-literal", "")         \
   _(TK_LIST_LITERAL, "list-literal", "")         \
   _(TK_TUPLE_LITERAL, "tuple-literal", "")       \
   _(TK_FOR, "for", "for")                        \
@@ -83,9 +91,15 @@ namespace script {
   _(TK_ARROW, "arrow", "->")                     \
   _(TK_DECL, "decl", "")                         \
   _(TK_SLICE_EXPR, "slice expr", "")             \
-  _(TK_TYPE_COMMENT, "type comment", "# type:")
+  _(TK_TYPE_COMMENT, "type comment", "# type:")  \
+  _(TK_RAISE, "raise", "raise")                  \
+  _(TK_ASSERT, "assert", "assert")               \
+  _(TK_DOTS, "dots", "...")                      \
+  _(TK_LIST_COMP, "list comprehension", "")      \
+  _(TK_PASS, "pass", "pass")                     \
+  _(TK_CLASS_DEF, "class", "class")
 
-static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?";
+static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!&^|";
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
@@ -98,7 +112,7 @@ enum TokenKind {
 };
 
 std::string kindToString(int kind);
-int stringToKind(std::string str);
+int stringToKind(const std::string& str);
 
 // nested hash tables that indicate char-by-char what is a valid token.
 struct TokenTrie;
@@ -107,7 +121,7 @@ struct TokenTrie {
   TokenTrie() : kind(0) {}
   void insert(const char* str, int tok) {
     if (*str == '\0') {
-      JIT_ASSERT(kind == 0);
+      AT_ASSERT(kind == 0);
       kind = tok;
       return;
     }
@@ -139,13 +153,26 @@ struct SharedParserData {
       head->insert(str.c_str(), *c);
     }
 
-#define ADD_CASE(tok, _, tokstring) \
-  if (*tokstring != '\0') {         \
-    head->insert(tokstring, tok);   \
+#define ADD_CASE(tok, _, tokstring)   \
+  if (*(tokstring) != '\0') {         \
+    head->insert((tokstring), (tok)); \
   }
     TC_FORALL_TOKEN_KINDS(ADD_CASE)
 #undef ADD_CASE
   }
+#ifdef _WIN32
+  static double strtod_c(const char* str, char** end) {
+    /// NOLINTNEXTLINE(hicpp-signed-bitwise)
+    static _locale_t loc = _create_locale(LC_ALL, "C");
+    return _strtod_l(str, end, loc);
+  }
+#else
+  static double strtod_c(const char* str, char** end) {
+    /// NOLINTNEXTLINE(hicpp-signed-bitwise)
+    static locale_t loc = newlocale(LC_ALL_MASK, "C", nullptr);
+    return strtod_l(str, end, loc);
+  }
+#endif
   // 1. skip whitespace
   // 2. handle comment or newline
   //
@@ -159,14 +186,15 @@ struct SharedParserData {
       return false;
     const char* startptr = str.c_str() + start;
     char* endptr;
-    std::strtod(startptr, &endptr);
+    strtod_c(startptr, &endptr);
     *len = endptr - startptr;
     return *len > 0;
   }
 
   bool isCharCount(char c, const std::string& str, size_t start, int len) {
-    //count checks from [start, start + len)
-    return start + len <= str.size() && std::count(str.begin() + start, str.begin() + start + len, c) == len;
+    // count checks from [start, start + len)
+    return start + len <= str.size() &&
+        std::count(str.begin() + start, str.begin() + start + len, c) == len;
   }
 
   // python concatenates all adjacent strings "a" "b" == "ab"
@@ -179,23 +207,25 @@ struct SharedParserData {
       return false;
     int quote_len = isCharCount(quote, str, start, 3) ? 3 : 1;
 
-    //end is now set past the opening quotation marks
+    // end is now set past the opening quotation marks
     size_t end = start + quote_len;
-    while(end < str.size() && !isCharCount(quote, str, end, quote_len)) {
+    while (end < str.size() && !isCharCount(quote, str, end, quote_len)) {
       if (str[end] == '\n' && quote_len != 3) {
         return false;
       }
-      //handle escaped characters. advances past escaped quotation marks,
-      //escaped newlines and escaped backslashes
+      // handle escaped characters. advances past escaped quotation marks,
+      // escaped newlines and escaped backslashes
+      // multi-char escapes like \x1A are handled fine here because the
+      // remainder of the escape are valid string characters anyway
       if (str[end] == '\\') {
         end++;
       }
       end++;
     }
-    //set length equal to the complete string including quotations
+    // set length equal to the complete string including quotations
     *len = end - start + quote_len;
-    //if end finished without going past the last character of the string than
-    //there is a match
+    // if end finished without going past the last character of the string than
+    // there is a match
     return end < str.size();
   }
 
@@ -212,8 +242,7 @@ struct SharedParserData {
     return match_string == type_string;
   }
   // find the longest match of str.substring(pos) against a token, return true
-  // if successful
-  // filling in kind, start,and len
+  // if successful filling in kind, start,and len
   bool match(
       const std::string& str,
       size_t pos,
@@ -247,6 +276,16 @@ struct SharedParserData {
             str, pos + 1, continuation, !continuation, kind, start, len);
       }
     }
+    // we handle white space before EOF because in the case we have something
+    // like the following where we need to generate the dedent token if foo:
+    //   ...
+    // else:
+    //   pass
+    if (whitespace_token) {
+      *kind = pos == str.size() ? TK_WHITESPACE_EOF : TK_WHITESPACE;
+      *len = pos - *start;
+      return true;
+    }
     if (pos == str.size()) {
       *kind = TK_EOF;
       *start = pos;
@@ -254,11 +293,6 @@ struct SharedParserData {
       return true;
     }
     // invariant: the next token is not whitespace or newline
-    if (whitespace_token) {
-      *kind = TK_WHITESPACE;
-      *len = pos - *start;
-      return true;
-    }
     *start = pos;
     // check for a valid number
     if (isNumber(str, pos, len)) {
@@ -289,14 +323,15 @@ struct SharedParserData {
       // identifier 'max'
       if (cur) {
         size_t child_offset = 0;
-        for (size_t e = cur->child_chars.size(); child_offset < e; ++child_offset) {
+        for (size_t e = cur->child_chars.size(); child_offset < e;
+             ++child_offset) {
           if (cur->child_chars[child_offset] == str[pos + i])
-          break;
+            break;
         }
 
         cur = (child_offset == cur->child_chars.size())
-          ? nullptr
-          : cur->child_tries[child_offset].get();
+            ? nullptr
+            : cur->child_tries[child_offset].get();
 
         if (cur && cur->kind != 0) {
           matched = true;
@@ -331,7 +366,7 @@ SharedParserData& sharedParserData();
 struct Token {
   int kind;
   SourceRange range;
-  Token(int kind, const SourceRange& range) : kind(kind), range(range) {}
+  Token(int kind, SourceRange range) : kind(kind), range(std::move(range)) {}
   std::string text() {
     return range.text();
   }
@@ -373,7 +408,8 @@ struct Lexer {
 
   [[noreturn]] void reportError(const std::string& what) {
     reportError(what, cur());
-  }[[noreturn]] void reportError(const std::string& what, const Token& t) {
+  }
+  [[noreturn]] void reportError(const std::string& what, const Token& t) {
     std::stringstream ss;
     ss << what << ":\n";
     t.range.highlight(ss);
@@ -385,7 +421,8 @@ struct Lexer {
        << "' here:\n";
     t.range.highlight(ss);
     throw std::runtime_error(ss.str());
-  }[[noreturn]] void expected(const std::string& what) {
+  }
+  [[noreturn]] void expected(const std::string& what) {
     expected(what, cur());
   }
   // Check that the current token has a given kind, return the current token,
@@ -420,8 +457,16 @@ struct Lexer {
       case '}':
         nesting--;
         break;
-      case TK_WHITESPACE: {
-        int depth = r.range.size();
+      case TK_WHITESPACE:
+      case TK_WHITESPACE_EOF: {
+        int depth =
+            r.kind == TK_WHITESPACE_EOF ? indent_stack.front() : r.range.size();
+        // note: TK_WHITESPACE_EOF is whitespace right before the EOF token
+        // just like we allow the code to be indented to a particular initial
+        // indent level, we allow the final indent to be anything and set
+        // it back to the initial indent level. This allows the code to be
+        // put into string literals inside code without worrying about final
+        // whitespace
         if (depth > indent_stack.back()) {
           indent_stack.push_back(depth);
           r.kind = TK_INDENT;
@@ -433,20 +478,12 @@ struct Lexer {
             indent_stack.pop_back();
             next_tokens.emplace_back(TK_DEDENT, r.range);
             if (indent_stack.size() == 0) {
-              reportError("invalid ident level", r);
+              reportError("invalid indent level " + std::to_string(depth), r);
             }
           }
           return; // We've already queued the tokens
         }
       } break;
-      case TK_EOF:
-        if (indent_stack.size() > 1) {
-          next_tokens.emplace_back(TK_NEWLINE, r.range);
-          next_tokens.emplace_back(TK_DEDENT, r.range);
-          indent_stack.pop_back();
-          return;
-        }
-        break;
       default:
         break;
     }
@@ -456,7 +493,7 @@ struct Lexer {
     int kind;
     size_t start;
     size_t length;
-    JIT_ASSERT(file);
+    AT_ASSERT(file);
     if (!shared.match(
             *file,
             pos,

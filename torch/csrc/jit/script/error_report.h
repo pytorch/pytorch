@@ -1,6 +1,6 @@
 #pragma once
 
-#include "torch/csrc/jit/script/tree.h"
+#include <torch/csrc/jit/script/tree.h>
 
 namespace torch {
 namespace jit {
@@ -14,10 +14,10 @@ struct ErrorReport : public std::exception {
   explicit ErrorReport(const SourceRange& r)
       : context(std::make_shared<SourceRange>(r)) {}
   explicit ErrorReport(std::shared_ptr<SourceLocation> loc)
-  : context(std::move(loc)) {}
+      : context(std::move(loc)) {}
   explicit ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
   explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
-  virtual const char* what() const noexcept override {
+  const char* what() const noexcept override {
     std::stringstream msg;
     msg << "\n" << ss.str();
     if (context != nullptr) {

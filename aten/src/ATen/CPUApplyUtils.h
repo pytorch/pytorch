@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ATen/Parallel.h"
-#include "ATen/TensorUtils.h"
+#include <ATen/Parallel.h>
+#include <ATen/TensorUtils.h>
 #include <limits>
 #include <utility>
 #include <cstring>
@@ -127,7 +127,7 @@ inline std::pair<int64_t, int64_t> collapse_dims(
  */
 
 inline Tensor sort_strides(Tensor& tensor_) {
-  IntList strides = tensor_.strides();
+  IntArrayRef strides = tensor_.strides();
   std::vector<int64_t> indices;
   indices.reserve(tensor_.ndimension());
   for (int64_t i = 0; i < tensor_.ndimension(); i++) {
@@ -156,12 +156,14 @@ struct strided_tensor_iter_fixed {
   strided_tensor_iter_fixed(Tensor& tensor, bool sort_strides = false)
       : data_(tensor.data<T>()) {
     std::memset(counter_, 0, sizeof(int64_t) * N);
-    std::memcpy(
-        sizes_, tensor.sizes().data(), tensor.ndimension() * sizeof(int64_t));
-    std::memcpy(
-        strides_,
-        tensor.strides().data(),
-        tensor.ndimension() * sizeof(int64_t));
+    if (tensor.dim() > 0) {
+      std::memcpy(
+          sizes_, tensor.sizes().data(), tensor.dim() * sizeof(int64_t));
+      std::memcpy(
+          strides_,
+          tensor.strides().data(),
+          tensor.dim() * sizeof(int64_t));
+    }
     dim_ = std::get<1>(collapse_dims(sizes_, strides_, tensor.ndimension()));
   }
 };
@@ -493,37 +495,6 @@ inline void CPU_tensor_apply4(
         strided_tensor_iter<scalar2>(tensor2),
         strided_tensor_iter<scalar3>(tensor3),
         strided_tensor_iter<scalar4>(tensor4));
-  }
-}
-
-template <typename scalar1, typename Op>
-inline void CPU_tensor_parallel_apply1(
-    Tensor tensor1,
-    const Op op,
-    int64_t grain_size = internal::GRAIN_SIZE) {
-  if (!_apply_preamble({tensor1}))
-    return;
-  if (tensor1.ndimension() < 8) {
-    parallel_for(
-        0,
-        tensor1.numel(),
-        grain_size,
-        [&tensor1, &op](int64_t begin, int64_t end) {
-          apply_op(
-              end - begin,
-              begin,
-              op,
-              strided_tensor_iter_fixed<scalar1, 8>(tensor1, true));
-        });
-  } else {
-    parallel_for(
-        0,
-        tensor1.numel(),
-        grain_size,
-        [&tensor1, &op](int64_t begin, int64_t end) {
-          apply_op(
-              end - begin, begin, op, strided_tensor_iter<scalar1>(tensor1));
-        });
   }
 }
 

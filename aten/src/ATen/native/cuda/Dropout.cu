@@ -1,9 +1,10 @@
-#include "ATen/ATen.h"
-#include "ATen/AccumulateType.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/detail/IndexUtils.cuh"
-#include "ATen/cuda/detail/TensorInfo.cuh"
-#include "curand_kernel.h"
+#include <ATen/ATen.h>
+#include <ATen/AccumulateType.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/detail/TensorInfo.cuh>
+#include <c10/macros/Macros.h>
+#include <curand_kernel.h>
 
 #include <THC/THCGeneral.h>
 #include <THC/THCTensorRandom.h>
@@ -34,7 +35,9 @@ template <
           typename IndexType,
           int ADims>
 #if __CUDA_ARCH__ >= 350
-__launch_bounds__(256,8)
+C10_LAUNCH_BOUNDS_2(256, 8)
+#elif defined (__HIP_PLATFORM_HCC__)
+C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void
 fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
@@ -51,7 +54,7 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
         idx,
         seeds.second,
         &state);
-  IndexType rounded_size = ((totalElements - 1)/(blockDim.x * gridDim.x * UNROLL)+1) * 
+  IndexType rounded_size = ((totalElements - 1)/(blockDim.x * gridDim.x * UNROLL)+1) *
         blockDim.x * gridDim.x * UNROLL;
   for (IndexType linearIndex = idx;
        linearIndex < rounded_size;
@@ -97,7 +100,7 @@ void masked_scale_kernel(at::Tensor& ret, const at::Tensor src, const at::Tensor
 std::tuple<Tensor,Tensor>
 fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
   Tensor ret = at::empty_like(self);
-  Tensor mask = self.type().toScalarType(kByte).tensor(self.sizes());
+  Tensor mask = at::empty(self.sizes(), self.options().dtype(kByte));
   const int64_t nelem = self.numel();
   const int64_t block_size = 256;
   unsigned int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor/block_size;
@@ -107,7 +110,7 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
 //number of times random will be generated per thread, to offset philox counter in thc random state
   int64_t counter_offset = ((nelem - 1)/(block_size*grid.x*UNROLL)+1)*UNROLL;
   if (cuda::detail::canUse32BitIndexMath(self)){
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "fused_dropout", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "fused_dropout", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
       accscalar_t pa = (accscalar_t)(p);
       auto self_info = cuda::detail::getTensorInfo<scalar_t, unsigned int>(self);
@@ -125,7 +128,7 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
       }
    });
   } else {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "fused_dropout", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "fused_dropout", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
       accscalar_t pa = (accscalar_t)(p);
       auto self_info = cuda::detail::getTensorInfo<scalar_t, uint64_t>(self);
@@ -149,8 +152,8 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
 
 Tensor masked_scale_cuda(const Tensor& self, const Tensor& mask, double scale){
    Tensor ret = at::empty_like(self);
-   AT_CHECK(mask.type().scalarType() == at::ScalarType::Byte, "mask should be torch.uint8 dtype");
-   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "masked_scale", [&] {
+   AT_CHECK(mask.scalar_type() == at::ScalarType::Byte, "mask should be torch.uint8 dtype");
+   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "masked_scale", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
       accscalar_t pa = (accscalar_t)(scale);
     masked_scale_kernel<scalar_t>(ret, self, mask, pa);

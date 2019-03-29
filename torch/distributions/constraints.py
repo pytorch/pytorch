@@ -19,7 +19,6 @@ The following constraints are implemented:
 """
 
 import torch
-from torch.distributions.utils import batch_tril
 
 __all__ = [
     'Constraint',
@@ -256,7 +255,7 @@ class _LowerTriangular(Constraint):
     Constrain to lower-triangular square matrices.
     """
     def check(self, value):
-        value_tril = batch_tril(value)
+        value_tril = value.tril()
         return (value_tril == value).view(value.shape[:-2] + (-1,)).min(-1)[0]
 
 
@@ -265,12 +264,10 @@ class _LowerCholesky(Constraint):
     Constrain to lower-triangular square matrices with positive diagonals.
     """
     def check(self, value):
-        value_tril = batch_tril(value)
+        value_tril = value.tril()
         lower_triangular = (value_tril == value).view(value.shape[:-2] + (-1,)).min(-1)[0]
 
-        n = value.size(-1)
-        diag_mask = torch.eye(n, n, dtype=value.dtype, device=value.device)
-        positive_diagonal = (value * diag_mask > (diag_mask - 1)).min(-1)[0].min(-1)[0]
+        positive_diagonal = (value.diagonal(dim1=-2, dim2=-1) > 0).min(-1)[0]
         return lower_triangular & positive_diagonal
 
 

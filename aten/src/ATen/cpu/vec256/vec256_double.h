@@ -1,13 +1,14 @@
 #pragma once
 
-#include "intrinsics.h"
-#include "vec256_base.h"
+#include <ATen/cpu/vec256/intrinsics.h>
+#include <ATen/cpu/vec256/vec256_base.h>
 #if defined(__AVX__) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
 namespace at {
 namespace vec256 {
+// See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
 #if defined(__AVX__) && !defined(_MSC_VER)
@@ -16,7 +17,9 @@ template <> class Vec256<double> {
 private:
   __m256d values;
 public:
-  static constexpr int size = 4;
+  static constexpr int size() {
+    return 4;
+  }
   Vec256() {}
   Vec256(__m256d v) : values(v) {}
   Vec256(double val) {
@@ -40,7 +43,7 @@ public:
     return Vec256<double>(base, base + step, base + 2 * step, base + 3 * step);
   }
   static Vec256<double> set(const Vec256<double>& a, const Vec256<double>& b,
-                            int64_t count = size) {
+                            int64_t count = size()) {
     switch (count) {
       case 0:
         return a;
@@ -53,22 +56,22 @@ public:
     }
     return b;
   }
-  static Vec256<double> loadu(const void* ptr, int64_t count = size) {
-    if (count == size)
+  static Vec256<double> loadu(const void* ptr, int64_t count = size()) {
+    if (count == size())
       return _mm256_loadu_pd(reinterpret_cast<const double*>(ptr));
 
-    __at_align32__ double tmp_values[size];
+    __at_align32__ double tmp_values[size()];
     std::memcpy(
         tmp_values,
         reinterpret_cast<const double*>(ptr),
         count * sizeof(double));
     return _mm256_load_pd(tmp_values);
   }
-  void store(void* ptr, int count = size) const {
-    if (count == size) {
+  void store(void* ptr, int count = size()) const {
+    if (count == size()) {
       _mm256_storeu_pd(reinterpret_cast<double*>(ptr), values);
     } else if (count > 0) {
-      double tmp_values[size];
+      double tmp_values[size()];
       _mm256_storeu_pd(reinterpret_cast<double*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(double));
     }
@@ -213,14 +216,24 @@ Vec256<double> inline operator/(const Vec256<double>& a, const Vec256<double>& b
   return _mm256_div_pd(a, b);
 }
 
+// Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
+// either input is a NaN.
 template <>
-Vec256<double> inline max(const Vec256<double>& a, const Vec256<double>& b) {
-  return _mm256_max_pd(a, b);
+Vec256<double> inline maximum(const Vec256<double>& a, const Vec256<double>& b) {
+  Vec256<double> max = _mm256_max_pd(a, b);
+  Vec256<double> isnan = _mm256_cmp_pd(a, b, _CMP_UNORD_Q);
+  // Exploit the fact that all-ones is a NaN.
+  return _mm256_or_pd(max, isnan);
 }
 
+// Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
+// either input is a NaN.
 template <>
-Vec256<double> inline min(const Vec256<double>& a, const Vec256<double>& b) {
-  return _mm256_min_pd(a, b);
+Vec256<double> inline minimum(const Vec256<double>& a, const Vec256<double>& b) {
+  Vec256<double> min = _mm256_min_pd(a, b);
+  Vec256<double> isnan = _mm256_cmp_pd(a, b, _CMP_UNORD_Q);
+  // Exploit the fact that all-ones is a NaN.
+  return _mm256_or_pd(min, isnan);
 }
 
 template <>
@@ -236,6 +249,19 @@ Vec256<double> inline operator|(const Vec256<double>& a, const Vec256<double>& b
 template <>
 Vec256<double> inline operator^(const Vec256<double>& a, const Vec256<double>& b) {
   return _mm256_xor_pd(a, b);
+}
+
+template <>
+void convert(const double* src, double* dst, int64_t n) {
+  int64_t i;
+#pragma unroll
+  for (i = 0; i <= (n - Vec256<double>::size()); i += Vec256<double>::size()) {
+    _mm256_storeu_pd(dst + i, _mm256_loadu_pd(src + i));
+  }
+#pragma unroll
+  for (; i < n; i++) {
+    dst[i] = src[i];
+  }
 }
 
 #ifdef __AVX2__

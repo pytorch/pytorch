@@ -1,9 +1,9 @@
-#include "THCUNN.h"
-#include "THCTensor.hpp"
-#include "common.h"
-#include "vol2col.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCTensor.hpp>
+#include <THCUNN/common.h>
+#include <THCUNN/vol2col.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
 
-#include "generic/VolumetricDilatedConvolution.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/VolumetricDilatedConvolution.cu>
+#include <THC/THCGenerateFloatTypes.h>

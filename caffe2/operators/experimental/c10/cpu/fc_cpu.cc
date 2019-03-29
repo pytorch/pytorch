@@ -1,28 +1,40 @@
 #include "caffe2/core/context.h"
-#include "caffe2/core/dispatch/KernelRegistration.h"
+#include <ATen/core/dispatch/KernelRegistration.h>
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/experimental/c10/schemas/fc.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/core/tensor.h"
 
 using caffe2::BaseContext;
 using caffe2::Tensor;
 
 namespace caffe2 {
 namespace {
+
+struct Cache final : public c10::KernelCache {
+  vector<int64_t> Y_shape_cache_;
+  at::Tensor bias_multiplier_ = at::Tensor(C10Tensor(Tensor()));
+};
+
 template <class DataType, class Context>
 void fc_op_cpu_impl(
-    const Tensor& X,
-    const Tensor& W,
-    const Tensor& b,
-    Tensor* Y,
-    int axis,
-    int axis_w,
-    caffe2::ops::FullyConnected::Cache* cache,
-    BaseContext* context) {
+    const at::Tensor& X_,
+    const at::Tensor& W_,
+    const at::Tensor& b_,
+    const at::Tensor& Y_,
+    int64_t axis,
+    int64_t axis_w,
+    Cache* cache) {
+  Tensor X{C10Tensor(X_)};
+  Tensor W{C10Tensor(W_)};
+  Tensor b{C10Tensor(b_)};
+  Tensor Y{C10Tensor(Y_)};
+  CPUContext context;
+
   constexpr bool TransposeWeight = true;
 
-  CAFFE_ENFORCE(b.ndim() == 1, b.ndim());
+  CAFFE_ENFORCE(b.dim() == 1, b.dim());
   // batch size
   const auto canonical_axis = X.canonical_axis_index(axis);
   const auto M = X.size_to_dim(canonical_axis);
@@ -32,14 +44,14 @@ void fc_op_cpu_impl(
                                 : W.size_from_dim(canonical_axis_w);
 
   auto dimErrorString = [&]() {
-    return caffe2::MakeString(
+    return c10::str(
         "Dimension mismatch: ",
         "X: ",
-        X.dims(),
+        X.sizes(),
         ", W: ",
-        W.dims(),
+        W.sizes(),
         ", b: ",
-        b.dims(),
+        b.sizes(),
         ", axis: ",
         axis,
         ", M: ",
@@ -51,22 +63,22 @@ void fc_op_cpu_impl(
   };
 
   // Error checking
-  CAFFE_ENFORCE(M == X.size() / K, dimErrorString());
-  CAFFE_ENFORCE(K == W.size() / N, dimErrorString());
+  CAFFE_ENFORCE(M == X.numel() / K, dimErrorString());
+  CAFFE_ENFORCE(K == W.numel() / N, dimErrorString());
   CAFFE_ENFORCE(N == b.dim32(0), dimErrorString());
-  CAFFE_ENFORCE(N == b.size(), dimErrorString());
+  CAFFE_ENFORCE(N == b.numel(), dimErrorString());
 
-  cache->Y_shape_cache_ = X.dims();
+  cache->Y_shape_cache_ = X.sizes().vec();
   // This is an invariant of canonical_axis, so we can DCHECK.
   DCHECK_LE(canonical_axis + 1, cache->Y_shape_cache_.size());
   cache->Y_shape_cache_.resize(canonical_axis + 1);
   cache->Y_shape_cache_[canonical_axis] = N;
-  Y->Resize(cache->Y_shape_cache_);
-  CAFFE_ENFORCE(M * N == Y->size(), dimErrorString());
+  Y.Resize(cache->Y_shape_cache_);
+  CAFFE_ENFORCE(M * N == Y.numel(), dimErrorString());
 
-  if (X.size() == 0) {
+  if (X.numel() == 0) {
     // skip the rest of the computation if X is empty
-    Y->template mutable_data<DataType>();
+    Y.template mutable_data<DataType>();
     return;
   }
 
@@ -87,19 +99,17 @@ void fc_op_cpu_impl(
       X.template data<DataType>(),
       W.template data<DataType>(),
       0,
-      Y->template mutable_data<DataType>(),
-      static_cast<Context*>(context),
+      Y.template mutable_data<DataType>(),
+      static_cast<Context*>(&context),
       math_type);
   // Add bias term
-  if (cache->bias_multiplier_.size() != M) {
-    // If the helper bias multiplier is not M, reshape and fill it with one.
-    cache->bias_multiplier_.Resize(M);
-    caffe2::math::Set<DataType, Context>(
-        M,
-        caffe2::convert::To<float, DataType>(1),
-        cache->bias_multiplier_.template mutable_data<DataType>(),
-        static_cast<Context*>(context));
-  }
+  Tensor bias_multiplier(cache->bias_multiplier_);
+  ReinitializeTensor(&bias_multiplier, {M}, at::dtype<DataType>().device(CPU));
+  caffe2::math::Set<DataType, Context>(
+      M,
+      caffe2::convert::To<float, DataType>(1),
+      bias_multiplier.template mutable_data<DataType>(),
+      static_cast<Context*>(&context));
   caffe2::math::Gemm<DataType, Context, caffe2::DefaultEngine>(
       CblasNoTrans,
       CblasNoTrans,
@@ -107,11 +117,11 @@ void fc_op_cpu_impl(
       N,
       1,
       1,
-      cache->bias_multiplier_.template data<DataType>(),
+      bias_multiplier.template data<DataType>(),
       b.template data<DataType>(),
       1,
-      Y->template mutable_data<DataType>(),
-      static_cast<Context*>(context),
+      Y.template mutable_data<DataType>(),
+      static_cast<Context*>(&context),
       math_type);
 }
 } // namespace
@@ -119,16 +129,7 @@ void fc_op_cpu_impl(
 
 namespace c10 {
 C10_REGISTER_KERNEL(caffe2::ops::FullyConnected)
-    .kernel(&caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>)
-    .dispatchKey(c10::DispatchKey<3>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<float>()}});
+    .withCache<caffe2::Cache>()
+    .kernel<decltype(caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>), &caffe2::fc_op_cpu_impl<float, caffe2::CPUContext>>()
+    .dispatchKey(CPUTensorId());
 } // namespace c10

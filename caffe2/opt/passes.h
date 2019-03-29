@@ -40,9 +40,13 @@ class CAFFE2_API WorkspaceOptimizationPass : public OptimizationPass {
   Workspace* ws_;
 };
 
-CAFFE_DECLARE_REGISTRY(WorkspaceOptimizationPassRegistry, WorkspaceOptimizationPass, NNModule*, Workspace*);
+C10_DECLARE_REGISTRY(
+    WorkspaceOptimizationPassRegistry,
+    WorkspaceOptimizationPass,
+    NNModule*,
+    Workspace*);
 #define REGISTER_WS_OPT_PASS(clsname) \
-  CAFFE_REGISTER_CLASS(WorkspaceOptimizationPassRegistry, clsname, clsname)
+  C10_REGISTER_CLASS(WorkspaceOptimizationPassRegistry, clsname, clsname)
 #define REGISTER_WS_OPT_PASS_FROM_FUNC(passname, funcname)      \
   class passname : public WorkspaceOptimizationPass {           \
    public:                                                      \
@@ -53,9 +57,9 @@ CAFFE_DECLARE_REGISTRY(WorkspaceOptimizationPassRegistry, WorkspaceOptimizationP
   };                                                            \
   REGISTER_WS_OPT_PASS(passname);
 
-CAFFE_DECLARE_REGISTRY(OptimizationPassRegistry, OptimizationPass, NNModule*);
+C10_DECLARE_REGISTRY(OptimizationPassRegistry, OptimizationPass, NNModule*);
 #define REGISTER_OPT_PASS(clsname) \
-  CAFFE_REGISTER_CLASS(OptimizationPassRegistry, clsname, clsname)
+  C10_REGISTER_CLASS(OptimizationPassRegistry, clsname, clsname)
 #define REGISTER_OPT_PASS_FROM_FUNC(passname, funcname) \
   class passname : public OptimizationPass {            \
    public:                                              \

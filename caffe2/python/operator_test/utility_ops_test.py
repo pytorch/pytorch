@@ -11,6 +11,7 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 import random
+import six
 import unittest
 
 
@@ -403,13 +404,13 @@ class TestUtilityOps(serial.SerializedTestCase):
             )
             self.assertDeviceChecks(dc, op, inputs, [0])
 
-        with self.assertRaisesRegexp(RuntimeError, 'Step size cannot be 0'):
-            inputs = (np.array(0), np.array(10), np.array(0))
-            op = core.CreateOperator(
-                "Range",
-                names[len(inputs) - 1],
-                ["Y"]
-            )
+        inputs = (np.array(0), np.array(10), np.array(0))
+        op = core.CreateOperator(
+            "Range",
+            names[len(inputs) - 1],
+            ["Y"]
+        )
+        with six.assertRaisesRegex(self, RuntimeError, 'Step size cannot be 0'):
             self.assertReferenceChecks(
                 device_option=gc,
                 op=op,

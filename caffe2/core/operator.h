@@ -2,6 +2,7 @@
 #define CAFFE2_CORE_OPERATOR_H_
 
 #include <array>
+#include <cfenv>
 #include <climits>
 #include <cstddef>
 #include <exception>
@@ -9,18 +10,25 @@
 #include <typeinfo>
 #include <vector>
 
+#include "c10/macros/Macros.h"
+#include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator_gradient.h"
 #include "caffe2/core/operator_schema.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
+
+#include <ATen/core/Tensor.h>
+#include <ATen/core/function_schema.h>
+#include <ATen/core/ivalue.h>
+
+C10_DECLARE_bool(caffe2_operator_throw_if_fp_exceptions);
 
 namespace caffe2 {
 
@@ -30,23 +38,58 @@ typedef ObserverBase<OperatorBase> OperatorObserver;
 class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
  public:
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
+
+  /*
+   * Notes: All outputs ivalues must be tensors. Input ivalue list must start
+   * with all tensors ("inputs" in caffe2 terminology),
+   * followed by non-tensors ("arguments" in caffe2 terminology).
+   * Alternatively, inputs can be one tensor list ivalue followed by non-tensors
+   * to represent operators with a variable number of inputs.
+   */
+  explicit OperatorBase(
+      const c10::FunctionSchema& schema,
+      std::vector<c10::IValue> inputs,
+      std::vector<at::Tensor> outputs);
+
   virtual ~OperatorBase() noexcept {}
+
+  /** @brief Return true if the operator was instantiated with OperatorDef
+   * New operators should be instantiated with FunctionSchema
+   */
+  bool isLegacyOperator() const {
+    return !fn_schema_;
+  }
+
+  const c10::FunctionSchema& getFunctionSchema() const {
+    CAFFE_ENFORCE(!isLegacyOperator());
+    return *fn_schema_.get();
+  }
 
   /** @brief Checks if the operator has an argument of the given name.
    */
   inline bool HasArgument(const string& name) const {
-    CAFFE_ENFORCE(operator_def_, "operator_def was null!");
-    return ArgumentHelper::HasArgument(*operator_def_, name);
+    if (isLegacyOperator()) {
+      CAFFE_ENFORCE(operator_def_, "operator_def was null!");
+      return ArgumentHelper::HasArgument(*operator_def_, name);
+    }
+    return getFunctionSchema().argumentIndexWithName(name).has_value();
   }
 
   // Functions that deal with arguments. Basically, this allows us to map an
   // argument name to a specific type of argument that we are trying to access.
   template <typename T>
   inline T GetSingleArgument(const string& name, const T& default_value) const {
-    CAFFE_ENFORCE(operator_def_, "operator_def was null!");
-    return ArgumentHelper::GetSingleArgument<OperatorDef, T>(
-        *operator_def_, name, default_value);
+    if (isLegacyOperator()) {
+      CAFFE_ENFORCE(operator_def_, "operator_def was null!");
+      return ArgumentHelper::GetSingleArgument<OperatorDef, T>(
+          *operator_def_, name, default_value);
+    }
+    auto index = getFunctionSchema().argumentIndexWithName(name);
+    CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
+    const auto& value = newstyle_inputs_[index.value()];
+    return value.template to<T>();
   }
+
   template <typename T>
   inline bool HasSingleArgumentOfType(const string& name) const {
     CAFFE_ENFORCE(operator_def_, "operator_def was null!");
@@ -54,12 +97,23 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         *operator_def_, name);
   }
   template <typename T>
+  inline vector<T> GetVectorFromIValueList(const c10::IValue& value) const {
+    return value.template to<vector<T>>();
+  }
+
+  template <typename T>
   inline vector<T> GetRepeatedArgument(
       const string& name,
       const vector<T>& default_value = {}) const {
-    CAFFE_ENFORCE(operator_def_, "operator_def was null!");
-    return ArgumentHelper::GetRepeatedArgument<OperatorDef, T>(
-        *operator_def_, name, default_value);
+    if (isLegacyOperator()) {
+      CAFFE_ENFORCE(operator_def_, "operator_def was null!");
+      return ArgumentHelper::GetRepeatedArgument<OperatorDef, T>(
+          *operator_def_, name, default_value);
+    }
+    auto index = getFunctionSchema().argumentIndexWithName(name);
+    CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
+    const auto& value = newstyle_inputs_[index.value()];
+    return GetVectorFromIValueList<T>(value);
   }
 
   // Get the inputs and outputs as specific types.
@@ -88,23 +142,46 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   // a bit easier
   template <typename T>
   inline const T& Input(int idx, DeviceType type) {
-    static_assert(
-        std::is_same<T, Tensor>::value,
-        "Input(int, DeviceType) is only available for Tensor");
-    DCHECK_LT(idx, inputs_.size());
-    try {
-      // TODO(jerryzh): We'll need to check device type in Get<T>() later
-      // Get<T>() -> Get<T>(type)
-      const auto& tensor = inputs_.at(idx)->template Get<T>();
-      return tensor;
-    } catch (::caffe2::EnforceNotMet& enf) {
-      if (has_debug_def()) {
-        enf.AppendMessage(".\nOffending Blob name: ");
-        enf.AppendMessage(debug_def().input(idx));
-        enf.AppendMessage(".\n");
+    if (isLegacyOperator()) {
+      static_assert(
+          std::is_same<T, Tensor>::value,
+          "Input(int, DeviceType) is only available for Tensor");
+      DCHECK_LT(idx, inputs_.size());
+      try {
+        // TODO(jerryzh): We'll need to check device type in Get<T>() later
+        // Get<T>() -> Get<T>(type)
+        const auto& tensor = inputs_.at(idx)->template Get<T>();
+        return tensor;
+      } catch (::caffe2::EnforceNotMet& enf) {
+        if (has_debug_def()) {
+          enf.AppendMessage(".\nOffending Blob name: ");
+          enf.AppendMessage(debug_def().input(idx));
+          enf.AppendMessage(".\n");
+        }
+        throw enf;
       }
-      throw enf;
     }
+    DCHECK_LT(0, newstyle_inputs_.size());
+    IValue ival;
+    if (newstyle_inputs_[0].isTensorList()) {
+      // if the first input is a tensor list, we get input tensors by indexing into that list.
+      // currently, this means that only tensors from that list are accessible as inputs.
+      // any hypothetical input tensors that come after the list are not accessible.
+      const auto& tensorList = newstyle_inputs_[0].toTensorListRef();
+      DCHECK_LT(idx, tensorList.size());
+      ival = tensorList[idx];
+    } else {
+      // if the first input is not a tensor list, we get input tensors by indexing into the inputs.
+      DCHECK_LT(idx, newstyle_inputs_.size());
+      ival = newstyle_inputs_[idx];
+    }
+    CAFFE_ENFORCE(
+        ival.isTensor(),
+        "Input(int, DeviceType) is only available for IValues that store Tensors");
+    Tensor tensor = caffe2::Tensor(ival.toTensor());
+    CAFFE_ENFORCE_EQ(tensor.GetDeviceType(), type);
+    input_tensors_[idx] = std::move(tensor);
+    return input_tensors_[idx];
   }
 
   template <typename T>
@@ -119,11 +196,99 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   // TODO(jerryzh): Remove this template
   template <typename T>
   inline T* Output(int idx, DeviceType type) {
-    static_assert(
-        std::is_same<T, Tensor>::value,
-        "Output(int, DeviceType) is only available for Tensor");
-    return outputs_.at(idx)->GetMutableTensor(type);
+    if (isLegacyOperator()) {
+      static_assert(
+          std::is_same<T, Tensor>::value,
+          "Output(int, DeviceType) is only available for Tensor");
+      // When you get a Tensor here it is not fully initialized
+      return BlobGetMutableTensor(outputs_.at(idx), type);
+    }
+    auto& output = newstyle_outputs_[idx];
+    Tensor tensor = caffe2::Tensor(output);
+    if (!tensor.defined() || tensor.GetDeviceType() != type) {
+      // Fix tensor type
+      tensor = Tensor(type);
+      output = at::Tensor(std::move(tensor.getIntrusivePtr()));
+    }
+    output_tensors_[idx] = caffe2::Tensor(output);
+    return &output_tensors_[idx];
   }
+
+  inline Tensor
+  XOutputTensor(int idx, at::IntArrayRef dims, at::TensorOptions options) {
+    CAFFE_ENFORCE_WITH_CALLER(
+        options.device_opt() != c10::nullopt,
+        "device must be provided in option.");
+    if (isLegacyOperator()) {
+      return XBlobGetMutableTensor(outputs_.at(idx), dims, options);
+    }
+
+    return OutputTensor(idx, dims, options)->UnsafeSharedInstance();
+  }
+
+  void SetOutputTensor(int idx, Tensor tensor) {
+    if (!isLegacyOperator()) {
+      newstyle_outputs_[idx] = at::Tensor(tensor);
+
+      // also update the tensor in the hack
+      output_tensors_[idx] = std::move(tensor);
+    } else {
+      // update the tensor in the workspace
+      BlobSetTensor(outputs_.at(idx), std::move(tensor));
+    }
+  }
+
+  Tensor OutputTensorOrUndefined(int idx) {
+    if (isLegacyOperator()) {
+      return BlobGetTensorOrUndefined(*outputs_.at(idx));
+    }
+    return output_tensors_[idx].UnsafeSharedInstance();
+  }
+
+  inline Tensor*
+  OutputTensor(int idx, at::IntArrayRef dims, at::TensorOptions options) {
+    if (isLegacyOperator()) {
+      CAFFE_ENFORCE_WITH_CALLER(
+          options.device_opt() != c10::nullopt,
+          "device must be provided in options.");
+      return BlobGetMutableTensor(outputs_.at(idx), dims, options);
+    }
+    auto& output = newstyle_outputs_[idx];
+    Tensor tensor =
+        GetSizedTensorWithOptions(caffe2::Tensor(output), dims, options);
+    // assign it back in case it changed
+    output = at::Tensor(std::move(tensor.getIntrusivePtr()));
+
+    output_tensors_[idx] = caffe2::Tensor(output);
+    return &output_tensors_[idx];
+  }
+
+  // Get output Tensor of the operator and CopyFrom the given Tensor
+  Tensor* OutputTensorCopyFrom(
+      int idx,
+      at::TensorOptions options,
+      const Tensor& src,
+      bool async = false) {
+    CAFFE_ENFORCE_WITH_CALLER(
+        options.device_opt() != c10::nullopt,
+        "device must be provided in options.");
+    // Ouptut Tensor will always have the same data type as `src`
+    if (!options.has_dtype()) {
+      options = options.dtype(src.dtype());
+    }
+    CAFFE_ENFORCE_WITH_CALLER(
+        options.dtype() == src.dtype(),
+        "We don't allow change of src data type in OutputTensorCopyFrom");
+    Tensor* t = OutputTensor(idx, src.sizes(), options);
+    t->CopyFrom(src, async);
+    return t;
+  }
+
+  Tensor* OutputTensorAlias(int idx, const Tensor& src) {
+    return BlobSetTensor(OutputBlob(idx),
+                  src.Alias());
+  }
+
 
   template <typename T>
   inline T* Output(int idx, T* allocated) {
@@ -139,6 +304,13 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return outputs_.at(idx);
   }
 
+  // Check whether output j is an alias of input i by comparing Blob pointers,
+  // note this does not check if the two Blobs points to the same Tensor, or if
+  // the Tensor pointers point to the same TensorImpl, or if the Storages alias
+  inline bool IsInputOutputAlias(int i, int j) {
+    return inputs_.at(i) == outputs_.at(j);
+  }
+
   template <typename T>
   inline bool InputIsType(int idx) {
     static_assert(
@@ -149,7 +321,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline bool InputIsTensorType(int idx, DeviceType device_type) {
-    return inputs_.at(idx)->IsTensorType(device_type);
+    return BlobIsTensorType(*inputs_.at(idx), device_type);
   }
 
   template <typename T>
@@ -162,14 +334,18 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline bool OutputIsTensorType(int idx, DeviceType type) {
-    return outputs_.at(idx)->IsTensorType(type);
+    return BlobIsTensorType(*outputs_.at(idx), type);
   }
 
   inline int InputSize() const {
-    return inputs_.size();
+    return input_size_;
   }
+
   inline int OutputSize() const {
-    return outputs_.size();
+    if (isLegacyOperator()) {
+      return outputs_.size();
+    }
+    return newstyle_outputs_.size();
   }
   inline const vector<const Blob*>& Inputs() const { return inputs_; }
   inline const vector<Blob*>& Outputs() { return outputs_; }
@@ -229,13 +405,13 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       }
       return result;
     } catch (EnforceNotMet& err) {
-      SetEventFinished(err.what());
+      SetEventFinishedWithException(err.what());
       throw;
     } catch (const std::exception& err) {
-      SetEventFinished(err.what());
+      SetEventFinishedWithException(err.what());
       throw;
     } catch (...) {
-      SetEventFinished(getErrorMsg().c_str());
+      SetEventFinishedWithException(getErrorMsg().c_str());
       throw;
     }
   }
@@ -328,7 +504,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return !event_;
   }
 
-  virtual void FinishDeviceComputation() {
+  // Internal API invoked by observers. Normal callers shouldn't invoke it.
+  virtual void SyncDeviceBarrierForObservers() {
     CAFFE_NOT_IMPLEMENTED;
   }
 
@@ -359,6 +536,10 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return helper_;
   }
 
+  std::vector<at::Tensor> move_newstyle_outputs() && {
+    return std::move(newstyle_outputs_);
+  }
+
  public:
   static const int kNoNetPositionSet = -1;
 
@@ -370,6 +551,18 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   std::string type_;
   vector<const Blob*> inputs_;
   vector<Blob*> outputs_;
+  // Preferrably use c10::optional, but nvcc doesn't work
+  std::unique_ptr<const c10::FunctionSchema> fn_schema_ = nullptr;
+  vector<c10::IValue> newstyle_inputs_;
+  vector<at::Tensor> newstyle_outputs_;
+  // HACK
+  // We preserve the fact that Output() returns Tensor*
+  // by storing Tensor in a vector owned by the
+  // operator.
+  vector<caffe2::Tensor> input_tensors_;
+  vector<caffe2::Tensor> output_tensors_;
+
+  int input_size_;
 
   int net_position_{kNoNetPositionSet};
 
@@ -386,6 +579,12 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     }
   }
 
+  void SetEventFinishedWithException(const char* err_msg = nullptr) {
+    if (event_) {
+      event_->SetFinishedWithException(err_msg);
+    }
+  }
+
   std::string getErrorMsg() {
     if (has_debug_def()) {
       return "Error from operator: " + ProtoDebugString(debug_def());
@@ -397,15 +596,53 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   // An event used by asynchronous execution.
   std::unique_ptr<Event> event_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(OperatorBase);
+  C10_DISABLE_COPY_AND_ASSIGN(OperatorBase);
 };
 
-// If your operator does not need any specialized contructor or destructor,
-// you can simply use this to save two lines of code.
-#define USE_SIMPLE_BASE_CTOR_DTOR(name)                                        \
-  name(const OperatorDef& operator_def, Workspace* ws)                         \
-      : OperatorBase(operator_def, ws) {}                                      \
-  virtual ~name() noexcept {}
+template <>
+inline NetDef OperatorBase::GetSingleArgument<NetDef>(
+    const std::string& name,
+    const NetDef& default_value) const {
+  if (isLegacyOperator()) {
+    CAFFE_ENFORCE(operator_def_, "operator_def was null!");
+    return ArgumentHelper::GetSingleArgument<OperatorDef, NetDef>(
+        *operator_def_, name, default_value);
+  }
+  CAFFE_THROW("Cannot get NetDefs from IValue");
+  return NetDef();
+}
+
+template <>
+inline vector<int> OperatorBase::GetVectorFromIValueList<int>(
+    const c10::IValue& value) const {
+  const auto& vs = value.toIntListRef();
+  vector<int> out;
+  out.reserve(vs.size());
+  for (const auto& v : vs) {
+    out.emplace_back(v);
+  }
+  return out;
+}
+
+template <>
+inline vector<float> OperatorBase::GetVectorFromIValueList<float>(
+    const c10::IValue& value) const {
+  const auto& vs = value.toDoubleListRef();
+  vector<float> out;
+  out.reserve(vs.size());
+  for (const auto& v : vs) {
+    out.emplace_back(v);
+  }
+  return out;
+}
+
+template <>
+inline vector<string> OperatorBase::GetVectorFromIValueList<string>(
+    const c10::IValue& value) const {
+  CAFFE_THROW("Cannot extract vector<string> from ivalue.");
+  vector<string> out;
+  return out;
+}
 
 // OP_SINGLE_ARG provides a shorter initialization choice for initialization of
 // member variables for the class constructors.
@@ -443,18 +680,123 @@ class Operator : public OperatorBase {
       : OperatorBase(operator_def, ws), context_(operator_def.device_option()) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
-    context_.SwitchToDevice(0);
+    context_.SwitchToDevice();
+  }
+  explicit Operator(
+      const c10::FunctionSchema& fn_schema,
+      std::vector<c10::IValue> inputs,
+      std::vector<at::Tensor> outputs)
+      : OperatorBase(fn_schema, std::move(inputs), std::move(outputs)) {
+    // In the constructor, we switch to the device so that the child class
+    // constructors will run on that device.
+    context_.SwitchToDevice();
   }
   ~Operator() noexcept override {}
 
+  /// Retrieve a non-owning reference to the input at position 'idx' for this
+  /// operator.  The returned reference is valid for the duration of the
+  /// RunOnDevice call.  The optional 'type' parameter can be used to assert a
+  /// required device type for the input (by default, we assert that the tensor
+  /// is consistent with the device type implied by the Context parameter of an
+  /// Operator.)
   inline const Tensor& Input(
       int idx,
       DeviceType type = Context::GetDeviceType()) {
     return OperatorBase::template Input<Tensor>(idx, type);
   }
 
+  /// XOutput is a modernized version of Output which returns a Tensor
+  /// rather than a Tensor* (the raw pointer in the latter case is
+  /// useless, as Tensor is a pointer type.)
+  Tensor XOutput(int idx, at::IntArrayRef dims, at::TensorOptions options) {
+    // We'll default device to the device of the current Operator Context
+    if (options.device_opt() == c10::nullopt) {
+      return OperatorBase::XOutputTensor(
+          idx, dims, options.device(context_.device()));
+    }
+    return OperatorBase::XOutputTensor(idx, dims, options);
+  }
+
+  /// Retrieve a non-owning pointer to the output at position 'idx',
+  /// initializing it to have size 'dims' and properties 'options' if
+  /// there is no pre-existing output or the pre-existing output does
+  /// not have the correct options.  The returned pointer is valid for
+  /// the duration of the RunOnDevice call.  If device is not explicitly
+  /// specified in options, we default to allocating output on the
+  /// current device of the device type implied by the Context parameter
+  /// of this Operator.
+  ///
+  /// Note [Operator::Output what?]
+  /// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  /// The contract of Operator::Output is somewhat complex; it is perhaps better
+  /// understood in terms of what was historically an idiomatic Caffe2 operator
+  /// implementation:
+  ///
+  ///     void RunOnDevice() override {
+  ///         auto* output = Output(0, output_size, dtype<float>());
+  ///         float* output_ptr = output->data<float>();
+  ///         // write into output_ptr
+  ///     }
+  ///
+  /// In the simple case, this code does the following things:
+  ///
+  ///   1. Allocates a new tensor with size 'output_size' and dtype 'float'
+  ///      (and device type whatever the Operator's device type is)
+  ///   2. "Registers" this tensor as the 0th output tensor of this operator
+  ///      (Caffe2 operators don't "return" outputs; instead, outputs
+  ///      are shoved into an output vector which the executor reads out.)
+  ///   3. Returns the tensor, so the operator implementation can write
+  ///      the actual output data into the tensor.
+  ///
+  /// So what's this business with "pre-existing" outputs?  Caffe2
+  /// commonly applies an optimization whereby it reuses tensors on
+  /// subsequent runs of operators in a graph.  It doesn't know ahead
+  /// of time what intermediate tensors it will need, so the first
+  /// time it runs a graph it has all of the operators create the outputs
+  /// necessary (as described above).  However, the second time around,
+  /// it will reuse all of the tensors created from the first time.
+  /// If they are lucky, this time the Output() call is a no-op and
+  /// just returns the old tensor.
+  ///
+  /// However, we cannot /guarantee/ that the output size will be the
+  /// same the next time the Operator is called; for example, output
+  /// size may be data dependent and vary between runs.  In this case,
+  /// we have to resize it to the correct size.  Resizing is still
+  /// helpful, as we may be able to fit the output in the same
+  /// space that was previously used.
+  ///
+  Tensor* Output(int idx, at::IntArrayRef dims, at::TensorOptions options) {
+    // We'll default device to the device of the current Operator Context
+    if (options.device_opt() == c10::nullopt) {
+      return OperatorBase::OutputTensor(
+          idx, dims, options.device(context_.device()));
+    }
+    return OperatorBase::OutputTensor(idx, dims, options);
+  }
+
+  /// Legacy: please consider using the version of Output() which also takes
+  /// dtype and size as arguments.
   inline Tensor* Output(int idx, DeviceType type = Context::GetDeviceType()) {
     return OperatorBase::template Output<Tensor>(idx, type);
+  }
+
+  /// Get the output Tensor of an operator (allocating it if it is not
+  /// already initialized), and copy the contents of src into it.
+  /// You probably don't actually want to use this function (the fact
+  /// that you have a Tensor to copy from is probably a mistake:
+  /// you should have written the output into the output tensor,
+  /// from Output, directly in the first place), but this method
+  /// is situationally useful.
+  Tensor* OutputTensorCopyFrom(
+      int idx,
+      at::TensorOptions options,
+      const Tensor& src,
+      bool async = false) {
+    if (options.device_opt() == c10::nullopt) {
+      return OperatorBase::OutputTensorCopyFrom(
+          idx, options.device(context_.device()), src, async);
+    }
+    return OperatorBase::OutputTensorCopyFrom(idx, options, src, async);
   }
 
   void WaitEvent(const Event& ev, int stream_id = -1) final {
@@ -484,7 +826,22 @@ class Operator : public OperatorBase {
       StartAllObservers();
 
       context_.SwitchToDevice(stream_id);
+
+      if (FLAGS_caffe2_operator_throw_if_fp_exceptions) {
+        std::feclearexcept(FE_ALL_EXCEPT);
+      }
       bool result = RunOnDevice();
+      if (FLAGS_caffe2_operator_throw_if_fp_exceptions) {
+        CAFFE_ENFORCE(
+            !std::fetestexcept(FE_DIVBYZERO),
+            "Division by zero floating point exception (FE_DIVBYZERO) reported.");
+        CAFFE_ENFORCE(
+            !std::fetestexcept(FE_INVALID),
+            "Invalid floating point exception (FE_INVALID) reported.");
+        CAFFE_ENFORCE(
+            !std::fetestexcept(FE_OVERFLOW),
+            "Overflow floating point exception (FE_OVERFLOW) reported.");
+      }
       if (!result) {
         this->RecordLastFailedOpNetPosition();
       }
@@ -537,17 +894,17 @@ class Operator : public OperatorBase {
             "Error from operator: \n" + ProtoDebugString(debug_def()));
         AddRelatedBlobInfo(&err);
       }
-      SetEventFinished(err.what());
+      SetEventFinishedWithException(err.what());
       this->RecordLastFailedOpNetPosition();
       StopAllObservers();
       throw;
     } catch (const std::exception& err) {
-      SetEventFinished(err.what());
+      SetEventFinishedWithException(err.what());
       this->RecordLastFailedOpNetPosition();
       StopAllObservers();
       throw;
     } catch (...) {
-      SetEventFinished(getErrorMsg().c_str());
+      SetEventFinishedWithException(getErrorMsg().c_str());
       this->RecordLastFailedOpNetPosition();
       StopAllObservers();
       throw;
@@ -567,6 +924,9 @@ class Operator : public OperatorBase {
   // to finished state by RunAsync.
   // Defaulting to the value from context (true for CUDA, false for CPU).
   // Override in case of async CPU operators
+  // Async CPU operators are expected to catch all exceptions in async parts
+  // and set Event to finished/failed state with Event::SetFinished or
+  // SetFinishedWithException call.
   bool HasAsyncPart() const override {
     return context_.HasAsyncPartDefault();
   }
@@ -588,11 +948,14 @@ class Operator : public OperatorBase {
     return HasAsyncPart() && context_.SupportsAsyncScheduling();
   }
 
-  void FinishDeviceComputation() override {
+  void SyncDeviceBarrierForObservers() override {
     context_.FinishDeviceComputation();
   }
 
   const Context* getContext() const {
+    return &context_;
+  }
+  Context* getContext() {
     return &context_;
   }
 
@@ -615,21 +978,24 @@ class Operator : public OperatorBase {
   /* using override */ using OperatorBase::InputSize;               \
   /* using override */ using OperatorBase::Output;                  \
   /* using override */ using OperatorBase::Input;                   \
-  /* using override */ using OperatorBase::OutputSize
+  /* using override */ using OperatorBase::OutputSize;              \
+  /* using override */ using OperatorBase::IsInputOutputAlias;      \
+  /* using override */ using OperatorBase::OutputTensorAlias
 
-#define USE_OPERATOR_FUNCTIONS(context)                    \
-  USE_OPERATOR_BASE_FUNCTIONS;                             \
-  /* using override */ using Operator<context>::context_;  \
-  /* using override */ using Operator<context>::Input;     \
-  /* using override */ using Operator<context>::InputBlob; \
-  /* using override */ using Operator<context>::Output;    \
-  /* using override */ using Operator<context>::OutputBlob
+#define USE_OPERATOR_FUNCTIONS(context)                     \
+  USE_OPERATOR_BASE_FUNCTIONS;                              \
+  /* using override */ using Operator<context>::context_;   \
+  /* using override */ using Operator<context>::Input;      \
+  /* using override */ using Operator<context>::InputBlob;  \
+  /* using override */ using Operator<context>::Output;     \
+  /* using override */ using Operator<context>::OutputBlob; \
+  /* using override */ using Operator<context>::OutputTensorCopyFrom
 
 #define USE_OPERATOR_CONTEXT_FUNCTIONS USE_OPERATOR_FUNCTIONS(Context)
 
 #define USE_SIMPLE_CTOR_DTOR(name)                                             \
-  name(const OperatorDef& operator_def, Workspace* ws)                         \
-      : Operator<Context>(operator_def, ws) {}                                 \
+  template<class... Args> explicit name(Args&&... args)                        \
+      : Operator<Context>(std::forward<Args>(args)...) {}                      \
   virtual ~name() noexcept {}
 
 // Helpers to implement runtime op polymorphism. Often it's convenient to make
@@ -705,7 +1071,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
   }
 };
 
-#define CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER(                                 \
+#define C10_DEFINE_TENSOR_TYPES_DISPATCHER(                                    \
     TensorTypes, DoRunWithType, DoRunWithOtherType)                            \
   template <typename FirstType, typename... Types, typename... ExtraArgs>      \
   struct DispatchHelper<TensorTypes<FirstType, Types...>, ExtraArgs...> {      \
@@ -722,7 +1088,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Tensor& tensor) {                           \
-      return call<Op>(op, tensor.meta());                                      \
+      return call<Op>(op, tensor.dtype());                                     \
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Blob& blob) {                               \
@@ -738,7 +1104,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Tensor& tensor) {                           \
-      return call<Op>(op, tensor.meta());                                      \
+      return call<Op>(op, tensor.dtype());                                     \
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Blob& blob) {                               \
@@ -756,35 +1122,35 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Tensor& tensor) {                           \
-      return call<Op>(op, tensor.meta());                                      \
+      return call<Op>(op, tensor.dtype());                                     \
     }                                                                          \
     template <typename Op>                                                     \
     static bool call(Op* op, const Blob& blob) {                               \
       return call<Op>(op, blob.meta());                                        \
     }                                                                          \
   };
-CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER(
+C10_DEFINE_TENSOR_TYPES_DISPATCHER(
     TensorTypes,
     DoRunWithType,
     DoRunWithOtherType)
-CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER(
+C10_DEFINE_TENSOR_TYPES_DISPATCHER(
     TensorTypes2,
     DoRunWithType2,
     DoRunWithOtherType2)
-#undef CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER
+#undef C10_DEFINE_TENSOR_TYPES_DISPATCHER
 
 // The device type registry. This works in two phases:
 // (1) gDeviceTypeRegistry() maps the device types values to the actual operator
 //     registry function.
 // (2) Then, one can call the operator registry function to further create the
 //     operators.
-typedef Registry<
+typedef c10::Registry<
     std::string,
     std::unique_ptr<OperatorBase>,
     const OperatorDef&,
     Workspace*>
     OperatorRegistry;
-typedef Registry<
+typedef c10::Registry<
     std::string,
     std::unique_ptr<OperatorBase>,
     const OperatorDef&,
@@ -806,7 +1172,7 @@ struct CAFFE2_API DeviceTypeRegisterer {
 
 #define CAFFE_REGISTER_DEVICE_TYPE(type, registry_function) \
   namespace {                                               \
-  static DeviceTypeRegisterer CAFFE_ANONYMOUS_VARIABLE(     \
+  static DeviceTypeRegisterer C10_ANONYMOUS_VARIABLE(       \
       DeviceType)(type, &registry_function);                \
   }
 
@@ -817,72 +1183,80 @@ struct CAFFE2_API DeviceTypeRegisterer {
 // not depend on specific cuda or cudnn libraries. This means that we will be
 // able to compile it even when there is no cuda available - we simply do not
 // link any cuda or cudnn operators.
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
     CPUOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 #define REGISTER_CPU_OPERATOR_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(CPUOperatorRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(CPUOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_CPU_OPERATOR(name, ...)                           \
-  CAFFE2_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();\
+  C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CPU##name() { \
     CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
   }                                                                \
-  CAFFE_REGISTER_CLASS(CPUOperatorRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(CPUOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CPU_OPERATOR_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(CPUOperatorRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(CPUOperatorRegistry, str_name, __VA_ARGS__)
 
 #define REGISTER_CPU_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  CAFFE_REGISTER_CLASS(CPUOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+  C10_REGISTER_CLASS(CPUOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
-CAFFE_DECLARE_REGISTRY(
+// Use these macros to register gradient operators.  They can be automatically
+// excluded from builds that don't need them (e.g., mobile).
+#ifdef CAFFE2_NO_GRADIENT_OPS
+#define REGISTER_CPU_GRADIENT_OPERATOR(...) /* No gradients. */
+#else
+#define REGISTER_CPU_GRADIENT_OPERATOR(...) \
+  MACRO_EXPAND(REGISTER_CPU_OPERATOR(__VA_ARGS__))
+#endif
+
+C10_DECLARE_REGISTRY(
     CUDAOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 #define REGISTER_CUDA_OPERATOR_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(CUDAOperatorRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(CUDAOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_CUDA_OPERATOR(name, ...)                           \
-  CAFFE2_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();       \
+  C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();   \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CUDA##name() { \
     CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
   }                                                                 \
-  CAFFE_REGISTER_CLASS(CUDAOperatorRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(CUDAOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CUDA_OPERATOR_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(CUDAOperatorRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(CUDAOperatorRegistry, str_name, __VA_ARGS__)
 
 #define REGISTER_CUDA_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  CAFFE_REGISTER_CLASS(                                       \
-      CUDAOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+  C10_REGISTER_CLASS(CUDAOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
 // Macros for cudnn since we use it often
 #define REGISTER_CUDNN_OPERATOR(name, ...) \
   REGISTER_CUDA_OPERATOR_WITH_ENGINE(name, CUDNN, __VA_ARGS__)
 
 // Macros for HIP operators
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
     HIPOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 #define REGISTER_HIP_OPERATOR_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(HIPOperatorRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(HIPOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_HIP_OPERATOR(name, ...)                           \
-  CAFFE2_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();       \
+  C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_HIP##name() { \
-    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
-  }                                                                 \
-  CAFFE_REGISTER_CLASS(HIPOperatorRegistry, name, __VA_ARGS__)
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
+  }                                                                \
+  C10_REGISTER_CLASS(HIPOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_HIP_OPERATOR_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(HIPOperatorRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(HIPOperatorRegistry, str_name, __VA_ARGS__)
 
 #define REGISTER_HIP_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  CAFFE_REGISTER_CLASS(                                       \
-      HIPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+  C10_REGISTER_CLASS(HIPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
 #define REGISTER_MIOPEN_OPERATOR(name, ...) \
-  REGISTER_HIP_OPERATOR_WITH_ENGINE(name, MIOPEN, __VA_ARGS__)
+  REGISTER_HIP_OPERATOR_WITH_ENGINE(name, MIOPEN, __VA_ARGS__) \
+  REGISTER_HIP_OPERATOR_WITH_ENGINE(name, CUDNN, __VA_ARGS__) // Make CUDNN an alias of MIOPEN for HIP ops
 
 // StaticLinkingProtector is a helper class that ensures that the Caffe2
 // library is linked correctly with whole archives (in the case of static
@@ -929,9 +1303,9 @@ class CAFFE2_API UnsupportedOperatorFeature : public std::exception {
 // A helper macro that should ONLY be used in the operator constructor to check
 // if needed features are met. If not, throws the UnsupportedOperatorFeature
 // exception with the given message.
-#define OPERATOR_NEEDS_FEATURE(condition, ...)                           \
-  if (!(condition)) {                                                    \
-    throw UnsupportedOperatorFeature(::caffe2::MakeString(__VA_ARGS__)); \
+#define OPERATOR_NEEDS_FEATURE(condition, ...)                 \
+  if (!(condition)) {                                          \
+    throw UnsupportedOperatorFeature(::c10::str(__VA_ARGS__)); \
   }
 
 // Creates an operator with the given operator definition.
@@ -993,5 +1367,7 @@ CAFFE2_API void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer
 std::function<void(const OperatorDef&)> GetOperatorLogger();
 
 }  // namespace caffe2
+
+#include "caffe2/core/c10_operator.h"
 
 #endif  // CAFFE2_CORE_OPERATOR_H_

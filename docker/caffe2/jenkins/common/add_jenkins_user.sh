@@ -3,11 +3,9 @@
 set -ex
 
 # Mirror jenkins user in container
-echo "jenkins:x:$JENKINS_UID:$JENKINS_GID::/var/lib/jenkins:" >> /etc/passwd
-echo "jenkins:x:$JENKINS_GID:" >> /etc/group
+groupadd -g 1014 jenkins
+useradd -u 1014 -g 1014 -d /var/lib/jenkins -m jenkins
 
-# Create $HOME
-mkdir -p /var/lib/jenkins
 chown jenkins:jenkins /var/lib/jenkins
 mkdir -p /var/lib/jenkins/.ccache
 chown jenkins:jenkins /var/lib/jenkins/.ccache

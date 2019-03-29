@@ -7,13 +7,14 @@ import argparse
 from caffe2.proto import caffe2_pb2
 from caffe2.python import gradient_checker
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python.serialized_test import coverage
 import hypothesis as hy
 import inspect
 import numpy as np
 import os
-import re
 import shutil
 import sys
+import tempfile
 import threading
 from zipfile import ZipFile
 
@@ -140,16 +141,15 @@ class SerializedTestCase(hu.HypothesisTestCase):
 
         source_dir = self.get_output_dir()
         test_name = self.get_output_filename()
-        full_dir = os.path.join(source_dir, test_name)
-        _prepare_dir(full_dir)
+        temp_dir = tempfile.mkdtemp()
         with ZipFile(os.path.join(source_dir, test_name + '.zip')) as z:
-            loaded = z.extractall(full_dir)
+            z.extractall(temp_dir)
 
-        op_path = os.path.join(full_dir, 'op.pb')
-        inout_path = os.path.join(full_dir, 'inout.npz')
-        loaded = np.load(inout_path, encoding='bytes')
+        op_path = os.path.join(temp_dir, 'op.pb')
+        inout_path = os.path.join(temp_dir, 'inout.npz')
 
         # load serialized input and output
+        loaded = np.load(inout_path, encoding='bytes')
         loaded_inputs = loaded['inputs'].tolist()
         inputs_equal = True
         for (x, y) in zip(inputs, loaded_inputs):
@@ -157,16 +157,17 @@ class SerializedTestCase(hu.HypothesisTestCase):
                 inputs_equal = False
         loaded_outputs = loaded['outputs'].tolist()
 
-        # load operator
-        with open(op_path, 'rb') as f:
-            loaded_op = f.read()
-
-        op_proto = parse_proto(loaded_op)
-        device_type = loaded['device_type']
-        device_option = caffe2_pb2.DeviceOption(device_type=int(device_type))
-
         # if inputs are not the same, run serialized input through serialized op
         if not inputs_equal:
+            # load operator
+            with open(op_path, 'rb') as f:
+                loaded_op = f.read()
+
+            op_proto = parse_proto(loaded_op)
+            device_type = loaded['device_type']
+            device_option = caffe2_pb2.DeviceOption(
+                device_type=int(device_type))
+
             outputs = hu.runOpOnInput(device_option, op_proto, loaded_inputs)
             grad_ops = _getGradientOrNone(op_proto)
 
@@ -176,12 +177,24 @@ class SerializedTestCase(hu.HypothesisTestCase):
 
         # assert gradient op is equal
         for i in range(len(grad_ops)):
-            with open(os.path.join(full_dir, 'grad_{}.pb'.format(i)), 'rb') as f:
+            grad_path = os.path.join(temp_dir, 'grad_{}.pb'.format(i))
+            with open(grad_path, 'rb') as f:
                 loaded_grad = f.read()
             grad_proto = parse_proto(loaded_grad)
-            self.assertTrue(grad_proto == grad_ops[i])
+            self._assertSameOps(grad_proto, grad_ops[i])
 
-        shutil.rmtree(full_dir)
+        shutil.rmtree(temp_dir)
+
+    def _assertSameOps(self, op1, op2):
+        op1_ = caffe2_pb2.OperatorDef()
+        op1_.CopyFrom(op1)
+        op1_.arg.sort(key=lambda arg: arg.name)
+
+        op2_ = caffe2_pb2.OperatorDef()
+        op2_.CopyFrom(op2)
+        op2_.arg.sort(key=lambda arg: arg.name)
+
+        self.assertEqual(op1_, op2_)
 
     def assertSerializedOperatorChecks(
             self,
@@ -190,13 +203,19 @@ class SerializedTestCase(hu.HypothesisTestCase):
             gradient_operator,
             op,
             device_option,
+            atol=1e-7,
+            rtol=1e-7,
     ):
         if self.should_serialize:
             if getattr(_output_context, 'should_generate_output', False):
                 self.serialize_test(
                     inputs, outputs, gradient_operator, op, device_option)
+                if not getattr(_output_context, 'disable_gen_coverage', False):
+                    coverage.gen_serialized_test_coverage(
+                        self.get_output_dir(), TOP_DIR)
             else:
-                self.compare_test(inputs, outputs, gradient_operator)
+                self.compare_test(
+                    inputs, outputs, gradient_operator, atol, rtol)
 
     def assertReferenceChecks(
         self,
@@ -225,12 +244,17 @@ class SerializedTestCase(hu.HypothesisTestCase):
         )
         if not getattr(_output_context, 'disable_serialized_check', False):
             grad_ops = _getGradientOrNone(op)
+            rtol = threshold
+            if atol is None:
+                atol = threshold
             self.assertSerializedOperatorChecks(
                 inputs,
                 outs,
                 grad_ops,
                 op,
                 device_option,
+                atol,
+                rtol,
             )
 
 
@@ -245,12 +269,17 @@ def testWithArgs():
     parser.add_argument(
         '-D', '--disable-serialized_check', action='store_true', dest='disable',
         help='disable checking serialized tests')
+    parser.add_argument(
+        '-C', '--disable-gen-coverage', action='store_true',
+        dest='disable_coverage',
+        help='disable generating coverage markdown file')
     parser.add_argument('unittest_args', nargs='*')
     args = parser.parse_args()
     sys.argv[1:] = args.unittest_args
     _output_context.__setattr__('should_generate_output', args.generate)
     _output_context.__setattr__('output_dir', args.output)
     _output_context.__setattr__('disable_serialized_check', args.disable)
+    _output_context.__setattr__('disable_gen_coverage', args.disable_coverage)
 
     import unittest
     unittest.main()

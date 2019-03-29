@@ -1,6 +1,8 @@
 #pragma once
 #include <ATen/ATen.h>
+#include <atomic>
 #include <cstddef>
+#include <exception>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -20,6 +22,30 @@ inline int64_t divup(int64_t x, int64_t y) {
   return (x + y - 1) / y;
 }
 
+inline int get_max_threads() {
+#ifdef _OPENMP
+  return omp_get_max_threads();
+#else
+  return 1;
+#endif
+}
+
+inline int get_thread_num() {
+#ifdef _OPENMP
+  return omp_get_thread_num();
+#else
+  return 0;
+#endif
+}
+
+inline bool in_parallel_region() {
+#ifdef _OPENMP
+  return omp_in_parallel();
+#else
+  return false;
+#endif
+}
+
 template <class F>
 inline void parallel_for(
     const int64_t begin,
@@ -27,14 +53,26 @@ inline void parallel_for(
     const int64_t grain_size,
     const F& f) {
 #ifdef _OPENMP
+  std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
+  std::exception_ptr eptr;
 #pragma omp parallel if (!omp_in_parallel() && ((end - begin) >= grain_size))
   {
     int64_t num_threads = omp_get_num_threads();
     int64_t tid = omp_get_thread_num();
     int64_t chunk_size = divup((end - begin), num_threads);
     int64_t begin_tid = begin + tid * chunk_size;
-    if (begin_tid < end)
-      f(begin_tid, std::min(end, chunk_size + begin_tid));
+    if (begin_tid < end) {
+      try {
+        f(begin_tid, std::min(end, chunk_size + begin_tid));
+      } catch (...) {
+        if (!err_flag.test_and_set()) {
+          eptr = std::current_exception();
+        }
+      }
+    }
+  }
+  if (eptr) {
+    std::rethrow_exception(eptr);
   }
 #else
   if (begin < end) {
@@ -43,6 +81,39 @@ inline void parallel_for(
 #endif
 }
 
+/*
+parallel_reduce
+
+begin: index at which to start applying reduction
+
+end: index at which to stop applying reduction
+
+grain_size: number of elements per chunk. impacts number of elements in
+intermediate results tensor and degree of parallelization.
+
+ident: identity for binary combination function sf. sf(ident, x) needs to return
+x.
+
+f: function for reduction over a chunk. f needs to be of signature scalar_t
+f(int64_t partial_begin, int64_t partial_end, scalar_t identifiy)
+
+sf: function to combine two partial results. sf needs to be of signature
+scalar_t sf(scalar_t x, scalar_t y)
+
+For example, you might have a tensor of 10000 entires and want to sum together
+all the elements. Parallel_reduce with a grain_size of 2500 will then allocate
+an intermediate result tensor with 4 elements. Then it will execute the function
+"f" you provide and pass the beginning and end index of these chunks, so
+0-2499, 2500-4999, etc. and the combination identity. It will then write out
+the result from each of these chunks into the intermediate result tensor. After
+that it'll reduce the partial results from each chunk into a single number using
+the combination function sf and the identity ident. For a total summation this
+would be "+" and 0 respectively. This is similar to tbb's approach [1], where
+you need to provide a function to accumulate a subrange, a function to combine
+two partial results and an identity.
+
+[1] https://software.intel.com/en-us/node/506154
+*/
 template <class scalar_t, class F, class SF>
 inline scalar_t parallel_reduce(
     const int64_t begin,

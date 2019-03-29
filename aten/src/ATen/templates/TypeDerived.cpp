@@ -3,29 +3,29 @@
 // for context
 #define __STDC_FORMAT_MACROS
 
-#include "ATen/${Type}.h"
+#include <ATen/${Type}.h>
 
 // ${generated_comment}
 
 $th_headers
 $storage_tensor_headers
-#include "ATen/${Generator}.h"
-#include "ATen/core/TensorImpl.h"
-#include "ATen/Allocator.h"
-#include "ATen/DeviceGuard.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/core/UndefinedTensorImpl.h"
-#include "ATen/Utils.h"
-#include "ATen/WrapDimUtils.h"
-#include "ATen/core/Half.h"
-#include "ATen/core/optional.h"
+#include <ATen/${Generator}.h>
+#include <c10/core/Allocator.h>
+#include <ATen/DeviceGuard.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Utils.h>
+#include <ATen/WrapDimUtils.h>
+#include <c10/util/Half.h>
+#include <c10/core/TensorImpl.h>
+#include <c10/core/UndefinedTensorImpl.h>
+#include <c10/util/Optional.h>
 
 #include <cstddef>
 #include <functional>
 #include <memory>
 #include <utility>
 
-#include "ATen/Config.h"
+#include <ATen/Config.h>
 $extra_cuda_headers
 
 namespace at {
@@ -53,13 +53,9 @@ TypeID ${Type}::ID() const {
   return ${TypeID};
 }
 
-size_t ${Type}::elementSizeInBytes() const {
-  return sizeof(${ScalarType});
-}
-
 /* example
 Tensor * ${Type}::add(Tensor & a, Tensor & b) {
-  std::cout << "add ${Tensor}\n";
+  std::cout << "add Tensor with backend ${Backend}\n";
   return &a;
 }
 */

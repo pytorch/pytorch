@@ -27,6 +27,27 @@ caffe2::OperatorDef* Caffe2Annotation::getMutableOperatorDef() {
 }
 
 // Distributed annotations
+void Caffe2Annotation::setDeviceOption(const caffe2::DeviceOption& devOpt) {
+  *OpDef.mutable_device_option() = devOpt;
+}
+
+bool Caffe2Annotation::hasDeviceOption() const {
+  return OpDef.has_device_option();
+}
+
+const caffe2::DeviceOption& Caffe2Annotation::getDeviceOption() const {
+  CAFFE_ENFORCE(
+      hasDeviceOption(),
+      "DeviceOption was never set.  Use Caffe2Annotation::setDeviceOption.");
+  return OpDef.device_option();
+}
+caffe2::DeviceOption* Caffe2Annotation::getMutableDeviceOption() {
+  CAFFE_ENFORCE(
+      hasDeviceOption(),
+      "DeviceOption was never set.  Use Caffe2Annotation::setDeviceOption.");
+  return OpDef.mutable_device_option();
+}
+
 void Caffe2Annotation::setDevice(std::string device) {
   Device = device;
 }

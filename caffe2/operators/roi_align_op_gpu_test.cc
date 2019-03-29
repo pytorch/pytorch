@@ -18,7 +18,7 @@ void AddConstInput(
     Context* context,
     Workspace* ws) {
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(Context::GetDeviceType());
+  auto* tensor = BlobGetMutableTensor(blob, Context::GetDeviceType());
   tensor->Resize(shape);
   math::Set<float, Context>(
       tensor->size(), value, tensor->template mutable_data<float>(), context);
@@ -39,10 +39,10 @@ void AddInput<CPUContext>(
     const string& name,
     Workspace* ws) {
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
-      tensor->template mutable_data<float>(), tensor->size());
+      tensor->template mutable_data<float>(), tensor->numel());
   tensor_vec.array() = utils::AsEArrXt(values);
 }
 
@@ -53,11 +53,11 @@ void AddInput<CUDAContext>(
     const string& name,
     Workspace* ws) {
   Tensor tmp(shape, CPU);
-  EigenVectorMap<float> tmp_vec(tmp.mutable_data<float>(), tmp.size());
+  EigenVectorMap<float> tmp_vec(tmp.mutable_data<float>(), tmp.numel());
   tmp_vec.array() = utils::AsEArrXt(values);
 
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CUDA);
+  auto* tensor = BlobGetMutableTensor(blob, CUDA);
   tensor->CopyFrom(tmp);
 }
 
@@ -190,7 +190,7 @@ void CreateAndRun(
   EXPECT_NE(nullptr, Y_blob);
 
   auto& Y = Y_blob->Get<Tensor>();
-  outResult->CopyFrom(Y, &context);
+  outResult->CopyFrom(Y);
 }
 
 } // namespace
@@ -210,12 +210,12 @@ TEST(RoiAlignTest, CheckCPUGPUEqual) {
     CreateAndRun<CUDAContext>(&y_gpu, "NCHW", test_params, false);
     CreateAndRun<CPUContext>(&y_cpu_nhwc, "NHWC", test_params, false);
 
-    EXPECT_EQ(y_cpu.dims(), y_gpu.dims());
-    EXPECT_EQ(y_cpu.dims(), y_cpu_nhwc.dims());
-    ConstEigenVectorMap<float> y_cpu_vec(y_cpu.data<float>(), y_cpu.size());
-    ConstEigenVectorMap<float> y_gpu_vec(y_gpu.data<float>(), y_gpu.size());
+    EXPECT_EQ(y_cpu.sizes(), y_gpu.sizes());
+    EXPECT_EQ(y_cpu.sizes(), y_cpu_nhwc.sizes());
+    ConstEigenVectorMap<float> y_cpu_vec(y_cpu.data<float>(), y_cpu.numel());
+    ConstEigenVectorMap<float> y_gpu_vec(y_gpu.data<float>(), y_gpu.numel());
     ConstEigenVectorMap<float> y_cpu_nhwc_vec(
-        y_cpu_nhwc.data<float>(), y_cpu_nhwc.size());
+        y_cpu_nhwc.data<float>(), y_cpu_nhwc.numel());
     int max_diff_idx = -1;
     (y_cpu_vec - y_gpu_vec).cwiseAbs().maxCoeff(&max_diff_idx);
     EXPECT_FLOAT_EQ(y_cpu_vec[max_diff_idx], y_gpu_vec[max_diff_idx]);
@@ -251,12 +251,12 @@ TEST(RoiAlignTest, CheckCPUGPUEqual) {
     CreateAndRun<CUDAContext>(&y_gpu, "NCHW", test_params, true);
     CreateAndRun<CPUContext>(&y_cpu_nhwc, "NHWC", test_params, true);
 
-    EXPECT_EQ(y_cpu.dims(), y_gpu.dims());
-    EXPECT_EQ(y_cpu.dims(), y_cpu_nhwc.dims());
-    ConstEigenVectorMap<float> y_cpu_vec(y_cpu.data<float>(), y_cpu.size());
-    ConstEigenVectorMap<float> y_gpu_vec(y_gpu.data<float>(), y_gpu.size());
+    EXPECT_EQ(y_cpu.sizes(), y_gpu.sizes());
+    EXPECT_EQ(y_cpu.sizes(), y_cpu_nhwc.sizes());
+    ConstEigenVectorMap<float> y_cpu_vec(y_cpu.data<float>(), y_cpu.numel());
+    ConstEigenVectorMap<float> y_gpu_vec(y_gpu.data<float>(), y_gpu.numel());
     ConstEigenVectorMap<float> y_cpu_nhwc_vec(
-        y_cpu_nhwc.data<float>(), y_cpu_nhwc.size());
+        y_cpu_nhwc.data<float>(), y_cpu_nhwc.numel());
     int max_diff_idx = -1;
     (y_cpu_vec - y_gpu_vec).cwiseAbs().maxCoeff(&max_diff_idx);
     EXPECT_NEAR(y_cpu_vec[max_diff_idx], y_gpu_vec[max_diff_idx], 1e-1);

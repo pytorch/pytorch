@@ -1,18 +1,17 @@
-#include "THCCachingHostAllocator.h"
-#include "THCStream.h"
+#include <THC/THCCachingHostAllocator.h>
+
 
 #include <cuda_runtime_api.h>
 #include <deque>
 #include <memory>
 #include <mutex>
-#include <set>
 #include <stdint.h>
 #include <unordered_map>
+#include <unordered_set>
+#include <set>
 #include <utility>
 
 namespace {
-
-typedef std::shared_ptr<THCStream> THCStreamPtr;
 
 struct BlockSize
 {
@@ -26,7 +25,7 @@ struct Block : public BlockSize
 {
   bool  allocated;    // true if the block is currently allocated
   int   event_count;  // number of outstanding cuda events
-  std::set<THCStreamPtr> streams;
+  std::unordered_set<at::cuda::CUDAStream> streams;
 
   Block(size_t size, void* ptr, bool allocated) :
       BlockSize(size, ptr), allocated(allocated), event_count(0), streams() {}
@@ -131,7 +130,7 @@ struct HostAllocator
     return cudaSuccess;
   }
 
-  cudaError_t recordEvent(void* ptr, THCStream *stream)
+  cudaError_t recordEvent(void* ptr, at::cuda::CUDAStream stream)
   {
     std::lock_guard<std::mutex> lock(mutex);
 
@@ -144,10 +143,7 @@ struct HostAllocator
     Block& block = it->second;
     THAssert(block.allocated);
 
-    THCStreamPtr stream_ptr(stream, &THCStream_free);
-    THCStream_retain(stream);
-
-    block.streams.insert(std::move(stream_ptr));
+    block.streams.insert(stream);
     return cudaSuccess;
   }
 
@@ -223,18 +219,16 @@ struct HostAllocator
     err = cudaGetDevice(&prev_device);
     if (err != cudaSuccess) return err;
 
-    std::set<THCStreamPtr> streams(std::move(block.streams));
+    std::unordered_set<at::cuda::CUDAStream> streams(std::move(block.streams));
     for (auto it = streams.begin(); it != streams.end(); ++it) {
-      auto& stream = *it;
-
-      err = cudaSetDevice(THCStream_device(stream.get()));
+      err = cudaSetDevice(it->device_index());
       if (err != cudaSuccess) break;
 
       cudaEvent_t event;
       err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
       if (err != cudaSuccess) break;
 
-      err = cudaEventRecord(event, THCStream_stream(stream.get()));
+      err = cudaEventRecord(event, it->stream());
       if (err != cudaSuccess) break;
 
       block.event_count++;
@@ -250,7 +244,7 @@ struct HostAllocator
 
 static HostAllocator allocator;
 
-cudaError_t THCCachingHostAllocator_recordEvent(void *ptr, THCStream *stream)
+cudaError_t THCCachingHostAllocator_recordEvent(void *ptr, at::cuda::CUDAStream stream)
 {
   return allocator.recordEvent(ptr, stream);
 }

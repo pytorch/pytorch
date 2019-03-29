@@ -1,8 +1,8 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
-#include "torch/csrc/autograd/variable.h"
-#include "cstdint"
+#include <torch/csrc/python_headers.h>
+#include <torch/csrc/autograd/variable.h>
+#include <cstdint>
 
 extern PyTypeObject THPSizeType;
 

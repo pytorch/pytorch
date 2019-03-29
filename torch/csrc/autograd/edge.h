@@ -4,7 +4,7 @@
 #include <functional>
 #include <memory>
 
-#include "torch/csrc/utils/hash.h"
+#include <torch/csrc/utils/hash.h>
 
 namespace torch { namespace autograd {
 

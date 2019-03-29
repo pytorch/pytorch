@@ -190,9 +190,8 @@ BENCHMARK(BM_OperatorCreationCUDA);
 static void BM_RawAllocDeallocCPU(benchmark::State& state) {
   while (state.KeepRunning()) {
     // Allocating only 1 byte in order to measure the overhead.
-    auto ptr_and_deleter = GetCPUAllocator()->New(1);
-    // Deallocate.
-    ptr_and_deleter.second(ptr_and_deleter.first);
+    auto data_ptr = GetCPUAllocator()->allocate(1);
+    // Deallocated when it's out of scope
   }
 }
 BENCHMARK(BM_RawAllocDeallocCPU);

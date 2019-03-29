@@ -1,36 +1,49 @@
 #!/bin/bash
 
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-test"
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
+
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
 if [ -n "${IN_CIRCLECI}" ]; then
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
     # TODO: move this to Docker
-    sudo apt-get update
-    sudo apt-get install -y --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
+    sudo apt-get -qq update
+    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
   fi
 
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]]; then
     # TODO: move this to Docker
-    sudo apt-get update
-    sudo apt-get install -y --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
-    sudo apt-get install -y --no-install-recommends openssh-client openssh-server
+    sudo apt-get -qq update
+    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
+    sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
     sudo mkdir -p /var/run/sshd
+  fi
+
+  if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
+    export PYTORCH_TEST_WITH_SLOW=1
+    export PYTORCH_TEST_SKIP_FAST=1
   fi
 fi
 
-# JIT C++ extensions require ninja.
-git clone https://github.com/ninja-build/ninja --quiet
-pushd ninja
-python ./configure.py --bootstrap
-export PATH="$PWD:$PATH"
-popd
+# --user breaks ppc64le builds and these packages are already in ppc64le docker
+if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
+  # JIT C++ extensions require ninja.
+  pip install -q ninja --user
+  # ninja is installed in /var/lib/jenkins/.local/bin
+  export PATH="/var/lib/jenkins/.local/bin:$PATH"
+
+  # TODO: move this to Docker
+  pip install -q hypothesis --user
+
+  # mypy will fail to install on Python <3.4.  In that case,
+  # we just won't run these tests.
+  pip install mypy --user || true
+fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
 # if you're not careful.  Check this if you made some changes and the
@@ -56,13 +69,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
-    function get_exit_code() {
-      set +e
-      "$@"
-      retcode=$?
-      set -e
-      return $retcode
-    }
     (cd test && python -c "import torch")
     echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
@@ -72,20 +78,25 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_TEST_WITH_ROCM=1
+  # ROCm CI is using Caffe2 docker images, which doesn't have several packages
+  # needed in testing. We install them here.
+  pip install -q psutil "librosa>=0.6.2" --user
 fi
 
-if [[ "${JOB_BASE_NAME}" == *-NO_AVX-* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* ]]; then
   export ATEN_CPU_CAPABILITY=default
-elif [[ "${JOB_BASE_NAME}" == *-NO_AVX2-* ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
 test_python_nn() {
   time python test/run_test.py --include nn --verbose
+  assert_git_not_dirty
 }
 
 test_python_all_except_nn() {
   time python test/run_test.py --exclude nn --verbose
+  assert_git_not_dirty
 }
 
 test_aten() {
@@ -102,11 +113,14 @@ test_aten() {
       SUDO=sudo
     fi
 
+    ${SUDO} ln -s "$TORCH_LIB_PATH"/libc10* build/bin
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
+    ${SUDO} ln -s "$TORCH_LIB_PATH"/libmkldnn* build/bin
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
 
     ls build/bin
     aten/tools/run_tests.sh build/bin
+    assert_git_not_dirty
   fi
 }
 
@@ -124,21 +138,25 @@ test_torchvision() {
   # this should be a transient requirement...)
   # See https://github.com/pytorch/pytorch/issues/7525
   #time python setup.py install
-  pip install --user .
+  pip install -q --user .
   popd
+  rm -rf vision
 }
 
 test_libtorch() {
   if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
-     echo "Testing libtorch"
-     CPP_BUILD="$PWD/../cpp-build"
-     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-       "$CPP_BUILD"/caffe2/bin/test_jit
-     else
-       "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
-     fi
-     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-     OMP_NUM_THREADS=2 "$CPP_BUILD"/caffe2/bin/test_api
+    echo "Testing libtorch"
+    python test/cpp/jit/tests_setup.py setup
+    CPP_BUILD="$PWD/../cpp-build"
+    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+      "$CPP_BUILD"/caffe2/bin/test_jit
+    else
+      "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
+    fi
+    python test/cpp/jit/tests_setup.py shutdown
+    python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/bin/test_api
+    assert_git_not_dirty
   fi
 }
 
@@ -147,31 +165,43 @@ test_custom_script_ops() {
     echo "Testing custom script operators"
     CUSTOM_OP_BUILD="$PWD/../custom-op-build"
     pushd test/custom_operator
-    cp -r "$CUSTOM_OP_BUILD" build
+    cp -a "$CUSTOM_OP_BUILD" build
     # Run tests Python-side and export a script module.
     python test_custom_ops.py -v
     python model.py --export-script-module=model.pt
     # Run tests C++-side and load the exported script module.
     build/test_custom_ops ./model.pt
     popd
+    assert_git_not_dirty
   fi
 }
 
-if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
+test_xla() {
+  export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
+  export XRT_WORKERS="localservice:0;grpc://localhost:40934"
+  pushd xla
+  python test/test_operations.py
+  python test/test_train_mnist.py --tidy
+  popd
+  assert_git_not_dirty
+}
+
+if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
+  test_torchvision
+  test_xla
+elif [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
+  test_torchvision
   test_python_nn
+elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
   test_python_all_except_nn
   test_aten
-  test_torchvision
   test_libtorch
   test_custom_script_ops
 else
-  if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
-    test_python_nn
-  elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
-    test_python_all_except_nn
-    test_aten
-    test_torchvision
-    test_libtorch
-    test_custom_script_ops
-  fi
+  test_torchvision
+  test_python_nn
+  test_python_all_except_nn
+  test_aten
+  test_libtorch
+  test_custom_script_ops
 fi

@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/AbsCriterion.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/AbsCriterion.cu"
 #else
 
 void THNN_(AbsCriterion_updateOutput)(
@@ -19,7 +19,7 @@ void THNN_(AbsCriterion_updateOutput)(
     return;
   }
 
-  THCTensor_(resize1d)(state, output, 1);
+  THCTensor_(resize0d)(state, output);
 
   ptrdiff_t size = THCTensor_(nElement)(state, input);
 
@@ -30,13 +30,13 @@ void THNN_(AbsCriterion_updateOutput)(
   thrust::device_ptr<scalar_t> target_data(THCTensor_(data)(state, target));
   accreal sum = thrust::inner_product(input_data, input_data+size, target_data, (accreal)0, thrust::plus<accreal>(), abs_functor<scalar_t, accreal>());
 
-  if (reduction == Reduction::ElementwiseMean)
+  if (reduction == Reduction::Mean)
     sum /= size;
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, target);
 
-  THCTensor_(set1d)(state, output, 0, ScalarConvert<accreal, scalar_t>::to(sum));
+  THCTensor_(set0d)(state, output, ScalarConvert<accreal, scalar_t>::to(sum));
 }
 
 void THNN_(AbsCriterion_updateGradInput)(
@@ -63,7 +63,7 @@ void THNN_(AbsCriterion_updateGradInput)(
   THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
 
   ptrdiff_t size = THCTensor_(nElement)(state, input);
-  scalar_t norm = ScalarConvert<double, scalar_t>::to(reduction == Reduction::ElementwiseMean ? 1./size : 1.);
+  scalar_t norm = ScalarConvert<double, scalar_t>::to(reduction == Reduction::Mean ? 1./size : 1.);
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);
@@ -73,7 +73,7 @@ void THNN_(AbsCriterion_updateGradInput)(
   thrust::device_ptr<scalar_t> gradInput_data(THCTensor_(data)(state, gradInput));
 
   thrust::transform(input_data, input_data+size, target_data, gradInput_data,
-                    abs_updateGradInput_functor<scalar_t>(norm, THCTensor_(get1d)(state, gradOutput, 0)));
+                    abs_updateGradInput_functor<scalar_t>(norm, THCTensor_(get0d)(state, gradOutput)));
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, target);

@@ -4,6 +4,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
+#include "observers/macros.h"
 
 namespace caffe2 {
 

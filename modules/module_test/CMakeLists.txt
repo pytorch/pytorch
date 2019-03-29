@@ -12,4 +12,7 @@ if (BUILD_TEST)
 
   target_link_libraries(caffe2_module_test_dynamic caffe2_library)
   install(TARGETS caffe2_module_test_dynamic DESTINATION lib)
+  if (MSVC)
+    install(FILES $<TARGET_PDB_FILE:caffe2_module_test_dynamic> DESTINATION lib OPTIONAL)
+  endif()
 endif()

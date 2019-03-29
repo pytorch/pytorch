@@ -5,7 +5,13 @@ import torch
 from copy import deepcopy
 from itertools import chain
 
-required = object()
+
+class _RequiredParameter(object):
+    """Singleton class representing a required parameter for an Optimizer."""
+    def __repr__(self):
+        return "<required parameter>"
+
+required = _RequiredParameter()
 
 
 class Optimizer(object):

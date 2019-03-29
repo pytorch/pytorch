@@ -5,21 +5,8 @@
 #include <intrin.h>
 #endif
 
-#include "AVX.h"
+#include <TH/vector/AVX.h>
 #include <TH/THGeneral.h>
-
-void THDoubleVector_copy_AVX(double *y, const double *x, const ptrdiff_t n) {
-  ptrdiff_t i;
-  ptrdiff_t off;
-  for (i=0; i<=((n)-8); i+=8) {
-    _mm256_storeu_pd(y+i, _mm256_loadu_pd(x+i));
-    _mm256_storeu_pd(y+i+4, _mm256_loadu_pd(x+i+4));
-  }
-  off = (n) - ((n)%8);
-  for (i=0; i<((n)%8); i++) {
-    y[off+i] = x[off+i];
-  }
-}
 
 void THDoubleVector_fill_AVX(double *x, const double c, const ptrdiff_t n) {
   ptrdiff_t i;
@@ -137,19 +124,6 @@ void THDoubleVector_adds_AVX(double *y, const double *x, const double c, const p
   }
   for (; i<(n); i++) {
     y[i] = x[i] + c;
-  }
-}
-
-void THFloatVector_copy_AVX(float *y, const float *x, const ptrdiff_t n) {
-  ptrdiff_t i;
-  ptrdiff_t off;
-  for (i=0; i<=((n)-16); i+=16) {
-    _mm256_storeu_ps(y+i, _mm256_loadu_ps(x+i));
-    _mm256_storeu_ps(y+i+8, _mm256_loadu_ps(x+i+8));
-  }
-  off = (n) - ((n)%16);
-  for (i=0; i<((n)%16); i++) {
-    y[off+i] = x[off+i];
   }
 }
 

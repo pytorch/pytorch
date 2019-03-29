@@ -13,8 +13,9 @@ namespace caffe2 {
 template <typename T, class Context>
 class WeightedSampleOp final : public Operator<Context> {
  public:
-  WeightedSampleOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit WeightedSampleOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
@@ -22,7 +23,7 @@ class WeightedSampleOp final : public Operator<Context> {
 
  private:
   vector<float> cum_mass_;
-  Tensor unif_samples_{Context::GetDeviceType()};
+  Tensor unif_samples_;
 };
 
 } // namespace caffe2

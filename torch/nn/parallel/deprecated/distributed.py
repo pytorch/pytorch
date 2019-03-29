@@ -7,6 +7,7 @@ import torch
 from torch.autograd import Variable
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors, \
     _take_tensors
+import torch.utils.hooks
 
 from torch.cuda.comm import broadcast_coalesced
 from torch.cuda import nccl
@@ -193,7 +194,6 @@ class DistributedDataParallel(Module):
         self.reduced = [False] * len(self.bucket_sizes)
 
         self._register_grad_hooks()
-
         self.dispatch_lock = threading.Lock()
         self._start_reduction_threads()
 
@@ -202,7 +202,8 @@ class DistributedDataParallel(Module):
         if dist._backend != dist.dist_backend.NCCL:
             del attrs['_grad_accs'], attrs['_reduction_queues'], \
                 attrs['_reduction_streams'], attrs['_reduction_threads'], \
-                attrs['_nccl_streams'], attrs['_default_streams']
+                attrs['_nccl_streams'], attrs['_default_streams'], \
+                attrs['dispatch_lock']
         return attrs
 
     def __setstate__(self, state):
@@ -211,6 +212,7 @@ class DistributedDataParallel(Module):
             self._register_nccl_grad_hook()
         else:
             self._register_grad_hooks()
+            self.dispatch_lock = threading.Lock()
             self._start_reduction_threads()
 
     def forward(self, *inputs, **kwargs):
@@ -359,6 +361,7 @@ class DistributedDataParallel(Module):
             if not p.requires_grad:
                 continue
 
+            @torch.utils.hooks.unserializable_hook
             def allreduce_hook(*unused):
                 Variable._execution_engine.queue_callback(reduction_fn_nccl)
 

@@ -1,1 +1,2 @@
 vptr:libtorch.so
+bounds:asmjit::Zone::_alloc

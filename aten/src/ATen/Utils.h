@@ -1,13 +1,13 @@
 #pragma once
 
-#include "ATen/core/ATenGeneral.h"
-#include "ATen/StorageImpl.h"
-#include "ATen/core/UndefinedTensorImpl.h"
+#include <ATen/core/ATenGeneral.h>
+#include <c10/core/StorageImpl.h>
+#include <c10/core/UndefinedTensorImpl.h>
 
-#include <ATen/core/ScalarType.h>
-#include "ATen/Formatting.h"
-#include "ATen/core/ArrayRef.h"
-#include "ATen/core/Error.h"
+#include <c10/core/ScalarType.h>
+#include <ATen/Formatting.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <sstream>
@@ -24,14 +24,14 @@
 
 namespace at {
 
-AT_API int _crash_if_asan(int);
+CAFFE2_API int _crash_if_asan(int);
 
 static inline const Storage& checked_storage(
     const Storage& expr,
     const char* name,
     int pos,
     DeviceType device_type,
-    DataType data_type) {
+    caffe2::TypeMeta dtype) {
   if (expr.device_type() != device_type) {
     AT_ERROR(
         "Expected object of device type ",
@@ -44,10 +44,10 @@ static inline const Storage& checked_storage(
         name,
         "'");
   }
-  if (expr.dtype().id() != data_type) {
+  if (expr.dtype() != dtype) {
     AT_ERROR(
         "Expected object of data type ",
-        data_type,
+        dtype,
         " but got data type ",
         expr.dtype().id(),
         " for argument #",
@@ -73,6 +73,9 @@ static inline TensorImpl* checked_tensor_unwrap(const Tensor& expr, const char *
     AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),
              " for argument #", pos, " '", name, "'");
   }
+  if (expr.is_variable()) {  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
+    AT_ERROR("Expected Tensor (not Variable) for argument #", pos, " '", name, "'");
+  }
   return expr.unsafeGetTensorImpl();
 }
 
@@ -88,7 +91,11 @@ static inline std::vector<TensorImpl*> checked_tensor_list_unwrap(ArrayRef<Tenso
     }
     if (expr.scalar_type() != scalar_type) {
       AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),
-               " for sequence elment ", i , " in sequence argument at position #", pos, " '", name, "'");
+               " for sequence element ", i , " in sequence argument at position #", pos, " '", name, "'");
+    }
+    if (expr.is_variable()) {  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
+      AT_ERROR("Expected Tensor (not Variable) for sequence element ",
+               i , " in sequence argument at position #", pos, " '", name, "'");
     }
     unwrapped.emplace_back(expr.unsafeGetTensorImpl());
   }
@@ -113,11 +120,11 @@ std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, 
 }
 
 inline int64_t sum_intlist(ArrayRef<int64_t> list) {
-  return std::accumulate(list.begin(), list.end(), 0);
+  return std::accumulate(list.begin(), list.end(), 0ll);
 }
 
 inline int64_t prod_intlist(ArrayRef<int64_t> list) {
-  return std::accumulate(list.begin(), list.end(), 1, std::multiplies<int64_t>());
+  return std::accumulate(list.begin(), list.end(), 1ll, std::multiplies<int64_t>());
 }
 
 } // at

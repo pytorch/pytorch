@@ -1,12 +1,12 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/Config.h"
-#include "ATen/Dispatch.h"
-#include "ATen/Utils.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/native/SpectralOpsUtils.h"
-#include "ATen/native/cuda/CuFFTUtils.h"
-#include "ATen/native/cuda/CuFFTPlanCache.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Utils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/native/SpectralOpsUtils.h>
+#include <ATen/native/cuda/CuFFTUtils.h>
+#include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
@@ -114,7 +114,7 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "_fft_fill_with_conjugate_symmetry_", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "_fft_fill_with_conjugate_symmetry_", [&] {
     typedef thrust::device_ptr<scalar_t> device_ptr;
     typedef thrust::counting_iterator<int64_t> counter;
     typedef thrust::transform_iterator<cnt_to_dst_idx_functor, counter> dst_idx_iterator;
@@ -173,8 +173,8 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
 static inline Tensor _run_cufft(
     const CuFFTConfig &config, Tensor& input, int64_t signal_ndim,
     bool complex_input, bool complex_output, bool inverse,
-    IntList checked_signal_sizes, bool normalized, bool onesided,
-    IntList output_sizes, bool input_was_cloned
+    IntArrayRef checked_signal_sizes, bool normalized, bool onesided,
+    IntArrayRef output_sizes, bool input_was_cloned
 ) {
   if (config.should_clone_input() && !input_was_cloned) {
     input = input.clone();
@@ -184,7 +184,7 @@ static inline Tensor _run_cufft(
   auto& ctx = at::globalContext();
 
   // set output
-  auto output = input.type().tensor(output_sizes);
+  auto output = at::empty(output_sizes, input.options());
 
   // set to current stream
   CUFFT_CHECK(cufftSetStream(plan, at::cuda::getCurrentCUDAStream()));
@@ -194,7 +194,7 @@ static inline Tensor _run_cufft(
 
   // run
 #ifdef __HIP_PLATFORM_HCC__
-  if (input.type().scalarType() == ScalarType::Float) {
+  if (input.scalar_type() == ScalarType::Float) {
       if (complex_input && complex_output) {
         CUFFT_CHECK(hipfftExecC2C(plan, static_cast<hipfftComplex*>(input.data_ptr()),
           static_cast<hipfftComplex*>(output.data_ptr()),
@@ -208,7 +208,7 @@ static inline Tensor _run_cufft(
       } else {
         AT_ERROR("hipFFT doesn't support r2r (float)");
       }
-    } else if (input.type().scalarType() == ScalarType::Double) {
+    } else if (input.scalar_type() == ScalarType::Double) {
       if (complex_input && complex_output) {
         CUFFT_CHECK(hipfftExecZ2Z(plan, static_cast<hipfftDoubleComplex*>(input.data_ptr()),
           static_cast<hipfftDoubleComplex*>(output.data_ptr()),
@@ -225,7 +225,7 @@ static inline Tensor _run_cufft(
     } else {
       std::ostringstream ss;
       ss << "hipFFT doesn't support tensor of type: "
-         << at::toString(input.type().scalarType());
+         << toString(input.scalar_type());
       AT_ERROR(ss.str());
     }
 #else
@@ -291,8 +291,8 @@ void cufft_clear_plan_cache_impl() {
 // Currently not utilizing multi GPUs so this can be potentially sped up.
 Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
                   bool complex_input, bool complex_output, bool inverse,
-                  IntList checked_signal_sizes, bool normalized, bool onesided,
-                  IntList output_sizes) {
+                  IntArrayRef checked_signal_sizes, bool normalized, bool onesided,
+                  IntArrayRef output_sizes) {
   Tensor input = self;
   bool input_was_cloned = false;
 
@@ -308,10 +308,11 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   }
 
   // cuFFT requires input and output data pointers to complex type aligned.
-  // Our allocated output tensor is always 256 bytes aligned so it is fine, but
-  // we need to check input tensor to make sure that it is not unaligned, e.g.,
+  // Our newly allocated output tensor is always 512 bytes aligned so it is fine
+  // (see kRoundSmall and kRoundLarge in THCCachingAllocator.cpp), but we do
+  // need to check input tensor to make sure that it is not unaligned, e.g.,
   // from a slicing.
-  auto complex_size_bytes = 2 * input.type().elementSizeInBytes();
+  auto complex_size_bytes = 2 * input.element_size();
   if (reinterpret_cast<std::uintptr_t>(input.data_ptr()) % complex_size_bytes != 0) {
     input = input.clone();
     input_was_cloned = true;

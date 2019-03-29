@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/VolumetricDilatedConvolution.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/VolumetricDilatedConvolution.cu"
 #else
 
 #include <ATen/div_rtn.h>

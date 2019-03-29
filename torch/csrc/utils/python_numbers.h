@@ -1,11 +1,11 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <cstdint>
 #include <stdexcept>
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/utils/tensor_numpy.h"
-#include "torch/csrc/jit/tracing_state.h"
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/utils/tensor_numpy.h>
+#include <torch/csrc/jit/tracing_state.h>
 
 // largest integer that can be represented consecutively in a double
 const int64_t DOUBLE_INT_MAX = 9007199254740992;
@@ -81,7 +81,9 @@ inline int64_t THPUtils_unpackIndex(PyObject* obj) {
     if (index == nullptr) {
       throw python_error();
     }
-    obj = index.get();
+    // NB: This needs to be called before `index` goes out of scope and the
+    // underlying object's refcount is decremented
+    return THPUtils_unpackLong(index.get());
   }
   return THPUtils_unpackLong(obj);
 }

@@ -1,11 +1,11 @@
-#include "ATen/ATen.h"
-#include "ATen/core/Layout.h"
-#include "ATen/Device.h"
-#include "ATen/Error.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/native/GridSampler.h"
-#include "ATen/native/cpu/GridSamplerKernel.h"
-#include "ATen/cpu/vml.h"
+#include <ATen/native/GridSampler.h>
+#include <ATen/ATen.h>
+#include <ATen/Device.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/core/Layout.h>
+#include <ATen/cpu/vml.h>
+#include <ATen/native/cpu/GridSamplerKernel.h>
+#include <c10/util/Exception.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -534,7 +534,7 @@ DEFINE_DISPATCH(grid_sampler_2d_cpu_kernel);
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 Tensor grid_sampler_3d_cpu(const Tensor& input, const Tensor& grid,
                            int64_t interpolation_mode, int64_t padding_mode) {
-  return AT_DISPATCH_FLOATING_TYPES(input.type(), "grid_sampler3d_cpu", [&] {
+  return AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "grid_sampler3d_cpu", [&] {
     return grid_sampler_3d_cpu_impl<scalar_t>(
       input, grid, static_cast<GridSamplerInterpolation>(interpolation_mode),
       static_cast<GridSamplerPadding>(padding_mode));
@@ -554,7 +554,7 @@ DEFINE_DISPATCH(grid_sampler_2d_backward_cpu_kernel);
 std::tuple<Tensor, Tensor>
 grid_sampler_3d_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& grid,
                              int64_t interpolation_mode, int64_t padding_mode) {
-  return AT_DISPATCH_FLOATING_TYPES(input.type(), "grid_sampler_3d_backward_cpu", [&] {
+  return AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "grid_sampler_3d_backward_cpu", [&] {
     return grid_sampler_3d_backward_cpu_impl<scalar_t>(
       grad_output, input, grid,
       static_cast<GridSamplerInterpolation>(interpolation_mode),

@@ -1,4 +1,4 @@
-#include "THCReduceApplyUtils.cuh"
+#include <THC/THCReduceApplyUtils.cuh>
 
 #include <assert.h>
 #include <stdlib.h>

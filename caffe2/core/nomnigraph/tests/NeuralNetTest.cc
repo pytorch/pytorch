@@ -18,6 +18,8 @@ TEST(NeuralNetGraph, ReplaceGraph) {
 
   auto input1 = graph.createNode(util::make_unique<Tensor>("input1"));
   auto input2 = graph.createNode(util::make_unique<Tensor>("input2"));
+  // Test renaming blob
+  nn::get<Tensor>(input2)->setName("input2_renamed");
   auto sum = graph.createNode(util::make_unique<Sum>());
   auto sumOutput = graph.createNode(util::make_unique<Tensor>("sumOutput"));
   auto relu = graph.createNode(util::make_unique<Relu>());
@@ -45,30 +47,29 @@ TEST(NeuralNetGraph, ReplaceGraph) {
   auto mg = NNMatchGraph();
   auto matchSumInput =
       mg.createNode(std::move(matchExternalTensorNode().count(2)));
-  auto matchSum = mg.createNode(matchOp<Sum>("matchSum"));
+  auto matchSum = mg.createNode(nn::is<Sum>);
   mg.createEdge(matchSumInput, matchSum);
 
-  auto matchSumOutput = mg.createNode(matchTensor("matchSumOutput"));
+  auto matchSumOutput = mg.createNode(nn::is<Tensor>);
   mg.createEdge(matchSum, matchSumOutput);
 
-  auto matchRelu = mg.createNode(matchOp<Relu>("matchRelu"));
+  auto matchRelu = mg.createNode(nn::is<Relu>);
   mg.createEdge(matchSumOutput, matchRelu);
 
   auto matchRoot = matchRelu;
-  EXPECT_FALSE(NNSubgraphMatcher::isSubgraphMatch(sum, matchRoot).isMatch());
-  EXPECT_FALSE(
-      NNSubgraphMatcher::isSubgraphMatch(reluOutput, matchRoot).isMatch());
-  EXPECT_FALSE(NNSubgraphMatcher::isSubgraphMatch(input1, matchRoot).isMatch());
+  EXPECT_FALSE(mg.isSubgraphMatch(sum, matchRoot).isMatch());
+  EXPECT_FALSE(mg.isSubgraphMatch(reluOutput, matchRoot).isMatch());
+  EXPECT_FALSE(mg.isSubgraphMatch(input1, matchRoot).isMatch());
 
-  EXPECT_TRUE(NNSubgraphMatcher::isSubgraphMatch(relu, matchRoot).isMatch());
+  EXPECT_TRUE(mg.isSubgraphMatch(relu, matchRoot).isMatch());
 
-  NNSubgraphMatcher::replaceSubgraph(
+  mg.replaceSubgraph(
       graph,
       matchRoot,
       [&matchSumOutput](
           NNGraph& g,
           NNGraph::NodeRef relu,
-          const NNSubgraphMatcher::SubgraphMatchResultType& matchResult) {
+          const NNMatchGraph::SubgraphMatchResultType& matchResult) {
         auto fusedNode = g.createNode(util::make_unique<SumRelu>());
         auto sumNode =
             getProducer(matchResult.getMatchNodeMap()->at(matchSumOutput));

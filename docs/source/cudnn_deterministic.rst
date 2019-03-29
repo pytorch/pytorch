@@ -5,3 +5,4 @@
     undesirable, you can try to make the operation deterministic (potentially at
     a performance cost) by setting ``torch.backends.cudnn.deterministic =
     True``.
+    Please see the notes on :doc:`/notes/randomness` for background.

@@ -1,16 +1,10 @@
-def script(y1):
-  x = aten::add(y1, 1, 1)
-  z1 = aten::add(x, 5, 1)
-  t9 = aten::lt(y1, 8)
-  t10 = prim::TensorToNum(t9)
-  y = y1
-  z = z1
-  t11 = t10
-  while t11:
-    y2 = aten::add(y, 1, 1)
-    t17 = aten::lt(y2, 8)
-    t18 = prim::TensorToNum(t17)
-    t11 = t18
-    y = y2
-    z = x
-  return (x, z)
+def graph(self,
+    y: Tensor) -> Tuple[Tensor, Tensor]:
+  x = torch.add(y, 1, 1)
+  z = torch.add(x, 5, 1)
+  y0, z0 = y, z
+  _0 = bool(torch.lt(y, 8))
+  while _0:
+    y1 = torch.add_(y0, 1, 1)
+    _0, y0, z0 = bool(torch.lt(y1, 8)), y1, x
+  return (x, z0)

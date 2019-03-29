@@ -2,7 +2,7 @@
 
 namespace caffe2 {
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     C10OperatorRegistry,
     OperatorBase,
     const OperatorDef&,

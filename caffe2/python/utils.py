@@ -231,13 +231,14 @@ def GetContentFromProtoString(s, function_map):
 
 def ConvertProtoToBinary(proto_class, filename, out_filename):
     """Convert a text file of the given protobuf class to binary."""
-    proto = TryReadProtoWithClass(proto_class, open(filename).read())
+    with open(filename) as f:
+        proto = TryReadProtoWithClass(proto_class, f.read())
     with open(out_filename, 'w') as fid:
         fid.write(proto.SerializeToString())
 
 
 def GetGPUMemoryUsageStats():
-    """Get GPU memory usage stats from CUDAContext. This requires flag
+    """Get GPU memory usage stats from CUDAContext/HIPContext. This requires flag
        --caffe2_gpu_memory_tracking to be enabled"""
     from caffe2.python import workspace, core
     workspace.RunOperatorOnce(
@@ -245,7 +246,7 @@ def GetGPUMemoryUsageStats():
             "GetGPUMemoryUsage",
             [],
             ["____mem____"],
-            device_option=core.DeviceOption(caffe2_pb2.CUDA, 0),
+            device_option=core.DeviceOption(workspace.GpuDeviceType, 0),
         ),
     )
     b = workspace.FetchBlob("____mem____")
@@ -382,3 +383,38 @@ def EnumClassKeyVals(cls):
                 )
                 enum[k] = v
     return enum
+
+
+def ArgsToDict(args):
+    """
+    Convert a list of arguments to a name, value dictionary. Assumes that
+    each argument has a name. Otherwise, the argument is skipped.
+    """
+    ans = {}
+    for arg in args:
+        if not arg.HasField("name"):
+            continue
+        for d in arg.DESCRIPTOR.fields:
+            if d.name == "name":
+                continue
+            if d.label == d.LABEL_OPTIONAL and arg.HasField(d.name):
+                ans[arg.name] = getattr(arg, d.name)
+                break
+            elif d.label == d.LABEL_REPEATED:
+                list_ = getattr(arg, d.name)
+                if len(list_) > 0:
+                    ans[arg.name] = list_
+                    break
+        else:
+            ans[arg.name] = None
+    return ans
+
+
+def NHWC2NCHW(tensor):
+    assert tensor.ndim >= 1
+    return tensor.transpose((0, tensor.ndim - 1) + tuple(range(1, tensor.ndim - 1)))
+
+
+def NCHW2NHWC(tensor):
+    assert tensor.ndim >= 2
+    return tensor.transpose((0,) + tuple(range(2, tensor.ndim)) + (1,))

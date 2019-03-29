@@ -69,7 +69,7 @@ X after running op:
         "Y",
         "*(type: Tensor`<float>`)* The exponential of the input tensor computed "
         "element-wise.")
-    .InheritOnnxSchema("Exp");
+    .InheritOnnxSchema();
 
 namespace {
 

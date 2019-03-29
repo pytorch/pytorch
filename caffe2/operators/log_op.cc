@@ -68,7 +68,7 @@ X after running op:
         0,
         "Y",
         "*(type: Tensor`<float>`)* Output tensor computed as the natural log of the input tensor computed, element-wise.")
-    .InheritOnnxSchema("Log");
+    .InheritOnnxSchema();
 
 namespace {
 

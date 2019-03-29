@@ -1,12 +1,12 @@
-#include "THCUNN.h"
-#include "THCTensor.hpp"
-#include "common.h"
-#include "THCDeviceTensor.cuh"
-#include "THCDeviceTensorUtils.cuh"
-#include "THCDeviceUtils.cuh"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCAtomics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCTensor.hpp>
+#include <THCUNN/common.h>
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCDeviceTensorUtils.cuh>
+#include <THC/THCDeviceUtils.cuh>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCAtomics.cuh>
 
 template <typename Dtype, typename Acctype>
 __global__ void cuda_VolumetricAveragePooling_updateOutput(
@@ -275,5 +275,5 @@ __global__ void cuda_VolumetricAveragePooling_updateGradInput(
   }
 }
 
-#include "generic/VolumetricAveragePooling.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/VolumetricAveragePooling.cu>
+#include <THC/THCGenerateFloatTypes.h>

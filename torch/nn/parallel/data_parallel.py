@@ -1,6 +1,7 @@
 import operator
 import torch
 import warnings
+from itertools import chain
 from ..modules import Module
 from .scatter_gather import scatter_kwargs, gather
 from .replicate import replicate
@@ -35,7 +36,7 @@ def _check_balance(device_ids):
 class DataParallel(Module):
     r"""Implements data parallelism at the module level.
 
-    This container parallelizes the application of the given module by
+    This container parallelizes the application of the given :attr:`module` by
     splitting the input across the specified devices by chunking in the batch
     dimension (other objects will be copied once per device). In the forward
     pass, the module is replicated on each device, and each replica handles a
@@ -47,10 +48,27 @@ class DataParallel(Module):
     See also: :ref:`cuda-nn-dataparallel-instead`
 
     Arbitrary positional and keyword inputs are allowed to be passed into
-    DataParallel EXCEPT Tensors. All tensors will be scattered on dim
-    specified (default 0). Primitive types will be broadcasted, but all
-    other types will be a shallow copy and can be corrupted if written to in
-    the model's forward pass.
+    DataParallel but some types are specially handled. tensors will be
+    **scattered** on dim specified (default 0). tuple, list and dict types will
+    be shallow copied. The other types will be shared among different threads
+    and can be corrupted if written to in the model's forward pass.
+
+    The parallelized :attr:`module` must have its parameters and buffers on
+    ``device_ids[0]`` before running this :class:`~torch.nn.DataParallel`
+    module.
+
+    .. warning::
+        In each forward, :attr:`module` is **replicated** on each device, so any
+        updates to the running module in ``forward`` will be lost. For example,
+        if :attr:`module` has a counter attribute that is incremented in each
+        ``forward``, it will always stay at the initial value because the update
+        is done on the replicas which are destroyed after ``forward``. However,
+        :class:`~torch.nn.DataParallel` guarantees that the replica on
+        ``device[0]`` will have its parameters and buffers sharing storage with
+        the base parallelized :attr:`module`. So **in-place** updates to the
+        parameters or buffers on ``device[0]`` will be recorded. E.g.,
+        :class:`~torch.nn.BatchNorm2d` and :func:`~torch.nn.utils.spectral_norm`
+        rely on this behavior to update the buffers.
 
     .. warning::
         Forward and backward hooks defined on :attr:`module` and its submodules
@@ -88,7 +106,7 @@ class DataParallel(Module):
     Example::
 
         >>> net = torch.nn.DataParallel(model, device_ids=[0, 1, 2])
-        >>> output = net(input_var)
+        >>> output = net(input_var)  # input_var can be on any device, including CPU
     """
 
     # TODO: update notes/cuda.rst when this class handles 8+ GPUs well
@@ -110,6 +128,7 @@ class DataParallel(Module):
         self.module = module
         self.device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
         self.output_device = _get_device_index(output_device, True)
+        self.src_device_obj = torch.device("cuda:{}".format(self.device_ids[0]))
 
         _check_balance(self.device_ids)
 
@@ -119,6 +138,13 @@ class DataParallel(Module):
     def forward(self, *inputs, **kwargs):
         if not self.device_ids:
             return self.module(*inputs, **kwargs)
+
+        for t in chain(self.module.parameters(), self.module.buffers()):
+            if t.device != self.src_device_obj:
+                raise RuntimeError("module must have its parameters and buffers "
+                                   "on device {} (device_ids[0]) but found one of "
+                                   "them on device: {}".format(self.src_device_obj, t.device))
+
         inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
         if len(self.device_ids) == 1:
             return self.module(*inputs[0], **kwargs[0])
@@ -146,7 +172,7 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
 
     Args:
         module (Module): the module to evaluate in parallel
-        inputs (tensor): inputs to the module
+        inputs (Tensor): inputs to the module
         device_ids (list of int or torch.device): GPU ids on which to replicate module
         output_device (list of int or torch.device): GPU location of the output  Use -1 to indicate the CPU.
             (default: device_ids[0])
@@ -162,6 +188,16 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
 
     if output_device is None:
         output_device = device_ids[0]
+
+    device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
+    output_device = _get_device_index(output_device, True)
+    src_device_obj = torch.device("cuda:{}".format(device_ids[0]))
+
+    for t in chain(module.parameters(), module.buffers()):
+        if t.device != src_device_obj:
+            raise RuntimeError("module must have its parameters and buffers "
+                               "on device {} (device_ids[0]) but found one of "
+                               "them on device: {}".format(src_device_obj, t.device))
 
     inputs, module_kwargs = scatter_kwargs(inputs, module_kwargs, device_ids, dim)
     if len(device_ids) == 1:

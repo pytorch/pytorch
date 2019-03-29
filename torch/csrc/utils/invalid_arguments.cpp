@@ -1,6 +1,8 @@
-#include "invalid_arguments.h"
+#include <torch/csrc/utils/invalid_arguments.h>
 
-#include "python_strings.h"
+#include <torch/csrc/utils/python_strings.h>
+
+#include <torch/csrc/utils/memory.h>
 
 #include <algorithm>
 #include <unordered_map>
@@ -22,7 +24,7 @@ struct Type {
 struct SimpleType: public Type {
   SimpleType(std::string& name): name(name) {};
 
-  bool is_matching(PyObject *object) {
+  bool is_matching(PyObject *object) override {
     return py_typename(object) == name;
   }
 
@@ -33,7 +35,7 @@ struct MultiType: public Type {
   MultiType(std::initializer_list<std::string> accepted_types):
     types(accepted_types) {};
 
-  bool is_matching(PyObject *object) {
+  bool is_matching(PyObject *object) override {
     auto it = std::find(types.begin(), types.end(), py_typename(object));
     return it != types.end();
   }
@@ -44,7 +46,7 @@ struct MultiType: public Type {
 struct NullableType: public Type {
   NullableType(std::unique_ptr<Type> type): type(std::move(type)) {};
 
-  bool is_matching(PyObject *object) {
+  bool is_matching(PyObject *object) override {
     return object == Py_None || type->is_matching(object);
   }
 
@@ -55,7 +57,7 @@ struct TupleType: public Type {
   TupleType(std::vector<std::unique_ptr<Type>> types):
     types(std::move(types)) {};
 
-  bool is_matching(PyObject *object) {
+  bool is_matching(PyObject *object) override {
     if (!PyTuple_Check(object)) return false;
     auto num_elements = PyTuple_GET_SIZE(object);
     if (num_elements != (long)types.size()) return false;
@@ -73,7 +75,7 @@ struct SequenceType: public Type {
   SequenceType(std::unique_ptr<Type> type):
     type(std::move(type)) {};
 
-  bool is_matching(PyObject *object) {
+  bool is_matching(PyObject *object) override {
     if (!PySequence_Check(object)) return false;
     auto num_elements = PySequence_Length(object);
     for (int i = 0; i < num_elements; i++) {
@@ -88,7 +90,7 @@ struct SequenceType: public Type {
 
 struct Argument {
   Argument(std::string name, std::unique_ptr<Type> type):
-      name(name), type(std::move(type)) {};
+      name(std::move(name)), type(std::move(type)) {};
 
   std::string name;
   std::unique_ptr<Type> type;
@@ -124,30 +126,30 @@ std::vector<std::string> _splitString(const std::string &s, const std::string& d
 std::unique_ptr<Type> _buildType(std::string type_name, bool is_nullable) {
   std::unique_ptr<Type> result;
   if (type_name == "float") {
-    result.reset(new MultiType({"float", "int", "long"}));
+    result = torch::make_unique<MultiType>(MultiType{"float", "int", "long"});
   } else if (type_name == "int") {
-    result.reset(new MultiType({"int", "long"}));
+    result = torch::make_unique<MultiType>(MultiType{"int", "long"});
   } else if (type_name.find("tuple[") == 0) {
     auto type_list = type_name.substr(6);
     type_list.pop_back();
     std::vector<std::unique_ptr<Type>> types;
     for (auto& type: _splitString(type_list, ","))
       types.emplace_back(_buildType(type, false));
-    result.reset(new TupleType(std::move(types)));
+    result = torch::make_unique<TupleType>(std::move(types));
   } else if (type_name.find("sequence[") == 0) {
     auto subtype = type_name.substr(9);
     subtype.pop_back();
-    result.reset(new SequenceType(_buildType(subtype, false)));
+    result = torch::make_unique<SequenceType>(_buildType(subtype, false));
   } else {
-    result.reset(new SimpleType(type_name));
+    result = torch::make_unique<SimpleType>(type_name);
   }
   if (is_nullable)
-    result.reset(new NullableType(std::move(result)));
+    result = torch::make_unique<NullableType>(std::move(result));
   return result;
 }
 
 std::pair<Option, std::string> _parseOption(const std::string& _option_str,
-    const std::unordered_map<std::string, PyObject*> kwargs)
+    const std::unordered_map<std::string, PyObject*>& kwargs)
 {
   if (_option_str == "no arguments")
     return std::pair<Option, std::string>(Option(false, false), _option_str);

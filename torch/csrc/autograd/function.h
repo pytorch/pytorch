@@ -1,17 +1,17 @@
 #pragma once
 
-#include "torch/csrc/autograd/edge.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/autograd/anomaly_mode.h"
-#include "torch/csrc/autograd/profiler.h"
-#include "torch/csrc/autograd/saved_variable.h"
-#include "torch/csrc/autograd/input_metadata.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/python_stub.h"
-#include "torch/csrc/utils/variadic.h"
+#include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/anomaly_mode.h>
+#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/saved_variable.h>
+#include <torch/csrc/autograd/input_metadata.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/python_stub.h>
+#include <torch/csrc/utils/variadic.h>
 
 #include <ATen/ATen.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -86,10 +86,9 @@ void deleteFunction(Function* function);
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 struct TORCH_API Function : std::enable_shared_from_this<Function> {
  public:
-  /// Construct a new `Function` with `num_inputs` inputs and the given
-  /// `next_edges`. sequence_nr is a (currently THE) hint to prioritization
-  /// in the backward() pass, with higher sequence numbers prioritized
-  /// before lower sequence numbers.
+  /// Construct a new `Function` with the given `next_edges`. `sequence_nr` is
+  /// a (currently THE) hint to prioritization in the backward() pass, with
+  /// higher sequence numbers prioritized before lower sequence numbers.
   explicit Function(
       uint64_t sequence_nr,
       edge_list&& next_edges = edge_list())
@@ -130,8 +129,8 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   /// of the new input.
   uint32_t add_input_metadata(
     const at::Type& type
-  , at::IntList shape
-  , const int64_t device) noexcept {
+  , at::IntArrayRef shape
+  , at::Device device) noexcept {
     uint32_t input_nr = input_metadata_.size();
     input_metadata_.emplace_back(type, shape, device);
     return input_nr;

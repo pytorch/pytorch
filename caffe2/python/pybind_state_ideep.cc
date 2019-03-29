@@ -53,8 +53,11 @@ public:
   }
 
   FetchedBlob FetchTensor(const itensor &atensor, bool force_copy) {
+#ifdef USE_NUMPY
     FetchedBlob result;
-    CAFFE_ENFORCE(atensor.materialized(),
+    CAFFE_ENFORCE((atensor.ndims() != 0) &&
+                  (atensor.get_nelems() == 0 ||
+                   atensor.get_data_handle() != nullptr),
                   "Trying to fetch uninitialized tensor");
     const int numpy_type = CaffeToNumpyType(type_transform(atensor));
     CAFFE_ENFORCE(
@@ -86,6 +89,9 @@ public:
     }
 
     return result;
+#else
+    CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif // USE_NUMPY
   }
 };
 
@@ -108,6 +114,7 @@ public:
       const DeviceOption &option,
       PyArrayObject *original_array,
       itensor *tensor) {
+#ifdef USE_NUMPY
     PyArrayObject *array = PyArray_GETCONTIGUOUS(original_array);
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
     const auto npy_type = PyArray_TYPE(array);
@@ -139,17 +146,26 @@ public:
         tensor->reorder_from(adims, type,
                              static_cast<void *>(PyArray_DATA(array)));
     }
+#else
+    CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif // USE_NUMPY
   }
 
   bool ZeroDim(PyArrayObject *array) {
+#ifdef USE_NUMPY
     int ndim = PyArray_NDIM(array);
-    npy_intp *npy_dims = PyArray_DIMS(array);
-    return ndim == 0 ||
-      std::find(npy_dims, npy_dims + ndim, 0) != npy_dims + ndim;
+    return ndim == 0;
+#else
+    CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif
   }
 
-  void Feed(const DeviceOption &option, PyArrayObject *original_array,
-            Blob *blob) {
+  void Feed(
+      const DeviceOption& option,
+      PyArrayObject* original_array,
+      Blob* blob,
+      bool in_place) override {
+#ifdef USE_NUMPY
     try {
       PyArrayObject *array = PyArray_GETCONTIGUOUS(original_array);
       auto g = MakeGuard([&]() { Py_XDECREF(array); });
@@ -163,13 +179,24 @@ public:
         DeviceOption cpu_option(option);
         cpu_option.set_device_type(DeviceTypeProto::PROTO_CPU);
         TensorFeeder<CPUContext> cpu_tensor_feeder;
-        cpu_tensor_feeder.FeedTensor(cpu_option, original_array,
-                                     blob->GetMutableTensor(CPU));
+        if (in_place) {
+          cpu_tensor_feeder.FeedTensor(
+              option,
+              original_array,
+              BlobGetMutableTensor(blob, OptionToDevice(option).type()),
+              true);
+        } else {
+          blob->Reset<Tensor>(new Tensor(
+                                  cpu_tensor_feeder.FeedTensor(cpu_option, original_array)));
+        }
       }
     } catch (ideep::error &e) {
       LOG(ERROR) << "IDEEP error: " << e.message;
       throw;
     }
+#else
+    CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif
   }
 };
 

@@ -1,6 +1,6 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/Config.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Config.h>
 
 #if !AT_MKL_ENABLED()
 
@@ -14,11 +14,11 @@ Tensor& _baddbmm_mkl_(Tensor& self, const Tensor& batch1, const Tensor& batch2, 
 
 #else // AT_MKL_ENABLED
 
-#include "ATen/ATen.h"
-#include "ATen/Config.h"
-#include "ATen/Dispatch.h"
-#include "ATen/Utils.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Utils.h>
+#include <ATen/NativeFunctions.h>
 
 #include <algorithm>
 #include <vector>
@@ -83,7 +83,7 @@ static inline void baddbmm_mkl_template(const Tensor& res, const Tensor& mat1, c
 
 Tensor& _baddbmm_mkl_(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
   // checks are done in native/LinearAlgebra.cpp
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "baddbmm__mkl", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "baddbmm__mkl", [&] {
       baddbmm_mkl_template<scalar_t>(self, batch1, batch2, beta, alpha);
     });
 

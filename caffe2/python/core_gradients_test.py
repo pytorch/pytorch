@@ -9,9 +9,8 @@ import hypothesis.strategies as st
 import unittest
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, test_util
+from caffe2.python import core, test_util, workspace
 from caffe2.python.core import CreateOperator, GradientRegistry
-from caffe2.python import workspace
 
 import numpy as np
 
@@ -88,13 +87,17 @@ class TestGradientCalculation(test_util.TestCase):
     def assertOperatorListEqual(self, operatorDefList1, operatorDefList2):
         for op in operatorDefList1:
             op.debug_info = ""
+            if op.device_option:
+                del op.device_option.extra_info[:]
         for op in operatorDefList2:
             op.debug_info = ""
+            if op.device_option:
+                del op.device_option.extra_info[:]
         self.assertEqual(operatorDefList1, operatorDefList2)
 
     @given(device_option=st.sampled_from([
         None,
-        core.DeviceOption(caffe2_pb2.CUDA, 1)]))
+        core.DeviceOption(workspace.GpuDeviceType, 1)]))
     def testDirect(self, device_option):
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
@@ -279,7 +282,7 @@ class TestGradientCalculation(test_util.TestCase):
 
     @given(device_option=st.sampled_from([
         None,
-        core.DeviceOption(caffe2_pb2.CUDA, 1)]))
+        core.DeviceOption(workspace.GpuDeviceType, 1)]))
     def testMultiUseInput(self, device_option):
         """Test gradient for the following case:
 

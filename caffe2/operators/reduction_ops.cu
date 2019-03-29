@@ -83,16 +83,16 @@ template <>
 bool SumElementsGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& dY = Input(1);
-  DCHECK_EQ(dY.size(), 1);
-  auto* dX = Output(0);
-  dX->ResizeLike(X);
+  DCHECK_EQ(dY.numel(), 1);
+
+  auto* dX = Output(0, X.sizes(), at::dtype<float>());
   SumElementsGradientKernel<float>
-      <<<CAFFE_GET_BLOCKS(X.size()),
+      <<<CAFFE_GET_BLOCKS(X.numel()),
          CAFFE_CUDA_NUM_THREADS,
          0,
          context_.cuda_stream()>>>(
           average_,
-          X.size(),
+          X.numel(),
           dY.data<float>(),
           dX->template mutable_data<float>());
   return true;
@@ -104,10 +104,9 @@ bool MaxReductionGradientOp<T, Context, ROWWISE>::RunOnDevice() {
   auto& Y = Input(1);
   auto& dY = Input(2);
 
-  auto* dX = Output(0);
-  dX->ResizeLike(X);
+  auto* dX = Output(0, X.sizes(), at::dtype<T>());
 
-  CAFFE_ENFORCE_EQ(X.ndim(), 3);
+  CAFFE_ENFORCE_EQ(X.dim(), 3);
 
   const int batch_size = X.dim32(0);
   const int M = X.dim32(1);

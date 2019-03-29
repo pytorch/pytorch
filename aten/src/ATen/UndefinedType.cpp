@@ -1,5 +1,5 @@
-#include "ATen/UndefinedType.h"
-#include "ATen/core/Error.h"
+#include <ATen/UndefinedType.h>
+#include <c10/util/Exception.h>
 
 namespace at {
 
@@ -23,12 +23,6 @@ Device UndefinedType::getDeviceFromPtr(void*) const {
   AT_ERROR("getDeviceFromPtr not defined for UndefinedType");
 }
 
-Storage UndefinedType::storage(bool resizable) const {
-  AT_ERROR("storage not defined for UndefinedType");
-}
-Storage UndefinedType::storage(size_t size, bool resizable) const {
-  AT_ERROR("storage(size_t) not defined for UndefinedType");
-}
 Storage UndefinedType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
   AT_ERROR("storageFromBlob not defined for UndefinedType");
 }
@@ -53,10 +47,6 @@ TypeID UndefinedType::ID() const {
   return TypeID::Undefined;
 }
 
-size_t UndefinedType::elementSizeInBytes() const {
-  AT_ERROR("elementSizeInBytes not defined for UndefinedType");
-}
-
 Type & UndefinedType::toBackend(Backend b) const {
   if (b == Backend::Undefined) {
     return TypeDefault::toBackend(b);
@@ -68,14 +58,6 @@ Type & UndefinedType::toScalarType(ScalarType s) const {
     return TypeDefault::toScalarType(s);
   }
   AT_ERROR("toScalarType not implemented for UndefinedType to non-UndefinedType");
-}
-
-Tensor & UndefinedType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
-  AT_ERROR("s_copy not defined for UndefinedType");
-}
-
-Tensor & UndefinedType::_s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const {
-  AT_ERROR("_s_copy_from not defined for UndefinedType");
 }
 
 }

@@ -57,13 +57,13 @@ class FunHashOp : public Operator<Context> {
     int64_t num_alpha = 1;
     if (adaptive_) {
       const auto& alpha = Input(4);
-      num_alpha = alpha.dim(0);
+      num_alpha = alpha.size(0);
     }
 
     const auto* seg_data = seg.template data<int>();
 
-    int64_t num_weight = weight.dim(0);
-    int64_t num_nz_ent = seg.dim(0);
+    int64_t num_weight = weight.size(0);
+    int64_t num_nz_ent = seg.size(0);
 
     int64_t n_segments = num_segments_;
     if (num_segments_ == -1) {
@@ -75,8 +75,7 @@ class FunHashOp : public Operator<Context> {
       ++n_segments;
     }
 
-    auto* output = Output(0);
-    output->Resize(n_segments, num_outputs_);
+    auto* output = Output(0, {n_segments, num_outputs_}, at::dtype<T>());
 
     T* output_data = output->template mutable_data<T>();
 
@@ -164,20 +163,19 @@ class FunHashGradientOp : public Operator<Context> {
 
     if (adaptive_) {
       const auto& alpha = Input(5);
-      num_alpha = alpha.dim(0);
-      auto* grad_alpha = Output(1);
-      grad_alpha->ResizeLike(alpha);
+      num_alpha = alpha.size(0);
+
+      auto* grad_alpha = Output(1, alpha.sizes(), at::dtype<T>());
       grad_alpha_data = grad_alpha->template mutable_data<T>();
       memset(grad_alpha_data, 0, sizeof(T) * num_alpha);
     }
 
     const auto* seg_data = seg.template data<int>();
 
-    int64_t num_weight = weight.dim(0);
-    int64_t num_nz_ent = seg.dim(0);
+    int64_t num_weight = weight.size(0);
+    int64_t num_nz_ent = seg.size(0);
 
-    auto* grad_weight = Output(0);
-    grad_weight->ResizeLike(weight);
+    auto* grad_weight = Output(0, weight.sizes(), at::dtype<T>());
     T* grad_weight_data = grad_weight->template mutable_data<T>();
 
     const auto* grad_out_data = grad_out.template data<T>();

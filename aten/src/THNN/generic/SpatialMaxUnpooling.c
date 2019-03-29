@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SpatialMaxUnpooling.c"
+#define TH_GENERIC_FILE "THNN/generic/SpatialMaxUnpooling.c"
 #else
 
 static void THNN_(SpatialMaxUnpooling_updateOutput_frame)(scalar_t *input_p, scalar_t *output_p,
@@ -24,7 +24,7 @@ static void THNN_(SpatialMaxUnpooling_updateOutput_frame)(scalar_t *input_p, sca
     {
       for(j = 0; j < iwidth; j++)
       {
-        maxp = ind_p_k[i*iwidth + j] - TH_INDEX_BASE;  /* retrieve position of max */
+        maxp = ind_p_k[i*iwidth + j];  /* retrieve position of max */
         if(maxp<0 || maxp>=owidth*oheight){
 #pragma omp critical
           {
@@ -145,7 +145,7 @@ static void THNN_(SpatialMaxUnpooling_updateGradInput_frame)(scalar_t *gradInput
     {
       for(j = 0; j < iwidth; j++)
       {
-        maxp = ind_p_k[i*iwidth + j] - TH_INDEX_BASE; /* retrieve position of max */
+        maxp = ind_p_k[i*iwidth + j]; /* retrieve position of max */
         if(maxp < 0 || maxp >= owidth * oheight) {
             THError("invalid max index %ld, owidth= %d, oheight= %d", maxp, owidth, oheight);
         }

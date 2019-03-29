@@ -1,24 +1,14 @@
-def script(a1, b1):
-  t5 = aten::lt(a1, 10)
-  t6 = prim::TensorToNum(t5)
-  a = a1
-  b = b1
-  c = 0
-  t7 = t6
-  while t7:
-    a2 = aten::add(a, 1, 1)
-    b2 = aten::add(b, 1, 1)
-    t15 = aten::gt(a2, b2)
-    t16 = prim::TensorToNum(t15)
-    if t16:
-      c4 = 2
+def graph(self,
+    a: Tensor,
+    b: Tensor) -> Tensor:
+  a0, b0, c = a, b, 0
+  _0 = bool(torch.lt(a, 10))
+  while _0:
+    a1 = torch.add(a0, 1, 1)
+    b1 = torch.add(b0, 1, 1)
+    if bool(torch.gt(a1, b1)):
+      c0 = 2
     else:
-      c4 = 3
-    t21 = aten::lt(a2, 10)
-    t22 = prim::TensorToNum(t21)
-    t7 = t22
-    a = a2
-    b = b2
-    c = c4
-  t27 = aten::add(a, 1, 1)
-  return t27
+      c0 = 3
+    _0, a0, b0, c = bool(torch.lt(a1, 10)), a1, b1, c0
+  return torch.add(torch.add(a0, 1, 1), c, 1)

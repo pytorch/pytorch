@@ -59,7 +59,7 @@ Tensor cudnn_affine_grid_generator_forward(
   checkContiguous(c, theta);
   checkSize(c, theta, {N, 2, 3});
 
-  auto grid_t = theta->type().tensor();
+  auto grid_t = at::empty({0}, theta->options());
   grid_t.resize_({N, H, W, 2});
 
   auto dataType = getCudnnDataType(*theta);
@@ -82,7 +82,7 @@ Tensor cudnn_affine_grid_generator_backward(
   checkContiguous(c, grad_grid);
   checkSize(c, grad_grid, {N, H, W, 2});
 
-  auto grad_theta_t = grad_grid->type().tensor();
+  auto grad_theta_t = at::empty({0}, grad_grid->options());
   grad_theta_t.resize_({N, 2, 3});
 
   auto dataType = getCudnnDataType(grad_theta_t);

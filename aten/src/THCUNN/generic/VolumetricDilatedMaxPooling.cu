@@ -1,6 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/VolumetricDilatedMaxPooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/VolumetricDilatedMaxPooling.cu"
 #else
+
+#include <THCUNN/generic/pooling_shape.h>
 
 #define UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW:                         \
   cuda_VolumetricDilatedMaxPooling_updateOutput<KW>                     \
@@ -77,28 +79,9 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
              "kT: %d kW: %d, kH: %d, padT: %d, padW: %d, padH: %d",
              kT, kW, kH, padT, padW, padH);
 
-  if (ceilMode)
-  {
-    outputTime   = (int)(ceil((float)(inputTime - (dilationT * (kT - 1) + 1) + 2*padT) / dT)) + 1;
-    outputHeight = (int)(ceil((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    outputWidth  = (int)(ceil((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
-  }
-  else
-  {
-    outputTime   = (int)(floor((float)(inputTime - (dilationT * (kT - 1) + 1) + 2*padT) / dT)) + 1;
-    outputHeight = (int)(floor((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    outputWidth  = (int)(floor((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
-  }
-
-  if (padT || padW || padH)
-  {
-    if ((outputTime - 1)*dT >= inputTime + padT)
-      --outputTime;
-    if ((outputHeight - 1)*dH >= inputHeight + padH)
-      --outputHeight;
-    if ((outputWidth  - 1)*dW >= inputWidth  + padW)
-      --outputWidth;
-  }
+  outputTime = pooling_output_shape<int>(inputTime, kT, padT, dT, dilationT, ceilMode);
+  outputHeight = pooling_output_shape<int>(inputHeight, kH, padH, dH, dilationH, ceilMode);
+  outputWidth = pooling_output_shape<int>(inputWidth, kW, padW, dW, dilationW, ceilMode);
 
   if (outputTime < 1 || outputHeight < 1 || outputWidth < 1)
     THError("Given input size: (%dx%dx%dx%d). Calculated output size: (%dx%dx%dx%d). Output size is too small",
@@ -180,28 +163,9 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
     AT_ERROR("non-empty 4D or 5D tensor expected, got size: ", input->sizes());
   }
 
-  if (ceilMode)
-  {
-    outputTime   = (int)(ceil((float)(inputTime - (dilationT * (kT - 1) + 1) + 2*padT) / dT)) + 1;
-    outputHeight = (int)(ceil((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    outputWidth  = (int)(ceil((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
-  }
-  else
-  {
-    outputTime   = (int)(floor((float)(inputTime - (dilationT * (kT - 1) + 1) + 2*padT) / dT)) + 1;
-    outputHeight = (int)(floor((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    outputWidth  = (int)(floor((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
-  }
-
-  if (padT || padW || padH)
-  {
-    if ((outputTime - 1)*dT >= inputTime + padT)
-      --outputTime;
-    if ((outputHeight - 1)*dH >= inputHeight + padH)
-      --outputHeight;
-    if ((outputWidth  - 1)*dW >= inputWidth  + padW)
-      --outputWidth;
-  }
+  outputTime = pooling_output_shape<int>(inputTime, kT, padT, dT, dilationT, ceilMode);
+  outputHeight = pooling_output_shape<int>(inputHeight, kH, padH, dH, dilationH, ceilMode);
+  outputWidth = pooling_output_shape<int>(inputWidth, kW, padW, dW, dilationW, ceilMode);
 
   if (!fiveDimensionalInput) /* 4D */
   {

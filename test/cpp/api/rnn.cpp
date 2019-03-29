@@ -3,7 +3,7 @@
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/rnn.h>
 #include <torch/optim/adam.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/support.h>
@@ -45,7 +45,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
 
     const auto backend = cuda ? torch::kCUDA : torch::kCPU;
     auto inputs =
-        torch::rand({nlen, bs, 1}, backend).round().toType(torch::kFloat32);
+        torch::rand({nlen, bs, 1}, backend).round().to(torch::kFloat32);
     auto labels = inputs.sum(0).detach();
     inputs.set_requires_grad(true);
 
@@ -56,7 +56,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
     loss.backward();
     optimizer.step();
 
-    running_loss = running_loss * 0.99 + loss.toCFloat() * 0.01;
+    running_loss = running_loss * 0.99 + loss.item<float>() * 0.01;
     if (epoch > max_epoch) {
       return false;
     }
@@ -81,7 +81,7 @@ void check_lstm_sizes(RNNOutput output) {
   ASSERT_EQ(output.state.size(3), 64); // 64 hidden dims
 
   // Something is in the hiddens
-  ASSERT_GT(output.state.norm().toCFloat(), 0);
+  ASSERT_GT(output.state.norm().item<float>(), 0);
 }
 
 struct RNNTest : torch::test::SeedingFixture {};
@@ -103,7 +103,7 @@ TEST_F(RNNTest, CheckOutputSizes) {
   torch::Tensor diff = next.state - output.state;
 
   // Hiddens changed
-  ASSERT_GT(diff.abs().sum().toCFloat(), 1e-3);
+  ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
 }
 
 TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
@@ -111,8 +111,8 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
   // Make sure the outputs match pytorch outputs
   LSTM model(2, 2);
   for (auto& v : model->parameters()) {
-    float size = v->numel();
-    auto p = static_cast<float*>(v->storage().data());
+    float size = v.numel();
+    auto p = static_cast<float*>(v.storage().data());
     for (size_t i = 0; i < size; i++) {
       p[i] = i / size;
     }
@@ -137,7 +137,7 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
                    0.6620, 0.7860, 0.6501, 0.7741, 0.7889, 0.9003,
                    0.7769, 0.8905, 0.7635, 0.8794, 0.7484, 0.8666};
   for (size_t i = 0; i < 3 * 4 * 2; i++) {
-    ASSERT_LT(std::abs(flat[i].toCFloat() - c_out[i]), 1e-3);
+    ASSERT_LT(std::abs(flat[i].item<float>() - c_out[i]), 1e-3);
   }
 
   ASSERT_EQ(out.state.ndimension(), 4); // (hx, cx) x layers x B x 2
@@ -163,7 +163,7 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
                    1.0931,
                    1.4911};
   for (size_t i = 0; i < 16; i++) {
-    ASSERT_LT(std::abs(flat[i].toCFloat() - h_out[i]), 1e-3);
+    ASSERT_LT(std::abs(flat[i].item<float>() - h_out[i]), 1e-3);
   }
 }
 
@@ -206,7 +206,7 @@ TEST_F(RNNTest, Sizes_CUDA) {
   torch::Tensor diff = next.state - output.state;
 
   // Hiddens changed
-  ASSERT_GT(diff.abs().sum().toCFloat(), 1e-3);
+  ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
 }
 
 TEST_F(RNNTest, EndToEndLSTM_CUDA) {
@@ -226,4 +226,16 @@ TEST_F(RNNTest, EndToEndRNNRelu_CUDA) {
 TEST_F(RNNTest, EndToEndRNNTanh_CUDA) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
       [](int s) { return RNN(RNNOptions(s, s).tanh().layers(2)); }, true));
+}
+
+TEST_F(RNNTest, PrettyPrintRNNs) {
+  ASSERT_EQ(
+      c10::str(LSTM(LSTMOptions(128, 64).layers(3).dropout(0.2))),
+      "torch::nn::LSTM(input_size=128, hidden_size=64, layers=3, dropout=0.2)");
+  ASSERT_EQ(
+      c10::str(GRU(GRUOptions(128, 64).layers(3).dropout(0.5))),
+      "torch::nn::GRU(input_size=128, hidden_size=64, layers=3, dropout=0.5)");
+  ASSERT_EQ(
+      c10::str(RNN(RNNOptions(128, 64).layers(3).dropout(0.2).tanh())),
+      "torch::nn::RNN(input_size=128, hidden_size=64, layers=3, dropout=0.2, activation=tanh)");
 }

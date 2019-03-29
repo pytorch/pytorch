@@ -1,8 +1,10 @@
-#include "ATen/ATen.h"
-#include "ATen/CPUApplyUtils.h"
-#include "ATen/Dispatch.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/core/Half.h"
+#include <ATen/native/Activation.h>
+
+#include <ATen/ATen.h>
+#include <ATen/CPUApplyUtils.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/native/TensorIterator.h>
 
 
 namespace at { namespace native {
@@ -10,12 +12,14 @@ namespace at { namespace native {
 static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
 
+DEFINE_DISPATCH(threshold_stub);
+
 Tensor relu(const Tensor & self) {
-  return self.clamp_min(0.0);
+  return at::threshold(self, 0, 0);
 }
 
 Tensor & relu_(Tensor & self) {
-  return self.clamp_min_(0.0);
+  return at::threshold_(self, 0, 0);
 }
 
 Tensor selu(const Tensor & self) {
@@ -37,11 +41,43 @@ Tensor & celu_(Tensor & self, Scalar alpha) {
 }
 
 Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
-  return at::rrelu_with_noise(self, self.type().tensor(), lower, upper, training, generator);
+  return at::rrelu_with_noise(self, at::empty({0}, self.options()), lower, upper, training, generator);
 }
 
 Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
-  return at::rrelu_with_noise_(self, self.type().tensor(), lower, upper, training, generator);
+  return at::rrelu_with_noise_(self, at::empty({0}, self.options()), lower, upper, training, generator);
+}
+
+// computes `result = self <= threshold ? value : other`
+// other is `self` in threshold() and `grad` in threshold_backward()
+static Tensor threshold_out(
+    optional<Tensor> opt_result,
+    const Tensor& self,
+    Scalar threshold,
+    Scalar value,
+    const Tensor& other) {
+  Tensor result = opt_result.value_or(Tensor());
+  auto iter = TensorIterator::binary_op(result, self, other);
+  threshold_stub(iter->device_type(), *iter, threshold, value);
+  return iter->output();
+}
+
+Tensor threshold(const Tensor& self, Scalar threshold, Scalar value) {
+  return threshold_out(nullopt, self, threshold, value, self);
+}
+
+Tensor& threshold_(Tensor& self, Scalar threshold, Scalar value) {
+  threshold_out(make_optional(self), self, threshold, value, self);
+  return self;
+}
+
+Tensor& threshold_out(Tensor& result, const Tensor& self, Scalar threshold, Scalar value) {
+  threshold_out(make_optional(result), self, threshold, value, self);
+  return result;
+}
+
+Tensor threshold_backward(const Tensor& grad, const Tensor& self, Scalar threshold) {
+  return threshold_out(nullopt, self, threshold, 0, grad);
 }
 
 // -----------------------------------
@@ -114,7 +150,7 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
 
   // case1: shared weight for all channels
   if (weight_num == 1) {
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "prelu_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "prelu_cpu", [&] {
       prelu_cpu_kernel_share_weights<scalar_t>(result, input, weight);
     });
   }
@@ -132,10 +168,10 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
       input_stride1 = strides[1];
     }
     AT_CHECK(channel_size == weight_num,
-      "Mismatch of parameter numbers and input channel size. Found parameter numbers = %d, and channel size = %d.",
-      weight_num, channel_size);
+      "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
+      " and channel size = ", channel_size, ".");
 
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "prelu_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "prelu_cpu", [&] {
       prelu_cpu_kernel_multi_weights<scalar_t>(
         result,
         input,
@@ -241,7 +277,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
 
   // case1: shared parameter for all channels
   if (weight_num == 1) {
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "prelu_backward_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "prelu_backward_cpu", [&] {
       prelu_cpu_backward_kernel_share_weights<scalar_t>(input, weight, grad_out, input_grad, weight_grad);
     });
   }
@@ -259,10 +295,10 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
       input_stride1 = strides[1];
     }
     AT_CHECK(channel_size == weight_num,
-      "Mismatch of parameter numbers and input channel size. Found parameter numbers = %d, and channel size = %d.",
-      weight_num, channel_size);
+      "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
+      " and channel size = ", channel_size, ".");
 
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "prelu_backward_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "prelu_backward_cpu", [&] {
       prelu_cpu_backward_kernel_multi_weights<scalar_t>(
         input,
         weight,
@@ -290,7 +326,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
 // -----------------------------------
 Tensor hardshrink_cpu(const Tensor & self, Scalar lambd) {
   auto out_tensor = at::empty_like(self);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "hardshrink_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "hardshrink_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
     at::CPU_tensor_apply2<scalar_t, scalar_t>(
       self,
@@ -306,7 +342,7 @@ Tensor hardshrink_cpu(const Tensor & self, Scalar lambd) {
 
 Tensor hardshrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar lambd) {
   auto out_tensor = at::empty_like(self);
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "hardshrink_backward_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "hardshrink_backward_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
     at::CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
       self,

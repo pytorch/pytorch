@@ -13,7 +13,7 @@
 #include "caffe2/utils/math.h"
 #include "nnpack.h"
 
-CAFFE2_DEFINE_bool(caffe2_profile_nnpack, false, "");
+C10_DEFINE_bool(caffe2_profile_nnpack, false, "");
 namespace caffe2 {
 
 void initNNPACK() {
@@ -231,11 +231,12 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
             (transformedFilterSize + sizeof(float) - 1) / sizeof(float);
 
         for (auto g = 0; g < group_; g++) {
-          transformedFilters_[g] = ws_->CreateBlob(
-                                          "__transformed_kernel_" +
-                                          to_string(__sync_fetch_and_add(
-                                              &precomputed_transform_id, 1)))
-                                       ->GetMutableTensor(CPU);
+          transformedFilters_[g] = BlobGetMutableTensor(
+              ws_->CreateBlob(
+                  "__transformed_kernel_" +
+                  to_string(
+                      __sync_fetch_and_add(&precomputed_transform_id, 1))),
+              CPU);
           transformedFilters_[g]->Resize(transformedFilterElements);
 
           status = nnp_convolution_inference(

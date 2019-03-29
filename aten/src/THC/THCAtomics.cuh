@@ -1,10 +1,10 @@
 #ifndef THC_ATOMICS_INC
 #define THC_ATOMICS_INC
 
-#include "THC.h"
-#include "TH/THHalf.h"
-#include "THCNumerics.cuh"
-#include "ATen/ATen.h"
+#include <THC/THC.h>
+#include <TH/THHalf.h>
+#include <THC/THCNumerics.cuh>
+#include <ATen/ATen.h>
 
 template <typename T, size_t n>
 struct AtomicAddIntegerImpl;
@@ -96,19 +96,24 @@ static inline __device__ void atomicAdd(int64_t *address, int64_t val) {
 }
 
 static inline  __device__ void atomicAdd(at::Half *address, at::Half val) {
-  unsigned int * address_as_ui =
-    (unsigned int *) ((char *)address - ((size_t)address & 2));
-  unsigned int old = *address_as_ui;
-  unsigned int assumed;
+  #if ((CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
+    unsigned int * address_as_ui =
+      (unsigned int *) ((char *)address - ((size_t)address & 2));
+    unsigned int old = *address_as_ui;
+    unsigned int assumed;
 
-  do {
-    assumed = old;
-    at::Half hsum;
-    hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-    hsum = THCNumerics<at::Half>::add(hsum, val);
-    old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16) : (old & 0xffff0000) | hsum.x;
-    old = atomicCAS(address_as_ui, assumed, old);
-  } while (assumed != old);
+    do {
+      assumed = old;
+      at::Half hsum;
+      hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
+      hsum = THCNumerics<at::Half>::add(hsum, val);
+      old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16) : (old & 0xffff0000) | hsum.x;
+      old = atomicCAS(address_as_ui, assumed, old);
+    } while (assumed != old);
+  #else
+    atomicAdd(reinterpret_cast<__half*>(address), val);
+  #endif
+
 }
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
@@ -128,7 +133,18 @@ static inline  __device__  void atomicAdd(double *address, double val) {
 } while (assumed != old);
 }
 #elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000) || defined(__HIP_PLATFORM_HCC__)
-#if defined(__HIP_PLATFORM_HCC__) && __hcc_workweek__ < 18312
+
+/* Note [hip-clang differences to hcc]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * The upcoming hip-clang compiler for ROCm differs from hcc in a few details.
+ * It exports the __HIP__ macro, we can hence differentiate between hcc and
+ * hip-clang. In the below, hcc only received support for atomicAdd with double
+ * typing after work week 18312. hip-clang had support from the first version.
+ * In general, the code-visible differences between hip-clang and hcc will be
+ * minimal.
+ */
+
+#if defined(__HIP_PLATFORM_HCC__) && __hcc_workweek__ < 18312 && !__HIP__
   // This needs to be defined for the host side pass
   static inline  __device__  void atomicAdd(double *address, double val) { }
 #endif

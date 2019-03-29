@@ -1,19 +1,25 @@
 #include <climits>
-#include <ATen/core/intrusive_ptr.h>
+#include <c10/util/intrusive_ptr.h>
 
-#include "THStorageFunctions.hpp"
+#include <TH/THStorageFunctions.hpp>
 
-#include "generic/THStorage.cpp"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THStorage.cpp>
+#include <TH/THGenerateAllTypes.h>
 
-#include "generic/THStorage.cpp"
-#include "THGenerateHalfType.h"
+#include <TH/generic/THStorage.cpp>
+#include <TH/THGenerateHalfType.h>
 
-#include "generic/THStorageCopy.cpp"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THStorage.cpp>
+#include <TH/THGenerateBoolType.h>
 
-#include "generic/THStorageCopy.cpp"
-#include "THGenerateHalfType.h"
+#include <TH/generic/THStorageCopy.cpp>
+#include <TH/THGenerateAllTypes.h>
+
+#include <TH/generic/THStorageCopy.cpp>
+#include <TH/THGenerateHalfType.h>
+
+#include <TH/generic/THStorageCopy.cpp>
+#include <TH/THGenerateBoolType.h>
 
 THStorage* THStorage_new(caffe2::TypeMeta data_type) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(

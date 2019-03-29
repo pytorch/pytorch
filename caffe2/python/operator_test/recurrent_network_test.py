@@ -15,7 +15,6 @@ import os
 import unittest
 
 class RecurrentNetworkTest(serial.SerializedTestCase):
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     @given(T=st.integers(1, 4),
            n=st.integers(1, 5),
            d=st.integers(1, 5))

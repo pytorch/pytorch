@@ -41,7 +41,7 @@ class Timer {
 
  protected:
   std::chrono::time_point<clock> start_time_;
-  AT_DISABLE_COPY_AND_ASSIGN(Timer);
+  C10_DISABLE_COPY_AND_ASSIGN(Timer);
 };
 }
 

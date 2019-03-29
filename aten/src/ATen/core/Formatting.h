@@ -1,17 +1,22 @@
 #pragma once
 
-#include <ATen/core/Scalar.h>
+#include <c10/core/Scalar.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/TensorMethods.h>
 #include <ATen/core/Type.h>
 #include <iostream>
 
+
+namespace c10 {
+CAFFE2_API std::ostream& operator<<(std::ostream& out, Backend b);
+}
 namespace at {
 
-AT_API std::ostream& operator<<(std::ostream & out, IntList list);
-AT_API std::ostream& operator<<(std::ostream & out, Backend b);
-AT_API std::ostream& operator<<(std::ostream & out, const Type & t);
-AT_API std::ostream& print(std::ostream& stream, const Tensor & tensor, int64_t linesize);
+CAFFE2_API std::ostream& operator<<(std::ostream& out, const Type& t);
+CAFFE2_API std::ostream& print(
+    std::ostream& stream,
+    const Tensor& tensor,
+    int64_t linesize);
 static inline std::ostream& operator<<(std::ostream & out, const Tensor & t) {
   return print(out,t,80);
 }

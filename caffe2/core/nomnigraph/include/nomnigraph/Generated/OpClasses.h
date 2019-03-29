@@ -1,3 +1,4 @@
+
 class Relu : public NeuralNetOperator {
  public:
   Relu() : NeuralNetOperator(NNKind::Relu) {}
@@ -564,13 +565,32 @@ class Clip : public NeuralNetOperator {
 
 class FC : public NeuralNetOperator {
  public:
-  FC() : NeuralNetOperator(NNKind::FC) {}
+  FC(int axis = 1, int axisW = 1)
+      : NeuralNetOperator(NNKind::FC), axis_(axis), axisW_(axisW) {}
 
   ~FC() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(FC);
 
+  int getAxis() const {
+    return axis_;
+  }
+
+  int getAxisW() const {
+    return axisW_;
+  }
+
+  void setAxis(int axis) {
+    axis_ = axis;
+  }
+
+  void setAxisW(int axisW) {
+    axisW_ = axisW;
+  }
+
  private:
+  int axis_;
+  int axisW_;
 };
 
 class GivenTensorFill : public NeuralNetOperator {
@@ -638,13 +658,23 @@ class ChannelShuffle : public NeuralNetOperator {
 
 class Add : public NeuralNetOperator {
  public:
-  Add() : NeuralNetOperator(NNKind::Add) {}
+  Add(int broadcast = 0)
+      : NeuralNetOperator(NNKind::Add), broadcast_(broadcast) {}
 
   ~Add() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(Add);
 
+  int getBroadcast() const {
+    return broadcast_;
+  }
+
+  void setBroadcast(int broadcast) {
+    broadcast_ = broadcast;
+  }
+
  private:
+  int broadcast_;
 };
 
 class Reshape : public NeuralNetOperator {
@@ -709,6 +739,28 @@ class NHWC2NCHW : public NeuralNetOperator {
   ~NHWC2NCHW() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(NHWC2NCHW);
+
+ private:
+};
+
+class Declare : public NeuralNetOperator {
+ public:
+  Declare() : NeuralNetOperator(NNKind::Declare) {}
+
+  ~Declare() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Declare);
+
+ private:
+};
+
+class Export : public NeuralNetOperator {
+ public:
+  Export() : NeuralNetOperator(NNKind::Export) {}
+
+  ~Export() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Export);
 
  private:
 };

@@ -1,8 +1,8 @@
 #ifndef THC_HALF_AUTO_NUMERICS_INC
 #define THC_HALF_AUTO_NUMERICS_INC
 
-#include "TH/THHalf.h"
-#include "THCNumerics.cuh"
+#include <TH/THHalf.h>
+#include <THC/THCNumerics.cuh>
 
 // WARNING: THCNumerics is being deprecated. Read the comments and function usage
 //          in THCNumerics to learn about the deprecation

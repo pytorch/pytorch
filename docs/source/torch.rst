@@ -6,6 +6,7 @@ Tensors
 ----------------------------------
 .. autofunction:: is_tensor
 .. autofunction:: is_storage
+.. autofunction:: is_floating_point
 .. autofunction:: set_default_dtype
 .. autofunction:: get_default_dtype
 .. autofunction:: set_default_tensor_type
@@ -106,6 +107,13 @@ There are a few more in-place random sampling functions defined on Tensors as we
 - :func:`torch.Tensor.random_` - numbers sampled from the discrete uniform distribution
 - :func:`torch.Tensor.uniform_` - numbers sampled from the continuous uniform distribution
 
+Quasi-random sampling
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: torch.quasirandom.SobolEngine
+    :members:
+    :exclude-members: MAXBIT, MAXDIM
+    :undoc-members:
 
 Serialization
 ----------------------------------
@@ -223,6 +231,7 @@ Reduction Ops
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: allclose
+.. autofunction:: argsort
 .. autofunction:: eq
 .. autofunction:: equal
 .. autofunction:: ge
@@ -256,20 +265,28 @@ Spectral Ops
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: bincount
+.. autofunction:: broadcast_tensors
+.. autofunction:: cartesian_prod
+.. autofunction:: combinations
 .. autofunction:: cross
 .. autofunction:: diag
+.. autofunction:: diag_embed
 .. autofunction:: diagflat
 .. autofunction:: diagonal
 .. autofunction:: einsum
 .. autofunction:: flatten
 .. autofunction:: flip
+.. autofunction:: rot90
 .. autofunction:: histc
 .. autofunction:: meshgrid
 .. autofunction:: renorm
+.. autofunction:: roll
 .. autofunction:: tensordot
 .. autofunction:: trace
 .. autofunction:: tril
+.. autofunction:: tril_indices
 .. autofunction:: triu
+.. autofunction:: triu_indices
 
 
 BLAS and LAPACK Operations
@@ -285,6 +302,9 @@ BLAS and LAPACK Operations
 .. autofunction:: btrifact_with_info
 .. autofunction:: btrisolve
 .. autofunction:: btriunpack
+.. autofunction:: chain_matmul
+.. autofunction:: cholesky
+.. autofunction:: cholesky_solve
 .. autofunction:: dot
 .. autofunction:: eig
 .. autofunction:: gels
@@ -308,8 +328,10 @@ BLAS and LAPACK Operations
 .. autofunction:: potrs
 .. autofunction:: pstrf
 .. autofunction:: qr
+.. autofunction:: solve
 .. autofunction:: svd
 .. autofunction:: symeig
+.. autofunction:: triangular_solve
 .. autofunction:: trtrs
 
 Utilities

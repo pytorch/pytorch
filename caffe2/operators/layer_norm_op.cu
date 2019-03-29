@@ -1,370 +1,289 @@
+#include "caffe2/core/operator_c10wrapper.h"
 #include "caffe2/operators/layer_norm_op.h"
-
-#include <cub/cub.cuh>
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/math/reduce.cuh"
+#include "caffe2/utils/math/utils.h"
 
 namespace caffe2 {
 
 namespace {
+
 template <typename T>
-struct SqrTransform {
-  inline __host__ __device__ T operator()(const T v) const {
-    return v * v;
-  }
-};
-
-// X = X - Y^2
-__global__ void sqrtXMinusYSquaredKernel(
+__global__ void ComputeStdDevAndFusedParamsCUDAKernel(
     const int N,
-    float* x,
-    const float* y,
-    const float epsilon) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-    x[i] = sqrtf(x[i] - y[i] * y[i] + epsilon);
+    const T epsilon,
+    const T* mean,
+    const T* var,
+    T* stddev,
+    T* scale,
+    T* bias);
+
+template <>
+__global__ void ComputeStdDevAndFusedParamsCUDAKernel<float>(
+    const int N,
+    const float epsilon,
+    const float* mean,
+    const float* var,
+    float* stddev,
+    float* scale,
+    float* bias) {
+  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < N) {
+#if __CUDA_ARCH__ >= 350
+    const float rstd = rsqrtf(__ldg(var + index) + epsilon);
+    stddev[index] = rstd * (__ldg(var + index) + epsilon);
+    scale[index] = rstd;
+    bias[index] = -rstd * __ldg(mean + index);
+#else
+    const float rstd = rsqrtf(var[index] + epsilon);
+    stddev[index] = rstd * (var[index] + epsilon);
+    scale[index] = rstd;
+    bias[index] = -rstd * mean[index];
+#endif
   }
 }
 
-// out[i, j] = (X[i, j] - mu[i]) / sigma[i]
-__global__ void normalizeKernel(
-    const int row_dim,
+template <typename T>
+__global__ void LayerNormForwardCUDAKernel(
+    const int M,
     const int N,
-    const float* x,
-    const float* mu,
-    const float* sigma,
-    float* out) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-    out[i] = (x[i] - mu[i / row_dim]) / (sigma[i / row_dim]);
+    const T* X,
+    const T* scale,
+    const T* bias,
+    T* Y);
+
+template <>
+__global__ void LayerNormForwardCUDAKernel<float>(
+    const int M,
+    const int N,
+    const float* X,
+    const float* scale,
+    const float* bias,
+    float* Y) {
+  const int size = M * N;
+  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < size) {
+    const int i = index / N;
+#if __CUDA_ARCH__ >= 350
+    Y[index] = fmaf(__ldg(X + index), __ldg(scale + i), __ldg(bias + i));
+#else
+    Y[index] = fmaf(X[index], scale[i], bias[i]);
+#endif
   }
 }
 
-template <typename InputIterator_t>
-void allocScratchAndReduce(
-    InputIterator_t input,
-    float* output,
-    int num_segments,
-    int* seg_indices,
-    Tensor* scratch,
-    cudaStream_t stream) {
-  size_t temp_storage_bytes;
-  cub::DeviceSegmentedReduce::Sum(
-      nullptr, // To retrieve required temporary storage size
-      temp_storage_bytes, // size_t &temp_storage_bytes
-      input, // InputIteratorT d_i
-      output, // OutputIteratorT d_out
-      num_segments, // int num_segments
-      seg_indices, // int *d_begin_offsets
-      seg_indices + 1, // int *d_end_offsets
-      stream // cudaStream_t stream=0
-      );
-  size_t temp_storage_floats = temp_storage_bytes / sizeof(float) +
-      (temp_storage_bytes % sizeof(float) ? 1 : 0);
-  scratch->Resize(vector<size_t>{temp_storage_floats});
+template <typename T>
+__global__ void ComputeInternalGradientsCUDAKernel(
+    const int M,
+    const int N,
+    const T* dY,
+    const T* X,
+    T* ds,
+    T* db) {
+  __shared__ typename BlockReduce<T>::TempStorage ds_storage;
+  __shared__ typename BlockReduce<T>::TempStorage db_storage;
+  const int i = blockIdx.x;
+  T ds_val = 0;
+  T db_val = 0;
+  for (int j = threadIdx.x; j < N; j += blockDim.x) {
+    const int index = i * N + j;
+#if __CUDA_ARCH__ >= 350
+    ds_val += __ldg(dY + index) * __ldg(X + index);
+    db_val += __ldg(dY + index);
+#else
+    ds_val += dY[index] * X[index];
+    db_val += dY[index];
+#endif
+  }
+  ds_val = BlockReduce<T>(ds_storage).Sum(ds_val);
+  db_val = BlockReduce<T>(db_storage).Sum(db_val);
+  if (threadIdx.x == 0) {
+    ds[i] = ds_val;
+    db[i] = db_val;
+  }
+}
 
-  cub::DeviceSegmentedReduce::Sum(
-      scratch->template mutable_data<float>(), // To retrieve required temporary
-                                               // storage size
-      temp_storage_bytes, // size_t &temp_storage_bytes
-      input, // InputIteratorT d_i
-      output, // OutputIteratorT d_out
-      num_segments, // int num_segments
-      seg_indices, // int *d_begin_offsets
-      seg_indices + 1, // int *d_end_offsets
-      stream // cudaStream_t stream=0
-  );
+template <typename T>
+__global__ void ComputeFusedParamsCUDAKernel(
+    const int M,
+    const int N,
+    const T* mean,
+    const T* sig,
+    const T* ds,
+    const T* db,
+    T* dY_scale,
+    T* X_scale,
+    T* bias);
+
+template <>
+__global__ void ComputeFusedParamsCUDAKernel<float>(
+    const int M,
+    const int N,
+    const float* mean,
+    const float* sig,
+    const float* ds,
+    const float* db,
+    float* dY_scale,
+    float* X_scale,
+    float* bias) {
+  const float scale = 1.0f / static_cast<float>(N);
+  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < M) {
+#if __CUDA_ARCH__ >= 350
+    const float rsig = 1.0f / __ldg(sig + index);
+    const float X_scale_val =
+        fmaf(__ldg(db + index), __ldg(mean + index), -__ldg(ds + index)) *
+        math::utils::Cube<float>(rsig) * scale;
+    dY_scale[index] = rsig;
+    X_scale[index] = X_scale_val;
+    bias[index] = -fmaf(
+        X_scale_val, __ldg(mean + index), __ldg(db + index) * rsig * scale);
+#else
+    const float rsig = 1.0f / sig[index];
+    const float X_scale_val = fmaf(db[index], mean[index], -ds[index]) *
+        math::utils::Cube<float>(rsig) * scale;
+    dY_scale[index] = rsig;
+    X_scale[index] = X_scale_val;
+    bias[index] = -fmaf(X_scale_val, mean[index], db[index] * rsig * scale);
+#endif
+  }
+}
+
+template <typename T>
+__global__ void LayerNormBackwardCUDAKenrel(
+    const int M,
+    const int N,
+    const T* dY_scale,
+    const T* dY,
+    const T* X_scale,
+    const T* X,
+    const T* bias,
+    T* dX);
+
+template <>
+__global__ void LayerNormBackwardCUDAKenrel<float>(
+    const int M,
+    const int N,
+    const float* dY_scale,
+    const float* dY,
+    const float* X_scale,
+    const float* X,
+    const float* bias,
+    float* dX) {
+  const int size = M * N;
+  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < size) {
+    const int i = index / N;
+#if __CUDA_ARCH__ >= 350
+    dX[index] = fmaf(
+        __ldg(dY + index),
+        __ldg(dY_scale + i),
+        fmaf(__ldg(X + index), __ldg(X_scale + i), __ldg(bias + i)));
+#else
+    dX[index] =
+        fmaf(dY[index], dY_scale[i], fmaf(X[index], X_scale[i], bias[i]));
+#endif
+  }
 }
 
 } //  namespace
 
 template <>
+template <typename T>
+void LayerNormOp<CUDAContext>::ComputeStdDevAndFusedParams(
+    const int N,
+    const T* mean,
+    const T* var,
+    T* stddev,
+    T* scale,
+    T* bias,
+    float epsilon,
+    CUDAContext* context) {
+  const int M = math::DivUp(N, CAFFE_CUDA_NUM_THREADS);
+  ComputeStdDevAndFusedParamsCUDAKernel<T>
+      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+          N, static_cast<T>(epsilon), mean, var, stddev, scale, bias);
+}
+
 template <>
-bool LayerNormOp<CUDAContext>::DoRunWithType<float>() {
-  const auto& input = Input(0);
-  auto* output = Output(0);
-  auto* mean = Output(1);
-  auto* stdev = Output(2);
-
-  CAFFE_ENFORCE_GE(input.dims().size(), 2, "LayerNorm requires input dim >= 2");
-
-  const auto canonical_axis = input.canonical_axis_index(axis_);
-  const int left = input.size_to_dim(canonical_axis);
-  const int right = input.size_from_dim(canonical_axis);
-
-  output->ResizeLike(input);
-  std::vector<int64_t> stats_dims(
-      input.dims().begin(), input.dims().begin() + canonical_axis);
-  stats_dims.push_back(1);
-  mean->Resize(stats_dims);
-  stdev->Resize(stats_dims);
-
-  std::vector<int> segs(left + 1);
-  std::iota(segs.begin(), segs.end(), 0);
-  std::transform(
-      segs.begin(),
-      segs.end(),
-      segs.begin(),
-      std::bind1st(std::multiplies<int>(), right));
-
-  seg_indices_.Resize(vector<size_t>{segs.size()});
-  context_.CopyBytesFromCPU(
-      sizeof(int) * segs.size(),
-      static_cast<void*>(segs.data()),
-      static_cast<void*>(seg_indices_.mutable_data<int>()));
-
-  if (right == 1) {
-    mean->CopyFrom(input);
-    mean->Resize(stats_dims);
-    math::Set<float, CUDAContext>(
-        left, sqrtf(epsilon_), stdev->mutable_data<float>(), &context_);
-  } else {
-    // Calculate row-wise means
-    // First stage: sum up feature vectors
-    allocScratchAndReduce(
-        input.data<float>(),
-        mean->mutable_data<float>(),
-        left,
-        seg_indices_.mutable_data<int>(),
-        &scratch_,
-        context_.cuda_stream());
-
-    // Second stage: Normalize by feature vector dim
-    math::Scale<float, float, CUDAContext>(
-        left,
-        1.0f / right,
-        mean->mutable_data<float>(),
-        mean->mutable_data<float>(),
-        &context_);
-
-    // Calculate row-wise standard deviation
-
-    // First stage: sum up row-wise squared values
-    SqrTransform<float> transform;
-    cub::TransformInputIterator<float, SqrTransform<float>, const float*> it(
-        input.data<float>(), transform);
-    allocScratchAndReduce(
-        it,
-        stdev->mutable_data<float>(),
-        left,
-        seg_indices_.mutable_data<int>(),
-        &scratch_,
-        context_.cuda_stream());
-
-    // Second stage: Normalize by feature vector dim
-    math::Scale<float, float, CUDAContext>(
-        left,
-        1.0f / right,
-        stdev->mutable_data<float>(),
-        stdev->mutable_data<float>(),
-        &context_);
-
-    // stddev = sqrt(E(x^2) - E(x)^2 + epsilon)
-    sqrtXMinusYSquaredKernel<<<
-        CAFFE_GET_BLOCKS(left),
-        CAFFE_CUDA_NUM_THREADS,
-        0,
-        context_.cuda_stream()>>>(
-        left,
-        stdev->mutable_data<float>(),
-        mean->mutable_data<float>(),
-        epsilon_);
-  }
-
-  // out[i, j] = (in[i,j] - mu[i]) / (sigma[i])
-  normalizeKernel<<<
-      CAFFE_GET_BLOCKS(left),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      right,
-      left * right,
-      input.data<float>(),
-      mean->data<float>(),
-      stdev->data<float>(),
-      output->mutable_data<float>());
-
-  return true;
+template <typename T>
+void LayerNormOp<CUDAContext>::LayerNormForward(
+    const int M,
+    const int N,
+    const T* X,
+    const T* scale,
+    const T* bias,
+    T* Y,
+    CUDAContext* context) {
+  const int K = math::DivUp(M * N, CAFFE_CUDA_NUM_THREADS);
+  LayerNormForwardCUDAKernel<T>
+      <<<K, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
+          M, N, X, scale, bias, Y);
 }
 
 REGISTER_CUDA_OPERATOR(LayerNorm, LayerNormOp<CUDAContext>);
 
-namespace {
-// x : [N, D]
-// y : [N, 1]
-// z : [N, D]
-// (x - broadcast(y)) * z
-__global__ void zTimesXminusYbroadcast(
-    int N,
-    int D,
-    const float* x,
-    const float* y,
-    const float* z,
-    float* out) {
-  CUDA_1D_KERNEL_LOOP(i, N * D) {
-    out[i] = (x[i] - y[i / D]) * z[i];
-  }
+template <>
+template <typename T>
+void LayerNormGradientOp<CUDAContext>::ComputeInternalGradients(
+    const int M,
+    const int N,
+    const T* dY,
+    const T* X,
+    T* ds,
+    T* db) {
+  ComputeInternalGradientsCUDAKernel<T>
+      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          M, N, dY, X, ds, db);
 }
-
-__global__ void normalizeByNegStdev(
-    int N,
-    bool var,
-    const float* x,
-    const float* stdev,
-    float* out) {
-  if (var) {
-    CUDA_1D_KERNEL_LOOP(i, N) {
-      out[i] = (-1.0f * x[i]) / (stdev[i] * stdev[i]);
-    }
-  } else {
-    CUDA_1D_KERNEL_LOOP(i, N) {
-      out[i] = (-1.0f * x[i]) / (stdev[i]);
-    }
-  }
-}
-
-__global__ void gradientMegaKernel(
-    int N,
-    int D,
-    const float* stdev,
-    const float* X,
-    const float* dstdev,
-    const float* dmean,
-    const float* dout,
-    float* out) {
-  CUDA_1D_KERNEL_LOOP(i, N * D) {
-    out[i] = 1.0f / stdev[i / D] * dout[i] +
-        X[i] / (D * stdev[i / D]) * dstdev[i / D] + 1.0f / D * dmean[i / D];
-  }
-}
-
-#define PRINT(X, N, D) printTensor >> (X, N, D)
-
-} // namespace
 
 template <>
+template <typename T>
+void LayerNormGradientOp<CUDAContext>::ComputeFusedParams(
+    const int M,
+    const int N,
+    const T* mean,
+    const T* sig,
+    const T* ds,
+    const T* db,
+    T* dY_scale,
+    T* X_scale,
+    T* bias) {
+  const int K = math::DivUp(M, CAFFE_CUDA_NUM_THREADS);
+  ComputeFusedParamsCUDAKernel<T>
+      <<<K, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          M, N, mean, sig, ds, db, dY_scale, X_scale, bias);
+}
+
 template <>
-bool LayerNormGradientOp<CUDAContext>::DoRunWithType<float>() {
-  const auto& dout = Input(0);
-  const auto& norm_outputs = Input(1);
-  const auto& means = Input(2);
-  const auto& stdev = Input(3);
-  const auto& norm_inputs = Input(4);
-  auto* ginput = Output(0);
-
-  const auto canonical_axis = norm_inputs.canonical_axis_index(axis_);
-  const unsigned long left = norm_inputs.size_to_dim(canonical_axis);
-  const unsigned long right = norm_inputs.size_from_dim(canonical_axis);
-
-  ginput->ResizeLike(norm_inputs);
-  std::vector<int64_t> stats_dims(
-      norm_inputs.dims().begin(), norm_inputs.dims().begin() + canonical_axis);
-  stats_dims.push_back(1);
-  dmean_.Resize(stats_dims);
-  dstdev_.Resize(stats_dims);
-  gscratch_.Resize(std::vector<size_t>{left, right});
-
-  std::vector<int> segs(left + 1);
-  std::iota(segs.begin(), segs.end(), 0);
-  std::transform(
-      segs.begin(),
-      segs.end(),
-      segs.begin(),
-      std::bind1st(std::multiplies<int>(), right));
-
-  seg_indices_.Resize(vector<size_t>{segs.size()});
-  context_.CopyBytesFromCPU(
-      sizeof(int) * segs.size(),
-      static_cast<void*>(segs.data()),
-      static_cast<void*>(seg_indices_.mutable_data<int>()));
-
-  // Calculate gradient of the standard deviation
-  // temp1 = (x - mean) * dout
-  zTimesXminusYbroadcast<<<
-      CAFFE_GET_BLOCKS(left * right),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      left,
-      right,
-      norm_inputs.data<float>(),
-      means.data<float>(),
-      dout.data<float>(),
-      gscratch_.mutable_data<float>());
-
-  dstdev_.Resize(vector<size_t>{left, 1});
-  // dstdev = reduce(temp1)
-  allocScratchAndReduce(
-      gscratch_.data<float>(),
-      dstdev_.mutable_data<float>(),
-      left,
-      seg_indices_.mutable_data<int>(),
-      &scratch_,
-      context_.cuda_stream());
-  // dstdev = -dstdev / sqrt(stdev)
-  normalizeByNegStdev<<<
-      CAFFE_GET_BLOCKS(left),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      left,
-      true,
-      dstdev_.data<float>(),
-      stdev.data<float>(),
-      dstdev_.mutable_data<float>());
-
-  // Calculate gradient of the mean
-  // dmean = reduce(dout)
-  allocScratchAndReduce(
-      dout.data<float>(),
-      dmean_.mutable_data<float>(),
-      left,
-      seg_indices_.mutable_data<int>(),
-      &scratch_,
-      context_.cuda_stream());
-  // mean * stdev
-  math::Mul(
-      left,
-      means.data<float>(),
-      dstdev_.data<float>(),
-      gscratch_.mutable_data<float>(),
-      &context_);
-  // [\sum dout] + mean * stdev
-  math::Add(
-      left,
-      dmean_.data<float>(),
-      gscratch_.data<float>(),
-      dmean_.mutable_data<float>(),
-      &context_);
-  // -1 / std * [[\sum dout] + mean * stdev]
-  normalizeByNegStdev<<<
-      CAFFE_GET_BLOCKS(left),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      left,
-      false,
-      dmean_.data<float>(),
-      stdev.data<float>(),
-      dmean_.mutable_data<float>());
-
-  // Calculate gradient of input
-  gradientMegaKernel<<<
-      CAFFE_GET_BLOCKS(left),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      left,
-      right,
-      stdev.data<float>(),
-      norm_inputs.data<float>(),
-      dstdev_.data<float>(),
-      dmean_.data<float>(),
-      dout.data<float>(),
-      ginput->mutable_data<float>());
-
-  return true;
+template <typename T>
+void LayerNormGradientOp<CUDAContext>::LayerNormBackward(
+    const int M,
+    const int N,
+    const T* dY_scale,
+    const T* dY,
+    const T* X_scale,
+    const T* X,
+    const T* bias,
+    T* dX) {
+  const int K = math::DivUp(M * N, CAFFE_CUDA_NUM_THREADS);
+  LayerNormBackwardCUDAKenrel<T>
+      <<<K, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          M, N, dY_scale, dY, X_scale, X, bias, dX);
 }
 
 REGISTER_CUDA_OPERATOR(LayerNormGradient, LayerNormGradientOp<CUDAContext>);
 
 } // namespace caffe2
+
+C10_REGISTER_CAFFE2_OPERATOR_CUDA(
+    LayerNorm,
+    caffe2::LayerNormOp<caffe2::CUDAContext>)
+
+namespace caffe2 {
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(
+    "_caffe2::LayerNorm",
+    C10LayerNorm_DontUseThisOpYet);
+}

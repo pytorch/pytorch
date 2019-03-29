@@ -17,35 +17,22 @@ using namespace nom::repr;
 using NodeRef = NNGraph::NodeRef;
 using EdgeRef = NNGraph::EdgeRef;
 
-class GroupAnnotation {
- public:
+struct GroupAnnotation {
   GroupAnnotation(int i, int g = -1) : group(g), in_degree(i) {}
   int group;
   int in_degree;
   bool needs_transform{true};
 };
 
-struct VisitorContext {
-  VisitorContext(std::function<bool(const caffe2::OperatorDef&)> func)
-      : predicate(func) {}
-  std::unordered_map<NodeRef, GroupAnnotation> infos;
-  std::unordered_set<NodeRef> frontier;
-  std::vector<NodeRef> current_group;
-  std::function<bool(const caffe2::OperatorDef&)> predicate;
-
-  int group{0};
-  bool find_supported{true};
-};
-
 std::string ShowNode(NodeRef node) {
   if (nn::is<NeuralNetData>(node)) {
     const auto* nn_tensor = nn::get<NeuralNetData>(node);
-    return MakeString("Tensor: ", nn_tensor->getName());
+    return c10::str("Tensor: ", nn_tensor->getName());
   } else if (nn::is<NeuralNetOperator>(node)) {
     const auto* nn_op = nn::get<NeuralNetOperator>(node);
     const auto& op_def =
         dyn_cast<Caffe2Annotation>(nn_op->getAnnotation())->getOperatorDef();
-    return MakeString("Op: ", op_def.type());
+    return c10::str("Op: ", op_def.type());
   } else {
     CAFFE_THROW("Known node");
   }
@@ -57,8 +44,8 @@ void DumpGraph(NNGraph* g) {
     assert(node->data() && "Node doesn't have data, can't render it");
     if (isa<NeuralNetOperator>(node->data())) {
       auto* op = dyn_cast<NeuralNetOperator>(node->data().get());
-      labelMap["label"] = op->getName() + " (" +
-          caffe2::to_string((unsigned long long)node) + ")";
+      labelMap["label"] =
+          op->getName() + " (" + c10::to_string((unsigned long long)node) + ")";
       auto* annotation = op->getAnnotation();
       if (annotation && isa<Caffe2Annotation>(annotation)) {
         auto device_annotation = dyn_cast<Caffe2Annotation>(annotation);
@@ -73,8 +60,8 @@ void DumpGraph(NNGraph* g) {
     } else if (isa<Data>(node->data())) {
       auto tensor = dyn_cast<NeuralNetData>(node->data().get());
       labelMap["label"] = tensor->getName();
-      labelMap["label"] += "_" + caffe2::to_string(tensor->getVersion()) + " " +
-          caffe2::to_string((unsigned long long)node);
+      labelMap["label"] += "_" + c10::to_string(tensor->getVersion()) + " " +
+          c10::to_string((unsigned long long)node);
     }
     return labelMap;
   };
@@ -82,6 +69,36 @@ void DumpGraph(NNGraph* g) {
   std::ofstream out("dump.dot");
   out << nom::converters::convertToDotString(g, nnprinter);
   out.close();
+}
+
+struct VisitorContext {
+  VisitorContext(std::function<bool(const caffe2::OperatorDef&)> func)
+      : predicate(func) {}
+
+  std::unordered_map<NodeRef, GroupAnnotation> infos;
+  std::unordered_set<NodeRef> frontier;
+  std::vector<NodeRef> current_group;
+  std::function<bool(const caffe2::OperatorDef&)> predicate;
+
+  int group{0};
+  bool find_supported{true};
+};
+
+GroupAnnotation& GetInfo(
+    std::unordered_map<NodeRef, GroupAnnotation>& infos,
+    NodeRef node) {
+  auto it = infos.find(node);
+  CAFFE_ENFORCE(it != infos.end(), "Node info not found for ", ShowNode(node));
+  return it->second;
+}
+
+const GroupAnnotation& GetInfo(
+    const std::unordered_map<NodeRef, GroupAnnotation>& infos,
+    NodeRef node) {
+  auto it = infos.find(node);
+  CAFFE_ENFORCE(
+      it != infos.end(), "Const node info not found for ", ShowNode(node));
+  return it->second;
 }
 
 // Explore the graph in topological order until we hit stopping nodes. This is
@@ -99,7 +116,7 @@ void Explore(
   while (!q.empty()) {
     auto node = q.front();
     q.pop();
-    auto& info = context->infos.at(node);
+    auto& info = GetInfo(context->infos, node);
 
     // Check if the node is supported, stop exploring further if not supported
     if (nn::is<NeuralNetOperator>(node)) {
@@ -122,7 +139,7 @@ void Explore(
     // Continue exploring its fanouts
     for (const auto& out_edge : node->getOutEdges()) {
       auto child_node = out_edge->head();
-      auto& child_info = context->infos.at(child_node);
+      auto& child_info = GetInfo(context->infos, child_node);
       if (--child_info.in_degree == 0) {
         q.push(child_node);
       }
@@ -216,7 +233,7 @@ void DetectBoundaryReferences(
     // inputs
     for (auto in_edge : node->getInEdges()) {
       auto parent_node = in_edge->tail();
-      const auto& info = infos.at(parent_node);
+      const auto& info = GetInfo(infos, parent_node);
       if (info.group != subgraph->group_id &&
           nn::is<NeuralNetData>(parent_node)) {
         const auto* nn_tensor = nn::get<const NeuralNetData>(parent_node);
@@ -238,7 +255,7 @@ void DetectBoundaryReferences(
       subgraph->external_output_refs.emplace(name, node);
     } else {
       for (auto child_node : nn::getConsumers(node)) {
-        const auto& info = infos.at(child_node);
+        const auto& info = GetInfo(infos, child_node);
         if (info.group != subgraph->group_id) {
           subgraph->external_output_refs.emplace(name, node);
           break;
@@ -329,7 +346,8 @@ void PruneUnrefereredNodes(NNModule* nn) {
 caffe2::NetDef OptimizeForBackend(
     caffe2::NetDef& net,
     std::function<bool(const caffe2::OperatorDef&)> supports,
-    std::function<caffe2::NetDef(const caffe2::NetDef&)> transform_func) {
+    std::function<caffe2::NetDef(const caffe2::NetDef&)> transform_func,
+    bool debug) {
   auto nn = convertToNNModule(net);
   auto& dfg = nn.dataFlow;
 
@@ -395,6 +413,10 @@ caffe2::NetDef OptimizeForBackend(
   // Prune dangling nodes, because after transformation, some weights might be
   // absorbed
   PruneUnrefereredNodes(&nn);
+
+  if (debug) {
+    DumpGraph(&dfg);
+  }
 
   auto new_net = convertToCaffe2Proto(nn);
   new_net.set_name(net.name() + "_opt");

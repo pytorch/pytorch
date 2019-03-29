@@ -28,7 +28,7 @@ class CAFFE2_API PatternNetTransform : public Transform {
         "External outputs do not match!");
     ordered_ops_ = GetPatternTraversalOrder(p_);
     inverse_ops_.resize(ordered_ops_.size());
-    for (int i = 0; i < ordered_ops_.size(); i++) {
+    for (size_t i = 0; i < ordered_ops_.size(); i++) {
       inverse_ops_[ordered_ops_[i]] = i;
     }
   }
@@ -124,7 +124,7 @@ class CAFFE2_API PatternNetTransform : public Transform {
   bool argument_match_ = false;
 
   const string TransformBlobWrapper(const string& blob_name) {
-    return "transform/" + blob_name + "_" + caffe2::to_string(ssa_id_);
+    return "transform/" + blob_name + "_" + c10::to_string(ssa_id_);
   }
 
   int ssa_id_ = 0;

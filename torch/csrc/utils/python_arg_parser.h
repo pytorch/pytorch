@@ -40,22 +40,23 @@
 //      they only bind to Tensor).
 
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
-#include "torch/csrc/Device.h"
-#include "torch/csrc/Dtype.h"
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/Generator.h"
-#include "torch/csrc/autograd/generated/VariableType.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/tensor/python_tensor.h"
-#include "torch/csrc/utils/numpy_stub.h"
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/utils/python_numbers.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/autograd/variable.h"
+#include <torch/csrc/Device.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Generator.h>
+#include <torch/csrc/autograd/generated/VariableType.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/utils/numpy_stub.h>
+#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/six.h>
+#include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
 
@@ -80,6 +81,7 @@ struct PythonArgs;
 // Contains bound Python arguments in declaration order
 template<int N>
 struct ParsedArgs {
+  ParsedArgs() : args() { }
   PyObject* args[N];
 };
 
@@ -124,12 +126,14 @@ struct PythonArgs {
   inline at::Storage storage(int i);
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
-  inline at::optional<at::ScalarType> scalartypeOptional(int i);
+  inline c10::optional<at::ScalarType> scalartypeOptional(int i);
+  inline c10::optional<at::Scalar> scalarOptional(int i);
+  inline c10::optional<int64_t> toInt64Optional(int i);
   inline const THPLayout& layout(int i);
   inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
-  inline at::optional<at::Device> deviceOptional(int i);
+  inline c10::optional<at::Device> deviceOptional(int i);
   inline std::string string(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
@@ -227,7 +231,7 @@ inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar
   // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
   // handle most NumPy scalar types except np.float64.
   if (THPVariable_Check(args[i])) {
-    return at::_local_scalar(((THPVariable*)args[i])->cdata);
+    return ((THPVariable*)args[i])->cdata.item();
   }
   if (THPUtils_checkLong(args[i])) {
     return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
@@ -239,17 +243,22 @@ inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar
   return at::Scalar(THPUtils_unpackDouble(args[i]));
 }
 
+inline c10::optional<at::Scalar> PythonArgs::scalarOptional(int i) {
+  if (!args[i]) return c10::nullopt;
+  return scalar(i);
+}
+
 inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
   if (!args[i]) return std::vector<at::Tensor>();
-  PyObject* arg = args[i];
-  auto tuple = PyTuple_Check(arg);
-  auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  auto tuple = six::isTuple(args[i]);
+  THPObjectPtr arg = six::maybeAsTuple(args[i]);
+  auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
   std::vector<at::Tensor> res(size);
   for (int idx = 0; idx < size; idx++) {
-    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
     if (!THPVariable_Check(obj)) {
       throw TypeError("expected Tensor as element %d in argument %d, but got %s",
-                 idx, i, Py_TYPE(args[i])->tp_name);
+                 idx, i, Py_TYPE(obj)->tp_name);
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
@@ -259,18 +268,18 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
 template<int N>
 inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   auto res = std::array<at::Tensor, N>();
-  PyObject* arg = args[i];
-  if (!arg) return res;
-  auto tuple = PyTuple_Check(arg);
-  auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  if (!args[i]) return res;
+  auto tuple = six::isTuple(args[i]);
+  THPObjectPtr arg = six::maybeAsTuple(args[i]);
+  auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
   if (size != N) {
     throw TypeError("expected tuple of %d elements but got %d", N, (int)size);
   }
   for (int idx = 0; idx < size; idx++) {
-    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
     if (!THPVariable_Check(obj)) {
       throw TypeError("expected Tensor as element %d in argument %d, but got %s",
-                 idx, i, Py_TYPE(args[i])->tp_name);
+                 idx, i, Py_TYPE(obj)->tp_name);
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
@@ -295,17 +304,17 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
       // Elements of torch.Size are tensors during tracing, and we need to record extra
-      // information before they are turned into an IntList
+      // information before they are turned into an IntArrayRef
       if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
         auto & var = THPVariable_Unpack(obj);
-        jit::tracer::ArgumentStash::stashIntListElem(
+        jit::tracer::ArgumentStash::stashIntArrayRefElem(
             signature.params[i].name, size, idx, var);
-        res[idx] = var.toCLong();
+        res[idx] = var.item<int64_t>();
         continue;
       } else {
         res[idx] = THPUtils_unpackIndex(obj);
       }
-    } catch (std::runtime_error &e) {
+    } catch (const std::exception &e) {
       throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
           signature.name.c_str(), signature.params[i].name.c_str(),
           signature.params[i].type_name().c_str(), Py_TYPE(obj)->tp_name, idx + 1);
@@ -328,8 +337,9 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
   return reinterpret_cast<THPDtype*>(args[i])->scalar_type;
 }
 
-inline at::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
-  if (!args[i]) return at::nullopt;
+inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
+  if (!args[i])
+    return c10::nullopt;
   return scalartype(i);
 }
 
@@ -362,21 +372,8 @@ inline at::Device PythonArgs::device(int i) {
     AT_CHECK(device_index >= 0, "Device index must not be negative");
     return at::Device(at::DeviceType::CUDA, device_index);
   }
-  const std::string device_str = THPUtils_unpackString(args[i]);
-  if (device_str == cpu_str) {
-    return at::Device(at::DeviceType::CPU);
-  } else if (device_str == cuda_str) {
-    return at::Device(at::DeviceType::CUDA);
-  } else if (device_str.compare(0, cpu_prefix.length(), cpu_prefix) == 0) {
-    const auto device_index = std::stoi(device_str.substr(cpu_prefix.length()));
-    AT_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(at::DeviceType::CPU, device_index);
-  } else if (device_str.compare(0, cuda_prefix.length(), cuda_prefix) == 0) {
-    const auto device_index = std::stoi(device_str.substr(cuda_prefix.length()));
-    AT_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(at::DeviceType::CUDA, device_index);
-  }
-  throw torch::TypeError("only \"cuda\" and \"cpu\" are valid device types, got %s", device_str.c_str());
+  const std::string &device_str = THPUtils_unpackString(args[i]);
+  return at::Device(device_str);
 }
 
 inline at::Device PythonArgs::deviceWithDefault(int i, const at::Device& default_device) {
@@ -384,8 +381,9 @@ inline at::Device PythonArgs::deviceWithDefault(int i, const at::Device& default
   return device(i);
 }
 
-inline at::optional<at::Device> PythonArgs::deviceOptional(int i) {
-  if (!args[i]) return at::nullopt;
+inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
+  if (!args[i])
+    return c10::nullopt;
   return device(i);
 }
 
@@ -396,11 +394,22 @@ inline std::string PythonArgs::string(int i) {
 
 inline int64_t PythonArgs::toInt64(int i) {
   if (!args[i]) return signature.params[i].default_int;
+  if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
+    auto & var = THPVariable_Unpack(args[i]);
+    jit::tracer::ArgumentStash::stashValue(
+        signature.params[i].name, idx, var, jit::IntType::get());
+  }
   return THPUtils_unpackLong(args[i]);
 }
 
 inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {
   if (!args[i]) return default_int;
+  return toInt64(i);
+}
+
+inline c10::optional<int64_t> PythonArgs::toInt64Optional(int i) {
+  if (!args[i])
+    return c10::nullopt;
   return toInt64(i);
 }
 

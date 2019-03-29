@@ -10,6 +10,10 @@ setlocal
 SET ORIGINAL_DIR=%cd%
 SET CAFFE2_ROOT=%~dp0%..
 
+if NOT DEFINED BUILD_BINARY (
+  set BUILD_BINARY=OFF
+)
+
 if NOT DEFINED CAFFE2_STATIC_LINK_CUDA (
   set CAFFE2_STATIC_LINK_CUDA=OFF
 )
@@ -41,7 +45,7 @@ if NOT DEFINED CMAKE_GENERATOR (
     :: In default we use win64 VS 2015.
     :: Main reason is that currently, cuda 9 does not support VS 2017 newest
     :: version. To use cuda you will have to use 2015.
-    set CMAKE_GENERATOR="Visual Studio 14 2015 Win64"
+    set CMAKE_GENERATOR="Visual Studio 15 2017 Win64"
   )
 )
 
@@ -57,9 +61,10 @@ cd %CAFFE2_ROOT%\build
 
 :: Set up cmake. We will skip building the test files right now.
 :: TODO: enable cuda support.
-cmake .. ^
+cmake ^
   -G%CMAKE_GENERATOR% ^
   -DBUILD_TEST=OFF ^
+  -DBUILD_BINARY=%BUILD_BINARY% ^
   -DCMAKE_BUILD_TYPE=%CMAKE_BUILD_TYPE% ^
   -DCAFFE2_STATIC_LINK_CUDA=%CAFFE2_STATIC_LINK_CUDA% ^
   -DUSE_CUDA=%USE_CUDA% ^
@@ -75,6 +80,8 @@ cmake .. ^
   -DUSE_OPENCV=OFF ^
   -DBUILD_SHARED_LIBS=OFF ^
   -DBUILD_PYTHON=OFF^
+  -DPYTHON_EXECUTABLE=python^
+  .. ^
   || goto :label_error
 
 :: Actually run the build

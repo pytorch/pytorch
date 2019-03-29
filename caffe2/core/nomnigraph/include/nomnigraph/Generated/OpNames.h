@@ -1,3 +1,4 @@
+
 case NNKind::Relu:
   return "Relu";
 
@@ -75,3 +76,9 @@ case NNKind::NCHW2NHWC:
 
 case NNKind::NHWC2NCHW:
   return "NHWC2NCHW";
+
+case NNKind::Declare:
+  return "Declare";
+
+case NNKind::Export:
+  return "Export";

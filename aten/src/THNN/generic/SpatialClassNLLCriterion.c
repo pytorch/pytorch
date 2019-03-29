@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SpatialClassNLLCriterion.c"
+#define TH_GENERIC_FILE "THNN/generic/SpatialClassNLLCriterion.c"
 #else
 
 #define INITIAL_CHECK                                                            \
@@ -59,7 +59,6 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   INITIAL_CHECK;
   THTensor_(resize1d)(output, 1);
   THTensor_(resize1d)(total_weight, 1);
-  ignore_index -= TH_INDEX_BASE;
 
   if (reduction == Reduction::None) {
     int64_t batch_size = THTensor_(size)(input, 0);
@@ -72,7 +71,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
     for (b = 0; b < batch_size; b++) {
       for (h = 0; h < H; h++) {
         for (w = 0; w < W; w++) {
-          int64_t cur_target = (int64_t)THIndexTensor_(get3d)(target, b, h, w) - TH_INDEX_BASE;
+          int64_t cur_target = (int64_t)THIndexTensor_(get3d)(target, b, h, w);
           if (cur_target == ignore_index) {
             THTensor_(fastSet3d)(output, b, h, w, 0.0f);
             continue;
@@ -105,7 +104,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   scalar_t output_acc = 0;
   for (int b = 0; b < batch_size; b++) {
     for (int elem = 0; elem < map_size; elem++) {
-      int cur_target = target_data[b * map_size + elem] - TH_INDEX_BASE;
+      int cur_target = target_data[b * map_size + elem];
       if (cur_target == ignore_index) continue;
       THAssert(cur_target >= 0 && cur_target < n_classes);
 
@@ -117,7 +116,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   *total_weight_data = total_weight_acc;
   *output_data = output_acc;
 
-  if (reduction == Reduction::ElementwiseMean && *total_weight_data)
+  if (reduction == Reduction::Mean && *total_weight_data)
     *output_data /= *total_weight_data;
 
   c10::raw::intrusive_ptr::decref(input);
@@ -143,7 +142,6 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   THArgCheck(THTensor_(isContiguous)(gradInput), 4,
               "gradInput must be contiguous");
   THNN_CHECK_SHAPE(input, gradInput);
-  ignore_index -= TH_INDEX_BASE;
 
   if (reduction == Reduction::None) {
     GRADOUTPUT_SHAPE_CHECK;
@@ -157,7 +155,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
     for (b = 0; b < batch_size; b++) {
       for (h = 0; h < H; h++) {
         for (w = 0; w < W; w++) {
-          int64_t cur_target = (int64_t)THIndexTensor_(get3d)(target, b, h, w) - TH_INDEX_BASE;
+          int64_t cur_target = (int64_t)THIndexTensor_(get3d)(target, b, h, w);
           if (cur_target == ignore_index) {
             continue;
           }
@@ -188,14 +186,14 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   int64_t map_size = THTensor_(size)(input, 2) * THTensor_(size)(input, 3);
   int64_t sample_size = map_size * n_classes;
 
-  scalar_t normalize = (reduction == Reduction::ElementwiseMean) ? *total_weight_data : 1.0f;
+  scalar_t normalize = (reduction == Reduction::Mean) ? *total_weight_data : 1.0f;
 
   int b;
   #pragma omp parallel for
   for (b = 0; b < batch_size; b++) {
     int elem;
     for (elem = 0; elem < map_size; elem++) {
-      int cur_target = target_data[b * map_size + elem] - TH_INDEX_BASE;
+      int cur_target = target_data[b * map_size + elem];
       if (cur_target == ignore_index) continue;
       THAssert(cur_target >= 0 && cur_target < n_classes);
 

@@ -1,2 +1,2 @@
 #pragma once
-#include <ATen/core/Device.h>
+#include <c10/core/Device.h>

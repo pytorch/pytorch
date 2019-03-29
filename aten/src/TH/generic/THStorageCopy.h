@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THStorageCopy.h"
+#define TH_GENERIC_FILE "TH/generic/THStorageCopy.h"
 #else
 
 /* Support for copy between different Storage types */
@@ -14,5 +14,6 @@ TH_API void THStorage_(copyLong)(THStorage *storage, struct THLongStorage *src);
 TH_API void THStorage_(copyFloat)(THStorage *storage, struct THFloatStorage *src);
 TH_API void THStorage_(copyDouble)(THStorage *storage, struct THDoubleStorage *src);
 TH_API void THStorage_(copyHalf)(THStorage *storage, struct THHalfStorage *src);
+TH_API void THStorage_(copyBool)(THStorage *storage, struct THBoolStorage *src);
 
 #endif

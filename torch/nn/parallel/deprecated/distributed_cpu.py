@@ -4,6 +4,7 @@ import torch.distributed.deprecated as dist
 from torch.nn.modules import Module
 from collections import defaultdict
 from torch.autograd import Variable
+import torch.utils.hooks
 
 
 class DistributedDataParallelCPU(Module):
@@ -19,7 +20,7 @@ class DistributedDataParallelCPU(Module):
 
     This module could be used in conjunction with the DistributedSampler,
     (see :class `torch.utils.data.distributed.DistributedSampler`)
-    which will load a subset of the original datset for each node with the same
+    which will load a subset of the original dataset for each node with the same
     batch size. So strong scaling should be configured like this:
         n = 1, batch size = 128
         n = 2, batch size = 64
@@ -90,6 +91,7 @@ class DistributedDataParallelCPU(Module):
                         buf.copy_(synced)
 
         for param in list(self.module.parameters()):
+            @torch.utils.hooks.unserializable_hook
             def allreduce_hook(*unused):
                 Variable._execution_engine.queue_callback(allreduce_params)
 

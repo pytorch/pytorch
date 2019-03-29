@@ -137,18 +137,14 @@ void LSTMUnitGradient(
 template <typename Context>
 class LSTMUnitOp : public Operator<Context> {
  public:
-  LSTMUnitOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit LSTMUnitOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        forget_bias_(
-            static_cast<float>(this->template GetSingleArgument<float>(
-                "forget_bias",
-                0.0))),
-        sequence_lengths_(this->template GetSingleArgument<bool>(
-            "sequence_lengths",
-            true)),
-        drop_states_(this->template GetSingleArgument<bool>(
-            "drop_states",
-            false)) {}
+        forget_bias_(static_cast<float>(
+            this->template GetSingleArgument<float>("forget_bias", 0.0))),
+        sequence_lengths_(
+            this->template GetSingleArgument<bool>("sequence_lengths", true)),
+        drop_states_(
+            this->template GetSingleArgument<bool>("drop_states", false)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   using Operator<Context>::Operator;
 
@@ -158,11 +154,11 @@ class LSTMUnitOp : public Operator<Context> {
     const size_t TIMESTEP = SEQ_LENGTHS + (sequence_lengths_ ? 1 : 0);
 
     // Extract N
-    const auto N = Input(CELL_T_M_1).dim(1);
+    const auto N = Input(CELL_T_M_1).size(1);
 
     // Gates: 1xNxG
-    const auto G = Input(GATES).dim(2);
-    const auto D = Input(CELL_T_M_1).dim(2);
+    const auto G = Input(GATES).size(2);
+    const auto D = Input(CELL_T_M_1).size(2);
 
     CAFFE_ENFORCE_EQ(4 * D, G);
     const auto* H_prev = Input(HIDDEN_T_M_1).template data<T>();
@@ -171,7 +167,7 @@ class LSTMUnitOp : public Operator<Context> {
 
     const int32_t* seqLengths = nullptr;
     if (sequence_lengths_) {
-      CAFFE_ENFORCE_EQ(Input(SEQ_LENGTHS).size(), N);
+      CAFFE_ENFORCE_EQ(Input(SEQ_LENGTHS).numel(), N);
       seqLengths = Input(SEQ_LENGTHS).template data<int32_t>();
     }
 
@@ -218,18 +214,15 @@ class LSTMUnitOp : public Operator<Context> {
 template <typename Context>
 class LSTMUnitGradientOp : public Operator<Context> {
  public:
-  LSTMUnitGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        forget_bias_(
-            static_cast<float>(this->template GetSingleArgument<float>(
-                "forget_bias",
-                0.0))),
-        sequence_lengths_(this->template GetSingleArgument<bool>(
-            "sequence_lengths",
-            true)),
-        drop_states_(this->template GetSingleArgument<bool>(
-            "drop_states",
-            false)) {}
+  template <class... Args>
+  explicit LSTMUnitGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        forget_bias_(static_cast<float>(
+            this->template GetSingleArgument<float>("forget_bias", 0.0))),
+        sequence_lengths_(
+            this->template GetSingleArgument<bool>("sequence_lengths", true)),
+        drop_states_(
+            this->template GetSingleArgument<bool>("drop_states", false)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   template <typename T>
@@ -243,11 +236,11 @@ class LSTMUnitGradientOp : public Operator<Context> {
     const size_t CELL_T_GRAD = inputOffset + 4;
 
     // Extract N
-    const auto N = Input(CELL_T_M_1).dim(1);
+    const auto N = Input(CELL_T_M_1).size(1);
 
     // Gates: 1xNxG
-    const auto G = Input(GATES).dim(2);
-    const auto D = Input(CELL_T_M_1).dim(2);
+    const auto G = Input(GATES).size(2);
+    const auto D = Input(CELL_T_M_1).size(2);
 
     CAFFE_ENFORCE_EQ(4 * D, G);
     const auto* C_prev = Input(CELL_T_M_1).template data<T>();
@@ -262,7 +255,7 @@ class LSTMUnitGradientOp : public Operator<Context> {
 
     const int32_t* seqLengths = nullptr;
     if (sequence_lengths_) {
-      CAFFE_ENFORCE_EQ(Input(SEQ_LENGTHS).size(), N);
+      CAFFE_ENFORCE_EQ(Input(SEQ_LENGTHS).numel(), N);
       seqLengths = Input(SEQ_LENGTHS).template data<int32_t>();
     }
 

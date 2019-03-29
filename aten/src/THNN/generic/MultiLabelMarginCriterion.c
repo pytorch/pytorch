@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/MultiLabelMarginCriterion.c"
+#define TH_GENERIC_FILE "THNN/generic/MultiLabelMarginCriterion.c"
 #else
 
 // TODO: improve error messages
@@ -35,8 +35,8 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
              && (target->size(1) == dim), "inconsistent target size");
   }
 
-  THArgCheck(THIndexTensor_(minall)(target) >= -1+TH_INDEX_BASE, 3, "target out of range");
-  THArgCheck(THIndexTensor_(maxall)(target) < dim+TH_INDEX_BASE, 3, "target out of range");
+  THArgCheck(THIndexTensor_(minall)(target) >= -1, 3, "target out of range");
+  THArgCheck(THIndexTensor_(maxall)(target) < dim, 3, "target out of range");
 
   target = THIndexTensor_(newContiguous)(target);
   input = THTensor_(newContiguous)(input);
@@ -58,14 +58,14 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     {
       for (ddt = 0; ddt < dim; ddt++)
       {
-        THIndex_t target_idx = target_data[ddt] - TH_INDEX_BASE;
+        THIndex_t target_idx = target_data[ddt];
         if (target_idx < 0)
           break;
         isTarget_data[target_idx] = 1;
       }
       for (dt = 0; dt < dim; dt++)
       {
-        THIndex_t target_idx = target_data[dt] - TH_INDEX_BASE;
+        THIndex_t target_idx = target_data[dt];
         scalar_t input_target;
         if (target_idx < 0)
           break;
@@ -87,7 +87,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     }
 
     sum /= dim;
-    if (reduction == Reduction::ElementwiseMean)
+    if (reduction == Reduction::Mean)
       sum /= nframe;
     THTensor_(fastSet1d)(output, 0, sum);
 
@@ -102,7 +102,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   {
     for (ddt = 0; ddt < dim; ddt++)
     {
-      THIndex_t target_idx = target_data[ddt] - TH_INDEX_BASE;
+      THIndex_t target_idx = target_data[ddt];
       if (target_idx < 0)
         break;
       isTarget_data[target_idx] = 1;
@@ -111,7 +111,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     sum = 0;
     for (dt = 0; dt < dim; dt++)
     {
-      THIndex_t target_idx = target_data[dt] - TH_INDEX_BASE;
+      THIndex_t target_idx = target_data[dt];
       scalar_t input_target;
       if (target_idx < 0)
         break;
@@ -179,8 +179,8 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
              && (isTarget->size(1) == dim), 3, "inconsistent isTarget size");
   }
 
-  THArgCheck(THIndexTensor_(minall)(target) >= -1+TH_INDEX_BASE, 3, "target out of range");
-  THArgCheck(THIndexTensor_(maxall)(target) < dim+TH_INDEX_BASE, 3, "target out of range");
+  THArgCheck(THIndexTensor_(minall)(target) >= -1, 3, "target out of range");
+  THArgCheck(THIndexTensor_(maxall)(target) < dim, 3, "target out of range");
 
   THArgCheck(THTensor_(minall)(isTarget) >= 0, 3, "isTarget out of range");
   THArgCheck(THTensor_(maxall)(isTarget) <= 1, 3, "isTarget out of range");
@@ -197,13 +197,13 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   THTensor_(zero)(gradInput);
   gradInput_data = gradInput->data<scalar_t>();
 
-  g = reduction == Reduction::ElementwiseMean ? (1./((scalar_t)(nframe*dim))) : (1./((scalar_t)dim));
+  g = reduction == Reduction::Mean ? (1./((scalar_t)(nframe*dim))) : (1./((scalar_t)dim));
 
   for (t = 0; t < nframe; t++)
   {
     for (dt = 0; dt < dim; dt++)
     {
-      THIndex_t target_idx = target_data[dt] - TH_INDEX_BASE;
+      THIndex_t target_idx = target_data[dt];
       scalar_t input_target;
       if (target_idx < 0)
         break;

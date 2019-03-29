@@ -1,8 +1,8 @@
 #pragma once
 
-#include <ATen/core/Registry.h>
-#include <ATen/core/ScalarType.h>
-#include <ATen/core/Backend.h>
+#include <c10/core/Backend.h>
+#include <c10/core/ScalarType.h>
+#include <c10/util/Registry.h>
 
 namespace at {
   class LegacyTypeDispatch;
@@ -20,8 +20,7 @@ namespace at {
 //
 // We may choose to absorb autograd into ATen, in which case this interface is obsolete.
 //
-struct AT_API VariableHooksInterface {
-
+struct CAFFE2_API VariableHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
   virtual ~VariableHooksInterface() {}
@@ -34,18 +33,21 @@ struct AT_API VariableHooksInterface {
     // no-op if Variable not available; it'll get handled (if at all) when
     // libtorch.so gets loaded
   }
-
 };
 
 // NB: dummy argument to suppress "ISO C++11 requires at least one argument
 // for the "..." in a variadic macro"
-struct AT_API VariableHooksArgs {};
+struct CAFFE2_API VariableHooksArgs {};
 
-AT_DECLARE_REGISTRY(VariableHooksRegistry, VariableHooksInterface, VariableHooksArgs)
-#define REGISTER_VARIABLE_HOOKS(clsname) AT_REGISTER_CLASS(VariableHooksRegistry, clsname, clsname)
+C10_DECLARE_REGISTRY(
+    VariableHooksRegistry,
+    VariableHooksInterface,
+    VariableHooksArgs);
+#define REGISTER_VARIABLE_HOOKS(clsname) \
+  C10_REGISTER_CLASS(VariableHooksRegistry, clsname, clsname)
 
 namespace detail {
-  AT_API const VariableHooksInterface& getVariableHooks();
+CAFFE2_API const VariableHooksInterface& getVariableHooks();
 }
 
 } // namespace at

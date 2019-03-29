@@ -39,20 +39,19 @@ class TTPadOp final : public Operator<Context> {
     auto* X_pad = Output(0);
     CAFFE_ENFORCE(&X == X_pad);
 
-    CAFFE_ENFORCE(X.ndim() == 2, X.ndim());
+    CAFFE_ENFORCE(X.dim() == 2, X.dim());
 
-    auto X_dim0 = X.dim(0);
-    auto X_dim1 = X.dim(1);
+    auto X_dim0 = X.size(0);
+    auto X_dim1 = X.size(1);
 
-    auto* X_orig_dim0 = Output(1);
-    X_orig_dim0->Resize(1);
+    auto* X_orig_dim0 = Output(1, {1}, at::dtype<int64_t>());
     *X_orig_dim0->template mutable_data<int64_t>() = X_dim0;
 
     if (X_dim0 % scale_ != 0) {
       int64_t padded_dim0 = (X_dim0 / scale_ + 1) * scale_;
       auto dim0_diff = padded_dim0 - X_dim0;
       // set growthPct to the upper bound percentage: (100 * scale_ / X_dim0)
-      X_pad->Extend(dim0_diff, 100 * scale_ / X_dim0, &context_);
+      X_pad->Extend(dim0_diff, 100 * scale_ / X_dim0);
 
       auto* X_pad_data = X_pad->template mutable_data<T>();
       int64_t X_size = X_dim0 * X_dim1;
@@ -79,8 +78,8 @@ class TTPadGradientOp final : public Operator<Context> {
     CAFFE_ENFORCE(&G == output);
 
     auto old_dim0 = *Input(1).template data<int64_t>();
-    auto new_dim0 = G.dim(0);
-    auto dim1 = G.dim(1);
+    auto new_dim0 = G.size(0);
+    auto dim1 = G.size(1);
 
     if (old_dim0 < new_dim0) {
       output->ShrinkTo(old_dim0);

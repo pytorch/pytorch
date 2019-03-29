@@ -1,76 +1,43 @@
 #pragma once
 
-#include <torch/csrc/jit/function_schema.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/stack.h>
+#include <ATen/core/stack.h>
+#include <ATen/core/op_registration/infer_schema.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 
-#include <caffe2/utils/Metaprogramming.h>
-#include <caffe2/utils/TypeList.h>
+#include <ATen/core/function_schema.h>
+#include <c10/util/Metaprogramming.h>
+#include <c10/util/TypeList.h>
 
-namespace torch { namespace jit {
+namespace torch {
+namespace jit {
 namespace detail {
-template <typename... Ts, size_t... Is>
-std::vector<Argument> createArgumentVectorFromTypes(Indices<Is...> indices) {
-  // Arguments are named "_<index>"
-  return {Argument("_" + std::to_string(Is), getTypePtr<decay_t<Ts>>())...};
-}
 
-template <typename... Ts, size_t... Is>
-std::vector<Argument> createReturns(Indices<Is...> indices) {
-  return createArgumentVectorFromTypes<Ts..., Is...>();
-}
+using ::c10::Argument;
+using ::c10::FunctionSchema;
 
-/// Unpack a tuple return type into a vector of return types, one per tuple
-/// element.
-template <typename... Ts>
-std::vector<Argument> createReturns(std::tuple<Ts...>* tuple) {
-  // Create an index pack so we can call `get<Indices>` on the tuple next.
-  return createReturns<Ts...>(typename MakeIndices<sizeof...(Ts)>::indices{});
-}
 
-/// Create a single-element `vector` for simple (non-tuple) return types.
-template <typename ReturnType>
-std::vector<Argument> createReturns(ReturnType*) {
-  return {Argument("_1", getTypePtr<decay_t<ReturnType>>())};
-}
 
-/// Creates a vector of `Argument` from `FunctionTraits` and a pack of indices
-/// into the argument list.
-template <typename FunctionTraits, size_t... Is>
-std::vector<Argument> createArgumentVectorFromTraits(Indices<Is...> indices) {
-  using ArgumentTypes = typename FunctionTraits::parameter_types;
-  return createArgumentVectorFromTypes<
-      c10::guts::typelist::element_t<Is, ArgumentTypes>...>(indices);
-}
-
-/// Creates a `FunctionSchema` object from a `FunctionTraits` type for a
-/// function.
-template <typename FunctionTraits>
-FunctionSchema createFunctionSchemaFromTraits(const std::string& name) {
-  using ReturnType = typename FunctionTraits::return_type;
-  auto arguments = createArgumentVectorFromTraits<FunctionTraits>(
-      typename MakeIndices<FunctionTraits::number_of_parameters>::indices{});
-  auto returns = createReturns(static_cast<ReturnType*>(nullptr));
-  return {name, arguments, returns};
-}
-
+/// Adds the elements of the `tuple` as input nodes to the traced graph.
 template <size_t... Is, typename... Types>
 Node* getTracedNode(
     const FunctionSchema& schema,
     const std::tuple<Types...>& tuple) {
-  auto symbol = Symbol::fromQualString(schema.name);
+  auto symbol = Symbol::fromQualString(schema.name());
   const auto& graph = tracer::getTracingState()->graph;
-  Node* node = graph->create(std::move(symbol), /*outputs=*/0);
+  Node* node = graph->create(symbol, /*num_outputs=*/0);
   tracer::recordSourceLocation(node);
 
   // Hack to call addInputs for the parameter pack in a sequenced fashion.
   // https://stackoverflow.com/questions/12030538/calling-a-function-for-each-variadic-template-argument-and-an-array
-  int _[] = {(tracer::addInputs(node, schema.arguments[Is].name.c_str(), std::get<Is>(tuple)), 0)...};
-  (void)_;
+  int _[] = {
+      (tracer::addInputs(
+           node, schema.arguments()[Is].name().c_str(), std::get<Is>(tuple)),
+       0)...};
+  (void)_; // ignore
 
-  graph->appendNode(node);
+  graph->insertNode(node);
 
   return node;
 }
@@ -85,22 +52,28 @@ void callOperatorWithTuple(
     const FunctionSchema& schema,
     Implementation&& implementation,
     Stack& stack,
-    std::tuple<Types...>& tuple,
+    std::tuple<Types...>& arguments,
     Indices<Is...>) {
+  AT_ASSERT(stack.size() == sizeof...(Is));
+
+  // Pop values from the stack into the elements of the tuple.
+  pop(stack, std::get<Is>(arguments)...);
+
   Node* node = nullptr;
   if (jit::tracer::isTracing()) {
-    node = getTracedNode<Is...>(schema, tuple);
+    node = getTracedNode<Is...>(schema, arguments);
   }
 
-  pop(stack, std::get<Is>(tuple)...);
-  auto result =
-      std::forward<Implementation>(implementation)(std::get<Is>(tuple)...);
+  // Call into the actual, original, user-supplied function.
+  auto return_value =
+      std::forward<Implementation>(implementation)(std::get<Is>(arguments)...);
 
   if (jit::tracer::isTracing()) {
-    jit::tracer::addOutput(node, result);
+    jit::tracer::addOutput(node, return_value);
   }
 
-  push(stack, IValue(std::move(result)));
+  // Push the return value back onto the stack.
+  push(stack, IValue(std::move(return_value)));
 }
 
 inline void checkArgumentVector(
@@ -109,20 +82,23 @@ inline void checkArgumentVector(
     const std::vector<Argument>& provided,
     const FunctionSchema& inferredSchema,
     const FunctionSchema& providedSchema) {
+  // clang-format off
   AT_CHECK(
       inferred.size() == provided.size(),
       "Inferred ", inferred.size(), " ", what,
       "(s) for operator implementation, but the provided schema specified ",
-      provided.size(), " ", what, "(s). Inferred schema: ",
-      inferredSchema, " | Provided schema: ", providedSchema);
+      provided.size(), " ", what, "(s). Inferred schema: ", inferredSchema,
+      " | Provided schema: ", providedSchema);
+  // clang-format on
   for (size_t i = 0; i < provided.size(); ++i) {
+    // clang-format off
     AT_CHECK(
-        provided[i].type->isSubtypeOf(inferred[i].type),
-        "Inferred type for ", what, " #", i, " was ",
-        *inferred[i].type, ", but the provided schema specified type ",
-        *provided[i].type, " for the ", what,
-        " in that position. Inferred schema: ",
+        provided[i].type()->isSubtypeOf(inferred[i].type()),
+        "Inferred type for ", what, " #", i, " was ", *inferred[i].type(),
+        ", but the provided schema specified type ", *provided[i].type(),
+        " for the ", what, " in that position. Inferred schema: ",
         inferredSchema, " | Provided schema: ", providedSchema);
+    // clang-format on
   }
 }
 
@@ -137,8 +113,8 @@ FunctionSchema inferAndCheckSchema(const std::string& schemaOrName) {
   const auto bracketIndex = schemaOrName.find('(');
   if (bracketIndex == std::string::npos) {
     // Infer the full schema and we're good.
-    return torch::jit::detail::createFunctionSchemaFromTraits<Traits>(
-        /*name=*/schemaOrName);
+    return c10::detail::createFunctionSchemaFromTraits<Traits>(
+        /*name=*/schemaOrName, "");
   }
 
   // If the user provided her own schema, we need to infer it nevertheless and
@@ -148,18 +124,18 @@ FunctionSchema inferAndCheckSchema(const std::string& schemaOrName) {
   auto providedSchema = parseSchema(schemaOrName);
 
   const auto inferredSchema =
-      torch::jit::detail::createFunctionSchemaFromTraits<Traits>(
-          providedSchema.name);
+      c10::detail::createFunctionSchemaFromTraits<Traits>(
+          providedSchema.name(), providedSchema.overload_name());
   checkArgumentVector(
       "argument",
-      inferredSchema.arguments,
-      providedSchema.arguments,
+      inferredSchema.arguments(),
+      providedSchema.arguments(),
       inferredSchema,
       providedSchema);
   checkArgumentVector(
       "return value",
-      inferredSchema.returns,
-      providedSchema.returns,
+      inferredSchema.returns(),
+      providedSchema.returns(),
       inferredSchema,
       providedSchema);
   return providedSchema;
@@ -200,6 +176,8 @@ Operator createOperator(
       c10::guts::typelist::map_t<decay_t, typename Traits::parameter_types>;
   using ArgumentTuple =
       typename c10::guts::typelist::to_tuple<ArgumentTypes>::type;
+  static constexpr auto kNumberOfArguments =
+      std::tuple_size<ArgumentTuple>::value;
 
   auto schema = torch::jit::detail::inferAndCheckSchema<Traits>(schemaOrName);
 
@@ -207,10 +185,10 @@ Operator createOperator(
     ArgumentTuple tuple;
     torch::jit::detail::callOperatorWithTuple(
         schema,
-        std::move(implementation),
+        std::move(implementation), // NOLINT(bugprone-move-forwarding-reference)
         stack,
         tuple,
-        typename MakeIndices<std::tuple_size<ArgumentTuple>::value>::indices{});
+        typename MakeIndices<kNumberOfArguments>::indices{});
     return 0;
   });
 }

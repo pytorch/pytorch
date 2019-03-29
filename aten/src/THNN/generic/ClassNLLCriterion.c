@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/ClassNLLCriterion.c"
+#define TH_GENERIC_FILE "THNN/generic/ClassNLLCriterion.c"
 #else
 
 void THNN_(ClassNLLCriterion_updateOutput)(
@@ -15,7 +15,6 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   THTensor_(resize1d)(total_weight, 1);
   int n_dims = THTensor_(nDimensionLegacyAll)(input);
   int n_classes = THTensor_(size)(input, n_dims - 1);
-  ignore_index -= TH_INDEX_BASE;
 
   if (THIndexTensor_(nDimensionLegacyAll)(target) > 1) {
     THError("multi-target not supported");
@@ -37,13 +36,13 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     int i;
     #pragma omp parallel for private(i)
     for (i = 0; i < batch_size; i++) {
-      int cur_target = THLongTensor_fastGetLegacy1dNoScalars(target, i) - TH_INDEX_BASE;
+      int cur_target = THLongTensor_fastGetLegacy1dNoScalars(target, i);
 
+      if (cur_target == ignore_index) {
+	THTensor_(fastSet1d)(output, i, 0.0f);
+	continue;
+      }
       if (cur_target >= 0 && cur_target < n_classes) {
-          if (cur_target == ignore_index) {
-            THTensor_(fastSet1d)(output, i, 0.0f);
-            continue;
-          }
           scalar_t cur_weight = weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f;
           THTensor_(fastSet1d)(output, i, -THTensor_(fastGet2d)(input, i, cur_target) * cur_weight);
       } else {
@@ -74,7 +73,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   output_data[0] = total_weight_data[0] = 0.0;
 
   if (THTensor_(nDimensionLegacyAll)(input) == 1) {
-    int cur_target = target_data[0] - TH_INDEX_BASE;
+    int cur_target = target_data[0];
     if (cur_target != ignore_index) {
       THAssert(cur_target >= 0 && cur_target < n_classes);
       total_weight_data[0] = weights ? weights_data[cur_target] : 1.0f;
@@ -88,7 +87,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
 
     int i;
     for (i = 0; i < batch_size; i++) {
-      int cur_target = target_data[i] - TH_INDEX_BASE;
+      int cur_target = target_data[i];
       if (cur_target != ignore_index) {
         THAssert(cur_target >= 0 && cur_target < n_classes);
 
@@ -99,7 +98,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     }
   }
 
-  if (reduction == Reduction::ElementwiseMean && total_weight_data[0]) {
+  if (reduction == Reduction::Mean && total_weight_data[0]) {
     output_data[0] /= total_weight_data[0];
   }
 
@@ -126,7 +125,6 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
 
   int n_dims = THTensor_(nDimensionLegacyAll)(input);
   int n_classes = THTensor_(size)(input, n_dims - 1);
-  ignore_index -= TH_INDEX_BASE;
 
   if (!THTensor_(isContiguous)(gradInput)) {
     THError("gradInput must be contiguous");
@@ -151,7 +149,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     int i;
     #pragma omp parallel for private(i)
     for (i = 0; i < batch_size; i++) {
-      int cur_target = THLongTensor_fastGetLegacy1dNoScalars(target, i) - TH_INDEX_BASE;
+      int cur_target = THLongTensor_fastGetLegacy1dNoScalars(target, i);
       if (cur_target == ignore_index) {
         continue;
       }
@@ -178,12 +176,12 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
   scalar_t gradOutput_value = THTensor_(get1d)(gradOutput, 0);
 
   if (THTensor_(nDimensionLegacyAll)(input) == 1) {
-    int cur_target = target_data[0] - TH_INDEX_BASE;
+    int cur_target = target_data[0];
     if (cur_target != ignore_index) {
       THAssert(cur_target >= 0 && cur_target < n_classes);
 
       gradInput_data[cur_target] =
-        (reduction != Reduction::ElementwiseMean && weights) ? -weights_data[cur_target] : -1;
+        (reduction != Reduction::Mean && weights) ? -weights_data[cur_target] : -1;
       gradInput_data[cur_target] *= gradOutput_value;
     }
 
@@ -195,7 +193,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
 
     int i;
     for (i = 0; i < batch_size; i++){
-      int cur_target = target_data[i] - TH_INDEX_BASE;
+      int cur_target = target_data[i];
 
       if (cur_target != ignore_index) {
         THAssert(cur_target >= 0 && cur_target < n_classes);
@@ -203,7 +201,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         gradInput_data[i * n_target + cur_target] =
           -(weights ? weights_data[cur_target] : 1.0f) * gradOutput_value;
 
-        if (reduction == Reduction::ElementwiseMean && *total_weight_data) {
+        if (reduction == Reduction::Mean && *total_weight_data) {
           gradInput_data[i * n_target + cur_target] /= *total_weight_data;
         }
       }

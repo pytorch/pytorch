@@ -1,7 +1,7 @@
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCAtomics.cuh"
-#include "THCApply.cuh"
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCAtomics.cuh>
+#include <THC/THCApply.cuh>
 
 // Compute the offsets into the given tensors for a linear index. For the 't2'
 // tensor, dimension 'dim' is skipped. The tensors are assumed to have the same
@@ -93,7 +93,7 @@ __global__ void THCudaTensor_gatherKernel(
                                                           tensor, &tensorOffset,
                                                           src, &srcOffset);
 
-    int64_t indexValue = index.data[indexOffset] - TH_INDEX_BASE;
+    int64_t indexValue = index.data[indexOffset];
     assert(indexValue >= 0 && indexValue < src.sizes[dim]);
     srcOffset += indexValue * src.strides[dim];
 
@@ -120,7 +120,7 @@ __global__ void THCudaTensor_scatterKernel(
                                                           src, &srcOffset,
                                                           tensor, &tensorOffset);
 
-    int64_t indexValue = index.data[indexOffset] - TH_INDEX_BASE;
+    int64_t indexValue = index.data[indexOffset];
     assert(indexValue >= 0 && indexValue < tensor.sizes[dim]);
     tensorOffset += indexValue * tensor.strides[dim];
 
@@ -147,7 +147,7 @@ __global__ void THCudaTensor_scatterAddKernel(
                                                           src, &srcOffset,
                                                           tensor, &tensorOffset);
 
-    int64_t indexValue = index.data[indexOffset] - TH_INDEX_BASE;
+    int64_t indexValue = index.data[indexOffset];
     assert(indexValue >= 0 && indexValue < tensor.sizes[dim]);
     tensorOffset += indexValue * tensor.strides[dim];
 
@@ -172,7 +172,7 @@ __global__ void THCudaTensor_scatterFillKernel(
                                                           index, &indexOffset,
                                                           tensor, &tensorOffset);
 
-    int64_t indexValue = index.data[indexOffset] - TH_INDEX_BASE;
+    int64_t indexValue = index.data[indexOffset];
     assert(indexValue >= 0 && indexValue < tensor.sizes[dim]);
     tensorOffset += indexValue * tensor.strides[dim];
 
@@ -180,5 +180,5 @@ __global__ void THCudaTensor_scatterFillKernel(
   }
 }
 
-#include "generic/THCTensorScatterGather.cu"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensorScatterGather.cu>
+#include <THC/THCGenerateAllTypes.h>

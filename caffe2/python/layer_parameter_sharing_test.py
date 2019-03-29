@@ -8,6 +8,7 @@ from caffe2.python.modeling.parameter_sharing import (
     ParameterSharing,
 )
 from caffe2.python.layer_test_util import LayersTestCase
+import six
 
 
 class ParameterSharingTest(LayersTestCase):
@@ -114,7 +115,7 @@ class ParameterSharingTest(LayersTestCase):
                 self.assertEquals(self.model.layers[-1].w,
                                   'global_scope/fc/w')
 
-                with self.assertRaisesRegexp(ValueError, 'Got inconsistent shapes .*'):
+                with six.assertRaisesRegex(self, ValueError, 'Got inconsistent shapes .*'):
                     self.model.FC(
                         self.model.input_feature_schema.float_features,
                         output_dims + 1

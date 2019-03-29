@@ -1,6 +1,7 @@
-#include "torch/csrc/autograd/input_buffer.h"
+#include <torch/csrc/autograd/input_buffer.h>
 
-#include "torch/csrc/autograd/functions/basic_ops.h"
+#include <torch/csrc/autograd/functions/basic_ops.h>
+#include <torch/csrc/autograd/input_metadata.h>
 
 #include <ATen/DeviceGuard.h>
 
@@ -20,23 +21,42 @@ void InputBuffer::add(size_t pos, Variable var) {
   if (!old_var.defined()) {
     buffer[pos] = std::move(var);
   } else {
-    at::DeviceGuard device_guard(var);
+    at::OptionalDeviceGuard device_guard(device_of(var));
     // ATen doesn't route sparse additions correctly...
-    if (old_var.type().is_sparse()) {
-      buffer[pos] = var + old_var;
+    // do dense + sparse in-place if possible
+    if (old_var.is_sparse()) {
+//storage use_count is a big hammer, but for anything lighter there's an adversarial example with unexpected inplace modification
+      if (!var.is_sparse() && var.is_contiguous() && var.storage().use_count() == 1) {
+          buffer[pos] = var.add_(old_var);
+      } else {
+          buffer[pos] = var + old_var;
+      }
     } else {
-      buffer[pos] = old_var + var;
+      if (var.is_sparse() && !old_var.is_sparse() && old_var.is_contiguous() && old_var.storage().use_count() == 1) {
+          buffer[pos] = old_var.add_(var);
+      } else {
+          buffer[pos] = old_var + var;
+      }
     }
   }
 }
 
-auto InputBuffer::device() const -> int {
+auto InputBuffer::device() const -> at::Device {
+  // Since we pick the first non-CPU tensor, this won't work with
+  // mixed device-type operations (e.g., an op that is both CUDA
+  // and XLA).  This is *incredibly* unlikely, so we don't worry
+  // about it.
   for (auto& var : buffer) {
-    if (var.defined() && var.type().is_cuda()) {
-      return var.get_device();
+    if (var.defined()) {
+      auto device = var.device();
+      if (device.type() != at::kCPU) {
+        return device;
+      }
     }
   }
-  return -1;
+  // Only report to the CPU thread if there really were no tensors
+  // from other devices.
+  return at::kCPU;
 }
 
 auto InputBuffer::variables(InputBuffer&& g) -> std::vector<Variable> {

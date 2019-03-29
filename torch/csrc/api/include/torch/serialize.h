@@ -1,49 +1,75 @@
 #pragma once
 
-#include <torch/nn/module.h>
-#include <torch/nn/pimpl.h>
 #include <torch/serialize/archive.h>
-#include <torch/tensor.h>
+#include <torch/serialize/tensor.h>
 
-#include <string>
 #include <utility>
 
 namespace torch {
-namespace optim {
-class Optimizer;
-} // namespace optim
-} // namespace torch
 
-namespace torch {
-namespace serialize {
-template <typename ModuleType>
-void save(const nn::ModuleHolder<ModuleType>& module, OutputArchive& archive) {
-  module->save(archive);
-}
-
-template <typename ModuleType>
-void load(nn::ModuleHolder<ModuleType>& module, InputArchive& archive) {
-  module->load(archive);
-}
-
-void save(const Tensor& tensor, OutputArchive& archive);
-
-void save(const optim::Optimizer& optimizer, OutputArchive& archive);
-void load(optim::Optimizer& optimizer, InputArchive& archive);
-} // namespace serialize
-
-template <typename T>
-void save(const T& value, const std::string& filename) {
+/// Serializes the given `value`.
+/// There must be an overload of `operator<<` between `serialize::OutputArchive`
+/// and `Value` for this method to be well-formed. Currently, such an overload
+/// is provided for (subclasses of):
+///
+/// - `torch::nn::Module`,
+/// - `torch::optim::Optimizer`
+/// - `torch::Tensor`
+///
+/// To perform the serialization, a `serialize::OutputArchive` is constructed,
+/// and all arguments after the `value` are forwarded to its `save_to` method.
+/// For example, you can pass a filename, or an `ostream`.
+///
+/// \rst
+/// .. code-block:: cpp
+///
+///   torch::nn::Linear model(3, 4);
+///   torch::save(model, "model.pt");
+///
+///   torch::optim::SGD sgd(/*lr=*/0.9);
+///   std::ostringstream stream;
+///   torch::save(sgd, stream);
+///
+///   auto tensor = torch::ones({3, 4});
+///   torch::save(tensor, "my_tensor.pt");
+/// \endrst
+template <typename Value, typename... SaveToArgs>
+void save(const Value& value, SaveToArgs&&... args) {
   serialize::OutputArchive archive;
-  serialize::save(value, archive);
-  serialize::save_to_file(archive, filename);
+  archive << value;
+  archive.save_to(std::forward<SaveToArgs>(args)...);
 }
 
-template <typename T>
-void load(T& value, const std::string& filename) {
-  serialize::InputArchive archive = serialize::load_from_file(filename);
-  serialize::load(value, archive);
+/// Deserializes the given `value`.
+/// There must be an overload of `operator>>` between `serialize::InputArchive`
+/// and `Value` for this method to be well-formed. Currently, such an overload
+/// is provided for (subclasses of):
+///
+/// - `torch::nn::Module`,
+/// - `torch::optim::Optimizer`
+/// - `torch::Tensor`
+///
+/// To perform the serialization, a `serialize::InputArchive` is constructed,
+/// and all arguments after the `value` are forwarded to its `load_from` method.
+/// For example, you can pass a filename, or an `istream`.
+///
+/// \rst
+/// .. code-block:: cpp
+///
+///   torch::nn::Linear model(3, 4);
+///   torch::load(model, "model.pt");
+///
+///   torch::optim::SGD sgd(/*lr=*/0.9);
+///   std::istringstream stream("...");
+///   torch::load(sgd, stream);
+///
+///   auto tensor = torch::ones({3, 4});
+///   torch::load(tensor, "my_tensor.pt");
+/// \endrst
+template <typename Value, typename... LoadFromArgs>
+void load(Value& value, LoadFromArgs&&... args) {
+  serialize::InputArchive archive;
+  archive.load_from(std::forward<LoadFromArgs>(args)...);
+  archive >> value;
 }
-
-Tensor load(const std::string& filename);
 } // namespace torch

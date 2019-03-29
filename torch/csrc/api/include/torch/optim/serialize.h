@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/serialize/archive.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -11,7 +11,6 @@
 
 namespace torch {
 namespace optim {
-namespace detail {
 
 // Note: These functions are all called `serialize()` so they can be called
 // inside a template where the archive type is a template type and can thus be
@@ -49,9 +48,10 @@ void serialize(
     serialize::InputArchive& archive,
     const std::string& key,
     BufferContainer& buffers) {
+  buffers.clear();
   torch::Tensor size_tensor;
   archive.read(key + "/size", size_tensor);
-  const size_t size = size_tensor.toCLong();
+  const size_t size = size_tensor.item<int64_t>();
   for (size_t index = 0; index < size; ++index) {
     buffers.emplace_back();
     archive.read(
@@ -59,9 +59,8 @@ void serialize(
   }
 }
 
-#define TORCH_OPTIM_SERIALIZE(name) \
-  torch::optim::detail::serialize(archive, #name, self.name)
+#define _TORCH_OPTIM_SERIALIZE(name) \
+  torch::optim::serialize(archive, #name, self.name)
 
-} // namespace detail
 } // namespace optim
 } // namespace torch

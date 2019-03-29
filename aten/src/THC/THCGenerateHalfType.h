@@ -2,7 +2,7 @@
 #error "You must define THC_GENERIC_FILE before including THGenerateHalfType.h"
 #endif
 
-#include "TH/THHalf.h"
+#include <TH/THHalf.h>
 
 #define scalar_t THHalf
 #define accreal float

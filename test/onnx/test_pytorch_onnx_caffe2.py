@@ -140,8 +140,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
         # Either user specified input or random (deterministic) input
         if input is None:
-            input = Variable(torch.randn(batch_size, 3, 224, 224),
-                             requires_grad=True)
+            input = torch.randn(batch_size, 3, 224, 224, requires_grad=True)
         if use_gpu:
             model, input = self.convert_cuda(model, input)
 
@@ -151,7 +150,7 @@ class TestCaffe2Backend(unittest.TestCase):
             torch_out = (torch_out,)
 
         caffe2_out = run_embed_params(onnxir, model, input, state_dict, use_gpu)
-        for i, (x, y) in enumerate(zip(torch_out, caffe2_out)):
+        for _, (x, y) in enumerate(zip(torch_out, caffe2_out)):
             np.testing.assert_almost_equal(x.data.cpu().numpy(), y, decimal=3)
 
     def run_actual_test(self, model, train, batch_size, state_dict=None,
@@ -169,8 +168,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
         # Either user specified input or random (deterministic) input
         if input is None:
-            input = Variable(torch.randn(batch_size, 3, 224, 224),
-                             requires_grad=True)
+            input = torch.randn(batch_size, 3, 224, 224, requires_grad=True)
         # GPU-ize the model, if requested
         if use_gpu:
             model, input = self.convert_cuda(model, input)
@@ -191,21 +189,35 @@ class TestCaffe2Backend(unittest.TestCase):
                                 use_gpu=use_gpu_, example_outputs=example_outputs)
 
     def test_linear(self):
-        model = nn.Linear(1, 1)
-        input = Variable(torch.randn(1, 1), requires_grad=True)
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.many_fc = nn.Sequential(
+                    nn.Linear(4, 5, bias=True),
+                    nn.ReLU(inplace=True),
+                    nn.Linear(5, 6, bias=True),
+                    nn.ReLU(inplace=True),
+                    nn.Linear(6, 7, bias=True),
+                )
+
+            def forward(self, input):
+                return self.many_fc(input)
+
+        model = MyModel()
+        input = torch.randn(3, 4, requires_grad=True)
         self.run_model_test(model, train=False, batch_size=0, input=input)
 
     def test_lstm_cell(self):
         model = nn.LSTMCell(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE)
-        input = Variable(torch.randn(BATCH_SIZE, RNN_INPUT_SIZE))
-        h0 = Variable(torch.randn(BATCH_SIZE, RNN_HIDDEN_SIZE))
-        c0 = Variable(torch.randn(BATCH_SIZE, RNN_HIDDEN_SIZE))
+        input = torch.randn(BATCH_SIZE, RNN_INPUT_SIZE)
+        h0 = torch.randn(BATCH_SIZE, RNN_HIDDEN_SIZE)
+        c0 = torch.randn(BATCH_SIZE, RNN_HIDDEN_SIZE)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=(input, (h0, c0)), use_gpu=False)
 
     def test_gru_cell(self):
         model = nn.GRUCell(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE)
-        input = Variable(torch.randn(BATCH_SIZE, RNN_INPUT_SIZE))
-        h0 = Variable(torch.randn(BATCH_SIZE, RNN_HIDDEN_SIZE))
+        input = torch.randn(BATCH_SIZE, RNN_INPUT_SIZE)
+        h0 = torch.randn(BATCH_SIZE, RNN_HIDDEN_SIZE)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=(input, h0), use_gpu=False)
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
@@ -232,7 +244,7 @@ class TestCaffe2Backend(unittest.TestCase):
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
             seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
-            inputs = [Variable(torch.randn(l, RNN_INPUT_SIZE)) for l in seq_lengths]
+            inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs)
             if packed_sequence == 2:
                 inputs = inputs.transpose(0, 1)
@@ -241,10 +253,10 @@ class TestCaffe2Backend(unittest.TestCase):
             directions = 2 if bidirectional else 1
 
             if initial_state:
-                h0 = Variable(torch.randn(directions * layers, batch_size, RNN_HIDDEN_SIZE))
+                h0 = torch.randn(directions * layers, batch_size, RNN_HIDDEN_SIZE)
                 inputs.append(h0)
             if packed_sequence != 0:
-                inputs.append(Variable(torch.IntTensor(seq_lengths)))
+                inputs.append(torch.IntTensor(seq_lengths))
             if len(inputs) == 1:
                 input = inputs[0]
             else:
@@ -272,7 +284,7 @@ class TestCaffe2Backend(unittest.TestCase):
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
             seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
-            inputs = [Variable(torch.randn(l, RNN_INPUT_SIZE)) for l in seq_lengths]
+            inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs)
             if packed_sequence == 2:
                 inputs = inputs.transpose(0, 1)
@@ -281,11 +293,11 @@ class TestCaffe2Backend(unittest.TestCase):
             directions = 2 if bidirectional else 1
 
             if initial_state:
-                h0 = Variable(torch.randn(directions * layers, batch_size, RNN_HIDDEN_SIZE))
-                c0 = Variable(torch.randn(directions * layers, batch_size, RNN_HIDDEN_SIZE))
+                h0 = torch.randn(directions * layers, batch_size, RNN_HIDDEN_SIZE)
+                c0 = torch.randn(directions * layers, batch_size, RNN_HIDDEN_SIZE)
                 inputs.append((h0, c0))
             if packed_sequence != 0:
-                inputs.append(Variable(torch.IntTensor(seq_lengths)))
+                inputs.append(torch.IntTensor(seq_lengths))
             if len(inputs) == 1:
                 input = inputs[0]
             else:
@@ -312,7 +324,7 @@ class TestCaffe2Backend(unittest.TestCase):
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
             seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
-            inputs = [Variable(torch.randn(l, RNN_INPUT_SIZE)) for l in seq_lengths]
+            inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs)
             if packed_sequence == 2:
                 inputs = inputs.transpose(0, 1)
@@ -321,10 +333,10 @@ class TestCaffe2Backend(unittest.TestCase):
             directions = 2 if bidirectional else 1
 
             if initial_state:
-                h0 = Variable(torch.randn(directions * layers, batch_size, RNN_HIDDEN_SIZE))
+                h0 = torch.randn(directions * layers, batch_size, RNN_HIDDEN_SIZE)
                 inputs.append(h0)
             if packed_sequence != 0:
-                inputs.append(Variable(torch.IntTensor(seq_lengths)))
+                inputs.append(torch.IntTensor(seq_lengths))
             if len(inputs) == 1:
                 input = inputs[0]
             else:
@@ -343,7 +355,7 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 3, bidirectional=True)
         seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=7)
         seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
-        input = [Variable(torch.randn(l, RNN_INPUT_SIZE)) for l in seq_lengths]
+        input = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
         input = rnn_utils.pad_sequence(input)
 
         # Test that we are correctly splitting between init and
@@ -373,7 +385,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
         netD = dcgan._netD(1)
         netD.apply(dcgan.weights_init)
-        input = Variable(torch.randn(BATCH_SIZE, 3, dcgan.imgsz, dcgan.imgsz))
+        input = torch.randn(BATCH_SIZE, 3, dcgan.imgsz, dcgan.imgsz)
         self.run_model_test(netD, train=False, batch_size=BATCH_SIZE,
                             input=input)
 
@@ -381,8 +393,7 @@ class TestCaffe2Backend(unittest.TestCase):
         netG.apply(dcgan.weights_init)
         state_dict = model_zoo.load_url(model_urls['dcgan_b'], progress=False)
         # state_dict = model_zoo.load_url(model_urls['dcgan_f'], progress=False)
-        noise = Variable(
-            torch.randn(BATCH_SIZE, dcgan.nz, 1, 1).normal_(0, 1))
+        noise = torch.randn(BATCH_SIZE, dcgan.nz, 1, 1).normal_(0, 1)
         self.run_model_test(netG, train=False, batch_size=BATCH_SIZE,
                             input=noise, state_dict=state_dict, rtol=1e-2, atol=1e-6)
 
@@ -396,8 +407,7 @@ class TestCaffe2Backend(unittest.TestCase):
     @skip("doesn't match exactly...")
     # TODO: figure out the numerical instabilities
     def test_inception(self):
-        x = Variable(
-            torch.randn(BATCH_SIZE, 3, 299, 299), requires_grad=True)
+        x = torch.randn(BATCH_SIZE, 3, 299, 299, requires_grad=True)
         # state_dict = model_zoo.load_url(model_urls['inception_v3_google'], progress=False)
         state_dict = None
         self.run_model_test(inception_v3(), train=False, batch_size=BATCH_SIZE,
@@ -422,7 +432,7 @@ class TestCaffe2Backend(unittest.TestCase):
         super_resolution_net = SRResNet(
             rescale_factor=4, n_filters=64, n_blocks=8)
         state_dict = model_zoo.load_url(model_urls['srresNet'], progress=False)
-        x = Variable(torch.randn(1, 3, 224, 224), requires_grad=True)
+        x = torch.randn(1, 3, 224, 224, requires_grad=True)
         self.run_model_test(super_resolution_net, train=False,
                             batch_size=1, state_dict=state_dict,
                             input=x, use_gpu=False)
@@ -433,7 +443,7 @@ class TestCaffe2Backend(unittest.TestCase):
     def test_super_resolution(self):
         super_resolution_net = SuperResolutionNet(upscale_factor=3)
         state_dict = model_zoo.load_url(model_urls['super_resolution'], progress=False)
-        x = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
+        x = torch.randn(1, 1, 224, 224, requires_grad=True)
         self.run_model_test(super_resolution_net, train=False,
                             batch_size=BATCH_SIZE, state_dict=state_dict,
                             input=x, use_gpu=False, atol=1e-6)
@@ -471,8 +481,7 @@ class TestCaffe2Backend(unittest.TestCase):
         model = word_language_model.RNNModel(model_name, ntokens, emsize,
                                              nhid, nlayers, dropout, tied,
                                              batchsize)
-        x = Variable(torch.arange(0, ntokens).long().view(-1, batchsize),
-                     requires_grad=False)
+        x = torch.arange(0, ntokens).long().view(-1, batchsize)
         # Only support CPU version, since tracer is not working in GPU RNN.
         self.run_model_test(model, train=False, input=(x, model.hidden),
                             batch_size=batchsize, use_gpu=False)
@@ -490,17 +499,17 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_word_language_model("GRU")
 
     def test_batchnorm1d_special(self):
-        c = Variable(torch.randn(BATCH_SIZE, 224))
+        c = torch.randn(BATCH_SIZE, 224)
         model = nn.BatchNorm1d(224)
         self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
 
     def test_batchnorm2d_noaffine(self):
-        c = Variable(torch.randn(128, 128, 1, 1))
+        c = torch.randn(128, 128, 1, 1)
         model = nn.BatchNorm2d(128, affine=False)
         self.run_model_test(model, train=False, input=c, batch_size=BATCH_SIZE)
 
     def test_constant(self):
-        c = Variable(torch.randn(BATCH_SIZE, 3, 224, 224))
+        c = torch.randn(BATCH_SIZE, 3, 224, 224)
 
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -523,7 +532,7 @@ class TestCaffe2Backend(unittest.TestCase):
             def forward(self, input):
                 return fn(input)
 
-        m1 = Variable(torch.randn(3, 4))
+        m1 = torch.randn(3, 4)
         self.run_model_test(MyModel(), input=m1, train=False, batch_size=BATCH_SIZE)
 
     def test_index_1d(self):
@@ -567,7 +576,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
             def forward(self, input):
                 return input.sqrt()
-        input = Variable(torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9))
+        input = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
         self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
 
     def test_log(self):
@@ -577,7 +586,17 @@ class TestCaffe2Backend(unittest.TestCase):
 
             def forward(self, input):
                 return input.log()
-        input = Variable(torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9))
+        input = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
+        self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
+
+    def test_erf(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, input):
+                return input.erf()
+        input = torch.empty(BATCH_SIZE, 10, 10).uniform_(4, 9)
         self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
 
     def test_trigonometry(self):
@@ -588,7 +607,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
                 def forward(self, input):
                     return getattr(input, name)()
-            input = Variable(torch.empty(BATCH_SIZE, 10, 10).uniform_())
+            input = torch.empty(BATCH_SIZE, 10, 10).uniform_()
             self.run_model_test(MyModel(), train=False, input=input, batch_size=BATCH_SIZE)
 
         test_func('cos')
@@ -622,7 +641,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_embedding(self):
         model = nn.Embedding(10, 3, padding_idx=-1)
-        input = Variable(torch.LongTensor(list(range(10))[::-1]))
+        input = torch.LongTensor(list(range(10))[::-1])
         self.run_model_test(model, train=False, input=input, batch_size=BATCH_SIZE)
 
     def test_constantpad2d(self):
@@ -645,25 +664,93 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.MaxPool2d(5, padding=2)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
+    def test_maxpool1d_ceil(self):
+        model = nn.MaxPool1d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_maxpool2d_ceil(self):
+        model = nn.MaxPool2d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_maxpool3d_ceil(self):
+        model = nn.MaxPool3d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 44, 31, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
     @unittest.skip("C2 and PyTorch have small difference in padding implementation")
     def test_avgpool2d(self):
         model = nn.AvgPool2d(5, padding=(2))
+        self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
+
+    def test_avgpool2d_with_count_include_pad_set_false(self):
+        model = nn.AvgPool2d(7, padding=(2), count_include_pad=False)
+        self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
+
+    def test_avgpool2d_with_count_include_pad_set_true(self):
+        model = nn.AvgPool2d(7, padding=(2), count_include_pad=True)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
     def test_avgpool2d_no_padding(self):
         model = nn.AvgPool2d(5)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
+    def test_avg_pool1D_ceil(self):
+        model = torch.nn.AvgPool1d(3, 2, ceil_mode=True)
+        x = torch.randn(1, 1, 7, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_avg_pool2D_ceil(self):
+        model = torch.nn.AvgPool2d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_avg_pool3D_ceil(self):
+        model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 44, 31, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_avg_pool1D(self):
+        model = torch.nn.AdaptiveAvgPool1d((5))
+        x = torch.randn(20, 16, 50, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_avg_pool2D(self):
+        model = torch.nn.AdaptiveAvgPool2d((5, 4))
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_avg_pool3D(self):
+        model = torch.nn.AdaptiveAvgPool3d((5, 4, 3))
+        x = torch.randn(20, 16, 50, 44, 30, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_max_pool1D(self):
+        model = torch.nn.AdaptiveMaxPool1d((5))
+        x = torch.randn(20, 16, 50, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_max_pool2D(self):
+        model = torch.nn.AdaptiveMaxPool2d((5, 4))
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_max_pool3D(self):
+        model = torch.nn.AdaptiveMaxPool3d((5, 4, 3))
+        x = torch.randn(20, 16, 50, 44, 30, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
     def test_weight_norm(self):
         model = nn.utils.weight_norm(nn.Conv1d(1, 1, 3))
-        input = Variable(torch.randn(1, 1, 5), requires_grad=True)
+        input = torch.randn(1, 1, 5, requires_grad=True)
         self.run_model_test(
             model, train=True, batch_size=0, input=input, use_gpu=False
         )
 
     def test_mnist(self):
         model = MNIST()
-        input = Variable(torch.randn(BATCH_SIZE, 1, 28, 28))
+        input = torch.randn(BATCH_SIZE, 1, 28, 28)
         state_dict = None
         # TODO: test with state_dict
         self.run_model_test(model, train=False, input=input, batch_size=BATCH_SIZE,
@@ -676,8 +763,8 @@ class TestCaffe2Backend(unittest.TestCase):
 
             def forward(self, m1, m2):
                 return torch.mm(m1, m2)
-        m1 = Variable(torch.randn(3, 4))
-        m2 = Variable(torch.randn(4, 5))
+        m1 = torch.randn(3, 4)
+        m2 = torch.randn(4, 5)
         self.run_model_test(MyModel(), train=False, input=(m1, m2), batch_size=BATCH_SIZE, use_gpu=False)
 
     def test_addmm(self):
@@ -687,9 +774,9 @@ class TestCaffe2Backend(unittest.TestCase):
 
             def forward(self, ma, m1, m2):
                 return torch.addmm(ma, m1, m2)
-        ma = Variable(torch.randn(5))
-        m1 = Variable(torch.randn(3, 4))
-        m2 = Variable(torch.randn(4, 5))
+        ma = torch.randn(5)
+        m1 = torch.randn(3, 4)
+        m2 = torch.randn(4, 5)
         self.run_model_test(MyModel(), train=False, input=(ma, m1, m2), batch_size=BATCH_SIZE, use_gpu=False)
 
     # test for a pytorch optimization pass, see https://github.com/pytorch/pytorch/pull/7872
@@ -700,7 +787,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
             def forward(self, x):
                 return x.transpose(1, 2).transpose(2, 3)
-        x = Variable(torch.randn(5, 6, 7, 8))
+        x = torch.randn(5, 6, 7, 8)
         self.run_model_test(MyModel(), train=False, input=x, batch_size=BATCH_SIZE, use_gpu=False)
 
     def test_sum(self):
@@ -712,7 +799,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
                 def forward(self, x):
                     return torch.sum(x, **params)
-            x = Variable(torch.randn(*shape))
+            x = torch.randn(*shape)
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
     def test_cumsum(self):
@@ -724,7 +811,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
                 def forward(self, x):
                     return torch.cumsum(x, **params)
-            x = Variable(torch.randn(*shape))
+            x = torch.randn(*shape)
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
     def test_layer_norm(self):
@@ -749,8 +836,15 @@ class TestCaffe2Backend(unittest.TestCase):
             def forward(self, x):
                 return x.repeat(1, 2, 3, 4)
 
-        x = Variable(torch.randn(4, 3, 2, 1), requires_grad=True)
+        x = torch.randn(4, 3, 2, 1, requires_grad=True)
         self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
+
+    @unittest.skip("Temporary - waiting for https://github.com/onnx/onnx/pull/1773.")
+    def test_upsample(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        model = nn.Upsample(scale_factor=2, mode='nearest')
+        self.run_model_test(model, train=False, input=(x),
+                            batch_size=BATCH_SIZE, use_gpu=False)
 
     def test_repeat_dim_overflow(self):
         class MyModel(torch.nn.Module):
@@ -760,7 +854,7 @@ class TestCaffe2Backend(unittest.TestCase):
             def forward(self, x):
                 return x.repeat(1, 2, 3, 4)
 
-        x = Variable(torch.randn(1, 2), requires_grad=True)
+        x = torch.randn(1, 2, requires_grad=True)
         self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
     def test_repeat_dynamic(self):
@@ -771,8 +865,8 @@ class TestCaffe2Backend(unittest.TestCase):
             def forward(self, x, y):
                 return x.repeat(y.size()[0] / 2, y.size()[1] * 2)
 
-        x = Variable(torch.randn(1, 2), requires_grad=True)
-        y = Variable(torch.randn(2, 4), requires_grad=True)
+        x = torch.randn(1, 2, requires_grad=True)
+        y = torch.randn(2, 4, requires_grad=True)
         self.run_model_test(MyModel(), train=False, input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
 
     def test_mean(self):
@@ -784,26 +878,32 @@ class TestCaffe2Backend(unittest.TestCase):
 
                 def forward(self, x):
                     return torch.mean(x, **params)
-            x = Variable(torch.randn(*shape))
+            x = torch.randn(*shape)
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
     # TODO: Add test cases for prod once Caffe2 has support for ReduceProd
-
     def test_softmax(self):
         for i in range(7)[2:]:
             model = nn.Softmax(dim=i - 1)
             dims = [2] * (i - 2) + [3, 4]
-            input = Variable(torch.randn(*dims).fill_(1),
-                             requires_grad=True)
+            input = torch.ones(*dims, requires_grad=True)
             self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=input)
 
     def test_logsoftmax(self):
         for i in range(7)[2:]:
             model = nn.LogSoftmax(dim=i - 1)
             dims = [2] * (i - 2) + [3, 4]
-            input = Variable(torch.randn(*dims).fill_(1),
-                             requires_grad=True)
+            input = torch.ones(*dims, requires_grad=True)
             self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=input)
+
+    def test_randn(self):
+        x = torch.randn(1, 2, 3, 4)
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return (torch.randn(1, 2, 3, 4) + x).shape
+        self.run_model_test(MyModule(), train=False, input=(x),
+                            batch_size=BATCH_SIZE, use_gpu=False)
 
     def test_convtranspose(self):
         model = nn.ConvTranspose2d(3, 3, 3, stride=3, bias=False, padding=1, output_padding=2)
@@ -818,7 +918,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
                 def forward(self, x):
                     return x.unsqueeze(dim)
-            x = Variable(torch.randn(*shape))
+            x = torch.randn(*shape)
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, atol=1e-7)
 
     # NB: InstanceNorm model includes unused weights, so skip this in TestCaffe2BackendEmbed
@@ -827,6 +927,14 @@ class TestCaffe2Backend(unittest.TestCase):
     def test_instance_norm(self):
         underlying = nn.InstanceNorm2d(3)
         self.run_model_test(underlying, train=False, batch_size=BATCH_SIZE)
+
+    def test_pixel_shuffle(self):
+        underlying = nn.PixelShuffle(4)
+        shape = (1, 64, 5, 5)
+        input = Variable(torch.randn(*shape),
+                         requires_grad=True)
+        self.run_model_test(underlying, train=False, input=(input),
+                            batch_size=BATCH_SIZE)
 
     def test_dynamic_sizes(self):
         class MyModel(torch.nn.Module):
@@ -837,7 +945,7 @@ class TestCaffe2Backend(unittest.TestCase):
                 shape = torch.onnx.operators.shape_as_tensor(x)
                 new_shape = torch.cat((torch.LongTensor([-1]), shape[0].view(1)))
                 return torch.onnx.operators.reshape_from_tensor_shape(x, new_shape)
-        x = Variable(torch.randn(3, 5, 7))
+        x = torch.randn(3, 5, 7)
         self.run_model_test(MyModel(), train=False, input=x, batch_size=BATCH_SIZE, use_gpu=False)
 
     def test_advanced_broadcast(self):
@@ -847,8 +955,8 @@ class TestCaffe2Backend(unittest.TestCase):
 
             def forward(self, x, y):
                 return torch.mul(x, y)
-        x = Variable(torch.randn(1, 5, 10))
-        y = Variable(torch.randn(1, 5, 1))
+        x = torch.randn(1, 5, 10)
+        y = torch.randn(1, 5, 1)
         self.run_model_test(MyModel(), train=False, input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
 
     def test_int8_export(self):
@@ -918,6 +1026,149 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.rand(5, 5, 5)
         self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_tensor_factories(self):
+        class TensorFactory(torch.nn.Module):
+            def forward(self, x):
+                return torch.zeros(x.size()) + torch.ones(x.size())
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_where_functional(self):
+        class WhereFunctional(torch.nn.Module):
+            def forward(self, x):
+                return torch.where(x > 2.0, x, torch.neg(x))
+
+        x = torch.randn(3, 4)
+        self.run_model_test(WhereFunctional(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_where_method(self):
+        class WhereMethod(torch.nn.Module):
+            def forward(self, x):
+                return x.where(x > 2.0, torch.neg(x))
+
+        x = torch.randn(3, 4)
+        self.run_model_test(WhereMethod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_data_dependent_zeros_factory(self):
+        class ZerosFactory(torch.nn.Module):
+            def forward(self, input):
+                return torch.cat([input, torch.zeros(input.size(0), 1).type_as(input)], dim=1)
+
+        x = torch.zeros(3, 4)
+        self.run_model_test(ZerosFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_implicit_expand(self):
+        class ImplicitExpandExportMod(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        x = torch.randn(3, 4)
+        self.run_model_test(ImplicitExpandExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_reduce_sum(self):
+        class ReduceSumNegativeIndices(torch.nn.Module):
+            def forward(self, x):
+                return x.sum(-1)
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(ReduceSumNegativeIndices(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_group_norm(self):
+        c = torch.randn(BATCH_SIZE, 6, 224)
+        model = nn.GroupNorm(3, 6)
+        self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
+
+    def test_rsub(self):
+        class RsubModel(torch.nn.Module):
+            def forward(self, x):
+                return 1 - x
+
+        x = torch.randn(1, 2)
+        self.run_model_test(RsubModel(), train=False, input=(x,),
+                            batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_isnan(self):
+        class IsNaNModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.isnan(input)
+
+        x = torch.tensor([1.0, float('nan'), 2.0])
+        self.run_model_test(IsNaNModel(), train=False, input=x, batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_flatten(self):
+        class FlattenModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.flatten(input)
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.run_model_test(FlattenModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_flatten2D(self):
+        class FlattenModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.flatten(input, 1)
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.run_model_test(FlattenModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_argmax(self):
+        class ArgmaxModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.argmax(input, dim=1)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(ArgmaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_argmax_none_dim(self):
+        class ArgmaxModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.argmax(input)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(ArgmaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_argmin(self):
+        class ArgminModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.argmin(input, dim=1)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(ArgminModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_argmin_none_dim(self):
+        class ArgminModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.argmin(input)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(ArgminModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_reshape(self):
+        class ReshapeModel(torch.nn.Module):
+            def forward(self, input):
+                return input.reshape(1, 1)
+
+        x = torch.randn(1, requires_grad=True)
+        self.run_model_test(ReshapeModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_reshape_as(self):
+        class ReshapeAsModel(torch.nn.Module):
+            def forward(self, input):
+                y = torch.randn(3, 1, 2, 1, requires_grad=False)
+                return input.reshape_as(y)
+
+        x = torch.randn(2, 3, requires_grad=True)
+        self.run_model_test(ReshapeAsModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_narrow(self):
+        class NarrowModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.narrow(input, 0, 0, 2)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        self.run_model_test(NarrowModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
 # a bit of metaprogramming to set up all the rnn tests
 

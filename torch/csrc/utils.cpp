@@ -1,21 +1,24 @@
-#include "torch/csrc/python_headers.h"
-#include <stdarg.h>
+#include <torch/csrc/python_headers.h>
+#include <cstdarg>
 #include <string>
 #include <vector>
 #include <sstream>
 #include <algorithm>
 #include <unordered_map>
-#include "THP.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/utils/invalid_arguments.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/DynamicTypes.h"
+#include <torch/csrc/THP.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/invalid_arguments.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/DynamicTypes.h>
 
-#include "generic/utils.cpp"
+#include <torch/csrc/generic/utils.cpp>
 #include <TH/THGenerateAllTypes.h>
 
-#include "generic/utils.cpp"
+#include <torch/csrc/generic/utils.cpp>
 #include <TH/THGenerateHalfType.h>
+
+#include <torch/csrc/generic/utils.cpp>
+#include <TH/THGenerateBoolType.h>
 
 int THPUtils_getCallable(PyObject *arg, PyObject **result) {
   if (!PyCallable_Check(arg))
@@ -140,7 +143,7 @@ void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* met
     // remove nullptr terminator
     vector.pop_back();
   }
-  while (1) {
+  while (true) {
     vector.push_back(*methods);
     if (!methods->ml_name) {
       break;
@@ -183,7 +186,7 @@ void THPUtils_invalidArguments(PyObject *given_args, PyObject *given_kwargs,
   va_list option_list;
   va_start(option_list, num_options);
   for (size_t i = 0; i < num_options; i++)
-    option_strings.push_back(va_arg(option_list, const char*));
+    option_strings.emplace_back(va_arg(option_list, const char*));
   va_end(option_list);
 
   PyErr_SetString(PyExc_TypeError, torch::format_invalid_args(
@@ -234,3 +237,11 @@ void THPPointer<THTensor>::free() {
     THTensor_free(LIBRARY_STATE ptr);
   }
 }
+
+template<>
+void THPPointer<THPStorage>::free() {
+  if (ptr)
+    Py_DECREF(ptr);
+}
+
+template class THPPointer<THPStorage>;

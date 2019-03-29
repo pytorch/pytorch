@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/TemporalMaxPooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/TemporalMaxPooling.cu"
 #else
 
 static inline void THNN_(TemporalMaxPooling_shapeCheck)(

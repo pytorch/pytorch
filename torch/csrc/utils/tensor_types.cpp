@@ -1,10 +1,10 @@
 #include <Python.h>
 
-#include "tensor_types.h"
+#include <torch/csrc/utils/tensor_types.h>
 
-#include "torch/csrc/autograd/generated/VariableType.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/tensor/python_tensor.h"
+#include <torch/csrc/autograd/generated/VariableType.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/tensor/python_tensor.h>
 
 #include <sstream>
 #include <unordered_map>
@@ -72,11 +72,11 @@ std::vector<std::pair<Backend, ScalarType>> all_declared_types() {
   // can't easily iterate over enum classes
   std::vector<Backend> backends = { Backend::CPU, Backend::CUDA, Backend::SparseCPU, Backend::SparseCUDA };
   std::vector<ScalarType> scalar_types = { ScalarType::Byte, ScalarType::Char, ScalarType::Double, ScalarType::Float,
-                                           ScalarType::Int, ScalarType::Long, ScalarType::Short, ScalarType::Half};
+                                           ScalarType::Int, ScalarType::Long, ScalarType::Short, ScalarType::Half, ScalarType::Bool};
   for (auto& backend : backends) {
     for (auto& scalar_type : scalar_types) {
-      // there is no sparse half types.
-      if (scalar_type == ScalarType::Half && (backend == Backend::SparseCUDA || backend == Backend::SparseCPU)) {
+      // there are no sparse half or bool types.
+      if ((scalar_type == ScalarType::Half || scalar_type == ScalarType::Bool) && (backend == Backend::SparseCUDA || backend == Backend::SparseCPU)) {
         continue;
       }
       ret.emplace_back(std::make_pair(backend, scalar_type));

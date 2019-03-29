@@ -1,13 +1,13 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/Dtype.h"
-#include "torch/csrc/Layout.h"
-#include "torch/csrc/PythonTypes.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/autograd/generated/VariableType.h"
-#include "torch/csrc/utils/cuda_enabled.h"
-#include "torch/csrc/utils/cuda_lazy_init.h"
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/Layout.h>
+#include <torch/csrc/PythonTypes.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/generated/VariableType.h>
+#include <torch/csrc/utils/cuda_enabled.h>
+#include <torch/csrc/utils/cuda_lazy_init.h>
 
 #include <ATen/ATen.h>
 
@@ -33,6 +33,7 @@ const std::unordered_map<std::string, at::ScalarType> attype_names = {
   {"Short", at::kShort},
   {"Int", at::kInt},
   {"Long", at::kLong},
+  {"Bool", at::kBool},
 };
 
 std::unordered_map<at::Type*, PyTypeObject*> attype_to_py_storage_type;
@@ -70,9 +71,11 @@ at::Type* get_type(const std::string& name, bool is_cuda, bool is_sparse) {
 
 PyTypeObject* getPyTypeObject(const at::Storage& storage)
 {
+  at::ScalarType scalarType = at::typeMetaToScalarType(storage.dtype());
+  at::TensorOptions options = at::TensorOptions(storage.device_type()).dtype(scalarType);
   auto attype = at::globalContext().getNonVariableTypeOpt(
-      deviceTypeToBackend(storage.device_type()),
-      at::dataTypeToScalarType(storage.dtype().id()));
+      at::tensorTypeIdToBackend(at::computeTensorTypeId(options)),
+      scalarType);
   auto it = attype_to_py_storage_type.find(attype);
   if (it != attype_to_py_storage_type.end()) {
     return it->second;

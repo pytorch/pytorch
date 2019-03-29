@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/HardTanh.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/HardTanh.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 void THNN_(HardTanh_updateOutput)(
            THCState *state,

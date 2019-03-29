@@ -1,13 +1,13 @@
 #pragma once
 
-#include <ATen/Registry.h>
-#include <ATen/Error.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Registry.h>
 
 namespace at {
 
 class Context;
 
-struct AT_API ComplexHooksInterface {
+struct CAFFE2_API ComplexHooksInterface {
   virtual ~ComplexHooksInterface() {}
 
   virtual void registerComplexTypes(Context*) const {
@@ -15,13 +15,16 @@ struct AT_API ComplexHooksInterface {
   }
 };
 
-struct AT_API ComplexHooksArgs {};
-AT_DECLARE_REGISTRY(ComplexHooksRegistry, ComplexHooksInterface, ComplexHooksArgs)
+struct CAFFE2_API ComplexHooksArgs {};
+C10_DECLARE_REGISTRY(
+    ComplexHooksRegistry,
+    ComplexHooksInterface,
+    ComplexHooksArgs);
 #define REGISTER_COMPLEX_HOOKS(clsname) \
-  AT_REGISTER_CLASS(ComplexHooksRegistry, clsname, clsname)
+  C10_REGISTER_CLASS(ComplexHooksRegistry, clsname, clsname)
 
 namespace detail {
-AT_API const ComplexHooksInterface& getComplexHooks();
+CAFFE2_API const ComplexHooksInterface& getComplexHooks();
 }
 
 }

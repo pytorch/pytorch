@@ -3,8 +3,8 @@
 
 #include <mutex>
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/blob_serialization.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
@@ -52,7 +52,7 @@ class CAFFE2_API Cursor {
    */
   virtual bool Valid() = 0;
 
-  AT_DISABLE_COPY_AND_ASSIGN(Cursor);
+  C10_DISABLE_COPY_AND_ASSIGN(Cursor);
 };
 
 /**
@@ -71,7 +71,7 @@ class CAFFE2_API Transaction {
    */
   virtual void Commit() = 0;
 
-  AT_DISABLE_COPY_AND_ASSIGN(Transaction);
+  C10_DISABLE_COPY_AND_ASSIGN(Transaction);
 };
 
 /**
@@ -99,14 +99,14 @@ class CAFFE2_API DB {
  protected:
   Mode mode_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(DB);
+  C10_DISABLE_COPY_AND_ASSIGN(DB);
 };
 
 // Database classes are registered by their names so we can do optional
 // dependencies.
-CAFFE_DECLARE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
+C10_DECLARE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
 #define REGISTER_CAFFE2_DB(name, ...) \
-  CAFFE_REGISTER_CLASS(Caffe2DBRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(Caffe2DBRegistry, name, __VA_ARGS__)
 
 /**
  * Returns a database object of the given database type, source and mode. The
@@ -187,7 +187,13 @@ class CAFFE2_API DBReader {
     db_type_ = db_type;
     source_ = source;
     db_ = CreateDB(db_type_, source_, READ);
-    CAFFE_ENFORCE(db_, "Cannot open db: ", source_, " of type ", db_type_);
+    CAFFE_ENFORCE(
+        db_,
+        "Cannot find db implementation of type ",
+        db_type,
+        " (while trying to open ",
+        source_,
+        ")");
     InitializeCursor(num_shards, shard_id);
   }
 
@@ -282,10 +288,10 @@ class CAFFE2_API DBReader {
   unique_ptr<DB> db_;
   unique_ptr<Cursor> cursor_;
   mutable std::mutex reader_mutex_;
-  uint32_t num_shards_;
-  uint32_t shard_id_;
+  uint32_t num_shards_{};
+  uint32_t shard_id_{};
 
-  AT_DISABLE_COPY_AND_ASSIGN(DBReader);
+  C10_DISABLE_COPY_AND_ASSIGN(DBReader);
 };
 
 class CAFFE2_API DBReaderSerializer : public BlobSerializerBase {
@@ -295,7 +301,8 @@ class CAFFE2_API DBReaderSerializer : public BlobSerializerBase {
    * otherwise this function produces a fatal error.
    */
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       BlobSerializerBase::SerializationAcceptor acceptor) override;
 };

@@ -20,14 +20,19 @@ function(filter_list output input)
     set(${output} ${result} PARENT_SCOPE)
 endfunction()
 
-################################################################################
+function(filter_list_exclude output input)
+    unset(result)
+    foreach(filename ${${input}})
+        foreach(pattern ${ARGN})
+            if(NOT "${filename}" MATCHES "${pattern}")
+                list(APPEND result "${filename}")
+            endif()
+        endforeach()
+    endforeach()
+    set(${output} ${result} PARENT_SCOPE)
+endfunction()
 
-if (DEFINED ENV{PYTORCH_PYTHON})
-  message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
-  set(PYCMD "$ENV{PYTORCH_PYTHON}")
-else()
-  SET(PYCMD "python")
-endif()
+################################################################################
 
 # ---[ Write the macros file
 configure_file(
@@ -59,21 +64,10 @@ if (NOT BUILD_ATEN_MOBILE)
     SET(VCOMP_LIB "vcompd")
   ENDIF()
 
-  # SET_SOURCE_FILES_PROPERTIES must be in the same CMakeLists.txt file as the target that includes the file
-  # so we need to set these commands here rather than in src/TH
-  IF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
-    IF(MSVC)
-      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/generic/simd/convolve5x5_sse.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG}/fp:fast")
-    ELSE(MSVC)
-      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/generic/simd/convolve5x5_sse.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG} -ffast-math")
-    ENDIF(MSVC)
-  ENDIF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
   IF(C_AVX_FOUND)
     IF(MSVC)
-      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/generic/simd/convolve5x5_avx.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG}/fp:fast ${CXX_AVX_FLAGS}")
       SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG}/arch:AVX ${CXX_AVX_FLAGS}")
     ELSE(MSVC)
-      SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/generic/simd/convolve5x5_avx.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG} -ffast-math ${CXX_AVX_FLAGS}")
       SET_SOURCE_FILES_PROPERTIES(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG} ${CXX_AVX_FLAGS}")
     ENDIF(MSVC)
   ENDIF(C_AVX_FOUND)
@@ -145,17 +139,22 @@ if (NOT BUILD_ATEN_MOBILE)
 
   FILE(GLOB all_python "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/*.py")
 
+  set(GEN_ROCM_FLAG)
+  if (USE_ROCM)
+    set(GEN_ROCM_FLAG --rocm)
+  endif()
+
   SET(GEN_COMMAND
-      ${PYCMD} ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen.py
+      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen.py
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+      ${GEN_ROCM_FLAG}
       ${cwrap_files}
   )
 
   EXECUTE_PROCESS(
       COMMAND ${GEN_COMMAND}
         --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt
-        --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       RESULT_VARIABLE RETURN_VALUE
   )
   if (NOT RETURN_VALUE EQUAL 0)
@@ -179,7 +178,6 @@ if (NOT BUILD_ATEN_MOBILE)
 
   add_custom_command(OUTPUT ${generated_cpp} ${cuda_generated_cpp}
     COMMAND ${GEN_COMMAND}
-      --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
     DEPENDS ${all_python} ${all_templates} ${cwrap_files} ${core_gen_checked_inputs})
 
   # Generated headers used from a CUDA (.cu) file are

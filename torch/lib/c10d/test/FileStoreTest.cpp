@@ -1,4 +1,4 @@
-#include "StoreTestCommon.hpp"
+#include <c10d/test/StoreTestCommon.hpp>
 
 #include <unistd.h>
 
@@ -34,7 +34,7 @@ void testHelper(const std::string prefix = "") {
 
   // Basic set/get
   {
-    c10d::FileStore fileStore(path);
+    c10d::FileStore fileStore(path, 2);
     c10d::PrefixStore store(prefix, fileStore);
     c10d::test::set(store, "key0", "value0");
     c10d::test::set(store, "key1", "value1");
@@ -46,7 +46,7 @@ void testHelper(const std::string prefix = "") {
 
   // Perform get on new instance
   {
-    c10d::FileStore fileStore(path);
+    c10d::FileStore fileStore(path, 2);
     c10d::PrefixStore store(prefix, fileStore);
     c10d::test::check(store, "key0", "value0");
   }
@@ -57,15 +57,15 @@ void testHelper(const std::string prefix = "") {
   const auto numIterations = 100;
   c10d::test::Semaphore sem1, sem2;
   for (auto i = 0; i < numThreads; i++) {
-    threads.push_back(std::move(std::thread([&] {
-      c10d::FileStore fileStore(path);
+    threads.push_back(std::thread([&] {
+      c10d::FileStore fileStore(path, numThreads + 1);
       c10d::PrefixStore store(prefix, fileStore);
       sem1.post();
       sem2.wait();
       for (auto j = 0; j < numIterations; j++) {
         store.add("counter", 1);
       }
-    })));
+    }));
   }
   sem1.wait(numThreads);
   sem2.post(numThreads);
@@ -75,7 +75,7 @@ void testHelper(const std::string prefix = "") {
 
   // Check that the counter has the expected value
   {
-    c10d::FileStore fileStore(path);
+    c10d::FileStore fileStore(path, numThreads + 1);
     c10d::PrefixStore store(prefix, fileStore);
     std::string expected = std::to_string(numThreads * numIterations);
     c10d::test::check(store, "counter", expected);

@@ -11,7 +11,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/proto/caffe2_pb.h"
 
-CAFFE2_DECLARE_bool(caffe2_workspace_stack_debug);
+C10_DECLARE_bool(caffe2_workspace_stack_debug);
 
 namespace caffe2 {
 namespace detail {
@@ -154,8 +154,9 @@ class CAFFE2_API WorkspaceStack {
 template <class Context>
 class CreateScopeOp final : public Operator<Context> {
  public:
-  CreateScopeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit CreateScopeOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
@@ -164,8 +165,9 @@ class CreateScopeOp final : public Operator<Context> {
 template <class Context>
 class HasScopeOp final : public Operator<Context> {
  public:
-  HasScopeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit HasScopeOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;

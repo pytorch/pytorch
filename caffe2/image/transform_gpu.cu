@@ -56,11 +56,7 @@ bool TransformOnGPU(
     Tensor& mean,
     Tensor& std,
     Context* context) {
-  // data comes in as NHWC
   const int N = X.dim32(0), C = X.dim32(3), H = X.dim32(1), W = X.dim32(2);
-  // data goes out as NCHW
-  Y->Resize(std::vector<int>{N,C,H,W});
-
   auto* input_data = X.template data<T_IN>();
   auto* output_data = Y->template mutable_data<T_OUT>();
 

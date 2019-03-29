@@ -7,10 +7,13 @@ Distributed communication package - torch.distributed
 .. automodule:: torch.distributed
 .. currentmodule:: torch.distributed
 
-Currently torch.distributed supports three backends, each with
+Backends
+--------
+
+``torch.distributed`` supports three backends, each with
 different capabilities. The table below shows which functions are available
 for use with CPU / CUDA tensors.
-MPI supports cuda only if the implementation used to build PyTorch supports it.
+MPI supports CUDA only if the implementation used to build PyTorch supports it.
 
 
 +------------+-----------+-----------+-----------+
@@ -26,16 +29,90 @@ MPI supports cuda only if the implementation used to build PyTorch supports it.
 +------------+-----+-----+-----+-----+-----+-----+
 | all_reduce | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
 +------------+-----+-----+-----+-----+-----+-----+
-| reduce     | ✘   | ✘   | ✓   | ?   | ✘   | ✓   |
+| reduce     | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +------------+-----+-----+-----+-----+-----+-----+
-| all_gather | ✘   | ✘   | ✓   | ?   | ✘   | ✓   |
+| all_gather | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +------------+-----+-----+-----+-----+-----+-----+
-| gather     | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
+| gather     | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
 +------------+-----+-----+-----+-----+-----+-----+
-| scatter    | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
+| scatter    | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
 +------------+-----+-----+-----+-----+-----+-----+
-| barrier    | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
+| barrier    | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +------------+-----+-----+-----+-----+-----+-----+
+
+
+Backends that come with PyTorch
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+PyTorch distributed currently only supports Linux. By default, the Gloo and NCCL backends
+are built and included in PyTorch distributed (NCCL only when building with CUDA).
+MPI is an
+optional backend that can only be included if you build PyTorch from source. (e.g.
+building PyTorch on a host that has MPI installed.)
+
+
+Which backend to use?
+^^^^^^^^^^^^^^^^^^^^^
+
+In the past, we were often asked: "which backend should I use?".
+
+- Rule of thumb
+
+  - Use the NCCL backend for distributed **GPU** training
+  - Use the Gloo backend for distributed **CPU** training.
+
+- GPU hosts with InfiniBand interconnect
+
+  - Use NCCL, since it's the only backend that currently supports
+    InfiniBand and GPUDirect.
+
+- GPU hosts with Ethernet interconnect
+
+  - Use NCCL, since it currently provides the best distributed GPU
+    training performance, especially for multiprocess single-node or
+    multi-node distributed training. If you encounter any problem with
+    NCCL, use Gloo as the fallback option. (Note that Gloo currently
+    runs slower than NCCL for GPUs.)
+
+- CPU hosts with InfiniBand interconnect
+
+  - If your InfiniBand has enabled IP over IB, use Gloo, otherwise,
+    use MPI instead. We are planning on adding InfiniBand support for
+    Gloo in the upcoming releases.
+
+- CPU hosts with Ethernet interconnect
+
+  - Use Gloo, unless you have specific reasons to use MPI.
+
+Common environment variables
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Choosing the network interface to use
+"""""""""""""""""""""""""""""""""""""
+
+By default, both NCCL and Gloo
+backends will try to find the network interface to use for communication. However, this
+is not always guaranteed to be successful from our experiences. Therefore, if you
+encounter any problem on either backend not being able to find the correct network
+interface. You can try to set the following environment variables (each one
+applicable to its respective backend):
+
+* **NCCL_SOCKET_IFNAME**, for example ``export NCCL_SOCKET_IFNAME=eth0``
+* **GLOO_SOCKET_IFNAME**, for example ``export GLOO_SOCKET_IFNAME=eth0``
+
+Other NCCL environment variables
+""""""""""""""""""""""""""""""""
+
+NCCL has also provided a number of environment variables for fine-tuning purposes.
+
+Commonly used ones include the following for debugging purposes:
+
+- ``export NCCL_DEBUG=INFO``
+- ``export NCCL_DEBUG_SUBSYS=ALL``
+
+For the full list of NCCL environment variables, please refer to
+`NVIDIA NCCL's official documentation <https://docs.nvidia.com/deeplearning/sdk/nccl-developer-guide/docs/env.html>`_
+
 
 .. _distributed-basics:
 
@@ -75,13 +152,15 @@ joined.
 
 .. autofunction:: init_process_group
 
+.. autoclass:: Backend
+
+.. autofunction:: get_backend
+
 .. autofunction:: get_rank
 
 .. autofunction:: get_world_size
 
 .. autofunction:: is_initialized
-
-.. autofunction:: get_default_group
 
 .. autofunction:: is_mpi_available
 
@@ -107,7 +186,8 @@ package. ``group_name`` is deprecated as well.
     import torch.distributed as dist
 
     # Use address of one of the machines
-    dist.init_process_group(backend, init_method='tcp://10.1.1.20:23456', rank=args.rank, world_size=4)
+    dist.init_process_group(backend, init_method='tcp://10.1.1.20:23456',
+                            rank=args.rank, world_size=4)
 
 Shared file-system initialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -118,7 +198,7 @@ with ``file://`` and contain a path to a non-existent file (in an existing
 directory) on a shared file system. File-system initialization will automatically
 create that file if it doesn't exist, but will not delete the file. Therefore, it
 is your responsibility to make sure that the file is cleaned up before the next
-init_process_group call on the same file path/name.
+:func:`init_process_group` call on the same file path/name.
 
 Note that automatic rank assignment is not supported anymore in the latest
 distributed package and ``group_name`` is deprecated as well.
@@ -128,13 +208,20 @@ distributed package and ``group_name`` is deprecated as well.
     local systems and NFS support it.
 
 .. warning::
-    This method does not clean up and remove the file and it is your responsibility
-    to remove the file at the end of the training. This is especially important
-    if you plan to call init_process_group multiple times on the same file name.
+    This method will always create the file and try its best to clean up and remove
+    the file at the end of the program. In other words, each initialization with
+    the file init method will need a brand new empty file in order for the initialization
+    to succeed. If the same file used by the previous initialization (which happens not
+    to get cleaned up) is used again, this is unexpected behavior and can often cause
+    deadlocks and failures. Therefore, even though this method will try its best to clean up
+    the file, if the auto-delete happens to be unsuccessful, it is your responsibility
+    to ensure that the file is removed at the end of the training to prevent the same
+    file to be reused again during the next time. This is especially important
+    if you plan to call :func:`init_process_group` multiple times on the same file name.
     In other words, if the file is not removed/cleaned up and you call
-    init_process_group again on that file, it is unexpected behavior and will cause
-    failures. The rule of thumb here is that, make sure that the file is non-existent or
-    empty everytime init_process_group is called.
+    :func:`init_process_group` again on that file, failures are expected.
+    The rule of thumb here is that, make sure that the file is non-existent or
+    empty everytime :func:`init_process_group` is called.
 
 ::
 
@@ -172,6 +259,10 @@ used to create new groups, with arbitrary subsets of all processes. It returns
 an opaque group handle that can be given as a ``group`` argument to all collectives
 (collectives are distributed functions to exchange information in certain well-known programming patterns).
 
+Currently `torch.distributed` does not support creating groups with different backends.
+In other words, each group being created will use the same backend as you specified in
+:func:`~torch.distributed.init_process_group`.
+
 .. autofunction:: new_group
 
 Point-to-point communication
@@ -193,18 +284,18 @@ as they should never be created manually, but they are guaranteed to support two
 
 .. autofunction:: irecv
 
-Synchronous and asynchornous collective operations
+Synchronous and asynchronous collective operations
 --------------------------------------------------
 Every collective operation function supports the following two kinds of operations:
 
 synchronous operation - the default mode, when ``async_op`` is set to False.
 when the function returns, it is guaranteed that
 the collective operation is performed (not necessarily completed if it's a CUDA op since all
-CUDA ops are asynchornous), and any further function calls depending on the data of the
+CUDA ops are asynchronous), and any further function calls depending on the data of the
 collective operation can be called. In the synchronous mode, the collective function does not
 return anything
 
-asynchornous operation - when ``async_op`` is set to True. The collective operation function
+asynchronous operation - when ``async_op`` is set to True. The collective operation function
 returns a distributed request object. In general, you don't need to create it manually and it
 is guaranteed to support two methods:
 
@@ -228,6 +319,16 @@ Collective functions
 .. autofunction:: scatter
 
 .. autofunction:: barrier
+
+.. autoclass:: ReduceOp
+
+.. class:: reduce_op
+
+    Deprecated enum-like class for reduction operations: ``SUM``, ``PRODUCT``,
+    ``MIN``, and ``MAX``.
+
+    :class:`~torch.distributed.ReduceOp` is recommended to use instead.
+
 
 Multi-GPU collective functions
 ------------------------------
@@ -299,6 +400,24 @@ Launch utility
 --------------
 
 The `torch.distributed` package also provides a launch utility in
-`torch.distributed.launch`.
+`torch.distributed.launch`. This helper utility can be used to launch
+multiple processes per node for distributed training. This utility also supports
+both python2 and python3.
+
 
 .. automodule:: torch.distributed.launch
+
+
+Spawn utility
+-------------
+
+The :doc:`torch.multiprocessing` package also provides a ``spawn``
+function in :func:`torch.multiprocessing.spawn`. This helper function
+can be used to spawn multiple processes. It works by passing in the
+function that you want to run and spawns N processes to run it. This
+can be used for multiprocess distributed training as well.
+
+For references on how to use it, please refer to `PyToch example - ImageNet
+implementation <https://github.com/pytorch/examples/tree/master/imagenet>`_
+
+Note that this function requires Python 3.4 or higher.

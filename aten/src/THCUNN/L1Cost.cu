@@ -1,7 +1,7 @@
-#include "THCUNN.h"
-#include "common.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
 
 #include <thrust/device_ptr.h>
 #include <thrust/reduce.h>
@@ -30,5 +30,5 @@ struct l1cost_updateGradInput_functor
   }
 };
 
-#include "generic/L1Cost.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/L1Cost.cu>
+#include <THC/THCGenerateFloatTypes.h>

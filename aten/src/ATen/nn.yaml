@@ -1,266 +1,287 @@
 # Loss functions
 
-- name: binary_cross_entropy(Tensor self, Tensor target, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean)
+- name: _thnn_binary_cross_entropy(Tensor self, Tensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean)
   cname: BCECriterion
   scalar_check:
-    output: reduction != Reduction::None || self_->dim() == 0
+    output: 'false'
+    grad_input: 'false'
 
-- name: l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
+- name: _thnn_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: AbsCriterion
   scalar_check:
-    output: reduction != Reduction::None || self_->dim() == 0
+    output: 'false'
+    grad_input: 'false'
 
-- name: mse_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
+- name: _thnn_mse_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: MSECriterion
   scalar_check:
-    output: reduction != Reduction::None || self_->dim() == 0
+    output: 'false'
+    grad_input: 'false'
 
-- name: multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean)
+- name: _thnn_multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor? weight={}, int64_t reduction=Reduction::Mean)
   cname: MultiMarginCriterion
   scalar_check:
-    output: reduction != Reduction::None || self_->dim() == 0
+    output: reduction != Reduction::None || self_->dim() == 0 || (reduction == Reduction::None && self_->dim() == 1)
 
-- name: multilabel_margin_loss(Tensor self, LongTensor target, int64_t reduction=Reduction::ElementwiseMean)
+- name: _thnn_multilabel_margin_loss(Tensor self, LongTensor target, int64_t reduction=Reduction::Mean)
   cname: MultiLabelMarginCriterion
   buffers: [is_target]
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
     is_target: target_->dim() == 0
 
-- name: nll_loss(Tensor self, LongTensor target, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean, int64_t ignore_index=-100)
+- name: _thnn_nll_loss(Tensor self, LongTensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100)
   cname: ClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
     total_weight: 'true'
 
-- name: nll_loss2d(Tensor self, LongTensor target, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean, int64_t ignore_index=-100)
+- name: _thnn_nll_loss2d(Tensor self, LongTensor target, Tensor? weight={}, int64_t reduction=Reduction::Mean, int64_t ignore_index=-100)
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
     total_weight: 'true'
 
-- name: smooth_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
+- name: _thnn_smooth_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: SmoothL1Criterion
   scalar_check:
-    output: reduction != Reduction::None || self_->dim() == 0
+    output: 'false'
+    grad_input: 'false'
 
-- name: soft_margin_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
+- name: _thnn_soft_margin_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: SoftMarginCriterion
   scalar_check:
-    output: reduction != Reduction::None || self_->dim() == 0
+    output: 'false'
+    grad_input: 'false'
 
 # Activation functions
 
-- name: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1)
+- name: _thnn_elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1)
   cname: ELU
   has_inplace: True
   scalar_check:
-    output: self_->dim() == 0
-    grad_input: output_->dim() == 0
+    output: 'false'
+    grad_input: 'false'
 
-- name: glu(Tensor self, int64_t dim=-1)
+- name: _thnn_glu(Tensor self, int64_t dim=-1)
   cname: GatedLinear
   wrap_dim:
     dim: self
   scalar_check:
     output: 'false'
+    grad_input: 'false'
 
-- name: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1)
+- name: _thnn_hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1)
   cname: HardTanh
   has_inplace: True
   scalar_check:
-    output: self_->dim() == 0
+    output: 'false'
+    grad_input: 'false'
 
-- name: leaky_relu(Tensor self, Scalar negative_slope=0.01)
+- name: _thnn_leaky_relu(Tensor self, Scalar negative_slope=0.01)
   cname: LeakyReLU
   has_inplace: True
   scalar_check:
-    output: self_->dim() == 0
+    output: 'false'
+    grad_input: 'false'
 
-- name: log_sigmoid(Tensor self)
+- name: _thnn_log_sigmoid(Tensor self)
   cname: LogSigmoid
   buffers: [buffer]
   scalar_check:
-    output: self_->dim() == 0
-    buffer: self_->dim() == 0
+    output: 'false'
+    buffer: 'false'
+    grad_input: 'false'
 
 # NOTE: we treat noise as an input (it's really a buffer) because the codegen
 # can't handle in-place functions that have buffers
-- name: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr)
+- name: _thnn_rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr)
   cname: RReLU
   has_inplace: True
   scalar_check:
-    output: self_->dim() == 0
+    output: 'false'
+    grad_input: 'false'
 
-- name: softplus(Tensor self, Scalar beta=1, Scalar threshold=20)
+- name: _thnn_softplus(Tensor self, Scalar beta=1, Scalar threshold=20)
   cname: SoftPlus
   scalar_check:
-    output: self_->dim() == 0
+    output: 'false'
+    grad_input: 'false'
 
-- name: softshrink(Tensor self, Scalar lambd=0.5)
+- name: _thnn_softshrink(Tensor self, Scalar lambd=0.5)
   cname: SoftShrink
   scalar_check:
-    output: self_->dim() == 0
-
-- name: threshold(Tensor self, Scalar threshold, Scalar value)
-  cname: Threshold
-  has_inplace: True
-  scalar_check:
-    output: self_->dim() == 0
+    output: 'false'
+    grad_input: 'false'
 
 # Pooling
 
-- name: adaptive_avg_pool2d(Tensor self, IntList[2] output_size)
-  cname: SpatialAdaptiveAveragePooling
-
-- name: adaptive_avg_pool3d(Tensor self, IntList[3] output_size)
+- name: _thnn_adaptive_avg_pool3d(Tensor self, IntArrayRef[3] output_size)
   cname: VolumetricAdaptiveAveragePooling
+  scalar_check:
+    output: 'false'
+    grad_input: 'false'
 
-- name: adaptive_max_pool2d(Tensor self, IntList[2] output_size)
+- name: _thnn_adaptive_max_pool2d(Tensor self, IntArrayRef[2] output_size)
   cname: SpatialAdaptiveMaxPooling
+  scalar_check:
+    output: 'false'
+    grad_input: 'false'
 
-- name: adaptive_max_pool3d(Tensor self, IntList[3] output_size)
+- name: _thnn_adaptive_max_pool3d(Tensor self, IntArrayRef[3] output_size)
   cname: VolumetricAdaptiveMaxPooling
+  scalar_check:
+    output: 'false'
+    grad_input: 'false'
 
-- name: avg_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, bool ceil_mode=false, bool count_include_pad=true)
+- name: _thnn_avg_pool2d(Tensor self, IntArrayRef[2] kernel_size, IntArrayRef[2] stride={}, IntArrayRef[2] padding=0, bool ceil_mode=false, bool count_include_pad=true)
   cname: SpatialAveragePooling
   default_init:
     stride: kernel_size
+  scalar_check:
+    output: 'false'
+    grad_input: 'false'
 
-- name: avg_pool3d(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, bool ceil_mode=false, bool count_include_pad=true)
+- name: _thnn_avg_pool3d(Tensor self, IntArrayRef[3] kernel_size, IntArrayRef[3] stride={}, IntArrayRef[3] padding=0, bool ceil_mode=false, bool count_include_pad=true)
   cname: VolumetricAveragePooling
   default_init:
     stride: kernel_size
-
-- name: fractional_max_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] output_size, Tensor random_samples)
-  cname: SpatialFractionalMaxPooling
   scalar_check:
     output: 'false'
+    grad_input: 'false'
 
-- name: max_pool2d_with_indices(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false)
+- name: _thnn_max_pool2d_with_indices(Tensor self, IntArrayRef[2] kernel_size, IntArrayRef[2] stride={}, IntArrayRef[2] padding=0, IntArrayRef[2] dilation=1, bool ceil_mode=false)
   cname: SpatialDilatedMaxPooling
   default_init:
     stride: kernel_size
+  scalar_check:
+    output: 'false'
+    grad_input: 'false'
 
-- name: max_pool3d_with_indices(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[3] dilation=1, bool ceil_mode=false)
+- name: _thnn_max_pool3d_with_indices(Tensor self, IntArrayRef[3] kernel_size, IntArrayRef[3] stride={}, IntArrayRef[3] padding=0, IntArrayRef[3] dilation=1, bool ceil_mode=false)
   cname: VolumetricDilatedMaxPooling
   default_init:
     stride: kernel_size
+  scalar_check:
+    output: 'false'
+    grad_input: 'false'
 
-- name: max_unpool2d(Tensor self, LongTensor indices, IntList[2] output_size)
+- name: _thnn_max_unpool2d(Tensor self, LongTensor indices, IntArrayRef[2] output_size)
   cname: SpatialMaxUnpooling
+  scalar_check:
+    output: 'false'
+    grad_input: 'false'
 
-- name: max_unpool3d(Tensor self, LongTensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding)
+- name: _thnn_max_unpool3d(Tensor self, LongTensor indices, IntArrayRef[3] output_size, IntArrayRef[3] stride, IntArrayRef[3] padding)
   cname: VolumetricMaxUnpooling
-
-# Padding
-
-- name: reflection_pad1d(Tensor self, IntList[2] padding)
-  cname: TemporalReflectionPadding
-
-- name: reflection_pad2d(Tensor self, IntList[4] padding)
-  cname: SpatialReflectionPadding
-
-- name: replication_pad1d(Tensor self, IntList[2] padding)
-  cname: TemporalReplicationPadding
-
-- name: replication_pad2d(Tensor self, IntList[4] padding)
-  cname: SpatialReplicationPadding
-
-- name: replication_pad3d(Tensor self, IntList[6] padding)
-  cname: VolumetricReplicationPadding
+  scalar_check:
+    output: 'false'
+    grad_input: 'false'
 
 # Upsampling
 
-# Note: The upsampling backwards functions also include an IntList input_size
+# Note: The upsampling backwards functions also include an IntArrayRef input_size
 # parameter, which is added by nn_parse.py
 
-- name: upsample_linear1d(Tensor self, IntList[1] output_size, bool align_corners)
+- name: _thnn_upsample_linear1d(Tensor self, IntArrayRef[1] output_size, bool align_corners)
   cname: TemporalUpSamplingLinear
   scalar_check:
+    self: 'false'
     grad_input: 'false'
 
-- name: upsample_bilinear2d(Tensor self, IntList[2] output_size, bool align_corners)
+- name: _thnn_upsample_bilinear2d(Tensor self, IntArrayRef[2] output_size, bool align_corners)
   cname: SpatialUpSamplingBilinear
   scalar_check:
+    self: 'false'
     grad_input: 'false'
 
-- name: upsample_trilinear3d(Tensor self, IntList[3] output_size, bool align_corners)
+- name: _thnn_upsample_bicubic2d(Tensor self, IntArrayRef[2] output_size, bool align_corners)
+  cname: SpatialUpSamplingBicubic
+  scalar_check:
+    grad_input: 'false'
+
+- name: _thnn_upsample_trilinear3d(Tensor self, IntArrayRef[3] output_size, bool align_corners)
   cname: VolumetricUpSamplingTrilinear
   scalar_check:
+    self: 'false'
     grad_input: 'false'
 
-- name: upsample_nearest1d(Tensor self, IntList[1] output_size)
+- name: _thnn_upsample_nearest1d(Tensor self, IntArrayRef[1] output_size)
   cname: TemporalUpSamplingNearest
   scalar_check:
+    self: 'false'
     grad_input: 'false'
 
-- name: upsample_nearest2d(Tensor self, IntList[2] output_size)
+- name: _thnn_upsample_nearest2d(Tensor self, IntArrayRef[2] output_size)
   cname: SpatialUpSamplingNearest
   scalar_check:
+    self: 'false'
     grad_input: 'false'
 
-- name: upsample_nearest3d(Tensor self, IntList[3] output_size)
+- name: _thnn_upsample_nearest3d(Tensor self, IntArrayRef[3] output_size)
   cname: VolumetricUpSamplingNearest
   scalar_check:
+    self: 'false'
     grad_input: 'false'
 
 
 # Private functions. These also exist in TH, but we want the backwards functions
 # to implement derivatives.
 
-- name: _sigmoid(Tensor self)
+- name: _thnn_sigmoid(Tensor self)
   cname: Sigmoid
   scalar_check:
-    output: self_->dim() == 0
-    grad_input: output_->dim() == 0
+    output: 'false'
+    grad_input: 'false'
 
-- name: _tanh(Tensor self)
+- name: _thnn_tanh(Tensor self)
   cname: Tanh
   scalar_check:
-    output: self_->dim() == 0
-    grad_input: output_->dim() == 0
-
-# Batch normalization
-
-# The buffers here are somewhat hazardous, because their type will be
-# based off of self, even though you may plausibly wish running_mean
-# and running_var to have different precision than self (e.g.,
-# BatchNorm on half).  Fortunately, THNN doesn't actually ever do this,
-# so the buffer allocation code is "correct".  If you ever do fix this,
-# you should just port the function entirely to a native ATen function.
-- name: thnn_batch_norm(Tensor self, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double momentum, double eps)
-  cname: BatchNormalization
-  buffers: [save_mean, save_std]
+    output: 'false'
+    grad_input: 'false'
 
 # Convolutions
 
-- name: thnn_conv_transpose2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, IntList[2] dilation=1)
+- name: _thnn_conv_transpose2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0, IntArrayRef[2] output_padding=0, IntArrayRef[2] dilation=1)
   cname: SpatialFullDilatedConvolution
   buffers: [columns, ones]
 
-- name: thnn_conv_transpose3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1)
+- name: _thnn_conv_transpose3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias={}, IntArrayRef[3] stride=1, IntArrayRef[3] padding=0, IntArrayRef[3] output_padding=0, IntArrayRef[3] dilation=1)
   cname: VolumetricFullDilatedConvolution
   buffers: [finput, fgrad_input]
 
-- name: thnn_conv2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0)
+- name: _thnn_conv2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0)
   cname: SpatialConvolutionMM
   buffers: [finput, fgrad_input]
 
-- name: thnn_conv_depthwise2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
+- name: _thnn_conv_depthwise2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0, IntArrayRef[2] dilation=1)
   cname: SpatialDepthwiseConvolution
   buffers: []
 
-- name: thnn_conv3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0)
+- name: _thnn_conv3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias={}, IntArrayRef[3] stride=1, IntArrayRef[3] padding=0)
   cname: VolumetricConvolutionMM
   buffers: [finput, fgrad_input]
 
-- name: thnn_conv_dilated2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
+- name: _thnn_conv_dilated2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0, IntArrayRef[2] dilation=1)
   cname: SpatialDilatedConvolution
   buffers: [columns, ones]
 
-- name: thnn_conv_dilated3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1)
+- name: _thnn_conv_dilated3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias={}, IntArrayRef[3] stride=1, IntArrayRef[3] padding=0, IntArrayRef[3] dilation=1)
   cname: VolumetricDilatedConvolution
   buffers: [columns, ones]
+
+# Fold and Unfold
+
+- name: _thnn_col2im(Tensor self, IntArrayRef[2] output_size, IntArrayRef[2] kernel_size, IntArrayRef[2] dilation, IntArrayRef[2] padding, IntArrayRef[2] stride)
+  cname: Col2Im
+  scalar_check:
+    output: 'false'
+    grad_input: 'false'
+
+- name: _thnn_im2col(Tensor self, IntArrayRef[2] kernel_size, IntArrayRef[2] dilation, IntArrayRef[2] padding, IntArrayRef[2] stride)
+  cname: Im2Col
+  scalar_check:
+    output: 'false'
+    grad_input: 'false'

@@ -9,11 +9,12 @@
 #include <vector>
 #include <unordered_map>
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/filler.h"
+#include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
 
@@ -163,6 +164,13 @@ class CAFFE2_API OpSchema {
   OpSchema& InheritOnnxSchema(const std::string& onnx_schema_name);
 
   /**
+   * @brief Shortcut to InheritOnnxSchema(type_)
+   */
+  OpSchema& InheritOnnxSchema() {
+    return InheritOnnxSchema(type_);
+  }
+
+  /**
    * @brief Sets the tensor inference function to produce the same output as
    * the input.
    */
@@ -179,6 +187,10 @@ class CAFFE2_API OpSchema {
   inline vector<TensorShape> InferTensor(
       const OperatorDef& def,
       const vector<TensorShape>& input_type_shape) const {
+    CAFFE_ENFORCE(
+        Verify(def),
+        "(InferTensor) Operator def did not pass schema checking: ",
+        ProtoDebugString(def));
     return tensor_inference_function_(def, input_type_shape);
   }
 
@@ -364,7 +376,21 @@ class CAFFE2_API OpSchema {
     return device_inference_function_(def);
   }
 
-  // The helper is build sparse input with values, keys, and lengths; e.g.:
+  // The helper is build sparse input with values, keys, weights and lengths;
+  // e.g.:
+  // values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
+  // keys    = [0, 1, 4, 0, 1, 2, 5, 1, 2]
+  // weights = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+  //            \_____/  \________/  \__/
+  // lengths =    [3,        4,       2]
+  OpSchema& WeightedValueKeyLengthInputFillers(
+      size_t value_index,
+      size_t key_index,
+      size_t length_index,
+      size_t weight_index);
+
+  // The helper is build sparse input with values, keys, weights and lengths;
+  // e.g.:
   // values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
   // keys    = [0, 1, 4, 0, 1, 2, 5, 1, 2]
   //            \_____/  \________/  \__/
@@ -500,7 +526,7 @@ inline TensorShape CreateTensorShape(
     vector<T_I> dims,
     ::caffe2::TensorProto_DataType dt) {
   TensorShape ts;
-  for (int d : dims) {
+  for (T_I d : dims) {
     ts.add_dims(d);
   }
   ts.set_data_type(dt);
@@ -562,7 +588,7 @@ OpSchema::Cost PointwiseCostInference(
   const TensorShape X = inputs[0];
   uint64_t nElemX = nElemFromDim(X);
   uint64_t nElemRead = 0;
-  for (int i = 0; i < inputs.size(); ++i) {
+  for (size_t i = 0; i < inputs.size(); ++i) {
     nElemRead += nElemFromDim(inputs[i]);
   }
 
@@ -576,18 +602,30 @@ OpSchema::Cost PointwiseCostInference(
 
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                                     \
-  CAFFE2_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
+#define OPERATOR_SCHEMA(name)                                       \
+  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
       &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #else // CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                                     \
-  CAFFE2_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
+#define OPERATOR_SCHEMA(name)                                       \
+  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
       1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #endif // CAFFE2_NO_OPERATOR_SCHEMA
 
+#ifdef CAFFE2_NO_GRADIENT_OPS
+
+#define GRADIENT_OPERATOR_SCHEMA(name)                              \
+  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =     \
+      1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
+
+#else
+
+#define GRADIENT_OPERATOR_SCHEMA(name) OPERATOR_SCHEMA(name)
+
+#endif
 #endif // CAFFE2_CORE_OPERATOR_SCHEMA_H_

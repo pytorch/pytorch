@@ -194,7 +194,6 @@ class TestOperators(hu.HypothesisTestCase):
         _test_binary("Mul", ref, filter_=not_overflow, test_gradient=True)(self)
         _test_binary_broadcast("Mul", ref, filter_=not_overflow)(self)
 
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     def test_div(self):
         def ref(x, y):
             return (x / y, )
@@ -321,7 +320,7 @@ class TestOperators(hu.HypothesisTestCase):
         for param, _ in enumerate(inputs):
             self.assertGradientChecks(gc, op, inputs, param, [0])
 
-    @unittest.skipIf(not workspace.has_gpu_support and not workspace.has_hip_support,
+    @unittest.skipIf(not workspace.has_gpu_support,
                      "Skipping test due to no gpu present.")
     @given(hidden_size=st.integers(min_value=1, max_value=3),
            num_layers=st.integers(min_value=1, max_value=3),
@@ -1527,8 +1526,11 @@ class TestOperators(hu.HypothesisTestCase):
            net_type=st.sampled_from(
                ["simple", "dag"] +
                (["async_dag"] if workspace.has_gpu_support else [])),
-           do=st.sampled_from(hu.device_options))
-    def test_dag_net_forking(self, net_type, num_workers, do):
+           # This test is flaky on rocm caused by race condition in
+           # hcc HSAQueue, the fix will be coming in rocm 2.2 (see
+           # https://github.com/pytorch/pytorch/issues/16229
+           **hu.gcs_no_hip)
+    def test_dag_net_forking(self, net_type, num_workers, gc, dc):
         from caffe2.python.model_helper import ModelHelper
         from caffe2.python import brew
         m = ModelHelper(name="test_model")
@@ -1561,8 +1563,8 @@ class TestOperators(hu.HypothesisTestCase):
         m.net.SquaredL2Distance(["0_0", "label"], "xent")
         m.net.AveragedLoss("xent", "loss")
         input_to_grad = m.AddGradientOperators(["loss"])
-        m.Proto().device_option.CopyFrom(do)
-        m.param_init_net.Proto().device_option.CopyFrom(do)
+        m.Proto().device_option.CopyFrom(gc)
+        m.param_init_net.Proto().device_option.CopyFrom(gc)
 
         m.Proto().type = net_type
         m.Proto().num_workers = num_workers
@@ -1578,10 +1580,10 @@ class TestOperators(hu.HypothesisTestCase):
             for input_blob in input_blobs:
                 self.ws.create_blob(input_blob).feed(
                     np.random.randn(n, d).astype(np.float32),
-                    device_option=do)
+                    device_option=gc)
                 self.ws.create_blob("label").feed(
                     np.random.randn(n, d).astype(np.float32),
-                    device_option=do)
+                    device_option=gc)
             self.ws.run(m.net)
             gradients = [
                 self.ws.blobs[str(input_to_grad[input_blob])].fetch()
@@ -1825,7 +1827,6 @@ class TestOperators(hu.HypothesisTestCase):
         out, = self.assertReferenceChecks(gc, op, [a], ref)
         self.assertEqual(dst, out.dtype)
 
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     @given(a=hu.tensor(),
            eps=st.floats(min_value=1e-4, max_value=1e-2),
            a_grad=hu.tensor(elements=st.floats(min_value=0.01, max_value=0.99)),
@@ -2224,36 +2225,6 @@ class TestOperators(hu.HypothesisTestCase):
             ws.run(op)
         for blob, arr in feeds:
             np.testing.assert_array_equal(ws.blobs[blob].fetch(), arr)
-
-    @given(sizes=st.lists(st.integers(1, 100), min_size=1),
-           in_place=st.booleans(),
-           **hu.gcs)
-    def test_unsafe_coalesce(self, sizes, in_place, gc, dc):
-        gAlignment = 64
-        Xs = [np.random.randn(size)
-              .astype(np.random.choice([np.float32, np.float64, np.uint8]))
-              for size in sizes]
-        op = core.CreateOperator(
-            "UnsafeCoalesce",
-            ["X_{}".format(i) for i, _ in enumerate(sizes)],
-            [("X_{}" if in_place else "Y_{}").format(i)
-             for i, _ in enumerate(sizes)] + ["coalesced"])
-        self.assertDeviceChecks(dc, op, Xs, list(range(len(sizes) + 1)))
-
-        def unsafe_coalesce(*xs):
-            def to_uint8(x):
-                x_aligned_bytes = ((x.nbytes + gAlignment - 1) // gAlignment) \
-                    * gAlignment
-                x_aligned = np.zeros(
-                    shape=(x_aligned_bytes // x.dtype.itemsize, ),
-                    dtype=x.dtype)
-                x_aligned[:x.size] = x
-                x_cast = np.fromstring(x_aligned.tobytes(), dtype='<u1')
-                return x_cast
-            flat = [to_uint8(x) for x in xs]
-            coalesced = np.concatenate(flat)
-            return list(xs) + [coalesced]
-        self.assertReferenceChecks(gc, op, Xs, unsafe_coalesce)
 
     @given(inp=_dtypes().flatmap(lambda dt: _tensor_and_indices(
         elements=st.floats(min_value=0, max_value=1), dtype=dt)),

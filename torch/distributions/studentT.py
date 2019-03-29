@@ -10,7 +10,8 @@ from torch.distributions.utils import _standard_normal, broadcast_all
 
 class StudentT(Distribution):
     r"""
-    Creates a Student's t-distribution parameterized by :attr:`df`.
+    Creates a Student's t-distribution parameterized by degree of
+    freedom :attr:`df`, mean :attr:`loc` and scale :attr:`scale`.
 
     Example::
 
@@ -20,6 +21,8 @@ class StudentT(Distribution):
 
     Args:
         df (float or Tensor): degrees of freedom
+        loc (float or Tensor): mean of the distribution
+        scale (float or Tensor): scale of the distribution
     """
     arg_constraints = {'df': constraints.positive, 'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
@@ -41,8 +44,8 @@ class StudentT(Distribution):
 
     def __init__(self, df, loc=0., scale=1., validate_args=None):
         self.df, self.loc, self.scale = broadcast_all(df, loc, scale)
-        self._chi2 = Chi2(df)
-        batch_shape = torch.Size() if isinstance(df, Number) else self.df.size()
+        self._chi2 = Chi2(self.df)
+        batch_shape = self.df.size()
         super(StudentT, self).__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

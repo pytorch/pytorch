@@ -26,7 +26,7 @@ bool RoIPoolOp<float, CPUContext>::RunOnDevice() {
 
   Y->Resize(num_rois, channels, pooled_height_, pooled_width_);
   if (!is_test_) {
-    A->Resize(Y->dims());
+    A->Resize(Y->sizes());
   }
 
   const float* Xdata = X.data<float>();

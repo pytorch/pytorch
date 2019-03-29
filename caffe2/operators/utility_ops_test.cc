@@ -4,7 +4,7 @@
 #include "caffe2/operators/utility_ops.h"
 #include <gtest/gtest.h>
 
-CAFFE2_DECLARE_string(caffe_test_root);
+C10_DECLARE_string(caffe_test_root);
 
 namespace caffe2 {
 
@@ -16,10 +16,10 @@ static void AddConstInput(
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   math::Set<float, CPUContext>(
-      tensor->size(), value, tensor->template mutable_data<float>(), &context);
+      tensor->numel(), value, tensor->template mutable_data<float>(), &context);
   return;
 }
 
@@ -38,8 +38,8 @@ TEST(UtilityOpTest, testReshapeWithScalar) {
   EXPECT_TRUE(op->Run());
   Blob* XNew = ws.GetBlob("XNew");
   const TensorCPU& XNewTensor = XNew->Get<Tensor>();
-  EXPECT_EQ(1, XNewTensor.ndim());
-  EXPECT_EQ(1, XNewTensor.size());
+  EXPECT_EQ(1, XNewTensor.dim());
+  EXPECT_EQ(1, XNewTensor.numel());
 }
 
 } // namespace caffe2

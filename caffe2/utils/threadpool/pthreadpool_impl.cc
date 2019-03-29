@@ -11,6 +11,14 @@ void pthreadpool_compute_1d(
     pthreadpool_function_1d_t function,
     void* argument,
     size_t range) {
+  if (threadpool == nullptr) {
+    /* No thread pool provided: execute function sequentially on the calling
+     * thread */
+    for (size_t i = 0; i < range; i++) {
+      function(argument, i);
+    }
+    return;
+  }
   reinterpret_cast<caffe2::ThreadPool*>(threadpool)
       ->run(
           [function, argument](int threadId, size_t workId) {
@@ -21,4 +29,19 @@ void pthreadpool_compute_1d(
 
 size_t pthreadpool_get_threads_count(pthreadpool_t threadpool) {
   return reinterpret_cast<caffe2::ThreadPool*>(threadpool)->getNumThreads();
+}
+
+pthreadpool_t pthreadpool_create(size_t threads_count) {
+  std::mutex thread_pool_creation_mutex_;
+  std::lock_guard<std::mutex> guard(thread_pool_creation_mutex_);
+
+  return reinterpret_cast<pthreadpool_t>(new caffe2::ThreadPool(threads_count));
+}
+
+void pthreadpool_destroy(pthreadpool_t pthreadpool) {
+  if (pthreadpool) {
+    caffe2::ThreadPool* threadpool =
+        reinterpret_cast<caffe2::ThreadPool*>(pthreadpool);
+    delete threadpool;
+  }
 }

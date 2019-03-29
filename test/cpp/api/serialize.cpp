@@ -1,12 +1,14 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/tempfile.h>
+
 #include <torch/nn/modules/functional.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/sgd.h>
 #include <torch/serialize.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/support.h>
@@ -30,13 +32,15 @@ Sequential xor_model() {
 }
 
 torch::Tensor save_and_load(torch::Tensor input) {
-  torch::test::TempFile tempfile;
-  torch::save(input, tempfile.str());
-  return torch::load(tempfile.str());
+  std::stringstream stream;
+  torch::save(input, stream);
+  torch::Tensor tensor;
+  torch::load(tensor, stream);
+  return tensor;
 }
 } // namespace
 
-TEST(Serialize, Basic) {
+TEST(SerializeTest, Basic) {
   torch::manual_seed(0);
 
   auto x = torch::randn({5, 5});
@@ -47,7 +51,23 @@ TEST(Serialize, Basic) {
   ASSERT_TRUE(x.allclose(y));
 }
 
-TEST(Serialize, Resized) {
+TEST(SerializeTest, BasicToFile) {
+  torch::manual_seed(0);
+
+  auto x = torch::randn({5, 5});
+
+  auto tempfile = c10::make_tempfile();
+  torch::save(x, tempfile.name);
+
+  torch::Tensor y;
+  torch::load(y, tempfile.name);
+
+  ASSERT_TRUE(y.defined());
+  ASSERT_EQ(x.sizes().vec(), y.sizes().vec());
+  ASSERT_TRUE(x.allclose(y));
+}
+
+TEST(SerializeTest, Resized) {
   torch::manual_seed(0);
 
   auto x = torch::randn({11, 5});
@@ -59,7 +79,7 @@ TEST(Serialize, Resized) {
   ASSERT_TRUE(x.allclose(y));
 }
 
-TEST(Serialize, Sliced) {
+TEST(SerializeTest, Sliced) {
   torch::manual_seed(0);
 
   auto x = torch::randn({11, 5});
@@ -71,7 +91,7 @@ TEST(Serialize, Sliced) {
   ASSERT_TRUE(x.allclose(y));
 }
 
-TEST(Serialize, NonContiguous) {
+TEST(SerializeTest, NonContiguous) {
   torch::manual_seed(0);
 
   auto x = torch::randn({11, 5});
@@ -83,14 +103,14 @@ TEST(Serialize, NonContiguous) {
   ASSERT_TRUE(x.allclose(y));
 }
 
-TEST(Serialize, XOR) {
+TEST(SerializeTest, XOR) {
   // We better be able to save and load an XOR model!
   auto getLoss = [](Sequential model, uint32_t batch_size) {
     auto inputs = torch::empty({batch_size, 2});
     auto labels = torch::empty({batch_size});
     for (size_t i = 0; i < batch_size; i++) {
       inputs[i] = torch::randint(2, {2}, torch::kInt64);
-      labels[i] = inputs[i][0].toCLong() ^ inputs[i][1].toCLong();
+      labels[i] = inputs[i][0].item<int64_t>() ^ inputs[i][1].item<int64_t>();
     }
     auto x = model->forward<torch::Tensor>(inputs);
     return torch::binary_cross_entropy(x, labels);
@@ -112,36 +132,36 @@ TEST(Serialize, XOR) {
     loss.backward();
     optimizer.step();
 
-    running_loss = running_loss * 0.99 + loss.sum().toCFloat() * 0.01;
+    running_loss = running_loss * 0.99 + loss.sum().item<float>() * 0.01;
     ASSERT_LT(epoch, 3000);
     epoch++;
   }
 
-  torch::test::TempFile tempfile;
-  torch::save(model, tempfile.str());
-  torch::load(model2, tempfile.str());
+  auto tempfile = c10::make_tempfile();
+  torch::save(model, tempfile.name);
+  torch::load(model2, tempfile.name);
 
   auto loss = getLoss(model2, 100);
-  ASSERT_LT(loss.toCFloat(), 0.1);
+  ASSERT_LT(loss.item<float>(), 0.1);
 }
 
-TEST(Serialize, Optim) {
+TEST(SerializeTest, Optim) {
   auto model1 = Linear(5, 2);
   auto model2 = Linear(5, 2);
   auto model3 = Linear(5, 2);
 
   // Models 1, 2, 3 will have the same parameters.
-  torch::test::TempFile model_tempfile;
-  torch::save(model1, model_tempfile.str());
-  torch::load(model2, model_tempfile.str());
-  torch::load(model3, model_tempfile.str());
+  auto model_tempfile = c10::make_tempfile();
+  torch::save(model1, model_tempfile.name);
+  torch::load(model2, model_tempfile.name);
+  torch::load(model3, model_tempfile.name);
 
-  auto param1 = model1->parameters();
-  auto param2 = model2->parameters();
-  auto param3 = model3->parameters();
+  auto param1 = model1->named_parameters();
+  auto param2 = model2->named_parameters();
+  auto param3 = model3->named_parameters();
   for (const auto& p : param1) {
-    ASSERT_TRUE(param1[p.key].allclose(param2[p.key]));
-    ASSERT_TRUE(param2[p.key].allclose(param3[p.key]));
+    ASSERT_TRUE(p->allclose(param2[p.key()]));
+    ASSERT_TRUE(param2[p.key()].allclose(param3[p.key()]));
   }
 
   // Make some optimizers with momentum (and thus state)
@@ -176,71 +196,111 @@ TEST(Serialize, Optim) {
   // Do 2 steps of model 3 while saving the optimizer
   step(optim3, model3);
 
-  torch::test::TempFile optim_tempfile;
-  torch::save(optim3, optim_tempfile.str());
-  torch::load(optim3_2, optim_tempfile.str());
+  auto optim_tempfile = c10::make_tempfile();
+  torch::save(optim3, optim_tempfile.name);
+  torch::load(optim3_2, optim_tempfile.name);
   step(optim3_2, model3);
 
-  param1 = model1->parameters();
-  param2 = model2->parameters();
-  param3 = model3->parameters();
+  param1 = model1->named_parameters();
+  param2 = model2->named_parameters();
+  param3 = model3->named_parameters();
   for (const auto& p : param1) {
-    const auto& name = p.key;
+    const auto& name = p.key();
     // Model 1 and 3 should be the same
     ASSERT_TRUE(
-        param1[name].norm().toCFloat() == param3[name].norm().toCFloat());
+        param1[name].norm().item<float>() == param3[name].norm().item<float>());
     ASSERT_TRUE(
-        param1[name].norm().toCFloat() != param2[name].norm().toCFloat());
+        param1[name].norm().item<float>() != param2[name].norm().item<float>());
   }
 }
 
-// CATCH_TEST_CASE("Serialize/Default/CUDA", "[cuda]") {
-//   torch::manual_seed(0);
-//   // We better be able to save and load a XOR model!
-//   auto getLoss = [](Sequential model, uint32_t batch_size) {
-//     auto inputs = torch::empty({batch_size, 2});
-//     auto labels = torch::empty({batch_size});
-//     for (size_t i = 0; i < batch_size; i++) {
-//       inputs[i] = torch::randint(2, {2}, torch::kInt64);
-//       labels[i] = inputs[i][0].toCLong() ^ inputs[i][1].toCLong();
-//     }
-//     auto x = model->forward<torch::Tensor>(inputs);
-//     return torch::binary_cross_entropy(x, labels);
-//   };
-//
-//   auto model = xor_model();
-//   auto model2 = xor_model();
-//   auto model3 = xor_model();
-//   auto optimizer = torch::optim::SGD(
-//       model->parameters(),
-//       torch::optim::SGDOptions(1e-1).momentum(0.9).nesterov(true).weight_decay(
-//           1e-6));
-//
-//   float running_loss = 1;
-//   int epoch = 0;
-//   while (running_loss > 0.1) {
-//     torch::Tensor loss = getLoss(model, 4);
-//     optimizer.zero_grad();
-//     loss.backward();
-//     optimizer.step();
-//
-//     running_loss = running_loss * 0.99 + loss.sum().toCFloat() * 0.01;
-//     ASSERT_LT(epoch, 3000);
-//     epoch++;
-//   }
-//
-//   torch::test::TempFile tempfile;
-//   torch::save(model, tempfile.str());
-//   torch::load(model2, tempfile.str());
-//
-//   auto loss = getLoss(model2, 100);
-//   ASSERT_LT(loss.toCFloat(), 0.1);
-//
-//   model2->to(torch::kCUDA);
-//   torch::test::TempFile tempfile2;
-//   torch::save(model2, tempfile2.str());
-//   torch::load(model3, tempfile2.str());
-//
-//   loss = getLoss(model3, 100);
-//   ASSERT_LT(loss.toCFloat(), 0.1);
-// }
+TEST(SerializeTest, XOR_CUDA) {
+  torch::manual_seed(0);
+  // We better be able to save and load a XOR model!
+  auto getLoss = [](Sequential model,
+                    uint32_t batch_size,
+                    bool is_cuda = false) {
+    auto inputs = torch::empty({batch_size, 2});
+    auto labels = torch::empty({batch_size});
+    if (is_cuda) {
+      inputs = inputs.cuda();
+      labels = labels.cuda();
+    }
+    for (size_t i = 0; i < batch_size; i++) {
+      inputs[i] = torch::randint(2, {2}, torch::kInt64);
+      labels[i] = inputs[i][0].item<int64_t>() ^ inputs[i][1].item<int64_t>();
+    }
+    auto x = model->forward<torch::Tensor>(inputs);
+    return torch::binary_cross_entropy(x, labels);
+  };
+
+  auto model = xor_model();
+  auto model2 = xor_model();
+  auto model3 = xor_model();
+  auto optimizer = torch::optim::SGD(
+      model->parameters(),
+      torch::optim::SGDOptions(1e-1).momentum(0.9).nesterov(true).weight_decay(
+          1e-6));
+
+  float running_loss = 1;
+  int epoch = 0;
+  while (running_loss > 0.1) {
+    torch::Tensor loss = getLoss(model, 4);
+    optimizer.zero_grad();
+    loss.backward();
+    optimizer.step();
+
+    running_loss = running_loss * 0.99 + loss.sum().item<float>() * 0.01;
+    ASSERT_LT(epoch, 3000);
+    epoch++;
+  }
+
+  auto tempfile = c10::make_tempfile();
+  torch::save(model, tempfile.name);
+  torch::load(model2, tempfile.name);
+
+  auto loss = getLoss(model2, 100);
+  ASSERT_LT(loss.item<float>(), 0.1);
+
+  model2->to(torch::kCUDA);
+  loss = getLoss(model2, 100, true);
+  ASSERT_LT(loss.item<float>(), 0.1);
+
+  auto tempfile2 = c10::make_tempfile();
+  torch::save(model2, tempfile2.name);
+  torch::load(model3, tempfile2.name);
+
+  loss = getLoss(model3, 100, true);
+  ASSERT_LT(loss.item<float>(), 0.1);
+}
+
+TEST(
+    SerializeTest,
+    CanSerializeModulesWithIntermediateModulesWithoutParametersOrBuffers) {
+  struct C : torch::nn::Module {
+    C() {
+      register_buffer("foo", torch::ones(5, torch::kInt32));
+    }
+  };
+  struct B : torch::nn::Module {};
+  struct A : torch::nn::Module {
+    A() {
+      register_module("b", std::make_shared<B>());
+      register_module("c", std::make_shared<C>());
+    }
+  };
+  struct M : torch::nn::Module {
+    M() {
+      register_module("a", std::make_shared<A>());
+    }
+  };
+
+  auto out = std::make_shared<M>();
+  std::stringstream ss;
+  torch::save(out, ss);
+  auto in = std::make_shared<M>();
+  torch::load(in, ss);
+
+  const int output = in->named_buffers()["a.c.foo"].sum().item<int>();
+  ASSERT_EQ(output, 5);
+}

@@ -13,6 +13,7 @@ vector<TensorShape> TensorInferenceForBatchMatMul(
   if (!broadcast) {
     const auto ndim = in[0].dims_size();
     CAFFE_ENFORCE_GE(ndim, 2);
+    CAFFE_ENFORCE_GE(in[1].dims_size(), 2);
     int a_dim0;
     int b_dim1;
     if (helper.GetSingleArgument<int>("trans_a", 0)) {
@@ -141,7 +142,8 @@ two diemnsional, it behaves like normal matrix multiplication.
         "Pass 1 to allow broadcasting of dimensions. Behavior is the same as numpy.matmul. Gradient is currently not supported when running in broadcast mode.")
     .TensorInferenceFunction(TensorInferenceForBatchMatMul)
     .CostInferenceFunction(
-        OpSchema::CostInferenceFunctionType(CostInferenceForBatchMatMul));
+        OpSchema::CostInferenceFunctionType(CostInferenceForBatchMatMul))
+    .InheritOnnxSchema();
 
 class GetBatchMatMulGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -172,13 +174,6 @@ class GetBatchMatMulGradient : public GradientMakerBase {
     auto trans_b_arg = vector<Argument>{MakeArgument<int>("trans_b", 1)};
     auto trans_both_arg = vector<Argument>{MakeArgument<int>("trans_a", 1),
                                            MakeArgument<int>("trans_b", 1)};
-
-    if (ArgumentHelper::HasArgument(Def(), "use_scratch")) {
-      no_trans_arg.push_back(MakeArgument<int>("use_scratch", 1));
-      trans_a_arg.push_back(MakeArgument<int>("use_scratch", 1));
-      trans_b_arg.push_back(MakeArgument<int>("use_scratch", 1));
-      trans_both_arg.push_back(MakeArgument<int>("use_scratch", 1));
-    }
 
     if (trans_a) {
       if (trans_b) {

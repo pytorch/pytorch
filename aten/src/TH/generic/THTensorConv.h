@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensorConv.h"
+#define TH_GENERIC_FILE "TH/generic/THTensorConv.h"
 #else
 
 TH_API void THTensor_(validXCorr2Dptr)(scalar_t *r_,

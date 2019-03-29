@@ -1,8 +1,8 @@
 #ifndef TH_MEMORY_FILE_INC
 #define TH_MEMORY_FILE_INC
 
-#include "THFile.h"
-#include "THStorageFunctions.h"
+#include <TH/THFile.h>
+#include <TH/THStorageFunctions.h>
 
 TH_API THFile *THMemoryFile_newWithStorage(THCharStorage *storage, const char *mode);
 TH_API THFile *THMemoryFile_new(const char *mode);

@@ -55,7 +55,7 @@ def force_unicode(s):
 
 def get_device_option(device):
     m = {DeviceType.CPU: caffe2_pb2.CPU,
-         DeviceType.CUDA: caffe2_pb2.CUDA}
+         DeviceType.CUDA: workspace.GpuDeviceType}
     return core.DeviceOption(m[device.type], device.device_id)
 
 
@@ -155,7 +155,6 @@ class Caffe2Backend(Backend):
     # In most cases, this should be empty - as the effort of ONNX is
     # to unify the operator definitions.
     _renamed_operators = {
-        'Caffe2ConvTranspose':   'ConvTranspose',
         'GlobalMaxPool':         'MaxPool',
         'GlobalAveragePool':     'AveragePool',
         'Pad':                   'PadImage',
@@ -172,6 +171,7 @@ class Caffe2Backend(Backend):
         'Unsqueeze':             'ExpandDims',
         'Loop':                  'ONNXWhile',
         'Tile':                  'NumpyTile',
+        'RandomNormal':          'GaussianFill',
     }
 
     _global_renamed_attrs = {'kernel_shape': 'kernels'}
@@ -197,6 +197,7 @@ class Caffe2Backend(Backend):
         'Loop': '_create_loop',
         'If': '_create_if',
         'Upsample': '_create_upsample',
+        'RandomNormal': '_create_gaussian_fill'
     }
 
     # Dummy name generator
@@ -382,19 +383,6 @@ class Caffe2Backend(Backend):
         return outputs
 
     @classmethod
-    def _create_upsample(cls, init_model, pred_model, n, opset_version):
-        c2_op = cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n, opset_version)
-        if opset_version >= 7:
-            if len(n.attrs['scales']) != 4:
-                raise ValueError("The scales argument should have size 4")
-            elif not (np.isclose(n.attrs['scales'][0], 1) and np.isclose(n.attrs['scales'][1], 1)):
-                raise ValueError("The first two elements in the scales argument must be 1")
-            c2_op.arg.extend([caffe2.python.utils.MakeArgument('height_scale', n.attrs['scales'][2])])
-            c2_op.arg.extend([caffe2.python.utils.MakeArgument('width_scale', n.attrs['scales'][3])])
-
-        return c2_op
-
-    @classmethod
     def _create_rnn_variant(cls, init_model, pred_model, n, opset_version):
         assert init_model is not None, "cannot convert RNNs without access to the full model"
         assert pred_model is not None, "cannot convert RNNs without access to the full model"
@@ -568,27 +556,28 @@ class Caffe2Backend(Backend):
         assert ops[0][0].type == 'If'
         if_op = ops[0][0]
         then_net = else_net = None
+        control_inputs = []
         for arg in if_op.arg:
             if arg.name == 'then_net':
                 then_net = arg.n
             if arg.name == 'else_net':
                 else_net = arg.n
+            if arg.name == '__control_inputs':
+                control_inputs = arg.strings
+
         assert then_net and else_net
         then_net_outs = then_net.external_output
         else_net_outs = else_net.external_output
         op_outputs = if_op.output
         assert len(then_net_outs) == len(else_net_outs)
         assert len(else_net_outs) == len(op_outputs)
-        then_net_remap = {}
-        else_net_remap = {}
-        # Un-SSA branch outputs - since we're emitting everything into the same
-        # namespace we don't need the graph output names and the op output
-        # names to be unique
-        for then_name, else_name, op_name in zip(then_net_outs, else_net_outs, op_outputs):
-            then_net_remap[then_name] = op_name
-            else_net_remap[else_name] = op_name
-        cls._remove_ssa(then_net, then_net_remap)
-        cls._remove_ssa(else_net, else_net_remap)
+
+        for arg in if_op.arg:
+            if arg.name == 'then_net':
+                arg.n.external_input.extend(control_inputs)
+            if arg.name == 'else_net':
+                arg.n.external_input.extend(control_inputs)
+
         return ops
 
     @classmethod
@@ -655,7 +644,10 @@ class Caffe2Backend(Backend):
             if value_info.name in initialized:
                 continue
             shape = list(d.dim_value for d in value_info.type.tensor_type.shape.dim)
-            ws.FeedBlob(value_info.name, np.ones(shape), device_option)
+            ws.FeedBlob(
+                value_info.name,
+                np.ones(shape, dtype=onnx.mapping.TENSOR_TYPE_TO_NP_TYPE[value_info.type.tensor_type.elem_type]),
+                device_option)
 
     @staticmethod
     def optimize_onnx(input, init=False, predict=False):
@@ -926,7 +918,7 @@ class Caffe2Backend(Backend):
         device = Device(device_str)
         if device.type == DeviceType.CPU:
             return True
-        elif device.type == DeviceType.CUDA:
+        elif core.IsGPUDeviceType(device.type):
             return workspace.has_gpu_support
         return False
 

@@ -1,5 +1,5 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 #include <tuple>
 
 namespace at {
@@ -33,11 +33,11 @@ Tensor conv_tbc(const Tensor& self, const Tensor& weight, const Tensor& bias, in
       "the weight tensor (output channels).");
 
   // input * weights + bias -> output_features
-  Tensor output = self.type().tensor({
+  Tensor output = at::empty({
     olen,
     input_size[1],
     weight_size[2],
-  });
+  }, self.options());
   output.copy_(bias.expand(output.sizes()));
   for (int k = 0; k < kw; k++) {
     int iShift = std::max(0, static_cast<int>(k - real_pad));

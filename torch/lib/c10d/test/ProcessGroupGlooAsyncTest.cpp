@@ -1,17 +1,17 @@
 #include <gloo/transport/tcp/device.h>
 
-#include <c10d/CUDAUtils.hpp>
+#include <c10/cuda/CUDAGuard.h>
+#include <ATen/cuda/CUDAMultiStreamGuard.h>
+
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
-#include <c10d/private/CUDAUtils.hpp>
 #include <c10d/test/CUDATest.hpp>
 #include <c10d/test/TestUtils.hpp>
 
 using namespace c10d::test;
 
-using c10d::CUDAStream;
+using at::cuda::CUDAStream;
 using c10d::ProcessGroup;
-using c10d::THCStreamGuard;
 
 template <typename T, typename... Args>
 std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
@@ -22,8 +22,7 @@ std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
 
   std::vector<std::thread> threads;
   for (auto i = 0; i < N; i++) {
-    threads.push_back(
-        std::move(std::thread([i, N, &tests] { tests[i].start(i, N); })));
+    threads.push_back(std::thread([i, N, &tests] { tests[i].start(i, N); }));
   }
 
   for (auto& thread : threads) {
@@ -47,7 +46,7 @@ class AsyncTest {
   }
 
   void start(int rank, int size) {
-    auto store = std::make_shared<::c10d::FileStore>(path_);
+    auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
     // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
@@ -71,11 +70,13 @@ class AsyncInputIsOutputTest : public AsyncTest {
         numTensors_(numTensors),
         numDevices_(cudaNumDevices()),
         state_(::at::globalContext().lazyInitCUDA()) {
-
     // Allocate inputs on available devices in a round robin fashion.
     inputs_.resize(numTensors_);
     for (auto i = 0; i < numTensors_; i++) {
-      inputs_[i] = at::empty({16, 16}, at::device({at::kCUDA, i % numDevices_}));
+      inputs_[i] = at::empty(
+          {16, 16},
+          at::device(
+              {at::kCUDA, static_cast<c10::DeviceIndex>(i % numDevices_)}));
     }
 
     // Allocate a stream per device.
@@ -85,34 +86,24 @@ class AsyncInputIsOutputTest : public AsyncTest {
     // and pass this along to the collective (since it uses the THC
     // getters to retrieve the current stream).
     //
-    at::DeviceGuard deviceGuard;
-    streams_.resize(numDevices_);
+    at::cuda::OptionalCUDAGuard deviceGuard;
+    streams_.reserve(numDevices_);
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
-      streams_[i] = CUDAStream::create();
+      streams_.push_back(at::cuda::getStreamFromPool());
     }
-  }
-
-  std::vector<THCStreamGuard> createStreamGuard() {
-    std::vector<THCStreamGuard> guards;
-    for (auto& stream : streams_) {
-      guards.push_back(std::move(THCStreamGuard(state_, stream)));
-    }
-    return guards;
   }
 
   void wait(std::shared_ptr<ProcessGroup::Work>& work) {
-    auto guards = createStreamGuard();
-    if (!work->wait()) {
-      throw work->exception();
-    }
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
+    work->wait();
   }
 
   std::vector<at::Tensor> getTensors() {
     std::vector<at::Tensor> outputs(numTensors_);
 
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Copy inputs to outputs
     for (auto i = 0; i < numTensors_; i++) {
@@ -137,10 +128,10 @@ class AsyncAllreduceTest : public AsyncInputIsOutputTest {
 
   std::shared_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every stream
-    at::DeviceGuard deviceGuard;
+    at::cuda::OptionalCUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 10 * 1000 * 1000);
@@ -163,10 +154,10 @@ class AsyncBroadcastTest : public AsyncInputIsOutputTest {
 
   std::shared_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
-    auto guards = createStreamGuard();
+    at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Launch sleep on every stream
-    at::DeviceGuard deviceGuard;
+    at::cuda::OptionalCUDAGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
       cudaSleep(streams_[i], 10 * 1000 * 1000);

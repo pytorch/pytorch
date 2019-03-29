@@ -1,6 +1,8 @@
 #ifndef THC_TENSOR_TOPK_CUH
 #define THC_TENSOR_TOPK_CUH
 
+#include <c10/macros/Macros.h>
+
 template <typename T>
 struct TopKTypeConfig {};
 
@@ -117,7 +119,7 @@ struct TopKTypeConfig<at::Half> {
   typedef uint32_t RadixType;
 
   static inline __device__ RadixType convert(at::Half v) {
-#if CUDA_VERSION >= 8000
+#if CUDA_VERSION >= 8000 || defined __HIP_PLATFORM_HCC__
     RadixType x = __half_as_ushort(v);
     RadixType mask = -((x >> 15)) | 0x8000;
     return (x ^ mask);
@@ -128,7 +130,7 @@ struct TopKTypeConfig<at::Half> {
   }
 
   static inline __device__ at::Half deconvert(RadixType v) {
-#if CUDA_VERSION >= 8000
+#if CUDA_VERSION >= 8000 || defined __HIP_PLATFORM_HCC__
     RadixType mask = ((v >> 15) - 1) | 0x8000;
     return __ushort_as_half(v ^ mask);
 #else
@@ -176,7 +178,11 @@ __device__ void countRadixUsingMask(CountType counts[RadixSize],
 #pragma unroll
     for (unsigned int j = 0; j < RadixSize; ++j) {
       bool vote = hasVal && (digitInRadix == j);
+#if defined (__HIP_PLATFORM_HCC__)
+      counts[j] += __popcll(WARP_BALLOT(vote));
+#else
       counts[j] += __popc(WARP_BALLOT(vote, ACTIVE_MASK()));
+#endif
     }
   }
 
@@ -355,6 +361,7 @@ __device__ void radixSelect(DataType* data,
 }
 
 template <typename T, typename IndexType, int Dim, bool Order>
+C10_LAUNCH_BOUNDS_1(1024)
 __global__ void gatherTopK(TensorInfo<T, IndexType> input,
                            IndexType inputSliceSize,
                            IndexType outputSliceSize, // aka `k`
@@ -440,7 +447,7 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
       IndexType indexOffset = writeIndex * indicesWithinSliceStride;
 
       topKSliceStart[topKOffset] = v;
-      indicesSliceStart[indexOffset] = i + TH_INDEX_BASE; // to Lua index
+      indicesSliceStart[indexOffset] = i;
     }
 
     writeIndexStart += carry;
@@ -472,7 +479,7 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
       IndexType indexOffset = writeIndex * indicesWithinSliceStride;
 
       topKSliceStart[topKOffset] = v;
-      indicesSliceStart[indexOffset] = i + TH_INDEX_BASE; // to Lua index
+      indicesSliceStart[indexOffset] = i;
     }
 
     if (carry >= topKRemaining) {

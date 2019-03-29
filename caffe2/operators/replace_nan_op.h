@@ -12,8 +12,9 @@ template <class Context>
 class ReplaceNaNOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ReplaceNaNOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit ReplaceNaNOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<float, double>>::call(this, Input(0));
@@ -27,13 +28,13 @@ class ReplaceNaNOp final : public Operator<Context> {
     T value = this->template GetSingleArgument<T>("value", 0);
 
     auto& input = Input(0);
-    auto* output = Output(0);
-    output->ResizeLike(input);
+
+    auto* output = Output(0, input.sizes(), at::dtype<T>());
 
     const T* input_data = input.template data<T>();
     T* output_data = output->template mutable_data<T>();
 
-    ReplaceNaN<T>(value, input.size(), input_data, output_data);
+    ReplaceNaN<T>(value, input.numel(), input_data, output_data);
 
     return true;
   }

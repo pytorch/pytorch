@@ -27,27 +27,27 @@ class TensorFiller {
     CAFFE_ENFORCE_LE(min, max);
 
     Tensor temp_tensor(shape_, Context::GetDeviceType());
-    tensor->swap(temp_tensor);
+    std::swap(*tensor, temp_tensor);
     Type* data = tensor->template mutable_data<Type>();
 
     // select distribution
     switch (dist_) {
       case FD_UNIFORM: {
         math::RandUniform<Type, Context>(
-            tensor->size(), min, max, data, context);
+            tensor->numel(), min, max, data, context);
         break;
       }
       case FD_FIXEDSUM: {
         auto fixed_sum = static_cast<Type>(fixed_sum_);
-        CAFFE_ENFORCE_LE(min * tensor->size(), fixed_sum);
-        CAFFE_ENFORCE_GE(max * tensor->size(), fixed_sum);
+        CAFFE_ENFORCE_LE(min * tensor->numel(), fixed_sum);
+        CAFFE_ENFORCE_GE(max * tensor->numel(), fixed_sum);
         math::RandFixedSum<Type, Context>(
-            tensor->size(), min, max, fixed_sum_, data, context);
+            tensor->numel(), min, max, fixed_sum_, data, context);
         break;
       }
       case FD_SYNTHETIC: {
         math::RandSyntheticData<Type, Context>(
-            tensor->size(), min, max, data, context);
+            tensor->numel(), min, max, data, context);
         break;
       }
     }
@@ -77,10 +77,13 @@ class TensorFiller {
     return *this;
   }
 
-  // a helper function to construct the lengths vector for sparse features
+  // A helper function to construct the lengths vector for sparse features
+  // We try to pad least one index per batch unless the total_length is 0
   template <class Type>
   TensorFiller& SparseLengths(Type total_length) {
-    return FixedSum(total_length).Min(0).Max(total_length);
+    return FixedSum(total_length)
+        .Min(std::min(static_cast<Type>(1), total_length))
+        .Max(total_length);
   }
 
   // a helper function to construct the segments vector for sparse features

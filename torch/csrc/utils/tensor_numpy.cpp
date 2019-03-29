@@ -1,6 +1,6 @@
-#include "tensor_numpy.h"
+#include <torch/csrc/utils/tensor_numpy.h>
 
-#include "torch/csrc/utils/numpy_stub.h"
+#include <torch/csrc/utils/numpy_stub.h>
 
 #ifndef USE_NUMPY
 namespace torch { namespace utils {
@@ -16,9 +16,9 @@ bool is_numpy_scalar(PyObject* obj) {
 }}
 #else
 
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/autograd/python_variable.h"
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/python_variable.h>
 
 #include <ATen/ATen.h>
 #include <memory>
@@ -30,7 +30,7 @@ using namespace torch::autograd;
 
 namespace torch { namespace utils {
 
-static std::vector<npy_intp> to_numpy_shape(IntList x) {
+static std::vector<npy_intp> to_numpy_shape(IntArrayRef x) {
   // shape and stride conversion from int64_t to npy_intp
   auto nelem = x.size();
   auto result = std::vector<npy_intp>(nelem);
@@ -49,14 +49,27 @@ static std::vector<int64_t> to_aten_shape(int ndim, npy_intp* values) {
   return result;
 }
 
-static int aten_to_dtype(const at::Type& type);
+static int aten_to_dtype(const ScalarType scalar_type);
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
-  auto dtype = aten_to_dtype(tensor.type());
+  if (tensor.is_cuda()) {
+    throw TypeError(
+        "can't convert CUDA tensor to numpy. Use Tensor.cpu() to "
+        "copy the tensor to host memory first.");
+  }
+  if (tensor.is_sparse()) {
+    throw TypeError(
+        "can't convert sparse tensor to numpy. Use Tensor.to_dense() to "
+        "convert to a dense tensor first.");
+  }
+  if (tensor.type().backend() != Backend::CPU) {
+      throw TypeError("NumPy conversion for %s is not supported", tensor.type().toString());
+  }
+  auto dtype = aten_to_dtype(tensor.scalar_type());
   auto sizes = to_numpy_shape(tensor.sizes());
   auto strides = to_numpy_shape(tensor.strides());
   // NumPy strides use bytes. Torch strides use element counts.
-  auto element_size_in_bytes = tensor.type().elementSizeInBytes();
+  auto element_size_in_bytes = tensor.element_size();
   for (auto& stride : strides) {
     stride *= element_size_in_bytes;
   }
@@ -133,30 +146,19 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   });
 }
 
-static int aten_to_dtype(const at::Type& type) {
-  if (type.is_cuda()) {
-    throw TypeError(
-        "can't convert CUDA tensor to numpy. Use Tensor.cpu() to "
-        "copy the tensor to host memory first.");
+static int aten_to_dtype(const ScalarType scalar_type) {
+  switch (scalar_type) {
+    case kDouble: return NPY_DOUBLE;
+    case kFloat: return NPY_FLOAT;
+    case kHalf: return NPY_HALF;
+    case kLong: return NPY_INT64;
+    case kInt: return NPY_INT32;
+    case kShort: return NPY_INT16;
+    case kChar: return NPY_INT8;
+    case kByte: return NPY_UINT8;
+    default:
+      throw ValueError("Got unsupported ScalarType ", toString(scalar_type));
   }
-  if (type.is_sparse()) {
-    throw TypeError(
-        "can't convert sparse tensor to numpy. Use Tensor.to_dense() to "
-        "convert to a dense tensor first.");
-  }
-  if (type.backend() == Backend::CPU) {
-    switch (type.scalarType()) {
-      case kDouble: return NPY_DOUBLE;
-      case kFloat: return NPY_FLOAT;
-      case kHalf: return NPY_HALF;
-      case kLong: return NPY_INT64;
-      case kInt: return NPY_INT32;
-      case kShort: return NPY_INT16;
-      case kByte: return NPY_UINT8;
-      default: break;
-    }
-  }
-  throw TypeError("NumPy conversion for %s is not supported", type.toString());
 }
 
 ScalarType numpy_dtype_to_aten(int dtype) {
@@ -166,6 +168,7 @@ ScalarType numpy_dtype_to_aten(int dtype) {
     case NPY_HALF: return kHalf;
     case NPY_INT32: return kInt;
     case NPY_INT16: return kShort;
+    case NPY_INT8: return kChar;
     case NPY_UINT8: return kByte;
     default:
       // Workaround: MSVC does not support two switch cases that have the same value
@@ -179,7 +182,7 @@ ScalarType numpy_dtype_to_aten(int dtype) {
   if (!pytype) throw python_error();
   throw TypeError(
       "can't convert np.ndarray of type %s. The only supported types are: "
-      "double, float, float16, int64, int32, and uint8.",
+      "float64, float32, float16, int64, int32, int16, int8, and uint8.",
       ((PyTypeObject*)pytype.get())->tp_name);
 }
 

@@ -121,7 +121,7 @@ hard_sigmoid: [ 0.81488073,  0.56326419,  0.85684538,  0.78901446,  0.06546044]
     .Arg("beta", "float: the bias value of the function. Defaults to 0.5")
     .Input(0, "X", "1D input tensor")
     .Output(0, "Y", "1D output tensor with same shape as input")
-    .InheritOnnxSchema("HardSigmoid");
+    .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
 OPERATOR_SCHEMA(HardSigmoidGradient)

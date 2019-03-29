@@ -8,8 +8,6 @@
 
 namespace caffe2 {
 
-BaseStaticContext* GetIDEEPStaticContext();
-
 class IDEEPContext final : public BaseContext {
  public:
   typedef std::mt19937 rand_gen_type;
@@ -20,16 +18,10 @@ class IDEEPContext final : public BaseContext {
                                      : RandomNumberSeed()) {
     CAFFE_ENFORCE_EQ(option.device_type(), PROTO_IDEEP);
   }
+  explicit IDEEPContext(const at::Device& device)
+      : IDEEPContext(DeviceToOption(device)) {}
 
   ~IDEEPContext() noexcept override {}
-
-  BaseStaticContext* GetStaticContext() const override {
-    return GetIDEEPStaticContext();
-  }
-
-  static BaseStaticContext* StaticContext() {
-    return GetIDEEPStaticContext();
-  }
 
   inline void SwitchToDevice(int /*stream_id*/) {}
   using BaseContext::SwitchToDevice;
@@ -53,8 +45,8 @@ class IDEEPContext final : public BaseContext {
     return *random_generator_.get();
   }
 
-  inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
+  inline static at::DataPtr New(size_t nbytes) {
+    return GetAllocator(CPU)->allocate(nbytes);
   }
 
   void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
@@ -91,7 +83,7 @@ class IDEEPContext final : public BaseContext {
           static_cast<const void*>(src),
           static_cast<void*>(dst));
     } else {
-      for (int i = 0; i < n; ++i) {
+      for (size_t i = 0; i < n; ++i) {
         dst[i] = src[i];
       }
     }
@@ -117,6 +109,10 @@ class IDEEPContext final : public BaseContext {
 
   static bool IsStreamFree(const DeviceOption& /* unused */, int /* unused */) {
     return true;
+  }
+
+  at::Device device() const override {
+    return at::Device(IDEEP);
   }
 
   DeviceType device_type() const override {
@@ -171,30 +167,5 @@ inline void IDEEPContext::CopyBytes<IDEEPContext, CPUContext>(
   CAFFE_ENFORCE(dst);
   memcpy(dst, src, nbytes);
 }
-
-class IDEEPStaticContext : public BaseStaticContext {
- public:
-  inline std::pair<void*, MemoryDeleter> New(size_t nbytes) const override {
-    return GetCPUAllocator()->New(nbytes);
-  }
-
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<IDEEPContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<IDEEPContext>(option);
-  }
-
-  DeviceType GetDeviceType() override {
-    return IDEEP;
-  }
-
-  void ExtractDeviceOption(DeviceOption* device, const void* /*data*/)
-      override {
-    device->set_device_type(TypeToProto(GetDeviceType()));
-  }
-};
 
 } // namespace caffe2

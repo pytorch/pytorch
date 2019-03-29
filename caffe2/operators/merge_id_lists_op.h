@@ -17,11 +17,10 @@ class MergeIdListsOp : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     auto& first_lengths = Input(0);
-    CAFFE_ENFORCE_EQ(first_lengths.ndim(), 1, "LENGTHS should be 1-D");
-    const auto batch_size = first_lengths.size();
+    CAFFE_ENFORCE_EQ(first_lengths.dim(), 1, "LENGTHS should be 1-D");
+    const auto batch_size = first_lengths.numel();
 
-    auto* out_lengths = Output(0);
-    out_lengths->ResizeLike(first_lengths);
+    auto* out_lengths = Output(0, first_lengths.sizes(), at::dtype<int32_t>());
 
     auto* out_lengths_data = out_lengths->template mutable_data<int32_t>();
 
@@ -32,15 +31,14 @@ class MergeIdListsOp : public Operator<Context> {
     auto M = 0;
     for (size_t i = 0; i < InputSize(); i += 2) {
       auto& lengths = Input(i);
-      CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTHS should be 1-D");
-      CAFFE_ENFORCE_EQ(lengths.size(), batch_size, "LENGTHS should be equal");
+      CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTHS should be 1-D");
+      CAFFE_ENFORCE_EQ(lengths.numel(), batch_size, "LENGTHS should be equal");
       auto& values = Input(i + 1);
-      CAFFE_ENFORCE_EQ(values.ndim(), 1, "VALUES should be 1-D");
-      M += values.size();
+      CAFFE_ENFORCE_EQ(values.dim(), 1, "VALUES should be 1-D");
+      M += values.numel();
     }
 
-    auto* out_values = Output(1);
-    out_values->Resize(M);
+    auto* out_values = Output(1, {M}, at::dtype<T>());
 
     T* out_values_data = out_values->template mutable_data<T>();
     auto pos = 0;

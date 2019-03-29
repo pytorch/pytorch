@@ -1,19 +1,12 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensor.h"
+#define TH_GENERIC_FILE "TH/generic/THTensor.h"
 #else
 
 /* a la lua? dim, storageoffset, ...  et les methodes ? */
 
-#ifdef __cplusplus
-#include <ATen/core/TensorImpl.h>
-#endif
+#include <c10/core/TensorImpl.h>
 
-#ifdef __cplusplus
 #define THTensor at::TensorImpl
-#else
-typedef struct at_Tensor_Impl at_Tensor_Impl;
-#define THTensor at_Tensor_Impl
-#endif
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THTensor type.
@@ -25,6 +18,7 @@ typedef struct at_Tensor_Impl at_Tensor_Impl;
 #define THShortTensor THTensor
 #define THIntTensor THTensor
 #define THLongTensor THTensor
+#define THBoolTensor THTensor
 
 /**** access methods ****/
 TH_API THStorage* THTensor_(storage)(const THTensor *self);
@@ -75,6 +69,7 @@ TH_API THTensor *THTensor_(newUnfold)(THTensor *tensor, int dimension_, int64_t 
 // values, unless you are doing some size and stride tricks, do not use resize*.
 TH_API void THTensor_(resizeNd)(THTensor *tensor, int nDimension, const int64_t *size, const int64_t *stride);
 TH_API void THTensor_(resizeAs)(THTensor *tensor, THTensor *src);
+TH_API void THTensor_(resize0d)(THTensor *tensor);
 TH_API void THTensor_(resize1d)(THTensor *tensor, int64_t size0_);
 TH_API void THTensor_(resize2d)(THTensor *tensor, int64_t size0_, int64_t size1_);
 TH_API void THTensor_(resize3d)(THTensor *tensor, int64_t size0_, int64_t size1_, int64_t size2_);
@@ -119,15 +114,21 @@ TH_API void THTensor_(free)(THTensor *self);
 TH_API void THTensor_(freeCopyTo)(THTensor *self, THTensor *dst);
 
 /* Slow access methods [check everything] */
+TH_API void THTensor_(set0d)(THTensor *tensor, scalar_t value);
 TH_API void THTensor_(set1d)(THTensor *tensor, int64_t x0, scalar_t value);
 TH_API void THTensor_(set2d)(THTensor *tensor, int64_t x0, int64_t x1, scalar_t value);
 TH_API void THTensor_(set3d)(THTensor *tensor, int64_t x0, int64_t x1, int64_t x2, scalar_t value);
 TH_API void THTensor_(set4d)(THTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3, scalar_t value);
 
+TH_API scalar_t THTensor_(get0d)(const THTensor *tensor);
 TH_API scalar_t THTensor_(get1d)(const THTensor *tensor, int64_t x0);
 TH_API scalar_t THTensor_(get2d)(const THTensor *tensor, int64_t x0, int64_t x1);
 TH_API scalar_t THTensor_(get3d)(const THTensor *tensor, int64_t x0, int64_t x1, int64_t x2);
 TH_API scalar_t THTensor_(get4d)(const THTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3);
+
+/* Shape manipulation methods */
+TH_API void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension);
+TH_API void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int dimension);
 
 /* Debug methods */
 TH_API THDescBuff THTensor_(desc)(const THTensor *tensor);

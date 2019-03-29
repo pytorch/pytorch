@@ -1,14 +1,16 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include "THC/THC.h"
-#include "miopen-wrapper.h"
-#include "ATen/miopen/Handle.h"
+#include <THH/THH.h>
+#include <ATen/miopen/miopen-wrapper.h>
+#include <ATen/miopen/Handle.h>
 
 namespace at { namespace native {
 
 inline void setMIOpenStreamToCurrent() {
-  MIOPEN_CHECK(miopenSetStream(getMiopenHandle(), THCState_getCurrentStream(globalContext().getTHCState())));
+  // NB: Due to in-place HIPify, getCurrentCUDAStream actually means
+  // getCurrentHIPStream
+  MIOPEN_CHECK(miopenSetStream(getMiopenHandle(), at::hip::getCurrentHIPStream()));
 }
 
 // This function makes tensors which have zero stride contiguous, by

@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THStorage.cpp"
+#define TH_GENERIC_FILE "TH/generic/THStorage.cpp"
 #else
 
 #include <new>
@@ -120,7 +120,7 @@ THStorage* THStorage_(newWithDataAndAllocator)(at::DataPtr&& data, ptrdiff_t siz
       size,
       std::move(data),
       allocator,
-      true).release();
+      allocator != nullptr).release();
   return storage;
 }
 

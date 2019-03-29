@@ -26,11 +26,7 @@
 #cmakedefine BLAS_F2C
 #cmakedefine BLAS_USE_CBLAS_DOT
 
-#ifdef __cplusplus
 # define TH_EXTERNC extern "C"
-#else
-# define TH_EXTERNC extern
-#endif
 
 // Note(jiayq): copied from ATen/core/Macros.h. Because internal build of TH
 // and ATen are not unified yet, we need to duplicate code for now. Long term
@@ -77,8 +73,6 @@
 #ifndef M_PI
 # define M_PI 3.14159265358979323846
 #endif
-
-#define TH_INDEX_BASE 0
 
 typedef void (*THErrorHandlerFunction)(const char *msg, void *data);
 typedef void (*THArgErrorHandlerFunction)(int argNumber, const char *msg, void *data);
@@ -190,7 +184,9 @@ inline double expm1(double x) { return THExpm1(x); }
 #define popen _popen
 #define pclose _pclose
 #include <BaseTsd.h>
+#if !defined(HAVE_SSIZE_T)
 typedef SSIZE_T ssize_t;
+#endif
 #endif
 
 #endif

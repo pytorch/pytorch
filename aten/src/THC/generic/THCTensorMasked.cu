@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMasked.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMasked.cu"
 #else
 
 
@@ -24,7 +24,7 @@ void THCTensor_(maskedFillByte)(THCState* state,
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, tensor));
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
-  THCudaByteTensor_copyByte(state, maskCuda, mask);
+  THCTensor_(copy)(state, maskCuda, mask);
   THCTensor_(maskedFill)(state, tensor, maskCuda, value);
   THCudaByteTensor_free(state, maskCuda);
 }
@@ -54,9 +54,9 @@ void THCTensor_(maskedCopy)(THCState* state,
   // iterator prefix sums? Convert `mask` to the same datatype as what
   // we're accumulating the prefix sum in (int64_t) to get around it
   THCudaLongTensor* maskLong = THCudaLongTensor_new(state);
-  at::IntList maskSizes = mask->sizes();
+  at::IntArrayRef maskSizes = mask->sizes();
   THCudaLongTensor_resize(state, maskLong, maskSizes, {});
-  THCudaLongTensor_copyCudaByte(state, maskLong, mask);
+  THCTensor_(copy)(state, maskLong, mask);
 
   // Use a prefix sum to determine the output locations of the masked elements
   THCudaLongTensor* maskPrefixSum = THCudaLongTensor_new(state);
@@ -69,7 +69,7 @@ void THCTensor_(maskedCopy)(THCState* state,
     maskPrefixSumData(THCudaLongTensor_data(state, maskPrefixSum));
 
   thrust::exclusive_scan(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     maskData,
@@ -99,7 +99,7 @@ void THCTensor_(maskedCopyByte)(THCState* state,
                                 THCTensor *tensor, THByteTensor *mask, THCTensor *src) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
-  THCudaByteTensor_copyByte(state, maskCuda, mask);
+  THCTensor_(copy)(state, maskCuda, mask);
   THCTensor_(maskedCopy)(state, tensor, maskCuda, src);
   THCudaByteTensor_free(state, maskCuda);
 }
@@ -124,9 +124,9 @@ void THCTensor_(maskedSelect)(THCState* state,
   // iterator prefix sums? Convert `mask` to the same datatype as what
   // we're accumulating the prefix sum in (int64_t) to get around it
   THCudaLongTensor* maskLong = THCudaLongTensor_new(state);
-  at::IntList maskSizes = mask->sizes();
+  at::IntArrayRef maskSizes = mask->sizes();
   THCudaLongTensor_resize(state, maskLong, maskSizes, {});
-  THCudaLongTensor_copyCudaByte(state, maskLong, mask);
+  THCTensor_(copy)(state, maskLong, mask);
 
   // Use a prefix sum to determine the output locations of the masked elements
   THCudaLongTensor* maskPrefixSum = THCudaLongTensor_new(state);
@@ -139,7 +139,7 @@ void THCTensor_(maskedSelect)(THCState* state,
     maskPrefixSumData(THCudaLongTensor_data(state, maskPrefixSum));
 
   thrust::exclusive_scan(
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     maskData,
@@ -171,7 +171,7 @@ void THCTensor_(maskedSelectByte)(THCState* state,
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
-  THCudaByteTensor_copyByte(state, maskCuda, mask);
+  THCTensor_(copy)(state, maskCuda, mask);
   THCTensor_(maskedSelect)(state, tensor, src, maskCuda);
   THCudaByteTensor_free(state, maskCuda);
 }

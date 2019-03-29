@@ -1,39 +1,51 @@
 #include "caffe2/operators/channel_stats_op.h"
+
 #include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
 template <>
-bool ChannelStatsOp<CPUContext>::RunOnDevice() {
-  const auto& X = Input(INPUT);
-  CAFFE_ENFORCE(X.ndim() >= 3 && X.ndim() <= 5);
-  const int N = X.dim32(0);
-  const int C = X.dim32(1);
-  const int H = X.dim32(2);
-  const int W = X.ndim() > 3 ? X.dim32(3) : 1;
-  const int D = X.ndim() > 4 ? X.dim32(4) : 1;
-
-  const int sampleSize = H * W * D;
-
-  Output(SUM)->Resize(C);
-  Output(SUMSQ)->Resize(C);
-  EigenVectorArrayMap<float> sum(
-      Output(SUM)->template mutable_data<float>(), C);
-  EigenVectorArrayMap<float> sumsq(
-      Output(SUMSQ)->template mutable_data<float>(), C);
-
-  sum.setZero();
-  sumsq.setZero();
-  ConstEigenArrayMap<float> X_arr(X.data<float>(), sampleSize, N * C);
-  auto index = 0;
-  for (int n = 0; n < N; ++n) {
-    for (int c = 0; c < C; ++c) {
-      sum(c) += X_arr.col(index).sum();
-      sumsq(c) += X_arr.col(index).matrix().squaredNorm();
-      index++;
+template <>
+bool ChannelStatsOp<CPUContext>::ComputeChannelStatsNCHW<float>(
+    const int N,
+    const int C,
+    const int HxW,
+    const float* X,
+    float* sum,
+    float* sumsq) {
+  ConstEigenArrayMap<float> X_arr(X, HxW, N * C);
+  for (int i = 0; i < C; ++i) {
+    sum[i] = X_arr.col(i).sum();
+    sumsq[i] = X_arr.col(i).square().sum();
+  }
+  for (int i = 1; i < N; ++i) {
+    for (int j = 0; j < C; ++j) {
+      const int c = i * C + j;
+      sum[j] += X_arr.col(c).sum();
+      sumsq[j] += X_arr.col(c).square().sum();
     }
   }
+  return true;
+}
 
+template <>
+template <>
+bool ChannelStatsOp<CPUContext>::ComputeChannelStatsNHWC<float>(
+    const int N,
+    const int C,
+    const int HxW,
+    const float* X,
+    float* sum,
+    float* sumsq) {
+  ConstEigenArrayMap<float> X_arr(X, C, N * HxW);
+  EigenVectorArrayMap<float> sum_arr(sum, C);
+  EigenVectorArrayMap<float> sumsq_arr(sumsq, C);
+  sum_arr = X_arr.col(0);
+  sumsq_arr = X_arr.col(0).square();
+  for (int i = 1; i < N * HxW; ++i) {
+    sum_arr += X_arr.col(i);
+    sumsq_arr += X_arr.col(i).square();
+  }
   return true;
 }
 
@@ -49,7 +61,6 @@ reduced across multiple batches and used to obtain the mean and variance across
 the full set of batches. Using the new mean and variance as input to SpatialBN
 has the effect of changing the batch size over which SpatialBN is applied.
 )DOC")
-
     .Input(0, "X", "The input 4-dimensional tensor of shape NCHW")
     .Output(
         0,
@@ -61,5 +72,7 @@ has the effect of changing the batch size over which SpatialBN is applied.
         "sumsq",
         "The output 1-dimensional tensor of size C containing the sum of "
         "elements squared per channel.");
+
 SHOULD_NOT_DO_GRADIENT(ChannelStats);
+
 } // namespace caffe2

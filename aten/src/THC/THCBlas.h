@@ -1,8 +1,8 @@
 #ifndef THC_BLAS_INC
 #define THC_BLAS_INC
 
-#include "THCGeneral.h"
-#include "TH/THHalf.h"
+#include <THC/THCGeneral.h>
+#include <TH/THHalf.h>
 
 /* Level 1 */
 THC_API float THCudaBlas_Sdot(THCState *state, int64_t n, float *x, int64_t incx, float *y, int64_t incy);

@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/MultiMarginCriterion.c"
+#define TH_GENERIC_FILE "THNN/generic/MultiMarginCriterion.c"
 #else
 
 // TODO: improve error messages
@@ -39,7 +39,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   for (t = 0; t < nframe; t++)
   {
     THIndex_t idx = THIndexTensor_(get1d)(target, t);
-    THArgCheck((idx >= TH_INDEX_BASE) && (idx < dim + TH_INDEX_BASE), 3,
+    THArgCheck((idx >= 0) && (idx < dim), 3,
 	       "target out of range");
   }
 
@@ -57,7 +57,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     for (t = 0; t < nframe; t++)
     {
       sum = 0;
-      THIndex_t target_idx = target_data[t] - TH_INDEX_BASE;
+      THIndex_t target_idx = target_data[t];
       scalar_t input_target = input_data[target_idx];
       for (d = 0; d < dim; d++)
       {
@@ -85,7 +85,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     sum = 0;
     for (t = 0; t < nframe; t++)
     {
-      THIndex_t target_idx = target_data[t] - TH_INDEX_BASE;
+      THIndex_t target_idx = target_data[t];
       scalar_t input_target = input_data[target_idx];
       for (d = 0; d < dim; d++)
       {
@@ -104,7 +104,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     }
 
     sum /= dim;
-    if(reduction == Reduction::ElementwiseMean)
+    if(reduction == Reduction::Mean)
       sum /= nframe;
 
     THTensor_(set1d)(output, 0, sum);
@@ -152,7 +152,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
              "inconsistent target size, got: ", target->sizes());
   }
 
-  g = (reduction == Reduction::ElementwiseMean ? 1./((scalar_t)(nframe*dim)) : 1./((scalar_t)dim));
+  g = (reduction == Reduction::Mean ? 1./((scalar_t)(nframe*dim)) : 1./((scalar_t)dim));
 
   input = THTensor_(newContiguous)(input);
   target = THIndexTensor_(newContiguous)(target);
@@ -168,7 +168,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
 
   for (t = 0; t < nframe; t++)
   {
-    THIndex_t target_idx = target_data[t] - TH_INDEX_BASE;
+    THIndex_t target_idx = target_data[t];
     scalar_t input_target = input_data[target_idx];
     scalar_t gradInput_target = 0;
     for (d = 0; d < dim; d++)

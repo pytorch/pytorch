@@ -9,10 +9,9 @@ from caffe2.python import core
 import caffe2.python._import_c_extension as C
 
 
-def rewrite_init_net_simple(net, ideep=True):
-    device = caffe2_pb2.IDEEP if ideep else caffe2_pb2.MKLDNN
+def rewrite_init_net_simple(net):
     for op in net.op:
-        op.device_option.device_type = device
+        op.device_option.device_type = caffe2_pb2.IDEEP
 
 def last_producer(ops, blob):
     for (i, op) in reversed(list(enumerate(ops))):
@@ -36,7 +35,7 @@ def fix_BoxWithNMSLimit(net):
                 op.device_option.device_type = caffe2_pb2.CPU
 
 
-def rewrite_run_net_simple(net, ideep=True):
+def rewrite_run_net_simple(net):
     # Simple rewrite for now - assume entire graph can be executed
     # with MKL, so just insert copy ops for external_input[0] and
     # external_output[0]
@@ -49,8 +48,8 @@ def rewrite_run_net_simple(net, ideep=True):
             "Input blob: {} is not consumed by first op: {}".format(
                 input_blob, net.op[0]))
     # Modify input/outputs to point to copied MKL blobs.
-    from_cpu = "CopyCPUToIDEEP" if ideep else "CopyCPUToMKL"
-    to_cpu = "CopyIDEEPToCPU" if ideep else "CopyMKLToCPU"
+    from_cpu = "CopyCPUToIDEEP"
+    to_cpu = "CopyIDEEPToCPU"
     copy_input_op = core.CreateOperator(
         from_cpu, input_blob, mkl_tmp(input_blob))
     net.op[0].input[0] = mkl_tmp(input_blob)
@@ -73,20 +72,19 @@ def rewrite_run_net_simple(net, ideep=True):
     ops = [copy_input_op] + net.op[:] + copy_output_ops
     del net.op[:]
     net.op.extend(ops)
-    device = caffe2_pb2.IDEEP if ideep else caffe2_pb2.MKLDNN
+    device = caffe2_pb2.IDEEP
     for op in net.op:
         op.device_option.MergeFrom(
             core.DeviceOption(device_type=device))
         op.engine = ""
 
-    if ideep:
-        # Temporarily disbale conv+relu fusion until we verify further
-        # net.ParseFromString(
-        #     C.transform_optimizeForIDEEP(net.SerializeToString()))
-        fix_BoxWithNMSLimit(net)
+    # Temporarily disbale conv+relu fusion until we verify further
+    # net.ParseFromString(
+    #     C.transform_optimizeForIDEEP(net.SerializeToString()))
+    fix_BoxWithNMSLimit(net)
 
 
-def rewrite_run_net_simple_xrayocr_lstm(net, ideep=True):
+def rewrite_run_net_simple_xrayocr_lstm(net):
     # For xrayocr model with lstm, only rewrite the non-lstm part of the net to
     # enable mkl, then copy the temporary output blob at the break point
     # and all external inputs for lstm part to cpu, and execuate rest of the net
@@ -107,8 +105,8 @@ def rewrite_run_net_simple_xrayocr_lstm(net, ideep=True):
             "Input blob: {} is not consumed by first op: {}".format(
                 input_blob, net.op[0]))
     # Modify input/outputs to point to copied MKL blobs.
-    from_cpu = "CopyCPUToIDEEP" if ideep else "CopyCPUToMKL"
-    to_cpu = "CopyIDEEPToCPU" if ideep else "CopyMKLToCPU"
+    from_cpu = "CopyCPUToIDEEP"
+    to_cpu = "CopyIDEEPToCPU"
     copy_input_op = core.CreateOperator(
         from_cpu, input_blob, mkl_tmp(input_blob))
     net.op[0].input[0] = mkl_tmp(input_blob)
@@ -168,7 +166,7 @@ def rewrite_run_net_simple_xrayocr_lstm(net, ideep=True):
     del net.op[:]
     net.op.extend(ops)
 
-    device = caffe2_pb2.IDEEP if ideep else caffe2_pb2.MKLDNN
+    device = caffe2_pb2.IDEEP
     for op in net.op:
         # the first Shape op mark the starting point of LSTM chunk of the net
         if op.type == 'Shape':
@@ -204,16 +202,15 @@ def rewrite_run_net_simple_xrayocr_lstm(net, ideep=True):
                             else cpu_tmp(blob))
                     arg.n.external_input[:] = new_external_input
 
-    if ideep:
-        # Temporarily disbale conv+relu fusion until we verify further
-        # net.ParseFromString(
-        #     C.transform_optimizeForIDEEP(net.SerializeToString()))
-        fix_BoxWithNMSLimit(net)
+    # Temporarily disbale conv+relu fusion until we verify further
+    # net.ParseFromString(
+    #     C.transform_optimizeForIDEEP(net.SerializeToString()))
+    fix_BoxWithNMSLimit(net)
 
 
-def rewrite_model_helper_simple(model, ideep=True):
+def rewrite_model_helper_simple(model):
     model = copy.deepcopy(model)
     # All parameter initialization should run on MKL
-    rewrite_init_net_simple(model.param_init_net.Proto(), ideep)
-    rewrite_run_net_simple(model.net.Proto(), ideep)
+    rewrite_init_net_simple(model.param_init_net.Proto())
+    rewrite_run_net_simple(model.net.Proto())
     return model

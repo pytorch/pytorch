@@ -12,7 +12,7 @@
 
 namespace caffe2 {
 
-void ClipTransformRGB(
+CAFFE2_API void ClipTransformRGB(
     const unsigned char* buffer_rgb,
     const int multi_crop_count,
     const int crop_height,
@@ -40,7 +40,7 @@ void ClipTransformRGB(
     std::mt19937* randgen,
     float* transformed_clip);
 
-void ClipTransformOpticalFlow(
+CAFFE2_API void ClipTransformOpticalFlow(
     const unsigned char* buffer_rgb,
     const int crop_height,
     const int crop_width,
@@ -60,9 +60,10 @@ void ClipTransformOpticalFlow(
     const std::vector<float>& inv_std_of,
     float* transformed_clip);
 
-void FreeDecodedData(std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames);
+CAFFE2_API void FreeDecodedData(
+    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames);
 
-bool DecodeMultipleClipsFromVideo(
+CAFFE2_API bool DecodeMultipleClipsFromVideo(
     const char* video_buffer,
     const std::string& video_filename,
     const int encoded_size,

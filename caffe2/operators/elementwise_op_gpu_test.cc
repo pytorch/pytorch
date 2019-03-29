@@ -3,7 +3,7 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/flags.h"
 
-CAFFE2_DECLARE_string(caffe_test_root);
+C10_DECLARE_string(caffe_test_root);
 
 template <>
 void CopyVector<caffe2::CUDAContext>(const int N, const bool* x, bool* y) {

@@ -415,8 +415,8 @@ class TestShapeInference(test_util.TestCase):
         net = core.Net("concat")
 
         net.Concat(["A", "B"], ["C", "splits"], axis=1)
-        net.Concat(["C", "D"], ["E"], order="NCHW")
-        net.Concat(["E", "F"], ["G"], add_axis=1, order="NHWC")
+        net.Concat(["C", "D"], ["E", "splitsE"], order="NCHW")
+        net.Concat(["E", "F"], ["G", "splitsG"], add_axis=1, order="NHWC")
         (shapes, types) = workspace.InferShapesAndTypes(
             [net],
             {
@@ -435,8 +435,8 @@ class TestShapeInference(test_util.TestCase):
         net = core.Net("concat")
 
         net.Concat(["A", "B"], ["C", "splits"], axis=1)
-        net.Concat(["C", "D"], ["E"], order="NCHW")
-        net.Concat(["E", "F"], ["G"], add_axis=1, order="NHWC")
+        net.Concat(["C", "D"], ["E", "splitsE"], order="NCHW")
+        net.Concat(["E", "F"], ["G", "splitsG"], add_axis=1, order="NHWC")
         (shapes, types) = workspace.InferShapesAndTypes(
             [net],
             blob_dimensions={
@@ -518,11 +518,26 @@ class TestShapeInference(test_util.TestCase):
         self.InferTensorRunAndCompare(model)
 
     def testInt8Conversion(self):
-        model = model_helper.ModelHelper(name="int8_conversion_test")
+        model = model_helper.ModelHelper(name="fp32_int8_conversion_test")
         model.FloatToFused8BitRowwiseQuantized('x', 'x_8bit')
         model.Fused8BitRowwiseQuantizedToFloat('x_8bit', 'x_recovered')
         workspace.FeedBlob('x', np.random.rand(100, 150).astype(np.float32))
         self.InferTensorRunAndCompare(model)
+        x = workspace.FetchBlob('x')
+        x_recovered = workspace.FetchBlob('x_recovered')
+        # TODO: find a tighter bound
+        assert(np.allclose(x, x_recovered, atol=1e-2))
+
+    def testHalfInt8Conversion(self):
+        model = model_helper.ModelHelper(name="fp16_int8_conversion_test")
+        model.HalfFloatToFused8BitRowwiseQuantized('x', 'x_8bit')
+        model.Fused8BitRowwiseQuantizedToHalfFloat('x_8bit', 'x_recovered')
+        workspace.FeedBlob('x', np.random.rand(100, 150).astype(np.float16))
+        self.InferTensorRunAndCompare(model)
+        x = workspace.FetchBlob('x')
+        x_recovered = workspace.FetchBlob('x_recovered')
+        # TODO: find a tighter bound
+        assert(np.allclose(x, x_recovered, atol=1e-2))
 
     def testShapeOp(self):
         model = model_helper.ModelHelper(name="shape_op_test")

@@ -1,6 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMathPointwise.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMathPointwise.cu"
 #else
+
+#include <ATen/MemoryOverlap.h>
 
 #define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_(NAME, CFUNC, REAL)             \
   struct Tensor_##NAME##_##REAL##_Op {                                  \
@@ -15,6 +17,7 @@
                                                                         \
   void THCTensor_(NAME)(THCState* state, THCTensor* self_, THCTensor* src) { \
     THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));               \
+    at::assert_no_internal_overlap(self_, #NAME);                       \
     if (self_ == src) {                                                 \
       if (!THC_pointwiseApply1<scalar_t>(state, self_, Tensor_##NAME##_##REAL##_Op())) { \
         THArgCheck(false, 2, CUTORCH_DIM_WARNING);                      \
@@ -210,20 +213,6 @@ void THCTensor_(polygamma)(THCState* state, THCTensor* self_, int64_t n, THCTens
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(lerp)(THCState *state, THCTensor *result, THCTensor *a, THCTensor *b, scalar_t w)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, result, a, b));
-  THArgCheck(THCTensor_(nElement)(state, a) ==
-             THCTensor_(nElement)(state, b), 3, "sizes do not match");
-  THCTensor_(resizeAs)(state, result, a);
-
-  if (!THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, result, a, b, TensorLerpOp<scalar_t>(w))) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
 #endif
 
 namespace {
@@ -241,7 +230,7 @@ void THCTensor_(cadd)(THCState *state, THCTensor *self_, THCTensor* src1, scalar
 #else
   auto alpha = value;
 #endif
-  at::add_out(out, retainTensorImpl(src1), retainTensorImpl(src2), alpha);
+  at::add_out(out, at::Tensor(retainTensorImpl(src1)), at::Tensor(retainTensorImpl(src2)), alpha);
 }
 
 void THCTensor_(csub)(THCState *state, THCTensor *self_, THCTensor* src1, scalar_t value, THCTensor *src2)
