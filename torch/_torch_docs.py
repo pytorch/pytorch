@@ -4031,7 +4031,11 @@ Args:
     end (float): the ending value for the set of points
     step (float): the gap between each pair of adjacent points. Default: ``1``.
     {out}
-    {dtype}
+    {dtype} If `dtype` is not given, infer the data type from the other input
+        arguments. If any of `start`, `end`, or `stop` are floating-point, the
+        `dtype` is inferred to be the default dtype, see
+        :meth:`~torch.get_default_dtype`. Otherwise, the `dtype` is inferred to
+        be `torch.int64`.
     {layout}
     {device}
     {requires_grad}
