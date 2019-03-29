@@ -59,13 +59,11 @@ NO_GRADIENT(InferenceLSTM);
 
 C10_REGISTER_CAFFE2_OPERATOR_CPU(
     InferenceLSTM,
-    (std::vector<c10::Argument>{
-        c10::Argument("input_list", ListType::ofTensors()),
-        c10::Argument("num_layers", IntType::get()),
-        c10::Argument("has_biases", BoolType::get()),
-        c10::Argument("batch_first", BoolType::get()),
-        c10::Argument("bidirectional", BoolType::get())}),
-    (std::vector<c10::Argument>{c10::Argument("output"),
-                                c10::Argument("hidden"),
-                                c10::Argument("cell")}),
+    "_caffe2::InferenceLSTM("
+      "Tensor[] input_list, "
+      "int num_layers, "
+      "bool has_biases, "
+      "bool batch_first, "
+      "bool bidirectional"
+    ") -> (Tensor, Tensor, Tensor)",
     caffe2::InferenceLSTMOp);
