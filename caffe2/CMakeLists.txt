@@ -591,8 +591,7 @@ if (NOT BUILD_ATEN_MOBILE)
       set(TORCH_CUDA_LIBRARIES
 	${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
 	${CUDA_LIBRARIES})
-      target_include_directories(caffe2 PRIVATE "${NVTOOLEXT_HOME}/include")
-      target_include_directories(caffe2_gpu PRIVATE "${NVTOOLEXT_HOME}/include")
+      target_include_directories(caffe2 PUBLIC "${NVTOOLEXT_HOME}/include")
 
     elseif(APPLE)
       set(TORCH_CUDA_LIBRARIES
