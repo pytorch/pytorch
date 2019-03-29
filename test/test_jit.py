@@ -5429,22 +5429,18 @@ a")
                 run_test(code)
 
     def test_number_abs(self):
-        def float1():
-            return abs(-3.14)
+        def func1(x):
+            # type: (float) -> float
+            return abs(x)
 
-        def float2():
-            return abs(3.14)
+        def func2(x):
+            # type: (int) -> int
+            return abs(x)
 
-        def int1():
-            return abs(-10)
-
-        def int2():
-            return abs(10)
-
-        self.checkScript(float1, ())
-        self.checkScript(float2, ())
-        self.checkScript(int1, ())
-        self.checkScript(int2, ())
+        self.checkScript(func1, (-3.14,))
+        self.checkScript(func1, (3.14,))
+        self.checkScript(func2, (-10,))
+        self.checkScript(func2, (10,))
 
     def test_number_div(self):
         self.checkScript(div_int_future, (), optimize=True)
