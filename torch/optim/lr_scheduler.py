@@ -360,16 +360,13 @@ class ReduceLROnPlateau(object):
         self.num_bad_epochs = 0
 
     def step(self, metrics, epoch=None):
-        current = metrics
+        current = float(metrics)
         if epoch is None:
             epoch = self.last_epoch = self.last_epoch + 1
         self.last_epoch = epoch
 
         if self.is_better(current, self.best):
-            if isinstance(current, torch.Tensor):
-                self.best = current.clone().detach()
-            else:
-                self.best = copy.deepcopy(current)
+            self.best = current
             self.num_bad_epochs = 0
         else:
             self.num_bad_epochs += 1
