@@ -18,6 +18,11 @@ struct QTensorImpl;
 using QTensor = Tensor;
 using RealTensor = Tensor;
 
+struct Quantizer;
+//using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
+using QuantizerPtr = std::shared_ptr<Quantizer>;
+
+
 /**
  * Quantizer is the class for storing all the information
  * that's necessary to perform quantize and dequantize
@@ -37,12 +42,25 @@ using RealTensor = Tensor;
  * When you add new types of leaf Quantizer class, please also
  * make sure to add a corresponding QScheme enum since
  * they should have one to one mapping.
+ *
+ * Note about intrusive_ptr:
+ * QTensor holds an intrusive_ptr to Quantizer, and multiple Tensor can
+ * share the same Quantizer.
  */
 struct CAFFE2_API Quantizer {
   QScheme qscheme_;
   Quantizer() {}
   Quantizer(QScheme qscheme) : qscheme_(qscheme) {}
   virtual ~Quantizer();
+
+  // Copied from torch/csrc/jit/scope.h
+  // QuantizerPtr intrusive_from_this() {
+  //   c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
+  //                                          // from a raw `this` pointer
+  //                                          // so we need to bump the refcount
+  //                                          // to account for this ownership
+  //   return c10::intrusive_ptr<Quantizer>::reclaim(this);
+  // }
 
   virtual QScheme qscheme() {
     return qscheme_;
@@ -194,12 +212,15 @@ struct CAFFE2_API PerChannelAffineQuantizer: public AffineQuantizer {
 // This may be called repeatedly, so make sure it's pretty cheap.
 CAFFE2_API QTensorImpl* get_qtensorimpl(const QTensor& self);
 
-CAFFE2_API qint8 QuantizeUint8(float scale, uint8_t zero_point, float value);
+// Quantize a float value into a uint8 value given scale and zero_point
+CAFFE2_API qint8 quantize_uint8(float scale, uint8_t zero_point, float value);
 
 // double and int64_t are because of the native function API, we only have these argument
 // types right now in native functions
-CAFFE2_API std::shared_ptr<Quantizer> make_per_tensor_affine_quantizer(double scale, int64_t zero_point);
+CAFFE2_API QuantizerPtr make_per_tensor_affine_quantizer(double scale, int64_t zero_point);
+
+// Create a QTensor given arguments for normal Tensor and a quantizer
 QTensor new_qtensor(
-    IntArrayRef sizes, const TensorOptions& options, float scale, int8_t zero_point);
+    IntArrayRef sizes, const TensorOptions& options, bool is_variable, QuantizerPtr quantizer);
 
 } // namespace at
