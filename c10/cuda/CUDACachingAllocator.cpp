@@ -554,6 +554,8 @@ struct THCCachingAllocator
 
       cudaError_t err = cudaEventQuery(event);
       if (err == cudaErrorNotReady) {
+        // ignore and clear the error if not ready
+        cudaGetLastError();
         break;
       } else if (err != cudaSuccess) {
         C10_CUDA_CHECK(err);
