@@ -224,7 +224,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
 
   auto target_lengths_t = at::tensor(target_lengths, targets.options().dtype(kLong));
   auto input_lengths_t = at::tensor(input_lengths, targets.options().dtype(kLong));
-  tg_batch_offsets = tg_batch_offsets.toBackend(Backend::CUDA);
+  tg_batch_offsets = tg_batch_offsets.cuda();
 
   Tensor log_alpha = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
   Tensor neg_log_likelihood = at::empty({batch_size}, log_probs.options());
@@ -515,7 +515,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   }
   auto target_lengths_t = at::tensor(target_lengths, targets.options().dtype(kLong));
   auto input_lengths_t = at::tensor(input_lengths, targets.options().dtype(kLong));
-  tg_batch_offsets = tg_batch_offsets.toBackend(Backend::CUDA);
+  tg_batch_offsets = tg_batch_offsets.cuda();
 
   Tensor log_beta = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
   Tensor grad = at::full_like(log_probs, neginf); // initialization for log(sum (alpha beta))

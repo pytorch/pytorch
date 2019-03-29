@@ -35,10 +35,6 @@ inline Tensor Tensor::toType(ScalarType t) const {
   return toType(dispatch_type().toScalarType(t));
 }
 
-inline Tensor Tensor::toType(Backend b, ScalarType t) const {
-  return toType(dispatch_type().toBackend(b).toScalarType(t));
-}
-
 inline Tensor Tensor::toBackend(Backend b) const {
   return toType(dispatch_type().toBackend(b));
 }

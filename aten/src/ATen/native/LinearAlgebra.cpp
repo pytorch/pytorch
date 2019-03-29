@@ -372,7 +372,6 @@ Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
   result.resize_({});
   AT_CHECK(result.scalar_type() == self.scalar_type(),
            "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
-  // dispatching through type ensures we don't allow mismatched types.
   return result.fill_(self.dot(tensor));
 }
 
