@@ -9799,6 +9799,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
         def _get_tensors(**kwargs):
             return [
+                torch.tensor([10,11], **kwargs),
                 torch.randn(3, 5, **kwargs),
                 torch.rand(3, **kwargs),
                 # torch.randint(3,5, **kwargs), // unsupported
