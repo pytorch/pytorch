@@ -55,7 +55,13 @@ private:
   }
 
   at::Type& typeFor(const Tensor& ten) {
-    return at::getNonVariableType(backend(), typeMetaToScalarType(ten.meta()));
+    at::Backend b = backend();
+#ifdef __HIP_PLATFORM_HCC__
+    if (b == at::Backend::HIP) {
+      b = at::Backend::CUDA;
+    }
+#endif
+    return at::getNonVariableType(b, typeMetaToScalarType(ten.meta()));
   }
   at::Tensor tensorWrapping(const Tensor& ten_) {
     auto& ten = const_cast<Tensor&>(ten_);
@@ -80,6 +86,11 @@ private:
     auto at_sizes = src.sizes();
     caffe2::TypeMeta type_meta = typeMetaFor(src);
     at::Device device = src.device();
+#ifdef __HIP_PLATFORM_HCC__
+    if (device.type() == at::DeviceType::CUDA) {
+      device = at::Device(at::DeviceType::HIP, device.index());
+    }
+#endif
     at::TensorImpl* src_impl = src.unsafeReleaseTensorImpl();
     std::vector<int64_t> dims(at_sizes.begin(), at_sizes.end());
     dst->Resize(dims);
