@@ -766,20 +766,27 @@ class TestJit(JitTestCase):
 
         def test_device():
             @torch.jit.script
-            def func(x):
-                if x.dtype == torch.double:
+            def func_1(x):
+                if x.device == torch.device('cuda:0'):
                     a = 0
                 else:
                     a = 1
-                if x.device == torch.device('cuda:0'):
-                    a += 1
-                if x.is_cuda:
-                    a += 1
                 return a
 
-            test_input(func, torch.tensor(0.5), 0)
+            @torch.jit.script
+            def func_2(x):
+                if x.is_cuda:
+                    a = 0
+                else:
+                    a = 1
+                return a
+
+            test_input(func_1, torch.tensor(0.5), 1)
+            test_input(func_2, torch.tensor(0.5), 1)
+
             if RUN_CUDA:
-                test_input(func, torch.tensor(0.5).cuda(), 3)
+                test_input(func, torch.tensor(0.5, device="cuda:0"), 0)
+                test_input(func, torch.tensor(0.5, device="cuda:0"), 0)
 
         test_device()
 
