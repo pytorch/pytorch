@@ -3228,13 +3228,13 @@ a")
         def foo(x):
             return 3 + x.contiguous()
 
-        x = torch.tensor(1.0, dtype=torch.float, requires_grad=True)
-        output = foo(x)
-        self.assertEqual(output, 3.0)
+        x = torch.rand(1, dtype=torch.float, requires_grad=True)
+        out = foo(x)
+        self.assertEqual(out, x + 3)
 
-
-
-
+        grad = torch.randn(1, dtype=torch.float)
+        out.backward(grad)
+        self.assertEqual(x.grad, grad)
 
     def test_advancedindex(self):
         def consec(size, start=0):

@@ -34,10 +34,6 @@ bool is_sparse(const Tensor& self) {
   return self.is_sparse();
 }
 
-bool is_contiguous(const Tensor& self) {
-  return self.is_contiguous();
-}
-
 Tensor type_as(const Tensor& self, const Tensor& other) {
   return self.toType(other.type());
 }

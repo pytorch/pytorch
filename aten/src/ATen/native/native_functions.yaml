@@ -1181,11 +1181,6 @@
   variants: function, method
   device_guard: False
 
-- func: is_contiguous(Tensor self) -> bool
-  matches_jit_signature: True
-  variants: function, method
-  device_guard: False
-
 - func: is_complex(Tensor self) -> bool
   matches_jit_signature: True
   variants: function, method

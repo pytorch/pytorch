@@ -295,7 +295,6 @@ struct CAFFE2_API Type {
   virtual Tensor isclose(const Tensor & self, const Tensor & other, double rtol, double atol, bool equal_nan) const = 0;
   virtual bool is_distributed(const Tensor & self) const = 0;
   virtual bool is_floating_point(const Tensor & self) const = 0;
-  virtual bool is_contiguous(const Tensor & self) const = 0;
   virtual bool is_complex(const Tensor & self) const = 0;
   virtual bool is_nonzero(const Tensor & self) const = 0;
   virtual bool is_same_size(const Tensor & self, const Tensor & other) const = 0;

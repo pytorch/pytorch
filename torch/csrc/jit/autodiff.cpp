@@ -234,7 +234,6 @@ static c10::optional<std::vector<Value*>> build_script_grad(
 
   // Use backward graph to construct reverse_block
   auto bw_graph = compiled_graphs->backward;
-  bw_graph->dump();
   auto grad_vec = grads.vec();
   if (needTrimGrad(node)) {
     grad_vec.erase(grad_vec.begin() + 1, grad_vec.end());
