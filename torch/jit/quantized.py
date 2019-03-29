@@ -1,5 +1,6 @@
 import torch
 from typing import Tuple, Optional  # noqa: F401
+from torch import Tensor
 
 from torch.nn import _VF
 
