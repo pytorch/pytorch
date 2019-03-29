@@ -23,6 +23,6 @@ C10_DEFINE_OP_SCHEMA(
 
 namespace caffe2 {
 REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
-    ops::Add(),
+    "_c10_experimental::Add",
     C10Add_DontUseThisOpYet)
 }

@@ -145,8 +145,18 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
     events[devIdx].record();
     workerStreams.push_back(
         at::cuda::getStreamFromPool(false, devices[devIdx]));
-    // Let the worker stream to wait for the default stream
+    // Let worker streams to wait for default streams to make sure worker
+    // streams do not touch `gradsBatch` until all pending ops to create
+    // `gradBatch` finish.
     events[devIdx].block(workerStreams.back());
+
+    // Input `gradsBatch` are created on current streams and used in worker
+    // streams. Hence, they must record worker streams to prevent being
+    // freed before their worker stream ops finish.
+    for (at::Tensor& grad : gradsBatch[devIdx]) {
+      c10::cuda::CUDACachingAllocator::recordStream(
+        grad.storage().data(), workerStreams.back());
+    }
   }
 
   // Stream guards, now the current stream is the worker stream
@@ -179,6 +189,15 @@ void syncReduction(
   // and intra-node reduce to be operated on this worker stream to
   // improve performance
   at::cuda::CUDAStream workerStream = at::cuda::getStreamFromPool();
+
+  // Input `gradsBatch` are created on the current stream and used on the worker
+  // stream. Hence, they must record worker streams to prevent being freed
+  // before their worker stream ops finish.
+  for (at::Tensor& grad : gradsBatch) {
+    c10::cuda::CUDACachingAllocator::recordStream(
+      grad.storage().data(), workerStream);
+  }
+
   at::cuda::CUDAStreamGuard cudaGuard(workerStream);
 
   // Let the worker stream wait on the reduction stream
