@@ -1171,12 +1171,6 @@ inline Tensor Tensor::orgqr(const Tensor & input2) const {
 inline Tensor Tensor::ormqr(const Tensor & input2, const Tensor & input3, bool left, bool transpose) const {
     return dispatch_type().ormqr(*this, input2, input3, left, transpose);
 }
-inline std::tuple<Tensor,Tensor> Tensor::btrifact(bool pivot) const {
-    return dispatch_type().btrifact(*this, pivot);
-}
-inline std::tuple<Tensor,Tensor,Tensor> Tensor::btrifact_with_info(bool pivot) const {
-    return dispatch_type().btrifact_with_info(*this, pivot);
-}
 inline Tensor Tensor::btrisolve(const Tensor & LU_data, const Tensor & LU_pivots) const {
     return dispatch_type().btrisolve(*this, LU_data, LU_pivots);
 }

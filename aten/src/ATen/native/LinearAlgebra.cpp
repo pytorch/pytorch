@@ -21,10 +21,8 @@ namespace native {
 // where info helps us identify singular matrices.
 static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor& self) {
   Tensor p, lu, info;
-  std::tie(lu, p, info) = self.unsqueeze(0).btrifact_with_info();
-  p.squeeze_(0);
-  lu.squeeze_(0);
-  int int_info = info.squeeze_().item<int32_t>();
+  std::tie(lu, p, info) = at::_lu_with_info(self, /*pivot=*/true, /*check_errors=*/false);
+  int int_info = info.item<int32_t>();
   AT_CHECK(int_info >= 0, "LU factorization (getrf) failed with info = ", int_info);
   auto n = self.size(0);
   auto num_exchanges = (at::arange(1, n + 1, p.options()) != p).nonzero().size(0);

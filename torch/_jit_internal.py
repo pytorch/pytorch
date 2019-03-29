@@ -204,20 +204,26 @@ except ImportError:
             return TupleInstance(types)
 
     class TupleInstance(object):
+        __slots__ = ['__args__']
+
         def __init__(self, types):
-            setattr(self, '__args__', types)
+            self.__args__ = types
 
     class ListInstance(object):
+        __slots__ = ['__args__']
+
         def __init__(self, types):
-            setattr(self, '__args__', types)
+            self.__args__ = types
 
     class ListCls(object):
         def __getitem__(self, types):
             return TupleInstance(types)
 
     class DictInstance(object):
+        __slots__ = ['__args__']
+
         def __init__(self, types):
-            setattr(self, '__args__', types)
+            self.__args__ = types
 
     class DictCls(object):
         def __getitem__(self, types):

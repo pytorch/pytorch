@@ -60,11 +60,11 @@ with warnings.catch_warnings(record=True) as warns:
 class FilelikeMock(object):
     def __init__(self, data, has_fileno=True, has_readinto=False):
         if has_readinto:
-            setattr(self, 'readinto', self.readinto_opt)
+            self.readinto = self.readinto_opt
         if has_fileno:
             # Python 2's StringIO.StringIO has no fileno attribute.
             # This is used to test that.
-            setattr(self, 'fileno', self.fileno_opt)
+            self.fileno = self.fileno_opt
 
         self.calls = set()
         self.bytesio = io.BytesIO(data)
@@ -1052,7 +1052,7 @@ class _TestTorchMixin(object):
             "std", "sum", "var", "max", "min"]
 
         def normfn_attr(t, dim, keepdim=False, out=None):
-            attr = getattr(torch, "norm")
+            attr = torch.norm
             return attr(t, 2, dim, keepdim, out=out)
 
         for fn_name in dim_red_fns:
@@ -1746,44 +1746,43 @@ class _TestTorchMixin(object):
             _test_mm(n, m, p, torch.int64, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int64))
 
     @staticmethod
-    def _test_btrifact(self, cast):
+    def _test_lu(self, cast):
         from common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
 
         def run_test(matrix_size, batches, cast):
             a = cast(fullrank(matrix_size, *batches))
-            a_LU_info, pivots_info, info_ = a.btrifact_with_info()
+            a_LU_info, pivots_info, info_ = a.lu(get_infos=True)
             self.assertEqual(a_LU_info.size(), torch.Size(batches + (matrix_size, matrix_size)))
             self.assertEqual(pivots_info.size(), torch.Size(batches + (matrix_size,)))
             self.assertEqual(info_.size(), torch.Size(batches))
             self.assertEqual(info_.abs().sum(), 0)
-            a_LU, pivots = a.btrifact()
+            a_LU, pivots = a.lu()
             self.assertEqual(a_LU, a_LU_info)
             self.assertEqual(pivots_info, pivots)
             if a.is_cuda:
-                a_LU_info_nopiv, nopiv, info_nopiv = a.btrifact_with_info(pivot=False)
-                self.assertIsNone(nopiv)
+                a_LU_info_nopiv, nopiv, info_nopiv = a.lu(pivot=False, get_infos=True)
+                self.assertEqual(nopiv, cast(torch.zeros(a.shape[:-1], dtype=torch.int32)))
                 self.assertEqual(info_, info_nopiv)
             P, L, U = torch.btriunpack(a_LU, pivots)
             self.assertEqual(P.matmul(L.matmul(U)), a)
 
-        for ms, batch in product([3, 5, 7], [(2,), (3,), (3, 5)]):
+        for ms, batch in product([3, 5, 7], [(), (2,), (3,), (3, 5)]):
             run_test(ms, batch, cast)
 
         # Info should be positive for rank deficient matrices
-        a = cast(fullrank(3, 5))
+        a = cast(torch.ones(5, 3, 3))
         if not (a.is_cuda and any(x in torch.version.cuda for x in ['8.0', '9.2'])):
-            a[0, 1] = 2 * a[0, 0]  # Row 2 of a[0] is 2 times Row 1 of a[0], thereby causing a rank deficiency
-            self.assertGreater(a.btrifact_with_info()[2][0], 0)
+            self.assertGreater(a.lu(get_infos=True)[2][0], 0)
 
         # Error checking, no pivoting variant on CPU
         with self.assertRaisesRegex(RuntimeError,
-                                    'btrifact without pivoting is not implemented on the CPU'):
-            torch.btrifact(torch.empty(1, 2, 2), pivot=False)
+                                    'lu without pivoting is not implemented on the CPU'):
+            torch.lu(torch.empty(1, 2, 2), pivot=False)
 
     @skipIfNoLapack
     @skipIfRocm
-    def test_btrifact(self):
-        self._test_btrifact(self, lambda t: t)
+    def test_lu(self):
+        self._test_lu(self, lambda t: t)
 
     @staticmethod
     def _test_btrisolve(self, cast):
@@ -1797,7 +1796,7 @@ class _TestTorchMixin(object):
                                (-1.56, 4.00),
                                (9.81, -4.09)))
         a, b = cast(a), cast(b)
-        LU_data, pivots, info = a.btrifact_with_info()
+        LU_data, pivots, info = a.lu(get_infos=True)
         self.assertEqual(info.abs().sum(), 0)
         x = torch.btrisolve(b, LU_data, pivots)
         b_ = torch.bmm(a, x.unsqueeze(2)).squeeze()
@@ -1811,12 +1810,11 @@ class _TestTorchMixin(object):
     def _test_btriunpack(self, cast):
         def run_test(shape, cast):
             a = cast(torch.randn(*shape))
-            a_lu, p = torch.btrifact(a.reshape(-1, shape[-1], shape[-1]))
-            a_lu = a_lu.reshape_as(a)
-            p = p.reshape(a.shape[:-1])
+            a_lu, p = torch.lu(a)
             p_ref, l_ref, u_ref = torch.btriunpack(a_lu, p)
             self.assertEqual(p_ref.matmul(l_ref.matmul(u_ref)), a)
 
+        run_test((3, 3), cast)
         run_test((5, 3, 3), cast)
         run_test((7, 3, 5, 5), cast)
         run_test((7, 5, 3, 3, 3), cast)
@@ -3837,14 +3835,14 @@ class _TestTorchMixin(object):
 
             for lhs in lhsTensors:
                 lhs_expanded = lhs.expand(*(torch.Size(full_batch_dims) + torch.Size(lhs_mat_dims)))
-                lhs_expanded_matmul_fn = getattr(lhs_expanded, "matmul")
+                lhs_expanded_matmul_fn = lhs_expanded.matmul
                 for rhs in rhsTensors:
                     rhs_expanded = ((rhs if len(rhs_dims) != 1 else rhs.unsqueeze(-1)).
                                     expand(*(torch.Size(full_batch_dims) + torch.Size(rhs_mat_dims))))
                     truth = maybe_squeeze_result(lhs_expanded, rhs_expanded, lhs_expanded_matmul_fn(rhs_expanded))
                     for l in (lhs, lhs_expanded):
                         for r in (rhs, rhs_expanded):
-                            l_matmul_fn = getattr(l, "matmul")
+                            l_matmul_fn = l.matmul
                             result = maybe_squeeze_result(l, r, l_matmul_fn(r))
                             self.assertEqual(truth, result)
                             # test torch.matmul function as well
@@ -4743,10 +4741,13 @@ class _TestTorchMixin(object):
             A = torch.randn(3, 3, device=A_device)
             err_str = "Expected b and A to be on the same device"
             with self.assertRaisesRegex(RuntimeError, err_str):
-                torch.gesv(b, A)
+                torch.solve(b, A)
 
             with self.assertRaisesRegex(RuntimeError, err_str):
                 torch.cholesky_solve(b, A)
+
+            with self.assertRaisesRegex(RuntimeError, err_str):
+                torch.triangular_solve(b, A)
 
     @skipIfNoLapack
     def test_qr(self):
@@ -7965,12 +7966,12 @@ class _TestTorchMixin(object):
             self.assertEqual(torch.tensor(0., device=device), fn(torch.dot, (0,), (0,)))
 
             if torch._C.has_lapack:
-                # btrifact
-                A_LU, pivots = fn(torch.btrifact, (0, 5, 5))
+                # lu
+                A_LU, pivots = fn(torch.lu, (0, 5, 5))
                 self.assertEqual([(0, 5, 5), (0, 5)], [A_LU.shape, pivots.shape])
-                A_LU, pivots = fn(torch.btrifact, (0, 0, 0))
+                A_LU, pivots = fn(torch.lu, (0, 0, 0))
                 self.assertEqual([(0, 0, 0), (0, 0)], [A_LU.shape, pivots.shape])
-                A_LU, pivots = fn(torch.btrifact, (2, 0, 0))
+                A_LU, pivots = fn(torch.lu, (2, 0, 0))
                 self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
     @skipIfRocm
