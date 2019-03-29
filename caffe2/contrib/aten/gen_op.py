@@ -150,7 +150,7 @@ def supports(o, factory_methods):
 OPTION_TEMPLATE = CT("""\
 case ${key}: { // ${name}
     ${initialization}
-    run_op = [=] {
+    run_op = [&] {
         ${statements}
         auto the_result = ${invocation};
         ${assignments}
@@ -159,10 +159,8 @@ case ${key}: { // ${name}
 } break;
 """)
 
-ASSIGN_MULTI_RETURN_TEMPLATE = CT("""\
-for (int i = 0; i < OutputSize(); ++ i) {
-  ${assignment}
-}
+ASSIGN_CHECK_SIZE_TEMPLATE = CT("""\
+  if(OutputSize() > ${offset}) {${assignment}}
 """)
 
 
@@ -204,29 +202,13 @@ def find_factory_methods(decls):
     return factory_methods
 
 
-def same_output_type(o):
-    returns = o['returns']
-    ret_type = returns[0]['type']
-
-    for ret in returns:
-        if ret_type != ret['type']:
-            return False
-
-    return len(returns) > 1
-
-
 def emit_assignments(o, env):
-    if same_output_type(o):
-        ret = o['returns'][0]
-        ret_type = RETURN_MAP[ret['type'] if not value_is_tensor_type(ret) else 'Tensor']
-        assignment = CT(ret_type).substitute(env, offset='i', output=get_output(o, "i"))
-        env['assignments'] = ASSIGN_MULTI_RETURN_TEMPLATE.substitute(env, assignment=assignment)
-    else:
-        for i, r in enumerate(o['returns']):
-            t = RETURN_MAP[r['type'] if not value_is_tensor_type(r) else 'Tensor']
-            assignment = CT(t).substitute(env, offset=i, output=get_output(o, i))
-            env['assignments'].append(assignment)
+    for i, r in enumerate(o['returns']):
+        t = RETURN_MAP[r['type'] if not value_is_tensor_type(r) else 'Tensor']
+        assignment = CT(t).substitute(env, offset=i, output=get_output(o, i))
+        check_size_assignment = ASSIGN_CHECK_SIZE_TEMPLATE.substitute(env, offset=i, assignment=assignment)
 
+        env['assignments'].append(check_size_assignment)
 
 
 if __name__ == '__main__':
@@ -289,7 +271,7 @@ if __name__ == '__main__':
                 # switch to indexing the "stack" from the end as if we only had
                 env['statements'].append(
                     'auto {} = peekSlice({}, InputSize() - {}, InputSize());'
-                        .format(arg['name'], real_inputs, static_tensor_inputs))
+                    .format(arg['name'], real_inputs, static_tensor_inputs))
             elif value_is_tensor_type(arg):
                 # load tensor inputs from Caffe2
                 env['statements'].append(
