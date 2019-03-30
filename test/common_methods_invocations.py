@@ -102,7 +102,7 @@ S = 5
 #   input size/constructing fn,
 #   args (tuple represents shape of a tensor arg),
 #   test variant name (will be used at test name suffix),    // optional
-#   (True, [nodes]) if op has a formula in autodiff,         // optional
+#   (True, nonfusible_nodes, fusible_nodes) for autodiff,    // optional
 #   indices for possible dim arg,                            // optional
 #   fn mapping output to part that should be gradcheck'ed,   // optional
 # )
@@ -154,9 +154,9 @@ def method_tests():
         ('div', (S, S, S), (uniform_scalar(0.1),), 'scalar_broadcast_rhs', (True,)),
         ('div', (), (uniform_scalar(0.1),), 'scalar_broadcast_lhs', (True,)),
         ('div', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True,)),
-        ('__rdiv__', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True, {'cpu': ['aten::mul', 'aten::reciprocal'], 'cuda': 'prim::FusionGroup'})),
+        ('__rdiv__', torch.rand(S, S, S) + 1e-1, (3.14,), 'constant', (True, [], ['aten::mul', 'aten::reciprocal'])),
         ('div', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
-        ('__rdiv__', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True, {'cpu': ['aten::mul', 'aten::reciprocal'], 'cuda': 'prim::FusionGroup'})),
+        ('__rdiv__', uniform_scalar(1e-1, requires_grad=True), (3.14,), 'scalar_constant', (True, [], ['aten::mul', 'aten::reciprocal'])),
         ('pow', torch.rand(S, S, S) + 1e-3, (torch.rand(S, S, S) + 0.1,), '', (True,)),
         ('pow', torch.rand(S, S, S) + 1e-3, (torch.rand(1,) + 0.1,), 'broadcast_rhs', (True,)),
         ('pow', torch.rand(1,) + 1e-3, (torch.rand(S, S, S) + 0.1,), 'broadcast_lhs', (True,)),

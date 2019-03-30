@@ -70,6 +70,11 @@ except ImportError:
 
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
+# Note: creating FusionGroups is currently device-independent.
+# FusionGroup is created as long as torch is built with CUDA.
+# FusionGroup creation with CPU is disabled.
+FUSION_ENABLED = hasattr(torch._C, '_cuda_isDriverSufficient') and torch._C._cuda_isDriverSufficient()
+
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_HALF = RUN_CUDA
 if torch.cuda.is_available():
@@ -387,10 +392,24 @@ class JitTestCase(TestCase):
         torch._C._jit_pass_lint(graph)
         self.assertExpected(str(graph), *args, **kwargs)
 
-    def assertAutodiffNode(self, graph, should_autodiff_node, node):
-        diff_node = graph.findNode('prim::DifferentiableGraph')
-        self.assertEqual(should_autodiff_node,
-                         diff_node is not None and all([diff_node.g('Subgraph').findNode(n) is not None for n in node]))
+    def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):
+        if not FUSION_ENABLED:
+            nonfusible_nodes = nonfusible_nodes + fusible_nodes
+            fusible_nodes = []
+        diff_nodes = graph.findAllNodes('prim::DifferentiableGraph')
+        diff_subgraphs = [node.g('Subgraph') for node in diff_nodes]
+
+        # For any non-fusible node, it must show up in one of the DifferentiableGraph.
+        found_all_nonfusible_nodes = (len(diff_subgraphs) == 0 and len(nonfusible_nodes) == 0)\
+            or all([any(g.findNode(n) is not None for g in diff_subgraphs) for n in nonfusible_nodes])
+
+        # For any fusible node, it must show up in one of the FusionGroup in the DifferentiableGraph.
+        fusion_nodes = list(itertools.chain.from_iterable([g.findAllNodes('prim::FusionGroup') for g in diff_subgraphs]))
+        fusion_subgraphs = [node.g('Subgraph') for node in fusion_nodes]
+        found_all_fusible_nodes = (len(fusion_nodes) == 0 and len(fusible_nodes) == 0)\
+            or all([any(g.findNode(n) is not None for g in fusion_subgraphs) for n in fusible_nodes])
+
+        self.assertEqual(should_autodiff_node, found_all_nonfusible_nodes and found_all_fusible_nodes)
 
     def run_pass(self, name, trace):
         if isinstance(trace, torch._C.Graph):
@@ -13166,7 +13185,7 @@ EXCLUDE_MODULE_EXPORT_IMPORT = {
 #   args (tuple represents shape of a tensor arg),
 #   test variant name(will be used at test name suffix,
 #       'inplace' skips grad tests),                         // optional
-#   (True, [nodes]) if op has a formula in autodiff          // optional
+#   (True, nonfusible_nodes, fusible_nodes) for autodiff     // optional
 #   fn to determine if test should be skipped,               // optional
 #   fn mapping output to part that should be gradcheck'ed,   // optional
 #   kwargs for function,                                     // optional
@@ -13198,7 +13217,7 @@ nn_functional_tests = [
     ('adaptive_avg_pool1d', (S, S, S), (5,), '', (True,)),
     ('adaptive_avg_pool2d', (S, S, S, S), ([5, 7],), '', (True,)),
     ('adaptive_avg_pool3d', (S, S, S, S, S), ([3, 2, 2],), '', (True,)),
-    ('dropout', (S, S, S), (0.5,), '', (True, {'cpu': ['aten::mul', 'aten::div'], 'cuda': 'prim::FusionGroup'})),
+    ('dropout', (S, S, S), (0.5,), '', (True, ['prim::is_cuda', 'aten::bernoulli_'], ['aten::rand_like', 'aten::lt', 'aten::type_as', 'aten::mul', 'aten::div'])),
     ('alpha_dropout', (S, S, S), (0.5,)),
     ('dropout2d', (S, S, S), (0.5,)),
     ('dropout3d', (S, S, S), (0.5,)),
@@ -13272,8 +13291,8 @@ nn_functional_tests = [
     ('unfold', (S, S, S, S), ([2, 3]),),
     ('fold', (1, 3 * 2 * 2, 12), ([4, 5], [2, 2]),),
     ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
-    ('gumbel_softmax', (S, S), (2.,), '', (True, {'cpu': ['aten::neg', 'aten::add', 'aten::div', 'aten::softmax'], 'cuda': ['prim::FusionGroup', 'aten::softmax']})),
-    ('gumbel_softmax', (S, S), (2., True,), 'hard', (True, {'cpu': ['aten::neg', 'aten::add', 'aten::div', 'aten::softmax'], 'cuda': ['prim::FusionGroup', 'aten::softmax']})),
+    ('gumbel_softmax', (S, S), (2.,), '', (True, ['aten::softmax'], ['aten::neg', 'aten::add', 'aten::div'])),
+    ('gumbel_softmax', (S, S), (2., True,), 'hard', (True, ['aten::softmax'], ['aten::neg', 'aten::add', 'aten::div'])),
     ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
     ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)),
                                    1, 1., non_differentiable(torch.randn(S))),),
@@ -13405,14 +13424,14 @@ def add_autograd_test(
                     # Test with disable_autodiff_subgraph_inlining, which forces the graph
                     # to contain DifferentiableGraph nodes whenever possible. This allows us
                     # to test autodiff; we assume that autograd is correct and use autodiff for backprop
-                    should_autodiff_node, autodiff_node = normalize_check_ad(check_ad, name)
+                    should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
                     if test_name not in EXCLUDE_TRACED:
                         traced_fn = create_traced_fn(self, fn, disable_autodiff_subgraph_inlining=True)
 
                         check_against_reference(self, traced_fn,
                                                 fn, (self_variable,) + args_variable, kwargs_variable,
                                                 check_types=check_types)
-                        self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_node)
+                        self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
                     if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
                         script_fn = create_script_fn(self, name, 'method', output_process_fn,
@@ -13421,7 +13440,7 @@ def add_autograd_test(
                                                 fn, (self_variable,) + args_variable, kwargs_variable,
                                                 check_types=check_types)
 
-                        self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node and test_name not in EXCLUDE_SCRIPT_AD_CHECK, autodiff_node)
+                        self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node and test_name not in EXCLUDE_SCRIPT_AD_CHECK, autodiff_nodes, fusible_nodes)
 
                 # functional interface tests
                 if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
@@ -13498,14 +13517,14 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
         f_args_variable = (self_variable,) + args_variable
         f_args_tensor = (self_tensor,) + args_tensor
 
-        should_autodiff_node, autodiff_node = normalize_check_ad(check_ad, name)
+        should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
         if test_name not in EXCLUDE_SCRIPT:
             def run_test():
                 script_fn = create_script_fn(self, name, 'nn_functional', output_process_fn,
                                              disable_autodiff_subgraph_inlining=should_autodiff_node)
                 check_against_reference(self, script_fn, fn, f_args_variable, kwargs_variable, no_grad=no_grad)
                 # For tests we disabled AD subgraph inlining, make sure it's not falling back to autograd
-                self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_node)
+                self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
             if test_name in EXCLUDE_PYTHON_PRINT:
                 with self.disableModuleHook():
@@ -13637,18 +13656,19 @@ def post_add_test(test_name, skipTestIf, do_test, test_class):
 
 
 def normalize_check_ad(check_ad, name):
-    # normalized check_ad is 2-element tuple: (bool, List[str])
+    # normalized check_ad is 3-element tuple: (bool, List[str], List[str])
     if len(check_ad) == 0:
-        check_ad = (False, ['aten::' + name])
+        check_ad = [False, ['aten::' + name], []]
     elif len(check_ad) == 1:
-        check_ad = (check_ad[0], ['aten::' + name])
-    elif len(check_ad) != 2:
-        raise Exception('Invalid check_ad, requires (bool, str|List[str])')
+        check_ad = [check_ad[0], ['aten::' + name], []]
+    elif len(check_ad) == 2:
+        check_ad = [check_ad[0], check_ad[1], []]
+    elif len(check_ad) == 3:
+        check_ad = list(check_ad)
+    else:
+        raise Exception('Invalid check_ad, requires (bool, str|List[str], str|List[str])')
 
-    if isinstance(check_ad[1], dict):
-        check_ad = (check_ad[0], check_ad[1]['cuda' if torch.cuda.is_available() else 'cpu'])
-    if isinstance(check_ad[1], str):
-        check_ad = (check_ad[0], [check_ad[1]])
+    check_ad = [[t] if isinstance(t, str) else t for t in check_ad]
 
     return check_ad
 

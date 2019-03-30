@@ -1175,16 +1175,20 @@ If your PR adds/updates a gradient formula for `torch`/`nn` functions, you **MUS
 - `torch` functions: `method_tests` in [common_method_tests.py](../../../test/common_method_tests.py)
 - `nn` functions: `nn_functional_tests` in [test_jit.py](../../../test/test_jit.py)
 
-To turn on autodiff check, you can add an optional `check_ad(should_check_autodiff, autodiff_node)` tuple after the optional test variant name field.
-If `should_check_autodiff=True`, the differentiated traced/script forward graph must have a `prim::DifferentiableGraph` with all nodes in `autodiff_node` shows up in it.
-On the other hand, if `should_check_autodiff=False`, the graph can still have `prim::DifferentiableGraph` with other nodes, but not `autodiff_node`.
+To turn on autodiff check, you can add an optional `check_ad(should_check_autodiff[bool], nonfusible_nodes[str|list[str]], fusible_nodes[str|list[str]])` tuple after the optional test variant name field.
+If `should_check_autodiff=True`, the differentiated traced/script forward graph must have a `prim::DifferentiableGraph`.
 
-To make writing test easier, you only need to write out `autodiff_node` if it's different from the function name.
+All nodes in `nonfusible_nodes` should show up in at least once in `prim::DifferentiableGraph` subgraphs.
+When fusion is enabled, all nodes in `fusible_nodes` should show up in one of `prim::FusionGroup` graphs attached to `prim::DifferentiableGraph`,
+otherwise they're checked as `nonfusible_nodes` as well.
+On the other hand, if `should_check_autodiff=False`, the graph can still have `prim::DifferentiableGraph` with other nodes, but not `nonfusible_nodes` and `fusible_nodes`.
+
+To make writing test easier, you only need to write out node names if it's different from the function name. Below are a few examples:
 ```python
 ('conv1d', ...), # No symbolic gradient formula
-('avg_pool2d', ..., (True,)), # Has symbolic gradient formula, and node name is aten::avg_pool2d
-('dropout', ..., (True, {'cpu': ['aten::mul', 'aten::div'], 'cuda': 'prim::FusionGroup'})), # Some op are used when pytorch is compiled with cuda.
+('avg_pool2d', ..., (True,)), # Has symbolic gradient formula, only has one nonfusible node aten::avg_pool2d
 ('nll_loss', ..., (True, 'aten::nll_loss_forward')), # Is replaced by a different node in its symbolic gradient formula
+('dropout', ..., (True, ['prim::is_cuda', 'aten::bernoulli_'], ['aten::rand_like', ..., 'aten::div'])), # Some op are fused when fusion is enabled.
 ```
 
 Note that even for the same function, different tests could trigger different function schemas (e.g `aten::add`) while only a few of them have symbolic gradient formulas.
