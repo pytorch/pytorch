@@ -3111,7 +3111,7 @@ Example::
     >>> f = torch.rand(10, requires_grad=True, device="cuda")
     >>> f.is_leaf
     True
-    # f requires grad, has not operation creating it
+    # f requires grad, has no operation creating it
 
 
 """)
