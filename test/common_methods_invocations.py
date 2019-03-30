@@ -1,9 +1,9 @@
 import torch
-from torch._six import inf, nan, istuple
-from functools import reduce, wraps
+from torch._six import inf, istuple
+from functools import reduce
 from operator import mul, itemgetter
 import collections
-from torch.autograd import Variable, Function, detect_anomaly
+from torch.autograd import Variable
 from torch.testing import make_non_contiguous
 from common_utils import (skipIfNoLapack,
                           prod_single_zero, random_square_matrix_of_rank,

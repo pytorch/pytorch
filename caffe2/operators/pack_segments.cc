@@ -116,7 +116,6 @@ template <typename T, typename Data_T>
 bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto& data = Input(DATA);
   const auto& lengths = Input(LENGTHS);
-  auto* output = Output(0);
 
   CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");
   CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTH should be 1-D");
@@ -135,7 +134,7 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
       shape[0], lengths.size(0), "LENGTH should match DATA in dimension 0");
   shape.erase(shape.begin());
   shape[0] = total_l;
-  output->Resize(shape);
+  auto* output = Output(0, shape, at::dtype(data.dtype()));
   // create output tensor
   auto* out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
   if (!(data.size(0) && data.size(1))) {

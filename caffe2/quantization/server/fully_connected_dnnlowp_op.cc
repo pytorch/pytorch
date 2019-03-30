@@ -83,8 +83,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
     }
 
     auto* Y_ref = fp32_op->Output(0);
-    auto* Y = OutputTensorCPU_(0);
-    Y->ResizeLike(*Y_ref);
+    auto* Y = OutputTensorCPU_(0, Y_ref->sizes(), at::dtype(Y_ref->dtype()));
     fp32_op->context_.CopyItemsSameDevice(
         Y_ref->dtype(),
         Y_ref->size(),
