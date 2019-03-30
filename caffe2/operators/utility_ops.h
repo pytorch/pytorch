@@ -235,10 +235,9 @@ class FlattenToVecOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = Input(0);
-    auto* output = Output(0);
     CAFFE_ENFORCE_GE(
         input.dim(), 1, "The rank of the tensor must be >= 1.");
-    output->Resize(input.numel());
+    auto* output = Output(0, {input.numel()}, at::dtype(input.dtype()));
 
     context_.CopyItemsSameDevice(
         input.dtype(),
@@ -259,9 +258,8 @@ class ResizeLikeOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input0 = Input(0);
     auto& input1 = Input(1);
-    auto* output = Output(0);
     CAFFE_ENFORCE_EQ(input0.numel(), input1.numel());
-    output->ResizeLike(Input(1));
+    auto* output = Output(0, input1.sizes(), at::dtype(input0.dtype()));
     context_.CopyItemsSameDevice(
         input0.dtype(),
         input0.numel(),
@@ -1050,8 +1048,6 @@ class GatherRangesOp : public Operator<Context> {
   bool DoRunWithType() {
     auto& data = Input(DATA);
     auto& ranges = Input(RANGES);
-    auto* outputData = Output(0);
-    auto* outputLengths = Output(1);
 
     auto batchSize = ranges.size(0);
     CAFFE_ENFORCE(data.dim() == 1, "Data has to be 1-D");
@@ -1063,7 +1059,7 @@ class GatherRangesOp : public Operator<Context> {
     auto* rawData = static_cast<const char*>(data.raw_data());
     auto* rangesData = ranges.template data<Index>();
 
-    outputLengths->Resize(batchSize);
+    auto* outputLengths = Output(1, {batchSize}, at::dtype<int32_t>());
     auto* outputLengthsPtr = outputLengths->template mutable_data<int32_t>();
     size_t start = 0;
     size_t blockSize = ranges.size_from_dim(1);
@@ -1074,7 +1070,8 @@ class GatherRangesOp : public Operator<Context> {
     }
 
     size_t outputSize = accumulate(rangesData, 0, ranges.numel());
-    outputData->Resize(outputSize);
+    auto* outputData =
+        Output(0, {static_cast<int64_t>(outputSize)}, at::dtype(data.dtype()));
 
     auto outputRawData =
         static_cast<char*>(outputData->raw_mutable_data(data.dtype()));
@@ -1130,7 +1127,6 @@ class LengthsGatherOp : public Operator<Context> {
     auto& items = Input(ITEMS);
     auto& lengths = Input(LENGTHS);
     auto& indices = Input(INDICES);
-    auto* output = Output(0);
 
     CAFFE_ENFORCE_GE(items.dim(), 1, "ITEMS should be at least 1-D");
     CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTHS should be 1-D");
@@ -1147,7 +1143,7 @@ class LengthsGatherOp : public Operator<Context> {
     }
     auto shape = items.sizes().vec();
     shape[0] = total_length;
-    output->Resize(shape);
+    auto* output = Output(0, {shape}, at::dtype(items.dtype()));
 
     offsets_.clear();
     int64_t running_offset = 0;

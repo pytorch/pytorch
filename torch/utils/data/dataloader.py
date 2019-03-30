@@ -719,7 +719,12 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         self.rcvd_idx += 1
         self.try_put_index()
         if isinstance(data, _utils.ExceptionWrapper):
-            raise data.exc_type(data.exc_msg)
+            # make multiline KeyError msg readable by working around
+            # a python bug https://bugs.python.org/issue2651
+            if data.exc_type == KeyError and "\n" in data.exc_msg:
+                raise Exception("KeyError:" + data.exc_msg)
+            else:
+                raise data.exc_type(data.exc_msg)
         return data
 
     def shutdown_workers(self):
