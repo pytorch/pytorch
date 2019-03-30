@@ -90,4 +90,4 @@ class ConstantSampler(Sampler):
         return self.length
 
 
-from . import worker, signal_handling, pin_memory, collate
+from . import worker, signal_handling, pin_memory, collate  # noqa: F401
