@@ -74,9 +74,8 @@ except ImportError:
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 # Note: creating FusionGroups is currently device-independent.
-# FusionGroup is created as long as torch is built with CUDA.
 # FusionGroup creation with CPU is disabled.
-FUSION_ENABLED = hasattr(torch._C, '_cuda_isDriverSufficient') and torch._C._cuda_isDriverSufficient()
+FUSION_ENABLED = torch._C._jit_can_fuse_on_cpu() or torch._C._jit_can_fuse_on_gpu()
 
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_HALF = RUN_CUDA
