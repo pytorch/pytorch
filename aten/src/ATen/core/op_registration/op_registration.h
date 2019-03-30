@@ -65,21 +65,18 @@ public:
   template<class... ConfigParameters>
   guts::enable_if_t<guts::conjunction<detail::is_registration_config_parameter<guts::decay_t<ConfigParameters>>...>::value, RegisterOperators>
   op(FunctionSchema schema, ConfigParameters&&... configParameters) && {
-    detail::KernelRegistrationConfig config = detail::make_registration_config(std::forward<ConfigParameters>(configParameters)...);
-
-    if (config.inferred_function_schema.get() != nullptr) {
-      assertSchemasHaveSameSignature(*config.inferred_function_schema, schema);
-    }
-
-    registrars_.emplace_back(std::move(schema), config.dispatch_key, config.kernel_func, std::move(config.cache_creator_func));
+    registerOp_(std::move(schema), detail::make_registration_config(std::forward<ConfigParameters>(configParameters)...));
     return std::move(*this);
   }
 
-  // TODO error if dispatch key is not specified
   // TODO Add deprecated function and lambda based kernel APIs
 
 private:
-  std::vector<detail::OperatorRegistrar> registrars_;
+  void registerOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config);
+
+  class OperatorRegistrar;
+
+  std::vector<OperatorRegistrar> registrars_;
 };
 
 }
