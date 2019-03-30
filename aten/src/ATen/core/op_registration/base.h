@@ -56,6 +56,7 @@ namespace detail {
     TensorTypeId dispatch_key;
     KernelFunction* kernel_func = nullptr;
     KernelCacheCreatorFunction cache_creator_func = nullptr;
+    std::unique_ptr<FunctionSchema> inferred_function_schema = nullptr;
   };
 
   // is_registration_config_parameter is a concept that returns true_type iff its argument is
