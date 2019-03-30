@@ -8,8 +8,8 @@ import warnings
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
-from operator import mul, itemgetter
-from functools import reduce, wraps
+from operator import mul
+from functools import reduce
 from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
@@ -17,14 +17,11 @@ from torch.autograd.profiler import profile
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm,
-                          prod_single_zero, random_square_matrix_of_rank,
-                          random_symmetric_matrix, random_symmetric_psd_matrix,
-                          random_symmetric_pd_matrix, make_nonzero_det,
-                          random_fullrank_matrix_distinct_singular_value, load_tests)
+                          load_tests)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
-from torch.testing import make_non_contiguous, randn_like
+from torch.testing import randn_like
 from common_methods_invocations import (method_tests,
                                         create_input, unpack_variables,
                                         EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
@@ -32,7 +29,7 @@ from common_methods_invocations import (method_tests,
                                         EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
                                         exclude_tensor_method,
                                         mask_not_all_zeros,
-                                        L, S)
+                                        S)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings

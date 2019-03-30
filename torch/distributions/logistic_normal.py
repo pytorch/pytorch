@@ -2,7 +2,7 @@ import torch
 from torch.distributions import constraints
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
-from torch.distributions.transforms import ComposeTransform, ExpTransform, StickBreakingTransform
+from torch.distributions.transforms import StickBreakingTransform
 
 
 class LogisticNormal(TransformedDistribution):
