@@ -39,6 +39,21 @@ struct DispatchTableEntry final {
 };
 
 namespace detail {
+inline std::string dispatch_key_to_string(TensorTypeId id) {
+   // TODO Find better way to stringify tensor type ids without relying on backend
+   std::string name = "";
+   try {
+     name = toString(tensorTypeIdToBackend(id));
+   } catch (const std::exception&) {
+     // This can fail if the tensor type id is not one of the preregistered backends.
+     // However, dispatch_key_to_string is used to generate error reports, that
+     // means an error already has happened when entering this function.
+     // We don't want inner errors during generation of a report for an
+     // outer error. Just report an empty name instead.
+   }
+   return name + "[" + toString(id) + "]";
+}
+
 /// Kernel implementations in a thread-safe hash table.
 class ThreadsafeOperatorTable_ final {
  public:
@@ -49,7 +64,7 @@ class ThreadsafeOperatorTable_ final {
     });
     if (!res) {
       AT_ERROR("Tried to register multiple kernels with same dispatch key '",
-      dispatch_key_to_string(key), "' for operator '", operator_name ,"'.");
+      detail::dispatch_key_to_string(key), "' for operator '", operator_name ,"'.");
     }
   }
 
@@ -60,7 +75,7 @@ class ThreadsafeOperatorTable_ final {
       assert(num_removed <= 1); // This is not a multi-map
       if (num_removed == 0) {
         AT_ERROR("Tried to deregister a kernel with dispatch key '",
-                 dispatch_key_to_string(key), "' for operator '", operator_name,
+                 detail::dispatch_key_to_string(key), "' for operator '", operator_name,
                  "' but that kernel isn't registered. Registered dispatch keys are: ",
                  list_all_dispatch_keys(map));
       }
@@ -73,9 +88,7 @@ class ThreadsafeOperatorTable_ final {
       if (found != map.end()) {
         return &found->second;
       } else {
-        AT_ERROR("Didn't find kernel to dispatch to for operator '", operator_name,
-                 "'. Tried to look up kernel for dispatch key '", dispatch_key_to_string(key),
-                 "'. Registered dispatch keys are: ", list_all_dispatch_keys(map));
+        return nullptr;
       }
     });
   }
@@ -86,32 +99,23 @@ class ThreadsafeOperatorTable_ final {
     });
   }
 
+  std::string list_all_dispatch_keys() const {
+    return map_.read([&](const ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) -> std::string {
+      return list_all_dispatch_keys(map);
+    });
+  }
+
  private:
    static std::string list_all_dispatch_keys(const ska::flat_hash_map<TensorTypeId, DispatchTableEntry>& map) {
      if (map.size() == 0) {
        return "";
      }
      std::ostringstream str;
-     str << dispatch_key_to_string(map.begin()->first);
+     str << detail::dispatch_key_to_string(map.begin()->first);
      for (auto iter = ++map.begin(); iter != map.end(); ++iter) {
-       str << ", " << dispatch_key_to_string(iter->first);
+       str << ", " << detail::dispatch_key_to_string(iter->first);
      }
      return str.str();
-   }
-
-   static std::string dispatch_key_to_string(TensorTypeId id) {
-      // TODO Find better way to stringify tensor type ids without relying on backend
-      std::string name = "";
-      try {
-        name = toString(tensorTypeIdToBackend(id));
-      } catch (const std::exception&) {
-        // This can fail if the tensor type id is not one of the preregistered backends.
-        // However, dispatch_key_to_string is used to generate error reports, that
-        // means an error already has happened when entering this function.
-        // We don't want inner errors during generation of a report for an
-        // outer error. Just report an empty name instead.
-      }
-      return name + "[" + toString(id) + "]";
    }
 
    LeftRight<ska::flat_hash_map<TensorTypeId, DispatchTableEntry>> map_;
@@ -132,7 +136,8 @@ class DispatchTable final {
   explicit DispatchTable(const FunctionSchema& schema)
   : kernels_()
   , dispatch_strategy_(get_dispatch_strategy_(schema))
-  , operator_name_(schema.name()) {}
+  , operator_name_(schema.name())
+  , fallback_kernel_(c10::nullopt) {}
 
   DispatchTable(DispatchTable&&) = delete;
   DispatchTable& operator=(DispatchTable&&) = delete;
@@ -141,8 +146,8 @@ class DispatchTable final {
 
   /**
    * Register a kernel in the table at some dispatch key.
-   * @param func Concrete kernel function implementation to register
    * @param dispatch_key Dispatch key to define when this kernel is selected
+   * @param kernel Concrete kernel function implementation to register
    */
   void registerKernel(
       TensorTypeId dispatch_key,
@@ -163,15 +168,42 @@ class DispatchTable final {
   }
 
   /**
+   * Register a fallback kernel. This kernel will be returned from lookup
+   * whenever no other kernel matches the dispatch key.
+   * @param kernel Concrete kernel function implementation to register
+   */
+  void registerFallbackKernel(const DispatchTableEntry& kernel) {
+    fallback_kernel_ = kernel;
+  }
+
+  /**
+   * Deregister the fallback kernel.
+   * Without a fallback kernel, lookup of a dispatch key that doesn't match
+   * a kernel will fail again.
+   */
+  void deregisterFallbackKernel() {
+    fallback_kernel_.reset();
+  }
+
+  /**
    * Perform a dynamic dispatch on this table and find the kernel to call
    * for the given arguments.
    *
    * @param args Arguments to invoke the function with
-   * @return Kernel function pointing to the right kernel for the given arguments
+   * @return Kernel function pointing to the right kernel for the given arguments.
    */
    const DispatchTableEntry& lookup(const Stack* stack) const {
      TensorTypeId dispatch_key = dispatch_strategy_.get_dispatch_key(stack);
-     return *kernels_.lookup(dispatch_key, operator_name_);
+     auto found = kernels_.lookup(dispatch_key, operator_name_);
+     if (nullptr != found) {
+       return *found;
+     }
+     if (fallback_kernel_.has_value()) {
+       return *fallback_kernel_;
+     }
+     AT_ERROR("Didn't find kernel to dispatch to for operator '", operator_name_,
+              "'. Tried to look up kernel for dispatch key '", detail::dispatch_key_to_string(dispatch_key),
+              "'. Registered dispatch keys are: ", kernels_.list_all_dispatch_keys());
    }
 
    bool isEmpty() const {
@@ -225,6 +257,7 @@ private:
   detail::ThreadsafeOperatorTable_ kernels_;
   DispatchStrategy dispatch_strategy_;
   std::string operator_name_;
+  c10::optional<DispatchTableEntry> fallback_kernel_;
 };
 
 } // namespace c10

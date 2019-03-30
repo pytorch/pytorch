@@ -110,7 +110,17 @@ void Dispatcher::registerKernel(const OperatorHandle& op, TensorTypeId dispatch_
 
 void Dispatcher::deregisterKernel(const OperatorHandle& op, TensorTypeId dispatch_key) {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  op.operatorDefIterator_->dispatchTable.deregisterKernel(dispatch_key);
+  op.operatorDefIterator_->dispatchTable.deregisterKernel(std::move(dispatch_key));
+}
+
+void Dispatcher::registerFallbackKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func) {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  op.operatorDefIterator_->dispatchTable.registerFallbackKernel(DispatchTableEntry{kernel_func, std::move(cache_creator_func)});
+}
+
+void Dispatcher::deregisterFallbackKernel(const OperatorHandle& op) {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  op.operatorDefIterator_->dispatchTable.deregisterFallbackKernel();
 }
 
 void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
