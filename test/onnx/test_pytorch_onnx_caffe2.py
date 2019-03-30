@@ -1165,6 +1165,49 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_model_test(FlattenModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    def test_unique(self):
+        class M1(torch.nn.Module):
+            def forward(self, input):
+                return torch.unique(input, dim=1)
+
+        class M2(torch.nn.Module):
+            def forward(self, input):
+                return torch.unique(input)
+
+        class M3(torch.nn.Module):
+            def forward(self, input):
+                return torch.unique(input, dim=1, return_inverse=True)
+
+        class M4(torch.nn.Module):
+            def forward(self, input):
+                return torch.unique(input, return_inverse=True)
+
+        class M5(torch.nn.Module):
+            def forward(self, input):
+                return torch.unique(input, dim=1, return_counts=True)
+
+        class M6(torch.nn.Module):
+            def forward(self, input):
+                return torch.unique(input, return_counts=True)
+
+        class M7(torch.nn.Module):
+            def forward(self, input):
+                return torch.unique(input, dim=1, return_inverse=True, return_counts=True)
+
+        class M8(torch.nn.Module):
+            def forward(self, input):
+                return torch.unique(input, return_inverse=True, return_counts=True)
+
+        x = torch.randint(3, (4, 4))
+        self.run_model_test(M1(), train=False, input=x, batch_size=BATCH_SIZE)
+        self.run_model_test(M2(), train=False, input=x, batch_size=BATCH_SIZE)
+        self.run_model_test(M3(), train=False, input=x, batch_size=BATCH_SIZE)
+        self.run_model_test(M4(), train=False, input=x, batch_size=BATCH_SIZE)
+        self.run_model_test(M5(), train=False, input=x, batch_size=BATCH_SIZE)
+        self.run_model_test(M6(), train=False, input=x, batch_size=BATCH_SIZE)
+        self.run_model_test(M7(), train=False, input=x, batch_size=BATCH_SIZE)
+        self.run_model_test(M8(), train=False, input=x, batch_size=BATCH_SIZE)
+
     def test_argmax(self):
         class ArgmaxModel(torch.nn.Module):
             def forward(self, input):

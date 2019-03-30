@@ -1213,10 +1213,19 @@ def conv_tbc(g, input, weight, bias, pad):
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
 
 
-@parse_args('v', 'i', 'i')
-def _unique(g, input, sorted, return_inverse):
-    return g.op("ATen", input, operator_s="_unique", sorted_i=sorted,
-                return_inverse_i=return_inverse, outputs=2)
+def unique(g, input, sorted, return_inverse, return_counts, dim):
+    sorted = _parse_arg(sorted, 'i')
+    return_inverse = _parse_arg(return_inverse, 'i')
+    return_counts = _parse_arg(return_counts, 'i')
+    if dim.node().mustBeNone():
+        return g.op("ATen", input, operator_s="unique", sorted_i=sorted,
+                    return_inverse_i=return_inverse, return_counts_i=return_counts,
+                    outputs=3)
+    else:
+        dim = _parse_arg(dim, 'i')
+        return g.op("ATen", input, operator_s="unique_dim", sorted_i=sorted,
+                    return_inverse_i=return_inverse, return_counts_i=return_counts,
+                    dim_i=dim, outputs=3)
 
 
 # Metaprogram symbolics for each ATen native specialized cast operator.
