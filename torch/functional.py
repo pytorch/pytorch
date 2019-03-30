@@ -385,9 +385,6 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
 
 
-del torch.unique_dim
-
-
 def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
     r"""Returns the unique elements of the input tensor.
 
@@ -440,21 +437,13 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
                 [ 1,  2]])
 
     """
-    if dim is not None:
-        output, inverse_indices, counts = torch._C._VariableFunctions.unique_dim(
-            input,
-            dim,
-            sorted=sorted,
-            return_inverse=return_inverse,
-            return_counts=return_counts,
-        )
-    else:
-        output, inverse_indices, counts = torch._unique2(
-            input,
-            sorted=sorted,
-            return_inverse=return_inverse,
-            return_counts=return_counts,
-        )
+    output, inverse_indices, counts = torch._C._VariableFunctions.unique(
+        input,
+        dim=dim,
+        sorted=sorted,
+        return_inverse=return_inverse,
+        return_counts=return_counts,
+    )
     if return_inverse and return_counts:
         return output, inverse_indices, counts
     elif return_inverse:

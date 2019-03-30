@@ -150,17 +150,20 @@ _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
 }
 
 std::tuple<Tensor, Tensor, Tensor>
-_unique2_cpu(const Tensor& self, const bool sorted, const bool return_inverse, const bool return_counts) {
-  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique", [&] {
-    return _unique_cpu_template<scalar_t>(self, sorted, return_inverse, return_counts);
-  });
-}
-
-std::tuple<Tensor, Tensor, Tensor>
 unique_dim_cpu(const Tensor& self, const int64_t dim, const bool sorted, const bool return_inverse, const bool return_counts) {
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique_dim", [&] {
     // The current implementation using `dim` always sorts due to unhashable tensors
     return _unique_dim_cpu_template<scalar_t>(self, dim, return_inverse, return_counts);
+  });
+}
+
+std::tuple<Tensor, Tensor, Tensor>
+unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse, const bool return_counts, c10::optional<int64_t> dim) {
+  if (dim.has_value()) {
+    return unique_dim_cpu(self, dim.value(), sorted, return_inverse, return_counts);
+  }
+  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique", [&] {
+    return _unique_cpu_template<scalar_t>(self, sorted, return_inverse, return_counts);
   });
 }
 

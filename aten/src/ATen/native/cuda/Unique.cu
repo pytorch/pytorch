@@ -200,18 +200,21 @@ _unique_cuda(const Tensor& self, const bool sorted, const bool return_inverse) {
 }
 
 std::tuple<Tensor, Tensor, Tensor>
-_unique2_cuda(const Tensor& self, const bool sorted, const bool return_inverse, const bool return_counts) {
-  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique", [&] {
-    // The current CUDA implementation of unique always sort due to the
-    // lack of hashtable implementation in thrust
-    return unique_cuda_template<scalar_t>(self, return_inverse, return_counts);
+unique_dim_cuda(const Tensor& self, const int64_t dim, const bool sorted, const bool return_inverse, const bool return_counts) {
+  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique_dim", [&] {
+    return unique_dim_cuda_template<scalar_t>(self, dim, return_inverse, return_counts);
   });
 }
 
 std::tuple<Tensor, Tensor, Tensor>
-unique_dim_cuda(const Tensor& self, const int64_t dim, const bool sorted, const bool return_inverse, const bool return_counts) {
-  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique_dim", [&] {
-    return unique_dim_cuda_template<scalar_t>(self, dim, return_inverse, return_counts);
+unique_cuda(const Tensor& self, const bool sorted, const bool return_inverse, const bool return_counts, c10::optional<int64_t> dim) {
+  if (dim.has_value()) {
+    return unique_dim_cuda(self, dim.value(), sorted, return_inverse, return_counts);
+  }
+  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique", [&] {
+    // The current CUDA implementation of unique always sort due to the
+    // lack of hashtable implementation in thrust
+    return unique_cuda_template<scalar_t>(self, return_inverse, return_counts);
   });
 }
 

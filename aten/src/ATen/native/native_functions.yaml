@@ -2353,16 +2353,12 @@
     CPU: unique_dim_cpu
     CUDA: unique_dim_cuda
 
-# _unique and _unique_dim are fragile and modifying them easily cause internal break
-# the below operator is a temporary hack for adding return_counts support
-# Please don't rely on these two operators, they will be removed soon
-
-- func: _unique2(Tensor self, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
+- func: unique(Tensor self, bool sorted=True, bool return_inverse=False, bool return_counts=False, int? dim=None) -> (Tensor, Tensor, Tensor)
   matches_jit_signature: True
   variants: function
   dispatch:
-    CPU: _unique2_cpu
-    CUDA: _unique2_cuda
+    CPU: unique_cpu
+    CUDA: unique_cuda
 
 - func: _unsafe_view(Tensor self, int[] size) -> Tensor
   matches_jit_signature: True
