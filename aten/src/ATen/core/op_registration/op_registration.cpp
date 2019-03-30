@@ -40,9 +40,16 @@ private:
 };
 
 void RegisterOperators::registerOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config) {
-  // TODO Allow this for registering the schema without a kernel?
-  AT_CHECK(config.kernel_func != nullptr, "Cannot register operator without kernel");
+  // TODO We need to support registrations without a dispatch key,
+  //      at least for the deprecated APIs. Maybe also for new ones.
+  AT_CHECK(config.dispatch_key.has_value(),
+      "Tried to register an operator with function schema ", toString(schema),
+      ", but didn't specify a dispatch key. Please add a c10::dispatchKey(...) parameter to the registration call.");
 
+  // TODO Should we allow this and only register a schema without a kernel?
+  AT_CHECK(config.kernel_func != nullptr,
+      "Tried to register an operator with function schema ", toString(schema),
+      ", but didn't specify a kernel. Please add a c10::kernel<...>(...) parameter to the registration call.");
   // if kernel_func is set, so must be cache_creator_func, the API shouldn't allow anything else.
   AT_ASSERT(static_cast<bool>(config.cache_creator_func));
 
