@@ -8,6 +8,8 @@
 #include <ATen/core/op_registration/base.h>
 #include <ATen/core/op_registration/dispatch_key.h>
 #include <ATen/core/op_registration/kernel_stackbased.h>
+#include <ATen/core/op_registration/kernel_functor.h>
+#include <ATen/core/op_registration/kernel_function.h>
 
 namespace c10 {
 
@@ -63,15 +65,15 @@ public:
   guts::enable_if_t<guts::conjunction<detail::is_registration_config_parameter<guts::decay_t<ConfigParameters>>...>::value, RegisterOperators>
   op(FunctionSchema schema, ConfigParameters&&... configParameters) && {
     detail::KernelRegistrationConfig config = detail::make_registration_config(std::forward<ConfigParameters>(configParameters)...);
-    registrars_.emplace_back(std::move(schema), config.dispatch_key, config.kernel_func, config.cache_creator_func);
+    registrars_.emplace_back(std::move(schema), config.dispatch_key, config.kernel_func, std::move(config.cache_creator_func));
     return std::move(*this);
   }
 
   // TODO error if dispatch key is not specified
-  // TODO Add functor, function and lambda based kernel APIs
+  // TODO Add deprecated function and lambda based kernel APIs
 
 private:
-  std::vector<c10::detail::OperatorRegistrar> registrars_;
+  std::vector<detail::OperatorRegistrar> registrars_;
 };
 
 }
