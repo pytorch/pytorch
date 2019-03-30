@@ -360,7 +360,8 @@ class ReduceLROnPlateau(object):
         self.num_bad_epochs = 0
 
     def step(self, metrics, epoch=None):
-        current = metrics
+        # convert `metrics` to float, in case it's a zero-dim Tensor
+        current = float(metrics)
         if epoch is None:
             epoch = self.last_epoch = self.last_epoch + 1
         self.last_epoch = epoch

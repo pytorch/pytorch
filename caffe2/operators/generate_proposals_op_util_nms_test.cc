@@ -212,7 +212,6 @@ TEST(UtilsNMSTest, TestSoftNMS) {
   }
 }
 
-#if defined(CV_MAJOR_VERSION) && (CV_MAJOR_VERSION >= 3)
 TEST(UtilsNMSTest, TestNMSRotatedAngle0) {
   // Same inputs as TestNMS, but in RRPN format with angle 0 for testing
   // nms_cpu_rotated
@@ -389,6 +388,42 @@ TEST(UtilsNMSTest, TestSoftNMSRotatedAngle0) {
 
 TEST(UtilsNMSTest, RotatedBBoxOverlaps) {
   {
+    // One box is fully within another box, the angle is irrelavant
+    int M = 2, N = 3;
+    Eigen::ArrayXXf boxes(M, 5);
+    for (int i = 0; i < M; i++) {
+      boxes.row(i) << 0, 0, 5, 6, (360.0 / M - 180.0);
+    }
+
+    Eigen::ArrayXXf query_boxes(N, 5);
+    for (int i = 0; i < N; i++) {
+      query_boxes.row(i) << 0, 0, 3, 3, (360.0 / M - 180.0);
+    }
+
+    Eigen::ArrayXXf expected(M, N);
+    // 0.3 == (3 * 3) / (5 * 6)
+    expected.fill(0.3);
+
+    auto actual = utils::bbox_overlaps_rotated(boxes, query_boxes);
+    EXPECT_TRUE(((expected - actual).abs() < 1e-6).all());
+  }
+
+  {
+    // Angle 0
+    Eigen::ArrayXXf boxes(1, 5);
+    boxes << 39.500000, 50.451096, 80.000000, 18.097809, -0.000000;
+
+    Eigen::ArrayXXf query_boxes(1, 5);
+    query_boxes << 39.120628, 41.014862, 79.241257, 36.427757, -0.000000;
+
+    Eigen::ArrayXXf expected(1, 1);
+    expected << 0.48346716237;
+
+    auto actual = utils::bbox_overlaps_rotated(boxes, query_boxes);
+    EXPECT_TRUE(((expected - actual).abs() < 1e-6).all());
+  }
+
+  {
     // Simple case with angle 0 (upright boxes)
     Eigen::ArrayXXf boxes(2, 5);
     boxes << 10.5, 15.5, 21, 31, 0, 14.0, 17, 4, 10, 0;
@@ -436,6 +471,5 @@ TEST(UtilsNMSTest, RotatedBBoxOverlaps) {
     EXPECT_TRUE(((expected - actual).abs() < 1e-6).all());
   }
 }
-#endif // CV_MAJOR_VERSION >= 3
 
 } // namespace caffe2
