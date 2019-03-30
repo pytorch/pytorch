@@ -2366,7 +2366,7 @@
 # the below operator is a temporary hack for adding return_counts support
 # Please don't rely on these two operators, they will be removed soon
 
-- func: _unique2_temporary_will_remove_soon(Tensor self, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
+- func: _unique2(Tensor self, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
   matches_jit_signature: True
   variants: function
   dispatch:
