@@ -7,7 +7,6 @@
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/irparser.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
@@ -76,6 +75,7 @@ bool loadPythonClasses() {
 
   return true;
 }
+
 } // anonymous namespace
 
 #if defined(_WIN32)
@@ -375,12 +375,6 @@ void initJITBindings(PyObject* module) {
       },
       py::arg("qualified_name"));
 
-  m.def("parse_ir", [](const std::string& input) {
-    auto graph = std::make_shared<Graph>();
-    script::parseIR(input, &*graph);
-    return graph;
-  });
-
   py::class_<FunctionSchema>(m, "FunctionSchema")
       .def_property_readonly(
           "name", [](FunctionSchema& self) { return self.name(); })
@@ -496,5 +490,6 @@ void initJITBindings(PyObject* module) {
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
 }
+
 } // namespace jit
 } // namespace torch
