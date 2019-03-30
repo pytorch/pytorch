@@ -1,22 +1,14 @@
 #pragma once
 
-namespace caffe2 {
-namespace detail {
-
-constexpr const char* PREALLOCATED_OUTPUT_ARGNAME =
-    "_caffe2_preallocated_outputs";
-
-}
-}
-
-#ifndef C10_MOBILE
-
 #include <ATen/core/function_schema.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <vector>
 
 namespace caffe2 {
 namespace detail {
+
+constexpr const char* PREALLOCATED_OUTPUT_ARGNAME =
+    "_caffe2_preallocated_outputs";
 
 using _CallCaffe2OpFunc = std::vector<at::Tensor>(
     const c10::FunctionSchema& schema,
@@ -162,6 +154,7 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
  * - If your operator has a variable number of input tensors, make the first (!)
  *   input an input of type TensorList. There must be no other tensor inputs.
  */
+#ifndef C10_MOBILE
 #define C10_DECLARE_CAFFE2_OPERATOR(OperatorName)                  \
   namespace caffe2 {                                               \
   namespace _c10_ops {                                             \
