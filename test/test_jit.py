@@ -12,9 +12,6 @@ from contextlib import contextmanager
 from itertools import product, chain
 import torch.jit.frontend
 from torch.autograd import Variable, Function
-from torch.nn import Module
-from torch.autograd.function import traceable
-from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2, builtins, StringIO
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
@@ -25,7 +22,6 @@ from textwrap import dedent
 from functools import wraps
 import os
 import io
-import itertools
 import sys
 import unittest
 import inspect
@@ -46,14 +42,13 @@ from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from torch.testing import FileCheck
-from torch._C import TensorType, TupleType, FloatType, IntType, \
-    ListType, StringType, DictType
+from torch._C import TensorType
 from copy import deepcopy
 import random
 from typing import List, Dict, Optional, Tuple
 from torch.jit.frontend import NotSupportedError
 from torch import Tensor
-from torch.jit.annotations import BroadcastingList2, BroadcastingList3
+from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
 
 # For testing truediv in python 2
 from test_module.future_div import div_int_future, div_float_future
@@ -6727,8 +6722,6 @@ a")
 
     @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_type_annotation_py3(self):
-        import importlib.util
-
         code = dedent("""
         import torch
         from torch import Tensor
@@ -9349,8 +9342,6 @@ a")
             foo(torch.ones([123]))  # wrong size
 
     def test_builtin_error_messsage(self):
-        from torch.nn.modules.utils import _single, _pair, _triple, _quadruple
-
         with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def close_match(x):
@@ -11020,8 +11011,6 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
 
     @staticmethod
     def _test_super_resolution(self, device, check_export_import=True):
-        import torch.nn.init as init
-
         class Net(nn.Module):
 
             def __init__(self, upscale_factor):
