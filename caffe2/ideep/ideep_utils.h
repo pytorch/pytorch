@@ -9,6 +9,12 @@
 
 namespace caffe2 {
 
+enum ConvAlgorithm {
+  CONV_ALGORITHM_AUTO = 0,
+  CONV_ALGORITHM_WINOGRAD = 1,
+  CONV_ALGORITHM_MAX = CONV_ALGORITHM_WINOGRAD + 1
+};
+
 #define USE_IDEEP_DEF_ALIASES()                                                \
   using itensor = ideep::tensor;                                               \
   using iformat = ideep::format;                                               \
@@ -17,8 +23,5 @@ namespace caffe2 {
   using ipadding = ideep::padding_kind;                                        \
   using iattr = ideep::descriptor_group::attr_t;                               \
   using ibn_flag = ideep::batch_normalization_flag;
-
-const int CONV_ALGORITHM_AUTO = 0;
-const int CONV_ALGORITHM_WINOGRAD = 1;
 
 } // namespace caffe2
