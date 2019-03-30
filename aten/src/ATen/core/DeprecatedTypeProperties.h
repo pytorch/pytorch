@@ -36,7 +36,7 @@ class DeprecatedTypeProperties {
     return backendToDeviceType(backend_) == kCUDA;
   }
 
-  ScalarType scalar_type() const {
+  ScalarType scalarType() const {
     return scalar_type_;
   }
 
@@ -49,7 +49,7 @@ class DeprecatedTypeProperties {
   }
 
   bool operator==(const DeprecatedTypeProperties& other) const {
-    return backend_ == other.backend() && scalar_type_ == other.scalar_type();
+    return backend_ == other.backend() && scalar_type_ == other.scalarType();
   }
 
   bool operator!=(const DeprecatedTypeProperties& other) const {
@@ -58,7 +58,7 @@ class DeprecatedTypeProperties {
 
   std::string toString() const {
     std::stringstream ss;
-    ss << at::toString(backend()) << at::toString(scalar_type()) << "Type";
+    ss << at::toString(backend()) << at::toString(scalarType()) << "Type";
     return ss.str();
   }
 
