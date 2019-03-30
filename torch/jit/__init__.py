@@ -10,6 +10,7 @@ import torch._jit_internal as _jit_internal
 from torch._six import raise_from, with_metaclass, get_function_from_type, \
     string_classes
 from torch._jit_internal import ignore
+from torch.jit._pickle import Unpickler
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
@@ -1131,6 +1132,8 @@ if _enabled:
                     return self._get_method(attr)
             if attr == 'graph' and self._has_method('forward'):
                 return self.__getattr__('forward').graph
+            if self._has_attribute(attr):
+                return self._get_attribute(attr)
             return Module.__getattr__(self, attr)
 
         def __setattr__(self, attr, value):
