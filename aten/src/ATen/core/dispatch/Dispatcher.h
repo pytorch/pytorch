@@ -70,7 +70,7 @@ class RegistrationListenerList;
 class CAFFE2_API Dispatcher final {
 private:
   struct OperatorDef final {
-    explicit OperatorDef(FunctionSchema schema_)
+    explicit OperatorDef(FunctionSchema&& schema_)
     : dispatchTable(schema_)
     , schema(std::move(schema_))
     , refcount(0) {}
@@ -124,14 +124,31 @@ public:
   c10::optional<OperatorHandle> findSchema(const char* operator_name, const char* overload_name);
 
   /**
-   * Register an operator to the dispatch table for an operator.
+   * Register a kernel to the dispatch table for an operator.
+   * If dispatch_key is nullopt, then this registers a fallback kernel.
    */
   void registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func);
 
   /**
-   * Remove an operator from the dispatch table for an operator.
+   * Remove a kernel from the dispatch table for an operator.
+   * If dispatch_key is none, then this deregisters the fallback kernel.
+   * See documentation for registerKernel() for details.
    */
   void deregisterKernel(const OperatorHandle& op, TensorTypeId dispatch_key);
+
+  /**
+   * Register a fallback kernel for an operator.
+   * After this, when trying to lookup a kernel for an unknown dispatch key,
+   * it will not fail anymore, but return the fallback kernel instead.
+   */
+  void registerFallbackKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func);
+
+  /**
+   * Remove the fallback kernel for an operator.
+   * After this, if trying to lookup a kernel for an unknown dispatch key,
+   * the lookup will fail.
+   */
+  void deregisterFallbackKernel(const OperatorHandle& op);
 
   /**
    * Perform a dynamic dispatch and get the kernel for an operator.
