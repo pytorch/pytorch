@@ -16,7 +16,7 @@ from torch.nn import Module
 from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
-from torch._six import inf, PY2, builtins
+from torch._six import inf, PY2, builtins, StringIO
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state, set_rng_seed, slowTest
@@ -37,7 +37,10 @@ import warnings
 import math
 import types
 import pickle
+import pickletools
 import copy
+import zipfile
+
 
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
@@ -10488,8 +10491,6 @@ a")
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_attribute_unpickling(self):
-        import zipfile
-
         class M(torch.jit.ScriptModule):
             def __init__(self):
                 super(M, self).__init__()
@@ -10556,6 +10557,69 @@ a")
         m = M()
         imported_m = self.getExportImportCopy(m)
         self.assertEqual(m(), imported_m())
+
+    def test_serialization_big_ints(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.int32_max = torch.jit.Attribute(2**31 - 1, int)
+                self.int32_min = torch.jit.Attribute(-2**31, int)
+                self.uint32_max = torch.jit.Attribute(2**32, int)
+
+                self.int64_max = torch.jit.Attribute(2**63 - 1, int)
+                self.int64_min = torch.jit.Attribute(-2**63, int)
+
+                self.tensor = torch.nn.Parameter(torch.ones(2, 2))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                # type: (int) -> (int)
+                return x + (self.int32_max + self.int32_min) + (self.int64_max + self.int64_min)
+
+        m = M()
+        imported = self.getExportImportCopy(m)
+        self.assertEqual(m(10), imported(10))
+
+        self.assertEqual(m.int32_max, imported.int32_max)
+        self.assertEqual(m.int32_min, imported.int32_min)
+        self.assertEqual(m.uint32_max, imported.uint32_max)
+        self.assertEqual(m.int64_max, imported.int64_max)
+        self.assertEqual(m.int64_min, imported.int64_min)
+
+    def test_serialization_sharing(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.list = torch.jit.Attribute([], List[str])
+
+            @torch.jit.script_method
+            def forward(self, key):
+                # type: (str) -> List[str]
+                self.list.append(key)
+                self.list.append(key)
+                self.list.append(key)
+                return self.list
+
+        # the text of the string should only appear once in the pickling
+        m = M()
+        s1 = "a long string"
+        s2 = "a different, even longer string"
+        self.assertEqual(m(s1), [s1] * 3)
+        self.assertEqual(m(s2), [s1] * 3 + [s2] * 3)
+        with TemporaryFileName() as fname:
+            m.save(fname)
+            archive_name = os.path.basename(os.path.normpath(fname))
+            archive = zipfile.ZipFile(fname, 'r')
+            pickled_data = archive.read(os.path.join(archive_name, 'attributes.pkl'))
+
+            out = StringIO()
+            pickletools.dis(pickled_data, out=out)
+            disassembled = out.getvalue()
+
+            FileCheck().check_count(s1, 1, exactly=True) \
+                .check_count("BINGET", 2, exactly=True) \
+                .check_count(s2, 1, exactly=True) \
+                .check_count("BINGET", 2, exactly=True).run(out.getvalue())
 
     def test_optional_tuple(self):
         def fn(x=None):

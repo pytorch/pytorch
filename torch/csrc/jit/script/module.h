@@ -480,6 +480,9 @@ struct Module {
   autograd::Variable get_buffer(const std::string& name) const {
     return autograd::as_variable_ref(attributes.find(name)->slot()->toTensor());
   }
+  IValue get_attribute(const std::string& name) const {
+    return *attributes.find(name)->slot();
+  }
 
   // each module owns its method. The reference returned here
   // is guarenteed to stay valid until this module has been destroyed
