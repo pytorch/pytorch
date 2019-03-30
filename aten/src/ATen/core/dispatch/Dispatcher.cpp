@@ -103,9 +103,9 @@ void Dispatcher::deregisterSchema(const OperatorHandle& op) {
   }
 }
 
-void Dispatcher::registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator_func) {
+void Dispatcher::registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func) {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  op.operatorDefIterator_->dispatchTable.registerKernel(std::move(dispatch_key), DispatchTableEntry{kernel_func, cache_creator_func});
+  op.operatorDefIterator_->dispatchTable.registerKernel(std::move(dispatch_key), DispatchTableEntry{kernel_func, std::move(cache_creator_func)});
 }
 
 void Dispatcher::deregisterKernel(const OperatorHandle& op, TensorTypeId dispatch_key) {

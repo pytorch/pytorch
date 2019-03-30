@@ -22,9 +22,9 @@ namespace detail {
   // You shouldn't call this directly; instead, use the RegisterOperators class.
   class OperatorRegistrar final {
   public:
-    explicit OperatorRegistrar(FunctionSchema&& schema, TensorTypeId dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction* cache_creator)
+    explicit OperatorRegistrar(FunctionSchema&& schema, TensorTypeId dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction&& cache_creator)
     : op_(Dispatcher::singleton().registerSchema(std::move(schema))), dispatch_key_(std::move(dispatch_key)), owns_registration_(true) {
-      Dispatcher::singleton().registerKernel(op_, dispatch_key_, kernel, cache_creator);
+      Dispatcher::singleton().registerKernel(op_, dispatch_key_, kernel, std::move(cache_creator));
     }
 
     OperatorRegistrar(OperatorRegistrar&& rhs) noexcept
@@ -55,7 +55,7 @@ namespace detail {
   struct KernelRegistrationConfig final {
     TensorTypeId dispatch_key;
     KernelFunction* kernel_func = nullptr;
-    KernelCacheCreatorFunction* cache_creator_func = nullptr;
+    KernelCacheCreatorFunction cache_creator_func = nullptr;
   };
 
   // is_registration_config_parameter is a concept that returns true_type iff its argument is
