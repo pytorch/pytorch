@@ -237,7 +237,7 @@ class _BaseDataLoaderIter(object):
         # Probably the best way to do this is by moving the sample pushing
         # to a separate thread and then just sharing the data queue
         # but signalling the end is tricky without a non-blocking API
-        raise NotImplementedError("_DataLoaderIter cannot be pickled")
+        raise NotImplementedError("{} cannot be pickled", self.__class__.__name__)
 
 
 class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
@@ -591,9 +591,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             for worker_id, w in enumerate(self.workers):
                 if self.worker_status[worker_id] and not w.is_alive():
                     failed_workers.append(w)
-                    _utils.signal_handling._remove_worker_pid(id(self), w.pid)
-                    self.index_queues[worker_id].close()
-                    self.worker_status[worker_id] = False
+                    self.shutdown_worker(worker_id)
             if len(failed_workers) > 0:
                 pids_str = ', '.join(str(w.pid) for w in failed_workers)
                 raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str))
@@ -669,23 +667,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             if self.mode == _DataLoaderStrategy.Iterable:
                 # Check for IterableDatasetStopIteration
                 if isinstance(data, _utils.worker.IterableDatasetStopIteration):
-                    worker_id = data.worker_id
-                    assert self.worker_status[worker_id]
-
-                    # Signal termination to that specific worker that
-                    # exhasuted its IterableDataset.
-                    w = self.workers[worker_id]
-                    _utils.signal_handling._remove_worker_pid(id(self), w.pid)
-                    q = self.index_queues[worker_id]
-                    q.put(None)
-                    q.close()
-
-                    # Note that we don't actually join the worker here
-                    # because joining may be slow. Joinning is deferred to
-                    # shutdown_workers, which it is called when all workers
-                    # finish their IterableDataset copies or when this iterator
-                    # is garbage collected.
-                    self.worker_status[worker_id] = False
+                    self.shutdown_worker(data.worker_id)
+                    self.try_put_index()
                     continue
 
             if idx != self.rcvd_idx:
@@ -727,7 +710,28 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 raise data.exc_type(data.exc_msg)
         return data
 
+    def shutdown_worker(self, worker_id):
+        # Mark a worker as dead, e.g., due to exhausting an `IterableDataset`.
+        # This should be used only when this `_DataLoaderIter` is still running.
+
+        assert not self.shutdown and self.worker_status[worker_id]
+
+        # Signal termination to that specific worker.
+        w = self.workers[worker_id]
+        _utils.signal_handling._remove_worker_pid(id(self), w.pid)
+        q = self.index_queues[worker_id]
+        q.put(None)
+        q.close()
+
+        # Note that we don't actually join the worker here
+        # because joining may be slow. Joinning is deferred to
+        # shutdown_workers, which it is called when all workers
+        # finish their IterableDataset copies or when this iterator
+        # is garbage collected.
+        self.worker_status[worker_id] = False
+
     def shutdown_workers(self):
+        # Called when shutting down this `_DataLoaderIter`.
         # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on
         # the logic of this function.
         python_exit_status = _utils.python_exit_status
