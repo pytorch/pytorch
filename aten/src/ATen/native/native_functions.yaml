@@ -3818,26 +3818,12 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: btrifact(Tensor self, *, bool pivot=True, Tensor(a!) A_LU, Tensor(b!) pivots) -> (Tensor(a!), Tensor(b!))
-  matches_jit_signature: True
-
-- func: btrifact(Tensor self, *, bool pivot=True) -> (Tensor, Tensor)
-  matches_jit_signature: True
-  variants: method, function
-
-- func: btrifact_with_info(Tensor self, *, bool pivot=True, Tensor(a!) A_LU, Tensor(b!) pivots, Tensor(c!) info) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  matches_jit_signature: True
-
-- func: btrifact_with_info(Tensor self, *, bool pivot=True) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
-  variants: method, function
-
-- func: _btrifact_helper(Tensor self, bool pivot) -> (Tensor, Tensor, Tensor)
+- func: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor, Tensor, Tensor)
   matches_jit_signature: True
   variants: function
   dispatch:
-    CPU: _btrifact_helper_cpu
-    CUDA: _btrifact_helper_cuda
+    CPU: _lu_with_info_cpu
+    CUDA: _lu_with_info_cuda
 
 - func: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True

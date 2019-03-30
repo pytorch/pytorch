@@ -1,6 +1,5 @@
 from .cells import *
 from .factory import *
-from .test import *
 
 # (output, next_state) = cell(input, state)
 seqLength = 100
