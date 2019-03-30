@@ -18,10 +18,8 @@ namespace {
 
 
 template <
-  typename policy_t,
-  typename scalar_t,
-  typename equal_t,
-  typename not_equal_t
+  typename policy_t, typename scalar_t,
+  typename equal_t, typename not_equal_t
 >
 std::tuple<Tensor, Tensor, int64_t> compute_unique(
   const policy_t &policy,
