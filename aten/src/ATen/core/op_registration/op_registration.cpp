@@ -1,6 +1,8 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/function_schema_parser.h>
 
+#ifndef C10_MOBILE
+
 namespace c10 {
 
 RegisterOperators::RegisterOperators() = default;
@@ -76,3 +78,5 @@ void RegisterOperators::registerOp_(FunctionSchema&& schema, detail::KernelRegis
 }
 
 }
+
+#endif
