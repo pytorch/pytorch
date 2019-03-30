@@ -172,8 +172,10 @@ public:
 
       const auto npy_type = PyArray_TYPE(array);
       const TypeMeta &meta = NumpyTypeToCaffe(npy_type);
+
       // TODO: if necessary, use dispatcher.
-      if (meta.Match<float>() && !ZeroDim(original_array)) {
+      if ((in_place && blob->IsType<itensor>())
+          || (meta.Match<float>() && !ZeroDim(original_array))) {
         FeedTensor(option, original_array, blob->GetMutable<itensor>());
       } else {
         DeviceOption cpu_option(option);
@@ -181,9 +183,9 @@ public:
         TensorFeeder<CPUContext> cpu_tensor_feeder;
         if (in_place) {
           cpu_tensor_feeder.FeedTensor(
-              option,
+              cpu_option,
               original_array,
-              BlobGetMutableTensor(blob, OptionToDevice(option).type()),
+              BlobGetMutableTensor(blob, OptionToDevice(cpu_option).type()),
               true);
         } else {
           blob->Reset<Tensor>(new Tensor(
