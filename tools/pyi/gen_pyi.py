@@ -76,6 +76,7 @@ blacklist = [
     'tensordot',
     'norm',
     'split',
+    'unique',
     # These are handled specially by python_arg_parser.cpp
     'add',
     'add_',
