@@ -332,8 +332,7 @@ if(BUILD_TEST)
   # need to install it.
   set(BUILD_GTEST ON CACHE BOOL "Build gtest" FORCE)
   set(INSTALL_GTEST OFF CACHE BOOL "Install gtest." FORCE)
-  # We currently don't need gmock right now.
-  set(BUILD_GMOCK OFF CACHE BOOL "Build gmock." FORCE)
+  set(BUILD_GMOCK ON CACHE BOOL "Build gmock." FORCE)
   # For Windows, we will check the runtime used is correctly passed in.
   if (NOT CAFFE2_USE_MSVC_STATIC_RUNTIME)
       set(gtest_force_shared_crt ON CACHE BOOL "force shared crt on gtest" FORCE)
