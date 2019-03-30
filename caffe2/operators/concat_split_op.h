@@ -177,12 +177,11 @@ bool SplitOp<Context>::RunOnDevice() {
   }
   size_t input_offset = 0;
   for (int i = 0; i < OutputSize(); ++i) {
-    auto* output = Output(i);
     auto axis_dim = add_axis_ ? 1 : axis_data[i];
     if (!add_axis_) {
       output_dims[canonical_axis] = axis_data[i];
     }
-    output->Resize(output_dims);
+    auto* output = Output(i, output_dims, at::dtype(input.dtype()));
     math::CopyMatrix<Context>(
         input.itemsize(),
         before,
@@ -223,12 +222,11 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
   int after = input.size_from_dim(canonical_axis + 1);
   size_t input_offset = 0;
   for (int i = 0; i < OutputSize(); ++i) {
-    auto* output = Output(i);
     const auto* axis_offset = axis_data + length_length / OutputSize() * i;
     auto axis_dim = std::accumulate(
         axis_offset, axis_offset + length_length / OutputSize(), 0);
     output_dims[canonical_axis] = axis_dim;
-    output->Resize(output_dims);
+    auto* output = Output(i, output_dims, at::dtype(input.dtype()));
     math::CopyMatrix<Context>(
         input.itemsize(),
         before,
@@ -246,8 +244,6 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
 
 template <class Context>
 bool ConcatOp<Context>::RunOnDevice() {
-  auto* output = Output(0);
-
   // We can override default options(Context::GetDeviceType())
   // by explictly passing in device type we want
   Tensor* split = Output(
@@ -314,7 +310,7 @@ bool ConcatOp<Context>::RunOnDevice() {
   } else {
     output_dims[canonical_axis] = output_channels;
   }
-  output->Resize(output_dims);
+  auto* output = Output(0, output_dims, at::dtype(input_zero.dtype()));
   size_t output_offset = 0;
   for (int i = 0; i < InputSize(); ++i) {
     auto& input = Input(i);

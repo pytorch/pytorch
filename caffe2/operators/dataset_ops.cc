@@ -319,7 +319,11 @@ class PackRecordsOp : public Operator<CPUContext> {
     Output(0)->Resize(walker.size());
 
     // Output(0)->raw_mutable_data(TypeMeta::Make<SharedTensorVectorPtr>()));
-    auto* dst = Output(0)->template mutable_data<SharedTensorVectorPtr>();
+    auto* dst = Output(
+                    0,
+                    {static_cast<int64_t>(walker.size())},
+                    at::dtype<SharedTensorVectorPtr>())
+                    ->template mutable_data<SharedTensorVectorPtr>();
 
     for (int batchId = 0; batchId < walker.size(); ++batchId) {
       dst[batchId] = std::make_shared<std::vector<TensorCPU>>();
@@ -395,8 +399,8 @@ class UnPackRecordsOp : public Operator<CPUContext> {
     // Resize to the final output size
     std::vector<void*> destinations(numTensors);
     for (int i = 0; i < numTensors; ++i) {
-      Output(i)->Resize(outputDims[i]);
-      destinations[i] = Output(i)->raw_mutable_data(*metas[i]);
+      auto* output = Output(i, {outputDims[i]}, at::dtype(*metas[i]));
+      destinations[i] = output->raw_mutable_data(*metas[i]);
     }
 
     for (int i = 0; i < numRows; ++i) {
@@ -517,10 +521,9 @@ class ReadNextBatchOp : public Operator<CPUContext> {
       auto innerSize = in.size_from_dim(1);
       outDim = in.sizes().vec();
       outDim[0] = size;
-      auto* out = Output(i);
-      out->Resize(outDim);
       void* src =
           (char*)in.raw_data() + offset * innerSize * in.dtype().itemsize();
+      auto* out = Output(i, {outDim}, at::dtype(in.dtype()));
       void* dst = out->raw_mutable_data(in.dtype()); // create the tensor
       if (out->numel() == 0) {
         continue;
@@ -725,8 +728,7 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
         idx++;
       }
       idx = idxbegin; // reSet
-      auto* out = Output(i);
-      out->Resize(outDim);
+      auto* out = Output(i, {outDim}, at::dtype(in.dtype()));
       if (out->numel() == 0) {
         continue;
       }
@@ -773,13 +775,13 @@ class AppendOp final : public Operator<Context> {
   bool RunOnDevice() override {
     auto& a = Input(0);
     auto& b = Input(1);
-    auto* c = Output(0);
+    auto* c = Output(0, a.sizes(), at::dtype(a.dtype()));
     CAFFE_ENFORCE(b.dim() >= 1);
     if (a.numel() == 0 && a.size(0) == 0) {
       c->CopyFrom(b);
       return true;
     }
-    CAFFE_ENFORCE(&a == c, "First argument must be in-place.");
+    CAFFE_ENFORCE(IsInputOutputAlias(0, 0), "First argument must be in-place.");
     CAFFE_ENFORCE(c->dim() == b.dim());
     CAFFE_ENFORCE(b.dim() == c->dim());
     CAFFE_ENFORCE(a.dtype() == b.dtype());
@@ -813,13 +815,14 @@ class AtomicAppendOp final : public Operator<Context> {
     for (int i = 0; i < numFields; ++i) {
       auto& a = Input(1 + i);
       auto& b = Input(1 + i + numFields);
-      auto* c = Output(i);
+      auto* c = Output(i, a.sizes(), at::dtype(a.dtype()));
       CAFFE_ENFORCE(b.dim() >= 1);
       if (a.numel() == 0) {
         continue;
       }
       CAFFE_ENFORCE(
-          (void*)&a == (void*)c, "Appended-to arguments must be in-place.");
+          IsInputOutputAlias(1 + i, i),
+          "Appended-to arguments must be in-place.");
       CAFFE_ENFORCE(c->dim() == b.dim());
       CAFFE_ENFORCE(b.dim() == c->dim());
       CAFFE_ENFORCE(a.dtype() == b.dtype());
@@ -832,7 +835,8 @@ class AtomicAppendOp final : public Operator<Context> {
     for (int i = 0; i < numFields; ++i) {
       auto& a = Input(1 + i);
       auto& b = Input(1 + i + numFields);
-      auto* c = Output(i);
+      // Can we create Tensor with numel() == 0?
+      auto* c = Output(i, a.sizes(), at::dtype(a.dtype()));
       if (a.numel() == 0 && a.size(0) == 0) {
         c->CopyFrom(b);
         continue;
@@ -892,7 +896,6 @@ class ConcatTensorVectorOp final : public Operator<Context> {
     const TensorVectorPtr& tensorVector =
         OperatorBase::Input<TensorVectorPtr>(TENSOR_VECTOR);
 
-    auto* tensor = Output(TENSOR);
     CAFFE_ENFORCE(!tensorVector->empty());
 
     vector<int64_t> outputDims(tensorVector->at(0).sizes().vec());
@@ -906,7 +909,8 @@ class ConcatTensorVectorOp final : public Operator<Context> {
       outputDims[0] += tensorVector->at(i).sizes()[0];
     }
 
-    tensor->Resize(outputDims);
+    auto* tensor =
+        Output(TENSOR, outputDims, at::dtype(tensorVector->at(0).dtype()));
     int64_t offset = 0;
     auto* dst = (char*)tensor->raw_mutable_data(tensorVector->at(0).dtype());
 
@@ -1021,6 +1025,8 @@ class TrimDatasetOp : public Operator<CPUContext> {
     // trim each column to the offset
     for (int col = 0; col < walker.fields().size(); ++col) {
       auto newOuterSize = walker.fields().at(col).offset();
+      // TODO: Remove call to Output(col) since it
+      // returns partially initialized Tensor
       Output(col)->ShrinkTo(newOuterSize);
     }
     return true;

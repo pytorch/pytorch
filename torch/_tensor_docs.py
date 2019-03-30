@@ -486,20 +486,6 @@ bmm(batch2) -> Tensor
 See :func:`torch.bmm`
 """)
 
-add_docstr_all('btrifact',
-               r"""
-btrifact(pivot=True) -> (Tensor, Tensor)
-
-See :func:`torch.btrifact`
-""")
-
-add_docstr_all('btrifact_with_info',
-               r"""
-btrifact_with_info(pivot=True) -> (Tensor, Tensor, Tensor)
-
-See :func:`torch.btrifact_with_info`
-""")
-
 add_docstr_all('btrisolve',
                r"""
 btrisolve(LU_data, LU_pivots) -> Tensor
@@ -1017,13 +1003,6 @@ add_docstr_all('ger',
 ger(vec2) -> Tensor
 
 See :func:`torch.ger`
-""")
-
-add_docstr_all('solve',
-               r"""
-solve(A) -> Tensor, Tensor
-
-See :func:`torch.solve`
 """)
 
 add_docstr_all('indices',
@@ -2226,6 +2205,13 @@ Example::
     >>> torch.empty(3, 4, 5).size()
     torch.Size([3, 4, 5])
 
+""")
+
+add_docstr_all('solve',
+               r"""
+solve(A) -> Tensor, Tensor
+
+See :func:`torch.solve`
 """)
 
 add_docstr_all('sort',

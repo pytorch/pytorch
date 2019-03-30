@@ -8,11 +8,10 @@ template <>
 bool BooleanUnmaskOp<CPUContext>::RunOnDevice() {
   int maskSize = Input(0).numel();
   int numMasks = InputSize() / 2;
-  auto& valueMeta = Input(1).dtype();
+  auto& valueDtype = Input(1).dtype();
 
-  auto* valuesOut = Output(0);
-  valuesOut->Resize(maskSize);
-  auto* valuesOutPtr = (char*)valuesOut->raw_mutable_data(valueMeta);
+  auto* valuesOut = Output(0, maskSize, at::dtype(valueDtype));
+  auto* valuesOutPtr = (char*)valuesOut->raw_mutable_data(valueDtype);
 
   std::vector<int> nextValueIndices(numMasks, 0);
   for (int maskOffset = 0; maskOffset < maskSize; ++maskOffset) {
@@ -30,9 +29,9 @@ bool BooleanUnmaskOp<CPUContext>::RunOnDevice() {
       if (maskPtr[maskOffset]) {
         auto& valueIndex = nextValueIndices[maskIndex];
         CAFFE_ENFORCE_LT(valueIndex, values.numel());
-        auto* src = valuesPtr + (valueIndex++) * valueMeta.itemsize();
-        auto* dst = valuesOutPtr + maskOffset * valueMeta.itemsize();
-        std::copy(src, src + valueMeta.itemsize(), dst);
+        auto* src = valuesPtr + (valueIndex++) * valueDtype.itemsize();
+        auto* dst = valuesOutPtr + maskOffset * valueDtype.itemsize();
+        std::copy(src, src + valueDtype.itemsize(), dst);
         maskFound = true;
         break;
       }
