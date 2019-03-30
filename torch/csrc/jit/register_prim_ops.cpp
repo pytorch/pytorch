@@ -1552,6 +1552,14 @@ int dictGetDefault(Stack& stack) {
   return 0;
 }
 
+template<typename T>
+int hashValue(Stack& stack) {
+  auto value = pop(stack);
+  auto hash = std::hash<T>()(value.to<T>());
+  push(stack, int64_t(hash));
+  return 0;
+}
+
 RegisterOperators reg2({
 
 #define DEFINE_STRING_OP(op_name, string_op, result)                \
@@ -1914,6 +1922,11 @@ RegisterOperators reg2({
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("float"),
 #undef CREATE_DICT_OPS
+
+
+    Operator("aten::hash(str t) -> int", hashValue<std::string>),
+    Operator("aten::hash(int t) -> int", hashValue<int>),
+    Operator("aten::hash(float t) -> int", hashValue<double>),
 });
 
 // reference: _output_size in torch/nn/functional.py
