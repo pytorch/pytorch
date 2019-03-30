@@ -94,13 +94,16 @@ class ViterbiPathOp : public Operator<CPUContext> {
     auto block_size = predictions.numel() / predictions.size(0);
     auto block_bytesize =
         predictions.size_from_dim(1) * predictions.dtype().itemsize();
-    Tensor backpointers(CPU);
-    backpointers.ResizeLike(predictions);
+    Tensor backpointers =
+        caffe2::empty(predictions.sizes(), at::dtype<int32_t>().device(CPU));
 
-    Tensor trellis(std::vector<int64_t>{block_size}, CPU);
-    Tensor dpMat(CPU);
-    dpMat.ResizeLike(transitions);
-    Tensor dpMax(std::vector<int64_t>{block_size}, CPU);
+    Tensor trellis = caffe2::empty(
+        std::vector<int64_t>{block_size},
+        at::dtype(predictions.dtype()).device(CPU));
+    Tensor dpMat =
+        caffe2::empty(transitions.sizes(), at::dtype<float>().device(CPU));
+    Tensor dpMax = caffe2::empty(
+        std::vector<int64_t>{block_size}, at::dtype<float>().device(CPU));
     GatherRow(predictions, 0, block_size, block_bytesize, &trellis);
     for (auto i = 1; i < seqLen; i++) {
       AddColToMat(transitions, trellis, &dpMat);
@@ -120,8 +123,10 @@ class ViterbiPathOp : public Operator<CPUContext> {
           &context_);
     }
 
-    Tensor tMax(std::vector<int64_t>{1}, CPU);
-    Tensor tArgMax(std::vector<int64_t>{1}, CPU);
+    Tensor tMax =
+        caffe2::empty(std::vector<int64_t>{1}, at::dtype<float>().device(CPU));
+    Tensor tArgMax = caffe2::empty(
+        std::vector<int64_t>{1}, at::dtype<int32_t>().device(CPU));
     ColwiseMaxAndArg(
         trellis.template data<float>(),
         1,
@@ -131,7 +136,9 @@ class ViterbiPathOp : public Operator<CPUContext> {
 
     std::vector<int32_t> viterbiVec;
     viterbiVec.push_back(tArgMax.template data<int32_t>()[0]);
-    Tensor bpEntry(std::vector<int64_t>{block_size}, CPU);
+    Tensor bpEntry = caffe2::empty(
+        std::vector<int64_t>{block_size},
+        at::dtype(backpointers.dtype()).device(CPU));
     block_bytesize =
         backpointers.size_from_dim(1) * backpointers.dtype().itemsize();
     for (auto i = seqLen - 1; i > 0; i--) {
@@ -152,14 +159,14 @@ class SwapBestPathOp : public Operator<CPUContext> {
       : Operator(std::forward<Args>(args)...) {}
   bool RunOnDevice() override {
     auto& data = Input(0);
-    auto& newBestIdicies = Input(1);
+    auto& newBestIndicies = Input(1);
 
     CAFFE_ENFORCE(
-        data.dim() == 2 && newBestIdicies.dim() == 1,
+        data.dim() == 2 && newBestIndicies.dim() == 1,
         "predictions should be a 2D matrix and  bestPath should be 1D vector");
 
     CAFFE_ENFORCE(
-        data.size(0) == newBestIdicies.size(0),
+        data.size(0) == newBestIndicies.size(0),
         "predictions and bestPath dimensions not matching");
 
     auto* updatedData = Output(0, data.sizes(), at::dtype<float>());
@@ -167,10 +174,10 @@ class SwapBestPathOp : public Operator<CPUContext> {
     context_.CopyItemsSameDevice(
         data.dtype(), data.numel(), data.template data<float>(), outData);
 
-    Tensor bestScores(CPU);
-    bestScores.ResizeLike(newBestIdicies);
-    Tensor oldBestIndices(CPU);
-    oldBestIndices.ResizeLike(newBestIdicies);
+    Tensor bestScores =
+        caffe2::empty(newBestIndicies.sizes(), at::dtype<float>().device(CPU));
+    Tensor oldBestIndices = caffe2::empty(
+        newBestIndicies.sizes(), at::dtype<int32_t>().device(CPU));
 
     ColwiseMaxAndArg(
         data.template data<float>(),
@@ -182,7 +189,7 @@ class SwapBestPathOp : public Operator<CPUContext> {
     auto block_size = data.numel() / data.size(0);
 
     const int32_t* oldBestIdx = oldBestIndices.template data<int32_t>();
-    const int32_t* newIdx = newBestIdicies.template data<int32_t>();
+    const int32_t* newIdx = newBestIndicies.template data<int32_t>();
 
     for (auto i = 0; i < data.dim32(0); i++) {
       std::swap(
