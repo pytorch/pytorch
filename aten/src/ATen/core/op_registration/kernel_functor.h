@@ -138,6 +138,18 @@ namespace detail {
       return guts::make_unique<FunctionSchema>(inferFunctionSchema<KernelFunctor>("", ""));
     }
   };
+
+  template<class KernelFunctor, class... ConstructorParameters>
+  // enable_if: only enable it if KernelFunctor is actually a functor and inherits from c10::OperatorKernel
+  inline constexpr guts::enable_if_t<guts::is_functor<KernelFunctor>::value && std::is_base_of<OperatorKernel, KernelFunctor>::value,
+  detail::KernelRegistrationConfigParameter<detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>, detail::FunctionSchemaInferer<KernelFunctor>>>
+  kernelFunctor(ConstructorParameters&&... constructorParameters) {
+    return {
+      &detail::wrap_kernel_functor<KernelFunctor>::call,
+      detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
+      detail::FunctionSchemaInferer<KernelFunctor>()
+    };
+  }
 }
 
 /**
@@ -181,11 +193,7 @@ template<class KernelFunctor, class... ConstructorParameters>
 inline constexpr guts::enable_if_t<guts::is_functor<KernelFunctor>::value && std::is_base_of<OperatorKernel, KernelFunctor>::value,
 detail::KernelRegistrationConfigParameter<detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>, detail::FunctionSchemaInferer<KernelFunctor>>>
 kernel(ConstructorParameters&&... constructorParameters) {
-  return {
-    &detail::wrap_kernel_functor<KernelFunctor>::call,
-    detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
-    detail::FunctionSchemaInferer<KernelFunctor>()
-  };
+  return detail::kernelFunctor<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...);
 }
 
 }

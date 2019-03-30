@@ -49,6 +49,64 @@ template <template <class...> class Template, class... Args>
 struct is_instantiation_of<Template, Template<Args...>> : std::true_type {};
 template<template<class...> class Template, class T> using is_instantiation_of_t = typename is_instantiation_of<Template, T>::type;
 
+namespace detail {
+/**
+ * strip_class: helper to remove the class type from pointers to `operator()`.
+ */
+
+template <typename T>
+struct strip_class {};
+template <typename Class, typename Result, typename... Args>
+struct strip_class<Result (Class::*)(Args...)> {
+  using type = Result(Args...);
+};
+template <typename Class, typename Result, typename... Args>
+struct strip_class<Result (Class::*)(Args...) const> {
+  using type = Result(Args...);
+};
+template <typename T>
+using strip_class_t = typename strip_class<T>::type;
+} // namespace detail
+
+/**
+ * Evaluates to true_type, iff the given class is a Functor
+ * (i.e. has a call operator with some set of arguments)
+ */
+
+template<class Functor, class Enable = void>
+struct is_functor : std::false_type {};
+template<class Functor>
+struct is_functor<Functor, guts::enable_if_t<is_function_type<detail::strip_class_t<decltype(&Functor::operator())>>::value>> : std::true_type {};
+
+
+/**
+ * lambda_is_stateless<T> is true iff the lambda type T is stateless
+ * (i.e. does not have a closure).
+ * Example:
+ *  auto stateless_lambda = [] (int a) {return a;};
+ *  lambda_is_stateless<decltype(stateless_lambda)> // true
+ *  auto stateful_lambda = [&] (int a) {return a;};
+ *  lambda_is_stateless<decltype(stateful_lambda)> // false
+ */
+namespace detail {
+template<class LambdaType, class FuncType> struct is_stateless_lambda__ final {
+    static_assert(!std::is_same<LambdaType, LambdaType>::value, "Base case shouldn't be hit");
+};
+// implementation idea: According to the C++ standard, stateless lambdas are convertible to function pointers
+template<class LambdaType, class C, class Result, class... Args>
+struct is_stateless_lambda__<LambdaType, Result (C::*)(Args...) const> : std::is_convertible<LambdaType, Result(*)(Args...)> {};
+template<class LambdaType, class C, class Result, class... Args>
+struct is_stateless_lambda__<LambdaType, Result (C::*)(Args...)> : std::is_convertible<LambdaType, Result(*)(Args...)> {};
+
+// case where LambdaType is not even a functor
+template<class LambdaType, class Enable = void> struct is_stateless_lambda_ final : std::false_type {};
+// case where LambdaType is a functor
+template<class LambdaType> struct is_stateless_lambda_<LambdaType, guts::enable_if_t<is_functor<LambdaType>::value>>
+: is_stateless_lambda__<LambdaType, decltype(&LambdaType::operator())> {};
+}
+template<class T>
+using is_stateless_lambda = detail::is_stateless_lambda_<guts::decay_t<T>>;
+
 
 
 /**
