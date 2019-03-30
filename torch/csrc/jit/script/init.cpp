@@ -761,6 +761,7 @@ void initJitScriptBindings(PyObject* module) {
       .def("_set_parameter", &Module::set_parameter)
       .def("_get_parameter", &Module::get_parameter)
       .def("_get_buffer", &Module::get_buffer)
+      .def("_get_attribute", &Module::get_attribute)
       .def("_get_module", &Module::get_module)
       .def(
           "_get_modules",
@@ -799,6 +800,11 @@ void initJitScriptBindings(PyObject* module) {
                   buffer.key(), buffer->type(), toPyObject(std::move(v)));
             }
             return result;
+          })
+      .def(
+          "_has_attribute",
+          [](Module& self, const std::string& name) -> bool {
+            return self.find_attribute(name);
           })
       .def(
           "_has_parameter",
