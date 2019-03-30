@@ -18,28 +18,24 @@ namespace {
 
 
 template <
+  typename policy_t,
   typename scalar_t,
-  typename less_t,
   typename equal_t,
   typename not_equal_t
 >
 std::tuple<Tensor, Tensor, int64_t> compute_unique(
+  const policy_t &policy,
   scalar_t *data,
   int64_t num_inp,
-  Tensor &sorted_indices,
+  int64_t *sorted_indices_ptr,
   const bool return_inverse,
   const bool return_counts,
   TensorOptions options,
-  less_t less,
   equal_t equal,
   not_equal_t not_equal
 ) {
 
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-  auto policy = thrust::cuda::par(allocator).on(stream);
-
-  //sort
+  // inverse indices
   Tensor inverse_indices;
   if (!return_inverse) {
     inverse_indices = at::empty({0}, options);
@@ -54,19 +50,19 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
     thrust::scatter(policy, inv_loc_ptr, inv_loc_ptr + num_inp, sorted_indices_ptr, inverse_indices_ptr);
   }
 
-  // unique
+  // unique and count
   Tensor counts = at::empty({0}, options);
   int64_t num_out;
   if (!return_counts) {
     num_out = thrust::unique(policy, data, data + num_inp, equal) - data;
   } else {
-    Tensor sorted_indices = at::arange(0, num_inp + 1, options);
-    int64_t* sorted_indices_ptr = sorted_indices.data<int64_t>();
-    num_out = thrust::unique_by_key(policy, data, data + num_inp, sorted_indices_ptr, equal).first - data;
-    sorted_indices[num_out] = num_inp;
+    Tensor range = at::arange(0, num_inp + 1, options);
+    int64_t *range_ptr = range.data<int64_t>();
+    num_out = thrust::unique_by_key(policy, data, data + num_inp, range_ptr, equal).first - data;
+    range[num_out] = num_inp;
     counts.resize_(num_out);
     int64_t* counts_ptr = counts.data<int64_t>();
-    thrust::adjacent_difference(policy, sorted_indices_ptr + 1, sorted_indices_ptr + num_out + 1, counts_ptr);
+    thrust::adjacent_difference(policy, range_ptr + 1, range_ptr + num_out + 1, counts_ptr);
   }
 
   THCudaCheck(cudaGetLastError());
@@ -80,33 +76,32 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   const bool return_counts
 ) {
 
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  auto policy = thrust::cuda::par(allocator).on(stream);
+
   auto options = self.options().dtype(kLong);
   Tensor output = self.clone().reshape(-1);
   int64_t num_inp = output.numel();
   scalar_t* output_data = output.data<scalar_t>();
 
-  Tensor sorted_indices;
+  int64_t* sorted_indices_ptr = nullptr;
   if (!return_inverse) {
-    sorted_indices = at::empty({0}, options);
-    thrust::sort(policy, data, data + num_inp, less);
+    thrust::sort(policy, output_data, output_data + num_inp);
   } else {
-    sorted_indices = at::arange(0, num_inp, options);
-    int64_t* sorted_indices_ptr = sorted_indices.data<int64_t>();
-    thrust::stable_sort_by_key(policy, data, data + num_inp, sorted_indices_ptr);
+    Tensor sorted_indices = at::arange(0, num_inp, options);
+    sorted_indices_ptr = sorted_indices.data<int64_t>();
+    thrust::sort_by_key(policy, output_data, output_data + num_inp, sorted_indices_ptr);
   }
 
   Tensor inverse_indices, counts;
   int64_t num_out;
-  std::tie(inverse_indices, counts, num_out) =
-  compute_unique<scalar_t, thrust::less<scalar_t>, thrust::equal_to<scalar_t>,
-                  thrust::not_equal_to<scalar_t>>
-    (
-      output_data, num_inp, sorted_indices, return_inverse, return_counts,
-      options,
-      thrust::less<scalar_t>(),
-      thrust::equal_to<scalar_t>(),
-      thrust::not_equal_to<scalar_t>()
-    );
+  std::tie(inverse_indices, counts, num_out) = compute_unique(
+    policy, output_data, num_inp, sorted_indices_ptr,
+    return_inverse, return_counts, options,
+    thrust::equal_to<scalar_t>(),
+    thrust::not_equal_to<scalar_t>()
+  );
   output.resize_(num_out);
 
   if (return_inverse) {
@@ -115,62 +110,6 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
 
   return std::tuple<Tensor, Tensor, Tensor>(output, inverse_indices, counts);
 }
-
-template <typename scalar_t>
-class UniqueDimLess {
-  scalar_t *data;
-  int64_t n;
-public:
-  UniqueDimLess(scalar_t *data, int64_t n): data(data), n(n) {}
-  __device__ bool operator()(int64_t a, int64_t b) {
-    for (int64_t i = 0; i < n; ++i) {
-      scalar_t lhs = data[i + a * n];
-      scalar_t rhs = data[i + b * n];
-      if (lhs < rhs) {
-        return true;
-      } else if (lhs > rhs) {
-        return false;
-      }
-    }
-    return false;
-  }
-};
-
-template <typename scalar_t>
-class UniqueDimEqual {
-  scalar_t *data;
-  int64_t n;
-public:
-  UniqueDimEqual(scalar_t *data, int64_t n): data(data), n(n) {}
-  __device__ bool operator()(int64_t a, int64_t b) {
-    for (int64_t i = 0; i < n; ++i) {
-      scalar_t lhs = data[i + a * n];
-      scalar_t rhs = data[i + b * n];
-      if (lhs != rhs) {
-        return false;
-      }
-    }
-    return true;
-  }
-};
-
-template <typename scalar_t>
-class UniqueDimNotEqual {
-  scalar_t *data;
-  int64_t n;
-public:
-  UniqueDimNotEqual(scalar_t *data, int64_t n): data(data), n(n) {}
-  __device__ int64_t operator()(int64_t a, int64_t b) {
-    for (int64_t i = 0; i < n; ++i) {
-      scalar_t lhs = data[i + a * n];
-      scalar_t rhs = data[i + b * n];
-      if (lhs != rhs) {
-        return 1;
-      }
-    }
-    return 0;
-  }
-};
 
 template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
@@ -189,26 +128,58 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
     * to the result on the actual data.
     */
 
-  int64_t num_inp = self.size(dim);
-  Tensor input_flat = self.transpose(dim, 0).contiguous().view({num_inp, -1});
-  int64_t numel = input_flat.size(1);
-  scalar_t *input_flat_ptr = input_flat.data<scalar_t>();
-  auto less = UniqueDimLess<scalar_t>(input_flat_ptr, numel);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  auto policy = thrust::cuda::par(allocator).on(stream);
 
-  Tensor indices = at::arange(0, num_inp, self.options().dtype(kLong));
+  int64_t num_inp = self.size(dim);
+  auto options = self.options().dtype(kLong);
+  Tensor input_flat = self.transpose(dim, 0).contiguous().view({num_inp, -1});
+  int64_t n = input_flat.size(1);
+  scalar_t *input_flat_ptr = input_flat.data<scalar_t>();
+
+  Tensor indices = at::arange(0, num_inp, options);
   int64_t *indices_data = indices.data<int64_t>();
-  thrust::sort(policy, indices_data, indices_data + num_inp, less);
+  thrust::sort(policy, indices_data, indices_data + num_inp,
+    [=] __device__ (int64_t a, int64_t b) -> bool {
+      for (int64_t i = 0; i < n; ++i) {
+        scalar_t lhs = input_flat_ptr[i + a * n];
+        scalar_t rhs = input_flat_ptr[i + b * n];
+        if (lhs < rhs) {
+          return true;
+        } else if (lhs > rhs) {
+          return false;
+        }
+      }
+      return false;
+    }
+  );
 
   Tensor inverse_indices, counts;
   int64_t num_out;
-  std::tie(inverse_indices, counts, num_out) =
-  compute_unique<int64_t, UniqueDimLess<scalar_t>, UniqueDimEqual<scalar_t>,
-                  UniqueDimNotEqual<scalar_t>>
-  (
-    indices_data, num_inp, indices, return_inverse, return_counts,
-    self.options().dtype(kLong), less,
-    UniqueDimEqual<scalar_t>(input_flat_ptr, numel),
-    UniqueDimNotEqual<scalar_t>(input_flat_ptr, numel)
+  std::tie(inverse_indices, counts, num_out) = compute_unique(
+    policy, indices_data, num_inp, indices_data,
+    return_inverse, return_counts, options,
+    [=] __device__ (int64_t a, int64_t b) -> bool {
+      for (int64_t i = 0; i < n; ++i) {
+        scalar_t lhs = input_flat_ptr[i + a * n];
+        scalar_t rhs = input_flat_ptr[i + b * n];
+        if (lhs != rhs) {
+          return false;
+        }
+      }
+      return true;
+    },
+    [=] __device__ (int64_t a, int64_t b) -> int64_t {
+      for (int64_t i = 0; i < n; ++i) {
+        scalar_t lhs = input_flat_ptr[i + a * n];
+        scalar_t rhs = input_flat_ptr[i + b * n];
+        if (lhs != rhs) {
+          return 1;
+        }
+      }
+      return 0;
+    }
   );
   indices.resize_(num_out);
 
