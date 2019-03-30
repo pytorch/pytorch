@@ -5437,10 +5437,16 @@ a")
             # type: (int) -> int
             return abs(x)
 
+        def func3(x):
+            return abs(x)
+
         self.checkScript(func1, (-3.14,))
         self.checkScript(func1, (3.14,))
         self.checkScript(func2, (-10,))
         self.checkScript(func2, (10,))
+        self.checkScript(func3, (torch.tensor([-5, -10, -20]),))
+        self.checkScript(func3, (torch.tensor([5, 10, 20]),))
+        self.checkScript(func3, (torch.tensor([-5, 10, -20]),))
 
     def test_number_div(self):
         self.checkScript(div_int_future, (), optimize=True)

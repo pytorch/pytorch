@@ -18,6 +18,7 @@
 #include <c10/util/SmallVector.h>
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 #include <iostream>
 #include <limits>
@@ -1753,7 +1754,7 @@ RegisterOperators reg2({
         [](Stack& stack) {
           int64_t x;
           pop(stack, x);
-          push(stack, x < 0 ? -x : x);
+          push(stack, static_cast<int64_t>(std::abs(x)));
           return 0;
         }),
     Operator(
@@ -1761,7 +1762,15 @@ RegisterOperators reg2({
         [](Stack& stack) {
           float x;
           pop(stack, x);
-          push(stack, x < 0 ? -x : x);
+          push(stack, std::abs(x));
+          return 0;
+        }),
+    Operator(
+        "prim::abs(Tensor x) -> Tensor",
+        [](Stack& stack) {
+          at::Tensor x;
+          pop(stack, x);
+          push(stack, x.abs());
           return 0;
         }),
 
