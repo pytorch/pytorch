@@ -130,7 +130,7 @@ ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
 # add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
-    return type().${api_name}(${method_actuals});
+    return dispatch_type().${api_name}(${method_actuals});
 }
 """)
 # add a method declaration in Functions.h
@@ -193,6 +193,8 @@ CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 
 class NYIError(Exception):
     """Indicates we don't support this declaration yet"""
+
+    __slots__ = ['reason']
 
     def __init__(self, reason):
         self.reason = reason
@@ -491,6 +493,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'with_gil': bool,
     'cpu_half': bool,
     'deprecated': bool,
+    'cpu_bool': bool,
     # See Note [field_name versus name]
     'field_name': str,
     'formals_list': List[AtFormal],
@@ -730,14 +733,19 @@ def create_generic(top_env, declarations):
     def find_dispatch_tensor(formals):
         # type: (List[AtFormal]) -> Optional[str]
         # dispatch to self if it's a parameter
+        def is_any_tensor_type(formal):
+            return (formal['dynamic_type'] == 'Tensor' or formal['dynamic_type'] == 'BoolTensor'
+                    or formal['dynamic_type'] == 'IndexTensor')
+
         for formal in formals:
-            if formal['name'] == 'self' and formal['dynamic_type'] == 'Tensor' and not formal.get('is_nullable', False):
+            if formal['name'] == 'self' and is_any_tensor_type(formal) and not formal.get('is_nullable', False):
                 return formal['name']
         # otherwise dispatch to the first Tensor or TensorList
         for formal in formals:
-            if 'TensorList' == formal['dynamic_type'] or formal['dynamic_type'] == 'Tensor' and \
+            if 'TensorList' == formal['dynamic_type'] or is_any_tensor_type(formal) and \
                not formal.get('is_nullable', False):
                 return formal['name']
+
         return None
 
     def format_formal(f):

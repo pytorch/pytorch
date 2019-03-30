@@ -153,6 +153,86 @@ class TorchIntegration(hu.HypothesisTestCase):
         torch.testing.assert_allclose(rois, a)
         torch.testing.assert_allclose(rois_probs, b)
 
+    @given(
+        bsz=st.integers(1, 5),
+        seq_lens=st.integers(1, 6),
+        emb_lens=st.integers(5, 10),
+        hidden_size=st.integers(3, 7),
+        num_layers=st.integers(1, 4),
+        has_biases=st.booleans(),
+        is_bidirectional=st.booleans(),
+        batch_first=st.booleans(),
+    )
+    def test_inference_lstm(
+        self,
+        bsz,
+        seq_lens,
+        emb_lens,
+        hidden_size,
+        num_layers,
+        has_biases,
+        is_bidirectional,
+        batch_first,
+    ):
+        num_directions = 2 if is_bidirectional else 1
+        hx = np.zeros((num_layers * num_directions, bsz, hidden_size), dtype=np.float32)
+
+        if batch_first:
+            inputs = np.random.randn(bsz, seq_lens, emb_lens).astype(np.float32)
+        else:
+            inputs = np.random.randn(seq_lens, bsz, emb_lens).astype(np.float32)
+
+        torch_lstm = torch.nn.LSTM(
+            emb_lens,
+            hidden_size,
+            batch_first=batch_first,
+            bidirectional=is_bidirectional,
+            bias=has_biases,
+            num_layers=num_layers,
+        )
+
+        def inference_lstm_ref():
+            input_names = ["inputs", "hidden_0", "hidden_1"]
+            workspace.FeedBlob("inputs", inputs)
+            workspace.FeedBlob("hidden_0", hx)
+            workspace.FeedBlob("hidden_1", hx)
+            for i, param in enumerate(torch_lstm._flat_weights):
+                input_names.append("param_{}".format(i))
+                workspace.FeedBlob("param_{}".format(i), param.detach().numpy())
+
+            ref_op = core.CreateOperator(
+                "InferenceLSTM",
+                input_names,
+                ["output", "hidden", "cell"],
+                num_layers=num_layers,
+                has_biases=has_biases,
+                batch_first=batch_first,
+                bidirectional=is_bidirectional,
+            )
+            workspace.RunOperatorOnce(ref_op)
+            return (
+                workspace.FetchBlob("output"),
+                workspace.FetchBlob("hidden"),
+                workspace.FetchBlob("cell")
+            )
+
+        output, hidden, cell = inference_lstm_ref()
+        output = torch.tensor(output)
+        hidden = torch.tensor(hidden)
+        cell = torch.tensor(cell)
+        lstm_in = [
+            torch.from_numpy(inputs),
+            torch.from_numpy(hx),
+            torch.from_numpy(hx),
+        ] + [param.detach() for param in torch_lstm._flat_weights]
+
+        a, b, c = torch.ops._caffe2.InferenceLSTM(
+            lstm_in, num_layers, has_biases, batch_first, is_bidirectional
+        )
+        torch.testing.assert_allclose(output, a)
+        torch.testing.assert_allclose(hidden, b)
+        torch.testing.assert_allclose(cell, c)
+
     # Test case is using workspace.has_cuda_support and not workspace.has_gpu_support
     # to exclude it from HIP because tensor interop doesn't work for HIP tensors yet
     @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
@@ -192,3 +272,56 @@ class TorchIntegration(hu.HypothesisTestCase):
                 2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0)
         torch.testing.assert_allclose(rois, a.cpu())
         torch.testing.assert_allclose(rois_probs, b.cpu())
+
+    @given(
+        N=st.integers(min_value=1, max_value=2),
+        C=st.integers(min_value=4, max_value=4),
+        H=st.integers(min_value=10, max_value=10),
+        W=st.integers(min_value=8, max_value=8),
+    )
+    def _test_roi_align(self, N, C, H, W, device):
+        def rand_roi():
+            return np.array([
+                float(int(N * np.random.rand())),
+                0.5 * np.random.rand() * W,
+                0.5 * np.random.rand() * H,
+                (0.5 + 0.5 * np.random.rand()) * W,
+                (0.5 + 0.5 * np.random.rand()) * H,
+            ]).astype(np.float32)
+
+        feature = np.random.randn(N, C, H, W).astype(np.float32)
+        rois = np.array([rand_roi() for _ in range(10)])
+
+        def roi_align_ref(_feature, _rois):
+            ref_op = core.CreateOperator(
+                "RoIAlign",
+                ["feature", "rois"],
+                ["roi_feature"],
+                spatial_scale=1.0,
+                pooled_h=3,
+                pooled_w=3,
+                sampling_ratio=0
+            )
+            workspace.FeedBlob("feature", _feature)
+            workspace.FeedBlob("rois", _rois)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("roi_feature")
+
+        roi_feature_ref = roi_align_ref(feature, rois)
+        roi_feature = torch.ops._caffe2.RoIAlign(
+            torch.Tensor(feature).to(device),
+            torch.Tensor(rois).to(device),
+            order="NCHW",
+            spatial_scale=1.0,
+            pooled_h=3,
+            pooled_w=3,
+            sampling_ratio=0
+        )
+        torch.testing.assert_allclose(roi_feature_ref, roi_feature.cpu())
+
+    def test_roi_align_cpu(self):
+        self._test_roi_align(device="cpu")
+
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    def test_roi_align_cuda(self):
+        self._test_roi_align(device="cuda")

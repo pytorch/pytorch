@@ -364,7 +364,7 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef inpu
     }
   }
   if (reduction == Reduction::Mean) {
-    auto target_lengths_t = at::tensor(target_lengths, res.options().device(at::Device(at::Device::Type::CPU)).dtype(kLong)).toType(res.type());
+    auto target_lengths_t = at::tensor(target_lengths, res.options());
     return (res / target_lengths_t).mean();
   } else if (reduction == Reduction::Sum) {
     return res.sum();

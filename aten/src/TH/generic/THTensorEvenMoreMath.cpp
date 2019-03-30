@@ -620,26 +620,6 @@ accreal THTensor_(sumall)(THTensor *tensor)
   return sum;
 }
 
-accreal THTensor_(prodall)(THTensor *tensor)
-{
-  accreal prod = 1;
-  int serial_path = 0;
-#ifdef _OPENMP
-  int inOMP = omp_in_parallel();
-  if(inOMP) {
-    serial_path = 1;
-  } else {
-    TH_TENSOR_APPLY_REDUCTION_OMP(scalar_t, tensor, *:prod, prod *= *tensor_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-  }
-#else
-    serial_path = 1;
-#endif
-  if (serial_path) {
-    TH_TENSOR_APPLY(scalar_t, tensor, prod *= *tensor_data;);
-  }
-  return prod;
-}
-
 void THTensor_(add)(THTensor *r_, THTensor *t, scalar_t value)
 {
   THTensor_(resizeAs)(r_, t);

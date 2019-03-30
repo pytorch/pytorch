@@ -56,6 +56,7 @@ includes = [
     "caffe2/video/*",
     "caffe2/distributed/*",
     "caffe2/queue/*",
+    "caffe2/contrib/aten/*",
     "binaries/*",
     "caffe2/**/*_test*",
     "caffe2/core/*",
@@ -63,6 +64,7 @@ includes = [
     "caffe2/utils/*",
     "c10/cuda/*",
     "c10/cuda/test/CMakeLists.txt",
+    "modules/*",
     # PyTorch paths
     # Keep this synchronized with is_pytorch_file in hipify_python.py
     "aten/src/ATen/cuda/*",

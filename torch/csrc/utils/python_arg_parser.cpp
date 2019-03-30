@@ -131,7 +131,7 @@ bool FunctionParameter::check(PyObject* obj) {
       }
       return false;
     }
-    case ParameterType::TENSOR_LIST: return PyTuple_Check(obj) || PyList_Check(obj);
+    case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
         return true;

@@ -22,7 +22,6 @@ struct ${Type} final : public ${DenseBackend}TypeDefault {
   virtual caffe2::TypeMeta typeMeta() const override;
   virtual Backend backend() const override;
   virtual const char * toString() const override;
-  virtual size_t elementSizeInBytes() const override;
   virtual TypeID ID() const override;
 
   // example

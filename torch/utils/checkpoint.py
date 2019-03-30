@@ -7,6 +7,10 @@ def detach_variable(inputs):
     if isinstance(inputs, tuple):
         out = []
         for inp in inputs:
+            if not isinstance(inp, torch.Tensor):
+                out.append(inp)
+                continue
+
             x = inp.detach()
             x.requires_grad = inp.requires_grad
             out.append(x)
@@ -17,7 +21,7 @@ def detach_variable(inputs):
 
 
 def check_backward_validity(inputs):
-    if not any(inp.requires_grad for inp in inputs):
+    if not any(inp.requires_grad for inp in inputs if isinstance(inp, torch.Tensor)):
         warnings.warn("None of the inputs have requires_grad=True. Gradients will be None")
 
 
@@ -93,7 +97,9 @@ class CheckpointFunction(torch.autograd.Function):
         if isinstance(outputs, torch.Tensor):
             outputs = (outputs,)
         torch.autograd.backward(outputs, args)
-        return (None, None) + tuple(inp.grad for inp in detached_inputs)
+        grads = tuple(inp.grad if isinstance(inp, torch.Tensor) else inp
+                      for inp in detached_inputs)
+        return (None, None) + grads
 
 
 def checkpoint(function, *args, **kwargs):
