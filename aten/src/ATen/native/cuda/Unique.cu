@@ -44,7 +44,7 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
   } else {
       Tensor sorted_indices = at::arange(0, num_inp, options);
       int64_t* sorted_indices_ptr = sorted_indices.data<int64_t>();
-      thrust::sort_by_key(policy, data, data + num_inp, sorted_indices_ptr, less);
+      thrust::sort_by_key<decltype(policy), scalar_t *, int64_t *, less_t>(policy, data, data + num_inp, sorted_indices_ptr, less);
       Tensor inv_loc = at::empty({num_inp}, options);
       inverse_indices = at::empty({num_inp}, options);
       int64_t* inv_loc_ptr = inv_loc.data<int64_t>();
