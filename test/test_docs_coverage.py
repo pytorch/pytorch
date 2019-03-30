@@ -36,8 +36,7 @@ class TestDocCoverage(unittest.TestCase):
         whitelist = {
             # below are some jit functions
             'wait', 'fork', 'parse_type_comment', 'import_ir_module',
-            'to_batch_graph', 'import_ir_module_from_buffer',
-            'register_batch_operator', 'merge_type_from_type_comment',
+            'import_ir_module_from_buffer', 'merge_type_from_type_comment',
 
             # below are symbols mistakely binded to torch.*, but should
             # go to torch.nn.functional.* instead
