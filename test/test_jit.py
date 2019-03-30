@@ -1,6 +1,7 @@
 from __future__ import division
 import torch
 import torch.jit
+import torch.jit._logging
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.parallel as dp
@@ -13872,6 +13873,106 @@ class TestClassType(JitTestCase):
 
         self.assertEqual(x, f2.x)
         self.assertEqual(y, f2.y)
+
+
+class TestLogging(JitTestCase):
+    def test_bump_numeric_counter(self):
+        class ModuleThatLogs(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                for i in range(x.size(0)):
+                    x += 1.0
+                    torch.jit._logging.add_stat_value('foo', 1)
+
+                if bool(x.sum() > 0.0):
+                    torch.jit._logging.add_stat_value('positive', 1)
+                else:
+                    torch.jit._logging.add_stat_value('negative', 1)
+                return x
+
+        logger = torch.jit._logging.LockingLogger()
+        old_logger = torch.jit._logging.set_logger(logger)
+        try:
+
+            mtl = ModuleThatLogs()
+            for i in range(5):
+                mtl(torch.rand(3, 4, 5))
+
+            self.assertEqual(logger.get_counter_val('foo'), 15)
+            self.assertEqual(logger.get_counter_val('positive'), 5)
+        finally:
+            torch.jit._logging.set_logger(old_logger)
+
+    def test_trace_numeric_counter(self):
+        def foo(x):
+            torch.jit._logging.add_stat_value('foo', 1)
+            return x + 1.0
+
+        traced = torch.jit.trace(foo, torch.rand(3, 4))
+        logger = torch.jit._logging.LockingLogger()
+        old_logger = torch.jit._logging.set_logger(logger)
+        try:
+            traced(torch.rand(3, 4))
+
+            self.assertEqual(logger.get_counter_val('foo'), 1)
+        finally:
+            torch.jit._logging.set_logger(old_logger)
+
+    def test_time_measurement_counter(self):
+        class ModuleThatTimes(torch.jit.ScriptModule):
+            def forward(self, x):
+                tp_start = torch.jit._logging.time_point()
+                for i in range(30):
+                    x += 1.0
+                tp_end = torch.jit._logging.time_point()
+                torch.jit._logging.add_stat_value('mytimer', tp_end - tp_start)
+                return x
+
+        mtm = ModuleThatTimes()
+        logger = torch.jit._logging.LockingLogger()
+        old_logger = torch.jit._logging.set_logger(logger)
+        try:
+            mtm(torch.rand(3, 4))
+            self.assertGreater(logger.get_counter_val('mytimer'), 0)
+        finally:
+            torch.jit._logging.set_logger(old_logger)
+
+    def test_time_measurement_counter_script(self):
+        class ModuleThatTimes(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                tp_start = torch.jit._logging.time_point()
+                for i in range(30):
+                    x += 1.0
+                tp_end = torch.jit._logging.time_point()
+                torch.jit._logging.add_stat_value('mytimer', tp_end - tp_start)
+                return x
+
+        mtm = ModuleThatTimes()
+        logger = torch.jit._logging.LockingLogger()
+        old_logger = torch.jit._logging.set_logger(logger)
+        try:
+            mtm(torch.rand(3, 4))
+            self.assertGreater(logger.get_counter_val('mytimer'), 0)
+        finally:
+            torch.jit._logging.set_logger(old_logger)
+
+    def test_counter_aggregation(self):
+        def foo(x):
+            for i in range(3):
+                torch.jit._logging.add_stat_value('foo', 1)
+            return x + 1.0
+
+        traced = torch.jit.trace(foo, torch.rand(3, 4))
+        logger = torch.jit._logging.LockingLogger()
+        logger.set_aggregation_type('foo', torch.jit._logging.AggregationType.AVG)
+        old_logger = torch.jit._logging.set_logger(logger)
+        try:
+            traced(torch.rand(3, 4))
+
+            self.assertEqual(logger.get_counter_val('foo'), 1)
+        finally:
+            torch.jit._logging.set_logger(old_logger)
 
 
 for test in autograd_method_tests():
