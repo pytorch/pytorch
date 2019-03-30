@@ -179,11 +179,6 @@ bool PackSegmentsOp<CUDAContext>::DoRunWithType2() {
   int64_t num_seq = lengths.dim(0);
   const Data_T* data_ptr = data.data<Data_T>();
   const T* lengths_ptr = lengths.data<T>();
-  auto* out = Output(0);
-  Tensor* presence_mask = nullptr;
-  if (return_presence_mask_) {
-    presence_mask = Output(1);
-  }
 
   CAFFE_ENFORCE_GE(data.dim(), 1, "DATA should be at least 1-D");
   CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTH should be 1-D");
@@ -214,7 +209,7 @@ bool PackSegmentsOp<CUDAContext>::DoRunWithType2() {
   bool* presence_mask_data = nullptr;
   if (return_presence_mask_) {
     std::vector<int64_t> presence_shape{lengths.numel(), max_length};
-    presence_mask->Resize(presence_shape);
+    auto* presence_mask = Output(1, presence_shape, at::dtype<bool>());
     presence_mask_data = presence_mask->template mutable_data<bool>();
   }
 
@@ -222,8 +217,8 @@ bool PackSegmentsOp<CUDAContext>::DoRunWithType2() {
   auto shape = data.sizes().vec(); // Shape of out is batch_size x max_len x ...
   shape[0] = max_length;
   shape.insert(shape.begin(), lengths.numel());
-  out->Resize(shape);
-  Data_T* out_ptr = static_cast<Data_T*>(out->raw_mutable_data(data.meta()));
+  auto* out = Output(0, shape, at::dtype(data.dtype()));
+  Data_T* out_ptr = static_cast<Data_T*>(out->raw_mutable_data(data.dtype()));
 
   // Return empty out (with the proper shape) if first dim is 0.
   if (!data.dim(0)) {
@@ -265,7 +260,6 @@ bool UnpackSegmentsOp<CUDAContext>::DoRunWithType2() {
   int64_t num_seq = lengths.dim(0);
   const Data_T* data_ptr = data.data<Data_T>();
   const T* lengths_ptr = lengths.data<T>();
-  auto* out = Output(0);
 
   CAFFE_ENFORCE_GE(data.dim(), 1, "DATA should be at least 1-D");
   CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTH should be 1-D");
@@ -315,8 +309,8 @@ bool UnpackSegmentsOp<CUDAContext>::DoRunWithType2() {
       shape[0], lengths.dim(0), "LENGTH should match DATA in dimension 0");
   shape.erase(shape.begin());
   shape[0] = num_cell;
-  out->Resize(shape);
-  Data_T* out_ptr = static_cast<Data_T*>(out->raw_mutable_data(data.meta()));
+  auto* out = Output(0, shape, at::dtype(data.dtype()));
+  Data_T* out_ptr = static_cast<Data_T*>(out->raw_mutable_data(data.dtype()));
 
   // Return empty out (with the proper shape) if any of the dimensions is 0.
   if (data.dim(0) == 0 || data.dim(1) == 0) {
