@@ -307,6 +307,236 @@ bool fuseConvBNAndAffCh(repr::NNModule* nn, caffe2::Workspace* ws) {
   return false;
 }
 
+bool isSparseNode(const repr::NNGraph::NodeRef& nodeRef) {
+  if (!repr::nn::is<repr::Conv>(nodeRef) &&
+      !isOpType(nodeRef, "Int8Conv") &&
+      !isOpType(nodeRef, "Int8ConvRelu") &&
+      !isOpType(nodeRef, "Int8ConvSum") &&
+      !isOpType(nodeRef, "Int8ConvSumRelu")) {
+    return false;
+  }
+
+  auto op = repr::nn::get<repr::NeuralNetOperator>(nodeRef);
+  auto& opDef = getOpDef(*op);
+  for (const auto& arg : opDef.arg()) {
+    if (arg.name() == "kernel" && arg.i() != 1) {
+      return false;
+    }
+    if (arg.name() == "stride" && arg.i() <= 1) {
+      return false;
+    }
+  }
+  return true;
+}
+
+
+void checkSparse(repr::NNModule* nn, caffe2::Workspace* ws) {
+  CAFFE_ENFORCE(cpuinfo_initialize(), "failed to initialize cpuinfo");
+  // Assume the order of nodes from getMutableNodes conforms to
+  // the original topo order of operators
+
+  auto allNodes = nn->dataFlow.getMutableNodes();
+  int i = allNodes.size() - 1;
+  while (i > 0) {
+    auto curNode = allNodes[i];
+    if (!repr::nn::hasInputs(curNode)) {
+      --i;
+      continue;
+    }
+    auto cur = repr::nn::get<repr::NeuralNetOperator>(curNode);
+    if (!cur || !isOnIdeepDevice(*cur)) {
+      LOG(WARNING) << "Not a IDEEP operator";
+      --i;
+      continue;
+    }
+    // Check the curNode is the sparse node or not
+    // Only conv op with kernel = 1 and stride > 1 is the sparse node
+    if (!isSparseNode(curNode)) {
+      --i;
+      continue;
+    }
+   
+    int sparse_stride;
+    auto& curOp = getOpDef(*cur);
+    for (const auto& arg : curOp.arg()) {
+      if (arg.name() == "stride") {
+        sparse_stride = arg.i();
+      }
+    }
+
+    auto inputs = repr::nn::getInputs(curNode);
+    vector<repr::NNGraph::NodeRef> triggerSparseNodes, originSparseNodes, needPoolingInputs;
+    for (int m = 0; m < inputs.size(); ++m) {
+      if (inputs[m]->getInEdges().size() <= 0) {
+        continue;
+      }
+        
+      auto preNode = repr::nn::getProducer(inputs[m]);
+      if (!repr::nn::is<repr::Conv>(preNode) &&
+        !isOpType(preNode, "Int8Conv") &&
+        !isOpType(preNode, "Int8ConvRelu") &&
+        !isOpType(preNode, "Int8ConvSum") &&
+        !isOpType(preNode, "Int8ConvSumRelu") &&
+        !isOpType(preNode, "MaxPool") &&
+        !isOpType(preNode, "AveragePool") &&
+        !isOpType(preNode, "Int8MaxPool") &&
+        !isOpType(preNode, "Int8AveragePool")) {
+        originSparseNodes.push_back(curNode);
+        needPoolingInputs.push_back(inputs[m]);
+        continue; 
+      }
+      
+      // Check the other nodes with the same input of current sparse node are the sparse op or not
+      auto preOutputs = repr::nn::getOutputs(preNode);
+      bool all_consumers_sparse = true;
+      for (int n = 0; n < preOutputs.size(); ++n) {
+        auto consumers = repr::nn::getConsumers(preOutputs[n]);
+        for (int j = 0; j < consumers.size(); ++j) {
+          if (!isSparseNode(consumers[j])) {
+            all_consumers_sparse = false;  
+            break;
+          }  
+
+          int consumer_stride;
+          auto consumerNode = repr::nn::get<repr::NeuralNetOperator>(consumers[j]);
+          auto& consumerOp = getOpDef(*consumerNode);
+          for (const auto& arg : consumerOp.arg()) {
+            if (arg.name() == "stride") {
+              consumer_stride = arg.i();
+            }
+          }
+          if (consumer_stride != sparse_stride) {
+            all_consumers_sparse = false;  
+            break;
+          }
+        }
+        if (!all_consumers_sparse) {
+          break;
+        }
+      }
+      if (!all_consumers_sparse) {
+        needPoolingInputs.push_back(inputs[m]);
+        continue; 
+      } 
+
+      triggerSparseNodes.push_back(preNode);
+    }
+    
+    // If all the input of the sparse node need insert pooling, we do nothing on the topology. 
+    if (needPoolingInputs.size() == inputs.size()) {
+      --i;
+      continue;
+    }
+
+    // Pull up the large stride to the previous node can be enlarged stride
+    for (int m = 0 ; m < triggerSparseNodes.size(); ++m) {
+      auto triggerNode = repr::nn::get<repr::NeuralNetOperator>(triggerSparseNodes[m]);
+      auto* triggerOp = getMutableOpDef(*triggerNode);
+      for (auto& arg : *triggerOp->mutable_arg()) {
+        if (arg.name() == "stride") {
+          arg.set_i(arg.i() * sparse_stride); 
+        }
+      }
+
+      auto outputs = repr::nn::getOutputs(triggerSparseNodes[m]);
+      for (int n = 0; n < outputs.size(); ++n) {
+        auto consumers = repr::nn::getConsumers(outputs[n]);
+        for (int j = 0; j < consumers.size(); ++j) {
+          auto sparseNode = repr::nn::get<repr::NeuralNetOperator>(consumers[j]);
+          auto* sparseOp = getMutableOpDef(*sparseNode);
+          for (auto& arg : *sparseOp->mutable_arg()) {
+            if (arg.name() == "stride") {
+              arg.set_i(1); 
+            }
+          }
+        }
+      }
+    }
+
+    // Insert pooling between the origin sparse node and the producer node cannot be enlarged strdie
+    for (int m = 0; m < needPoolingInputs.size(); ++m) {
+      
+      bool quantizedOp = false;
+      float Y_scale;
+      int Y_zero_point; 
+      string order;
+      auto preNode = repr::nn::getProducer(needPoolingInputs[m]);
+      auto preNodeOp = repr::nn::get<repr::NeuralNetOperator>(preNode);
+      auto& preNodeOpDef = getOpDef(*preNodeOp);
+      if (preNodeOpDef.type().substr(0,4) == "Int8") {
+        quantizedOp = true;
+      }
+      for (const auto& arg : preNodeOpDef.arg()) {
+        if (arg.name() == "Y_scale") {
+          Y_scale = arg.f();
+          quantizedOp = true; 
+        }
+        if (arg.name() == "Y_zero_point") {
+          Y_zero_point = arg.i(); 
+        }
+        if (arg.name() == "order") {
+          order = arg.s(); 
+        }
+      }
+      
+      std::vector<int> kernel = {1,1};
+      auto maxPoolNode = nn->dataFlow.createNode(util::make_unique<repr::MaxPool>(kernel));
+      //auto maxPoolNode = nn->dataFlow.createNode(util::make_unique<repr::GenericOperator>());
+
+      caffe2::OperatorDef op_def;
+      op_def.set_name("MaxPool");
+      op_def.set_type("MaxPool");
+      AddArgument<int>("kernel", 1, &op_def);
+      AddArgument<int>("pad", 0, &op_def);
+      AddArgument<int>("stride", sparse_stride, &op_def);
+      AddArgument<int>("training_mode", 0, &op_def);
+      op_def.mutable_device_option()->set_device_type(PROTO_IDEEP);
+      
+      if (quantizedOp) {
+        op_def.set_type("Int8MaxPool");
+        op_def.set_name("Int8MaxPool");
+        AddArgument<float>("Y_scale", Y_scale, &op_def);
+        AddArgument<int>("Y_zero_point", Y_zero_point, &op_def);
+        AddArgument<int>("cudnn_exhaustive_search", 0, &op_def);
+        AddArgument<string>("order", order, &op_def);
+        op_def.set_engine("DNNLOWP");  
+      }
+      Caffe2Annotation annot;
+      annot.setOperatorDef(op_def);
+      
+      auto pool = repr::nn::get<repr::NeuralNetOperator>(maxPoolNode);
+      pool->setAnnotation(nom::util::make_unique<Caffe2Annotation>(annot));
+      nn->dataFlow.createEdge(needPoolingInputs[m], maxPoolNode);
+       
+      auto new_output_name = repr::nn::get<repr::Tensor>(needPoolingInputs[m])->getName();
+      auto pooling_output_name = new_output_name + "_pooling_output" + std::to_string(m);
+      auto poolingOutputTensor = util::make_unique<repr::Tensor>(pooling_output_name);
+      auto poolingOutput = nn->dataFlow.createNode(unique_dyn_cast<repr::NeuralNetData>(poolingOutputTensor));
+      nn->dataFlow.createEdge(maxPoolNode, poolingOutput);
+
+      auto curOutput = repr::nn::getOutputs(curNode).front();
+      auto origin_output_name = repr::nn::get<repr::Tensor>(curOutput)->getName();
+      if (new_output_name ==  origin_output_name) {
+        auto newCurOutputTensor = util::make_unique<repr::Tensor>(pooling_output_name);
+        auto newCurOutput = nn->dataFlow.createNode(unique_dyn_cast<repr::NeuralNetData>(newCurOutputTensor));
+        nn->dataFlow.replaceNode(curOutput, newCurOutput); // need to be check
+      }
+
+      auto edges = curNode->getInEdges();
+      for (const auto& edge : edges) {
+        auto head = edge->head();
+        auto headOutput = repr::nn::getOutputs(head).front();
+        if (edge->tail() == needPoolingInputs[m]) {
+          edge->setTail(poolingOutput);
+        }
+      }
+    }
+    allNodes = nn->dataFlow.getMutableNodes();
+    i +=  needPoolingInputs.size() * 2 -1;
+  }
+}
+
+
 bool fuseConvSum(repr::NNModule* nn, caffe2::Workspace* ws) {
   CAFFE_ENFORCE(cpuinfo_initialize(), "failed to initialize cpuinfo");
   // Assume the order of nodes from getMutableNodes conforms to
@@ -1195,6 +1425,7 @@ void OptimizeForMkldnn(
 
   setPoolingInferenceMode(nn);
   recycleDataMemoryForIdeep(nn);
+  checkSparse(nn, ws);
 }
 
 #endif // CAFFE2_USE_MKLDNN
