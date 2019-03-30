@@ -9,6 +9,7 @@ using c10::FunctionSchema;
 using c10::OperatorKernel;
 using c10::Argument;
 using c10::IntType;
+using c10::FloatType;
 using c10::ListType;
 using c10::kernel;
 using c10::dispatchKey;
@@ -31,25 +32,27 @@ C10_DECLARE_TENSOR_TYPE(TensorType2);
 C10_DEFINE_TENSOR_TYPE(TensorType2);
 
 struct ErrorKernel final : public OperatorKernel {
-  void operator()(const Tensor&) {
+  int64_t operator()(const Tensor&, int64_t) {
     EXPECT_TRUE(false); // this kernel should never be called
+    return 0;
   }
 };
 
 FunctionSchema errorOpSchema(
     "_test::error",
     "",
-    (std::vector<Argument>{Argument("dummy")}),
-    (std::vector<Argument>{}));
+    (std::vector<Argument>{Argument("dummy"),
+                           Argument("input", IntType::get())}),
+    (std::vector<Argument>{Argument("output", IntType::get())}));
 
 struct IncrementKernel final : OperatorKernel {
-  int operator()(const Tensor& tensor, int input) {
+  int64_t operator()(const Tensor& tensor, int64_t input) {
     return input + 1;
   }
 };
 
 struct DecrementKernel final : OperatorKernel {
-  int operator()(const Tensor& tensor, int input) {
+  int64_t operator()(const Tensor& tensor, int64_t input) {
     return input - 1;
   }
 };
@@ -171,7 +174,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithZeroOutputs_whe
 }
 
 struct KernelWithIntOutput final : OperatorKernel {
-  int operator()(Tensor, int a, int b) {
+  int64_t operator()(Tensor, int64_t a, int64_t b) {
     return a + b;
   }
 };
@@ -256,7 +259,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListOutpu
 }
 
 struct KernelWithIntListOutput final : OperatorKernel {
-  std::vector<int64_t> operator()(const Tensor&, int input1, int input2, int input3) {
+  std::vector<int64_t> operator()(const Tensor&, int64_t input1, int64_t input2, int64_t input3) {
     return {input1, input2, input3};
   }
 };
@@ -423,10 +426,10 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorInputByVa
   EXPECT_EQ(TensorType2(), captured_input.type_id());
 }
 
-int captured_int_input = 0;
+int64_t captured_int_input = 0;
 
 struct KernelWithIntInputWithoutOutput final : OperatorKernel {
-  void operator()(Tensor, int input1) {
+  void operator()(Tensor, int64_t input1) {
     captured_int_input = input1;
   }
 };
@@ -452,7 +455,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntInput_withou
 }
 
 struct KernelWithIntInputWithOutput final : OperatorKernel {
-  int operator()(Tensor, int input1) {
+  int64_t operator()(Tensor, int64_t input1) {
     return input1 + 1;
   }
 };
@@ -476,7 +479,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntInput_withOu
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
-int captured_input_list_size = 0;
+int64_t captured_input_list_size = 0;
 
 struct KernelWithIntListInputWithoutOutput final : OperatorKernel {
   void operator()(Tensor, ArrayRef<int64_t> input1) {
@@ -505,7 +508,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListInput_wi
 }
 
 struct KernelWithIntListInputWithOutput final : OperatorKernel {
-  int operator()(Tensor, ArrayRef<int64_t> input1) {
+  int64_t operator()(Tensor, ArrayRef<int64_t> input1) {
     return input1.size();
   }
 };
@@ -555,7 +558,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListInput
 }
 
 struct KernelWithTensorListInputWithOutput final : OperatorKernel {
-  int operator()(ArrayRef<Tensor> input1) {
+  int64_t operator()(ArrayRef<Tensor> input1) {
     return input1.size();
   }
 };
@@ -689,5 +692,308 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithMultipleConstru
   EXPECT_EQ(13, outputs[0].toInt());
 }
 
+template<class Return, class... Args> struct KernelFunc final : OperatorKernel{
+  Return operator()(Args...) { return {}; }
+};
+template<class... Args> struct KernelFunc<void, Args...> final : OperatorKernel {
+  void operator()(Args...) {}
+};
+
+TEST(OperatorRegistrationTest_FunctorBasedKernel, givenMismatchedKernel_withDifferentNumArguments_whenRegistering_thenFails) {
+  // assert this does not fail because it matches
+  RegisterOperators()
+      .op(FunctionSchema(
+          "_test::mismatch",
+          "",
+          (std::vector<Argument>{Argument("arg")}),
+          (std::vector<Argument>{Argument("ret", IntType::get())})
+      ), kernel<KernelFunc<int64_t, Tensor>>(), dispatchKey(TensorType1()));
+
+  // and now a set of mismatching schemas
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg"), Argument("arg2")}),
+            (std::vector<Argument>{Argument("ret", IntType::get())})
+        ), kernel<KernelFunc<int64_t, Tensor>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+
+  // assert this does not fail because it matches
+  RegisterOperators()
+      .op(FunctionSchema(
+          "_test::mismatch",
+          "",
+          (std::vector<Argument>{Argument("arg"), Argument("arg2")}),
+          (std::vector<Argument>{})
+      ), kernel<KernelFunc<void, Tensor, Tensor>>(), dispatchKey(TensorType1()));
+
+  // and now a set of mismatching schemas
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{}),
+            (std::vector<Argument>{})
+        ), kernel<KernelFunc<void, Tensor, Tensor>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg")}),
+            (std::vector<Argument>{})
+        ), kernel<KernelFunc<void, Tensor, Tensor>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg"), Argument("arg2"), Argument("arg3")}),
+            (std::vector<Argument>{})
+        ), kernel<KernelFunc<void, Tensor, Tensor>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+}
+
+TEST(OperatorRegistrationTest_FunctorBasedKernel, givenMismatchedKernel_withDifferentArgumentType_whenRegistering_thenFails) {
+  // assert this does not fail because it matches
+  RegisterOperators()
+      .op(FunctionSchema(
+          "_test::mismatch",
+          "",
+          (std::vector<Argument>{Argument("arg1"), Argument("arg2", IntType::get())}),
+          (std::vector<Argument>{Argument("ret", IntType::get())})
+      ), kernel<KernelFunc<int64_t, Tensor, int64_t>>(), dispatchKey(TensorType1()));
+
+  // and now a set of mismatching schemas
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg1"), Argument("arg2", FloatType::get())}),
+            (std::vector<Argument>{Argument("ret", IntType::get())})
+        ), kernel<KernelFunc<int64_t, Tensor, int64_t>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg1", IntType::get()), Argument("arg2", IntType::get())}),
+            (std::vector<Argument>{Argument("ret", IntType::get())})
+        ), kernel<KernelFunc<int64_t, Tensor, int64_t>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+}
+
+TEST(OperatorRegistrationTest_FunctorBasedKernel, givenMismatchedKernel_withDifferentNumReturns_whenRegistering_thenFails) {
+  // assert this does not fail because it matches
+  RegisterOperators()
+      .op(FunctionSchema(
+          "_test::mismatch",
+          "",
+          (std::vector<Argument>{Argument("arg")}),
+          (std::vector<Argument>{Argument("ret", IntType::get())})
+      ), kernel<KernelFunc<int64_t, Tensor>>(), dispatchKey(TensorType1()));
+
+  // and now a set of mismatching schemas
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg")}),
+            (std::vector<Argument>{})
+        ), kernel<KernelFunc<int64_t, Tensor>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg")}),
+            (std::vector<Argument>{Argument("ret1", IntType::get()),
+                                   Argument("ret2", IntType::get())})
+        ), kernel<KernelFunc<int64_t, Tensor>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+
+  // assert this does not fail because it matches
+  RegisterOperators()
+      .op(FunctionSchema(
+          "_test::mismatch",
+          "",
+          (std::vector<Argument>{Argument("arg")}),
+          (std::vector<Argument>{})
+      ), kernel<KernelFunc<void, Tensor>>(), dispatchKey(TensorType1()));
+
+  // and now a set of mismatching schemas
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg")}),
+            (std::vector<Argument>{Argument("ret")})
+        ), kernel<KernelFunc<void, Tensor>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg")}),
+            (std::vector<Argument>{Argument("ret"), Argument("ret2")})
+        ), kernel<KernelFunc<void, Tensor>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+
+  // assert this does not fail because it matches
+  RegisterOperators()
+      .op(FunctionSchema(
+          "_test::mismatch",
+          "",
+          (std::vector<Argument>{Argument("arg")}),
+          (std::vector<Argument>{Argument("ret1"), Argument("ret2")})
+      ), kernel<KernelFunc<std::tuple<Tensor, Tensor>, Tensor>>(), dispatchKey(TensorType1()));
+
+  // and now a set of mismatching schemas
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg")}),
+            (std::vector<Argument>{})
+        ), kernel<KernelFunc<std::tuple<Tensor, Tensor>, Tensor>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg")}),
+            (std::vector<Argument>{Argument("ret1")})
+        ), kernel<KernelFunc<std::tuple<Tensor, Tensor>, Tensor>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg")}),
+            (std::vector<Argument>{Argument("ret1"), Argument("ret2"), Argument("ret3")})
+        ), kernel<KernelFunc<std::tuple<Tensor, Tensor>, Tensor>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+}
+
+TEST(OperatorRegistrationTest_FunctorBasedKernel, givenMismatchedKernel_withDifferentReturnTypes_whenRegistering_thenFails) {
+  // assert this does not fail because it matches
+  RegisterOperators()
+      .op(FunctionSchema(
+          "_test::mismatch",
+          "",
+          (std::vector<Argument>{Argument("arg")}),
+          (std::vector<Argument>{Argument("ret", IntType::get())})
+      ), kernel<KernelFunc<int64_t, Tensor>>(), dispatchKey(TensorType1()));
+
+  // and now a set of mismatching schemas
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg")}),
+            (std::vector<Argument>{Argument("ret")})
+        ), kernel<KernelFunc<int64_t, Tensor>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg")}),
+            (std::vector<Argument>{Argument("ret", FloatType::get())})
+        ), kernel<KernelFunc<int64_t, Tensor>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+
+  // assert this does not fail because it matches
+  RegisterOperators()
+      .op(FunctionSchema(
+          "_test::mismatch",
+          "",
+          (std::vector<Argument>{Argument("arg")}),
+          (std::vector<Argument>{Argument("ret")})
+      ), kernel<KernelFunc<Tensor, Tensor>>(), dispatchKey(TensorType1()));
+
+  // and now a set of mismatching schemas
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg")}),
+            (std::vector<Argument>{Argument("ret", FloatType::get())})
+        ), kernel<KernelFunc<Tensor, Tensor>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+
+  // assert this does not fail because it matches
+  RegisterOperators()
+      .op(FunctionSchema(
+          "_test::mismatch",
+          "",
+          (std::vector<Argument>{Argument("arg")}),
+          (std::vector<Argument>{Argument("ret1"), Argument("ret2", IntType::get())})
+      ), kernel<KernelFunc<std::tuple<Tensor, int64_t>, Tensor>>(), dispatchKey(TensorType1()));
+
+  // and now a set of mismatching schemas
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg")}),
+            (std::vector<Argument>{Argument("ret1"), Argument("ret2", FloatType::get())})
+        ), kernel<KernelFunc<std::tuple<Tensor, int64_t>, Tensor>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+
+  EXPECT_THROW(
+    RegisterOperators()
+        .op(FunctionSchema(
+            "_test::mismatch",
+            "",
+            (std::vector<Argument>{Argument("arg")}),
+            (std::vector<Argument>{Argument("ret1", IntType::get()), Argument("ret2", IntType::get())})
+        ), kernel<KernelFunc<std::tuple<Tensor, int64_t>, Tensor>>(), dispatchKey(TensorType1())),
+    c10::Error
+  );
+}
 
 }
