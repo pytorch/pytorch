@@ -962,7 +962,7 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
   }
 }
 
-void recycleDataMemoryForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
+void recycleDataMemoryForIdeep(repr::NNModule* nn) {
   auto getIndex = [](std::unordered_map<unsigned long, int>& map, unsigned long key) {
     int index = -1;
     if (map.find(key) != map.end()) {
@@ -996,7 +996,7 @@ void recycleDataMemoryForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
     inplace_binds[node2].insert(node1);
   };
 
-  auto iterate_cur_live_tensors = [](int node, std::string node_name, int total_cids,
+  auto iterateCurLiveTensors = [](int node, std::string node_name, int total_cids,
                                    std::vector<bool>& cur_live_tensors,
                                    std::unordered_map<int, std::string>& cid_to_name,
                                    std::vector<std::unordered_set<int>>& interference_graph,
@@ -1015,7 +1015,6 @@ void recycleDataMemoryForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
 
   auto mem_opt_option = getenv("CAFFE2_INFERENCE_MEM_OPT");
   if ((mem_opt_option == NULL) || (atoi(mem_opt_option) == 0)) return;
-  if (nn->outputs.empty()) return;
 
   auto allNodes = nn->dataFlow.getMutableNodes();
   int allnodes_size = allNodes.size();
@@ -1033,9 +1032,9 @@ void recycleDataMemoryForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
     if (isa<repr::NeuralNetData>(opNode->data())) {
       auto tensor = dyn_cast<nom::repr::NeuralNetData>(opNode->data().get());
       auto tensor_name = tensor->getName();
-      if (ws->HasBlob(tensor_name)) continue;
-      assert(nn->inputs.find(opNode) == nn->inputs.end());
-      if (nn->outputs.find(opNode) != nn->outputs.end()) continue;
+      if (!repr::nn::hasProducer(opNode)) continue;
+      auto consumers = repr::nn::getConsumers(opNode);
+      if (consumers.empty()) continue;
       unsigned long node_key = (unsigned long)opNode;
       candidates_index[node_key]= cid;
       cid_to_nid[cid] = i;
@@ -1061,8 +1060,8 @@ void recycleDataMemoryForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
         if (out_id == -1) continue;
         auto out_name = cid_to_name[out_id];
         cur_live_tensors[out_id] = false;
-        iterate_cur_live_tensors(out_id, out_name, cid,
-                                 cur_live_tensors, cid_to_name, interference_graph, inplace_binds);
+        iterateCurLiveTensors(out_id, out_name, cid,
+                              cur_live_tensors, cid_to_name, interference_graph, inplace_binds);
 
         std::unordered_set<int> visited_inputs;
         for (int k = 0; k < inputs.size(); k++) {
@@ -1078,8 +1077,8 @@ void recycleDataMemoryForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
           }
 
           if (j > 0) continue;
-          iterate_cur_live_tensors(in_id, in_name, cid,
-                                 cur_live_tensors, cid_to_name, interference_graph, inplace_binds);
+          iterateCurLiveTensors(in_id, in_name, cid,
+                                cur_live_tensors, cid_to_name, interference_graph, inplace_binds);
           for (auto it = visited_inputs.begin(); it != visited_inputs.end(); ++it) {
             int n = *it;
             addInterferenceGraph(interference_graph, in_id, n);
@@ -1180,7 +1179,6 @@ static Fuser fusers[] = {
     fuseOrderSwitchToQuantizeOp,
     fusePreConvertOp,
 };
-
 void OptimizeForMkldnn(
     repr::NNModule* nn,
     caffe2::Workspace* ws,
@@ -1196,7 +1194,7 @@ void OptimizeForMkldnn(
   }
 
   setPoolingInferenceMode(nn);
-  recycleDataMemoryForIdeep(nn, ws);
+  recycleDataMemoryForIdeep(nn);
 }
 
 #endif // CAFFE2_USE_MKLDNN
