@@ -830,6 +830,12 @@ class Caffe2Backend(Backend):
                         already_broadcast = True
                 if not already_broadcast:
                     c2_op.arg.extend([caffe2.python.utils.MakeArgument('broadcast', 1)])
+        else:
+            # TODO: Caffe2's Pow does not support onnx broadcast semantics by
+            # default yet
+            if c2_op.type == 'Pow':
+                c2_op.arg.extend([caffe2.python.utils.MakeArgument('broadcast', 1)])
+
 
         return c2_op
 
