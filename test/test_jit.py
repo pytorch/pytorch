@@ -4708,6 +4708,56 @@ a")
         self.checkScript(test_script_clamp_min_none, input, optimize=True)
         self.checkScript(test_script_clamp_min, input, optimize=True)
 
+    def test_unique(self):
+
+        def unique_tt(x):
+            return torch.unique(x, return_inverse=True, return_counts=True)
+
+        def unique_dim_tt(x):
+            return torch.unique(x, dim=0, return_inverse=True, return_counts=True)
+
+        def unique_tf(x):
+            return torch.unique(x, return_inverse=True)
+
+        def unique_dim_tf(x):
+            return torch.unique(x, dim=0, return_inverse=True)
+
+        def unique_ft(x):
+            return torch.unique(x, return_counts=True)
+
+        def unique_dim_ft(x):
+            return torch.unique(x, dim=0, return_counts=True)
+
+        def unique_ff(x):
+            return torch.unique(x)
+
+        def unique_dim_ff(x):
+            return torch.unique(x, dim=0)
+
+        x = torch.randint(3, (10, 2))
+
+        self.checkTrace(unique_tt, [x], inputs_require_grads=False)
+        self.checkTrace(unique_dim_tt, [x], inputs_require_grads=False)
+        self.checkTrace(unique_tf, [x], inputs_require_grads=False)
+        self.checkTrace(unique_dim_tf, [x], inputs_require_grads=False)
+        self.checkTrace(unique_ft, [x], inputs_require_grads=False)
+        self.checkTrace(unique_dim_ft, [x], inputs_require_grads=False)
+        self.checkTrace(unique_ff, [x], inputs_require_grads=False)
+        self.checkTrace(unique_dim_ff, [x], inputs_require_grads=False)
+
+        self.checkScript(unique_tt, [x])
+        self.checkScript(unique_dim_tt, [x])
+
+        # TODO: scripting unique when return_inverse = False or
+        # return_counts=False is not supported yet
+
+        # self.checkScript(unique_tf, [x])
+        # self.checkScript(unique_dim_tf, [x])
+        # self.checkScript(unique_ft, [x])
+        # self.checkScript(unique_dim_ft, [x])
+        # self.checkScript(unique_ff, [x])
+        # self.checkScript(unique_dim_ff, [x])
+
     def test_script_bool_constant(self):
         script = '''
         def test_script_bool_constant():
