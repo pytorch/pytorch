@@ -64,7 +64,8 @@ public:
         numpy_type != -1,
         "Unsupported ideep memory data type? This usually should not happen "
         "since ideep memory usually only do float and double.");
-    itensor::dims dims = atensor.get_dims();
+    itensor::dims dims = atensor.get_public_format_dims();
+
     std::vector<npy_intp> npy_dims(dims.begin(), dims.end());
 
     result.copied = force_copy || atensor.need_reorder();
