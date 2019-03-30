@@ -16,13 +16,6 @@ namespace native{
 
 namespace {
 
-// template <
-//   typename policy_t,
-//   typename it1_t,
-//   typename it2_t,
-//   typename less_t
-// >
-// sort_by_key(policy_t, it1_t start, it1_t end, it2_t )
 
 template <
   typename scalar_t,
@@ -52,7 +45,7 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
   } else {
       Tensor sorted_indices = at::arange(0, num_inp, options);
       int64_t* sorted_indices_ptr = sorted_indices.data<int64_t>();
-      thrust::stable_sort_by_key<decltype(policy), scalar_t *, int64_t *, less_t>(policy, data, data + num_inp, sorted_indices_ptr, less);
+      thrust::stable_sort_by_key(policy, data, data + num_inp, sorted_indices_ptr/*, less*/);
       Tensor inv_loc = at::empty({num_inp}, options);
       inverse_indices = at::empty({num_inp}, options);
       int64_t* inv_loc_ptr = inv_loc.data<int64_t>();
