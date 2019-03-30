@@ -16,22 +16,30 @@
 namespace c10 {
 
 namespace detail {
+
+  template<class KernelCacheCreatorFunction_>
   struct KernelRegistrationConfigParameter final {
-    explicit constexpr KernelRegistrationConfigParameter(KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator_func)
-    : kernel_func_(kernel_func), cache_creator_func_(std::move(cache_creator_func)) {
+    template<class KernelCacheCreatorFunction__>
+    constexpr KernelRegistrationConfigParameter(KernelFunction* kernel_func, KernelCacheCreatorFunction__&& cache_creator_func)
+    : kernel_func_(kernel_func), cache_creator_func_(std::forward<KernelCacheCreatorFunction__>(cache_creator_func)) {
     }
 
-    void apply(KernelRegistrationConfig* registration) const {
+    void apply(KernelRegistrationConfig* registration) const & {
       registration->kernel_func = kernel_func_;
       registration->cache_creator_func = cache_creator_func_;
     }
 
+    void apply(KernelRegistrationConfig* registration) && {
+      registration->kernel_func = kernel_func_;
+      registration->cache_creator_func = std::move(cache_creator_func_);
+    }
+
   private:
     KernelFunction* kernel_func_;
-    KernelCacheCreatorFunction* cache_creator_func_;
+    KernelCacheCreatorFunction_ cache_creator_func_;
   };
 
-  static_assert(is_registration_config_parameter<KernelRegistrationConfigParameter>::value, "KernelRegistrationConfigParameter must fulfill the registration config parameter concept");
+  static_assert(is_registration_config_parameter<KernelRegistrationConfigParameter<KernelCacheCreatorFunction>>::value, "KernelRegistrationConfigParameter must fulfill the registration config parameter concept");
 }
 
 /**
@@ -52,8 +60,11 @@ namespace detail {
  * >         c10::kernel(&my_kernel_cpu, &my_cache_creator),
  * >         c10::dispatchKey(CPUTensorId()));
  */
-inline constexpr detail::KernelRegistrationConfigParameter kernel(KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator) {
-  return detail::KernelRegistrationConfigParameter(kernel_func, cache_creator);
+template<class KernelCacheCreatorFunction_>
+inline constexpr detail::KernelRegistrationConfigParameter<guts::decay_t<KernelCacheCreatorFunction_>> kernel(KernelFunction* kernel_func, KernelCacheCreatorFunction_&& cache_creator) {
+  static_assert(detail::is_registration_config_parameter<detail::KernelRegistrationConfigParameter<guts::decay_t<KernelCacheCreatorFunction_>>>::value, "KernelRegistrationConfigParameter must fulfill the registration config parameter concept");
+
+  return {kernel_func, std::forward<KernelCacheCreatorFunction_>(cache_creator)};
 }
 
 }
