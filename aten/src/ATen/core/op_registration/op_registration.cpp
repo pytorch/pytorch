@@ -1,7 +1,5 @@
 #include <ATen/core/op_registration/op_registration.h>
 
-#ifndef C10_MOBILE
-
 namespace c10 {
 
 RegisterOperators::RegisterOperators() = default;
@@ -73,5 +71,3 @@ void RegisterOperators::registerOp_(FunctionSchema&& schema, detail::KernelRegis
 }
 
 }
-
-#endif
