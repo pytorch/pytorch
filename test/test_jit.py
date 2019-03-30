@@ -22,7 +22,6 @@ from textwrap import dedent
 from functools import wraps
 import os
 import io
-import itertools
 import sys
 import unittest
 import inspect
