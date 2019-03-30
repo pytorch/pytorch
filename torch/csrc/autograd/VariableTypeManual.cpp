@@ -144,15 +144,15 @@ at::TypeExtendedInterface* VariableType::getVariableTypeFromBaseType(const at::T
 }
 
 namespace {
-std::vector<std::pair<Backend, ScalarType>> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
+std::vector<at::Type*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
   auto& context = at::globalContext();
-  std::vector<std::pair<Backend, ScalarType>> res;
+  std::vector<Type*> res;
   res.reserve(backends.size() * static_cast<int>(ScalarType::NumOptions));
   for (auto p : backends) {
     for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
       auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
       if (baseType) {
-        res.emplace_back(std::make_pair(static_cast<Backend>(p), static_cast<ScalarType>(s)));
+        res.emplace_back(VariableType::getVariableTypeFromBaseType(*baseType));
       }
     }
   }
@@ -160,11 +160,11 @@ std::vector<std::pair<Backend, ScalarType>> allTypesForBackends(at::ArrayRef<at:
 }
 }
 
-std::vector<std::pair<Backend, ScalarType>> VariableType::allCPUTypes() {
+std::vector<at::Type*> VariableType::allCPUTypes() {
   return allTypesForBackends({ Backend::CPU, Backend::SparseCPU });
 }
 
-std::vector<std::pair<Backend, ScalarType>> VariableType::allCUDATypes() {
+std::vector<at::Type*> VariableType::allCUDATypes() {
   at::globalContext().lazyInitCUDA();
   return allTypesForBackends({ Backend::CUDA, Backend::SparseCUDA });
 }
@@ -174,7 +174,7 @@ const Variable & VariableType::checked_cast_variable(const Tensor & t, const cha
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
   if (!t.is_variable()) {
-    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
+    AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " for argument #", pos, " '", name, "'");
   }
   return as_variable_ref(t);
 }
@@ -184,7 +184,7 @@ Variable & VariableType::checked_cast_variable(Tensor & t, const char * name, in
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
   if (!t.is_variable()) {
-    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
+    AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " for argument #", pos, " '", name, "'");
   }
   return as_variable_ref(t);
 }
@@ -215,8 +215,8 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
     if (!t.defined()) {
       continue;
     }
-    if (!isVariableType(t.type())) {
-      AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " at position #", i, " "
+    if (!isVariableType(t.dispatch_type())) {
+      AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " at position #", i, " "
                     "for iterable argument #", pos, " '", name, "'");
     }
     ret[i] = static_cast<const Variable&>(t).data();
@@ -266,7 +266,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
-    grad_fn->src_type = &src.type();
+    grad_fn->src_type = &src.dispatch_type();
     grad_fn->src_device = src.device();
   }
   {

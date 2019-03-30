@@ -284,7 +284,7 @@ class TestAutograd(TestCase):
         def fn(x):
             return x ** 2 + y * x + y ** 2
 
-        for i in range(5):
+        for _ in range(5):
             grad_x, = torch.autograd.grad(
                 fn(x), x, grad_outputs=grad_output, create_graph=True)
 
@@ -753,7 +753,7 @@ class TestAutograd(TestCase):
             y = x.clone()
 
             # build a "chain" computation graph
-            for i in range(depth):
+            for _ in range(depth):
                 y = y + y * 0.000001
 
             # graph deletion occurs when the above locals go out of scope.
@@ -774,7 +774,7 @@ class TestAutograd(TestCase):
             prev_values = [None, None]
 
             # Build a "chain with skip connections" graph
-            for i in range(depth):
+            for _ in range(depth):
                 prev_tensors = [tensor for tensor in prev_values[:-1]
                                 if tensor is not None]
                 prev_values.append(y)
@@ -809,7 +809,7 @@ class TestAutograd(TestCase):
             y = x.clone()
 
             # build deeply nested computation graph
-            for i in range(depth):
+            for _ in range(depth):
                 y = MyOp.apply(y, y)
 
             # graph deletion occurs when the above locals go out of scope.
@@ -1609,7 +1609,7 @@ class TestAutograd(TestCase):
             def __del__(self):
                 gc.collect()
 
-        for i in range(10):
+        for _ in range(10):
             Variable(torch.randn(10, 10), _grad_fn=CollectOnDelete())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
@@ -1965,7 +1965,7 @@ class TestAutograd(TestCase):
         add1 = a + b
         add2 = add1 + c
         # Simulate a long branch, so grad_output will get buffered.
-        for i in range(4):
+        for _ in range(4):
             a = a * 2
             b = b * 2
             c = c * 2
@@ -2150,6 +2150,18 @@ class TestAutograd(TestCase):
                               lambda a, b: torch.cat((a, b)),
                               True, f_args_variable, f_args_tensor)
 
+    def test_cdist(self):
+        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+            f_args_variable = (torch.randn(S, S, requires_grad=True),
+                               torch.randn(S, S, requires_grad=True))
+
+            def f(a, b):
+                return torch.cdist(a, b, p)
+
+            f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+            run_functional_checks(self, "test_cdist", "cdist", f,
+                                  True, f_args_variable, f_args_tensor)
+
     @skipIfNoLapack
     def test_cholesky(self):
         def func(root):
@@ -2171,20 +2183,22 @@ class TestAutograd(TestCase):
             run_test(upper, dims)
 
     @skipIfNoLapack
-    def test_trtrs(self):
-        def _test_with_size(N, C):
-            A = torch.rand(N, N, requires_grad=True)
-            b = torch.rand(N, C, requires_grad=True)
+    def test_triangular_solve(self):
+        def _test_with_size(A_dims, B_dims):
+            A = torch.rand(*A_dims).requires_grad_()
+            b = torch.rand(*B_dims).requires_grad_()
 
             for upper, transpose, unitriangular in product((True, False), repeat=3):
                 def func(A, b):
-                    return torch.trtrs(b, A, upper, transpose, unitriangular)
+                    return torch.triangular_solve(b, A, upper, transpose, unitriangular)
 
                 gradcheck(func, [A, b])
                 gradgradcheck(func, [A, b])
 
-        _test_with_size(S, S + 1)
-        _test_with_size(S, S - 1)
+        _test_with_size((3, 3), (3, 4))
+        _test_with_size((3, 3), (3, 2))
+        _test_with_size((2, 3, 3), (2, 3, 4))
+        _test_with_size((2, 3, 3), (2, 3, 2))
 
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_fft_ifft_rfft_irfft(self):

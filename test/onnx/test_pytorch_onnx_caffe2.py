@@ -1089,6 +1089,14 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(RsubModel(), train=False, input=(x,),
                             batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_isnan(self):
+        class IsNaNModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.isnan(input)
+
+        x = torch.tensor([1.0, float('nan'), 2.0])
+        self.run_model_test(IsNaNModel(), train=False, input=x, batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_flatten(self):
         class FlattenModel(torch.nn.Module):
             def forward(self, input):
@@ -1113,10 +1121,26 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(4, 4, requires_grad=True)
         self.run_model_test(ArgmaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    def test_argmax_none_dim(self):
+        class ArgmaxModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.argmax(input)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(ArgmaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
     def test_argmin(self):
         class ArgminModel(torch.nn.Module):
             def forward(self, input):
                 return torch.argmin(input, dim=1)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(ArgminModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_argmin_none_dim(self):
+        class ArgminModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.argmin(input)
 
         x = torch.randn(4, 4, requires_grad=True)
         self.run_model_test(ArgminModel(), train=False, input=x, batch_size=BATCH_SIZE)

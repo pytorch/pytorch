@@ -26,11 +26,11 @@ using at::Storage;
 using at::TensorOptions;
 
 static at::Type& default_type() {
-  return *torch::tensors::get_default_tensor_type().aten_type();
+  return torch::tensors::get_default_tensor_type();
 }
 
 static ScalarType default_scalar_type() {
-  return static_cast<ScalarType>(torch::tensors::get_default_tensor_type().scalar_type);
+  return torch::tensors::get_default_scalar_type();
 }
 
 static void maybe_initialize_cuda(const at::TensorOptions& options) {

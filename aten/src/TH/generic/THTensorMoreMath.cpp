@@ -240,83 +240,6 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   }
 }
 
-void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
-{
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
-      dimension);
-
-  THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
-  dim[dimension] = 1;
-  THTensor_(resize)(r_, dim, {});
-
-  int serial_path = 0;
-#ifdef _OPENMP
-  int inOMP = omp_in_parallel();
-  if (inOMP) {
-    serial_path = 1;
-  } else {
-    int r_Contig = THTensor_(isContiguous)(r_);
-    scalar_t *tp = t->data<scalar_t>();
-    scalar_t *rp = r_->data<scalar_t>();
-    if(r_Contig && (tp != rp)){
-      ptrdiff_t iter = 0;
-      ptrdiff_t r_Size = THTensor_(nElement)(r_);
-      int r_Dim = THTensor_nDimensionLegacyAll(r_);
-      #pragma omp parallel for if ( r_Size > HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-      for (iter = 0; iter < r_Size; iter++) {
-        int j;
-        int64_t quot;
-        int64_t rem = iter;
-        ptrdiff_t tBasicIndex = 0;
-
-        for(j = 0; j < r_Dim; ++j) {
-          if(j != dimension){
-            quot = rem/r_->stride(j);
-            rem = rem%r_->stride(j);
-            tBasicIndex += quot*t->stride(j);
-          }
-        }
-        scalar_t *t_data = tp+tBasicIndex;
-        scalar_t *r__data = rp+iter;
-        *r__data = 0;
-        for(j=0; j < THTensor_sizeLegacyNoScalars(t, dimension); ++j) {
-          *r__data += *(t_data + j*THTensor_strideLegacyNoScalars(t, dimension));
-        }
-      }
-    } else {
-      serial_path = 1;
-    }
-  }
-#else
-  serial_path = 1;
-#endif
-  if (serial_path) {
-    // two implementations optimized for data locality
-    if (THTensor_strideLegacyNoScalars(t, dimension) == 1) {
-      TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
-                           accreal sum = 0;
-                           int64_t i;
-                           for(i = 0; i < t_size; i++)
-                             sum += t_data[i*t_stride];
-                           *r__data = (scalar_t)sum;);
-    } else {
-      THTensor_(zero)(r_);
-      THTensor *temp_ = THTensor_(newWithTensor)(r_);
-      // r_.expand_as(t)
-      temp_->set_size(dimension,THTensor_sizeLegacyNoScalars(t, dimension));
-      temp_->set_stride(dimension, 0);
-
-      TH_TENSOR_APPLY2(scalar_t, temp_, scalar_t, t, *temp__data = *temp__data + *t_data;);
-      c10::raw::intrusive_ptr::decref(temp_);
-    }
-  }
-
-  if (!keepdim) {
-    THTensor_(squeeze1d)(r_, r_, dimension);
-  }
-}
-
 void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
@@ -538,18 +461,6 @@ void THTensor_(cminValue)(THTensor *r, THTensor *t, scalar_t value) {
                    *r_data = *t_data > value ? value : *t_data;);  // this order propagates NaN
 }
 
-void THTensor_(zerosLike)(THTensor *r_, THTensor *input)
-{
-  THTensor_(resizeAs)(r_, input);
-  THTensor_(zero)(r_);
-}
-
-void THTensor_(onesLike)(THTensor *r_, THTensor *input)
-{
-  THTensor_(resizeAs)(r_, input);
-  THTensor_(fill)(r_, 1);
-}
-
 void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
 {
   THArgCheck(THTensor_(nDimensionLegacyNoScalars)(t) == 1 || THTensor_(nDimensionLegacyNoScalars)(t) == 2, 1, "matrix or a vector expected");
@@ -599,50 +510,6 @@ void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
   }
 }
 
-void THTensor_(eye)(THTensor *r_, int64_t n, int64_t m)
-{
-  scalar_t *r__data;
-  int64_t i, sz;
-
-  THArgCheck(n > 0, 1, "invalid argument");
-
-  if(m <= 0)
-    m = n;
-
-  THTensor_(resize2d)(r_, n, m);
-  THTensor_(zero)(r_);
-
-  i = 0;
-  r__data = r_->data<scalar_t>();
-  sz = THMin(THTensor_(size)(r_, 0), THTensor_(size)(r_, 1));
-  for(i = 0; i < sz; i++)
-    r__data[i*(r_->stride(0)+r_->stride(1))] = 1;
-}
-
-void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
-{
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-  scalar_t *r__data;
-  int64_t r__stride_0;
-  int64_t i;
-
-  THArgCheck(n > 0, 1, "must be strictly positive");
-
-  THTensor_(resize1d)(r_, n);
-  r__data = r_->data<scalar_t>();
-  r__stride_0 = THTensor_(stride)(r_,0);
-
-  for(i = 0; i < n; i++)
-    r__data[i*r__stride_0] = (scalar_t)(i);
-
-  for(i = 0; i < n-1; i++)
-  {
-    int64_t z = THRandom_random(_generator) % (n-i);
-    scalar_t sav = r__data[i*r__stride_0];
-    r__data[i*r__stride_0] = r__data[(z+i)*r__stride_0];
-    r__data[(z+i)*r__stride_0] = sav;
-  }
-}
 
 /* I cut and pasted (slightly adapted) the quicksort code from
    Sedgewick's 1978 "Implementing Quicksort Programs" article
@@ -891,53 +758,6 @@ void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimensio
 
 /* Implementation of the Quickselect algorithm, based on Nicolas Devillard's
 public domain implementation at http://ndevilla.free.fr/median/median/
-Adapted similarly to the above Quicksort algorithm.
-This version does not produce indices along with values. */
-static void THTensor_(quickselectnoidx)(scalar_t *arr, int64_t k, int64_t elements, int64_t stride)
-{
-  int64_t P, L, R, i, j;
-  scalar_t rswap, piv;
-  L = 0;
-  R = elements-1;
-
-  do {
-    if (R <= L) /* One element only */
-      return;
-
-    if (R == L+1) {  /* Two elements only */
-      if (ARR(L) > ARR(R)) {
-        ARR_SWAP(L, R);
-      }
-      return;
-    }
-
-    /* Use median of three for pivot choice */
-    P=(L+R)>>1;
-    ARR_SWAP(P, L+1);
-    if (ARR(L+1) > ARR(R)) { ARR_SWAP(L+1, R); }
-    if (ARR(L) > ARR(R)) { ARR_SWAP(L, R); }
-    if (ARR(L+1) > ARR(L)) { ARR_SWAP(L+1, L); }
-
-    i = L+1;
-    j = R;
-    piv = ARR(L);
-    do {
-      do i++; while(ARR(i) < piv);
-      do j--; while(ARR(j) > piv);
-      if (j < i)
-        break;
-      ARR_SWAP(i, j);
-    } while(1);
-    ARR_SWAP(L, j);
-
-    /* Re-set active partition */
-    if (j <= k) L=i;
-    if (j >= k) R=j-1;
-  } while(1);
-}
-
-/* Implementation of the Quickselect algorithm, based on Nicolas Devillard's
-public domain implementation at http://ndevilla.free.fr/median/median/
 Adapted similarly to the above Quicksort algorithm. */
 static void THTensor_(quickselect)(scalar_t *arr, int64_t *idx, int64_t k, int64_t elements, int64_t stride)
 {
@@ -987,31 +807,6 @@ static void THTensor_(quickselect)(scalar_t *arr, int64_t *idx, int64_t k, int64
 #undef LONG_SWAP
 #undef REAL_SWAP
 #undef BOTH_SWAP
-
-scalar_t THTensor_(medianall)(THTensor *tensor)
-{
-  THArgCheck(THTensor_nDimensionLegacyAll(tensor) > 0, 1, "tensor must have one dimension");
-
-  scalar_t theMedian;
-  ptrdiff_t numel;
-  int64_t k;
-  THTensor *temp_;
-  scalar_t *temp__data;
-
-  numel = THTensor_(nElement)(tensor);
-  k = (numel-1) >> 1;
-
-  temp_ = THTensor_(newClone)(tensor);
-  temp__data = temp_->data<scalar_t>();
-
-  THTensor_(quickselectnoidx)(temp__data, k, numel, 1);
-
-  theMedian = temp__data[k];
-
-  c10::raw::intrusive_ptr::decref(temp_);
-
-  return theMedian;
-}
 
 void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
 {
@@ -1125,18 +920,6 @@ void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t,
     THTensor_(squeeze1d)(values_, values_, dimension);
     THLongTensor_squeeze1d(indices_, indices_, dimension);
   }
-}
-
-void THTensor_(median)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim)
-{
-  int64_t t_size_dim, k;
-
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "dimension out of range");
-
-  t_size_dim = THTensor_sizeLegacyNoScalars(t, dimension);
-  k = (t_size_dim-1) >> 1; /* take middle or one-before-middle element */
-
-  THTensor_(kthvalue)(values_, indices_, t, k+1, dimension, keepdim);
 }
 
 void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, int dim, int dir, int sorted)
@@ -1421,34 +1204,16 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,)
 #define TH_MATH_NAME(fn) fn
 #endif
 
-LAB_IMPLEMENT_BASIC_FUNCTION(log,TH_MATH_NAME(log))
 LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
-LAB_IMPLEMENT_BASIC_FUNCTION(log10,TH_MATH_NAME(log10))
-LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p))
-LAB_IMPLEMENT_BASIC_FUNCTION(log2,TH_MATH_NAME(log2))
-LAB_IMPLEMENT_BASIC_FUNCTION(erf,TH_MATH_NAME(erf))
-LAB_IMPLEMENT_BASIC_FUNCTION(erfc,TH_MATH_NAME(erfc))
 LAB_IMPLEMENT_BASIC_FUNCTION(erfinv,TH_erfinv)
-LAB_IMPLEMENT_BASIC_FUNCTION(ceil,TH_MATH_NAME(ceil))
-LAB_IMPLEMENT_BASIC_FUNCTION(floor,TH_MATH_NAME(floor))
-LAB_IMPLEMENT_BASIC_FUNCTION(round,TH_MATH_NAME(nearbyint))
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
-LAB_IMPLEMENT_BASIC_FUNCTION(trunc,TH_MATH_NAME(trunc))
 LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
 LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 
-LAB_IMPLEMENT_BASIC_FUNCTION(exp,TH_MATH_NAME(exp),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(expm1,TH_MATH_NAME(expm1),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(cos,TH_MATH_NAME(cos),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(acos,TH_MATH_NAME(acos),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(cosh,TH_MATH_NAME(cosh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(sin,TH_MATH_NAME(sin),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(asin,TH_MATH_NAME(asin),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(sinh,TH_MATH_NAME(sinh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(tan,TH_MATH_NAME(tan),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(atan,TH_MATH_NAME(atan),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(sqrt,TH_MATH_NAME(sqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
@@ -1467,15 +1232,6 @@ void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
     case 1: THTensor_(trigamma)(r_, t); return;
     default: THError("polygamma(n,x) is not implemented for n>=2");
   }
-}
-
-void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension, int keepdim)
-{
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "invalid dimension %d",
-      dimension);
-
-  THTensor_(sum)(r_, t, dimension, keepdim);
-  THTensor_(div)(r_, r_, THTensor_sizeLegacyNoScalars(t, dimension));
 }
 
 void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int keepdim)

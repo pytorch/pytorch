@@ -13,6 +13,7 @@
 #include <c10/util/Optional.h>
 #include <c10/core/Tensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/DeprecatedTypeProperties.h>
 
 namespace c10{
 struct TensorOptions;
@@ -175,7 +176,31 @@ class CAFFE2_API Tensor {
   bool is_contiguous() const {
     return impl_->is_contiguous();
   }
-  Type & type() const {
+
+  // Total bytes consumed by the "view" of elements of the array.  Does not
+  // include size of metadata.  The number reported here does not necessarily
+  // correspond to the true physical memory consumed by a tensor; instead,
+  // it reports the memory the tensor would take *if* it were contiguous.
+  // Defined to be numel() * itemsize()
+  size_t nbytes() const {
+    return impl_->numel() * impl_->itemsize();
+  }
+
+  // Length of one array element in bytes.  This is the traditional
+  // Numpy naming.
+  size_t itemsize() const {
+    return impl_->itemsize();
+  }
+
+  // Same as itemsize().  This is the PyTorch naming.
+  size_t element_size() const {
+    return impl_->itemsize();
+  }
+
+  DeprecatedTypeProperties type() const {
+    return DeprecatedTypeProperties(tensorTypeIdToBackend(type_id()), scalar_type());
+  }
+  Type & dispatch_type() const {
     return legacyTensorType(*impl_);
   }
   TensorTypeId type_id() const {

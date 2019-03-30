@@ -124,7 +124,7 @@ void TensorIterator::compute_types() {
         AT_ERROR("output with backend ", toString(op.tensor.type().backend()), " and dtype ", toString(op.tensor.scalar_type()),
                  " doesn't match the desired backend ", toString(op.backend), " and dtype ", toString(op.dtype));
       } else if (op.tensor.dim() == 0) {
-        op.tensor = op.tensor.to(TensorOptions(op.backend).dtype(op.dtype));
+        op.tensor = op.tensor.to(op.options());
       } else {
         AT_ERROR("expected backend ", toString(op.backend), " and dtype ", toString(op.dtype),
                  " but got backend ", toString(op.tensor.type().backend()), " and dtype ", toString(op.tensor.scalar_type()));
@@ -191,7 +191,7 @@ void TensorIterator::allocate_outputs() {
       for (int dim = 0; dim < ndim(); dim++) {
         tensor_stride[dim] /= element_size;
       }
-      op.tensor = at::empty_strided(tensor_shape, tensor_stride, TensorOptions(op.backend).dtype(op.dtype));
+      op.tensor = at::empty_strided(tensor_shape, tensor_stride, op.options());
     }
   }
 }
@@ -479,6 +479,13 @@ std::unique_ptr<TensorIterator> TensorIterator::binary_op(Tensor& out, const Ten
   return builder.build();
 }
 
+std::unique_ptr<TensorIterator> TensorIterator::unary_op(Tensor& out, const Tensor& a) {
+  auto builder = TensorIterator::Builder();
+  builder.add_output(out);
+  builder.add_input(a);
+  return builder.build();
+}
+
 std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   AT_ASSERT(out.defined());
   auto builder = TensorIterator::Builder();
@@ -548,7 +555,7 @@ static DimVector compute_stride(const Tensor& tensor, IntArrayRef shape) {
   int ndim = shape.size();
   auto original_shape = tensor.sizes();
   auto original_stride = tensor.strides();
-  auto element_size_in_bytes = tensor.dtype().itemsize();
+  auto element_size_in_bytes = tensor.element_size();
 
   auto stride = DimVector(ndim, 0);
   auto offset = ndim - original_shape.size();

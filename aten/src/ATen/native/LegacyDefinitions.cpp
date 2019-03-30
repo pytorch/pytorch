@@ -424,14 +424,6 @@ std::tuple<Tensor,Tensor> gels(const Tensor & self, const Tensor & A) {
   return at::legacy::th::_th_gels(self, A);
 }
 
-std::tuple<Tensor &,Tensor &> trtrs_out(Tensor & X, Tensor & M, const Tensor & self, const Tensor & A, bool upper, bool transpose, bool unitriangular) {
-  return at::legacy::th::_th_trtrs_out(X, M, self, A, upper, transpose, unitriangular);
-}
-
-std::tuple<Tensor,Tensor> trtrs(const Tensor & self, const Tensor & A, bool upper, bool transpose, bool unitriangular) {
-  return at::legacy::th::_th_trtrs(self, A, upper, transpose, unitriangular);
-}
-
 std::tuple<Tensor &,Tensor &> symeig_out(Tensor & e, Tensor & V, const Tensor & self, bool eigenvectors, bool upper) {
   return at::legacy::th::_th_symeig_out(e, V, self, eigenvectors, upper);
 }
@@ -502,22 +494,6 @@ Tensor & ormqr_out(Tensor & result, const Tensor & self, const Tensor & input2, 
 
 Tensor ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose) {
   return at::legacy::th::_th_ormqr(self, input2, input3, left, transpose);
-}
-
-std::tuple<Tensor &,Tensor &> btrifact_out(Tensor & A_LU, Tensor & pivots, const Tensor & self, bool pivot) {
-  return at::legacy::th::_th_btrifact_out(A_LU, pivots, self, pivot);
-}
-
-std::tuple<Tensor,Tensor> btrifact(const Tensor & self, bool pivot) {
-  return at::legacy::th::_th_btrifact(self, pivot);
-}
-
-std::tuple<Tensor &,Tensor &,Tensor &> btrifact_with_info_out(Tensor & A_LU, Tensor & pivots, Tensor & info, const Tensor & self, bool pivot) {
-  return at::legacy::th::_th_btrifact_with_info_out(A_LU, pivots, info, self, pivot);
-}
-
-std::tuple<Tensor,Tensor,Tensor> btrifact_with_info(const Tensor & self, bool pivot) {
-  return at::legacy::th::_th_btrifact_with_info(self, pivot);
 }
 
 Tensor & btrisolve_out(Tensor & result, const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
@@ -672,10 +648,6 @@ Tensor max(const Tensor & self, const Tensor & other) {
 
 Tensor max(const Tensor & self) {
   return at::legacy::th::_th_max(self);
-}
-
-Tensor median(const Tensor & self) {
-  return at::legacy::th::_th_median(self);
 }
 
 std::tuple<Tensor &,Tensor &> sort_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending) {

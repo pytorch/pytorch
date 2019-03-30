@@ -84,8 +84,8 @@ Tensor new_with_storage(const Type& type, Storage storage) {
 }
 
 Tensor new_with_tensor(const Type& type, const Tensor& other) {
-  if (other.type() != type) {
-    throw TypeError("expected %s (got %s)", type.toString(), other.type().toString());
+  if (other.dispatch_type() != type) {
+    throw TypeError("expected %s (got %s)", type.toString(), other.type().toString().c_str());
   }
   return other.slice();
 }
@@ -115,7 +115,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
   if (PyFloat_Check(obj)) {
     // this is always guaranteed to be a floating-point type, and makes it more
     // convenient to write e.g. torch.tensor(0.) than torch.tensor(0., dtype=torch.Tensor.dtype).
-    return static_cast<ScalarType>(torch::tensors::get_default_tensor_type().scalar_type);
+    return torch::tensors::get_default_tensor_type().scalarType();
   }
   if (THPUtils_checkLong(obj)) {
     return ScalarType::Long;
@@ -144,9 +144,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
     auto length = PySequence_Length(obj);
     if (length < 0) throw python_error();
     // match NumPy semantics, except use default tensor type instead of double.
-    if (length == 0) {
-      return static_cast<ScalarType>(torch::tensors::get_default_tensor_type().scalar_type);
-    }
+    if (length == 0) return torch::tensors::get_default_tensor_type().scalarType();
     for (int i = 0; i < length; ++i) {
       THPObjectPtr handle(PySequence_GetItem(obj, i));
       if (!handle) throw python_error();
@@ -209,7 +207,7 @@ Tensor internal_new_from_data(
     // infer the scalar type and device type; it's not expected to infer the layout since these constructors
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
     const auto& inferred_scalar_type = type_inference ? var.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(torch::getDeviceType(type)));
+    auto device = device_opt.has_value() ? *device_opt : (type_inference ? var.device() : at::Device(type.device_type()));
     AutoNoGIL no_gil;
     maybe_initialize_cuda(device);
     return var.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_variables);
@@ -232,7 +230,7 @@ Tensor internal_new_from_data(
   recursive_store(
       (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
       inferred_scalar_type, tensor.dtype().itemsize(), data);
-  auto device = device_opt.has_value() ? *device_opt : at::Device(torch::getDeviceType(type));
+  auto device = device_opt.has_value() ? *device_opt : at::Device(type.device_type());
   AutoNoGIL no_gil;
   maybe_initialize_cuda(device);
   return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
@@ -487,7 +485,7 @@ Tensor sparse_coo_tensor_ctor(const Type& default_type, ScalarType scalar_type, 
     at::OptionalDeviceGuard device_guard(r.deviceOptional(3));
     // if no dtype provided, infer type based on value type.
     Tensor values = internal_new_from_data(values_type, inferred_scalar_type, r.deviceOptional(3), r.pyobject(1), false, true, type_inference);
-    const auto& indices_type = values.type().toScalarType(kLong);
+    const auto& indices_type = values.dispatch_type().toScalarType(kLong);
     Tensor indices = internal_new_from_data(indices_type, kLong, r.deviceOptional(3), r.pyobject(0), false, true, false);
     return at::sparse_coo_tensor(indices, values, values.options().layout(at::kSparse)).set_requires_grad(r.toBool(4));
   } else if (r.idx == 1) {
@@ -497,7 +495,7 @@ Tensor sparse_coo_tensor_ctor(const Type& default_type, ScalarType scalar_type, 
     const auto& values_type = type.toDense();
     at::OptionalDeviceGuard device_guard(r.deviceOptional(4));
     Tensor values = internal_new_from_data(values_type, inferred_scalar_type, r.deviceOptional(4), r.pyobject(1), false, true, type_inference);
-    const auto& indices_type = values.type().toScalarType(kLong);
+    const auto& indices_type = values.dispatch_type().toScalarType(kLong);
     Tensor indices = internal_new_from_data(indices_type, kLong, r.deviceOptional(4), r.pyobject(0), false, true, false);
     return at::sparse_coo_tensor(indices, values, r.intlist(2), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(5));
   } else if (r.idx == 2) {

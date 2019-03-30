@@ -66,7 +66,7 @@ struct DimCounter {
 };
 struct CAFFE2_API OperandInfo {
   OperandInfo() {}
-  OperandInfo(const Tensor& t, const Backend backend=Backend::Undefined, const ScalarType dtype=ScalarType::Undefined)
+  explicit OperandInfo(const Tensor& t, const Backend backend=Backend::Undefined, const ScalarType dtype=ScalarType::Undefined)
     : tensor(t), backend(backend), dtype(dtype) {
       if (t.defined() && (backend == Backend::Undefined || dtype == ScalarType::Undefined)) {
         this->backend = t.type().backend();
@@ -100,6 +100,10 @@ struct CAFFE2_API OperandInfo {
   void set_type(Backend b, ScalarType s) {
     dtype = s;
     backend = b;
+  }
+
+  TensorOptions options() {
+    return TensorOptions(backendToDeviceType(backend)).dtype(dtype);
   }
 
   /// The data pointer. This may be different from tensor.data_ptr() if the
@@ -141,6 +145,7 @@ struct CAFFE2_API TensorIterator {
   void foreach_reduced_elt(const loop_subiter_t& loop, bool parallelize=true);
 
   static std::unique_ptr<TensorIterator> binary_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static std::unique_ptr<TensorIterator> unary_op(Tensor& out, const Tensor& a);
   static std::unique_ptr<TensorIterator> reduce_op(Tensor& out, const Tensor& a);
 
   int ndim() const { return shape_.size(); }
