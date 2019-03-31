@@ -7,7 +7,7 @@
 #      ARCH_AND_PTX : NAME | NUM.NUM | NUM.NUM(NUM.NUM) | NUM.NUM+PTX
 #      NAME: Fermi Kepler Maxwell Kepler+Tegra Kepler+Tesla Maxwell+Tegra Pascal
 #      NUM: Any number. Only those pairs are currently accepted by NVCC though:
-#            2.0 2.1 3.0 3.2 3.5 3.7 5.0 5.2 5.3 6.0 6.2
+#            2.0 2.1 3.0 3.2 3.5 3.7 5.0 5.2 5.3 6.0 6.2 7.0 7.5
 #      Returns LIST of flags to be added to CUDA_NVCC_FLAGS in ${out_variable}
 #      Additionally, sets ${out_variable}_readable to the resulting numeric list
 #      Example:
@@ -43,9 +43,16 @@ endif ()
 
 if (CUDA_VERSION VERSION_GREATER "8.5")
   list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Volta")
-  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "7.0" "7.0+PTX")
+  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "7.0")
 else()
   list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "6.1+PTX")
+endif()
+
+if (CUDA_VERSION VERSION_GREATER "9.5")
+  list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Turing")
+  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "7.5" "7.5+PTX")
+else()
+  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "7.0+PTX")
 endif()
 
 ################################################################################################
@@ -165,8 +172,11 @@ function(CUDA_SELECT_NVCC_ARCH_FLAGS out_variable)
         set(arch_bin 6.0 6.1)
         set(arch_ptx 6.1)
       elseif(${arch_name} STREQUAL "Volta")
-        set(arch_bin 7.0 7.0)
+        set(arch_bin 7.0)
         set(arch_ptx 7.0)
+      elseif(${arch_name} STREQUAL "Turing")
+        set(arch_bin 7.5)
+        set(arch_ptx 7.5)
       else()
         message(SEND_ERROR "Unknown CUDA Architecture Name ${arch_name} in CUDA_SELECT_NVCC_ARCH_FLAGS")
       endif()
