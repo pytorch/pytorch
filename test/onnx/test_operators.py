@@ -1,4 +1,4 @@
-from test_pytorch_common import TestCase, run_tests, skipIfNoLapack, flatten
+from test_pytorch_common import TestCase, run_tests, flatten
 
 import torch
 import torch.onnx
@@ -10,11 +10,9 @@ import itertools
 import io
 import unittest
 import inspect
-import argparse
 import glob
 import os
 import shutil
-import sys
 import common_utils as common
 
 
@@ -434,6 +432,10 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.flatten(x, 1), x)
 
+    def test_isnan(self):
+        x = torch.tensor([1, float('nan'), 2])
+        self.assertONNX(lambda x: torch.isnan(x), x)
+
     def test_argmax(self):
         x = torch.randn(4, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.argmax(x, dim=1), x)
@@ -551,6 +553,21 @@ class TestOperators(TestCase):
         x = torch.randn(2, 3).float()
         y = torch.randn(2, 3).float()
         self.assertONNX(lambda x, y: x + y, (x, y), opset_version=10)
+
+    def test_retain_param_name_disabled(self):
+        class MyModule(Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.fc1 = nn.Linear(4, 5, bias=False)
+                self.fc1.weight.data.fill_(2.)
+                self.fc2 = nn.Linear(5, 6, bias=False)
+                self.fc2.weight.data.fill_(3.)
+
+            def forward(self, x):
+                return self.fc2(self.fc1(x))
+
+        x = torch.randn(3, 4).float()
+        self.assertONNX(MyModule(), (x,), _retain_param_name=False)
 
 
 if __name__ == '__main__':

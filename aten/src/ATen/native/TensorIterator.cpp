@@ -183,7 +183,7 @@ void TensorIterator::allocate_outputs() {
     auto& op = operands_[i];
     if (!op.tensor.defined()) {
       AT_ASSERTM(op.type, "no type for operand", i);
-      int element_size = op.type->elementSizeInBytes();
+      int element_size = op.type->typeMeta().itemsize();
       op.stride_bytes = compatible_stride(element_size);
 
       auto tensor_shape = invert_perm(shape_);
@@ -479,6 +479,13 @@ std::unique_ptr<TensorIterator> TensorIterator::binary_op(Tensor& out, const Ten
   return builder.build();
 }
 
+std::unique_ptr<TensorIterator> TensorIterator::unary_op(Tensor& out, const Tensor& a) {
+  auto builder = TensorIterator::Builder();
+  builder.add_output(out);
+  builder.add_input(a);
+  return builder.build();
+}
+
 std::unique_ptr<TensorIterator> TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   AT_ASSERT(out.defined());
   auto builder = TensorIterator::Builder();
@@ -548,7 +555,7 @@ static DimVector compute_stride(const Tensor& tensor, IntArrayRef shape) {
   int ndim = shape.size();
   auto original_shape = tensor.sizes();
   auto original_stride = tensor.strides();
-  auto element_size_in_bytes = tensor.type().elementSizeInBytes();
+  auto element_size_in_bytes = tensor.element_size();
 
   auto stride = DimVector(ndim, 0);
   auto offset = ndim - original_shape.size();

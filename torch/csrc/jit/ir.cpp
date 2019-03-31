@@ -81,8 +81,8 @@ struct const_value_list_with_types {
   std::string delim;
   const_value_list_with_types(
       ArrayRef<const Value*> values,
-      const std::string& delim = ", ")
-      : values(values), delim(delim) {}
+      std::string delim_ = ", ")
+      : values(values), delim(std::move(delim_)) {}
 };
 
 std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
@@ -290,13 +290,15 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
 
 std::ostream& Graph::prettyPrint(std::ostream& out) {
   std::vector<at::Tensor> tensor_table;
-  PythonPrint(out, *this, tensor_table);
+  std::vector<ClassTypePtr> class_table;
+  PythonPrint(out, *this, tensor_table, class_table);
   return out;
 }
 
 void Graph::dumpPretty() {
   std::vector<at::Tensor> tensor_table;
-  PythonPrint(std::cout, *this, tensor_table);
+  std::vector<ClassTypePtr> class_table;
+  PythonPrint(std::cout, *this, tensor_table, class_table);
 }
 
 static void checkSameDevice(const Node* node) {
@@ -639,6 +641,10 @@ std::shared_ptr<Graph> Graph::copy() {
 bool Value::mustBeNone() const {
   return node_->mustBeNone();
 }
+bool Value::mustNotBeNone() const {
+  return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
+      !type()->cast<OptionalType>();
+}
 
 std::string Value::uniqueNameBase() const {
   std::string name = uniqueName();
@@ -769,9 +775,10 @@ bool Node::matches(
 }
 
 bool Node::mustBeNone() const {
-  return kind_ == prim::Constant && !this->hasAttributes() &&
-      (output()->type()->cast<OptionalType>() ||
-       output()->type() == NoneType::get());
+  return kind_ == prim::AutogradZero ||
+      (kind_ == prim::Constant && !this->hasAttributes() &&
+       (output()->type()->cast<OptionalType>() ||
+        output()->type() == NoneType::get()));
 }
 
 void Node::dump() const {
@@ -838,6 +845,8 @@ bool Node::hasSideEffects() const {
     case prim::RaiseException:
     case prim::SetAttr:
     case aten::warn:
+    case prim::AddStatValue:
+     case prim::TimePoint:
       return true;
   }
   return false;

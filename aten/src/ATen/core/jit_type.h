@@ -246,6 +246,11 @@ struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType,
     return ss.str();
   }
 
+  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
+    AT_ASSERT(contained_types.size() == 1);
+    return create(contained_types[0]);
+  }
+
   // common cast Optional[Tensor] for undefined tensor type
   static OptionalTypePtr ofTensor();
 private:
@@ -301,7 +306,7 @@ struct CAFFE2_API AutogradZeroTensorType : public TensorType {
            TensorType::isSubtypeOf(rhs);
   }
   std::string str() const override {
-    return "UndefinedTensor";
+    return "AutogradZeroTensor";
   }
 
   static const TypeKind Kind = TypeKind::AutogradZeroTensorType;
@@ -1106,6 +1111,8 @@ struct CAFFE2_API ClassType : public Type {
       std::shared_ptr<Module> module);
   // returns nullptr if there is no type with that name
   static ClassTypePtr get(const std::string& name);
+  // For testing: delete all registered types
+  static void clearRegistry();
 
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
@@ -1124,35 +1131,58 @@ struct CAFFE2_API ClassType : public Type {
     return std::string("ClassType<") + typename_ + ">";
   }
 
+  std::string python_str() const override {
+    return typename_;
+  }
+
   TypePtr getAttribute(const std::string& name) const {
-    const auto it = std::find_if(
-        attributes_.cbegin(), attributes_.cend(), [&](const Attribute& attr) {
-          return attr.name == name;
-        });
-    if (it == attributes_.cend()) {
-      return nullptr;
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+    size_t pos = 0;
+    for (const auto& attr : attributeNames_) {
+      if (name == attr) {
+        break;
+      }
+      ++pos;
     }
 
-    return it->type;
+    if (pos >= attributeNames_.size()) {
+      return nullptr;
+    }
+    return attributeTypes_[pos];
+  }
+
+  TypePtr getAttribute(size_t slot) const {
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+    AT_ASSERT(slot < attributeTypes_.size());
+    return attributeTypes_[slot];
+  }
+
+  const std::string& getAttributeName(size_t slot) const {
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+    AT_ASSERT(slot < attributeTypes_.size());
+    return attributeNames_[slot];
   }
 
   Method* getMethod(const std::string& name) const;
+  std::vector<Method*> methods() const;
 
   std::string name() const {
     return typename_;
   }
 
   size_t numAttributes() const {
-    return attributes_.size();
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+    return attributeNames_.size();
   }
 
   // Attributes are stored in a specific slot at runtime for effiency.
   // When emitting instructions we specify the slot so that attribute access is
   // a constant lookup
   size_t getAttributeSlot(const std::string& name) const {
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     size_t slot = 0;
-    for (const auto& attr : attributes_) {
-      if (name == attr.name) {
+    for (const auto& attr : attributeNames_) {
+      if (name == attr) {
         return slot;
       }
       slot++;
@@ -1162,14 +1192,19 @@ struct CAFFE2_API ClassType : public Type {
 
   bool hasAttribute(const std::string& name) const {
     return std::find_if(
-               attributes_.cbegin(),
-               attributes_.cend(),
-               [&](const Attribute& attr) { return attr.name == name; }) !=
-        attributes_.cend();
+               attributeNames_.cbegin(),
+               attributeNames_.cend(),
+               [&](const std::string& attr) { return attr == name; }) !=
+        attributeNames_.cend();
   }
 
   void addAttribute(const std::string& name, TypePtr type) {
-    attributes_.emplace_back(name, type);
+    attributeNames_.push_back(name);
+    attributeTypes_.push_back(type);
+  }
+
+  at::ArrayRef<TypePtr> containedTypes() const override {
+    return attributeTypes_;
   }
 
   static const TypeKind Kind = TypeKind::ClassType;
@@ -1187,13 +1222,10 @@ struct CAFFE2_API ClassType : public Type {
   // NOTE: this does not contain methods, which are stored in the module
   // TODO: once modules support arbitrary ivalue attributes, we don't need this
   // anymore.
-  struct Attribute {
-    Attribute(std::string n, TypePtr t)
-        : name(std::move(n)), type(std::move(t)) {}
-    std::string name;
-    TypePtr type;
-  };
-  std::vector<Attribute> attributes_;
+  // TODO: This is better represented as an OrderedDict, but alas it is not yet
+  // available from c10
+  std::vector<std::string> attributeNames_;
+  std::vector<TypePtr> attributeTypes_;
   // Holds method attributes
   std::shared_ptr<Module> module_;
 

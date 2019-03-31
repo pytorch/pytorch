@@ -12,14 +12,11 @@ generated.  In the full build system, OUTPUT_DIR is
 torch/csrc/jit/generated/
 """
 
-import os
 import argparse
-import re
 import copy
-from itertools import count, combinations, groupby
-from ..autograd.utils import CodeTemplate, write, uninplace_api_name
+from itertools import groupby
+from ..autograd.utils import CodeTemplate, write
 from ..autograd.gen_autograd import load_aten_declarations
-from collections import OrderedDict
 from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
 
 # JIT has a type system of
@@ -472,7 +469,11 @@ def signature(decl, should_match_schema=True):
         decl = '{} {}'.format(typ, name)
         if 'default' in arg:
             # clean up initializer lists {{true, true}} -> [true, true]
-            default = str(arg['default']) \
+            default = arg['default']
+            # NOTE: str(float) in python2 truncates, which makes JIT signatures not match native_functions
+            # signatures.  repr(float) doesn't seem to truncate in these cases.
+            default = str(default) if not isinstance(default, float) else repr(default)
+            default = default \
                 .replace('{{', '[') \
                 .replace('}}', ']') \
                 .replace('true', 'True') \

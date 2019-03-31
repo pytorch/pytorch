@@ -13,7 +13,7 @@ std::shared_ptr<nvinfer1::ICudaEngine> BuildTrtEngine(
   auto trt_builder = TrtObject(nvinfer1::createInferBuilder(*logger));
   auto trt_network = TrtObject(trt_builder->createNetwork());
   auto trt_parser =
-      TrtObject(nvonnxparser::createParser(trt_network.get(), *logger));
+      TrtObject(nvonnxparser::createParser(*trt_network, *logger));
   auto status = trt_parser->parse(onnx_model_str.data(), onnx_model_str.size());
   if (!status) {
     const auto num_errors = trt_parser->getNbErrors();

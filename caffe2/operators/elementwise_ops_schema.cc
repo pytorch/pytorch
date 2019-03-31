@@ -27,7 +27,7 @@ Argument `broadcast=1` needs to be passed to enable broadcasting.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_op_schema.cc
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_ops_schema.cc
 
 )DOC";
 
@@ -883,7 +883,7 @@ Performs element-wise negation on input tensor `X`.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_op_schema.cc
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_ops_schema.cc
 
 <details>
 
@@ -938,7 +938,7 @@ OPERATOR_SCHEMA(Sign)
 Computes sign for each element of the input: -1, 0 or 1.
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_op_schema.cc
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_ops_schema.cc
 
 <details>
 
