@@ -52,10 +52,9 @@ class RemoveDataBlocksOp final : public Operator<Context> {
     ind_vec.erase(std::unique(ind_vec.begin(), ind_vec.end()), ind_vec.end());
     indices_size = ind_vec.size();
 
-    auto* output = Output(0);
     auto shape = data.sizes().vec();
     shape[0] -= indices_size;
-    output->Resize(shape);
+    auto* output = Output(0, shape, at::dtype(data.dtype()));
     char* out_ptr = (char*)output->raw_mutable_data(data.dtype());
 
     ind_vec.insert(ind_vec.begin(), -1);
