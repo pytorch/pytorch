@@ -35,6 +35,7 @@ install_official_git_client: &install_official_git_client
   command: |
     set -e
 
+    ps ax | grep apt
     sudo apt-get -q -y update
     sudo apt-get -q -y install openssh-client git
 
