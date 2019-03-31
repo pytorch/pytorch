@@ -2986,6 +2986,7 @@ def add_test(
         self_size,
         args,
         variant_name='',
+        check_ad=(),  # only used in test_jit
         dim_args_idx=(),
         skipTestIf=(),
         output_process_fn=lambda x: x,
