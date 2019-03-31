@@ -1,35 +1,31 @@
 import torch._C
-from torch import Tensor
 from torch.autograd import Variable, function
 from torch.serialization import validate_cuda_device
-from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
+from torch.nn import Module, ModuleList, Parameter, Sequential
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
-from torch._six import raise_from, with_metaclass, get_function_from_type, \
+from torch._six import with_metaclass, get_function_from_type, \
     string_classes
-from torch._jit_internal import ignore
-from torch.jit._pickle import Unpickler
+from torch._jit_internal import ignore  # noqa: F401
+from torch.jit._pickle import Unpickler  # noqa: F401
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
 
 import math
-from collections import defaultdict, OrderedDict, namedtuple
+from collections import OrderedDict, namedtuple
 import textwrap
 import sys
 import warnings
-import itertools
 import weakref
 import types
 import contextlib
 import os
 import functools
 import copy
-import numbers
 import collections
-import re
 import inspect
 import pickle
 if sys.version_info[0] > 2:
