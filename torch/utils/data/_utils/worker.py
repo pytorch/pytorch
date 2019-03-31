@@ -129,13 +129,19 @@ def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
         _worker_info = WorkerInfo(id=worker_id, num_workers=num_workers,
                                   seed=seed, dataset=dataset)
 
-        if init_fn is not None:
-            init_fn(worker_id)
-
         from torch.utils.data import _DataLoaderStrategy
 
-        if mode == _DataLoaderStrategy.Iterable:
-            dataset_iter = iter(dataset)
+        init_exception = None
+
+        try:
+            if init_fn is not None:
+                init_fn(worker_id)
+
+            if mode == _DataLoaderStrategy.Iterable:
+                dataset_iter = iter(dataset)
+
+        except Exception:
+            init_exception = ExceptionWrapper(sys.exc_info())
 
         # When using Iterable mode, some worker can exit earlier than others due
         # to the IterableDataset behaving differently for different workers.
@@ -169,19 +175,23 @@ def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
                 continue
             idx, index = r
             try:
-                if mode == _DataLoaderStrategy.Iterable:
-                    try:
-                        data = convert_fn(next(dataset_iter))
-                    except StopIteration:
-                        data = IterableDatasetStopIteration(worker_id)
-                        # set `iteration_end` to save future `next(...)` calls,
-                        # and to avoid sending multiple `IterableDatasetStopIteration`.
-                        iteration_end = True
-                elif mode == _DataLoaderStrategy.Map:
-                    data = convert_fn(dataset[index])
+                if init_exception is not None:
+                    data = init_exception
+                    init_exception = None
                 else:
-                    # mode == _DataLoaderStrategy.MapWithBatchedRead:
-                    data = collate_fn([dataset[i] for i in index])
+                    if mode == _DataLoaderStrategy.Iterable:
+                        try:
+                            data = convert_fn(next(dataset_iter))
+                        except StopIteration:
+                            data = IterableDatasetStopIteration(worker_id)
+                            # set `iteration_end` to save future `next(...)` calls,
+                            # and to avoid sending multiple `IterableDatasetStopIteration`.
+                            iteration_end = True
+                    elif mode == _DataLoaderStrategy.Map:
+                        data = convert_fn(dataset[index])
+                    else:
+                        # mode == _DataLoaderStrategy.MapWithBatchedRead:
+                        data = collate_fn([dataset[i] for i in index])
             except Exception:
                 # It is important that we don't store exc_info in a variable,
                 # see NOTE [ Python Traceback Reference Cycle Problem ]

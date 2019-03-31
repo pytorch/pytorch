@@ -576,6 +576,17 @@ def test_iterable_dataset_multiprocessing():
         assert not w.is_alive()
 
 
+# used with test_error_in_init
+class ErrorIterableDataset(IterableDataset):
+    def __iter__(self):
+        raise RuntimeError("Error in __iter__")
+
+
+# used with test_error_in_init
+def error_worker_init_fn(_):
+    raise RuntimeError("Error in worker_init_fn")
+
+
 class TestDataLoader(TestCase):
 
     def setUp(self):
@@ -621,6 +632,15 @@ class TestDataLoader(TestCase):
                 self.assertEqual(errors,
                                  math.ceil(float(len(loader.dataset)) / loader.batch_size))
                 return
+
+    def test_error_in_init(self):
+        loader = DataLoader(ErrorIterableDataset(), num_workers=2)
+        with self.assertRaisesRegex(RuntimeError, 'Error in __iter__'):
+            list(iter(loader))
+
+        loader = DataLoader(self.dataset, num_workers=2, worker_init_fn=error_worker_init_fn)
+        with self.assertRaisesRegex(RuntimeError, 'Error in worker_init_fn'):
+            list(iter(loader))
 
     def test_invalid_assign_after_init(self):
         dl = DataLoader(self.dataset)
