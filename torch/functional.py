@@ -16,6 +16,7 @@ __all__ = [
     'isfinite',
     'isinf',
     'lu',
+    'lu_unpack',
     'norm',
     'meshgrid',
     'potrf',
@@ -83,7 +84,7 @@ def split(tensor, split_size_or_sections, dim=0):
     return tensor.split(split_size_or_sections, dim)
 
 
-def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
+def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     r"""Unpacks the data and pivots from a LU factorization of a tensor.
 
     Returns a tuple of tensors as ``(the pivots, the L tensor, the U tensor)``.
@@ -98,7 +99,7 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
 
         >>> A = torch.randn(2, 3, 3)
         >>> A_LU, pivots = A.lu()
-        >>> P, A_L, A_U = torch.btriunpack(A_LU, pivots)
+        >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
         >>>
         >>> # can recover A from factorization
         >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
@@ -803,6 +804,21 @@ def btrifact_with_info(A, pivot=True, out=None):
                   "set to True instead.",
                   stacklevel=2)
     return lu(A, pivot=pivot, get_infos=True, out=out)
+
+
+def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
+    r"""Unpacks the data and pivots from a LU factorization of a tensor.
+
+    For more information regarding :func:`torch.btriunpack`, please check :func:`torch.lu_unpack`.
+
+    .. warning::
+        :func:`torch.btriunpack` is deprecated in favour of :func:`torch.lu_unpack` and will be
+        removed in the next release. Please use :func:`torch.lu_unpack` instead.
+    """
+    warnings.warn("torch.btriunpack is deprecated in favour of torch.lu_unpack and will be "
+                  "removed in the next release. Please use torch.lu_unpack instead.", stacklevel=2)
+    return lu_unpack(LU_data=LU_data, LU_pivots=LU_pivots,
+                     unpack_data=unpack_data, unpack_pivots=unpack_pivots)
 
 
 def lu(A, pivot=True, get_infos=False, out=None):

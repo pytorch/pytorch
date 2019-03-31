@@ -84,7 +84,8 @@ std::vector<std::vector<TensorCPU>> split(
     CAFFE_ENFORCE_EQ(input.sizes().at(0), outputSize);
 
     for (int i = 0; i < outputSize; ++i) {
-      outputs[i].push_back(Tensor(outputDims, CPU));
+      outputs[i].push_back(
+          caffe2::empty(outputDims, at::dtype(input.dtype()).device(CPU)));
       context.CopyItemsToCPU(
           input.dtype(),
           innerSize,
