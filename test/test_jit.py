@@ -68,6 +68,10 @@ except ImportError:
 
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
+# Note: creating FusionGroups is currently device-independent.
+# FusionGroup creation with CPU is disabled.
+FUSION_ENABLED = torch._C._jit_can_fuse_on_cpu() or torch._C._jit_can_fuse_on_gpu()
+
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_HALF = RUN_CUDA
 if torch.cuda.is_available():
@@ -384,6 +388,25 @@ class JitTestCase(TestCase):
         graph = torch._C._jit_pass_canonicalize(graph)
         torch._C._jit_pass_lint(graph)
         self.assertExpected(str(graph), *args, **kwargs)
+
+    def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):
+        if not FUSION_ENABLED:
+            nonfusible_nodes = nonfusible_nodes + fusible_nodes
+            fusible_nodes = []
+        diff_nodes = graph.findAllNodes('prim::DifferentiableGraph')
+        diff_subgraphs = [node.g('Subgraph') for node in diff_nodes]
+
+        # For any non-fusible node, it must show up in one of the DifferentiableGraph.
+        found_all_nonfusible_nodes = (len(diff_subgraphs) == 0 and len(nonfusible_nodes) == 0)\
+            or all([any(g.findNode(n) is not None for g in diff_subgraphs) for n in nonfusible_nodes])
+
+        # For any fusible node, it must show up in one of the FusionGroup in the DifferentiableGraph.
+        fusion_nodes = list(chain.from_iterable([g.findAllNodes('prim::FusionGroup') for g in diff_subgraphs]))
+        fusion_subgraphs = [node.g('Subgraph') for node in fusion_nodes]
+        found_all_fusible_nodes = (len(fusion_nodes) == 0 and len(fusible_nodes) == 0)\
+            or all([any(g.findNode(n) is not None for g in fusion_subgraphs) for n in fusible_nodes])
+
+        self.assertEqual(should_autodiff_node, found_all_nonfusible_nodes and found_all_fusible_nodes)
 
     def run_pass(self, name, trace):
         if isinstance(trace, torch._C.Graph):
@@ -11283,6 +11306,15 @@ EXCLUDE_SCRIPT = {
     'test_nn_fold',
 }
 
+# chunk returns a list in scripting and we don't unpack the list,
+# Thus it won't be replaced by ConstantChunk and run AD.
+# It's explicitly checked in test_chunk_constant_script_ad
+EXCLUDE_SCRIPT_AD_CHECK = {
+    'test_chunk',
+    'test_chunk_dim',
+    'test_chunk_dim_neg0',
+}
+
 EXCLUDE_PYTHON_PRINT = {
     # no support for BroadcastingList in python printer
     'test_nn_max_unpool1d',
@@ -11299,23 +11331,6 @@ EXCLUDE_SCRIPT_MODULES = {
     'test_nn_AdaptiveAvgPool3d_tuple_none',
     'test_nn_AdaptiveMaxPool2d_tuple_none',
     'test_nn_AdaptiveMaxPool3d_tuple_none',
-}
-
-DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
-    'test_nn_avg_pool2d',
-    'test_nn_adaptive_avg_pool1d',
-    'test_nn_adaptive_avg_pool2d',
-    'test_nn_adaptive_avg_pool3d',
-    'test_nn_batch_norm',
-    'test_nn_embedding',
-    'test_nn_log_softmax',
-    'test_nn_softmax',
-    'test_nn_softmax_with_all_args',
-    'test_nn_threshold',
-    'test_nn_nll_loss',
-    # Should have added all test_nn_interpolate_* here,
-    # but it's using autodiff since its subgraph is over
-    # 2 nodes.
 }
 
 
@@ -11527,6 +11542,17 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
     def assertGraphSize(self, graph, size):
         self.assertEqual(len(list(graph.nodes())), size)
+
+    def test_chunk_constant_script_ad(self):
+        @torch.jit.script
+        def func(x):
+            x1, x2 = torch.chunk(x, 2)
+            return (x1, x2)
+
+        input = torch.rand(6, 10).requires_grad_()
+        func.debug_disable_autodiff_subgraph_inlining()
+        output = func(input)
+        self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
 
     def test_simple_merge(self):
         # o --> o
@@ -11867,6 +11893,7 @@ EXCLUDE_MODULE_EXPORT_IMPORT = {
 #   args (tuple represents shape of a tensor arg),
 #   test variant name(will be used at test name suffix,
 #       'inplace' skips grad tests),                         // optional
+#   (True, nonfusible_nodes, fusible_nodes) for autodiff     // optional
 #   fn to determine if test should be skipped,               // optional
 #   fn mapping output to part that should be gradcheck'ed,   // optional
 #   kwargs for function,                                     // optional
@@ -11880,7 +11907,7 @@ nn_functional_tests = [
     ('conv_transpose3d', (S, S, S, S, S), ((S, S, S, S, S),)),
     ('conv_tbc', (S, S, S), ((S, S, S), (S,), 2)),
     ('avg_pool1d', (S, S, S), (3,)),
-    ('avg_pool2d', (S, S, S, S), (3,)),
+    ('avg_pool2d', (S, S, S, S), (3,), '', (True,)),
     ('avg_pool3d', (S, S, S, S, S), (3,)),
     ('fractional_max_pool2d', (S, S, S, S), (3, [2, 3],)),
     ('max_pool1d', (S, S, S), (2, 1)),
@@ -11895,15 +11922,17 @@ nn_functional_tests = [
     ('adaptive_max_pool1d', (S, S, S), (5,)),
     ('adaptive_max_pool2d', (S, S, S, S), ([5, 7],)),
     ('adaptive_max_pool3d', (S, S, S, S, S), ([3, 2, 2],)),
-    ('adaptive_avg_pool1d', (S, S, S), (5,)),
-    ('adaptive_avg_pool2d', (S, S, S, S), ([5, 7],)),
-    ('adaptive_avg_pool3d', (S, S, S, S, S), ([3, 2, 2],)),
-    ('dropout', (S, S, S), (0.5,)),
+    ('adaptive_avg_pool1d', (S, S, S), (5,), '', (True,)),
+    ('adaptive_avg_pool2d', (S, S, S, S), ([5, 7],), '', (True,)),
+    ('adaptive_avg_pool3d', (S, S, S, S, S), ([3, 2, 2],), '', (True,)),
+    ('dropout', (S, S, S), (0.5,), '', (True,
+                                        ['prim::is_cuda', 'aten::bernoulli_'],
+                                        ['aten::rand_like', 'aten::lt', 'aten::type_as', 'aten::mul', 'aten::div'])),
     ('alpha_dropout', (S, S, S), (0.5,)),
     ('dropout2d', (S, S, S), (0.5,)),
     ('dropout3d', (S, S, S), (0.5,)),
     ('feature_alpha_dropout', (S, S, S), (0.5,)),
-    ('threshold', (S, S, S), (0.1, 2.),),
+    ('threshold', (S, S, S), (0.1, 2.), '', (True,)),
     ('threshold', (S, S, S), (0.1, 2., True), 'inplace'),
     ('relu', (S, S, S), (),),
     ('relu', (S, S, S), (), 'inplace'),
@@ -11927,16 +11956,17 @@ nn_functional_tests = [
     ('softsign', (S, S, S), (),),
     ('softplus', (S, S, S), (),),
     ('softmin', (S, S, S), (0,),),
-    ('softmax', (S, S, S), (0,),),
-    ('softmax', (S, S, S), (0, 3, torch.double), 'with_all_args'),
+    ('softmax', (S, S, S), (0,), '', (True,)),
+    ('softmax', (S, S, S), (0, 3, torch.double), 'with_all_args', (True,)),
     ('tanh', (S, S, S), (),),
     ('sigmoid', (S, S, S), (),),
-    ('log_softmax', (S, S, S), (0,),),
+    ('log_softmax', (S, S, S), (0,), '', (True,)),
     ('linear', (S, S), ((M, S),),),
     ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M),),),
-    ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ),),
+    ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
-    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),
+        '', (True, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5],),),
     ('layer_norm', (S, S, S, S), ([5], (S,)), 'with_only_weight'),
@@ -11944,7 +11974,7 @@ nn_functional_tests = [
     ('layer_norm', (S, S, S, S), ([5], (S,), (S,)), 'with_weight_and_bias'),
     ('group_norm', (S, S, S), (1, torch.rand(5),),),
     ('local_response_norm', (S, S, S), (2, ),),
-    ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]),),),
+    ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]),), '', (True, 'aten::nll_loss_forward')),
     ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2),),),
     ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2), True, True), 'full'),
     ('kl_div', F.log_softmax(torch.randn(S, 10), 1), (F.softmax(torch.randn(S, 10), 1),),),
@@ -11972,8 +12002,8 @@ nn_functional_tests = [
     ('unfold', (S, S, S, S), ([2, 3]),),
     ('fold', (1, 3 * 2 * 2, 12), ([4, 5], [2, 2]),),
     ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
-    ('gumbel_softmax', (S, S), (2.,),),
-    ('gumbel_softmax', (S, S), (2., True,), 'hard'),
+    ('gumbel_softmax', (S, S), (2.,), '', (True, ['aten::softmax'], ['aten::neg', 'aten::add', 'aten::div'])),
+    ('gumbel_softmax', (S, S), (2., True,), 'hard', (True, ['aten::softmax'], ['aten::neg', 'aten::add', 'aten::div'])),
     ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
     ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)),
                                    1, 1., non_differentiable(torch.randn(S))),),
@@ -11987,35 +12017,35 @@ nn_functional_tests = [
       torch.randint(1, S, (S,), dtype=torch.long))),
     ('upsample', torch.randn(S, S, M, M), (None, 2), 'with_scale'),
     ('upsample', torch.randn(S, S, M, M), (4,), 'with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'nearest_4d'),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'nearest_4d_with_scale'),
-    ('interpolate', torch.randn(S, S, M, M), (4,), 'nearest_4d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'area_4d'),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'area_4d_with_scale'),
-    ('interpolate', torch.randn(S, S, M, M), (4,), 'area_4d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'bilinear_4d'),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'bilinear_4d_with_scale'),
-    ('interpolate', torch.randn(S, S, M, M), (4,), 'bilinear_4d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'bicubic_4d'),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'bicubic_4d_with_scale'),
-    ('interpolate', torch.randn(S, S, M, M), (4,), 'bicubic_4d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'nearest_3d'),
-    ('interpolate', torch.randn(S, M, M), (None, 2.), 'nearest_3d_with_scale'),
-    ('interpolate', torch.randn(S, M, M), (4,), 'nearest_3d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'area_3d'),
-    ('interpolate', torch.randn(S, M, M), (None, 2.), 'area_3d_with_scale'),
-    ('interpolate', torch.randn(S, M, M), (4,), 'area_3d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'linear_3d'),
-    ('interpolate', torch.randn(S, M, M), (None, 2.), 'linear_3d_with_scale'),
-    ('interpolate', torch.randn(S, M, M), (4,), 'linear_3d_with_size'),
-    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'nearest_5d_with_scale'),
-    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'nearest_5d_with_size'),
-    ('interpolate', torch.zeros(3, 3, 3).view(1, 1, 3, 3, 3), (2,), 'area_5d'),
-    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'area_5d_with_scale'),
-    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'area_5d_with_size'),
-    ('interpolate', torch.zeros(3, 3, 3).view(1, 1, 3, 3, 3), (2,), 'trilinear_5d'),
-    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'trilinear_5d_with_scale'),
-    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'trilinear_5d_with_size'),
+    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'nearest_4d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'nearest_4d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (4,), 'nearest_4d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'area_4d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'area_4d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (4,), 'area_4d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'bilinear_4d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'bilinear_4d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (4,), 'bilinear_4d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'bicubic_4d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'bicubic_4d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (4,), 'bicubic_4d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'nearest_3d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M), (None, 2.), 'nearest_3d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M), (4,), 'nearest_3d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'area_3d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M), (None, 2.), 'area_3d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M), (4,), 'area_3d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'linear_3d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M), (None, 2.), 'linear_3d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M), (4,), 'linear_3d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'nearest_5d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'nearest_5d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3, 3).view(1, 1, 3, 3, 3), (2,), 'area_5d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'area_5d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'area_5d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3, 3).view(1, 1, 3, 3, 3), (2,), 'trilinear_5d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'trilinear_5d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'trilinear_5d_with_size', (True, 'aten::__interpolate')),
 ]
 
 
@@ -12063,6 +12093,7 @@ def add_autograd_test(
         self_size,
         args,
         variant_name='',
+        check_ad=(),
         dim_args_idx=(),
         skipTestIf=(),
         output_process_fn=lambda x: x,
@@ -12080,7 +12111,7 @@ def add_autograd_test(
         # for-loop bodies don't define scopes, so we have to save the variables
         # we want to close over in some way
         def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
-                    output_process_fn=output_process_fn):
+                    check_ad=check_ad, output_process_fn=output_process_fn):
             def check(name):
                 set_rng_seed(2)
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
@@ -12104,19 +12135,26 @@ def add_autograd_test(
                     # Test with disable_autodiff_subgraph_inlining, which forces the graph
                     # to contain DifferentiableGraph nodes whenever possible. This allows us
                     # to test autodiff; we assume that autograd is correct and use autodiff for backprop
+                    should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
                     if test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self,
-                                                create_traced_fn(self, fn,
-                                                                 disable_autodiff_subgraph_inlining=True),
+                        traced_fn = create_traced_fn(self, fn, disable_autodiff_subgraph_inlining=True)
+
+                        check_against_reference(self, traced_fn,
+                                                fn, (self_variable,) + args_variable, kwargs_variable,
+                                                check_types=check_types)
+                        self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
+
+                    if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
+                        script_fn = create_script_fn(self, name, 'method', output_process_fn,
+                                                     disable_autodiff_subgraph_inlining=True)
+                        check_against_reference(self, script_fn,
                                                 fn, (self_variable,) + args_variable, kwargs_variable,
                                                 check_types=check_types)
 
-                    if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
-                        check_against_reference(self,
-                                                create_script_fn(self, name, 'method', output_process_fn,
-                                                                 disable_autodiff_subgraph_inlining=True),
-                                                fn, (self_variable,) + args_variable, kwargs_variable,
-                                                check_types=check_types)
+                        self.assertAutodiffNode(script_fn.last_graph,
+                                                should_autodiff_node and test_name not in EXCLUDE_SCRIPT_AD_CHECK,
+                                                autodiff_nodes,
+                                                fusible_nodes)
 
                 # functional interface tests
                 if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
@@ -12162,7 +12200,7 @@ def suppress_warnings(fn):
     return wrapper
 
 
-def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=(),
+def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), skipTestIf=(),
                            output_process_fn=lambda x: x, kwargs=None):
     test_name = 'test_nn_' + name
 
@@ -12172,7 +12210,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
     no_grad = variant_name == 'inplace'
 
     @suppress_warnings
-    def do_test(self, name=name, args=args, test_name=test_name):
+    def do_test(self, name=name, args=args, test_name=test_name, check_ad=check_ad):
         torch.manual_seed(2)
 
         self_variable = create_input((self_size,))[0][0]
@@ -12193,13 +12231,14 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
         f_args_variable = (self_variable,) + args_variable
         f_args_tensor = (self_tensor,) + args_tensor
 
+        should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
         if test_name not in EXCLUDE_SCRIPT:
-            disable_ad_subgraph_inlining = test_name in DISABLE_AUTODIFF_SUBGRAPH_INLINING
-
             def run_test():
                 script_fn = create_script_fn(self, name, 'nn_functional', output_process_fn,
-                                             disable_autodiff_subgraph_inlining=disable_ad_subgraph_inlining)
+                                             disable_autodiff_subgraph_inlining=should_autodiff_node)
                 check_against_reference(self, script_fn, fn, f_args_variable, kwargs_variable, no_grad=no_grad)
+                # For tests we disabled AD subgraph inlining, make sure it's not falling back to autograd
+                self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
             if test_name in EXCLUDE_PYTHON_PRINT:
                 with self.disableModuleHook():
@@ -12328,6 +12367,24 @@ def post_add_test(test_name, skipTestIf, do_test, test_class):
 
     if not (TEST_WITH_UBSAN and test_name in UBSAN_BLACKLISTED_TESTS):
         setattr(test_class, test_name, do_test)
+
+
+def normalize_check_ad(check_ad, name):
+    # normalized check_ad is 3-element tuple: (bool, List[str], List[str])
+    if len(check_ad) == 0:
+        check_ad = [False, ['aten::' + name], []]
+    elif len(check_ad) == 1:
+        check_ad = [check_ad[0], ['aten::' + name], []]
+    elif len(check_ad) == 2:
+        check_ad = [check_ad[0], check_ad[1], []]
+    elif len(check_ad) == 3:
+        check_ad = list(check_ad)
+    else:
+        raise Exception('Invalid check_ad, requires (bool, str|List[str], str|List[str])')
+
+    check_ad = [[t] if isinstance(t, str) else t for t in check_ad]
+
+    return check_ad
 
 
 class TestAsync(JitTestCase):
