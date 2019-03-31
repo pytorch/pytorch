@@ -558,14 +558,19 @@ def init_fn(worker_id):
 
 def test_iterable_dataset_multiprocessing():
     num_workers = 3
-    sizes_for_all_workers = [0, 4, 20]
+    sizes_for_all_workers = [0, 4, 10]
     expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
     assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
     dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
+    print('built dataset')
     dataloader = DataLoader(dataset, num_workers=num_workers)
+    print('built loader')
     dataloader_iter = iter(dataloader)
-    retrieved = sorted((d.item() for d in dataloader_iter))
+    print('built iter')
+    retrieved = sorted([d.item() for d in dataloader_iter])
 
+    print('want', expected)
+    print('get ', retrieved)
     for a, b in zip(retrieved, expected):
         assert a == b
 

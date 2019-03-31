@@ -652,6 +652,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 # no valid `self.rcvd_idx` is found (i.e., didn't break)
                 self.shutdown_workers()
                 raise StopIteration
+            if self.mode == _DataLoaderStrategy.Iterable:
+                print('__next__: rcvd_idx', self.rcvd_idx)
+                print('__next__: task_info', self.task_info)
 
             # Now `self.rcvd_idx` is the batch index we want to fetch
 
@@ -662,11 +665,14 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
             assert (not self.shutdown and self.tasks_outstanding > 0)
             idx, data = self.get_data()
+            if self.mode == _DataLoaderStrategy.Iterable:
+                print('__next__: get', data, 'from', self.task_info[idx][0])
             self.tasks_outstanding -= 1
 
             if self.mode == _DataLoaderStrategy.Iterable:
                 # Check for IterableDatasetStopIteration
                 if isinstance(data, _utils.worker.IterableDatasetStopIteration):
+                    print('__next__: shut down', data.worker_id)
                     self.shutdown_worker(data.worker_id)
                     self.try_put_index()
                     continue
@@ -693,9 +699,13 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         else:
             # not found (i.e., didn't break)
             return
+
         self.index_queues[worker_queue_idx].put((self.send_idx, index))
         self.task_info[self.send_idx] = (worker_queue_idx,)
         self.tasks_outstanding += 1
+        if self.mode == _DataLoaderStrategy.Iterable:
+            print('try_put_index: put', (self.send_idx, index), 'to', worker_queue_idx)
+            print('try_put_index: task_info', self.task_info)
         self.send_idx += 1
 
     def process_data(self, data):
