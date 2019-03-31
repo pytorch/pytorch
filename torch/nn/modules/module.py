@@ -734,6 +734,10 @@ class Module(object):
             strict (bool, optional): whether to strictly enforce that the keys
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
+        
+        Returns:
+            dict:
+                a dictionary containing missing_keys and unexpected_keys
         """
         missing_keys = []
         unexpected_keys = []
@@ -756,7 +760,6 @@ class Module(object):
         load(self)
 
         if strict:
-            error_msg = ''
             if len(unexpected_keys) > 0:
                 error_msgs.insert(
                     0, 'Unexpected key(s) in state_dict: {}. '.format(
@@ -769,6 +772,7 @@ class Module(object):
         if len(error_msgs) > 0:
             raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
                                self.__class__.__name__, "\n\t".join(error_msgs)))
+        return {'unexpected_keys': unexpected_keys, 'missing_keys': missing_keys}
 
     def _named_members(self, get_members_fn, prefix='', recurse=True):
         r"""Helper method for yielding various names + members of modules."""
