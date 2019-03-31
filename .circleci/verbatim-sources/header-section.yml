@@ -5,8 +5,8 @@
 # https://github.com/pytorch/ossci-job-dsl/blob/master/src/main/groovy/ossci/pytorch/DockerVersion.groovy and
 # https://github.com/pytorch/ossci-job-dsl/blob/master/src/main/groovy/ossci/caffe2/DockerVersion.groovy,
 # and then update DOCKER_IMAGE_VERSION at the top of the following files:
-# * cimodel/pytorch_build_definitions.py
-# * cimodel/caffe2_build_definitions.py
+# * cimodel/data/pytorch_build_definitions.py
+# * cimodel/data/caffe2_build_definitions.py
 
 docker_config_defaults: &docker_config_defaults
   user: jenkins

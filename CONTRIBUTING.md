@@ -36,6 +36,17 @@ git clone https://github.com/pytorch/pytorch
 cd pytorch
 ```
 
+2.1. If you already have PyTorch from source, update it:
+
+```bash
+git pull --rebase
+git submodule sync --recursive
+git submodule update --init --recursive
+```
+
+If you want to have no-op incremental rebuilds (which are fast), see the section below titled "Make no-op build fast."
+
+
 3. Install PyTorch in `develop` mode:
 
 A full set of instructions on installing PyTorch from source is here:
@@ -318,6 +329,27 @@ Note that the original `nvcc` binary (typically at `/usr/local/cuda/bin`) must
 be on your `PATH`, otherwise `ccache` will emit the following error:
 
     ccache: error: Could not find compiler "nvcc" in PATH
+
+For example, here is how to install/configure `ccache` on Ubuntu:
+
+```bash
+# install ccache
+sudo apt install ccache
+
+# update symlinks and create/re-create nvcc link
+sudo /usr/sbin/update-ccache-symlinks
+sudo ln -s /usr/bin/ccache /usr/lib/ccache/nvcc
+
+# config: cache dir is ~/.ccache, conf file ~/.ccache/ccache.conf
+# max size of cache
+ccache -M 25Gi  # -M 0 for unlimited
+# unlimited number of files
+ccache -F 0
+
+# deploy (and add to ~/.bashrc for later)
+export PATH="/usr/lib/ccache:$PATH"
+export CUDA_NVCC_EXECUTABLE=/usr/lib/ccache/nvcc
+```
 
 ## CUDA Development tips
 

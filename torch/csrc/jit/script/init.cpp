@@ -14,10 +14,11 @@
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/passes/python_print.h>
-#include <torch/csrc/jit/passes/to_batch.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/script/parser.h>
+#include <torch/csrc/jit/tracer.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -28,6 +29,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <sstream>
@@ -329,7 +331,7 @@ struct ModuleValue : public SugaredValue {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     } else if (NamedIValue* v = module->find_attribute(field)) {
       return std::make_shared<SimpleValue>(
-          m.get_or_add_attribute(v->type, v->slot()));
+          m.get_or_add_attribute(v->type(), v->slot()));
     }
 
     // This can also be a call to a non-script module, or a plain
@@ -600,13 +602,13 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
 }
 
 static void gatherParametersAndBuffers(
-    std::vector<IValue*>& values,
+    std::vector<Slot>& values,
     const Module& m) {
   for (auto& param : m.get_parameters()) {
     values.push_back(param->slot());
   }
   for (auto& param : m.get_attributes()) {
-    if (param->type->isSubtypeOf(TensorType::get())) {
+    if (param->type()->isSubtypeOf(TensorType::get())) {
       values.push_back(param->slot());
     }
   }
@@ -764,6 +766,7 @@ void initJitScriptBindings(PyObject* module) {
       .def("_set_parameter", &Module::set_parameter)
       .def("_get_parameter", &Module::get_parameter)
       .def("_get_buffer", &Module::get_buffer)
+      .def("_get_attribute", &Module::get_attribute)
       .def("_get_module", &Module::get_module)
       .def(
           "_get_modules",
@@ -799,9 +802,14 @@ void initJitScriptBindings(PyObject* module) {
               py::tuple r(3);
               IValue v = *buffer->slot();
               result[i] = std::make_tuple(
-                  buffer.key(), buffer->type, toPyObject(std::move(v)));
+                  buffer.key(), buffer->type(), toPyObject(std::move(v)));
             }
             return result;
+          })
+      .def(
+          "_has_attribute",
+          [](Module& self, const std::string& name) -> bool {
+            return self.find_attribute(name);
           })
       .def(
           "_has_parameter",
@@ -849,10 +857,10 @@ void initJitScriptBindings(PyObject* module) {
              bool force_outplace) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
-            std::vector<IValue*> parameters;
+            std::vector<Slot> parameters;
             gatherParametersAndBuffers(parameters, *self);
             Stack inputs = toStack(input_tuple);
-            for (IValue* param : parameters) {
+            for (const Slot& param : parameters) {
               inputs.emplace_back(*param);
             }
             auto graph = tracer::createGraphByTracing(
@@ -943,7 +951,7 @@ void initJitScriptBindings(PyObject* module) {
              std::vector<std::tuple<std::shared_ptr<Module>, std::string>>
                  params,
              std::shared_ptr<Module> orig) {
-            std::vector<IValue*> member_inputs;
+            std::vector<Slot> member_inputs;
             for (auto& p : params) {
               NamedIValue* np = std::get<0>(p)->find_parameter(std::get<1>(p));
               if (np == nullptr) {
@@ -972,7 +980,13 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "propagate_and_assign_input_and_output_shapes",
           &Method::propagate_and_assign_input_and_output_shapes)
-      .def("initial_ivalues", &Method::initial_ivalues)
+      .def("initial_ivalues",[](Method& m) {
+        std::vector<at::Tensor> tensors;
+        for (auto& t : m.initial_ivalues()) {
+          tensors.push_back(t->toTensor());
+        }
+        return tensors;
+      })
       .def(
           "graph_for",
           [](py::args args, py::kwargs kwargs) {
@@ -992,7 +1006,16 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<ClassTypePtr> classes;
         PythonPrint(oss, m, constants, classes, true);
         return std::make_pair(oss.str(), std::move(constants));
-      });
+      })
+      .def_property_readonly(
+          "code",
+          [](Method& self) {
+            std::ostringstream ss;
+            std::vector<at::Tensor> tensors;
+            std::vector<ClassTypePtr> classes;
+            PythonPrint(ss, self, tensors, classes, false);
+            return ss.str();
+          });
 
   m.def(
       "_jit_script_compile",
@@ -1101,6 +1124,29 @@ void initJitScriptBindings(PyObject* module) {
       .def("run", [](testing::FileCheck& f, const Graph& g) {
         return f.run(g);
       });
+
+  m.def("_logging_set_logger", [](logging::LoggerBase* logger) {
+    return logging::setLogger(logger);
+  }, py::return_value_policy::reference);
+  py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
+      m, "LoggerBase");
+  py::enum_<logging::LockingLogger::AggregationType>(m, "AggregationType")
+      .value("SUM", logging::LockingLogger::AggregationType::SUM)
+      .value("AVG", logging::LockingLogger::AggregationType::AVG)
+      .export_values();
+  py::class_<
+      logging::LockingLogger,
+      logging::LoggerBase,
+      std::shared_ptr<logging::LockingLogger>>(m, "LockingLogger")
+      .def(py::init<>())
+      .def("set_aggregation_type", &logging::LockingLogger::setAggregationType)
+      .def("get_counter_val", &logging::LockingLogger::getCounterValue);
+  py::class_<
+      logging::NoopLogger,
+      logging::LoggerBase,
+      std::shared_ptr<logging::NoopLogger>>(m, "NoopLogger")
+      .def(py::init<>());
+
 }
 } // namespace script
 } // namespace jit

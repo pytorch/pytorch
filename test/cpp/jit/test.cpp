@@ -24,6 +24,7 @@
 #include <test/cpp/jit/test_ivalue.h>
 #include <test/cpp/jit/test_misc.h>
 #include <test/cpp/jit/test_netdef_converter.h>
+#include <test/cpp/jit/test_peephole_optimize.h>
 #include <test/cpp/jit/test_subgraph_utils.h>
 #include <test/cpp/jit/test_class_import.h>
 
@@ -63,6 +64,8 @@ namespace jit {
   _(ATenNativeBatchNorm)           \
   _(NoneSchemaMatch)               \
   _(ClassParser)                   \
+  _(PeepholeOptimize)              \
+  _(RecordFunction)                \
   _(ClassImport)
 
 #define TH_FORALL_TESTS_CUDA(_) \
