@@ -5,7 +5,7 @@
 ##############################################################################
 smoke_linux_test: &smoke_linux_test
   machine:
-    image: ubuntu-1604:201903-01
+    image: default
   steps:
   - run:
       <<: *setup_linux_system_environment

@@ -271,7 +271,7 @@ macos_brew_update: &macos_brew_update
 pytorch_linux_build_defaults: &pytorch_linux_build_defaults
   resource_class: large
   machine:
-    image: ubuntu-1604:201903-01
+    image: default
   steps:
   - run:
       <<: *setup_linux_system_environment
@@ -306,7 +306,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
 
 pytorch_linux_test_defaults: &pytorch_linux_test_defaults
   machine:
-    image: ubuntu-1604:201903-01
+    image: default
   steps:
   - run:
       <<: *setup_linux_system_environment
@@ -335,7 +335,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
 caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   resource_class: large
   machine:
-    image: ubuntu-1604:201903-01
+    image: default
   steps:
   - run:
       <<: *setup_linux_system_environment
@@ -396,7 +396,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
 
 caffe2_linux_test_defaults: &caffe2_linux_test_defaults
   machine:
-    image: ubuntu-1604:201903-01
+    image: default
   steps:
   - run:
       <<: *setup_linux_system_environment
@@ -815,7 +815,7 @@ binary_linux_build: &binary_linux_build
 # that on the docker executor)
 binary_linux_test: &binary_linux_test
   machine:
-    image: ubuntu-1604:201903-01
+    image: default
   steps:
   - run:
       <<: *setup_linux_system_environment
@@ -881,7 +881,7 @@ binary_linux_test: &binary_linux_test
 
 binary_linux_upload: &binary_linux_upload
   machine:
-    image: ubuntu-1604:201903-01
+    image: default
   steps:
   - run:
       <<: *setup_linux_system_environment
@@ -1066,7 +1066,7 @@ binary_mac_upload: &binary_mac_upload
 ##############################################################################
 smoke_linux_test: &smoke_linux_test
   machine:
-    image: ubuntu-1604:201903-01
+    image: default
   steps:
   - run:
       <<: *setup_linux_system_environment
@@ -1358,7 +1358,7 @@ jobs:
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     machine:
-      image: ubuntu-1604:201903-01
+      image: default
     steps:
     - run:
         <<: *setup_linux_system_environment
@@ -1389,7 +1389,7 @@ jobs:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:291"
     resource_class: large
     machine:
-      image: ubuntu-1604:201903-01
+      image: default
     steps:
     - run:
         <<: *setup_linux_system_environment
@@ -1703,7 +1703,7 @@ jobs:
 # update_s3_htmls job
   update_s3_htmls:
     machine:
-      image: ubuntu-1604:201903-01
+      image: default
     steps:
     - run:
         <<: *setup_linux_system_environment
