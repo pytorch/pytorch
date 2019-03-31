@@ -10600,6 +10600,7 @@ a")
         self.assertEqual(m.int64_max, imported.int64_max)
         self.assertEqual(m.int64_min, imported.int64_min)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: TemporaryFileName on Windows")
     def test_serialization_sharing(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
