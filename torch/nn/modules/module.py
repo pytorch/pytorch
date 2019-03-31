@@ -734,7 +734,7 @@ class Module(object):
             strict (bool, optional): whether to strictly enforce that the keys
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
-        
+
         Returns:
             dict:
                 a dictionary containing missing_keys and unexpected_keys
