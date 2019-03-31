@@ -310,7 +310,7 @@ class JitTestCase(TestCase):
 
                 # crack open the zip format to get at the main module code
                 archive = zipfile.ZipFile(buffer)
-                main_module = archive.open(os.path.join('archive', 'code', 'archive.py'))
+                main_module = archive.open('archive/code/archive.py')
                 main_module_code = ""
                 for line in main_module:
                     main_module_code += line.decode()
@@ -332,7 +332,7 @@ class JitTestCase(TestCase):
 
             saved_module_buffer_2.seek(0)
             archive2 = zipfile.ZipFile(saved_module_buffer_2)
-            main_module_2 = archive2.open(os.path.join('archive', 'code', 'archive.py'))
+            main_module_2 = archive2.open('archive/code/archive.py')
 
             main_module_2_code = ""
             for line in main_module_2:
