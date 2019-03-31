@@ -85,9 +85,10 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   if (input_.is_sparse()) {
     auto input = input_.coalesce();
     return grad.sparse_mask(at::SparseTensorRef(input));
-  } else {
-    AT_ASSERT(input_.layout() == c10::kMkldnn);
+  } else if (input_.layout() == c10::kMkldnn) {
     return grad.to_mkldnn();
+  } else {
+    AT_ERROR("Unsupported input layout: ", input_.layout());
   }
 }
 

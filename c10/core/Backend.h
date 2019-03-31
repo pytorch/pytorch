@@ -162,7 +162,7 @@ static inline Backend backendToCPU(Backend b) {
     case Backend::XLA:
       return Backend::CPU;
     case Backend::MkldnnCPU:
-      return Backend::CPU;
+      return Backend::MkldnnCPU;
     case Backend::Undefined:
       return Backend::Undefined;
     default:
