@@ -53,9 +53,9 @@ else:
 
 
 if PY2:
-    import Queue as queue
+    import Queue as queue  # noqa: F401
 else:
-    import queue
+    import queue  # noqa: F401
 
 
 def with_metaclass(meta, *bases):
@@ -136,6 +136,13 @@ if PY2:
     import __builtin__ as builtins
 elif PY3:
     import builtins
+
+if PY2:
+    import StringIO
+    StringIO = StringIO.StringIO
+elif PY3:
+    import io
+    StringIO = io.StringIO
 
 
 # The codes below is not copied from the six package, so the copyright

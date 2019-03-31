@@ -31,7 +31,6 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
   bool RunOnDevice() override {
     const auto& src = Input(0);
     const auto& mask = Input(1);
-    auto* dest = Output(0);
 
     CAFFE_ENFORCE(src.dim() >= 1);
     CAFFE_ENFORCE_EQ(mask.dim(), 1);
@@ -80,8 +79,8 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
     indices_.Resize(numOfOutput);
     std::vector<int64_t> dims = src.sizes().vec();
     dims[0] = numOfOutput;
-    dest->Resize(dims);
-    auto* destData = (uint8_t*)dest->raw_mutable_data(src.meta());
+    auto* dest = Output(0, dims, at::dtype(src.dtype()));
+    auto* destData = (uint8_t*)dest->raw_mutable_data(src.dtype());
     const auto* srcData = (uint8_t*)src.raw_data();
     if (OutputSize() == 2) {
 

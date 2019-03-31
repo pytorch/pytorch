@@ -3,7 +3,10 @@ import warnings
 from torch._six import string_classes
 from datetime import timedelta
 
-from .rendezvous import rendezvous, register_rendezvous_handler
+# This module is wildcard imported from torch.distributed.
+# TODO: specify __all__
+
+from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
 from . import BroadcastOptions, AllreduceOptions, ReduceOptions, \
     ScatterOptions, GatherOptions
 from . import ReduceOp

@@ -25,13 +25,12 @@ graph {
   initializer {
     dims: 2
     data_type: 1
-    name: "weight"
-    raw_data: "\340e\355<\246\305\315>"
+    name: "bias"
+    raw_data: "\000\000\000\000\000\000\000\000"
   }
   initializer {
-    dims: 2
-    data_type: 1
-    name: "bias"
+    data_type: 7
+    name: "num_batches_tracked"
     raw_data: "\000\000\000\000\000\000\000\000"
   }
   initializer {
@@ -47,9 +46,10 @@ graph {
     raw_data: "\000\000\200?\000\000\200?"
   }
   initializer {
-    data_type: 7
-    name: "num_batches_tracked"
-    raw_data: "\000\000\000\000\000\000\000\000"
+    dims: 2
+    data_type: 1
+    name: "weight"
+    raw_data: "\340e\355<\246\305\315>"
   }
   input {
     name: "input"

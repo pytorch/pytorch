@@ -120,7 +120,15 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
       .def(
           "_jit_pass_insert_observers",
-          [](std::shared_ptr<Graph>& g) { return InsertObserverNodes(g); })
+          [](std::shared_ptr<Graph>& g, py::function pyObserverFunction) {
+            // Create a new node that would be used in the insert observer pass:
+            // all observer nodes will be cloned from this one.
+            Node* new_node = g->createPythonOp(
+                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
+            InsertObserverNodes(g, new_node);
+            // We don't need this node anymore, don't forget to remove it.
+            new_node->destroy();
+          })
       .def(
           "_jit_pass_insert_fakequant",
           [](std::shared_ptr<Graph>& g) { return InsertFakeQuantNodes(g); })
@@ -208,6 +216,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
+      .def("_jit_can_fuse_on_cpu", canFuseOnCPU)
+      .def("_jit_can_fuse_on_gpu", canFuseOnGPU)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def(
           "_jit_differentiate",
