@@ -3,16 +3,14 @@ from __future__ import division
 
 import warnings
 import math
-import types
 
 import torch
 from torch._C import _infer_size, _add_docstr
 from . import _reduction as _Reduction
-from . import _functions
 from .modules import utils
 from ._functions import vision
 from .modules.utils import _single, _pair, _triple, _list_with_default
-from . import grad
+from . import grad  # noqa: F401
 from . import _VF
 from .._jit_internal import weak_script, List
 
@@ -2071,9 +2069,10 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
-    if not (target.size() == input.size()):
+    if target.size() != input.size():
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
-                      "Please ensure they have the same size.".format(target.size(), input.size()))
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
     if input.numel() != target.numel():
         raise ValueError("Target and input must have the same number of elements. target nelement ({}) "
                          "!= input nelement ({})".format(target.numel(), input.numel()))
@@ -2162,6 +2161,11 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
 
     See :class:`~torch.nn.SmoothL1Loss` for details.
     """
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
@@ -2183,6 +2187,11 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
 
     See :class:`~torch.nn.L1Loss` for details.
     """
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
@@ -2204,6 +2213,11 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
 
     See :class:`~torch.nn.MSELoss` for details.
     """
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
@@ -2460,7 +2474,6 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
     .. include:: cuda_deterministic_backward.rst
     """
-    from numbers import Integral
     from .modules.utils import _ntuple
 
     def _check_size_scale_factor(dim):
@@ -2758,7 +2771,7 @@ def pad(input, pad, mode='constant', value=0):
             elif mode == 'replicate':
                 ret = torch._C._nn.replication_pad1d(input, pad)
             elif mode == 'circular':
-                ret = pad_circular(input, pad)
+                ret = _pad_circular(input, pad)
             else:
                 ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
@@ -2770,7 +2783,7 @@ def pad(input, pad, mode='constant', value=0):
             elif mode == 'replicate':
                 ret = torch._C._nn.replication_pad2d(input, pad)
             elif mode == 'circular':
-                ret = pad_circular(input, pad)
+                ret = _pad_circular(input, pad)
             else:
                 ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
@@ -2783,7 +2796,7 @@ def pad(input, pad, mode='constant', value=0):
             elif mode == 'replicate':
                 ret = torch._C._nn.replication_pad3d(input, pad)
             elif mode == 'circular':
-                ret = pad_circular(input, pad)
+                ret = _pad_circular(input, pad)
             else:
                 ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
@@ -3017,7 +3030,7 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
 
 
 @weak_script
-def pad_circular(input, padding):
+def _pad_circular(input, padding):
     # type: (Tensor, List[int]) -> Tensor
     """
     Arguments

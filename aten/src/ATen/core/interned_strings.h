@@ -86,6 +86,8 @@ namespace c10 {
   _(prim, CreateObject)            \
   _(prim, SetAttr)                 \
   _(prim, GetAttr)                 \
+  _(prim, AddStatValue)            \
+  _(prim, TimePoint)               \
   _(aten, append)                  \
   _(aten, item)                    \
   _(aten, format)                  \
@@ -96,6 +98,7 @@ namespace c10 {
   _(aten, _set_item)               \
   _(aten, index_put_)              \
   _(aten, device)                  \
+  _(aten, hash)                    \
   _(aten, len)                     \
   _(aten, list)                    \
   _(aten, wait)                    \
