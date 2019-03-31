@@ -401,7 +401,7 @@ class JitTestCase(TestCase):
             or all([any(g.findNode(n) is not None for g in diff_subgraphs) for n in nonfusible_nodes])
 
         # For any fusible node, it must show up in one of the FusionGroup in the DifferentiableGraph.
-        fusion_nodes = list(itertools.chain.from_iterable([g.findAllNodes('prim::FusionGroup') for g in diff_subgraphs]))
+        fusion_nodes = list(chain.from_iterable([g.findAllNodes('prim::FusionGroup') for g in diff_subgraphs]))
         fusion_subgraphs = [node.g('Subgraph') for node in fusion_nodes]
         found_all_fusible_nodes = (len(fusion_nodes) == 0 and len(fusible_nodes) == 0)\
             or all([any(g.findNode(n) is not None for g in fusion_subgraphs) for n in fusible_nodes])
