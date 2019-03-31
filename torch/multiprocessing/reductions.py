@@ -1,7 +1,6 @@
 import torch
 import torch.utils.hooks
 import os
-import weakref
 import threading
 import multiprocessing
 from multiprocessing.reduction import ForkingPickler

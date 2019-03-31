@@ -110,8 +110,8 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
     // it.
     std::vector<char*> datas(numFields);
     for (int i = 0; i < numFields; ++i) {
-      Output(i)->Resize(batchSize_);
-      datas[i] = (char*)Output(i)->raw_mutable_data(instance->fieldMetas[i]);
+      auto* output = Output(i, batchSize_, at::dtype(instance->fieldMetas[i]));
+      datas[i] = (char*)output->raw_mutable_data(instance->fieldMetas[i]);
     }
 
     int rowsRead = 0;

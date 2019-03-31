@@ -1,6 +1,5 @@
 from common_utils import TestCase, run_tests
 import torch
-import warnings
 from torch import tensor
 import unittest
 

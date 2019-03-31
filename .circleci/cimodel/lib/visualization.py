@@ -22,7 +22,7 @@ def handle_missing_graphviz(f):
     calls to the draw() method of the returned object to do nothing.
     """
     try:
-        import pygraphviz
+        import pygraphviz  # noqa: F401
         return f
 
     except ModuleNotFoundError:
