@@ -33,10 +33,9 @@ class EnsureCPUOutputOp : public Operator<Context> {
   template <class InputContext>
   bool CopyWithContext() {
     // Output is always on CPU
+    auto* output = this->template Output<Tensor>(0, CPU);
     auto& input = this->template Input<Tensor>(0, InputContext::GetDeviceType());
-    // TODO: is it possible to use OutputTensorCopyFrom?
-    auto* output = this->OutputTensor(
-        0, input.sizes(), at::dtype(input.dtype()).device(CPU));
+    output->ResizeLike(input);
     context_.CopyItemsToCPU(
         input.dtype(),
         input.numel(),

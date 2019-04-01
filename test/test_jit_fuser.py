@@ -3,17 +3,12 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import functools
-import os
 import unittest
-import sys
 import torch
-import torch.autograd.function as function
 from torch import Tensor
 
-from common_utils import TestCase, run_tests, IS_WINDOWS, \
+from common_utils import IS_WINDOWS, \
     skipIfRocm, IS_SANDCASTLE
-from typing import List, Dict, Optional, Tuple
 
 from test_jit import JitTestCase, enable_cpu_fuser, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
     backward_graph

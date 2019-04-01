@@ -997,6 +997,30 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
   return idx;
 }
 
+int stringSlice(Stack& stack) {
+  auto step = pop(stack).toInt();
+  AT_CHECK(step == 1, "Slicing a string only supports step=1");
+
+  auto end = pop(stack).toInt();
+  auto start = pop(stack).toInt();
+  auto string = pop(stack).toStringRef();
+  const int64_t size = string.size();
+
+  // Clamp start and end to the bounds of the list
+  start = std::max(int64_t(0), normalizeIndex(start, size));
+  end = std::min(size, normalizeIndex(end, size));
+
+  if (end <= start) {
+    // Slice is empty
+    push(stack, std::string(""));
+    return 0;
+  }
+
+  std::string result(string.begin() + start, string.begin() + end);
+  push(stack, result);
+  return 0;
+}
+
 // Equivalent to list.at(idx)
 template <typename TList> // something like Shared<IntList>
 typename TList::element_type::ElemType& getItem(TList& list, int64_t idx) {
@@ -1743,7 +1767,29 @@ RegisterOperators reg2({
         "aten::ne(Tensor[] a, Tensor[] b) -> bool",
         listNe<Shared<TensorList>>),
     Operator("aten::ne(bool[] a, bool[] b) -> bool", listNe<Shared<BoolList>>),
-
+    Operator(
+        "aten::slice(str string, int start, int end=9223372036854775807, int step=1) -> str",
+        stringSlice),
+    Operator(
+        "prim::StringIndex(str string, int index) -> str",
+        [](Stack& stack) {
+          auto index = pop(stack).toInt();
+          auto string = pop(stack).toStringRef();
+          char c = string.at(index);
+          push(stack, std::string(&c, 1));
+          return 0;
+        }),
+    Operator(
+        "aten::ord(str string) -> int",
+        [](Stack& stack) {
+          auto string = pop(stack).toStringRef();
+          AT_CHECK(
+              string.size() == 1,
+              "String for ord() must be 1 character, found",
+              string.size());
+          push(stack, int64_t(string.at(0)));
+          return 0;
+        }),
 #define CREATE_COPY_OP(other_type, c_type)                                 \
   Operator(                                                                \
       "aten::copy_(Tensor(a!) self, " #other_type " other) -> Tensor(a!)", \
