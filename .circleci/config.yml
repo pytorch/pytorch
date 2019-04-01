@@ -205,8 +205,8 @@ setup_ci_environment: &setup_ci_environment
     sudo pip -q install awscli==1.16.35
 
     if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-      DRIVER_FN="NVIDIA-Linux-x86_64-418.43.run"
-      wget "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
+      DRIVER_FN="NVIDIA-Linux-x86_64-410.104.run"
+      wget "http://us.download.nvidia.com/XFree86/Linux-x86_64/410.104/$DRIVER_FN"
       sudo /bin/bash "$DRIVER_FN" -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
       nvidia-smi
     fi
