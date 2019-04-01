@@ -476,20 +476,6 @@ Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntArrayRef sizes) {
   return self;
 }
 
-Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, IntArrayRef dim, bool unbiased, bool keepdim, bool is_std) {
-  AT_CHECK(grads.size() > 0 && grads.size() <= 2, "grads size should be in interval [0,2]");
-  std::vector<Tensor> results;
-  if (grads[0].defined()) {
-    Tensor grad = is_std ? static_cast<Tensor>(grads[0]) / (r1 * 2) : static_cast<Tensor>(grads[0]);
-    results.push_back(at::var_backward(grad, self, dim, unbiased, keepdim));
-  }
-  if (grads[1].defined()) {
-    Tensor grad = static_cast<Tensor>(grads[1]);
-    results.push_back(at::sum_backward(grad, self.sizes(), dim, keepdim) / at::_safe_size(self.sizes(), dim));
-  }
-  return at::stack(results, 0);
-}
-
 std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, int64_t dim) {
   dim = at::legacy_cat_wrap_dim(dim, sizes);
   std::vector<Tensor> grad_inputs(sizes.size());
@@ -677,6 +663,20 @@ Tensor var_backward(Tensor grad, const Tensor & self, IntArrayRef dim, bool unbi
     grad = unsqueeze_multiple(grad, dim, self.sizes().size());
   }
   return (2.0 / (_safe_size(self.sizes(), dim) - unbiased)) * grad * (self - self.mean(dim, true));
+}
+
+Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, IntArrayRef dim, bool unbiased, bool keepdim, bool is_std) {
+  AT_CHECK(grads.size() > 0 && grads.size() <= 2, "grads size should be in interval [0,2]");
+  std::vector<Tensor> results;
+  if (grads[0].defined()) {
+    Tensor grad = is_std ? static_cast<Tensor>(grads[0]) / (r1 * 2) : static_cast<Tensor>(grads[0]);
+    results.push_back(var_backward(grad, self, dim, unbiased, keepdim));
+  }
+  if (grads[1].defined()) {
+    Tensor grad = static_cast<Tensor>(grads[1]);
+    results.push_back(sum_backward(grad, self.sizes(), dim, keepdim) / _safe_size(self.sizes(), dim));
+  }
+  return at::stack(results, 0);
 }
 
 Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArrayRef sizes) {

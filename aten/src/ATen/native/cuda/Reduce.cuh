@@ -292,7 +292,7 @@ struct ReduceOp {
   int noutputs;
 
   ReduceOp(ops_t ops, ReduceConfig config, InputCalculator input_calc, OutputCalculator output_calc,
-           const void* src, char* dst_[], void* acc_buf, void* cta_buf, int* semaphores, arg_t ident)
+           const void* src, char* dst_[], void* acc_buf, void* cta_buf, int* semaphores, arg_t ident, int noutputs)
     : ops(ops)
     , config(config)
     , input_calc(input_calc)
