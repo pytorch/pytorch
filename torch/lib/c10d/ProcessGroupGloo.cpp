@@ -10,10 +10,11 @@
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/CUDAStream.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 #endif
 
 #include <gloo/rendezvous/context.h>
@@ -150,6 +151,11 @@ void initializeStreamsEvents(
         /* isHighPriority */ true, tensors[i].device().index()));
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
+
+    // `tensors` are created on a different stream. Hence, they must record
+    // new streams in this Work to prevent being freed before the Work finishes.
+    c10::cuda::CUDACachingAllocator::recordStream(
+      tensors[i].storage().data(), streams[i]);
   }
 }
 
@@ -187,6 +193,14 @@ void initializeStreamsEvents(
         /* isHighPriority */ true, tensors[i][0].device().index()));
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
+
+    for (at::Tensor& tensor : tensors[i]) {
+      // `tensors` are created on a different stream. Hence, they must record
+      // new streams in this Work to prevent being freed before the Work
+      // finishes.
+      c10::cuda::CUDACachingAllocator::recordStream(
+        tensor.storage().data(), streams[i]);
+    }
   }
 }
 

@@ -2024,18 +2024,18 @@ torch.solve(B, A, out=None) -> (Tensor, Tensor)
 
 This function returns the solution to the system of linear
 equations represented by :math:`AX = B` and the LU factorization of
-A, in order as a tuple `X, LU`.
+A, in order as a namedtuple `solution, LU`.
 
 `LU` contains `L` and `U` factors for LU factorization of `A`.
 
 `torch.solve(B, A)` can take in 2D inputs `B, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
-batched outputs `X, LU`.
+batched outputs `solution, LU`.
 
 .. note::
 
     Irrespective of the original strides, the returned matrices
-    `X` and `LU` will be transposed, i.e. with strides like
+    `solution` and `LU` will be transposed, i.e. with strides like
     `B.contiguous().transpose(-1, -2).strides()` and
     `A.contiguous().transpose(-1, -2).strides()` respectively.
 
@@ -4031,7 +4031,11 @@ Args:
     end (float): the ending value for the set of points
     step (float): the gap between each pair of adjacent points. Default: ``1``.
     {out}
-    {dtype}
+    {dtype} If `dtype` is not given, infer the data type from the other input
+        arguments. If any of `start`, `end`, or `stop` are floating-point, the
+        `dtype` is inferred to be the default dtype, see
+        :meth:`~torch.get_default_dtype`. Otherwise, the `dtype` is inferred to
+        be `torch.int64`.
     {layout}
     {device}
     {requires_grad}
@@ -4353,8 +4357,9 @@ If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 If :attr:`descending` is ``True`` then the elements are sorted in descending
 order by value.
 
-A tuple of (sorted_tensor, sorted_indices) is returned, where the
-sorted_indices are the indices of the elements in the original `input` tensor.
+A namedtuple of (values, indices) is returned, where the `values` are the
+sorted values and `indices` are the indices of the elements in the original
+`input` tensor.
 
 Args:
     input (Tensor): the input tensor
@@ -5018,7 +5023,7 @@ If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 
 If :attr:`largest` is ``False`` then the `k` smallest elements are returned.
 
-A tuple of `(values, indices)` is returned, where the `indices` are the indices
+A namedtuple of `(values, indices)` is returned, where the `indices` are the indices
 of the elements in the original `input` tensor.
 
 The boolean option :attr:`sorted` if ``True``, will make sure that the returned
@@ -5041,7 +5046,7 @@ Example::
     >>> x
     tensor([ 1.,  2.,  3.,  4.,  5.])
     >>> torch.topk(x, 3)
-    (tensor([ 5.,  4.,  3.]), tensor([ 4,  3,  2]))
+    torch.return_types.topk(values=tensor([5., 4., 3.]), indices=tensor([4, 3, 2]))
 """)
 
 add_docstr(torch.trace,
@@ -5515,71 +5520,6 @@ Example::
             [ 0.,  0.,  0.]])
 """.format(**factory_like_common_args))
 
-add_docstr(torch.btrifact,
-           r"""
-btrifact(A, pivot=True) -> (Tensor, IntTensor)
-
-Batch LU factorization.
-
-Returns a tuple containing the LU factorization and pivots. Pivoting is done if
-:attr:`pivot` is set.
-
-.. note::
-    LU factorization with :attr:`pivot` = ``True`` is not available for CPU, and attempting
-    to do so will throw an error. However, LU factorization with :attr:`pivot` = ``True`` is
-    available for CUDA.
-
-Arguments:
-    A (Tensor): the tensor to factor
-    pivot (bool, optional): controls whether pivoting is done
-
-Returns:
-    A tuple containing factorization and pivots.
-
-Example::
-
-    >>> A = torch.randn(2, 3, 3)
-    >>> A_LU, pivots = torch.btrifact(A)
-    >>> A_LU
-    tensor([[[ 1.3506,  2.5558, -0.0816],
-             [ 0.1684,  1.1551,  0.1940],
-             [ 0.1193,  0.6189, -0.5497]],
-
-            [[ 0.4526,  1.2526, -0.3285],
-             [-0.7988,  0.7175, -0.9701],
-             [ 0.2634, -0.9255, -0.3459]]])
-
-    >>> pivots
-    tensor([[ 3,  3,  3],
-            [ 3,  3,  3]], dtype=torch.int32)
-""")
-
-add_docstr(torch.btrifact_with_info,
-           r"""
-btrifact_with_info(A, pivot=True) -> (Tensor, IntTensor, IntTensor)
-
-Batch LU factorization with additional error information.
-
-This is a version of :meth:`torch.btrifact` that always creates an info
-`IntTensor`, and returns it as the third return value.
-
-Arguments:
-    A (Tensor): the tensor to factor
-    pivot (bool, optional): controls whether pivoting is done
-
-Returns:
-    A tuple containing factorization, pivots, and an `IntTensor` where non-zero
-    values indicate whether factorization for each minibatch sample succeeds.
-
-Example::
-
-    >>> A = torch.randn(2, 3, 3)
-    >>> A_LU, pivots, info = A.btrifact_with_info()
-    >>> if info.nonzero().size(0) == 0:
-    >>>   print('LU factorization succeeded for all samples!')
-    LU factorization succeeded for all samples!
-""")
-
 add_docstr(torch.btrisolve,
            r"""
 btrisolve(b, LU_data, LU_pivots) -> Tensor
@@ -5590,14 +5530,14 @@ Returns the LU solve of the linear system :math:`Ax = b`.
 
 Arguments:
     b (Tensor): the RHS tensor
-    LU_data (Tensor): the pivoted LU factorization of A from :meth:`btrifact`.
+    LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu`.
     LU_pivots (IntTensor): the pivots of the LU factorization
 
 Example::
 
     >>> A = torch.randn(2, 3, 3)
     >>> b = torch.randn(2, 3)
-    >>> A_LU = torch.btrifact(A)
+    >>> A_LU = torch.lu(A)
     >>> x = torch.btrisolve(b, *A_LU)
     >>> torch.norm(torch.bmm(A, x.unsqueeze(2)) - b.unsqueeze(2))
     tensor(1.00000e-07 *
@@ -5800,18 +5740,22 @@ Arguments:
     A (Tensor): The input 2D square tensor
 
 Returns:
-    A tuple containing the sign of the determinant, and the log value of the
-    absolute determinant.
+    A namedtuple (sign, logabsdet) containing the sign of the determinant, and the log
+    value of the absolute determinant.
 
 Example::
 
     >>> A = torch.randn(3, 3)
+    >>> A
+    tensor([[ 0.0032, -0.2239, -1.1219],
+            [-0.6690,  0.1161,  0.4053],
+            [-1.6218, -0.9273, -0.0082]])
     >>> torch.det(A)
-    tensor(-4.8215)
+    tensor(-0.7576)
     >>> torch.logdet(A)
     tensor(nan)
     >>> torch.slogdet(A)
-    (tensor(-1.), tensor(1.5731))
+    torch.return_types.slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))
 """)
 
 add_docstr(torch.pinverse,
