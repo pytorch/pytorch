@@ -2531,55 +2531,49 @@
   matches_jit_signature: True
   variants: function
 
-- func: native_clone(Tensor self) -> Tensor
-  matches_jit_signature: True
-  dispatch:
-    SparseCPU: clone_sparse
-    SparseCUDA: clone_sparse
-
 - func: clone(Tensor self) -> Tensor
   matches_jit_signature: True
   variants: function, method
-
-- func: native_resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
-    SparseCPU: resize_as_sparse_
-    SparseCUDA: resize_as_sparse_
+    CPU: clone
+    CUDA: clone
+    SparseCPU: clone_sparse
+    SparseCUDA: clone_sparse
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   matches_jit_signature: True
   variants: function, method
-
-- func: native_pow(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
-    SparseCPU: pow_out_sparse_scalar
-    SparseCUDA: pow_out_sparse_scalar
-
-- func: native_pow(Tensor self, Scalar exponent) -> Tensor
-  matches_jit_signature: True
-  dispatch:
-    SparseCPU: pow_sparse_scalar
-    SparseCUDA: pow_sparse_scalar
+    CPU: resize_as_
+    CUDA: resize_as_
+    SparseCPU: resize_as_sparse_
+    SparseCUDA: resize_as_sparse_
 
 - func: pow(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
+  dispatch:
+    CPU: pow_out
+    CUDA: pow_out
+    SparseCPU: pow_out_sparse_scalar
+    SparseCUDA: pow_out_sparse_scalar
 
 - func: pow(Tensor self, Scalar exponent) -> Tensor
   matches_jit_signature: True
   variants: function, method
-  variants: method, function
-
-- func: native_zero_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
-    SparseCPU: zero_sparse_
-    SparseCUDA: zero_sparse_
+    CPU: pow
+    CUDA: pow
+    SparseCPU: pow_sparse_scalar
+    SparseCUDA: pow_sparse_scalar
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   matches_jit_signature: True
   variants: method, function
+  dispatch:
+    CPU: zero_
+    CUDA: zero_
+    SparseCPU: zero_sparse_
+    SparseCUDA: zero_sparse_
 
 - func: sub(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
