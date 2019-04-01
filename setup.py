@@ -374,6 +374,12 @@ class build_ext(setuptools.command.build_ext.build_ext):
             target_lib = os.path.join(
                 build_lib, 'torch', 'lib', '_C.lib').replace('\\', '/')
 
+            # Create "torch/lib" directory if not exists.
+            # (It is not created yet in "develop" mode.)
+            target_dir = os.path.dirname(target_lib)
+            if not os.path.exists(target_dir):
+                os.makedirs(target_dir)
+
             self.copy_file(export_lib, target_lib)
 
     def build_extensions(self):
