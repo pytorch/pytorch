@@ -3308,12 +3308,13 @@ class TestNN(NNTestCase):
         module = nn.Linear(10, 5).float().cuda()
         input = Variable(torch.randn(2, 10).float().cuda())
         expected_output = module(input).data
-        replicas = dp.replicate(module, (0, 1))
-        for i, replica in enumerate(replicas):
-            for p in replica.parameters():
-                self.assertEqual(p.get_device(), i)
-            replica_input = input.cuda(i)
-            self.assertEqual(replica(replica_input).data, expected_output)
+        for devices in [(0, 1), [[0], [1]]]:
+            replicas = dp.replicate(module, devices)
+            for i, replica in enumerate(replicas):
+                for p in replica.parameters():
+                    self.assertEqual(p.get_device(), i)
+                replica_input = input.cuda(i)
+                self.assertEqual(replica(replica_input).data, expected_output)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_replicate_multi_gpu_module(self):
@@ -3322,6 +3323,7 @@ class TestNN(NNTestCase):
                 super(MultiGpuModule, self).__init__()
                 self.net1 = torch.nn.Linear(10, 5).cuda(0)
                 self.net2 = torch.nn.Linear(5, 5).cuda(1)
+                self.bn = nn.BatchNorm2d(10).cuda(0)
 
             def forward(self, x):
                 out = self.net1(x.cuda(self.net1.weight.get_device()))
@@ -3338,6 +3340,9 @@ class TestNN(NNTestCase):
             self.assertEqual(replica.net1.bias.get_device(), i)
             self.assertEqual(replica.net2.weight.get_device(), 1 - i)
             self.assertEqual(replica.net2.bias.get_device(), 1 - i)
+            self.assertEqual(replica.bn.running_mean.get_device(), i)
+            self.assertEqual(replica.bn.running_var.get_device(), i)
+            self.assertEqual(replica.bn.num_batches_tracked.get_device(), i)
 
             replica_input = input.cuda(i)
             replica_output = replica(replica_input)
@@ -3349,11 +3354,12 @@ class TestNN(NNTestCase):
         net = nn.Module()
         net.bn = nn.BatchNorm2d(10)
         net.cuda()
-        replicas = dp.replicate(net, (0, 1))
-        for i, replica in enumerate(replicas):
-            self.assertEqual(replica.bn.running_mean.get_device(), i, 'buffer on wrong device')
-            self.assertEqual(replica.bn.running_var.get_device(), i, 'buffer on wrong device')
-            self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, 'buffer on wrong device')
+        for devices in [(0, 1), [[0], [1]]]:
+            replicas = dp.replicate(net, (0, 1))
+            for i, replica in enumerate(replicas):
+                self.assertEqual(replica.bn.running_mean.get_device(), i, 'buffer on wrong device')
+                self.assertEqual(replica.bn.running_var.get_device(), i, 'buffer on wrong device')
+                self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, 'buffer on wrong device')
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @skipIfRocm
@@ -3367,16 +3373,17 @@ class TestNN(NNTestCase):
             def forward(self, x):
                 return x * self.t_rg + self.t_not_rg
 
-        m = TestModule(torch.randn(100, device='cuda', requires_grad=True))
-        self.assertTrue(m.t_rg.requires_grad)
+        for devices in [[0, 1], [[0], [1]]]:
+            m = TestModule(torch.randn(100, device='cuda', requires_grad=True))
+            self.assertTrue(m.t_rg.requires_grad)
 
-        dpm = nn.DataParallel(m, [0, 1])
-        inp = torch.randn(2, 100, device='cuda')
+            dpm = nn.DataParallel(m, devices)
+            inp = torch.randn(2, 100, device='cuda')
 
-        def fn(t):
-            return dpm(inp)
+            def fn(t):
+                return dpm(inp)
 
-        torch.autograd.gradcheck(fn, (m.t_rg,))
+            torch.autograd.gradcheck(fn, (m.t_rg,))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parallel_apply(self):
