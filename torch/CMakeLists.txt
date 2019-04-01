@@ -185,6 +185,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/script/logging.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
@@ -243,6 +244,7 @@ if (NOT NO_API)
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/embedding.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/named_any.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
