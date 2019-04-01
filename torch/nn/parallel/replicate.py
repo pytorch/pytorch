@@ -123,10 +123,14 @@ def _copy_scriptmodule_methods(modules, module_copies, module_indices):
 # meaning that grouped_tensors[i] will be broadcast to grouped_devices[i].
 def _group_by_device(tensors, devices):
     if isinstance(devices[0], list):
-        # device id to output group index
+        # device id to output group index, this is necessary when `tensors` only
+        # use a subset of devices in `devices[0]`
         dev_to_idx = {dev: i for i, dev in enumerate(
             set([t.device.index for t in tensors]))}
 
+        # Group tensors by devices and remember each tensor's original index.
+        # The original_index helps to recover the original input tensor order
+        # from grouped tensors.
         grouped_tensors = [[] for _ in range(len(dev_to_idx))]
         original_index = [[] for _ in range(len(dev_to_idx))]
         for i, t in enumerate(tensors):
@@ -134,6 +138,7 @@ def _group_by_device(tensors, devices):
             original_index[group_id].append(i)
             grouped_tensors[group_id].append(t)
 
+        # group devices together if they should be in the same broadcast call
         grouped_devices = [[] for _ in range(len(dev_to_idx))]
         transpose = list(zip(*devices))
         for row in transpose:
@@ -145,10 +150,14 @@ def _group_by_device(tensors, devices):
         return [tensors], [devices], [list(range(len(tensors)))]
 
 
+# Return len(devices) replicas of input tensors. If input tensors reside on
+# multiple GPUs, devices must be a 2D list with devices[0] matching input
+# tensors' devices.
 def _broadcast_coalesced_reshape(tensors, devices, detach=False):
     from ._functions import Broadcast
 
-    # group, replica, tensor
+    # a triply-nested list of 1) broadcast group, 2) tensor list replica,
+    # 3) tensors on the same device.
     grouped_replicas = []
     grouped_tensors, grouped_devices, original_index = \
         _group_by_device(tensors, devices)
@@ -168,13 +177,22 @@ def _broadcast_coalesced_reshape(tensors, devices, detach=False):
                 grouped_replicas.append([])
 
     if isinstance(devices[0], list):
-        flatten = [0 for _ in tensors]
+        # convert the triply-nested list into a doubly-nested list of 1) replica
+        # 2) tensors in the same replica (can be on different devices)
+        transpose = [0 for _ in tensors]
         for g_idx in range(len(original_index)):
             for t_idx in range(len(original_index[g_idx])):
-                flatten[original_index[g_idx][t_idx]] = \
+                # g_idx is the broadcast group index.
+                # t_idx is the tensor's index in a replica within a group.
+                # Tensors in grouped_replicas[g_idx, :, t_idx] are replcias of
+                # input tensor[original_index[g_idx][t_idx]]. Retrieve the
+                # column and add it as the original_index[g_idx][t_idx]'s row in
+                # transpose.
+                transpose[original_index[g_idx][t_idx]] = \
                     [replica[t_idx] for replica in grouped_replicas[g_idx]]
 
-        return list(zip(*flatten))
+        # transpose the result to stay consistent with the 1D devices case.
+        return list(zip(*transpose))
     else:
         return grouped_replicas[0]
 
