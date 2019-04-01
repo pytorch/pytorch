@@ -8953,7 +8953,7 @@ a")
                 return torch.jit._unwrap_optional(None)
 
     def test_indexing_error(self):
-        with self.assertRaisesRegex(RuntimeError, "only supported on lists, dictionaries, tensors, and tuples"):
+        with self.assertRaisesRegex(RuntimeError, "only supported on List, Dict, Tensor, Tuple, and str"):
             @torch.jit.script
             def test_wrong_type():
                 a = 8
@@ -10183,6 +10183,43 @@ a")
 
         with self.capture_stdout() as captured:
             print(fn(x, scale, shift))
+
+    def test_string_index(self):
+        def fn(x):
+            # type: (str) -> str
+            return x[2]
+
+        self.checkScript(fn, ("abcde",))
+
+    def test_ord(self):
+        def fn(x):
+            # type: (str) -> int
+            return ord(x)
+
+        self.checkScript(fn, ("h"))
+        self.checkScript(fn, ("y"))
+
+    def test_string_slicing(self):
+        def fn1(x):
+            # type: (str) -> str
+            return x[1:3]
+
+        def fn2(x):
+            # type: (str) -> str
+            return x[-1:3]
+
+        def fn3(x):
+            # type: (str) -> str
+            return x[3:1]
+
+        def fn4(x):
+            # type: (str) -> str
+            return x[3:100]
+
+        self.checkScript(fn1, ("abcdefghi",))
+        self.checkScript(fn2, ("abcdefghi",))
+        self.checkScript(fn3, ("abcdefghi",))
+        self.checkScript(fn4, ("abcdefghi",))
 
     def test_non_final_return(self):
 
