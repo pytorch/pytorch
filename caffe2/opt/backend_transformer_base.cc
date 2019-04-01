@@ -45,6 +45,27 @@ TensorProto BackendTransformerBase::wrapShapeInfoIntoTensorProto(
   return t;
 }
 
+QTensorProto BackendTransformerBase::wrapShapeInfoIntoQTensorProto(
+    const std::string& name,
+    const ShapeInfo& shape_info) const {
+  QTensorProto t;
+  CAFFE_ENFORCE(
+      shape_info.is_quantized == true,
+      "Only quantized shapeinfo can be extracted into QTensor!");
+  t.set_name(name);
+  t.set_data_type(shape_info.shape.data_type());
+  t.set_scale(shape_info.q_info.scale);
+  t.set_bias(shape_info.q_info.offset);
+  // precision and is_signed is not used in onnxifi workflow, but it is required
+  // field
+  t.set_precision(0);
+  t.set_is_signed(0);
+  for (const auto i : shape_info.shape.dims()) {
+    t.add_dims(i);
+  }
+  return t;
+}
+
 std::unordered_map<std::string, TensorShape>
 BackendTransformerBase::ssaRewriteAndMapNames(
     Workspace* ws,
@@ -106,7 +127,11 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
     shape_map.emplace(
         std::piecewise_construct,
         std::forward_as_tuple(kv.first),
-        std::forward_as_tuple(kv.second.dim_type, kv.second.shape));
+        std::forward_as_tuple(
+            kv.second.dim_type,
+            kv.second.shape,
+            kv.second.is_quantized,
+            kv.second.q_info));
   }
   return shape_map;
 }
