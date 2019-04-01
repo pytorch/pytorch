@@ -1876,7 +1876,7 @@
     - arg: THTensor* tensor
 ]]
 [[
-  name: _th_cross
+  name: _th_cross_kernel
   cname: crossKernel
   variants:
     - function
