@@ -44,6 +44,8 @@ SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeM
   // we proxy to this constructor so we can initialize the device correctly, but really only indices/values of this shape are allowed.
   AT_ASSERT(indices_.sizes() == IntArrayRef({1, 0}));
   AT_ASSERT(values_.sizes() == IntArrayRef({0}));
+  AT_ASSERT(values_.device() == indices_.device());
+  AT_ASSERT(values_.device() == device());
 }
 
 IntArrayRef SparseTensorImpl::sizes() const {
@@ -119,6 +121,8 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
 
   indices_ = indices;
   values_ = values;
+  AT_ASSERT(device() == values_.device());
+  AT_ASSERT(values_.device() == indices_.device());
 
   coalesced_ = false;
 }
