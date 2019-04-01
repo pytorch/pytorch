@@ -492,27 +492,55 @@ void testWriteTracking() {
 }
 
 void testContainerAliasing() {
-  auto graph = std::make_shared<Graph>();
-  script::parseIR(
-      R"IR(
-graph():
-  %x : str = prim::Constant[value="a"]()
-  %y : Tensor = prim::Constant()
-  %a : (Tensor) = prim::TupleConstruct(%y)
-  %b : Dict(str, Tensor) = prim::DictConstruct(%x, %y)
-  %c : Tensor[] = prim::ListConstruct(%y)
-  return (%a, %b, %c)
-  )IR",
-      &*graph);
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph():
+    %x : str = prim::Constant[value="a"]()
+    %y : Tensor = prim::Constant()
+    %a : (Tensor) = prim::TupleConstruct(%y)
+    %b : Dict(str, Tensor) = prim::DictConstruct(%x, %y)
+    %c : Tensor[] = prim::ListConstruct(%y)
+    return (%a, %b, %c)
+    )IR",
+        &*graph);
 
-  auto node_iter = graph->block()->nodes().begin();
-  node_iter++; // string
-  Node* ten_node = *node_iter++;
-  AliasDb aliasDb(graph);
+    auto node_iter = graph->block()->nodes().begin();
+    node_iter++; // string
+    Node* ten_node = *node_iter++;
+    AliasDb aliasDb(graph);
 
-  AT_ASSERT(graph->outputs().size() == 3);
-  for (auto out : graph->outputs()) {
-    AT_ASSERT(aliasDb.mayAlias(ten_node->output(), out));
+    AT_ASSERT(graph->outputs().size() == 3);
+    for (auto out : graph->outputs()) {
+      AT_ASSERT(aliasDb.mayAlias(ten_node->output(), out));
+    }
+  }
+
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph():
+    %x : str = prim::Constant[value="a"]()
+    %y : int = prim::Constant[value=1]()
+    %a : (int) = prim::TupleConstruct(%y)
+    %b : Dict(str, int) = prim::DictConstruct(%x, %y)
+    %c : int[] = prim::ListConstruct(%y)
+    return (%a, %b, %c)
+    )IR",
+        &*graph);
+
+    auto node_iter = graph->block()->nodes().begin();
+    node_iter++; // string
+    Node* ten_node = *node_iter++;
+    AliasDb aliasDb(graph);
+
+    AT_ASSERT(graph->outputs().size() == 3);
+    // primitive values don't need to alias container
+    for (auto out : graph->outputs()) {
+      AT_ASSERT(!aliasDb.mayAlias(ten_node->output(), out));
+    }
   }
 }
 

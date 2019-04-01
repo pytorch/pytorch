@@ -365,6 +365,8 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeFork(node);
     case aten::wait:
       return analyzeWait(node);
+    case prim::TupleConstruct:
+      return analyzeTupleConstruct(node);
     case prim::Constant:
     case prim::AutogradZero:
     case prim::FusedConcat:
@@ -375,7 +377,6 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Function:
     case prim::CreateObject:
       return analyzeCreator(node);
-    case prim::TupleConstruct:
     case prim::ListConstruct:
     case prim::DictConstruct:
       return analyzeContainer(node);
@@ -681,6 +682,14 @@ void AliasDb::analyzeWait(Node* node) {
     // users do that and shoot themselves in the foot for now.
     for (const auto write : subgraphWrites) {
       registerWrite(write, node);
+    }
+  }
+}
+
+void AliasDb::analyzeTupleConstruct(Node* node) {
+  for (const auto& input : node->inputs()) {
+    if (shouldAnnotate(input)) {
+      makePointerTo(input, node->output());
     }
   }
 }

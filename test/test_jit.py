@@ -979,23 +979,20 @@ class TestJit(JitTestCase):
 
     def test_cse_not_introduce_aliasing(self):
         @torch.jit.script
-        def inner_fn(x):
+        def tensor_alias_outputs(x):
             return x + x, x + x
 
-        self.run_pass('cse', inner_fn.graph)
-        FileCheck().check_count("aten::add", 2).run(inner_fn.graph)
-
-        def python_op(x):
-            return inner_fn(x)
+        self.run_pass('cse', tensor_alias_outputs.graph)
+        FileCheck().check_count("aten::add", 2).run(tensor_alias_outputs.graph)
 
         @torch.jit.script
-        def script_fn(x):
-            a, b = python_op(x)
-            a.add_(1)
-            b.add_(1)
-            return a + b
+        def ints_alias_outputs(x):
+            # type: (int) -> Tuple[int, int]
+            return x + x, x + x
 
-        self.assertEqual(script_fn(torch.tensor(1.0)), torch.tensor(6.0))
+        # non-aliasing types can be CSEd
+        self.run_pass('cse', ints_alias_outputs.graph)
+        FileCheck().check_count("aten::add", 1).run(ints_alias_outputs.graph)
 
     def test_recursive_cse(self):
         x = torch.tensor([0.1])
