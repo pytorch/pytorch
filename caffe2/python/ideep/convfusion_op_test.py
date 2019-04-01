@@ -10,7 +10,7 @@ import copy
 import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
-from caffe2.python.transformations import optimizeForIDEEP
+from caffe2.python.transformations import optimizeForMKLDNN
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.ideep_test_util as mu
 
@@ -103,7 +103,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
         workspace.FeedBlob('b0', b, dc[1])
         net = core.Net("net")
         net.Proto().CopyFrom(old_net)
-        optimizeForIDEEP(net)
+        optimizeForMKLDNN(net)
         self.assertTrue(len(net.Proto().op) == 1)
         self.assertTrue(net.Proto().op[0].type == "ConvFusion")
         workspace.RunOperatorOnce(net.Proto().op[0])
@@ -243,7 +243,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
         workspace.FeedBlob('b0', b, dc[1])
         net = core.Net("net")
         net.Proto().CopyFrom(old_net)
-        optimizeForIDEEP(net)
+        optimizeForMKLDNN(net)
         self.assertTrue(len(net.Proto().op) == 2)
         self.assertTrue(net.Proto().op[1].type == "ConvFusion")
         workspace.RunNetOnce(net.Proto())
@@ -393,7 +393,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
         workspace.FeedBlob('b0', b, dc[1])
         net = core.Net("net")
         net.Proto().CopyFrom(old_net)
-        optimizeForIDEEP(net)
+        optimizeForMKLDNN(net)
         self.assertTrue(len(net.Proto().op) == 2)
         self.assertTrue(net.Proto().op[1].type == "ConvFusion")
         workspace.RunNetOnce(net.Proto())
@@ -481,7 +481,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
         workspace.FeedBlob('var', var, dc[1])
         net = core.Net("net")
         net.Proto().CopyFrom(old_net)
-        optimizeForIDEEP(net)
+        optimizeForMKLDNN(net)
         self.assertTrue(len(net.Proto().op) == 1)
         self.assertTrue(net.Proto().op[0].type == "Conv")
         workspace.RunOperatorOnce(net.Proto().op[0])
@@ -562,7 +562,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
         workspace.FeedBlob('bias', bias, dc[1])
         net = core.Net("net")
         net.Proto().CopyFrom(old_net)
-        optimizeForIDEEP(net)
+        optimizeForMKLDNN(net)
         self.assertTrue(len(net.Proto().op) == 1)
         self.assertTrue(net.Proto().op[0].type == "Conv")
         workspace.RunOperatorOnce(net.Proto().op[0])
