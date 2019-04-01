@@ -785,8 +785,8 @@ class TestJit(JitTestCase):
             test_input(func_2, torch.tensor(0.5), 1)
 
             if RUN_CUDA:
-                test_input(func, torch.tensor(0.5, device="cuda:0"), 0)
-                test_input(func, torch.tensor(0.5, device="cuda:0"), 0)
+                test_input(func_1, torch.tensor(0.5, device="cuda:0"), 0)
+                test_input(func_2, torch.tensor(0.5, device="cuda:0"), 0)
 
         test_device()
 
