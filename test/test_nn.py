@@ -3373,17 +3373,16 @@ class TestNN(NNTestCase):
             def forward(self, x):
                 return x * self.t_rg + self.t_not_rg
 
-        for devices in [[0, 1], [[0], [1]]]:
-            m = TestModule(torch.randn(100, device='cuda', requires_grad=True))
-            self.assertTrue(m.t_rg.requires_grad)
+        m = TestModule(torch.randn(100, device='cuda', requires_grad=True))
+        self.assertTrue(m.t_rg.requires_grad)
 
-            dpm = nn.DataParallel(m, devices)
-            inp = torch.randn(2, 100, device='cuda')
+        dpm = nn.DataParallel(m, [0, 1])
+        inp = torch.randn(2, 100, device='cuda')
 
-            def fn(t):
-                return dpm(inp)
+        def fn(t):
+            return dpm(inp)
 
-            torch.autograd.gradcheck(fn, (m.t_rg,))
+        torch.autograd.gradcheck(fn, (m.t_rg,))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parallel_apply(self):
