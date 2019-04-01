@@ -338,11 +338,11 @@ if(BUILD_TEST)
   endif()
 
   # Add googletest subdirectory but make sure our INCLUDE_DIRECTORIES
-  # don't bleed into it. This is because MKL adds a global /opt/conda/include
-  # directory, and if there's gtest installed in conda, the
-  # third_party/googletest/**.cc source files would try to include headers from
-  # /opt/conda/include/gtest/**.h instead of its own.
-  # Once we have proper target-based include directories,
+  # don't bleed into it. This is because libraries installed into the root conda
+  # env (e.g. MKL) add a global /opt/conda/include directory, and if there's
+  # gtest installed in conda, the third_party/googletest/**.cc source files
+  # would try to include headers from /opt/conda/include/gtest/**.h instead of
+  # its own. Once we have proper target-based include directories,
   # this shouldn't be necessary anymore.
   get_property(INC_DIR_temp DIRECTORY PROPERTY INCLUDE_DIRECTORIES)
   set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES "")
