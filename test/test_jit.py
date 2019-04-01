@@ -2232,10 +2232,10 @@ class TestJit(JitTestCase):
                 return input + self.w1 + self.w2
 
         model = MyModule()
-        state_dict = torch.jit._unique_state_dict(model, keep_vars=False)
-        unittest.TestCase.assertEqual(self, len(state_dict), 1)
-        state_dict = torch.jit._unique_state_dict(model, keep_vars=True)
-        unittest.TestCase.assertEqual(self, len(state_dict), 1)
+        unittest.TestCase.assertEqual(
+            self, len(torch.jit._unique_state_dict(model, keep_vars=False)), 1)
+        unittest.TestCase.assertEqual(
+            self, len(torch.jit._unique_state_dict(model, keep_vars=True)), 1)
 
     def test_trace_dict_input(self):
         class Bar(torch.nn.Module):
