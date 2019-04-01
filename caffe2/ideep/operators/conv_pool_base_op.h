@@ -32,7 +32,7 @@ class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
   ideep::tensor::dims CalcOutputDims(
       const ideep::tensor& input,
       int output_channel) {
-    CAFFE_ENFORCE(input.get_size() > 0);
+    CAFFE_ENFORCE_GT(input.get_size(), 0);
     ideep::tensor::dims output_dims;
     const auto input_dims = input.get_dims();
     std::vector<std::int64_t> input_Tdims(

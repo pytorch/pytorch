@@ -134,7 +134,7 @@ void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
     return;
   }
 
-  CAFFE_ENFORCE(fusion_type < FUSION_CONV_SUM_RELU, "Invalid fusion type");
+  CAFFE_ENFORCE_LT(fusion_type, FUSION_CONV_SUM_RELU, "Invalid fusion type");
   op->set_type("ConvFusion");
   auto* arg = op->add_arg();
   arg->set_name("fusion_type");

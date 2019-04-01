@@ -96,7 +96,7 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
         // While the required format is nchw, need to reorder to nchw.
         if (input.get_public_format() == iformat::nhwc) {
           itensor temp_ten ({input.get_dims(), idtype::f32, iformat::nchw},
-            dtensor->template mutable_data<float>());
+              dtensor->template mutable_data<float>());
           temp_ten.feed_from(input);
         } else if (!input.need_reorder()) {
           CAFFE_ENFORCE(!input.has_scale(),

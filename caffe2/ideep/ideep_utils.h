@@ -12,7 +12,7 @@ namespace caffe2 {
 enum ConvAlgorithm {
   CONV_ALGORITHM_AUTO = 0,
   CONV_ALGORITHM_WINOGRAD = 1,
-  CONV_ALGORITHM_MAX = CONV_ALGORITHM_WINOGRAD + 1
+  CONV_ALGORITHM_MAX
 };
 
 enum FusionType {
@@ -20,7 +20,7 @@ enum FusionType {
   FUSION_CONV_RELU = 1,
   FUSION_CONV_SUM = 2,
   FUSION_CONV_SUM_RELU = 3,
-  FUSION_MAX = FUSION_CONV_SUM_RELU + 1
+  FUSION_MAX
 };
 
 #define USE_IDEEP_DEF_ALIASES()                                                \

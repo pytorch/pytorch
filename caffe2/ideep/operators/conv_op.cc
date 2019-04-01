@@ -41,8 +41,8 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
 
     CAFFE_ENFORCE(4 == X.ndims());
     CAFFE_ENFORCE(4 == filter.ndims() || (grouped && (group_ > 1)));
-    CAFFE_ENFORCE(filter.get_dim(2 + grouped) == kernel_h());
-    CAFFE_ENFORCE(filter.get_dim(3 + grouped) == kernel_w());
+    CAFFE_ENFORCE_EQ(filter.get_dim(2 + grouped), kernel_h());
+    CAFFE_ENFORCE_EQ(filter.get_dim(3 + grouped), kernel_w());
     CAFFE_ENFORCE(
         X.get_dim(1) == filter.get_dim(1 + grouped) * group_,
         "Convolution op: input channels does not match: # of input channels ",
@@ -127,7 +127,7 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
 
     if (fusion_type_ == FUSION_CONV_SUM
         && fusion_type_ == FUSION_CONV_SUM_RELU) {
-      CAFFE_ENFORCE(Y == &(Input(InputSize() - 1)),
+      CAFFE_ENFORCE_EQ(Y,  &(Input(InputSize() - 1)),
           "Convolution fusion op: InPlace is enforced for sum fusion.");
     }
 
@@ -166,15 +166,21 @@ class IDEEPConvFusionOp final : public IDEEPConvOp {
         "Undefined Conv fusion type.",
         fusion_type_);
 
-    if (fusion_type_ == FUSION_CONV_RELU) {
-      attr_ = iattr::fuse_relu();
-      last_input_ = BIAS_OR_INPUT_S;
-    } else if (fusion_type_ == FUSION_CONV_SUM) {
-      attr_ = iattr::fuse_sum();
-      last_input_ = INPUT_S;
-    } else if (fusion_type_ == FUSION_CONV_SUM_RELU) {
-      attr_ = iattr::residual();
-      last_input_ = INPUT_S;
+    switch (fusion_type_) {
+      case FUSION_CONV_RELU:
+        attr_ = iattr::fuse_relu();
+        last_input_ = BIAS_OR_INPUT_S;
+        break;
+      case FUSION_CONV_SUM:
+        attr_ = iattr::fuse_sum();
+        last_input_ = INPUT_S;
+        break;
+      case FUSION_CONV_SUM_RELU:
+        attr_ = iattr::residual();
+        last_input_ = INPUT_S;
+        break;
+      default:
+        CAFFE_THROW("Unsupported conv fusion type!");
     }
   }
   virtual ~IDEEPConvFusionOp() {}
