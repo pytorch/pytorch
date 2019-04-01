@@ -544,7 +544,7 @@ void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
 /* Emulate NumPy behavior of putting NaNs
  * at the end of an ascending list. */
 #define GT_OR_NAN(x, y) \
-  ((x != x && y == y) || (x > y))
+  ((th_isnan(x) && !(th_isnan(y))) || (x > y))
 
 static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elements, int64_t stride)
 {

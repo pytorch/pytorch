@@ -1,6 +1,5 @@
 import os
-import sys
-from string import Template, ascii_lowercase
+from string import Template
 from ..cwrap import cwrap
 from ..cwrap.plugins import NNExtension, NullableArguments, AutoGPU
 from ..shared import import_module

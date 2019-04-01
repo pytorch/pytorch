@@ -6,7 +6,6 @@ template <>
 bool LengthsTileOp<CPUContext>::RunOnDevice() {
   auto& data = Input(DATA);
   auto& lengths = Input(LENGTHS);
-  auto* output = Output(0);
 
   CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTHS must be 1-D");
   CAFFE_ENFORCE_GE(data.dim(), 1, "DATA should be at least 1-D");
@@ -26,7 +25,7 @@ bool LengthsTileOp<CPUContext>::RunOnDevice() {
 
   auto shape = data.sizes().vec();
   shape[0] = total_length;
-  output->Resize(shape);
+  auto* output = Output(0, shape, at::dtype(data.dtype()));
 
   auto block_bytesize = data.size_from_dim(1) * data.dtype().itemsize();
   auto src = static_cast<const char*>(data.raw_data());
