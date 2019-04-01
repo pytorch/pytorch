@@ -1,4 +1,4 @@
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 import functools
 import itertools
 
@@ -6,6 +6,9 @@ import torch
 from ..backends.thnn import backend as thnn_backend
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
+
+
+_IncompatibleKeys = namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])
 
 
 def _addindent(s_, numSpaces):
@@ -736,8 +739,9 @@ class Module(object):
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
 
         Returns:
-            dict:
-                a dictionary containing missing_keys and unexpected_keys
+            ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
+                * **missing_keys** is a list of str containing the missing keys
+                * **unexpected_keys** is a list of str containing the unexpected keys
         """
         missing_keys = []
         unexpected_keys = []
@@ -772,7 +776,7 @@ class Module(object):
         if len(error_msgs) > 0:
             raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
                                self.__class__.__name__, "\n\t".join(error_msgs)))
-        return {'unexpected_keys': unexpected_keys, 'missing_keys': missing_keys}
+        return _IncompatibleKeys(missing_keys, unexpected_keys)
 
     def _named_members(self, get_members_fn, prefix='', recurse=True):
         r"""Helper method for yielding various names + members of modules."""
