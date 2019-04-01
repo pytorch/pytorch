@@ -539,11 +539,11 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 fn = getattr(torch.onnx.symbolic, op_name)
                 try:
                     return fn(g, *inputs, **attrs)
-                except AssertionError:
+                except AssertionError as e:
                     if is_aten_fallback_export:
                         # Falling back to ATen
-                        warnings.warn("An assertion error occured when trying to export {}. Falling back to ATen"
-                                      .format(op_name))
+                        warnings.warn("The following assertion error occured when trying to "
+                                      "export {}. Falling back to ATen. \n\n{}".format(op_name, e))
                         return _export_node_aten(g, n, op_name, inputs)
                     raise
 
