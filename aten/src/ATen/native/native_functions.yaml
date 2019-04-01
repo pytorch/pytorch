@@ -849,6 +849,13 @@
     SparseCPU: empty_sparse
     SparseCUDA: empty_sparse
 
+- func: from_file(str filename, *, bool? shared=None, int? size=0, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  matches_jit_signature: True
+  dispatch:
+    CPU: from_file
+    CUDA: from_file
+
+
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
   matches_jit_signature: True
   variants: method
