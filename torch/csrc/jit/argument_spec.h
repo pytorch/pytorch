@@ -43,7 +43,7 @@ struct ArgumentInfo {
     return at::ScalarType(type_);
   }
   operator TypePtr() const {
-    if (!defined())
+    if (!defined() && isTensor())
       return TensorType::get();
     return DimensionedTensorType::create(type(), ConvertIntToCPUOrCUDA(device()), dim());
   }
@@ -106,6 +106,9 @@ struct ArgumentSpec {
     } else {
       // NB: no need to set is_tensor to false, because we memset the struct to
       // 0 above
+      if (! input.isNone()) {
+	arg.defined_ = true;
+      }
       combineHash(arg);
       offset++;
     }
@@ -166,6 +169,17 @@ struct ArgumentSpec {
       return TupleType::create(fmap(
           tuple_type->elements(),
           [&](const TypePtr& subtype) { return fillType(subtype, offset); }));
+    } else if (auto optional_type = original->cast<OptionalType>()) {
+      // FIXME: let's leave Tensor? untouched, would be obsoleted by #18407
+      if (original->isSubtypeOf(OptionalType::ofTensor())) {
+	offset++;
+	return original;
+      }
+      auto& arg = args.at(offset++);
+      if (! arg.defined()) {
+	return NoneType::get();
+      }
+      return optional_type->getElementType();;
     } else {
       offset++;
       return original;
@@ -241,6 +255,8 @@ struct CompleteArgumentSpec {
           std::copy(strides.begin(), strides.end(), next_dim);
           next_dim += strides.size();
         }
+      } else {
+	pod.defined = inputs[i].isNone();
       }
       // each POD has a running tally of all dimensions including its own
       pod.total_dims = total_dims;
@@ -325,7 +341,7 @@ struct CompleteArgumentInfo {
         spec.sizes_strides() + sizes_strides_offset(i) + ndim, ndim);
   }
   operator TypePtr() const {
-    if (!defined())
+    if (!defined() && isTensor())
       return TensorType::get();
     return CompleteTensorType::create(
         type(), ConvertIntToCPUOrCUDA(device()), sizes(), strides());

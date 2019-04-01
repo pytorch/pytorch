@@ -583,12 +583,28 @@ RegisterOperators reg(
            };
          }),
      Operator(
-         "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)",
+         "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)",
          [](Stack& stack) {
-           at::Tensor self;
-           Shared<IntList> desired_sizes;
-           pop(stack, self, desired_sizes);
-           push(stack, at::sum_to(std::move(self), desired_sizes->elements()));
+	   IValue self, size;
+	   pop(stack, self, size);
+	   if (size.isNone()) {
+	     push(stack, self);
+	   } else {
+	     push(stack, at::sum_to(self.toTensor(), size.toIntList()->elements()));
+	   }
+           return 0;
+         }),
+     Operator(
+         "aten::_size_if_not_equal(Tensor self, Tensor other) -> int[]?",
+         [](Stack& stack) {
+           at::Tensor self, other;
+           pop(stack, self, other);
+	   const auto s = self.sizes();
+	   if (s == other.sizes()) {
+	     push(stack, IValue());
+	   } else {
+	     push(stack, s);
+	   }
            return 0;
          }),
      Operator(

@@ -109,7 +109,8 @@ bool isDifferentiable(Node* n) {
       "aten::sinh(Tensor self) -> Tensor",
       "aten::tan(Tensor self) -> Tensor",
       "aten::trunc(Tensor self) -> Tensor",
-      "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)",
+      "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)",
+      "aten::_size_if_not_equal(Tensor self, Tensor other) -> int[]?",
       "aten::log_softmax(Tensor self, int dim) -> Tensor",
       "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
       "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)",
@@ -270,11 +271,11 @@ class GradientHelper {
  private:
   Node* node;
 
-  SymbolicVariable gradSumToSizeOf(SymbolicVariable v, Symbol input_name) {
+  SymbolicVariable gradSumToSizeOf(SymbolicVariable v, Symbol input_name, SymbolicVariable fw_output) {
     Value* size;
     {
-      WithInsertPoint insert_guard{node};
-      size = SymbolicVariable(node->namedInput(input_name)).size();
+      WithInsertPoint insert_guard{node->next()};
+      size = SymbolicVariable(node->namedInput(input_name)).size_if_not_equal(fw_output);
     }
     return v.gradSumToSize(size);
   };
@@ -300,9 +301,9 @@ class GradientHelper {
 
     if (node->matches(
             "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
-      return {gradSumToSizeOf(grads.at(0), attr::self),
+      return {gradSumToSizeOf(grads.at(0), attr::self, outputs.at(0)),
               gradSumToSizeOf(
-                  grads.at(0) * node->namedInput(attr::alpha), attr::other),
+                  grads.at(0) * node->namedInput(attr::alpha), attr::other, outputs.at(0)),
               nullptr};
 
     } else if (
@@ -317,9 +318,9 @@ class GradientHelper {
     } else if (
         node->matches(
             "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
-      return {gradSumToSizeOf(grads.at(0), attr::self),
+      return {gradSumToSizeOf(grads.at(0), attr::self, outputs.at(0)),
               gradSumToSizeOf(
-                  -grads.at(0) * node->namedInput(attr::alpha), attr::other),
+                  -grads.at(0) * node->namedInput(attr::alpha), attr::other, outputs.at(0)),
               nullptr};
 
     } else if (
@@ -329,8 +330,8 @@ class GradientHelper {
 
     } else if (node->matches(
                    "aten::mul(Tensor self, Tensor other) -> Tensor")) {
-      return {gradSumToSizeOf(grads.at(0) * inputs.at(1), attr::self),
-              gradSumToSizeOf(grads.at(0) * inputs.at(0), attr::other)};
+      return {gradSumToSizeOf(grads.at(0) * inputs.at(1), attr::self, outputs.at(0)),
+              gradSumToSizeOf(grads.at(0) * inputs.at(0), attr::other, outputs.at(0))};
 
     } else if (node->matches(
                    "aten::mul(Tensor self, Scalar other) -> Tensor")) {
@@ -338,10 +339,10 @@ class GradientHelper {
 
     } else if (node->matches(
                    "aten::div(Tensor self, Tensor other) -> Tensor")) {
-      return {gradSumToSizeOf(grads.at(0) / inputs.at(1), attr::self),
+      return {gradSumToSizeOf(grads.at(0) / inputs.at(1), attr::self, outputs.at(0)),
               gradSumToSizeOf(
                   -grads.at(0) * inputs.at(0) / (inputs.at(1) * inputs.at(1)),
-                  attr::other)};
+                  attr::other, outputs.at(0))};
 
     } else if (node->matches(
                    "aten::div(Tensor self, Scalar other) -> Tensor")) {
@@ -352,30 +353,30 @@ class GradientHelper {
       return {
           gradSumToSizeOf(
               grads.at(0) * (inputs.at(0) > inputs.at(1)).type_as(grads.at(0)),
-              attr::self),
+              attr::self, outputs.at(0)),
           gradSumToSizeOf(
               grads.at(0) * (inputs.at(1) > inputs.at(0)).type_as(grads.at(0)),
-              attr::other)};
+              attr::other, outputs.at(0))};
 
     } else if (node->matches(
                    "aten::min(Tensor self, Tensor other) -> Tensor")) {
       return {
           gradSumToSizeOf(
               grads.at(0) * (inputs.at(0) < inputs.at(1)).type_as(grads.at(0)),
-              attr::self),
+              attr::self, outputs.at(0)),
           gradSumToSizeOf(
               grads.at(0) * (inputs.at(1) < inputs.at(0)).type_as(grads.at(0)),
-              attr::other)};
+              attr::other, outputs.at(0))};
 
     } else if (
         node->matches(
             "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor")) {
       return {nullptr,
               gradSumToSizeOf(
-                  grads.at(0) * inputs.at(0).type_as(grads.at(0)), attr::self),
+                  grads.at(0) * inputs.at(0).type_as(grads.at(0)), attr::self, outputs.at(0)),
               gradSumToSizeOf(
                   grads.at(0) * (1 - inputs.at(0)).type_as(grads.at(0)),
-                  attr::other)};
+                  attr::other, outputs.at(0))};
 
     } else if (node->matches("aten::sigmoid(Tensor self) -> Tensor")) {
       // TODO: The order of operations matter in this case. This
@@ -462,13 +463,18 @@ class GradientHelper {
 
     } else if (
         node->matches(
-            "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)")) {
+            "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")) {
       Value* self_size;
       {
         WithInsertPoint insert_guard{node};
         self_size = inputs.at(0).size();
       }
       return {grads.at(0).expand(self_size), nullptr};
+
+    } else if (
+        node->matches(
+            "aten::_size_if_not_equal(Tensor self, Tensor other) -> int[]?")) {
+      return {nullptr, nullptr};
 
     } else if (node->matches("aten::ceil(Tensor self) -> Tensor")) {
       return {SymbolicVariable::zeros_like(grads.at(0))};
@@ -561,7 +567,7 @@ class GradientHelper {
         node->matches(
             "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor")) {
       return {gradSumToSizeOf(
-                  grads.at(0) * node->namedInput(attr::beta), attr::self),
+              grads.at(0) * node->namedInput(attr::beta), attr::self, outputs.at(0)),
               grads.at(0).mm(inputs.at(2).t()) * node->namedInput(attr::alpha),
               inputs.at(1).t().mm(grads.at(0)) * node->namedInput(attr::alpha),
               nullptr,

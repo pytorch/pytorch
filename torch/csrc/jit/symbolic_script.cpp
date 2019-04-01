@@ -470,14 +470,18 @@ const std::vector<std::string> functions = {
             return torch.lerp(self, end, weight), backward
 
         def mul(self, other):
+            result = self * other
+            self_size = torch._size_if_not_equal(self, result)
+            other_size = torch._size_if_not_equal(other, result)
+
             def backward(grad_output):
                 # self & other are used in backward. No need to pass in their size
                 # from forward pass
-                grad_self = (grad_output * other)._grad_sum_to_size(self.size())
-                grad_other = (grad_output * self)._grad_sum_to_size(other.size())
+                grad_self = (grad_output * other)._grad_sum_to_size(self_size)
+                grad_other = (grad_output * self)._grad_sum_to_size(other_size)
                 return grad_self, grad_other
 
-            return self * other, backward
+            return result, backward
 
         def mv(self, vec):
             def backward(grad_output):
@@ -871,7 +875,6 @@ const std::vector<std::string> functions = {
                 return grad_self, None, None, None, None
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
-
       )"};
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
 
