@@ -1,6 +1,3 @@
-from numbers import Integral
-import warnings
-
 from .module import Module
 from .. import functional as F
 from ..._jit_internal import weak_module, weak_script_method
