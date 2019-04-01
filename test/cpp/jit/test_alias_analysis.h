@@ -624,6 +624,30 @@ graph():
     AT_ASSERT(aliasDb.mayContainAlias(list_1, g_output));
     AT_ASSERT(aliasDb.mayContainAlias(list_2, g_output));
   }
+
+  // simple example
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+graph():
+  %0 : Tensor = prim::Constant()
+  %1 : Tensor = prim::Constant()
+  %13 : (Tensor) = prim::TupleConstruct(%0)
+  return (%13)
+)IR",
+        &*graph);
+    AliasDb aliasDb(graph);
+
+    auto node_iter = graph->block()->nodes().begin();
+    auto first_ten = *node_iter++;
+    auto second_ten = *node_iter++;
+    auto tup_node = *node_iter;
+
+    AT_ASSERT(aliasDb.mayContainAlias(first_ten->output(), tup_node->output()));
+    AT_ASSERT(
+        !aliasDb.mayContainAlias(second_ten->output(), tup_node->output()));
+  }
 }
 
 void testWildcards() {

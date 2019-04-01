@@ -795,7 +795,12 @@ bool AliasDb::mayContainAlias(const Value* elem, const Value* container) const {
     return false;
   }
 
-  // container not a contained type - can return false
+  // don't know how to analyze nested containers
+  if (isContainerType(elem->type())) {
+    return true;
+  }
+
+  // if it's not a container type case already covered through mayAlias
   if (!isContainerType(container->type())) {
     return false;
   }
@@ -805,10 +810,6 @@ bool AliasDb::mayContainAlias(const Value* elem, const Value* container) const {
     return true;
   }
 
-  // don't know how to analyze nested containers
-  if (isContainerType(elem->type())) {
-    return true;
-  }
   for (const auto& container_elem :
        container->type()->expect<TupleType>()->elements()) {
     if (isContainerType(container_elem)) {
