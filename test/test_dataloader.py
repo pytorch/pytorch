@@ -3,13 +3,10 @@ import sys
 import errno
 import os
 import ctypes
-import signal
 import torch
 import gc
 import time
-import traceback
 import unittest
-import subprocess
 import itertools
 import warnings
 from torch import multiprocessing as mp
@@ -186,14 +183,20 @@ class TestConcatDataset(TestCase):
 # Inspired by https://stackoverflow.com/a/33599967
 class ErrorTrackingProcess(mp.Process):
 
-    def __init__(self, *args, **kwargs):
-        super(ErrorTrackingProcess, self).__init__(*args, **kwargs)
+    # Why no *args?
+    #   py2 doesn't support def fn(x, *args, key=val, **kwargs)
+    # Setting disable_stderr=True may generate a lot of unrelated error outputs
+    # but could be helpful for debugging.
+    def __init__(self, disable_stderr=True, **kwargs):
+        super(ErrorTrackingProcess, self).__init__(**kwargs)
         self._pconn, self._cconn = mp.Pipe()
         self._exception = None
+        self.disable_stderr = disable_stderr
 
     def run(self):
-        # Disable polluting stderr with errors that are supposed to happen.
-        sys.stderr = open(os.devnull, "w")
+        if self.disable_stderr:
+            # Disable polluting stderr with errors that are supposed to happen.
+            sys.stderr = open(os.devnull, "w")
         try:
             super(ErrorTrackingProcess, self).run()
             self._cconn.send(None)
@@ -411,6 +414,7 @@ def init_fn(worker_id):
 class TestDataLoader(TestCase):
 
     def setUp(self):
+        super(TestDataLoader, self).setUp()
         self.data = torch.randn(100, 2, 3, 5)
         self.labels = torch.randperm(50).repeat(2)
         self.dataset = TensorDataset(self.data, self.labels)
@@ -768,7 +772,8 @@ class TestDataLoader(TestCase):
                 loader_p = ErrorTrackingProcess(target=_test_proper_exit,
                                                 args=(use_workers, pin_memory, exit_method,
                                                       hold_iter_reference, loader_setup_event,
-                                                      tester_setup_event))
+                                                      tester_setup_event),
+                                                disable_stderr=False)
                 loader_p.start()
 
                 # Wait for loader process to set everything up, e.g., starting
@@ -926,6 +931,7 @@ class StringDataset(Dataset):
 
 class TestStringDataLoader(TestCase):
     def setUp(self):
+        super(TestStringDataLoader, self).setUp()
         self.dataset = StringDataset()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -951,6 +957,7 @@ class DictDataset(Dataset):
 
 class TestDictDataLoader(TestCase):
     def setUp(self):
+        super(TestDictDataLoader, self).setUp()
         self.dataset = DictDataset()
 
     def test_sequential_batch(self):
@@ -994,6 +1001,7 @@ class NamedTupleDataset(Dataset):
 
 class TestNamedTupleDataLoader(TestCase):
     def setUp(self):
+        super(TestNamedTupleDataLoader, self).setUp()
         self.dataset = NamedTupleDataset()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -1039,6 +1047,7 @@ def collate_into_packed_sequence_batch_first(batch):
 
 class TestCustomPinFn(TestCase):
     def setUp(self):
+        super(TestCustomPinFn, self).setUp()
         inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
         tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
         self.dataset = TensorDataset(inps, tgts)
@@ -1091,6 +1100,7 @@ class TestWorkerQueueDataset(Dataset):
 
 class TestIndividualWorkerQueue(TestCase):
     def setUp(self):
+        super(TestIndividualWorkerQueue, self).setUp()
         self.dataset = TestWorkerQueueDataset([i for i in range(128)])
 
     def _run_ind_worker_queue_test(self, batch_size, num_workers):

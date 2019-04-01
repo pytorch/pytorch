@@ -1132,8 +1132,8 @@ inline Tensor Tensor::addcdiv(const Tensor & tensor1, const Tensor & tensor2, Sc
 inline std::tuple<Tensor,Tensor> Tensor::gels(const Tensor & A) const {
     return type().gels(*this, A);
 }
-inline std::tuple<Tensor,Tensor> Tensor::trtrs(const Tensor & A, bool upper, bool transpose, bool unitriangular) const {
-    return type().trtrs(*this, A, upper, transpose, unitriangular);
+inline std::tuple<Tensor,Tensor> Tensor::triangular_solve(const Tensor & A, bool upper, bool transpose, bool unitriangular) const {
+    return type().triangular_solve(*this, A, upper, transpose, unitriangular);
 }
 inline std::tuple<Tensor,Tensor> Tensor::symeig(bool eigenvectors, bool upper) const {
     return type().symeig(*this, eigenvectors, upper);
@@ -1170,12 +1170,6 @@ inline Tensor Tensor::orgqr(const Tensor & input2) const {
 }
 inline Tensor Tensor::ormqr(const Tensor & input2, const Tensor & input3, bool left, bool transpose) const {
     return type().ormqr(*this, input2, input3, left, transpose);
-}
-inline std::tuple<Tensor,Tensor> Tensor::btrifact(bool pivot) const {
-    return type().btrifact(*this, pivot);
-}
-inline std::tuple<Tensor,Tensor,Tensor> Tensor::btrifact_with_info(bool pivot) const {
-    return type().btrifact_with_info(*this, pivot);
 }
 inline Tensor Tensor::btrisolve(const Tensor & LU_data, const Tensor & LU_pivots) const {
     return type().btrisolve(*this, LU_data, LU_pivots);

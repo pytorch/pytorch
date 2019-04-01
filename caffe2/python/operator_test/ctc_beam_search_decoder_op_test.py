@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core
+from caffe2.python.test_util import caffe2_flaky
 from collections import defaultdict, Counter
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
@@ -18,7 +19,7 @@ DEFAULT_PRUNE_THRESHOLD = 0.001
 
 
 class TestCTCBeamSearchDecoderOp(serial.SerializedTestCase):
-
+    @caffe2_flaky
     @serial.given(
         batch=st.sampled_from([1, 2, 4]),
         max_time=st.sampled_from([1, 8, 64]),
