@@ -1,6 +1,7 @@
 #include "memory_dag.h"
 
 #include <torch/csrc/utils/memory.h>
+#include <algorithm>
 #include <queue>
 
 namespace torch {
@@ -31,10 +32,63 @@ bool MemoryDAG::mayAliasImpl(const Element* a, const Element* b) const {
   return false;
 }
 
+bool MemoryDAG::mayContainAlias(
+    const Element* contained,
+    const Element* container) const {
+  return mayContainAliasImpl(contained, container);
+}
+
+bool MemoryDAG::mayContainAlias(Element* contained, Element* container) const {
+  return mayContainAliasImpl(contained, container);
+}
+
+bool MemoryDAG::mayContainAliasImpl(
+    const Element* elem,
+    const Element* container) const {
+  // If elem contains other elements, does container hold any of those elements?
+  if (std::any_of(
+          elem->contained_elements.begin(),
+          elem->contained_elements.begin(),
+          [&](const Element* e) {
+            return mayContainAliasImpl(e, container);
+          })) {
+    return true;
+  }
+
+  // If container contains other elements, do those containers hold elem?
+  if (std::any_of(
+          container->contained_elements.begin(),
+          container->contained_elements.begin(),
+          [&](const Element* cont) {
+            return mayContainAliasImpl(elem, cont);
+          })) {
+    return true;
+  }
+
+  const auto elemMemLoc = elem->getMemoryLocations();
+  const auto contMemLoc = container->getMemoryLocations();
+
+  for (const auto elem_mem : elemMemLoc) {
+    for (const auto container : contMemLoc) {
+      const auto& cont_elem = container->contained_elements;
+      if (std::find(cont_elem.begin(), cont_elem.end(), elem_mem) !=
+          cont_elem.end()) {
+        return true;
+      };
+    }
+  }
+
+  return false;
+}
+
 // Make `v` point at `to`.
 void MemoryDAG::makePointerTo(Element* from, Element* to) {
   from->pointsTo.insert(to);
   to->pointedFrom.insert(from);
+}
+
+void MemoryDAG::addToContainedElements(Element* elem, Element* container) {
+  container->contained_elements.push_back(elem);
 }
 
 // Give `v` a fresh alias (i.e. it does not point to any value)

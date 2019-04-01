@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/irparser.h>
 #include "test/cpp/jit/test_base.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
@@ -487,6 +488,141 @@ void testWriteTracking() {
         writingNode, std::unordered_set<const Value*>{a, b}));
     ASSERT_TRUE(aliasDb.writesToAlias(
         writingNode, std::unordered_set<const Value*>{aAlias}));
+  }
+}
+
+void testContainerAliasing() {
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph():
+    %x : str = prim::Constant[value="a"]()
+    %y : Tensor = prim::Constant()
+    %a : (Tensor) = prim::TupleConstruct(%y)
+    %b : Dict(str, Tensor) = prim::DictConstruct(%x, %y)
+    %c : Tensor[] = prim::ListConstruct(%y)
+    return (%a, %b, %c)
+    )IR",
+        &*graph);
+
+    auto node_iter = graph->block()->nodes().begin();
+    node_iter++; // string
+    Node* ten_node = *node_iter++;
+    AliasDb aliasDb(graph);
+
+    AT_ASSERT(graph->outputs().size() == 3);
+    for (auto out : graph->outputs()) {
+      AT_ASSERT(aliasDb.mayContainAlias(ten_node->output(), out));
+    }
+  }
+
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph():
+    %x : str = prim::Constant[value="a"]()
+    %y : int = prim::Constant[value=1]()
+    %a : (int) = prim::TupleConstruct(%y)
+    %b : Dict(str, int) = prim::DictConstruct(%x, %y)
+    %c : int[] = prim::ListConstruct(%y)
+    return (%a, %b, %c)
+    )IR",
+        &*graph);
+
+    auto node_iter = graph->block()->nodes().begin();
+    node_iter++; // string
+    Node* ten_node = *node_iter++;
+    AliasDb aliasDb(graph);
+
+    AT_ASSERT(graph->outputs().size() == 3);
+    // primitive values don't need to alias container
+    for (auto out : graph->outputs()) {
+      AT_ASSERT(!aliasDb.mayContainAlias(ten_node->output(), out));
+    }
+  }
+
+  // Test input aliasing
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph(%x: Tensor, %y: Tensor):
+    %a : (Tensor) = prim::TupleConstruct(%x)
+    return (%a)
+    )IR",
+        &*graph);
+
+    auto node_iter = graph->block()->nodes().begin();
+    auto tuple_node = *node_iter;
+    AliasDb aliasDb(graph);
+
+    for (auto input : graph->inputs()) {
+      AT_ASSERT(aliasDb.mayContainAlias(input, tuple_node->output()));
+    }
+  }
+
+  // Test tuple that doesn't come from construct
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+graph(%x : int,
+      %y : Tensor,
+      %z : Tensor):
+  %3 : int = prim::Constant[value=1]()
+  %4 : bool = aten::eq(%x, %3)
+  %a : (Tensor) = prim::If(%4)
+    block0():
+      %a.1 : (Tensor) = prim::TupleConstruct(%y)
+      -> (%a.1)
+    block1():
+      %a.2 : (Tensor) = prim::TupleConstruct(%z)
+      -> (%a.2)
+  return (%a)
+ )IR",
+        &*graph);
+
+    AliasDb aliasDb(graph);
+
+    for (auto input : graph->inputs()) {
+      if (input->type() == IntType::get()) {
+        continue;
+      }
+
+      AT_ASSERT(aliasDb.mayContainAlias(input, graph->outputs().at(0)));
+    }
+  }
+
+  // test nested types
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+graph():
+  %4 : Device? = prim::Constant()
+  %2 : int? = prim::Constant()
+  %0 : float = prim::Constant[value=1]()
+  %a : Tensor = aten::tensor(%0, %2, %4)
+  %a_list : Tensor[] = prim::ListConstruct(%a)
+  %b : Tensor = aten::tensor(%0, %2, %4)
+  %b_list : Tensor[] = prim::ListConstruct(%b)
+  %13 : (Tensor[], Tensor[]) = prim::TupleConstruct(%a_list, %b_list)
+  return (%13)
+)IR",
+        &*graph);
+    AliasDb aliasDb(graph);
+    auto g_output = graph->outputs().at(0);
+    auto list_2 = g_output->node()->inputs().at(0);
+    auto list_1 = g_output->node()->inputs().at(1);
+
+    // TODO FIX assume conservatively for now
+    AT_ASSERT(aliasDb.mayContainAlias(list_1, list_2));
+    AT_ASSERT(aliasDb.mayContainAlias(list_2, list_1));
+
+    AT_ASSERT(aliasDb.mayContainAlias(list_1, g_output));
+    AT_ASSERT(aliasDb.mayContainAlias(list_2, g_output));
   }
 }
 

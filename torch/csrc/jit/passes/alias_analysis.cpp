@@ -23,6 +23,16 @@ bool AliasDb::shouldAnnotate(const Value* v) {
   return shouldAnnotate(v->type());
 }
 
+bool AliasDb::isContainerType(const TypePtr& type) {
+  return type->kind() == TypeKind::ListType ||
+      type->kind() == TypeKind::TupleType ||
+      type->kind() == TypeKind::DictType ||
+      (type->kind() == TypeKind::FutureType &&
+       isContainerType(type->cast<FutureType>()->getElementType())) ||
+      (type->kind() == TypeKind::OptionalType &&
+       isContainerType(type->cast<OptionalType>()->getElementType()));
+}
+
 AliasDb::~AliasDb() = default;
 
 AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
@@ -365,10 +375,11 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeFork(node);
     case aten::wait:
       return analyzeWait(node);
+    case prim::TupleConstruct:
+      return analyzeTupleConstruct(node);
     case prim::Constant:
     case prim::DictConstruct:
     case prim::ListConstruct:
-    case prim::TupleConstruct:
     case prim::AutogradZero:
     case prim::FusedConcat:
     case prim::MMTreeReduce:
@@ -675,6 +686,14 @@ void AliasDb::analyzeWait(Node* node) {
   }
 }
 
+void AliasDb::analyzeTupleConstruct(Node* node) {
+  for (const auto& input : node->inputs()) {
+    if (shouldAnnotate(input)) {
+      addToContainedElements(input, node->output());
+    }
+  }
+}
+
 // SetAttr: writes to the `self` field
 void AliasDb::analyzeSetAttr(Node* node) {
   const auto self = node->inputs().at(0);
@@ -726,18 +745,32 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     return;
   }
 
-  if (!isTracked(from)) {
-    giveFreshAlias(from);
-  }
-  if (!isTracked(to)) {
-    giveFreshAlias(to);
-  }
-  auto fromEl = elementMap_.at(from);
-  auto toEl = elementMap_.at(to);
+  auto fromEl = getOrCreateElement(from);
+  auto toEl = getOrCreateElement(to);
+
   memoryDAG_->makePointerTo(fromEl, toEl);
 }
 
+void AliasDb::addToContainedElements(
+    const Value* elem,
+    const Value* container) {
+  if (!shouldAnnotate(elem)) {
+    return;
+  }
+
+  AT_ASSERT(isContainerType(container->type()));
+
+  auto elemEl = getOrCreateElement(elem);
+  auto contEl = getOrCreateElement(container);
+
+  memoryDAG_->addToContainedElements(elemEl, contEl);
+}
+
 bool AliasDb::mayAlias(const Value* a, const Value* b) const {
+  if (!shouldAnnotate(a) || !shouldAnnotate(b)) {
+    return false;
+  }
+
   if (isWildcard(a) || isWildcard(b)) {
     return true;
   }
@@ -747,6 +780,50 @@ bool AliasDb::mayAlias(const Value* a, const Value* b) const {
   }
 
   return memoryDAG_->mayAlias(elementMap_.at(a), elementMap_.at(b));
+}
+
+bool AliasDb::mayContainAlias(const Value* elem, const Value* container) const {
+  if (mayAlias(elem, container)) {
+    return true;
+  }
+
+  if (!shouldAnnotate(elem) || !shouldAnnotate(container)) {
+    return false;
+  }
+
+  if (!elementMap_.count(elem) || !elementMap_.count(container)) {
+    return false;
+  }
+
+  // container not a contained type - can return false
+  if (!isContainerType(container->type())) {
+    return false;
+  }
+
+  // don't know how to analyze anything except TupleConstruct
+  if (container->node()->kind() != prim::TupleConstruct) {
+    return true;
+  }
+
+  // don't know how to analyze nested containers
+  if (isContainerType(elem->type())) {
+    return true;
+  }
+  for (const auto& container_elem :
+       container->type()->expect<TupleType>()->elements()) {
+    if (isContainerType(container_elem)) {
+      return true;
+    }
+  }
+
+  for (const auto& input : container->node()->inputs()) {
+    if (isWildcard(input)) {
+      return true;
+    }
+  }
+
+  return memoryDAG_->mayContainAlias(
+      elementMap_.at(elem), elementMap_.at(container));
 }
 
 // Make each value in the `from` list point to its partner in the `to` list
@@ -769,6 +846,13 @@ void AliasDb::giveFreshAlias(const Value* value) {
   }
 
   elementMap_[value] = memoryDAG_->makeFreshValue(value);
+}
+
+Element* AliasDb::getOrCreateElement(const Value* value) {
+  if (!isTracked(value)) {
+    giveFreshAlias(value);
+  }
+  return elementMap_.at(value);
 }
 
 bool AliasDb::isTracked(const Value* v) const {
