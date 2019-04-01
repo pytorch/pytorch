@@ -204,10 +204,8 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
 
     tupled_inputs = _as_tuple(inputs)
     if any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)) and not check_sparse_nnz:
-        fail_test('gradcheck expects all tensor inputs '
+        return fail_test('gradcheck expects all tensor inputs '
                   'are dense when check_sparse_nnz is set to False.')
-        return False
-
 
     # Make sure that gradients are saved for all inputs
     any_input_requiring_grad = False
@@ -244,8 +242,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
             numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)
             for n in numerical:
                 if len(torch.nonzero(n)) > 0:
-                    fail_test('Numerical gradient for function expected to be zero')
-                    return False
+                    return fail_test('Numerical gradient for function expected to be zero')
         return True
 
     for i, o in enumerate(output):
