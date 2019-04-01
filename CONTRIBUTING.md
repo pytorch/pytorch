@@ -14,9 +14,9 @@ into two categories:
 Once you finish implementing a feature or bug-fix, please send a Pull Request to
 https://github.com/pytorch/pytorch
 
-If you are not familiar with creating a Pull Request, here are some guides:
-- http://stackoverflow.com/questions/14680711/how-to-do-a-github-pull-request
-- https://help.github.com/articles/creating-a-pull-request/
+This document covers some of the more technical aspects of contributing
+to PyTorch.  For more non-technical guidance about how to contribute to
+PyTorch, see the [Contributing Guide](docs/source/community/contribution_guide.rst).
 
 ## Developing PyTorch
 
