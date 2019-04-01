@@ -17,10 +17,12 @@ class FlattenOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = Input(0);
-    auto* output = Output(0);
     CAFFE_ENFORCE_GE(
         input.dim(), axis_, "The rank of the tensor must be >= axis.");
-    output->Resize(input.size_to_dim(axis_), input.size_from_dim(axis_));
+    auto* output = Output(
+        0,
+        {input.size_to_dim(axis_), input.size_from_dim(axis_)},
+        at::dtype(input.dtype()));
     context_.CopyItemsSameDevice(
         input.dtype(),
         input.numel(),

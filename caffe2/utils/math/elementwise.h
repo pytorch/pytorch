@@ -113,6 +113,39 @@ CAFFE2_API void GT(int N, const T* A, const T* B, bool* C, Context* context);
 template <typename T, class Context>
 CAFFE2_API void GE(int N, const T* A, const T* B, bool* C, Context* context);
 
+template <typename TAlpha, typename TData, class Context>
+CAFFE2_API void
+Axpy(std::int64_t N, TAlpha alpha, const TData* X, TData* Y, Context* context);
+
+// Different from the Axpy function above, if alpha is passed in
+// as a pointer, we will assume that it lives on the Context device,
+// for example on GPU.
+template <typename TAlpha, typename TData, class Context>
+CAFFE2_API void Axpy(
+    std::int64_t N,
+    const TAlpha* alpha,
+    const TData* X,
+    TData* Y,
+    Context* context);
+
+template <typename TAlpha, typename TData, class Context>
+CAFFE2_API void Axpby(
+    std::int64_t N,
+    TAlpha alpha,
+    const TData* X,
+    TAlpha beta,
+    TData* Y,
+    Context* context);
+
+template <typename TAlpha, typename TData, class Context>
+CAFFE2_API void Axpby(
+    std::int64_t N,
+    const TAlpha* alpha,
+    const TData* X,
+    const TAlpha* beta,
+    TData* Y,
+    Context* context);
+
 } // namespace math
 } // namespace caffe2
 

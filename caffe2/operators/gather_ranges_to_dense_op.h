@@ -66,9 +66,8 @@ class GatherRangesToDenseOp final : public Operator<Context> {
     vector<int64_t> outputDims{batchSize, 0};
     vector<char*> outputRawData;
     for (int i = 0; i < OutputSize(); ++i) {
-      auto* output = Output(i);
       outputDims[1] = lengths_[i];
-      output->Resize(outputDims);
+      auto* output = Output(i, outputDims, at::dtype(data.dtype()));
       char* ptr = static_cast<char*>(output->raw_mutable_data(data.dtype()));
       memset(ptr, 0, output->nbytes());
       outputRawData.push_back(ptr);

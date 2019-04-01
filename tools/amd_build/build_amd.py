@@ -2,7 +2,6 @@
 
 from __future__ import absolute_import, division, print_function
 import os
-import sys
 import subprocess
 import argparse
 from functools import reduce
@@ -56,6 +55,7 @@ includes = [
     "caffe2/video/*",
     "caffe2/distributed/*",
     "caffe2/queue/*",
+    "caffe2/contrib/aten/*",
     "binaries/*",
     "caffe2/**/*_test*",
     "caffe2/core/*",
