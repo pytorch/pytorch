@@ -55,10 +55,10 @@ using ModuleLookup = std::function<std::shared_ptr<Module>(
     const std::vector<std::string>&)>;
 
 struct NamedIValue {
-  NamedIValue(std::string name, TypePtr type, IValue ivalue)
+  NamedIValue(const std::string& name, TypePtr type, IValue ivalue)
       : name_(name),
         type_(type),
-        ivalue_(torch::make_unique<IValue>(std::move(ivalue))) {}
+        ivalue_(std::make_shared<IValue>(std::move(ivalue))) {}
 
   Slot slot() const {
     return Slot(ivalue_.get());
@@ -71,9 +71,9 @@ struct NamedIValue {
   }
 
  private:
-  const std::string name_;
-  const TypePtr type_;
-  std::unique_ptr<IValue> ivalue_;
+  std::string name_;
+  TypePtr type_;
+  std::shared_ptr<IValue> ivalue_;
 };
 
 struct Method {
@@ -614,10 +614,10 @@ struct Module {
           parameter_remap,
       std::vector<std::string> names = {}) const {
     auto curr = module_lookup(names);
-    for (auto& kv : parameters) {
+    for (auto& kv : get_parameters()) {
       curr->register_parameter(
-          kv.key(),
-          kv.value().slot()->toTensor(),
+          /*name=*/kv.key(),
+          /*v=*/kv.value().slot()->toTensor(),
           /*is_buffer=*/false);
       parameter_remap[&kv.value()] = curr->find_parameter(kv.key());
     }
