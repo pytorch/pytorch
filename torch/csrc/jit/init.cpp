@@ -25,6 +25,7 @@
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
+#include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
@@ -101,6 +102,18 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
+      .def(
+           "_jit_pass_onnx_constant_fold",
+           [](std::shared_ptr<Graph>& graph,
+               std::map<std::string, at::Tensor>& paramsDict) {
+           ConstantFoldONNX(graph->block(), paramsDict); // overload resolution
+           printf("Length of paramsDict is %d.\n", int(paramsDict.size()));
+           // 'graph' was created on the C++ side so any changes in it are reflected
+           // on the Python side. paramsDict was created on the Python side and 
+           // is copied in C++ runtime. Therefore we need to return it explicitly
+           // with the right return_value_policy.
+           return paramsDict;
+          }, pybind11::return_value_policy::move)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",

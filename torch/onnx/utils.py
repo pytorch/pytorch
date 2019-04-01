@@ -225,7 +225,7 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
                     example_outputs=None, propagate=False,
-                    _retain_param_name=False):
+                    _retain_param_name=False, do_constant_folding=False):
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
         args = (args, )
@@ -276,6 +276,9 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
     params_dict = dict(zip(param_names, params))
 
+    if do_constant_folding:
+        params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict)
+
     if verbose:
         print(graph)
 
@@ -302,17 +305,19 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
                              input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
-                             google_printer=False, opset_version=None, _retain_param_name=False):
+                             google_printer=False, opset_version=None, _retain_param_name=False, 
+                             do_constant_folding=False):
     from torch.onnx.symbolic import _default_onnx_opset_version, _set_opset_version
     if opset_version is None:
         opset_version = _default_onnx_opset_version
     _set_opset_version(opset_version)
-    graph, params, torch_out = _model_to_graph(model, args, f, verbose,
+    graph, params_dict, torch_out = _model_to_graph(model, args, f, verbose,
                                                training, input_names,
                                                output_names, operator_export_type,
-                                               example_outputs, propagate, _retain_param_name)
+                                               example_outputs, propagate, _retain_param_name,
+                                               do_constant_folding)
 
-    return graph._pretty_print_onnx(params, opset_version, False, operator_export_type, google_printer)
+    return graph._pretty_print_onnx(params_dict, opset_version, False, operator_export_type, google_printer)
 
 
 # NOTE: the output `torch_out` will contain the output tensors resulting from
@@ -322,7 +327,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 def _export(model, args, f, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
-            opset_version=None, _retain_param_name=False):
+            opset_version=None, _retain_param_name=False, do_constant_folding=False):
     global __IN_ONNX_EXPORT
     assert __IN_ONNX_EXPORT is False
     __IN_ONNX_EXPORT = True
