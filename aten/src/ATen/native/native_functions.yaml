@@ -25,6 +25,12 @@
   matches_jit_signature: True
   variants: function
 
+- func: from_buffer(bytearray bytes, str filename, *, bool? shared=None, int? size=0, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  matches_jit_signature: True
+  dispatch:
+    CPU: from_buffer
+    CUDA: from_buffer
+
 - func: _cast_Long(Tensor self, bool non_blocking=False) -> Tensor
   matches_jit_signature: True
   variants: function
