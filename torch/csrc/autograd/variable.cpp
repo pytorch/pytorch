@@ -28,7 +28,6 @@ Variable::Impl::Impl(at::Tensor data, std::unique_ptr<Variable::AutogradMeta> au
   autograd_meta->requires_grad_ = false;
   autograd_meta->is_view_ = false;
   autograd_meta->output_nr_ = gradient_edge.input_nr;
-  autograd_meta->pyobj_ = nullptr;
 
   // set_requires_grad also checks error conditions.
   autograd_meta->set_requires_grad(requires_grad, this);

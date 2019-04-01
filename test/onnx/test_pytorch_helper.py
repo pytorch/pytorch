@@ -1,7 +1,6 @@
 # Some standard imports
 import numpy as np
 from torch import nn
-from torch.autograd import Variable
 import torch.onnx
 import torch.nn.init as init
 from caffe2.python.model_helper import ModelHelper

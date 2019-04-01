@@ -18,6 +18,7 @@ $CAFFE2_ROOT/scripts/build_host_protoc.sh --other-flags $BITCODE_FLAGS
 
 # Now, actually build the iOS target.
 BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_ios"}
+INSTALL_PREFIX=${BUILD_ROOT}/install
 mkdir -p $BUILD_ROOT
 cd $BUILD_ROOT
 
@@ -79,12 +80,16 @@ fi
 
 CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
 CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
-
 cmake "$CAFFE2_ROOT" \
-    -DCMAKE_INSTALL_PREFIX=../install \
+    -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \
     -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_SHARED_LIBS=OFF \
     ${CMAKE_ARGS[@]} \
     $@
 
 cmake --build . -- "-j$(sysctl -n hw.ncpu)"
+
+# copy headers and libs to install directory
+echo "Will install headers and libs to $INSTALL_PREFIX for further Xcode project usage."
+make install
+echo "Installation completed, now you can copy the headers/libs from $INSTALL_PREFIX to your Xcode project directory."

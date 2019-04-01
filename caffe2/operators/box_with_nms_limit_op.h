@@ -6,6 +6,8 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 
+C10_DECLARE_CAFFE2_OPERATOR(BoxWithNMSLimit)
+
 namespace caffe2 {
 
 // C++ implementation of function insert_box_results_with_nms_and_limit()
