@@ -192,15 +192,16 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
         features.size(0) == sumLen, "FEATURE and LENGTH should be consistent");
     const auto block_size = features.size_from_dim(1);
 
+    auto* out_features = Output(1 + k);
     auto outDim = features.sizes().vec();
     outDim.at(0) += needPadding;
-    auto* out_features = Output(1 + k, outDim, at::dtype(features.dtype()));
+    out_features->Resize(outDim);
     auto dst =
         static_cast<char*>(out_features->raw_mutable_data(features.dtype()));
     auto src_base = static_cast<const char*>(features.raw_data());
     // copy data and add padding index as zero
-    Tensor zero =
-        caffe2::empty({block_size}, at::dtype(features.dtype()).device(CPU));
+    Tensor zero{CPU};
+    zero.Resize(block_size);
     auto zeroPtr = static_cast<char*>(zero.raw_mutable_data(features.dtype()));
     memset(zeroPtr, 0, zero.nbytes());
     int start_dest = 0;
