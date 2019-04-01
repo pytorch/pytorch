@@ -976,8 +976,7 @@ int stringSlice(Stack& stack) {
     return 0;
   }
 
-  std::string result;
-  result.insert(result.begin(), string.begin() + start, string.begin() + end);
+  std::string result(string.begin() + start, string.begin() + end);
   push(stack, result);
   return 0;
 }
