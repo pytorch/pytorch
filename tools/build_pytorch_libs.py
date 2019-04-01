@@ -115,10 +115,10 @@ def create_build_env():
         # When using Ninja under Windows, the gcc toolchain will be chosen as default.
         # But it should be set to MSVC as the user's first choice.
         if USE_NINJA:
-            cc = os.getenv('CC', 'cl')
-            cxx = os.getenv('CXX', 'cl')
-            os.environ['CC'] = cc
-            os.environ['CXX'] = cxx
+            cc = my_env.get('CC', 'cl')
+            cxx = my_env.get('CXX', 'cl')
+            my_env['CC'] = cc
+            my_env['CXX'] = cxx
     return my_env
 
 
