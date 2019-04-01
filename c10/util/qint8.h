@@ -12,10 +12,6 @@ struct alignas(1) qint8 {
   uint8_t val_;
   /* implicit */ qint8(uint8_t val=0) : val_(val) {}
 
-  inline operator uint8_t() const {
-    return val_;
-  }
-
 };
 
 } // namespace c10

@@ -61,6 +61,7 @@ QTensor PerTensorAffineQuantizer::quantize(RealTensor tensor) {
   IntArrayRef sizes = tensor.sizes();
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the quantizer that
   // can be reused, so I'm using intrusive_from_this here
+  AT_CHECK(tensor.options().device() == kCPU, "quantize only works for CPU backend right now.");
   QTensor qv = new_qtensor(sizes, tensor.options().dtype(at::kQInt8), tensor.is_variable(), intrusive_from_this());
   auto qvd = qv.data<qint8>();
   tensor.contiguous();
@@ -86,15 +87,5 @@ RealTensor PerTensorAffineQuantizer::dequantize(QTensor tensor) {
 }
 
 Quantizer::~Quantizer() {}
-UniformQuantizer::~UniformQuantizer() {}
-NonUniformQuantizer::~NonUniformQuantizer() {}
-AffineQuantizer::~AffineQuantizer() {}
-SymmetricQuantizer::~SymmetricQuantizer() {}
-PerTensorSymmetricQuantizer::~PerTensorSymmetricQuantizer() {}
-PerChannelSymmetricQuantizer::~PerChannelSymmetricQuantizer() {}
-PerTensorAffineQuantizer::~PerTensorAffineQuantizer() {}
-PerChannelAffineQuantizer::~PerChannelAffineQuantizer() {}
-
-
 
 } // namespace at

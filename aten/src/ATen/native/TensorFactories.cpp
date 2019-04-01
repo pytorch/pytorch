@@ -725,7 +725,7 @@ Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
       return tensor_cpu(values, options);                           \
     }                                                               \
   }
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
+AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(TENSOR)
 #undef TENSOR
 } // namespace native
 } // namespace at

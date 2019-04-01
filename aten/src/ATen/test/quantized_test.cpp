@@ -12,7 +12,7 @@
 
 using namespace at;
 
-TEST(TestQTensor, First) {
+TEST(TestQTensor, QuantDequantAPIs) {
   auto num_elements = 10;
   Tensor r = at::ones({num_elements});
   const float scale = 1.0;
@@ -30,7 +30,7 @@ TEST(TestQTensor, First) {
   auto r_data = r.data<float>();
   auto qr_data = qr.data<qint8>();
   for (auto i = 0; i < num_elements; ++i) {
-    ASSERT_EQ(quantize_uint8(scale, zero_point, r_data[i]), qr_data[i]);
+    ASSERT_EQ(quantize_uint8(scale, zero_point, r_data[i]).val_, qr_data[i].val_);
   }
 
   // Check for correct dequantization
