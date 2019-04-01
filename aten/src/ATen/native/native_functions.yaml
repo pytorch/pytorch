@@ -76,6 +76,18 @@
   dispatch:
      CUDA: masked_scale_cuda
 
+- func: _sobol_engine_draw(Tensor quasi, int n, Tensor sobolstate, int dimension, int num_generated, ScalarType? dtype) -> (Tensor, Tensor)
+  matches_jit_signature: True
+
+- func: _sobol_engine_ff_(Tensor(a!) self, int n, Tensor sobolstate, int dimension, int num_generated) -> Tensor(a!)
+  matches_jit_signature: True
+
+- func: _sobol_engine_scramble_(Tensor(a!) self, Tensor ltm, int dimension) -> Tensor(a!)
+  matches_jit_signature: True
+
+- func: _sobol_engine_initialize_state_(Tensor(a!) self, int dimension) -> Tensor(a!)
+  matches_jit_signature: True
+
 - func: _reshape_from_tensor(Tensor self, Tensor shape) -> Tensor
   matches_jit_signature: True
 
@@ -1978,7 +1990,7 @@
   variants: function, method
   device_guard: False
 
-- func: slogdet(Tensor self) -> (Tensor, Tensor)
+- func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   matches_jit_signature: True
   variants: function, method
 
@@ -3750,11 +3762,11 @@
     CPU: _cholesky_solve_helper_cpu
     CUDA: _cholesky_solve_helper_cuda
 
-- func: solve(Tensor self, Tensor A) -> (Tensor, Tensor)
+- func: solve(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
   matches_jit_signature: True
   variants: function, method
 
-- func: solve(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) lu) -> (Tensor(a!), Tensor(b!))
+- func: solve(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) lu) -> (Tensor(a!) solution, Tensor(b!) LU)
   matches_jit_signature: True
 
 - func: _solve_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
@@ -3806,26 +3818,12 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: btrifact(Tensor self, *, bool pivot=True, Tensor(a!) A_LU, Tensor(b!) pivots) -> (Tensor(a!), Tensor(b!))
-  matches_jit_signature: True
-
-- func: btrifact(Tensor self, *, bool pivot=True) -> (Tensor, Tensor)
-  matches_jit_signature: True
-  variants: method, function
-
-- func: btrifact_with_info(Tensor self, *, bool pivot=True, Tensor(a!) A_LU, Tensor(b!) pivots, Tensor(c!) info) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  matches_jit_signature: True
-
-- func: btrifact_with_info(Tensor self, *, bool pivot=True) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
-  variants: method, function
-
-- func: _btrifact_helper(Tensor self, bool pivot) -> (Tensor, Tensor, Tensor)
+- func: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor, Tensor, Tensor)
   matches_jit_signature: True
   variants: function
   dispatch:
-    CPU: _btrifact_helper_cpu
-    CUDA: _btrifact_helper_cuda
+    CPU: _lu_with_info_cpu
+    CUDA: _lu_with_info_cuda
 
 - func: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -4004,10 +4002,10 @@
     CPU: median_cpu
     CUDA: median_cuda
 
-- func: sort(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+- func: sort(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   matches_jit_signature: True
 
-- func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor, Tensor)
+- func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   matches_jit_signature: True
   variants: method, function
 
@@ -4015,10 +4013,10 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+- func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!) values, Tensor(b!) indices)
   matches_jit_signature: True
 
-- func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor, Tensor)
+- func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   matches_jit_signature: True
   variants: method, function
 

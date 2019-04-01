@@ -1691,12 +1691,12 @@ void addGlobalMethods(py::module& m) {
   // into a python interface in transformations.py
   // Prefix the transformation with transform_ to avoid clobbering the
   // function namespace.
-  m.def("transform_optimizeForIDEEP", [](py::bytes def, bool training_mode) {
+  m.def("transform_optimizeForMKLDNN", [](py::bytes def, bool training_mode) {
     caffe2::NetDef proto;
     CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
 
     auto nn = caffe2::convertToNNModule(proto);
-    opt::OptimizeForIdeep(&nn, gWorkspace, training_mode);
+    opt::OptimizeForMkldnn(&nn, gWorkspace, training_mode);
     auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
 
     std::string out;

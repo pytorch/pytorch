@@ -306,7 +306,7 @@ struct CAFFE2_API AutogradZeroTensorType : public TensorType {
            TensorType::isSubtypeOf(rhs);
   }
   std::string str() const override {
-    return "UndefinedTensor";
+    return "AutogradZeroTensor";
   }
 
   static const TypeKind Kind = TypeKind::AutogradZeroTensorType;

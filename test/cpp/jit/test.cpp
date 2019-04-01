@@ -24,6 +24,7 @@
 #include <test/cpp/jit/test_ivalue.h>
 #include <test/cpp/jit/test_misc.h>
 #include <test/cpp/jit/test_netdef_converter.h>
+#include <test/cpp/jit/test_peephole_optimize.h>
 #include <test/cpp/jit/test_subgraph_utils.h>
 
 using namespace torch::jit::script;
@@ -62,7 +63,9 @@ namespace jit {
   _(THNNConv)                      \
   _(ATenNativeBatchNorm)           \
   _(NoneSchemaMatch)               \
-  _(ClassParser)
+  _(ClassParser)                   \
+  _(PeepholeOptimize)              \
+  _(RecordFunction)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

@@ -13,7 +13,6 @@ import torch.utils.hooks
 from torch.nn import Parameter
 from common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN,
                           load_tests, slowTest)
-from multiprocessing.reduction import ForkingPickler
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
