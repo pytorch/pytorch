@@ -12,7 +12,7 @@ from . import BroadcastOptions, AllreduceOptions, ReduceOptions, \
 from . import ReduceOp
 from . import PrefixStore
 from . import ProcessGroupGloo
-from . import Reducer
+from . import Reducer  # noqa: F401
 
 
 _MPI_AVAILABLE = True
