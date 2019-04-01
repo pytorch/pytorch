@@ -6,9 +6,11 @@
 #if defined(__CUDACC__)
 #include <THC/THCDeviceUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
+#include <assert.h>
 #elif defined(__HIPCC__)
 #include <THH/THHDeviceUtils.cuh>
 #include <ATen/native/hip/DeviceSqrt.cuh>
+#include <assert.h>
 #else
 #include <cmath>
 #define device_sqrt std::sqrt
@@ -81,6 +83,11 @@ struct WelfordOps {
     };
   }
   inline C10_DEVICE scalar_t project(acc_t acc, int value = 0) const {
+#if defined(__CUDACC__) || defined(__HIPCC__)
+    assert(value >= 0 && value <= 1);
+#else
+    AT_ASSERT(value >= 0 && value <= 1);
+#endif
     if (value == 1) {
       return acc.mean;
     }
@@ -118,7 +125,11 @@ struct MeanOps {
   }
 
   inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
-    //AT_ASSERT(value == 0);
+#if defined(__CUDACC__) || defined(__HIPCC__)
+    assert(value == 0);
+#else
+    AT_ASSERT(value == 0);
+#endif
     return a * factor;
   }
 
@@ -144,7 +155,11 @@ struct AbsMinOps {
   }
 
   inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
-    //AT_ASSERT(value == 0);
+#if defined(__CUDACC__) || defined(__HIPCC__)
+    assert(value == 0);
+#else
+    AT_ASSERT(value == 0);
+#endif
     return a;
   }
 
@@ -167,7 +182,11 @@ struct AbsMaxOps {
   }
 
   inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
-    //AT_ASSERT(value == 0);
+#if defined(__CUDACC__) || defined(__HIPCC__)
+    assert(value == 0);
+#else
+    AT_ASSERT(value == 0);
+#endif
     return a;
   }
 
@@ -191,7 +210,11 @@ struct NormOps {
   }
 
   inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
-    //AT_ASSERT(value == 0);
+#if defined(__CUDACC__) || defined(__HIPCC__)
+    assert(value == 0);
+#else
+    AT_ASSERT(value == 0);
+#endif
     return compat_pow(a, acc_t(1.0)/norm);
   }
 
@@ -216,7 +239,11 @@ struct NormZeroOps {
   }
 
   inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
-    //AT_ASSERT(value == 0);
+#if defined(__CUDACC__) || defined(__HIPCC__)
+    assert(value == 0);
+#else
+    AT_ASSERT(value == 0);
+#endif
     return a;
   }
 
@@ -238,7 +265,11 @@ struct NormOneOps {
   }
 
   inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
-    //AT_ASSERT(value == 0);
+#if defined(__CUDACC__) || defined(__HIPCC__)
+    assert(value == 0);
+#else
+    AT_ASSERT(value == 0);
+#endif
     return a;
   }
 

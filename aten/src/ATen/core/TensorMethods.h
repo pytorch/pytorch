@@ -592,6 +592,9 @@ inline Tensor Tensor::std(bool unbiased) const {
 inline Tensor Tensor::std(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return type().std(*this, dim, unbiased, keepdim);
 }
+inline std::tuple<Tensor,Tensor> Tensor::std_mean(bool unbiased) const {
+    return type().std_mean(*this, unbiased);
+}
 inline std::tuple<Tensor,Tensor> Tensor::std_mean(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return type().std_mean(*this, dim, unbiased, keepdim);
 }
@@ -663,6 +666,9 @@ inline Tensor Tensor::var(bool unbiased) const {
 }
 inline Tensor Tensor::var(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return type().var(*this, dim, unbiased, keepdim);
+}
+inline std::tuple<Tensor,Tensor> Tensor::var_mean(bool unbiased) const {
+    return type().var_mean(*this, unbiased);
 }
 inline std::tuple<Tensor,Tensor> Tensor::var_mean(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return type().var_mean(*this, dim, unbiased, keepdim);

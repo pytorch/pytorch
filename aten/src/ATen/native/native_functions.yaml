@@ -2182,6 +2182,10 @@
   matches_jit_signature: True
   variants: function, method
 
+- func: std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function, method
+
 - func: std_mean(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
   matches_jit_signature: True
   variants: function, method
@@ -2380,6 +2384,10 @@
 
 - func: var(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
+
+- func: var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function, method
 
 - func: var_mean(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
   matches_jit_signature: True

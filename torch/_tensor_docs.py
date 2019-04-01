@@ -2274,6 +2274,13 @@ std(dim=None, unbiased=True, keepdim=False) -> Tensor
 See :func:`torch.std`
 """)
 
+add_docstr_all('std_mean',
+               r"""
+std_mean(dim=None, unbiased=True, keepdim=False) -> (Tensor, Tensor)
+
+See :func:`torch.std_mean`
+""")
+
 add_docstr_all('storage',
                r"""
 storage() -> torch.Storage
@@ -2764,6 +2771,13 @@ add_docstr_all('var',
 var(dim=None, unbiased=True, keepdim=False) -> Tensor
 
 See :func:`torch.var`
+""")
+
+add_docstr_all('var_mean',
+               r"""
+var(dim=None, unbiased=True, keepdim=False) -> (Tensor, Tensor)
+
+See :func:`torch.var_mean`
 """)
 
 add_docstr_all('view',

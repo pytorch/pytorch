@@ -385,6 +385,7 @@ struct CAFFE2_API Type {
   virtual Tensor & sqrt_(Tensor & self) const = 0;
   virtual Tensor std(const Tensor & self, bool unbiased) const = 0;
   virtual Tensor std(const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) const = 0;
+  virtual std::tuple<Tensor,Tensor> std_mean(const Tensor & self, bool unbiased) const = 0;
   virtual std::tuple<Tensor,Tensor> std_mean(const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) const = 0;
   virtual Tensor prod(const Tensor & self, ScalarType dtype) const = 0;
   virtual Tensor prod(const Tensor & self) const = 0;
@@ -409,6 +410,7 @@ struct CAFFE2_API Type {
   virtual Tensor & unsqueeze_(Tensor & self, int64_t dim) const = 0;
   virtual Tensor var(const Tensor & self, bool unbiased) const = 0;
   virtual Tensor var(const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) const = 0;
+  virtual std::tuple<Tensor,Tensor> var_mean(const Tensor & self, bool unbiased) const = 0;
   virtual std::tuple<Tensor,Tensor> var_mean(const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) const = 0;
   virtual Tensor view_as(const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor where(const Tensor & condition, const Tensor & self, const Tensor & other) const = 0;

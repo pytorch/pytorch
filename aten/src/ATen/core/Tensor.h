@@ -507,6 +507,7 @@ class CAFFE2_API Tensor {
   Tensor & sqrt_();
   Tensor std(bool unbiased=true) const;
   Tensor std(IntArrayRef dim, bool unbiased=true, bool keepdim=false) const;
+  std::tuple<Tensor,Tensor> std_mean(bool unbiased=true) const;
   std::tuple<Tensor,Tensor> std_mean(IntArrayRef dim, bool unbiased=true, bool keepdim=false) const;
   Tensor prod(ScalarType dtype) const;
   Tensor prod() const;
@@ -531,6 +532,7 @@ class CAFFE2_API Tensor {
   Tensor & unsqueeze_(int64_t dim);
   Tensor var(bool unbiased=true) const;
   Tensor var(IntArrayRef dim, bool unbiased=true, bool keepdim=false) const;
+  std::tuple<Tensor,Tensor> var_mean(bool unbiased=true) const;
   std::tuple<Tensor,Tensor> var_mean(IntArrayRef dim, bool unbiased=true, bool keepdim=false) const;
   Tensor view_as(const Tensor & other) const;
   Tensor where(const Tensor & condition, const Tensor & other) const;
