@@ -21,6 +21,9 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#ifdef CAFFE2_USE_MKLDNN
+#include <caffe2/ideep/ideep_utils.h>
+#endif
 
 namespace caffe2 {
 
@@ -105,6 +108,87 @@ class UpsampleNearestGradientOp final : public Operator<Context> {
   int scale_;
 };
 
+#ifdef CAFFE2_USE_MKLDNN
+USE_IDEEP_DEF_ALIASES();
+class IDEEPUpsampleNearestOp final : public IDEEPOperator {
+public:
+  USE_IDEEP_DEF_ALIASES();
+  USE_IDEEP_OPERATOR_FUNCTIONS();
+
+  IDEEPUpsampleNearestOp(const OperatorDef& operator_def, Workspace* ws)
+      : IDEEPOperator(operator_def, ws),
+        upsample_scale_(this->template GetSingleArgument<int>("scale", 2)) {
+  }
+  virtual ~IDEEPUpsampleNearestOp() {}
+
+  bool RunOnDevice() override {
+    const auto& X = Input(INPUT);
+    auto X_ = X;
+    if (!X_.is_nchw_channel_blocking()) {
+      X_.init({X.get_dims(), X.get_data_type(), iformat::nchw});
+      X_.feed_from(X);
+    }
+
+    auto Y_dims = X_.get_dims();
+    int d0, d1, d2, d3;
+    if (X_.ndims() == 3) {
+      d0 = 1;
+      d1 = Y_dims[0];
+      d2 = Y_dims[1] * upsample_scale_;
+      d3 = Y_dims[2] * upsample_scale_;
+      Y_dims = {d1, d2, d3};
+    } else {
+      d0 = Y_dims[0];
+      d1 = Y_dims[1];
+      d2 = Y_dims[2] * upsample_scale_;
+      d3 = Y_dims[3] * upsample_scale_;
+      Y_dims = {d0, d1, d2, d3};
+    }
+
+    auto* Y = Output(OUTPUT);
+    Y->init({Y_dims, X_.get_data_type(), X_.get_internal_format()});
+ 
+    const auto* Xdata = static_cast<float*>(X_.get_data_handle());
+    auto* Ydata = static_cast<float*>(Y->get_data_handle());
+
+    int scaled_d2 = d2 / upsample_scale_;
+    int scaled_d3 = d3 / upsample_scale_;
+    auto block_dims = X_.get_block_dims();
+    int c_blocking = block_dims ? block_dims[1] : 1;
+    int nc_num = d0 * ceil(float(d1) / c_blocking);
+    int Y_dim = d0 * d1 * d2 * d3;
+
+#ifdef _OPENMP
+#if (_OPENMP >= 201307)
+#pragma omp parallel for simd collapse(3)
+#else
+#pragma omp parallel for collapse(3)
+#endif
+#endif
+    for (int j = 0; j < nc_num; ++j) {
+      for (int u = 0; u < d2; ++u) {
+        for (int v = 0; v < d3; ++v) {
+          for (int k = 0; k < c_blocking; ++k) {
+            int scaled_u = u / upsample_scale_;
+            int scaled_v = v / upsample_scale_;
+            int ii = ((j * d2 + u) * d3 + v) * c_blocking + k;
+            int ipidx = ((j * scaled_d2 + scaled_u) * scaled_d3 + scaled_v) * c_blocking + k;
+            Ydata[ii] = Xdata[ipidx];
+          }
+        }
+      }
+    }
+    
+    return true;
+  }
+
+ protected:
+  int upsample_scale_;
+
+  INPUT_TAGS(INPUT);
+  OUTPUT_TAGS(OUTPUT);
+};
+#endif
 } // namespace caffe2
 
 #endif // UPSAMPLE_NEAREST_OP_H_
