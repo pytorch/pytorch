@@ -14,9 +14,6 @@ namespace at {
 // dtype-specific.
 class DeprecatedTypeProperties {
  public:
-  DeprecatedTypeProperties()
-    : backend_(Backend::Undefined), scalar_type_(ScalarType::Undefined) {}
-
   DeprecatedTypeProperties(Backend backend, ScalarType scalar_type)
     : backend_(backend), scalar_type_(scalar_type) {}
 
