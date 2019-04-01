@@ -19,7 +19,6 @@ from .gumbel import Gumbel
 from .half_normal import HalfNormal
 from .independent import Independent
 from .laplace import Laplace
-from .logistic_normal import LogisticNormal
 from .lowrank_multivariate_normal import (LowRankMultivariateNormal, _batch_lowrank_logdet,
                                           _batch_lowrank_mahalanobis)
 from .multivariate_normal import (MultivariateNormal, _batch_mahalanobis)
