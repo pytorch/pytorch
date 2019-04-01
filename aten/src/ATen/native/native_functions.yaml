@@ -2569,6 +2569,8 @@
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   matches_jit_signature: True
   variants: method, function
+  cpu_half: True
+  cpu_bool: True
   dispatch:
     CPU: zero_
     CUDA: zero_
