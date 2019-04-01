@@ -16,11 +16,9 @@ import torch.cuda
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
 from common_utils import TestCase, run_tests
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
-import common_utils as common
 
 BACKEND = os.environ["BACKEND"]
 TEMP_DIR = os.environ["TEMP_DIR"]

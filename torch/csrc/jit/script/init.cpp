@@ -17,7 +17,9 @@
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/script/parser.h>
+#include <torch/csrc/jit/tracer.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -28,6 +30,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <sstream>
@@ -759,6 +762,7 @@ void initJitScriptBindings(PyObject* module) {
       .def("_set_parameter", &Module::set_parameter)
       .def("_get_parameter", &Module::get_parameter)
       .def("_get_buffer", &Module::get_buffer)
+      .def("_get_attribute", &Module::get_attribute)
       .def("_get_module", &Module::get_module)
       .def(
           "_get_modules",
@@ -797,6 +801,11 @@ void initJitScriptBindings(PyObject* module) {
                   buffer.key(), buffer->type(), toPyObject(std::move(v)));
             }
             return result;
+          })
+      .def(
+          "_has_attribute",
+          [](Module& self, const std::string& name) -> bool {
+            return self.find_attribute(name);
           })
       .def(
           "_has_parameter",
@@ -1117,6 +1126,29 @@ void initJitScriptBindings(PyObject* module) {
           "Run",
           py::arg("checks_file"),
           py::arg("graph"));
+
+  m.def("_logging_set_logger", [](logging::LoggerBase* logger) {
+    return logging::setLogger(logger);
+  }, py::return_value_policy::reference);
+  py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
+      m, "LoggerBase");
+  py::enum_<logging::LockingLogger::AggregationType>(m, "AggregationType")
+      .value("SUM", logging::LockingLogger::AggregationType::SUM)
+      .value("AVG", logging::LockingLogger::AggregationType::AVG)
+      .export_values();
+  py::class_<
+      logging::LockingLogger,
+      logging::LoggerBase,
+      std::shared_ptr<logging::LockingLogger>>(m, "LockingLogger")
+      .def(py::init<>())
+      .def("set_aggregation_type", &logging::LockingLogger::setAggregationType)
+      .def("get_counter_val", &logging::LockingLogger::getCounterValue);
+  py::class_<
+      logging::NoopLogger,
+      logging::LoggerBase,
+      std::shared_ptr<logging::NoopLogger>>(m, "NoopLogger")
+      .def(py::init<>());
+
 }
 } // namespace script
 } // namespace jit

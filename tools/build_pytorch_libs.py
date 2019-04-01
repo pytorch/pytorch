@@ -1,22 +1,20 @@
-from .setup_helpers.env import (IS_64BIT, IS_ARM, IS_DARWIN, IS_LINUX, IS_PPC, IS_WINDOWS,
+from .setup_helpers.env import (IS_64BIT, IS_DARWIN, IS_WINDOWS,
                                 DEBUG, REL_WITH_DEB_INFO, USE_MKLDNN,
-                                check_env_flag, check_negative_env_flag, hotpatch_build_env_vars)
+                                check_env_flag, check_negative_env_flag)
 
 import os
 import sys
 import distutils
 import distutils.sysconfig
-from distutils.file_util import copy_file
-from distutils.dir_util import copy_tree
-from subprocess import check_call, call, check_output
+from subprocess import check_call, check_output
 from distutils.version import LooseVersion
 from .setup_helpers.cuda import USE_CUDA, CUDA_HOME
 from .setup_helpers.dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
 from .setup_helpers.nccl import USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB, USE_NCCL
-from .setup_helpers.rocm import ROCM_HOME, ROCM_VERSION, USE_ROCM
+from .setup_helpers.rocm import USE_ROCM
 from .setup_helpers.nnpack import USE_NNPACK
 from .setup_helpers.qnnpack import USE_QNNPACK
-from .setup_helpers.cudnn import CUDNN_INCLUDE_DIR, CUDNN_LIB_DIR, CUDNN_LIBRARY, USE_CUDNN
+from .setup_helpers.cudnn import CUDNN_INCLUDE_DIR, CUDNN_LIBRARY, USE_CUDNN
 
 
 from pprint import pprint
