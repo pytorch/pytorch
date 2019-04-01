@@ -1,9 +1,6 @@
-import numbers
-
 import torch
-from torch._C import TensorType, ListType, OptionalType
+from torch._C import ListType, OptionalType
 from torch.nn.modules.utils import _single, _pair, _triple
-from torch.nn.utils.rnn import PackedSequence
 import warnings
 
 import torch.onnx
@@ -11,9 +8,7 @@ import torch.onnx
 # ONNX symbolics
 import torch.onnx.utils
 
-from collections import Iterable
 from functools import partial, wraps
-import itertools
 
 import numpy
 import math
