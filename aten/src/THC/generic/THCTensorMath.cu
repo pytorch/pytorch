@@ -35,20 +35,6 @@ void THCTensor_(zero)(THCState *state, THCTensor *self_)
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(zerosLike)(THCState *state, THCTensor *r_, THCTensor *input)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
-  THCTensor_(resizeAs)(state, r_, input);
-  THCTensor_(zero)(state, r_);
-}
-
-void THCTensor_(onesLike)(THCState *state, THCTensor *r_, THCTensor *input)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
-  THCTensor_(resizeAs)(state, r_, input);
-  THCTensor_(fill)(state, r_, ScalarConvert<int, scalar_t>::to(1));
-}
-
 ptrdiff_t
 THCTensor_(numel)(THCState *state, THCTensor *t)
 {
@@ -268,10 +254,15 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
   self = THCTensor_(newContiguous)(state, self);
   thrust::device_ptr<scalar_t> self_data(THCTensor_(data)(state, self));
 
-  int num_dim = THCTensor_(nDimensionLegacyNoScalars)(state, self);
+  int num_dim = THCTensor_(nDimension)(state, self);
+  int num_dim_noscalars = std::max<int>(1, num_dim);
   int64_t N = THCTensor_(nElement)(state, self);
 
-  THCudaLongTensor_resize2d(state, tensor, N, num_dim);
+  // this is a little awkward for scalars because we run thrust to count the number of zeros
+  // (which are necessary to get the correct size), but thrust just has an array API, so
+  // we need to basically threat the scalar as a 1-dimensional tensor (array) for
+  // the counting part.
+  THCudaLongTensor_resize2d(state, tensor, N, num_dim_noscalars);
   tensor = THCudaLongTensor_newContiguous(state, tensor);
   thrust::device_ptr<int64_t> tensor_data(THCudaLongTensor_data(state, tensor));
 
@@ -280,7 +271,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
 
   typedef thrust::device_ptr<int64_t> Iter;
   strided_range<Iter> strided_tensor(tensor_data,
-                                     tensor_data+N*num_dim, num_dim);
+                                     tensor_data+N*num_dim_noscalars, num_dim_noscalars);
 
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
   cudaStream_t stream = THCState_getCurrentStream(state);
@@ -299,20 +290,22 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
 
   int64_t num_nonzeros = thrust::distance(strided_tensor.begin(), dend);
 
-  int64_t div = 1;
-  for (int dim = num_dim-1; dim >= 0; dim--) {
-    strided_range<Iter> stride_dim(tensor_data+dim,
-                                   tensor_data+N*num_dim, num_dim);
-    thrust::transform(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-      thrust::cuda::par(thrustAlloc).on(stream),
-#endif
-      strided_tensor.begin(),
-      strided_tensor.end(),
-      stride_dim.begin(),
-      idx_functor(div, THTensor_sizeLegacyNoScalars(self, dim))
-    );
-    div *= THTensor_sizeLegacyNoScalars(self, dim);
+  if (num_nonzeros > 0 && num_dim > 0) {
+    int64_t div = 1;
+    for (int dim = num_dim-1; dim >= 0; dim--) {
+      strided_range<Iter> stride_dim(tensor_data+dim,
+                                     tensor_data+N*num_dim, num_dim);
+      thrust::transform(
+  #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+        thrust::cuda::par(thrustAlloc).on(stream),
+  #endif
+        strided_tensor.begin(),
+        strided_tensor.end(),
+        stride_dim.begin(),
+        idx_functor(div, THTensor_(size)(self, dim))
+      );
+      div *= THTensor_(size)(self, dim);
+    }
   }
 
   THCudaLongTensor_resize2d(state, tensor, num_nonzeros, num_dim);
@@ -359,28 +352,6 @@ void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
     }
   }
   THCudaCheck(cudaGetLastError());
-}
-
-void THCTensor_(eye)(THCState *state, THCTensor *self_, int64_t n, int64_t m)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
-  THArgCheck(n > 0, 1, "invalid argument");
-
-  if(m <= 0)
-    m = n;
-
-  THCTensor_(resize2d)(state, self_, n, m);
-  THCTensor_(zero)(state, self_);
-
-  int64_t sz = THMin(n, m);
-  int64_t stride = THCTensor_(stride)(state, self_, 0) +
-                   THCTensor_(stride)(state, self_, 1);
-
-  THCTensor *diag = THCTensor_(newWithStorage1d)(state, THTensor_getStoragePtr(self_),
-      self_->storage_offset(),  sz, stride);
-
-  THCTensor_(fill)(state, diag, ScalarConvert<int, scalar_t>::to(1));
-  THCTensor_(free)(state, diag);
 }
 
 accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {

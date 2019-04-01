@@ -1043,4 +1043,62 @@ TEST(NetTest, ChainErrorTest) {
   ASSERT_FALSE(net->Run());
 }
 
+void testProfDAGNetErrorCase(bool test_error) {
+  std::string spec_template = R"DOC(
+        name: "prof_dag_error_test_net"
+        type: "prof_dag"
+        external_input: "in"
+        op {
+          input: "in"
+          output: "hidden"
+          type: "SyncErrorOp"
+          arg {
+            name: "fail"
+            i: <FAIL>
+          }
+          arg {
+            name: "throw"
+            i: 0
+          }
+        }
+        op {
+          input: "hidden"
+          output: "out"
+          type: "SyncErrorOp"
+          arg {
+            name: "fail"
+            i: 0
+          }
+        }
+  )DOC";
+
+  Workspace ws;
+  ws.CreateBlob("in");
+
+  NetDef net_def;
+  std::string net_spec = spec_template;
+  ReplaceAll(net_spec, "<FAIL>", test_error ? "1" : "0");
+  CAFFE_ENFORCE(TextFormat::ParseFromString(net_spec, &net_def));
+  auto net = CreateNet(net_def, &ws);
+
+  // with failing op - net runs return false, without - true
+  for (auto num_runs = 0; num_runs < 10; ++num_runs) {
+    auto ret = net->Run();
+    ASSERT_TRUE(test_error ? !ret : ret);
+  }
+
+  // with failing op - prof_dag handles invalid runs and returns empty stats,
+  // without - returns stats for each op
+  auto* prof_dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
+  CHECK_NOTNULL(prof_dag);
+  auto stats_proto = prof_dag->GetPerOperatorCost();
+  ASSERT_EQ(
+      stats_proto.stats_size(), test_error ? 0 : net->GetOperators().size());
+}
+
+TEST(NetTest, ProfDAGNetErrorTest) {
+  testProfDAGNetErrorCase(/*test_error=*/false);
+  testProfDAGNetErrorCase(/*test_error=*/true);
+}
+
 } // namespace caffe2

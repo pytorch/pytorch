@@ -2,6 +2,8 @@ import ctypes
 import torch
 from common_utils import TestCase, run_tests, skipIfRocm
 import unittest
+import glob
+import os
 
 # NOTE: this needs to be run in a brand new process
 
@@ -17,10 +19,17 @@ if not TEST_CUDA:
     TestCase = object  # noqa: F811
 
 
+_thnvrtc = None
+
+
 def get_is_primary_context_created(device):
     flags = ctypes.cast((ctypes.c_uint * 1)(), ctypes.POINTER(ctypes.c_uint))
     active = ctypes.cast((ctypes.c_int * 1)(), ctypes.POINTER(ctypes.c_int))
-    result = torch.cuda.cudart().cuDevicePrimaryCtxGetState(ctypes.c_int(device), flags, active)
+    global _thnvrtc
+    if _thnvrtc is None:
+        path = glob.glob('{}/lib/libthnvrtc.*'.format(os.path.dirname(torch.__file__)))[0]
+        _thnvrtc = ctypes.cdll.LoadLibrary(path)
+    result = _thnvrtc.cuDevicePrimaryCtxGetState(ctypes.c_int(device), flags, active)
     assert result == 0, 'cuDevicePrimaryCtxGetState failed'
     return bool(active[0])
 

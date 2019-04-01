@@ -11,8 +11,9 @@ class APMeterOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  APMeterOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit APMeterOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         buffer_size_(
             this->template GetSingleArgument<int32_t>("buffer_size", 1000)),
         buffer_used_(0) {}

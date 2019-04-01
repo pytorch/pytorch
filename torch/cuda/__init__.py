@@ -265,7 +265,7 @@ def set_device(device):
         torch._C._cuda_setDevice(device)
 
 
-def get_device_name(device):
+def get_device_name(device=None):
     r"""Gets the name of a device.
 
     Arguments:
@@ -277,7 +277,7 @@ def get_device_name(device):
     return get_device_properties(device).name
 
 
-def get_device_capability(device):
+def get_device_capability(device=None):
     r"""Gets the cuda capability of a device.
 
     Arguments:
@@ -321,12 +321,21 @@ def stream(stream):
     if stream is None:
         yield
         return
-    prev_stream = current_stream()
+    src_prev_stream = current_stream()
+
+    if src_prev_stream.device != stream.device:
+        # The given stream is on a different device; have to restore the
+        # current_stream on that device on exit as well
+        with device(stream.device):
+            dst_prev_stream = current_stream()
+
     torch._C._cuda_setStream(stream._cdata)
     try:
         yield
     finally:
-        torch._C._cuda_setStream(prev_stream._cdata)
+        if src_prev_stream.device != stream.device:
+            torch._C._cuda_setStream(dst_prev_stream._cdata)
+        torch._C._cuda_setStream(src_prev_stream._cdata)
 
 
 def device_count():
@@ -347,6 +356,19 @@ def synchronize():
     r"""Waits for all kernels in all streams on current device to complete."""
     _lazy_init()
     return torch._C._cuda_synchronize()
+
+
+def ipc_collect():
+    r"""Force collects GPU memory after it has been released by CUDA IPC.
+
+    .. note::
+        Checks if any sent CUDA tensors could be cleaned from the memory. Force
+        closes shared memory file used for reference counting if there is no
+        active counters. Useful when the producer process stopped actively sending
+        tensors and want to release unused memory.
+    """
+    _lazy_init()
+    return torch._C._cuda_ipc_collect()
 
 
 def current_stream(device=None):
@@ -551,7 +573,7 @@ def _dummy_type(name):
 
 if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     # Define dummy base classes
-    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half']:
+    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half', 'Bool']:
         storage_name = 'Cuda{0}StorageBase'.format(t)
         tensor_name = 'Cuda{0}TensorBase'.format(t)
 
@@ -613,6 +635,9 @@ class HalfStorage(_CudaBase, torch._C.CudaHalfStorageBase, _StorageBase):
     pass
 
 
+class BoolStorage(_CudaBase, torch._C.CudaBoolStorageBase, _StorageBase):
+    pass
+
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
 torch._storage_classes.add(LongStorage)
@@ -621,8 +646,9 @@ torch._storage_classes.add(ShortStorage)
 torch._storage_classes.add(CharStorage)
 torch._storage_classes.add(ByteStorage)
 torch._storage_classes.add(HalfStorage)
+torch._storage_classes.add(BoolStorage)
 
-from . import sparse
-from . import profiler
-from . import nvtx
-from .streams import Stream, Event
+from . import sparse  # noqa: F401
+from . import profiler  # noqa: F401
+from . import nvtx  # noqa: F401
+from .streams import Stream, Event  # noqa: F401

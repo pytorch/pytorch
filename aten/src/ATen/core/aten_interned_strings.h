@@ -8,10 +8,8 @@
 // To explicitly use interned strings as symbols in your code, you must add
 // them to this list.
 
-#if !C10_MOBILE
+#ifndef C10_MOBILE
 #define FORALL_ATEN_BASE_SYMBOLS(_) \
-_(aten, RoiPooling2d_backward) \
-_(aten, RoiPooling2d_forward) \
 _(aten, __and__) \
 _(aten, __iand__) \
 _(aten, __ilshift__) \
@@ -42,8 +40,6 @@ _(aten, _cast_Long) \
 _(aten, _cast_Short) \
 _(aten, _cat) \
 _(aten, _ceil) \
-_(aten, _cholesky_helper) \
-_(aten, _cholesky_solve_helper) \
 _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
 _(aten, _convolution_nogroup) \
@@ -82,10 +78,8 @@ _(aten, _fill) \
 _(aten, _floor) \
 _(aten, _fused_dropout) \
 _(aten, _ger) \
-_(aten, _gesv_helper) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
-_(aten, _inverse_helper) \
 _(aten, _linspace) \
 _(aten, _local_scalar) \
 _(aten, _local_scalar_dense) \
@@ -94,6 +88,7 @@ _(aten, _log10) \
 _(aten, _log1p) \
 _(aten, _log2) \
 _(aten, _logspace) \
+_(aten, _lu_with_info) \
 _(aten, _masked_scale) \
 _(aten, _mm) \
 _(aten, _mv) \
@@ -230,8 +225,6 @@ _(aten, bincount) \
 _(aten, blackman_window) \
 _(aten, bmm) \
 _(aten, broadcast_tensors) \
-_(aten, btrifact) \
-_(aten, btrifact_with_info) \
 _(aten, btrisolve) \
 _(aten, cartesian_prod) \
 _(aten, cat) \
@@ -347,7 +340,6 @@ _(aten, gels) \
 _(aten, geometric) \
 _(aten, geqrf) \
 _(aten, ger) \
-_(aten, gesv) \
 _(aten, get_device) \
 _(aten, glu) \
 _(aten, glu_backward) \
@@ -467,6 +459,10 @@ _(aten, miopen_convolution_transpose) \
 _(aten, miopen_convolution_transpose_backward) \
 _(aten, miopen_convolution_transpose_backward_input) \
 _(aten, miopen_convolution_transpose_backward_weight) \
+_(aten, miopen_depthwise_convolution) \
+_(aten, miopen_depthwise_convolution_backward) \
+_(aten, miopen_depthwise_convolution_backward_input) \
+_(aten, miopen_depthwise_convolution_backward_weight) \
 _(aten, mkldnn_convolution) \
 _(aten, mkldnn_convolution_backward) \
 _(aten, mkldnn_convolution_backward_input) \
@@ -565,7 +561,9 @@ _(aten, replication_pad3d_forward) \
 _(aten, reshape) \
 _(aten, reshape_as) \
 _(aten, resize) \
+_(aten, resize_) \
 _(aten, resize_as) \
+_(aten, resize_as_) \
 _(aten, rfft) \
 _(aten, rnn_relu) \
 _(aten, rnn_relu_cell) \
@@ -608,6 +606,7 @@ _(aten, softplus_forward) \
 _(aten, softshrink) \
 _(aten, softshrink_backward) \
 _(aten, softshrink_forward) \
+_(aten, solve) \
 _(aten, sort) \
 _(aten, sparse_coo_tensor) \
 _(aten, sparse_mask) \
@@ -673,10 +672,10 @@ _(aten, to_dense) \
 _(aten, topk) \
 _(aten, trace) \
 _(aten, transpose) \
+_(aten, triangular_solve) \
 _(aten, tril) \
 _(aten, triplet_margin_loss) \
 _(aten, triu) \
-_(aten, trtrs) \
 _(aten, trunc) \
 _(aten, type_as) \
 _(aten, unbind) \

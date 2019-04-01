@@ -1,7 +1,6 @@
 import torch
 import torch.utils.hooks
 import os
-import weakref
 import threading
 import multiprocessing
 from multiprocessing.reduction import ForkingPickler
@@ -40,7 +39,7 @@ class SharedCache(dict):
     """dictionary from multiprocessing handles to StorageWeakRef"""
 
     def __init__(self):
-        # free_dead_references() is called if the len exceeds the currrent
+        # free_dead_references() is called if the len exceeds the current
         # limit. The limit scales with the number of remaining live objects.
         self.limit = 128
         self.lock = threading.Lock()
@@ -87,7 +86,7 @@ def rebuild_tensor(cls, storage, metadata):
 
 def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                         storage_cls, storage_device, storage_handle, storage_size_bytes, storage_offset_bytes,
-                        requires_grad):
+                        requires_grad, ref_counter_handle, ref_counter_offset, event_handle, event_sync_required):
     # If storage_handle is None, storage points to nullptr.
     if storage_handle is None or storage_size_bytes == 0:
         storage = storage_cls(0)
@@ -99,8 +98,15 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
                 storage_device,
                 storage_handle,
                 storage_size_bytes,
-                storage_offset_bytes)
+                storage_offset_bytes,
+                ref_counter_handle,
+                ref_counter_offset,
+                event_handle,
+                event_sync_required)
             shared_cache[(storage_handle, storage_offset_bytes)] = StorageWeakRef(storage)
+        else:
+            # We already ref counting this Storage, but producer needs new ref-counters to be released.
+            storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset)
 
     t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
     if tensor_cls == torch.nn.parameter.Parameter:
@@ -211,11 +217,16 @@ def reduce_tensor(tensor):
     # thing.
     #
     if storage.is_cuda:
-        (device, handle, storage_size_bytes, storage_offset_bytes) = storage._share_cuda_()
+        (device,
+         handle,
+         storage_size_bytes,
+         storage_offset_bytes,
+         ref_counter_handle,
+         ref_counter_offset,
+         event_handle,
+         event_sync_required) = storage._share_cuda_()
         tensor_offset = tensor.storage_offset()
-
         shared_cache[handle] = StorageWeakRef(storage)
-
         # _backward_hooks purposely omitted here, see
         # Note [Don't serialize hooks]
         return (rebuild_cuda_tensor,
@@ -228,7 +239,11 @@ def reduce_tensor(tensor):
                  handle,  # identifier which CUDA allocation is the storage in.
                  storage_size_bytes,  # size(in bytes) of the storage
                  storage_offset_bytes,  # offset(in bytes) of the storage in the CUDA allocation
-                 tensor.requires_grad))
+                 tensor.requires_grad,
+                 ref_counter_handle,
+                 ref_counter_offset,
+                 event_handle,
+                 event_sync_required))
 
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
     metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad)

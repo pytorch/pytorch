@@ -97,25 +97,44 @@ static c10::optional<std::vector<int64_t>> canRunKernel(
 // (see above).
 // Note: Arguments are mutated by this call, although map_size is restored
 // to its original value.
-static void expandArgs(
+static bool expandArgs(
     const KernelSpec& spec,
     std::vector<at::Tensor>& args,
-    std::vector<int64_t>& map_size) {
+    std::vector<int64_t>& map_size, bool dry_run) {
+  bool has_broadcast = false;
   for (size_t i = 0; i < args.size(); ++i) {
     auto& arg = args[i];
     const auto& pdesc = spec.inputChunks()[i];
     if (pdesc.nSubTensors() == 1) {
       if (arg.sizes().equals(map_size))
         continue;
-      arg = arg.expand(map_size);
+      if (!dry_run) {
+        arg = arg.expand(map_size);
+        has_broadcast = true;
+      } else {
+        return true;
+      }
     } else {
       map_size.at(pdesc.dim()) *= pdesc.nSubTensors();
       if (!arg.sizes().equals(map_size)) {
-        arg = arg.expand(map_size);
+        if (!dry_run) {
+          arg = arg.expand(map_size);
+          has_broadcast = true;
+        } else {
+          return true;
+        }
       }
       map_size.at(pdesc.dim()) /= pdesc.nSubTensors();
     }
   }
+  return has_broadcast;
+}
+
+static bool shouldExpandArgs(
+    const KernelSpec& spec,
+    std::vector<at::Tensor>& args,
+    std::vector<int64_t>& map_size) {
+  return expandArgs(spec, args, map_size, /*dry_run=*/true);
 }
 
 // Note: assumes that inputs are 32-bit addressable
@@ -172,6 +191,7 @@ void launchFusion(
     const FusedKernel& fusion,
     const at::Device device,
     const at::ArrayRef<at::Tensor>& inputs,
+    const at::ArrayRef<IValue>& all_inputs,
     std::vector<at::Tensor>& outputs) {
   // Fails if fusion and given inputs disagree
   AT_ASSERT(inputs.size() == fusion.inputDesc().size());
@@ -203,6 +223,13 @@ void launchFusion(
     numel = computeNumel(map_size);
   }
 
+  // compute number of scalar inputs and convert them to float
+  std::vector<float> scalar_inputs;
+  scalar_inputs.reserve(all_inputs.size());
+  for (auto const &input: all_inputs){
+    if (input.isDouble()) scalar_inputs.push_back(input.to<float>());
+  }
+
   // Computes the storage needed to store TensorInfo structs for inputs and
   // outputs.
   size_t uncompressedDim = fusion.inputDesc().at(0).contiguity.size();
@@ -215,7 +242,7 @@ void launchFusion(
 
   // A vector of arguments to the kernel (numel, *input_desc_s, *output_desc_s)
   std::vector<void*> arguments;
-  arguments.reserve(3 + flat_inputs_size + flat_outputs_size);
+  arguments.reserve(3 + scalar_inputs.size() + flat_inputs_size + flat_outputs_size);
   arguments.push_back(&numel);
 
   auto addTensorInfoRaw = [&](const TensorDesc& desc,
@@ -246,7 +273,7 @@ void launchFusion(
       addTensorInfo(fusion.inputDesc()[i], tensor);
     } else {
       size_t chunk_offset = map_size[chunk.dim()] * tensor.stride(chunk.dim()) *
-          elementSize(tensor.type().scalarType());
+          elementSize(tensor.scalar_type());
       char* data_ptr = reinterpret_cast<char*>(tensor.data_ptr());
       for (size_t chunks = 0; chunks < chunk.nSubTensors(); ++chunks) {
         addTensorInfoRaw(
@@ -254,6 +281,10 @@ void launchFusion(
         data_ptr += chunk_offset;
       }
     }
+  }
+  // Adds scalar arguments
+  for (float &s: scalar_inputs){
+    arguments.push_back(&s);
   }
 
   // Adds (flattened) output arguments
@@ -326,7 +357,11 @@ bool runFusion(const int64_t key, Stack& stack) {
   // Tries to run fallback if map size can't be computed
   if (!maybe_map_size)
     return false;
-  expandArgs(spec, inputs, *maybe_map_size);
+  if (spec.hasRandom()) {
+      bool hasBroadcast = shouldExpandArgs(spec,inputs, *maybe_map_size);
+      if (hasBroadcast) return false;
+  }
+  expandArgs(spec, inputs, *maybe_map_size, /*dry_run=*/false);
 
   // Retrieves the kernel, compiling (and caching) if necessary
   ArgSpec arg_spec{inputs, device.index()};
@@ -340,7 +375,7 @@ bool runFusion(const int64_t key, Stack& stack) {
 
   // Launches fusion
   std::vector<at::Tensor> raw_outputs;
-  launchFusion(*(*maybe_kernel), device, inputs, raw_outputs);
+  launchFusion(*(*maybe_kernel), device, inputs, all_inputs, raw_outputs);
 
   auto outputs = fmap(spec.outputMapAndSizes(), [&](const OutputMapAndSize& omap) {
     if (omap.needsSumToSize()) {

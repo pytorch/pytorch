@@ -22,6 +22,7 @@ namespace script {
 //
 // Decl  = Decl(List<Param> params, Maybe<Expr> return_type)            TK_DECL
 // Def   = Def(Ident name, Decl decl, List<Stmt> body)                  TK_DEF
+// ClassDef = ClassDef(Ident name, List<Def> body)                      TK_CLASS_DEF
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
 //       | For(List<Expr> targets, List<Expr> iters, List<Stmt> body)   TK_FOR
@@ -107,6 +108,9 @@ struct TreeView {
   }
   int kind() const {
     return tree_->kind();
+  }
+  void dump() const {
+    std::cout << tree_;
   }
 
  protected:
@@ -290,6 +294,7 @@ struct Expr : public TreeView {
       case '&':
       case '^':
       case '|':
+      case TK_LIST_COMP:
         return;
       default:
         throw ErrorReport(tree)
@@ -328,8 +333,12 @@ struct Param : public TreeView {
       const SourceRange& range,
       const Ident& ident,
       const Expr& type,
-      const Maybe<Expr>& def) {
-    return Param(Compound::create(TK_PARAM, range, {ident, type, def}));
+      const Maybe<Expr>& def,
+      bool kwarg_only) {
+    TreeRef kwarg_only_tree =
+        Compound::create(kwarg_only ? TK_TRUE : TK_FALSE, range, {});
+    return Param(
+        Compound::create(TK_PARAM, range, {ident, type, def, kwarg_only_tree}));
   }
   Ident ident() const {
     return Ident(subtree(0));
@@ -340,8 +349,11 @@ struct Param : public TreeView {
   Maybe<Expr> defaultValue() const {
     return Maybe<Expr>(subtree(2));
   }
+  bool kwarg_only() const {
+    return TK_TRUE == subtree(3)->kind();
+  }
   Param withType(const Expr& typ) const {
-    return Param::create(range(), ident(), typ, defaultValue());
+    return Param::create(range(), ident(), typ, defaultValue(), kwarg_only());
   }
 };
 
@@ -390,6 +402,28 @@ struct Def : public TreeView {
       const Decl& decl,
       const List<Stmt>& stmts) {
     return Def(Compound::create(TK_DEF, range, {name, decl, stmts}));
+  }
+};
+
+struct ClassDef : public TreeView {
+  explicit ClassDef(const TreeRef& tree) : TreeView(tree) {
+    tree->match(TK_CLASS_DEF);
+  }
+  ClassDef withName(std::string new_name) const {
+    auto new_ident = Ident::create(name().range(), std::move(new_name));
+    return create(range(), new_ident, defs());
+  }
+  Ident name() const {
+    return Ident(subtree(0));
+  }
+  List<Def> defs() const {
+    return List<Def>(subtree(1));
+  }
+  static ClassDef create(
+      const SourceRange& range,
+      const Ident& name,
+      const List<Def>& defs) {
+    return ClassDef(Compound::create(TK_CLASS_DEF, range, {name, defs}));
   }
 };
 
@@ -462,6 +496,30 @@ struct For : public Stmt {
       const List<Expr>& itrs,
       const List<Stmt>& body) {
     return For(Compound::create(TK_FOR, range, {targets, itrs, body}));
+  }
+};
+
+//TODO: supports only single comprehension for now
+struct ListComp : public Expr {
+  explicit ListComp(const TreeRef& tree) : Expr(tree) {
+    tree->match(TK_LIST_COMP);
+  }
+  Expr elt() const {
+    return Expr(subtree(0));
+  }
+  Expr target() const {
+    return Expr(subtree(1));
+  }
+  Expr iter() const {
+    return Expr(subtree(2));
+  }
+  // TODO: no ifs for now
+  static ListComp create(
+      const SourceRange& range,
+      const Expr& elt,
+      const Expr& target,
+      const Expr& iter) {
+    return ListComp(Compound::create(TK_LIST_COMP, range, {elt, target, iter}));
   }
 };
 
@@ -875,7 +933,8 @@ struct DictLiteral : public Expr {
       const SourceRange& range,
       const List<Expr>& keys,
       const List<Expr>& values) {
-    return DictLiteral(Compound::create(TK_DICT_LITERAL, range, {keys, values}));
+    return DictLiteral(
+        Compound::create(TK_DICT_LITERAL, range, {keys, values}));
   }
 };
 

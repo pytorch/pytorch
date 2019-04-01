@@ -1,4 +1,3 @@
-import torch
 from .module import Module
 from .. import functional as F
 from ..._jit_internal import weak_module, weak_script_method
@@ -10,7 +9,7 @@ class PairwiseDistance(Module):
     Computes the batchwise pairwise distance between vectors :math:`v_1`, :math:`v_2` using the p-norm:
 
     .. math ::
-        \Vert x \Vert _p := \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}
+        \Vert x \Vert _p = \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}
 
     Args:
         p (real): the norm degree. Default: 2

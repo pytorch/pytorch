@@ -14,9 +14,10 @@ class CopyOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = this->template Input<Tensor>(0, SrcContext::GetDeviceType());
-    auto* output =
-        this->template Output<Tensor>(0, DstContext::GetDeviceType());
-    output->ResizeLike(input);
+    auto* output = this->OutputTensor(
+        0,
+        input.sizes(),
+        at::dtype(input.dtype()).device(DstContext::GetDeviceType()));
     this->context_.template CopyItems<SrcContext, DstContext>(
         input.dtype(),
         input.numel(),
@@ -29,8 +30,9 @@ class CopyOp : public Operator<Context> {
 template <class Context, class DstContext, class SrcContext>
 class CopyOnDeviceLikeOp : public CopyOp<Context, DstContext, SrcContext> {
  public:
-  CopyOnDeviceLikeOp(const OperatorDef& operator_def, Workspace* ws)
-      : CopyOp<Context, DstContext, SrcContext>(operator_def, ws) {}
+  template <class... Args>
+  explicit CopyOnDeviceLikeOp(Args&&... args)
+      : CopyOp<Context, DstContext, SrcContext>(std::forward<Args>(args)...) {}
 };
 
 } // namespace caffe2

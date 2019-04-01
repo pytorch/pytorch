@@ -5,6 +5,9 @@ namespace at { namespace native {
 
 namespace {
 
+template<bool inplace>
+using Ctype = typename std::conditional<inplace, Tensor&, Tensor>::type;
+
 Tensor make_feature_noise(const Tensor& input) {
   auto input_sizes = input.sizes();
   AT_CHECK(input.dim() >= 2, "Feature dropout requires at least 2 dimensions in the input");
@@ -36,8 +39,7 @@ Tensor multiply(const Tensor& input, const Tensor& noise) {
 }
 
 template<bool feature_dropout, bool alpha_dropout, bool inplace, typename T>
-typename std::conditional<inplace, Tensor&, Tensor>::type
-_dropout_impl(T& input, double p, bool train) {
+Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
   AT_CHECK(p >= 0 && p <= 1, "dropout probability has to be between 0 and 1, but got ", p);
   if (p == 0 || !train) {
     return input;
@@ -66,10 +68,9 @@ _dropout_impl(T& input, double p, bool train) {
   }
 }
 
-#define ALIAS_SPECIALIZATION(ALIAS_NAME, IS_FEATURE, IS_ALPHA)                 \
-template <bool inplace, typename... Args>                                      \
-typename std::conditional<inplace, Tensor&, Tensor>::type                      \
-ALIAS_NAME(Args&&... args) {                                                   \
+#define ALIAS_SPECIALIZATION(ALIAS_NAME, IS_FEATURE, IS_ALPHA)                      \
+template <bool inplace, typename... Args>                                           \
+Ctype<inplace> ALIAS_NAME(Args&&... args) {                                         \
   return _dropout_impl<IS_FEATURE, IS_ALPHA, inplace>(std::forward<Args>(args)...); \
 }
 

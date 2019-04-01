@@ -7,20 +7,20 @@ template <>
 class CopyOnDeviceLikeOp<CUDAContext, CUDAContext, CUDAContext>
     : public Operator<CUDAContext> {
  public:
-  CopyOnDeviceLikeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws) {}
+  template<class... Args> explicit CopyOnDeviceLikeOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...) {}
   USE_OPERATOR_FUNCTIONS(CUDAContext);
 
   bool RunOnDevice() override {
     auto& input = Input(0);
-    auto* output = OperatorBase::Output<Tensor>(0, CUDA);
+    auto* output = OperatorBase::OutputTensor(
+        0, input.sizes(), at::dtype(input.dtype()).device(CUDA));
     CUDAContext context(GetGPUIDForPointer(Input(1).raw_data()));
-    output->ResizeLike(input);
     context.template CopyItems<CUDAContext, CUDAContext>(
-        input.meta(),
+        input.dtype(),
         input.numel(),
         input.raw_data(),
-        output->raw_mutable_data(input.meta()));
+        output->raw_mutable_data(input.dtype()));
     return true;
   }
 };

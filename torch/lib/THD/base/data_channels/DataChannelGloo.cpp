@@ -172,7 +172,7 @@ void DataChannelGloo::allGatherT(
           "allGather got input and output on different devices");
     }
   }
-  uint64_t tensor_bytes = input.type().elementSizeInBytes() * input.numel();
+  uint64_t tensor_bytes = input.element_size() * input.numel();
   uint64_t all_tensor_bytes = tensor_bytes * output.size();
   auto ret = _cache->getAlgorithm<CollectiveType::ALL_GATHER, T>(
       group_id,
@@ -210,7 +210,7 @@ void DataChannelGloo::allGather(
     assertSameSizeAndType(out_tensor, input, "allGather");
 
   GENERATE_ALL_TYPES(
-      input.type().scalarType(), allGatherT, output, input, group_id)
+      input.scalar_type(), allGatherT, output, input, group_id)
 }
 
 // XXX: `gather` is not supported by Gloo yet.
@@ -236,7 +236,7 @@ void DataChannelGloo::allReduceT(
     at::Tensor& t,
     THDReduceOp operation,
     THDGroup group_id) {
-  uint64_t tensor_bytes = t.type().elementSizeInBytes() * t.numel();
+  uint64_t tensor_bytes = t.element_size() * t.numel();
   auto ret = _cache->getAlgorithm<CollectiveType::ALL_REDUCE, T>(
       group_id,
       _groups.at(group_id),
@@ -259,7 +259,7 @@ void DataChannelGloo::allReduce(
     THDGroup group_id) {
   RETURN_IF_NOT_IN_GROUP
   GENERATE_ALL_TYPES(
-      data.type().scalarType(), allReduceT, data, operation, group_id)
+      data.scalar_type(), allReduceT, data, operation, group_id)
 }
 
 // XXX: `reduce` is not supported by Gloo yet.
@@ -276,7 +276,7 @@ void DataChannelGloo::broadcastT(
     at::Tensor& data,
     rank_type src_rank,
     THDGroup group_id) {
-  uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
+  uint64_t tensor_bytes = data.element_size() * data.numel();
   auto ret = _cache->getAlgorithm<CollectiveType::BROADCAST, T>(
       group_id,
       _groups.at(group_id),
@@ -305,7 +305,7 @@ void DataChannelGloo::broadcast(
     THDGroup group_id) {
   RETURN_IF_NOT_IN_GROUP
   GENERATE_ALL_TYPES(
-      data.type().scalarType(), broadcastT, data, src_rank, group_id)
+      data.scalar_type(), broadcastT, data, src_rank, group_id)
 }
 
 void DataChannelGloo::send(Scalar& data, rank_type dst_rank) {

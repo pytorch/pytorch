@@ -125,13 +125,6 @@ class ProcessGroupGloo : public ProcessGroup {
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     std::chrono::milliseconds timeout;
     int threads;
-
-    // This controls how many Gloo algorithm instances are created for
-    // a single identifying key. If you have many identical calls with
-    // tensors of identical size and need to parallelize, this should
-    // be greater than 1. More cache entries means more memory usage.
-    // The default value is 1.
-    int cacheNumAlgorithmEntries;
   };
 
   explicit ProcessGroupGloo(

@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -18,10 +19,8 @@ std::unordered_set<Symbol> skip_list = {
     prim::If,
     prim::Loop,
     prim::Constant,
-    prim::Undefined,
+    prim::AutogradZero,
     prim::unchecked_unwrap_optional, // TODO remove
-    prim::None, // it is already a constant and propagating it will lose
-                // important type information about which Optional type it is
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.
 };
@@ -30,11 +29,7 @@ std::vector<IValue> runNode(Node* n) {
   auto op = getOperation(n);
   Stack stack;
   for (auto input : n->inputs()) {
-    if (input->node()->kind() == prim::None) {
-      stack.emplace_back(IValue());
-    } else {
-      stack.push_back(*(toIValue(input)));
-    }
+    stack.push_back(*(toIValue(input)));
   }
   op(stack);
   auto var_outputs = fmap(stack, [&](IValue v) -> IValue {
@@ -66,6 +61,9 @@ void propagateNode(Node* n) {
   for (size_t i = 0; i < outputs.size(); ++i) {
     try {
       auto new_output = graph->insertConstant(outputs[i]);
+      if (outputs[i].isNone()) {
+        new_output->setType(n->outputs()[i]->type());
+      }
       n->outputs()[i]->replaceAllUsesWith(new_output);
     } catch (constant_not_supported_error& err) {
       // we cannot actually represent the IValue as a constant node,
@@ -122,22 +120,41 @@ void inlineIf(Node* n, const AliasDb& aliasDb) {
   inlineIfBody(n->blocks().at(block_index));
 }
 
+void replaceAndRemoveIfOutput(Node* n, size_t i, Value* replacement) {
+  n->outputs().at(i)->replaceAllUsesWith(replacement);
+  n->eraseOutput(i);
+  n->blocks().at(0)->eraseOutput(i);
+  n->blocks().at(1)->eraseOutput(i);
+}
+
 // remove extra outputs from the node
 bool removeExtraIfOutputs(Node* n) {
   AT_CHECK(n->kind() == prim::If, "Only supported for If nodes");
   auto true_block = n->blocks()[0];
   auto false_block = n->blocks()[1];
+  auto graph = n->owningGraph();
   auto initial_outputs = true_block->outputs().size();
+  WithInsertPoint guard(n);
   for (size_t i = 0; i < true_block->outputs().size();) {
+    auto t_out = true_block->outputs().at(i);
+    auto f_out = false_block->outputs().at(i);
+
     // neither block changes the output value
     if (true_block->outputs()[i] == false_block->outputs()[i]) {
-      n->outputs().at(i)->replaceAllUsesWith(true_block->outputs()[i]);
-      n->eraseOutput(i);
-      true_block->eraseOutput(i);
-      false_block->eraseOutput(i);
-    } else {
-      i++; // increment bc we didn't remove current index
+      replaceAndRemoveIfOutput(n, i, true_block->outputs()[i]);
+      continue;
     }
+
+    // true block output is constant and constant matches false block output
+    auto maybe_const = toIValue(t_out);
+    auto eq = EqualNode();
+    if (maybe_const && eq(t_out->node(), f_out->node())) {
+      auto new_const = graph->insertConstant(*maybe_const, t_out->type());
+      replaceAndRemoveIfOutput(n, i, new_const);
+      continue;
+    }
+
+    i++; // increment bc we didn't remove current index
   }
   // an output was removed
   return initial_outputs != true_block->outputs().size();
@@ -170,8 +187,7 @@ void removeExtraLoopOutputs(Node* node) {
 void ConstantPropagation(Node* n, const AliasDb& aliasDb) {
   bool constant_inputs =
       std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-        return v->node()->kind() == prim::Constant ||
-            v->node()->kind() == prim::None;
+        return v->node()->kind() == prim::Constant;
       });
   bool supported_node = !n->kind().is_onnx() &&
       skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
@@ -217,6 +233,5 @@ void ConstantPropagation(std::shared_ptr<Graph>& graph) {
   ConstantPropagation(graph->block(), aliasDb);
   EliminateDeadCode(graph);
 }
-
 } // namespace jit
 } // namespace torch

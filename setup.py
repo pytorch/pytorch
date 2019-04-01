@@ -11,7 +11,7 @@
 #   MAX_JOBS
 #     maximum number of compile jobs we should use to compile your code
 #
-#   NO_CUDA
+#   USE_CUDA=0
 #     disables CUDA build
 #
 #   CFLAGS
@@ -27,35 +27,35 @@
 #
 # Environment variables for feature toggles:
 #
-#   NO_CUDNN
+#   USE_CUDNN=0
 #     disables the cuDNN build
 #
-#   NO_FBGEMM
+#   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
-#   NO_TEST
+#   BUILD_TEST=0
 #     disables the test build
 #
-#   NO_MIOPEN
+#   USE_MIOPEN=0
 #     disables the MIOpen build
 #
-#   NO_MKLDNN
+#   USE_MKLDNN=0
 #     disables use of MKLDNN
 #
-#   NO_NNPACK
+#   USE_NNPACK=0
 #     disables NNPACK build
 #
-#   NO_QNNPACK
+#   USE_QNNPACK=0
 #     disables QNNPACK build (quantized 8-bit operators)
 #
-#   NO_DISTRIBUTED
+#   USE_DISTRIBUTED=0
 #     disables distributed (c10d, gloo, mpi, etc.) build
 #
-#   NO_SYSTEM_NCCL
+#   USE_SYSTEM_NCCL=0
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
 #
-#   NO_CAFFE2_OPS
+#   BUILD_CAFFE2_OPS=0
 #     disable Caffe2 operators build
 #
 #   USE_GLOO_IBVERBS
@@ -142,7 +142,7 @@
 #     we will search for libraries in these paths
 
 from __future__ import print_function
-from setuptools import setup, Extension, distutils, Command, find_packages
+from setuptools import setup, Extension, distutils, find_packages
 from distutils import core, dir_util
 from distutils.core import Distribution
 from distutils.errors import DistutilsArgError
@@ -151,7 +151,6 @@ import setuptools.command.install
 import distutils.command.clean
 import distutils.sysconfig
 import filecmp
-import platform
 import subprocess
 import shutil
 import sys
@@ -231,18 +230,21 @@ cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
 version = '1.1.0a0'
+sha = 'Unknown'
+
+try:
+    sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
+except Exception:
+    pass
+
 if os.getenv('PYTORCH_BUILD_VERSION'):
     assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
     build_number = int(os.getenv('PYTORCH_BUILD_NUMBER'))
     version = os.getenv('PYTORCH_BUILD_VERSION')
     if build_number > 1:
         version += '.post' + str(build_number)
-else:
-    try:
-        sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
-        version += '+' + sha[:7]
-    except Exception:
-        pass
+elif sha != 'Unknown':
+    version += '+' + sha[:7]
 report("Building wheel {}-{}".format(package_name, version))
 
 
@@ -257,6 +259,7 @@ def build_deps():
         # this would claim to be a release build when it's not.)
         f.write("debug = {}\n".format(repr(DEBUG)))
         f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
+        f.write("git_version = {}\n".format(repr(sha)))
 
     def check_file(f):
         if not os.path.exists(f):
@@ -268,6 +271,7 @@ def build_deps():
     check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
     check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'foxi', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
 
@@ -369,6 +373,12 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
             target_lib = os.path.join(
                 build_lib, 'torch', 'lib', '_C.lib').replace('\\', '/')
+
+            # Create "torch/lib" directory if not exists.
+            # (It is not created yet in "develop" mode.)
+            target_dir = os.path.dirname(target_lib)
+            if not os.path.exists(target_dir):
+                os.makedirs(target_dir)
 
             self.copy_file(export_lib, target_lib)
 
@@ -638,31 +648,6 @@ if not IS_WINDOWS:
                    )
     extensions.append(DL)
 
-
-if USE_CUDA:
-    thnvrtc_link_flags = extra_link_args + [make_relative_rpath('lib')]
-    if IS_LINUX:
-        thnvrtc_link_flags = thnvrtc_link_flags + ['-Wl,--no-as-needed']
-    # these have to be specified as -lcuda in link_flags because they
-    # have to come right after the `no-as-needed` option
-    if IS_WINDOWS:
-        thnvrtc_link_flags += ['cuda.lib', 'nvrtc.lib']
-    else:
-        thnvrtc_link_flags += ['-lcuda', '-lnvrtc']
-    cuda_stub_path = [cuda_lib_path + '/stubs']
-    if IS_DARWIN:
-        # on macOS this is where the CUDA stub is installed according to the manual
-        cuda_stub_path = ["/usr/local/cuda/lib"]
-    THNVRTC = Extension("torch._nvrtc",
-                        sources=['torch/csrc/nvrtc.cpp'],
-                        language='c++',
-                        extra_compile_args=main_compile_args + extra_compile_args,
-                        include_dirs=[cwd],
-                        library_dirs=library_dirs + cuda_stub_path,
-                        extra_link_args=thnvrtc_link_flags,
-                        )
-    extensions.append(THNVRTC)
-
 # These extensions are built by cmake and copied manually in build_extensions()
 # inside the build_ext implementaiton
 extensions.append(
@@ -755,6 +740,7 @@ if __name__ == '__main__':
                 'lib/*.h',
                 'include/ATen/*.h',
                 'include/ATen/cpu/*.h',
+                'include/ATen/cpu/vec256/*.h',
                 'include/ATen/core/*.h',
                 'include/ATen/cuda/*.cuh',
                 'include/ATen/cuda/*.h',
@@ -767,8 +753,8 @@ if __name__ == '__main__':
                 'include/c10/macros/*.h',
                 'include/c10/core/*.h',
                 'include/ATen/core/dispatch/*.h',
+                'include/ATen/core/op_registration/*.h',
                 'include/c10/core/impl/*.h',
-                'include/ATen/core/opschema/*.h',
                 'include/c10/util/*.h',
                 'include/c10/cuda/*.h',
                 'include/c10/cuda/impl/*.h',
@@ -800,6 +786,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/generated/*.h',
                 'include/torch/csrc/jit/passes/*.h',
                 'include/torch/csrc/jit/script/*.h',
+                'include/torch/csrc/jit/testing/*.h',
                 'include/torch/csrc/onnx/*.h',
                 'include/torch/csrc/utils/*.h',
                 'include/pybind11/*.h',

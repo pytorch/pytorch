@@ -76,6 +76,18 @@ Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
   }
 }
 
+int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
+  int64_t size = 1;
+  if (sizes.size() == 0) {
+    return 1;
+  }
+  for (auto d : dim) {
+    d = at::maybe_wrap_dim(d, sizes.size());
+    size *= sizes[d];
+  }
+  return size;
+}
+
 Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Scalar> & p_, const Tensor & norm) {
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
@@ -146,6 +158,40 @@ Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
   Tensor args = at::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
   return grad * args.digamma_().sum(-1);
+}
+
+Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
+  // invert the permutation
+  auto ndims = fwd_dims.size();
+  std::vector<int64_t> dims(ndims);
+  for (size_t i = 0; i < ndims; i++) {
+    dims[at::maybe_wrap_dim(fwd_dims[i], ndims)] = i;
+  }
+  return grad.permute(dims);
+}
+
+Tensor unsqueeze_multiple(const Tensor & t, IntArrayRef dim, size_t n_dims) {
+    auto dims_to_unsqueeze = at::dim_list_to_bitset(dim, n_dims);
+    Tensor res = t;
+    for (size_t i = 0; i < n_dims; i++){
+      if (dims_to_unsqueeze[i]) {
+        res = res.unsqueeze(i);
+      }
+    }
+    return res;
+}
+
+Tensor sum_backward(const Tensor & grad, IntArrayRef sizes, IntArrayRef dims, bool keepdim) {
+  if (!keepdim && sizes.size() > 0) {
+    if (dims.size()==1) {
+      return grad.unsqueeze(dims[0]).expand(sizes);
+    } else {
+      Tensor res = unsqueeze_multiple(grad, dims, sizes.size());
+      return res.expand(sizes);
+    }
+  } else {
+    return grad.expand(sizes);
+  }
 }
 
 std::vector<int64_t> reverse_list(const IntArrayRef list) {
@@ -356,12 +402,12 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim, Sc
   return cumprod_backward(grad.to(input.scalar_type()), input, dim);
 }
 
-Tensor gesv_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
-  return std::get<0>(at::gesv(grad, A.transpose(-2, -1)));
+Tensor solve_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
+  return std::get<0>(at::solve(grad, A.transpose(-2, -1)));
 }
 
-Tensor gesv_backward_A(const Tensor & grad, const Tensor & self, const Tensor & A, const Tensor & solution) {
-  Tensor grad_self = gesv_backward_self(grad, self, A);
+Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor & A, const Tensor & solution) {
+  Tensor grad_self = solve_backward_self(grad, self, A);
   if (self.ndimension() == 2 && A.ndimension() == 2) {
     return -at::mm(grad_self, solution.transpose(-2, -1));
   }
@@ -383,13 +429,13 @@ Tensor cumsum_backward(const Tensor &x, int64_t dim, ScalarType input_dtype) {
   return cumsum_backward(x.to(input_dtype), dim);
 }
 
-//Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {
-//  if (!keepdim && self.dim() != 0) {
-//    grad = unsqueeze_multiple(grad, dim, self.sizes().size());
-//    result = unsqueeze_multiple(result, dim, self.sizes().size());
-//  }
-//  return grad * (self - result).exp();
-//}
+Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {
+  if (!keepdim && self.dim() != 0) {
+    grad = unsqueeze_multiple(grad, dim, self.sizes().size());
+    result = unsqueeze_multiple(result, dim, self.sizes().size());
+  }
+  return grad * (self - result).exp();
+}
 
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
   IntArrayRef sizes;
@@ -406,6 +452,28 @@ Tensor unbind_backward(const variable_list& grads, int64_t dim) {
         v.defined() ? static_cast<Tensor>(v) : at::zeros({}, o).expand(sizes));
   });
   return at::stack(grads_tensors, dim);
+}
+
+Tensor unsqueeze_to(const Tensor & self, IntArrayRef sizes) {
+  auto result = self;
+
+  int64_t nDims = sizes.size();
+  for (int64_t dim = 0; dim < nDims; dim++) {
+    if (sizes[dim] == 1) {
+      result = result.unsqueeze(dim);
+    }
+  }
+  return result;
+}
+
+Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntArrayRef sizes) {
+  dim = at::maybe_wrap_dim(dim, sizes.size());
+  // in NumPy it's not an error to unsqueeze a scalar, but we still need to avoided
+  // unsqueezing in the backward.
+  if (sizes.size() > 0 && sizes[dim] == 1) {
+    return self.unsqueeze(dim);
+  }
+  return self;
 }
 
 Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, IntArrayRef dim, bool unbiased, bool keepdim, bool is_std) {
@@ -552,6 +620,26 @@ Tensor select_equals_backward(Tensor grad, const Tensor & input, const Tensor & 
   return grad_input;
 }
 
+Tensor index_select_backward(Tensor grad, int64_t dim, Tensor indices, IntArrayRef sizes, bool keepdim) {
+  if (!keepdim && sizes.size() > 0) {
+    grad = grad.unsqueeze(dim);
+    indices = indices.unsqueeze(dim);
+  }
+  return at::zeros(sizes, grad.options()).scatter_(dim, indices, grad);
+}
+
+Tensor slice_backward(Tensor grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  grad_input.slice(dim, start, end, step).copy_(grad);
+  return grad_input;
+}
+
+Tensor select_backward(Tensor grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  grad_input.select(dim, index).copy_(grad);
+  return grad_input;
+}
+
 Tensor trace_backward(const Tensor & grad, IntArrayRef sizes) {
   if (sizes.size() != 2) {
     throw std::runtime_error("expected matrix input");
@@ -577,6 +665,19 @@ Tensor unfold_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t dim
   return grad_input.view(input_sizes);
 }
 
+Tensor var_backward(const Tensor & grad, const Tensor & self, bool unbiased) {
+  return (2.0 / (self.numel() - unbiased)) * grad * (self - self.mean());
+}
+
+Tensor var_backward(Tensor grad, const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) {
+  if (self.dim() == 0) {
+    return var_backward(grad, self, unbiased);
+  }
+  if (!keepdim && self.dim() > 1) {
+    grad = unsqueeze_multiple(grad, dim, self.sizes().size());
+  }
+  return (2.0 / (_safe_size(self.sizes(), dim) - unbiased)) * grad * (self - self.mean(dim, true));
+}
 
 Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArrayRef sizes) {
   int64_t numel = 1;
@@ -614,8 +715,8 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
 
   auto P = phi(at::matmul(L, Lbar));
   Tensor S;
-  std::tie(S, std::ignore) = at::gesv(P + P.transpose(-1, -2), L);
-  std::tie(S, std::ignore) = at::gesv(S.transpose(-1, -2), L);
+  std::tie(S, std::ignore) = at::solve(P + P.transpose(-1, -2), L);
+  std::tie(S, std::ignore) = at::solve(S.transpose(-1, -2), L);
   S = phi(S);
   if (upper) {
     S = S.transpose(-1, -2);
@@ -1652,16 +1753,16 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
 // Reference:
 // https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf
 // Sec. 2.3.1 Matrix inverse product
-std::tuple<Tensor, Tensor> trtrs_backward(
+std::tuple<Tensor, Tensor> triangular_solve_backward(
     const Tensor & grad_x, const Tensor & grad_m,
     const Tensor & b, const Tensor & a, const Tensor & x,
     const bool upper, const bool transpose, const bool unitriangular,
     std::array<bool, 2> output_mask) {
   Tensor grad_b, grad_a;
   if (grad_x.defined()) {
-    grad_b = std::get<0>(grad_x.trtrs(a, upper, !transpose, unitriangular));
+    grad_b = std::get<0>(grad_x.triangular_solve(a, upper, !transpose, unitriangular));
     if (output_mask[1]) {
-      grad_a = transpose ? -x.mm(grad_b.t()) : -grad_b.mm(x.t());
+      grad_a = transpose ? -x.matmul(grad_b.transpose(-1, -2)) : -grad_b.matmul(x.transpose(-1, -2));
       if (upper) {
         grad_a = grad_a.triu((int) unitriangular);
       } else {
@@ -1856,10 +1957,10 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   }
   // for half inputs, save_mean, save_invstd are float (ideally, we would cast
   // everything else, but not now)
-  auto mu = unsqueeze_dim1(training ? save_mean.to(input.type().scalarType()) : running_mean, input);
+  auto mu = unsqueeze_dim1(training ? save_mean.to(input.scalar_type()) : running_mean, input);
   auto input_sub_mu = input - mu;
   auto sigma2_eps_neg_1_2 = unsqueeze_dim1(
-      training ? save_invstd.to(input.type().scalarType())
+      training ? save_invstd.to(input.scalar_type())
                : running_var.add(Scalar(eps)).pow(-0.5),
       input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
@@ -1987,6 +2088,7 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   auto input = input_.coalesce();
   return grad.sparse_mask(at::SparseTensorRef(input));
 }
+
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p in pads])
 Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad) {

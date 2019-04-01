@@ -6,7 +6,7 @@
 #include "caffe2/utils/map_utils.h"
 #include "caffe2/utils/proto_utils.h"
 
-#if !C10_MOBILE
+#ifndef C10_MOBILE
 #include "onnx/checker.h"
 #include "onnx/optimizer/optimize.h"
 #endif
@@ -69,7 +69,7 @@ caffe2::DeviceOption GetDeviceOption(const Device& onnx_device) {
   return d;
 }
 
-#if !C10_MOBILE
+#ifndef C10_MOBILE
 ModelProto OptimizeOnnx(const ModelProto& input, bool init) {
   std::vector<std::string> passes{"fuse_consecutive_transposes",
                                   "eliminate_nop_transpose",
@@ -362,7 +362,8 @@ Caffe2Backend::get_special_operators() const {
               {"Dropout", &Caffe2Backend::CreateDropout},
               {"LRN", &Caffe2Backend::CreateLRN},
               {"DynamicSlice", &Caffe2Backend::CreateDynamicSlice},
-              {"RandomNormal", &Caffe2Backend::CreateRandomNormal}};
+              {"RandomNormal", &Caffe2Backend::CreateRandomNormal},
+              {"Where", &Caffe2Backend::CreateWhereOp}};
   return kSpecialOperators;
 }
 
@@ -578,6 +579,21 @@ Caffe2Ops Caffe2Backend::CreateRandomNormal(
     attributes.remove("scale");
   }
   return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
+}
+
+Caffe2Ops Caffe2Backend::CreateWhereOp(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  // The native Caffe2 op doesn't support broadcasting, so we defer the handling
+  // of this op to the ATen library that does.
+  onnx::NodeProto converted;
+  converted.CopyFrom(onnx_node->node);
+  converted.set_op_type("ATen");
+  onnx::AttributeProto* attr = converted.add_attribute();
+  attr->set_name("operator");
+  attr->set_s("where");
+  OnnxNode new_node(converted);
+  return CommonOnnxNodeToCaffe2Ops(&new_node, ctx);
 }
 
 Caffe2Ops Caffe2Backend::CreateReciprocal(
@@ -1422,7 +1438,7 @@ void Caffe2Backend::OnnxToCaffe2(
     const std::vector<Caffe2Ops>& extras) {
   auto device_option = GetDeviceOption(Device(device));
 
-#if !C10_MOBILE
+#ifndef C10_MOBILE
   ModelProto init_model = OptimizeOnnx(onnx_model, true);
   ModelProto pred_model = OptimizeOnnx(onnx_model, false);
 #else
@@ -1526,7 +1542,7 @@ Caffe2BackendRep* Caffe2Backend::Prepare(
   ModelProto onnx_model;
   ParseProtoFromLargeString(onnx_model_str, &onnx_model);
 
-#if !C10_MOBILE
+#ifndef C10_MOBILE
   ::ONNX_NAMESPACE::checker::check_model(onnx_model);
 #endif
 

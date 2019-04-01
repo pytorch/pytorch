@@ -7,6 +7,7 @@ import warnings
 import weakref
 from torch._six import imap
 from torch._C import _add_docstr
+from numbers import Number
 
 
 # NB: If you subclass Tensor, and want to share the subclassed class
@@ -247,18 +248,6 @@ class Tensor(torch._C._TensorBase):
         else:
             return self.flip(0)
 
-    def argmax(self, dim=None, keepdim=False):
-        r"""See :func:`torch.argmax`"""
-        return torch.argmax(self, dim, keepdim)
-
-    def argmin(self, dim=None, keepdim=False):
-        r"""See :func:`torch.argmin`"""
-        return torch.argmin(self, dim, keepdim)
-
-    def argsort(self, dim=None, descending=False):
-        r"""See :func:`torch.argsort`"""
-        return torch.argsort(self, dim, descending)
-
     def norm(self, p="fro", dim=None, keepdim=False, dtype=None):
         r"""See :func:`torch.norm`"""
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
@@ -270,6 +259,12 @@ class Tensor(torch._C._TensorBase):
                       ":attr:`upper` argument in torch.cholesky defaults to ``False``.", stacklevel=2)
         return super(Tensor, self).cholesky(upper=upper)
 
+    def pstrf(self, upper=True):
+        r"""See :func:`torch.pstrf`"""
+        warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
+                      "in the next release.", stacklevel=2)
+        return super(Tensor, self).pstrf(upper=upper)
+
     def potrs(self, u, upper=True):
         r"""See :func:`torch.cholesky_solve`"""
         warnings.warn("torch.potrs is deprecated in favour of torch.cholesky_solve and "
@@ -277,6 +272,42 @@ class Tensor(torch._C._TensorBase):
                       "and note that the :attr:`upper` argument in torch.cholesky_solve defaults "
                       "to ``False``.", stacklevel=2)
         return super(Tensor, self).cholesky_solve(u, upper=upper)
+
+    def gesv(self, A):
+        r"""See :func:`torch.solve`"""
+        warnings.warn("torch.gesv is deprecated in favour of torch.solve and will be removed in the "
+                      "next release. Please use torch.solve instead.", stacklevel=2)
+        return super(Tensor, self).solve(A)
+
+    def trtrs(self, A, upper=True, transpose=False, unitriangular=False):
+        r"""See :func:`torch.triangular_solve`"""
+        warnings.warn("torch.trtrs is deprecated in favour of torch.triangular_solve and will be "
+                      "removed in the next release. Please use torch.triangular_solve instead.",
+                      stacklevel=2)
+        return super(Tensor, self).triangular_solve(A, upper=upper,
+                                                    transpose=transpose, unitriangular=unitriangular)
+
+    def btrifact(self, pivot=True):
+        r"""See :func:`torch.lu`"""
+        warnings.warn("torch.btrifact is deprecated in favour of torch.lu and will be removed in "
+                      "the next release. Please use torch.lu instead.", stacklevel=2)
+        return torch._lu_with_info(self, pivot=pivot, check_errors=True)
+
+    def btrifact_with_info(self, pivot=True):
+        r"""See :func:`torch.lu`"""
+        warnings.warn("torch.btrifact_with_info is deprecated in favour of torch.lu with the "
+                      "and will be removed in the next release. Please use torch.lu with the "
+                      "get_infos argument set to True instead.", stacklevel=2)
+        return torch._lu_with_info(self, pivot=pivot, check_errors=False)
+
+    def lu(self, pivot=True, get_infos=False):
+        r"""See :func:`torch.lu`"""
+        # If get_infos is True, then we don't need to check for errors and vice versa
+        LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
+        if get_infos:
+            return LU, pivots, infos
+        else:
+            return LU, pivots
 
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
@@ -306,41 +337,6 @@ class Tensor(torch._C._TensorBase):
             return super(Tensor, self).split(split_size, dim)
         else:
             return super(Tensor, self).split_with_sizes(split_size, dim)
-
-    def index_add(self, dim, index, tensor):
-        r"""Out-of-place version of :meth:`torch.Tensor.index_add_`
-        """
-        return self.clone().index_add_(dim, index, tensor)
-
-    def index_copy(self, dim, index, tensor):
-        r"""Out-of-place version of :meth:`torch.Tensor.index_copy_`
-        """
-        return self.clone().index_copy_(dim, index, tensor)
-
-    def index_fill(self, dim, index, value):
-        r"""Out-of-place version of :meth:`torch.Tensor.index_fill_`
-        """
-        return self.clone().index_fill_(dim, index, value)
-
-    def scatter(self, dim, index, source):
-        r"""Out-of-place version of :meth:`torch.Tensor.scatter_`
-        """
-        return self.clone().scatter_(dim, index, source)
-
-    def scatter_add(self, dim, index, source):
-        r"""Out-of-place version of :meth:`torch.Tensor.scatter_add_`
-        """
-        return self.clone().scatter_add_(dim, index, source)
-
-    def masked_scatter(self, mask, tensor):
-        r"""Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
-        """
-        return self.clone().masked_scatter_(mask, tensor)
-
-    def masked_fill(self, mask, value):
-        r"""Out-of-place version of :meth:`torch.Tensor.masked_fill_`
-        """
-        return self.clone().masked_fill_(mask, value)
 
     def unique(self, sorted=True, return_inverse=False, dim=None):
         r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
@@ -464,6 +460,17 @@ class Tensor(torch._C._TensorBase):
             # Workaround, torch has no built-in bool tensor
             array = array.astype('uint8')
         return torch.from_numpy(array)
+
+    def __contains__(self, element):
+        r"""Check if `element` is present in tensor
+
+        Arguments:
+            element (Tensor or scalar): element to be checked
+                for presence in current tensor"
+        """
+        if isinstance(element, (torch.Tensor, Number)):
+            return (element == self).any().item()
+        return NotImplemented
 
     @property
     def __cuda_array_interface__(self):

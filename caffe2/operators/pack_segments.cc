@@ -67,6 +67,11 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
     presence_mask_data = presence_mask->template mutable_data<bool>();
   }
 
+  if (!data.size(0)) {
+    // Return empty output (with the proper shape)
+    return true;
+  }
+
   // Do padding
   if (output->template IsType<float>()) {
     math::Set<float, CPUContext>(
@@ -75,11 +80,6 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
         output->template mutable_data<float>(),
         &context_);
   }
-  if (!data.size(0)) {
-    // Return empty output (with the proper shape)
-    return true;
-  }
-
   if (return_presence_mask_) {
     memset(presence_mask_data, (int)false, presence_mask->numel());
   }
@@ -116,7 +116,6 @@ template <typename T, typename Data_T>
 bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto& data = Input(DATA);
   const auto& lengths = Input(LENGTHS);
-  auto* output = Output(0);
 
   CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");
   CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTH should be 1-D");
@@ -135,7 +134,7 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
       shape[0], lengths.size(0), "LENGTH should match DATA in dimension 0");
   shape.erase(shape.begin());
   shape[0] = total_l;
-  output->Resize(shape);
+  auto* output = Output(0, shape, at::dtype(data.dtype()));
   // create output tensor
   auto* out = static_cast<char*>(output->raw_mutable_data(data.dtype()));
   if (!(data.size(0) && data.size(1))) {

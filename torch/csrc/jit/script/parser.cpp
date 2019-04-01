@@ -1,7 +1,7 @@
+#include <torch/csrc/jit/script/parser.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
-#include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/tree.h>
 #include <torch/csrc/jit/script/tree_views.h>
 
@@ -127,7 +127,19 @@ struct ParserImpl {
       } break;
       case '[': {
         auto list = parseList('[', ',', ']', &ParserImpl::parseExp);
-        prefix = ListLiteral::create(list.range(), List<Expr>(list));
+
+        if (list.size() == 1 && (*list.begin()).kind() == TK_LIST_COMP) {
+          prefix = *list.begin();
+        } else {
+          for (auto se : list) {
+            if (se.kind() == TK_LIST_COMP) {
+              throw ErrorReport(list.range())
+                  << " expected a single list comprehension within '[' , ']'";
+            }
+          }
+          prefix = ListLiteral::create(list.range(), List<Expr>(list));
+        }
+
       } break;
       case '{': {
         L.next();
@@ -239,23 +251,39 @@ struct ParserImpl {
         continue;
       }
 
+      if (kind == TK_FOR) {
+        auto target = parseExp();
+        L.expect(TK_IN);
+        auto iter = parseExp();
+        prefix = ListComp::create(pos, Expr(prefix), target, iter);
+        continue;
+      }
+
       prefix = c(kind, pos, {prefix, parseExp(binary_prec)});
     }
     return Expr(prefix);
   }
-  template <typename T>
-  List<T> parseList(int begin, int sep, int end, T (ParserImpl::*parse)()) {
-    auto r = L.cur().range;
+  void parseSequence(
+      int begin,
+      int sep,
+      int end,
+      const std::function<void()>& parse) {
     if (begin != TK_NOTHING)
       L.expect(begin);
-    std::vector<T> elements;
     if (L.cur().kind != end) {
       do {
-        elements.push_back((this->*parse)());
+        parse();
       } while (L.nextIf(sep));
     }
     if (end != TK_NOTHING)
       L.expect(end);
+  }
+  template <typename T>
+  List<T> parseList(int begin, int sep, int end, T (ParserImpl::*parse)()) {
+    auto r = L.cur().range;
+    std::vector<T> elements;
+    parseSequence(
+        begin, sep, end, [&] { elements.emplace_back((this->*parse)()); });
     return List<T>::create(r, elements);
   }
 
@@ -323,10 +351,11 @@ struct ParserImpl {
 
     auto subscript_exprs =
         parseList('[', ',', ']', &ParserImpl::parseSubscriptExp);
+
     return Subscript::create(range, Expr(value), subscript_exprs);
   }
 
-  TreeRef parseParam() {
+  TreeRef parseParam(bool kwarg_only) {
     auto ident = parseIdent();
     TreeRef type;
     if (L.nextIf(':')) {
@@ -341,7 +370,7 @@ struct ParserImpl {
       def = Maybe<Expr>::create(L.cur().range);
     }
     return Param::create(
-        type->range(), Ident(ident), Expr(type), Maybe<Expr>(def));
+        type->range(), Ident(ident), Expr(type), Maybe<Expr>(def), kwarg_only);
   }
 
   Param parseBareTypeAnnotation() {
@@ -350,7 +379,8 @@ struct ParserImpl {
         type.range(),
         Ident::create(type.range(), ""),
         type,
-        Maybe<Expr>::create(type.range()));
+        Maybe<Expr>::create(type.range()),
+        /*kwarg_only=*/false);
   }
 
   Decl parseTypeComment() {
@@ -517,14 +547,49 @@ struct ParserImpl {
     }
   }
 
+  List<Param> parseParams() {
+    auto r = L.cur().range;
+    std::vector<Param> params;
+    bool kwarg_only = false;
+    parseSequence('(', ',', ')', [&] {
+      if (!kwarg_only && L.nextIf('*')) {
+        kwarg_only = true;
+      } else {
+        params.emplace_back(parseParam(kwarg_only));
+      }
+    });
+    return List<Param>::create(r, params);
+  }
   Decl parseDecl() {
-    auto paramlist = parseList('(', ',', ')', &ParserImpl::parseParam);
     // Parse return type annotation
+    List<Param> paramlist = parseParams();
     TreeRef return_type;
     Maybe<Expr> return_annotation = parseReturnAnnotation();
     L.expect(':');
     return Decl::create(
         paramlist.range(), List<Param>(paramlist), return_annotation);
+  }
+
+  TreeRef parseClass() {
+    L.expect(TK_CLASS_DEF);
+    const auto name = parseIdent();
+    if (L.nextIf('(')) {
+      // The parser only supports py3 syntax, so classes are new-style when
+      // they don't inherit from anything.
+      L.reportError(
+          "Inheritance is not yet supported for TorchScript classes yet.");
+    }
+    L.expect(':');
+
+    L.expect(TK_INDENT);
+    std::vector<Def> methods;
+    while (L.cur().kind != TK_DEDENT) {
+      methods.push_back(Def(parseFunction(/*is_method=*/true)));
+    }
+    L.expect(TK_DEDENT);
+
+    return ClassDef::create(
+        name.range(), name, List<Def>::create(name.range(), methods));
   }
 
   TreeRef parseFunction(bool is_method) {
@@ -568,11 +633,17 @@ Parser::~Parser() = default;
 TreeRef Parser::parseFunction(bool is_method) {
   return pImpl->parseFunction(is_method);
 }
+TreeRef Parser::parseClass() {
+  return pImpl->parseClass();
+}
 Lexer& Parser::lexer() {
   return pImpl->lexer();
 }
 Decl Parser::parseTypeComment() {
   return pImpl->parseTypeComment();
+}
+Expr Parser::parseExp() {
+  return pImpl->parseExp();
 }
 
 } // namespace script

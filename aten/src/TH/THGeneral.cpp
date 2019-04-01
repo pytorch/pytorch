@@ -196,7 +196,7 @@ void* THRealloc(void *ptr, ptrdiff_t size)
 
 void THFree(void *ptr)
 {
-  free(ptr);
+  c10::free_cpu(ptr);
 }
 
 double THLog10(const double x)

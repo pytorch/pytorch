@@ -7,6 +7,14 @@ binary_linux_build: &binary_linux_build
       <<: *binary_populate_env
   - run:
       <<: *binary_checkout
+  - run:
+      name: Install unbuffer and ts
+      command: |
+        set -ex
+        source /env
+        retry yum -q -y install epel-release
+        retry yum -q -y install expect moreutils
+
 
   - run:
       name: Build
@@ -28,8 +36,18 @@ binary_linux_build: &binary_linux_build
           build_script='manywheel/build.sh'
         fi
 
+        # We want to call unbuffer, which calls tclsh which finds the expect
+        # package. The expect was installed by yum into /usr/bin so we want to
+        # find /usr/bin/tclsh, but this is shadowed by /opt/conda/bin/tclsh in
+        # the conda docker images.
+        if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
+          mkdir /just_tclsh_bin
+          ln -s /usr/bin/tclsh /just_tclsh_bin/tclsh
+          export PATH=/just_tclsh_bin:$PATH
+        fi
+
         # Build the package
-        SKIP_ALL_TESTS=1 "/builder/$build_script"
+        SKIP_ALL_TESTS=1 unbuffer "/builder/$build_script" | ts
   - persist_to_workspace:
       root: /
       paths: final_pkgs

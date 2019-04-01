@@ -82,7 +82,7 @@ namespace kernel {
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS(512, 4)
+C10_LAUNCH_BOUNDS_2(512, 4)
 #endif
 __global__ void lstm_cell_forward(
             TensorInfo<scalar_t, index_type> input,
@@ -169,7 +169,7 @@ __global__ void lstm_cell_forward(
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS(512, 4)
+C10_LAUNCH_BOUNDS_2(512, 4)
 #endif
 __global__ void lstm_cell_backward(
               TensorInfo<scalar_t, index_type> storage,
@@ -234,7 +234,7 @@ __global__ void lstm_cell_backward(
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS(512, 4)
+C10_LAUNCH_BOUNDS_2(512, 4)
 #endif
 __global__ void gru_cell_forward(
             TensorInfo<scalar_t, index_type> Input,
@@ -304,7 +304,7 @@ __global__ void gru_cell_forward(
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS(512, 4)
+C10_LAUNCH_BOUNDS_2(512, 4)
 #endif
 __global__ void gru_cell_backward(
              TensorInfo<scalar_t, index_type> gradInInput,
@@ -501,7 +501,7 @@ std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_cuda(
   auto workspace = at::empty_like(input_gates);
   auto hy = at::empty_like(cx);
   auto cy = at::empty_like(cx);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input_gates.type(), "_thnn_fused_lstm_cell_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input_gates.scalar_type(), "_thnn_fused_lstm_cell_cuda", [&] {
     if (canUse32BitIndexMath(workspace)) { // See Note [64-bit index math check elision]
       lstm_forward_impl<scalar_t, int32_t>(input_gates, hidden_gates, input_bias, hidden_bias, cx, hy, cy, workspace);
     } else {
@@ -540,7 +540,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
 
   auto grad_gates = at::empty_like(workspace);
   auto grad_cx = at::empty_like(cx);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(workspace.type(), "_thnn_fused_lstm_cell_cuda_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(workspace.scalar_type(), "_thnn_fused_lstm_cell_cuda_backward", [&] {
     if (canUse32BitIndexMath(workspace)) { // See Note [64-bit index math check elision]
       lstm_backward_impl<scalar_t, int32_t>(grad_hy, grad_cy, cx, cy, workspace, grad_gates, grad_cx);
     } else {
@@ -565,7 +565,7 @@ std::tuple<Tensor, Tensor> _thnn_fused_gru_cell_cuda(
 
   auto workspace = at::empty({hx.size(0), hx.size(1) * GRU_WORKSPACE_MULTIPLIER}, hx.options());
   auto hy = at::empty_like(hx);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input_gates.type(), "_thnn_fused_gru_cell_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input_gates.scalar_type(), "_thnn_fused_gru_cell_cuda", [&] {
     if (canUse32BitIndexMath(workspace)) { // See Note [64-bit index math check elision]
       gru_forward_impl<scalar_t, int32_t>(input_gates, hidden_gates, input_bias, hidden_bias, hx, hy, workspace);
     } else {
@@ -589,7 +589,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_gru_cell_backward
   auto grad_input_gates = at::empty({workspace.size(0), hidden_size * 3}, workspace.options());
   auto grad_hidden_gates = at::empty({workspace.size(0), hidden_size * 3}, workspace.options());
   auto grad_hx = at::empty_like(grad_hy);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_hy.type(), "_thnn_fused_gru_cell_cuda_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_hy.scalar_type(), "_thnn_fused_gru_cell_cuda_backward", [&] {
     if (canUse32BitIndexMath(workspace)) { // See Note [64-bit index math check elision]
       gru_backward_impl<scalar_t, int32_t>(grad_hy, workspace, grad_input_gates, grad_hidden_gates, grad_hx);
     } else {

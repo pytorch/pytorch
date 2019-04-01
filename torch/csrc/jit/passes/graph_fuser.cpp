@@ -59,15 +59,15 @@ bool isSimpleMap(Node* node) {
       "aten::log10(Tensor self) -> Tensor",
       "aten::log1p(Tensor self) -> Tensor",
       "aten::log2(Tensor self) -> Tensor",
+      "aten::lerp(Tensor self, Tensor end, Scalar weight) -> Tensor",
+      "aten::lerp(Tensor self, Tensor end, Tensor weight) -> Tensor",
       "aten::max(Tensor self, Tensor other) -> Tensor",
       "aten::min(Tensor self, Tensor other) -> Tensor",
       "aten::mul(Tensor self, Tensor other) -> Tensor",
       "aten::neg(Tensor self) -> Tensor",
       "aten::pow(Tensor self, Tensor exponent) -> Tensor",
       "aten::pow(Tensor self, Scalar exponent) -> Tensor",
-      // See https://github.com/pytorch/pytorch/issues/14674 and make sure you
-      // won't make the same mistake before you reenable this.
-      //"aten::rand_like(Tensor self) -> Tensor",
+      "aten::rand_like(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
@@ -100,6 +100,7 @@ bool isSimpleMap(Node* node) {
       "aten::lt(Tensor self, Tensor other) -> Tensor",
       "aten::lt(Tensor self, Scalar other) -> Tensor",
 
+      "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor",
       "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
 
       "aten::type_as(Tensor self, Tensor other) -> Tensor",
@@ -107,9 +108,8 @@ bool isSimpleMap(Node* node) {
   if (!simple_mappable.find(node)) {
     return false;
   }
-  // Check that all non-tensor inputs are constant
   for (Value* input : node->inputs()) {
-    if (input->type()->isSubtypeOf(TensorType::get())) {
+    if (input->type()->isSubtypeOf(TensorType::get()) || input->type()->isSubtypeOf(FloatType::get())) {
       continue;
     }
     if (input->node()->kind() != prim::Constant) {
@@ -138,8 +138,7 @@ c10::optional<bool> isDefined(Value* tensor) {
   if (tensor->type()->isSubtypeOf(TensorType::get())) {
     return true;
   }
-  if (tensor->node()->kind() == prim::None ||
-      tensor->node()->kind() == prim::Undefined) {
+  if (tensor->node()->mustBeNone()) {
     return false;
   }
   return {};
@@ -265,7 +264,7 @@ struct GraphFuser {
       )SCRIPT";
           auto module = std::make_shared<script::Module>();
           defineMethodsInModule(
-              module, source, script::nativeResolver, /*self=*/nullptr);
+              module, source, script::nativeResolver, /*self=*/c10::nullopt);
           *graph_ptr = module->get_method("batch_norm").graph();
         },
         &bn_graph);
@@ -387,8 +386,9 @@ struct GraphFuser {
           group->insertInput(tensor_insert_idx, input);
           tensor_insert_idx++;
         } else if (
-            n->kind() == aten::_grad_sum_to_size &&
-            input->type()->isSubtypeOf(ListType::ofInts())) {
+          (input->type()->isSubtypeOf(FloatType::get()) && input->node()->kind() != prim::Constant) ||
+          (n->kind() == aten::_grad_sum_to_size &&
+            input->type()->isSubtypeOf(ListType::ofInts()))) {
           auto in_group = subgraph.addInput();
           in_group->setType(input->type());
           inputs_map[input] = in_group;

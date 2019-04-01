@@ -14,9 +14,8 @@ namespace int8 {
 
 class Int8ReluOp final : public Operator<CPUContext> {
  public:
-  Int8ReluOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
-        ws_(ws) {}
+  explicit Int8ReluOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws), ws_(ws) {}
 
   ~Int8ReluOp() {
     if (this->qnnpackOperator_ != nullptr) {
