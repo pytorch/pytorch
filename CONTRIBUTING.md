@@ -511,9 +511,12 @@ formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 
   ```bash
-  pip install flake8-mypy
   ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
   ```
+
+You'll need to install an appropriately configured flake8; see
+[Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
+for documentation on how to do this.
 
 ## Caffe2 notes
 
