@@ -2,22 +2,19 @@ from __future__ import print_function
 import sys
 import os
 import re
-import math
 import shutil
 import random
 import tempfile
 import unittest
-import traceback
 import torch
 import torch.nn as nn
 import torch.utils.data
 import torch.cuda
-import warnings
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.hub as hub
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common_utils import IS_WINDOWS, IS_PPC, skipIfRocm, load_tests
+from common_utils import skipIfRocm, load_tests
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -34,7 +31,7 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 HAS_CUDA = torch.cuda.is_available()
 
-from common_utils import TestCase, run_tests, download_file
+from common_utils import TestCase, run_tests
 
 
 class RandomDatasetMock(object):
@@ -326,7 +323,7 @@ test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 class TestFFI(TestCase):
     def test_deprecated(self):
         with self.assertRaisesRegex(ImportError, "torch.utils.ffi is deprecated. Please use cpp extensions instead."):
-            from torch.utils.ffi import create_extension
+            from torch.utils.ffi import create_extension  # noqa: F401
 
 
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
