@@ -60,7 +60,7 @@ def _to_device_index(devices):
     if len(devices) <= 0:
         raise RuntimeError("Cannot replicate using an empty device list.")
 
-    if isinstance(devices[0], list):
+    if isinstance(devices, list) and isinstance(devices[0], list):
         device_ids = []
         for i, device in enumerate(devices):
             assert len(device) == len(devices[0]), (
