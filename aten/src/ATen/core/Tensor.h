@@ -13,7 +13,7 @@
 #include <c10/util/Optional.h>
 #include <c10/core/Tensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/DeprecatedTypeProperties.h>
+#include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 
 namespace c10{
 struct TensorOptions;
@@ -197,8 +197,9 @@ class CAFFE2_API Tensor {
     return impl_->itemsize();
   }
 
-  DeprecatedTypeProperties type() const {
-    return DeprecatedTypeProperties(tensorTypeIdToBackend(type_id()), scalar_type());
+  DeprecatedTypeProperties & type() const {
+    return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+        tensorTypeIdToBackend(type_id()), scalar_type());
   }
   Type & dispatch_type() const {
     return legacyTensorType(*impl_);
