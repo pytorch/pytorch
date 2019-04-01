@@ -8,7 +8,7 @@ path = os.path.dirname(os.path.realpath(__file__))
 aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.yaml')
 whitelist = [
     'max', 'min', 'median', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
-    'pstrf', 'qr', 'geqrf',
+    'pstrf', 'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk',
 ]
 
 
