@@ -60,8 +60,7 @@ class GatherByKeyOp : public Operator<CPUContext> {
     }
     CAFFE_ENFORCE_EQ(keysTensor.numel(), totalSize);
 
-    auto* outTensor = Output(0);
-    outTensor->Resize(outShape);
+    auto* outTensor = Output(0, outShape, at::dtype(meta));
     auto* outData = static_cast<char*>(outTensor->raw_mutable_data(meta));
     const auto blockSize = outTensor->size_from_dim(1);
 
@@ -164,9 +163,8 @@ class PartitionOpBase : public Operator<CPUContext> {
           input.sizes().begin() + main_input.dim() - 1, input.sizes().end());
       for (int j = 0; j < partitions; ++j) {
         int out_idx = i + j * inputSize;
-        auto output = Output(out_idx);
         shape[0] = counts_[j];
-        output->Resize(shape);
+        auto output = Output(out_idx, shape, at::dtype(input.dtype()));
         out_datas_[out_idx] = output->raw_mutable_data(input.dtype());
       }
     }
@@ -256,13 +254,12 @@ class LengthsPartitionOp : public PartitionOpBase {
       // Specialization when partitions == 1 which just becomes a copy.
       for (int i = 0; i < InputSize(); ++i) {
         auto& input = Input(i);
-        auto& output = *Output(i);
-        output.ResizeLike(input);
+        auto* output = Output(i, input.sizes(), at::dtype(input.dtype()));
         context_.CopyItemsSameDevice(
             input.dtype(),
             input.numel(),
             input.raw_data(),
-            output.raw_mutable_data(input.dtype()));
+            output->raw_mutable_data(input.dtype()));
       }
       return true;
     }
@@ -280,9 +277,8 @@ class LengthsPartitionOp : public PartitionOpBase {
     const int32_t* lengths_data = length_input.template data<int32_t>();
     out_length_.resize(partitions);
     for (int i = 0; i < partitions; ++i) {
-      auto& output = *Output(i * InputSize());
-      output.Resize(elements);
-      out_length_[i] = output.template mutable_data<int32_t>();
+      auto* output = Output(i * InputSize(), elements, at::dtype<int32_t>());
+      out_length_[i] = output->template mutable_data<int32_t>();
     }
 
     int total_length = 0;

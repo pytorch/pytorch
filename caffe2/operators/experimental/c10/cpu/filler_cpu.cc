@@ -1,8 +1,8 @@
-#include <ATen/core/dispatch/KernelRegistration.h>
-#include "caffe2/operators/experimental/c10/schemas/filler.h"
-#include "caffe2/utils/math.h"
-#include "caffe2/core/tensor.h"
+#include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/Tensor.h>
+#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/tensor.h"
+#include "caffe2/utils/math.h"
 
 using caffe2::CPUContext;
 using caffe2::Tensor;
@@ -143,27 +143,107 @@ void uniform_fill_op_cpu_impl(
       output.template mutable_data<float>(),
       static_cast<CPUContext*>(&context));
 }
+
+static auto registry =
+    c10::RegisterOperators()
+        .op(FunctionSchema(
+                "_c10_experimental::ConstantFill",
+                "",
+                (std::vector<c10::Argument>{
+                    c10::Argument("inputs", ListType::ofTensors()),
+                    c10::Argument("output"),
+                    c10::Argument("shape", ListType::ofInts()),
+                    c10::Argument("extra_shape", ListType::ofInts()),
+                    c10::Argument("input_as_shape", BoolType::get()),
+                    c10::Argument("dtype", IntType::get()),
+                    c10::Argument("value", NumberType::get())}),
+                (std::vector<c10::Argument>{})),
+            c10::kernel<
+                decltype(constant_fill_op_cpu_impl),
+                &constant_fill_op_cpu_impl>(),
+            c10::dispatchKey(CPUTensorId()))
+        .op(FunctionSchema(
+                "_c10_experimental::UniformFill",
+                "",
+                (std::vector<c10::Argument>{
+                    c10::Argument("inputs", ListType::ofTensors()),
+                    c10::Argument("output"),
+                    c10::Argument("shape", ListType::ofInts()),
+                    c10::Argument("extra_shape", ListType::ofInts()),
+                    c10::Argument("input_as_shape", BoolType::get()),
+                    c10::Argument("min", FloatType::get()),
+                    c10::Argument("max", FloatType::get())}),
+                (std::vector<c10::Argument>{})),
+            c10::kernel<
+                decltype(uniform_fill_op_cpu_impl),
+                &uniform_fill_op_cpu_impl>(),
+            c10::dispatchKey(CPUTensorId()))
+        .op(FunctionSchema(
+                "_c10_experimental::GivenTensorFill",
+                "",
+                (std::vector<c10::Argument>{
+                    c10::Argument("inputs", ListType::ofTensors()),
+                    c10::Argument("output"),
+                    c10::Argument("shape", ListType::ofInts()),
+                    c10::Argument("extra_shape", ListType::ofInts()),
+                    c10::Argument("input_as_shape", BoolType::get()),
+                    c10::Argument("values"),
+                }),
+                (std::vector<c10::Argument>{})),
+            c10::kernel<
+                decltype(given_tensor_fill_op_cpu_impl<float, CPUContext>),
+                &given_tensor_fill_op_cpu_impl<float, CPUContext>>(),
+            c10::dispatchKey(CPUTensorId()))
+        .op(FunctionSchema(
+                "_c10_experimental::GivenTensorIntFill",
+                "",
+                (std::vector<c10::Argument>{
+                    c10::Argument("inputs", ListType::ofTensors()),
+                    c10::Argument("output"),
+                    c10::Argument("shape", ListType::ofInts()),
+                    c10::Argument("extra_shape", ListType::ofInts()),
+                    c10::Argument("input_as_shape", BoolType::get()),
+                    c10::Argument("values"),
+                }),
+                (std::vector<c10::Argument>{})),
+            c10::kernel<
+                decltype(given_tensor_fill_op_cpu_impl<int, CPUContext>),
+                &given_tensor_fill_op_cpu_impl<int, CPUContext>>(),
+            c10::dispatchKey(CPUTensorId()))
+        .op(FunctionSchema(
+                "_c10_experimental::GivenTensorInt64Fill",
+                "",
+                (std::vector<c10::Argument>{
+                    c10::Argument("inputs", ListType::ofTensors()),
+                    c10::Argument("output"),
+                    c10::Argument("shape", ListType::ofInts()),
+                    c10::Argument("extra_shape", ListType::ofInts()),
+                    c10::Argument("input_as_shape", BoolType::get()),
+                    c10::Argument("values"),
+                }),
+                (std::vector<c10::Argument>{})),
+            c10::kernel<
+                decltype(given_tensor_fill_op_cpu_impl<int, CPUContext>),
+                &given_tensor_fill_op_cpu_impl<int, CPUContext>>(),
+            c10::dispatchKey(CPUTensorId()));
+
 } // namespace
+
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::ConstantFill",
+    C10ConstantFill_DontUseThisOpYet)
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::UniformFill",
+    C10UniformFill_DontUseThisOpYet)
+
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::GivenTensorFill",
+    C10GivenTensorFill_DontUseThisOpYet)
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::GivenTensorIntFill",
+    C10GivenTensorIntFill_DontUseThisOpYet)
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::GivenTensorInt64Fill",
+    C10GivenTensorInt64Fill_DontUseThisOpYet)
+
 } // namespace caffe2
-
-namespace c10 {
-C10_REGISTER_KERNEL(caffe2::ops::ConstantFill)
-    .kernel<decltype(caffe2::constant_fill_op_cpu_impl), &caffe2::constant_fill_op_cpu_impl>()
-    .dispatchKey(CPUTensorId());
-
-C10_REGISTER_KERNEL(caffe2::ops::UniformFill)
-    .kernel<decltype(caffe2::uniform_fill_op_cpu_impl), &caffe2::uniform_fill_op_cpu_impl>()
-    .dispatchKey(CPUTensorId());
-
-C10_REGISTER_KERNEL(caffe2::ops::GivenTensorFill)
-    .kernel<decltype(caffe2::given_tensor_fill_op_cpu_impl<float, caffe2::CPUContext>), &caffe2::given_tensor_fill_op_cpu_impl<float, caffe2::CPUContext>>()
-    .dispatchKey(CPUTensorId());
-
-C10_REGISTER_KERNEL(caffe2::ops::GivenTensorIntFill)
-    .kernel<decltype(caffe2::given_tensor_fill_op_cpu_impl<int, caffe2::CPUContext>), &caffe2::given_tensor_fill_op_cpu_impl<int, caffe2::CPUContext>>()
-    .dispatchKey(CPUTensorId());
-
-C10_REGISTER_KERNEL(caffe2::ops::GivenTensorInt64Fill)
-    .kernel<decltype(caffe2::given_tensor_fill_op_cpu_impl<int64_t, caffe2::CPUContext>), &caffe2::given_tensor_fill_op_cpu_impl<int64_t, caffe2::CPUContext>>()
-    .dispatchKey(CPUTensorId());
-} // namespace c10
