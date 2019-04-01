@@ -1008,6 +1008,8 @@ c10::optional<GradientPair> gradientInfoForSchema(
     //    value since scalar/int aren't differentiable either way.
     //
     c10::ReplaceAll(schema_str, "Scalar", "float");
+    // For debugging AD change:
+    // std::cout << "Looking for " << schema_str << std::endl;
 
     auto sym_script_it = schema_to_graphs.find(schema_str);
 

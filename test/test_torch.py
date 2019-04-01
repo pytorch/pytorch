@@ -3,7 +3,6 @@ import io
 import os
 import math
 import random
-import operator
 import copy
 import shutil
 import torch
@@ -17,7 +16,7 @@ import gzip
 import types
 import textwrap
 import re
-from torch._utils_internal import get_file_path, get_file_path_2
+from torch._utils_internal import get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from torch._six import inf, nan, string_classes, istuple
@@ -2032,7 +2031,6 @@ class _TestTorchMixin(object):
     def _test_int_pow(self, cast):
         if not TEST_NUMPY:
             return
-        import numpy as np
 
         def check_against_np(tensor, exp):
             tensor_np = tensor.cpu().numpy()
@@ -4669,7 +4667,6 @@ class _TestTorchMixin(object):
         # Test non-contiguous inputs.
         if not TEST_NUMPY:
             return
-        import numpy
         from numpy.linalg import solve
         A = cast(random_fullrank_matrix_distinct_singular_value(2, 2)).permute(1, 0, 2)
         b = cast(torch.randn(2, 2, 2)).permute(2, 1, 0)
@@ -6218,7 +6215,6 @@ class _TestTorchMixin(object):
             # Test non-contiguous inputs.
             if not TEST_NUMPY:
                 return
-            import numpy
             from numpy.linalg import solve
             A = random_symmetric_pd_matrix(2, 2)
             b = torch.randn(2, 2, 2)
