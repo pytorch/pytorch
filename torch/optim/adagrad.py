@@ -38,7 +38,7 @@ class Adagrad(Optimizer):
             for p in group['params']:
                 state = self._get_state(p, group['initial_accumulator_value'])
                 state['sum'].share_memory_()
-    
+
     def _get_state(self, p, initial_accumulator_value):
         state = self.state[p]
         if len(state) == 0:
@@ -46,7 +46,7 @@ class Adagrad(Optimizer):
             state['step'] = 0
             state['sum'] = torch.full_like(p.data, initial_accumulator_value)
         return state
-    
+
     def step(self, closure=None):
         """Performs a single optimization step.
 
