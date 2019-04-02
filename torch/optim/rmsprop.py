@@ -81,7 +81,7 @@ class RMSprop(Optimizer):
                 state['step'] += 1
 
                 if group['weight_decay'] != 0:
-                    grad = grad.add(group['weight_decay'], p.data)
+                    grad.add_(group['weight_decay'], p.data)
 
                 square_avg.mul_(alpha).addcmul_(1 - alpha, grad, grad)
 
