@@ -69,5 +69,8 @@ class TestMkldnn(TestCase):
             self.assertRaisesRegex(ValueError, 'MKLDNN output is not supported at gradcheck yet',
                                    lambda: gradgradcheck(func, [root], atol=4e-2, rtol=1e-2))
 
+    def test_repr(self):
+        self.assertTrue("layout=torch._mkldnn" in str(torch.randn(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu')).to_mkldnn()))
+
 if __name__ == '__main__':
     run_tests()
