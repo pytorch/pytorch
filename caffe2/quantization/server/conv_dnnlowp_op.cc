@@ -353,7 +353,23 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
         const auto& packed_filter =
             this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER);
         Wq_depthwise_3x3_packed_ = packed_filter.W_depthwise_3x3;
-      } else {
+        if (!Wq_depthwise_3x3_packed_) {
+          LOG_FIRST_N(WARNING, 10)
+              << "Failed to see the expected prepacked weight for depthwise "
+                 "3x3. Pre-packing the weight now but please check if your "
+                 "Int8ConvPackWeight operator is correct and executed "
+                 "correctly";
+          filter_qparams_.resize(quantize_groupwise_ ? group_ : 1);
+          QuantizeWeight<T>(
+              InputBlob(FILTER),
+              kernel_dim,
+              M,
+              filter_qparams_,
+              W_quantized_,
+              qfactory_.get());
+        }
+      }
+      if (!Wq_depthwise_3x3_packed_) {
         Wq_depthwise_3x3_packed_.reset(new fbgemm::Packed3x3ConvMatrix(
             group_, reinterpret_cast<const int8_t*>(W_quantized_.data())));
       }
@@ -362,7 +378,23 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
         const auto& packed_filter =
             this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER);
         Wq_depthwise_3x3x3_packed_ = packed_filter.W_depthwise_3x3x3;
-      } else {
+        if (!Wq_depthwise_3x3x3_packed_) {
+          LOG_FIRST_N(WARNING, 10)
+              << "Failed to see the expected prepacked weight for depthwise "
+                 "3x3x3. Pre-packing the weight now but please check if your "
+                 "Int8ConvPackWeight operator is correct and executed "
+                 "correctly";
+          filter_qparams_.resize(quantize_groupwise_ ? group_ : 1);
+          QuantizeWeight<T>(
+              InputBlob(FILTER),
+              kernel_dim,
+              M,
+              filter_qparams_,
+              W_quantized_,
+              qfactory_.get());
+        }
+      }
+      if (!Wq_depthwise_3x3x3_packed_) {
         Wq_depthwise_3x3x3_packed_.reset(new fbgemm::Packed3x3x3ConvMatrix(
             group_, reinterpret_cast<const int8_t*>(W_quantized_.data())));
       }
@@ -371,7 +403,23 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
         const auto& packed_filter =
             this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER);
         Wq_gconv_packed_ = packed_filter.W_gconv;
-      } else {
+        if (!Wq_gconv_packed_) {
+          LOG_FIRST_N(WARNING, 10)
+              << "Failed to see the expected prepacked weight for group "
+                 "convolution. Pre-packing the weight now but please check if "
+                 "your Int8ConvPackWeight operator is correct and executed "
+                 "correctly";
+          filter_qparams_.resize(quantize_groupwise_ ? group_ : 1);
+          QuantizeWeight<T>(
+              InputBlob(FILTER),
+              kernel_dim,
+              M,
+              filter_qparams_,
+              W_quantized_,
+              qfactory_.get());
+        }
+      }
+      if (!Wq_gconv_packed_) {
         const Tensor& X = InputTensorCPU_(INPUT);
         const int N = X.dim32(0), C = X.dim32(X.dim() - 1);
 
@@ -395,7 +443,23 @@ void ConvDNNLowPOp<T, ReluFused>::QuantizeWeight_() {
         const auto& packed_filter =
             this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER);
         Wq_packed_ = packed_filter.W;
-      } else {
+        if (!Wq_packed_) {
+          LOG_FIRST_N(WARNING, 10)
+              << "Failed to see the expected prepacked weight."
+                 "Pre-packing the weight now but please check if "
+                 "your Int8ConvPackWeight operator is correct and executed "
+                 "correctly";
+          filter_qparams_.resize(quantize_groupwise_ ? group_ : 1);
+          QuantizeWeight<T>(
+              InputBlob(FILTER),
+              kernel_dim,
+              M,
+              filter_qparams_,
+              W_quantized_,
+              qfactory_.get());
+        }
+      }
+      if (!Wq_packed_) {
         // fast path using fbgemm
         Wq_packed_.reset(new fbgemm::PackBMatrix<int8_t>(
             fbgemm::matrix_op_t::Transpose,

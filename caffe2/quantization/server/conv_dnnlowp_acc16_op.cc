@@ -69,6 +69,10 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
     return false;
   }
 
+  int kernel_dim = this->KernelDim_();
+  const auto& filter = InputTensorCPU_(FILTER);
+  int num_out_channels = filter.dim32(0);
+
   if (!Wq_acc16_packed_ &&
       this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER)) {
     CAFFE_ENFORCE_EQ(
@@ -88,14 +92,30 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
           << " doesn't match with nbits_in_non_outlier specified in operator "
           << nbits_in_non_outlier_;
     }
+    if (!Wq_outlier_ || !Wq_acc16_packed_) {
+      LOG_FIRST_N(WARNING, 10)
+          << "Failed to see the expected prepacked weight for acc16."
+             "Pre-packing the weight now but please check if "
+             "your Int8ConvPackWeight operator is correct and executed "
+             "correctly";
+      // If only one of Wq_outlier_ and Wq_acc16_packed_ is available, it may
+      // be inconsistent with the unavailable one we're going to construct,
+      // so we make both unavailable.
+      Wq_outlier_.reset();
+      Wq_acc16_packed_.reset();
+      this->filter_qparams_.resize(this->quantize_groupwise_ ? group_ : 1);
+      QuantizeWeight<uint8_t>(
+          InputBlob(FILTER),
+          kernel_dim,
+          num_out_channels,
+          this->filter_qparams_,
+          W_quantized_,
+          this->qfactory_.get());
+    }
 
     first_invocation_ = false;
     return true;
   }
-
-  int kernel_dim = this->KernelDim_();
-  const auto& filter = InputTensorCPU_(FILTER);
-  int num_out_channels = filter.dim32(0);
 
   // Check if we should fallback to 32-bit accumulation
   if (this->order_ == StorageOrder::NHWC) {

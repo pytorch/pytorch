@@ -614,7 +614,23 @@ bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
           const auto& packed_filter =
               this->template Input<Int8FCDNNLowPPackedWeightBlob>(1);
           Wq_packed_ = packed_filter.W;
-        } else {
+          if (!Wq_packed_) {
+            LOG_FIRST_N(WARNING, 10)
+                << "Failed to see the expected prepacked weight."
+                   "Pre-packing the weight now but please check if "
+                   "your Int8FCPackWeight operator is correct and executed "
+                   "correctly";
+            filter_qparams_.resize(quantize_channelwise_ ? N : 1);
+            QuantizeWeight<T>(
+                InputBlob(1),
+                K,
+                N,
+                filter_qparams_,
+                W_quantized_,
+                qfactory_.get());
+          }
+        }
+        if (!Wq_packed_) {
           Wq_packed_ = GetOrCreateFbgemmPackBMatrix<int32_t>(
               fbgemm::matrix_op_t::Transpose,
               K,

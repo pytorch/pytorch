@@ -66,38 +66,54 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
             << " doesn't match with nbits_in_non_outlier specified in operator "
             << nbits_in_non_outlier_;
       }
-    } else {
-      if (!Wq_acc16_packed_ && nbits_in_non_outlier_ < 8) {
-        static int log_occurences = 0;
-        if (log_occurences < 32) {
-          ++log_occurences;
-          LOG(WARNING) << "FC DNNLOWP_ACC16 using outlier-aware quantization";
-        }
-
-        // Separate out outliers
-        CAFFE_ENFORCE(!W_quantized_.empty());
-
-        Wq_outlier_.reset(
-            ExtractOutlierMatrix(1, K, N, nbits_in_non_outlier_, W_quantized_));
-        int outlier_cnt = Wq_outlier_->ColPtr()[N];
-
-        LOG(INFO) << "Proportion of outlier for FC layer with weight blob "
-                  << this->debug_def().input(1) << " is "
-                  << (float)outlier_cnt / W_quantized_.size();
-
-        LOG(INFO) << "copy_to_32bit_frequency " << copy_to_32bit_frequency_;
+      if (!Wq_outlier_ || !Wq_acc16_packed_) {
+        LOG_FIRST_N(WARNING, 10)
+            << "Failed to see the expected prepacked weight for acc16."
+               "Pre-packing the weight now but please check if "
+               "your Int8FCPackWeight operator is correct and executed "
+               "correctly";
+        // If only one of Wq_outlier_ and Wq_acc16_packed_ is available, it may
+        // be inconsistent with the unavailable one we're going to construct,
+        // so we make both unavailable.
+        Wq_outlier_.reset();
+        Wq_acc16_packed_.reset();
+        filter_qparams_.resize(quantize_channelwise_ ? N : 1);
+        QuantizeWeight<uint8_t>(
+            InputBlob(1), K, N, filter_qparams_, W_quantized_, qfactory_.get());
+      }
+    }
+    if (!Wq_acc16_packed_ && nbits_in_non_outlier_ < 8) {
+      static int log_occurences = 0;
+      if (log_occurences < 32) {
+        ++log_occurences;
+        LOG(WARNING) << "FC DNNLOWP_ACC16 using outlier-aware quantization";
       }
 
+      // Separate out outliers
+      CAFFE_ENFORCE(!W_quantized_.empty());
+
+      Wq_outlier_.reset(
+          ExtractOutlierMatrix(1, K, N, nbits_in_non_outlier_, W_quantized_));
+      int outlier_cnt = Wq_outlier_->ColPtr()[N];
+
+      LOG(INFO) << "Proportion of outlier for FC layer with weight blob "
+                << this->debug_def().input(1) << " is "
+                << (float)outlier_cnt / W_quantized_.size();
+
+      LOG(INFO) << "copy_to_32bit_frequency " << copy_to_32bit_frequency_;
+    }
+
+    if (!Wq_acc16_packed_) {
       Wq_acc16_packed_.reset(new fbgemm::PackBMatrix<int8_t, int16_t>(
           fbgemm::matrix_op_t::Transpose,
           K,
           N,
           reinterpret_cast<const int8_t*>(W_quantized_.data()),
           K));
+    }
 
-      if (is_weight_constant_) {
-        vector<T_signed>().swap(W_quantized_);
-      }
+    if (is_weight_constant_) {
+      vector<T_signed>().swap(W_quantized_);
     }
   }
 
