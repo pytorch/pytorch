@@ -4584,12 +4584,12 @@ a")
         res = fn(None)
         self.assertEqual(res, 1)
         g = fn.graph_for(None)
-        self.assertEqual(list(g.inputs())[0].type().kind(), 'NoneType')
+        self.assertEqual(next(g.inputs()).type().kind(), 'NoneType')
         t = torch.ones(1)
         res = fn(t)
         self.assertEqual(res, 0)
         g = fn.graph_for(t)
-        self.assertEqual(list(g.inputs())[0].type().kind(), 'DimensionedTensorType')
+        self.assertEqual(next(g.inputs()).type().kind(), 'DimensionedTensorType')
 
         @torch.jit.script
         def fn(x):
@@ -4599,11 +4599,10 @@ a")
 
         res = fn(t)
         self.assertEqual(res, t)
-        g = fn.graph_for(t)
         with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
             res = fn(None)
         g = fn.graph_for(None)
-        self.assertEqual(list(g.nodes())[0].output().type().str(), "Tensor")
+        self.assertEqual(next(g.nodes()).output().type().str(), "Tensor")
 
     def test_while_write_outer_then_read(self):
         def func(a, b):

@@ -153,10 +153,18 @@ struct ArgumentSpec {
 
  private:
   TypePtr fillType(TypePtr original, size_t& offset) const {
+    // We specialize OptionalType::ofTensor to TensorType.
+    // This allows us to do static analysis on None vs. defined tensors
+    // and we have spearate ArgumentSpecs for them, anyway.
     if (original->isSubtypeOf(TensorType::get()) ||
         original->isSubtypeOf(OptionalType::ofTensor())) {
       auto& arg = args.at(offset++);
       if (!arg.defined()) {
+        // Previously we specialized only TensorType, and undefined arguments
+        // were mapped to AutogradZeroTensorType. For OptionalType::ofTensor
+        // we prefer to have NoneType as the specialization. But passing None
+        // will cause the arg to not be defined. We leave the old behaviour
+        // as is.
         if (original->isSubtypeOf(OptionalType::ofTensor())) {
           return NoneType::get();
         } else {
