@@ -1060,7 +1060,7 @@ inline Tensor & Tensor::geometric_(double p, Generator * generator) {
 inline Tensor Tensor::diag(int64_t diagonal) const {
     return type().diag(*this, diagonal);
 }
-inline Tensor Tensor::cross(const Tensor & other, int64_t dim) const {
+inline Tensor Tensor::cross(const Tensor & other, c10::optional<int64_t> dim) const {
     return type().cross(*this, other, dim);
 }
 inline Tensor Tensor::triu(int64_t diagonal) const {
