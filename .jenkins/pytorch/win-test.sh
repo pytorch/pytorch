@@ -1,7 +1,9 @@
 #!/bin/bash -e
 
 COMPACT_JOB_NAME=pytorch-win-ws2016-cuda9-cudnn7-py3-test
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+SCRIPT_PARENT_DIR=$(dirname "${BASH_SOURCE[0]}")
+source "$SCRIPT_PARENT_DIR/common.sh"
 
 export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
 if [[ ${JOB_NAME} == *"develop"* ]]; then
@@ -17,29 +19,6 @@ if [ ! -z "$(ls $TMP_DIR/ci_scripts/*)" ]; then
     rm $TMP_DIR/ci_scripts/*
 fi
 
-cat >$TMP_DIR/ci_scripts/download_image.py << EOL
-
-import os
-import sys
-import boto3
-import botocore
-
-IMAGE_COMMIT_TAG = os.getenv('IMAGE_COMMIT_TAG')
-
-session = boto3.session.Session()
-s3 = session.resource('s3')
-BUCKET_NAME = 'ossci-windows-build'
-KEY = 'pytorch/'+IMAGE_COMMIT_TAG+'.7z'
-LOCAL_FILE_PATH = sys.argv[1]
-try:
-    s3.Bucket(BUCKET_NAME).download_file(KEY, LOCAL_FILE_PATH)
-except botocore.exceptions.ClientError as e:
-    if e.response['Error']['Code'] == "404":
-        print("The object does not exist.")
-    else:
-        raise
-
-EOL
 
 cat >$TMP_DIR/ci_scripts/setup_pytorch_env.bat <<EOL
 
@@ -160,6 +139,15 @@ cd %TMP_DIR_WIN%\\build\\torch\\lib
 set PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt/bin/x64;%TMP_DIR_WIN%\\build\\torch\\lib;%PATH%
 test_api.exe --gtest_filter="-IntegrationTest.MNIST*"
 EOL
+
+
+
+SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
+CI_SCRIPTS_DIR=$TMP_DIR/ci_scripts
+
+# Used by setup_pytorch_env.bat:
+cp $SCRIPT_HELPERS_DIR/download_image.py $CI_SCRIPTS_DIR
+
 
 run_tests() {
     if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
