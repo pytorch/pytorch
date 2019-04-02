@@ -812,7 +812,8 @@ def all_reduce(tensor,
                async_op=False):
     """
     Reduces the tensor data across all machines in such a way that all get
-    the final result.
+    the final result. If using ``nccl`` backend, :attr:`tensor` in each process
+    need to reside on a different GPU, otherwise NCCL could hang.
 
     After the call ``tensor`` is going to be bitwise identical in all processes.
 
@@ -1013,7 +1014,9 @@ def all_gather(tensor_list,
                group=group.WORLD,
                async_op=False):
     """
-    Gathers tensors from the whole group in a list.
+    Gathers tensors from the whole group in a list. If using ``nccl`` backend,
+    :attr:`tensor` in each process need to reside on a different GPU, otherwise
+    NCCL could hang.
 
     Arguments:
         tensor_list (list[Tensor]): Output list. It should contain
