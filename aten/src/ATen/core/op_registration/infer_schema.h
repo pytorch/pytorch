@@ -95,7 +95,7 @@ FunctionSchema createFunctionSchemaFromTraits(std::string name, std::string over
          std::move(returns),
          /*is_vararg=*/false,
          /*is_varret=*/false,
-         /*has_alias_annotation=*/false};
+         /*is_inferred_from_custom_op=*/true};
 }
 }
 
