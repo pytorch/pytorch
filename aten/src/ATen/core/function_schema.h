@@ -128,11 +128,10 @@ private:
   const bool is_vararg_;
   const bool is_varret_;
 
-  // True if this schema was inferred for a custom operator. We need this
-  // because custom ops will infer a schema without alias annotations, so we
-  // need to
-  //   1) know which schemas were generated from custom ops
-  //   2) treat custom ops conservatively w.r.t. aliasing and mutation
+  // False if this schema was inferred for a custom operator. Custom ops infer
+  // a schema without alias annotations, so we need to:
+  //   1) know that the schema information is incomplete
+  //   2) treat the op conservatively w.r.t. aliasing and mutation
   const bool has_alias_annotation_;
 
 public:
