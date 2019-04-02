@@ -428,7 +428,9 @@ void AliasDb::analyzeImpl(Node* node) {
     }
   }
 
-  if (schema.has_alias_annotation()) {
+  if (!schema.has_alias_annotation()) {
+    // If the schema eixsts but explicitly lacks aliasing information, it
+    // should be analyzed as a custom op.
     return analyzeCustomOp(node);
   }
 

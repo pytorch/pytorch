@@ -154,12 +154,12 @@ public:
     return is_varret_;
   }
   bool is_mutable() const {
-    return has_alias_annotation_ ||
+    return !has_alias_annotation_ ||
         std::any_of(
-               arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
-                 const auto& aliasInfo = arg.alias_info();
-                 return aliasInfo && aliasInfo.value().isWrite();
-               });
+            arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
+              const auto& aliasInfo = arg.alias_info();
+              return aliasInfo && aliasInfo.value().isWrite();
+            });
   }
   bool has_alias_annotation() const {
     return has_alias_annotation_;

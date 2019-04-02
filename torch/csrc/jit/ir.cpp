@@ -851,7 +851,7 @@ bool Node::hasSideEffects() const {
   }
   // Custom ops may have arbitrary side effects
   const auto schema = maybeSchema();
-  if (schema && schema->has_alias_annotation()) {
+  if (schema && !schema->has_alias_annotation()) {
     return true;
   }
 
