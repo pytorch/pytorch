@@ -46,16 +46,6 @@ FunctionSchema dummySchema(
     (std::vector<Argument>{Argument("dummy")}),
     (std::vector<Argument>{}));
 
-TEST(OperatorRegistrationTest, whenTryingToRegisterWithoutKernel_thenFails) {
-  // make sure it crashes when kernel is absent
-  expectThrows<c10::Error>([&] {
-    c10::RegisterOperators().op(dummySchema, dispatchKey(TensorType1()));
-  }, "but didn't specify a kernel");
-
-  // but make sure it doesn't crash when kernel is present
-  c10::RegisterOperators().op(dummySchema, kernel<DummyKernel>(), dispatchKey(TensorType1()));
-}
-
 TEST(OperatorRegistrationTest, givenOpWithoutFallbackKernel_whenCallingOpWithWrongDispatchKey_thenFails) {
   auto registrar = c10::RegisterOperators().op(dummySchema, kernel<DummyKernel>(), dispatchKey(TensorType1()));
 
@@ -170,6 +160,51 @@ TEST(OperatorRegistrationTest, givenOpWithFirstOtherAndThenFallbackKernel_whenCa
   callOp(*op, dummyTensor(TensorType2()));
   EXPECT_FALSE(called_kernel);
   EXPECT_TRUE(called_fallback);
+}
+
+TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegistering_thenOnlyRegistersSchema) {
+  auto registrar = c10::RegisterOperators().op(dummySchema);
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+  expectThrows<c10::Error>([&] {
+    callOp(*op, dummyTensor(TensorType1()));
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+}
+
+TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRunningOutOfScope_thenSchemaIsGone) {
+  {
+    auto registrar = c10::RegisterOperators().op(dummySchema);
+  }
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  EXPECT_FALSE(op.has_value());
+}
+
+TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringKernelAfterwards_thenCanBeCalled) {
+  auto registrar1 = c10::RegisterOperators().op(dummySchema);
+
+  bool called_kernel = false;
+  auto registrar2 = c10::RegisterOperators().op(dummySchema, kernel<MockKernel>(&called_kernel), dispatchKey(TensorType1()));
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+  callOp(*op, dummyTensor(TensorType1()));
+  EXPECT_TRUE(called_kernel);
+}
+
+TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringKernelAfterwardsAndRunsOutOfScope_thenSchemaIsStillThereButCannotBeCalledAnymore) {
+  auto registrar1 = c10::RegisterOperators().op(dummySchema);
+
+  {
+    auto registrar2 = c10::RegisterOperators().op(dummySchema, kernel<DummyKernel>(), dispatchKey(TensorType1()));
+  }
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+  expectThrows<c10::Error>([&] {
+    callOp(*op, dummyTensor(TensorType1()));
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
 }
 
 }
