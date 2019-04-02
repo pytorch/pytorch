@@ -897,16 +897,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return impl;
   }
 
-  virtual void set_version_counter(
+  void set_version_counter(
     const c10::VariableVersion& version_counter) noexcept {
     version_counter_ = version_counter;
   }
 
-  virtual const c10::VariableVersion& version_counter() const noexcept {
+  const c10::VariableVersion& version_counter() const noexcept {
     return version_counter_;
   }
 
-  virtual void bump_version() noexcept {
+  void bump_version() noexcept {
     version_counter_.bump();
   }
 

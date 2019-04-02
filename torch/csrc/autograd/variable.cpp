@@ -106,19 +106,6 @@ int64_t Variable::Impl::get_device_slow() const {
   return data_.get_device();
 }
 
-void Variable::Impl::set_version_counter(
-  const c10::VariableVersion& version_counter) noexcept {
-  data_.unsafeGetTensorImpl()->set_version_counter(version_counter);
-}
-
-const c10::VariableVersion& Variable::Impl::version_counter() const noexcept {
-  return data_.unsafeGetTensorImpl()->version_counter();
-}
-
-void Variable::Impl::bump_version() noexcept {
-  data_.unsafeGetTensorImpl()->bump_version();
-}
-
 std::shared_ptr<Function> Variable::grad_accumulator() const {
   auto autograd_meta = get_autograd_meta();
   if (autograd_meta->grad_fn_) {

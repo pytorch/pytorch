@@ -434,10 +434,6 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 
   int64_t storage_offset() const override;
 
-  void set_version_counter(const c10::VariableVersion& version_counter) noexcept override;
-  const c10::VariableVersion& version_counter() const noexcept override;
-  void bump_version() noexcept override;
-
   /// The underlying data tensor for this Variable.
   /// This field will be removed once VariableImpl and TensorImpl are merged.
   at::Tensor data_;
@@ -698,19 +694,19 @@ inline bool Variable::is_leaf() const noexcept {
 
 inline void Variable::set_version_counter(
     const c10::VariableVersion& version_counter) noexcept {
-  get()->set_version_counter(version_counter);
+  data().unsafeGetTensorImpl()->set_version_counter(version_counter);
 }
 
 inline void Variable::bump_version() noexcept {
-  get()->bump_version();
+  data().unsafeGetTensorImpl()->bump_version();
 }
 
 inline uint32_t Variable::current_version() const noexcept {
-  return get()->version_counter().current_version();
+  return data().unsafeGetTensorImpl()->version_counter().current_version();
 }
 
 inline const c10::VariableVersion& Variable::version_counter() const noexcept {
-  return get()->version_counter();
+  return data().unsafeGetTensorImpl()->version_counter();
 }
 
 // Hooks
