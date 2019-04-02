@@ -3304,6 +3304,40 @@ class _TestTorchMixin(object):
     def test_multinomial(self):
         self._test_multinomial(self, torch.FloatTensor)
 
+    @staticmethod
+    def _test_multinomial_alias(self, cast):
+        # Get probs vector to use in setup
+        def get_probs(length, is_contiguous):
+            probs = torch.softmax(torch.randn(length), 0)
+            if not is_contiguous:
+                probs = torch.softmax(torch.randn(length, 2), 0)[:, 1]
+            assert not (is_contiguous ^ probs.is_contiguous()), "contiguity requirement not met"
+            return cast(probs)
+
+        for is_contiguous in [True, False]:
+            probs = get_probs(4, is_contiguous)
+            alias_table, prob_table = torch._multinomial_alias_setup(probs)
+            for n_samples in [-1, 1, 10]:
+                if n_samples > 0:
+                    samples = torch._multinomial_alias_draw(prob_table, alias_table, n_samples)
+                    self.assertEqual(prob_table.size(), torch.Size([4]), "size mismatch: probability table")
+                    self.assertEqual(alias_table.size(), torch.Size([4]), "size mismatch: alias table")
+                    self.assertEqual(samples.size(), torch.Size([n_samples]), "wrong number of samples")
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "cannot sample <= 0 samples"):
+                        torch._multinomial_alias_draw(prob_table, alias_table, n_samples)
+
+            with self.assertRaisesRegex(RuntimeError, "expected 1-D"):
+                probs = probs.view(2, 2)
+                torch._multinomial_alias_setup(probs)
+
+            with self.assertRaisesRegex(RuntimeError, "expected 1-D"):
+                a_t, p_t = torch._multinomial_alias_setup(probs)
+                torch._multinomial_alias_draw(p_t.view(2, 2), a_t.view(2, 2))
+
+    def test_multinomial_alias(self):
+        self._test_multinomial_alias(self, lambda t: t)
+
     def _spawn_method(self, method, arg):
         try:
             mp.set_start_method('spawn')
@@ -9792,6 +9826,40 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertTrue(pinned.is_pinned())
         self.assertEqual(pinned, x)
         self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_pin_memory_from_constructor(self):
+
+        def _get_like(t, **kwargs):
+            return [
+                torch.rand_like(t, **kwargs),
+                torch.randn_like(t, **kwargs),
+                torch.empty_like(t, **kwargs),
+                torch.full_like(t, 4, **kwargs),
+                torch.zeros_like(t, **kwargs),
+                torch.ones_like(t, **kwargs),
+            ]
+
+        def _get_tensors(**kwargs):
+            return [
+                torch.tensor([10,11], **kwargs),
+                torch.randn(3, 5, **kwargs),
+                torch.rand(3, **kwargs),
+                # torch.randint(3,5, **kwargs), // unsupported
+                torch.zeros(3, **kwargs),
+                torch.randperm(3, **kwargs),
+                torch.empty(6, **kwargs),
+                torch.ones(6, **kwargs),
+                torch.eye(6, **kwargs),
+                torch.arange(3, 5, **kwargs),]
+
+        pinned_tensors = _get_tensors(pin_memory=True) + _get_like(torch.empty(5, dtype=torch.float64), pin_memory=True)
+        for x in pinned_tensors:
+            self.assertTrue(x.is_pinned())
+
+        tensors = _get_tensors() + _get_like(torch.empty(5, dtype=torch.float64, pin_memory=True))
+        for x in tensors:
+            self.assertFalse(x.is_pinned())
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_unresizable(self):

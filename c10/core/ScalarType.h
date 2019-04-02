@@ -219,6 +219,7 @@ static inline bool isComplexType(ScalarType t) {
   return (
       t == ScalarType::ComplexHalf || t == ScalarType::ComplexFloat ||
       t == ScalarType::ComplexDouble);
+
 }
 
 static inline bool isQIntType(ScalarType t) {

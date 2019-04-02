@@ -150,7 +150,8 @@ class Unpickler {
       const std::vector<at::Tensor>* tensor_table)
       : bytes_(static_cast<const uint8_t*>(data)),
         end_ptr_(bytes_ + size),
-        tensor_table_(tensor_table) {}
+        tensor_table_(tensor_table),
+        last_opcode_(OpCode::STOP) {}
 
   std::vector<IValue> parse_ivalue_list();
 
