@@ -162,7 +162,7 @@ std::pair<at::Tensor, at::Tensor> lstm(
   return {hy, cy};
 }
 
-std::vector<Node*> findAllNodes(
+TORCH_API std::vector<Node*> findAllNodes(
     c10::ArrayRef<torch::jit::Block*> blocks,
     Symbol kind,
     bool recurse = true) {
