@@ -275,14 +275,6 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
 
             module_ip = self.constructor(*self.constructor_args, inplace=True)
 
-            # There is no guarantee that `input`'s version is zero at this point,
-            # so we manually bump `input`'s version to a much higher value, so that
-            # the subsequent version checks won't find `input_ip_clone`'s version
-            # and `input`'s version to be accidentally equal.
-            for i in range(20):
-                with torch.no_grad():
-                    input.add_(1)
-
             input_version = input._version
             with freeze_rng_state():
                 output = module(input)
@@ -290,9 +282,11 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
 
             input_ip = deepcopy(input)
             input_ip_clone = input_ip.clone()
+            input_ip_clone_saved_version = input_ip_clone._version
             with freeze_rng_state():
+                # in-place operations should change `input_ip_clone`'s version
                 output_ip = module_ip(input_ip_clone)
-            test_case.assertNotEqual(input_ip_clone._version, input_version)
+            test_case.assertNotEqual(input_ip_clone._version, input_ip_clone_saved_version)
             test_case.assertEqual(output, output_ip)
             grad = output.data.clone().normal_()
             input.grad.data.zero_()
