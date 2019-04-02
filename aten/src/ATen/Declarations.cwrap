@@ -1846,18 +1846,19 @@
     - arg: THTensor* tensor
 ]]
 [[
-  name: _th_cross
-  cname: cross
+  name: _th_cross_kernel
+  cname: crossKernel
   variants:
     - function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
       output: True
     - THTensor* self
     - THTensor* other
-    - arg: long dim
-      default: -1
+    - arg: int64_t dim
 ]]
 [[
   name: _th_diag
