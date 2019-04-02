@@ -187,12 +187,8 @@ void Variable::Impl::set_data(const at::Tensor &new_data) {
   type_id_ = new_data.type().type_id();
   is_variable_ = true;
 
-  // // `var.set_data(...)` is not supposed to affect `var`'s version counter, so we save
-  // // the original version counter and restore it after replacing the underlying tensor.
-  // auto saved_version_ = data_.unsafeGetTensorImpl()->version_counter().current_version();
   auto new_data_copy = at::Tensor(new_data.getIntrusivePtr()->shallow_copy_and_detach());
   data_ = std::move(new_data_copy);
-  // data_.unsafeGetTensorImpl()->set_version_counter(saved_version_);
 }
 
 void Variable::Impl::release_resources() {
