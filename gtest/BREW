@@ -1,0 +1,28 @@
+cc_library(
+  name = "gtest",
+  srcs = ["gtest-all.cpp"],
+  hdrs = ["gtest.h"],
+  cflags = ["-DGTEST_USE_OWN_TR1_TUPLE=1"],
+)
+
+cc_library(
+  name = "gtest_main",
+  srcs = ["gtest_main.cc"],
+  deps = [
+      ":gtest",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog"
+  ],
+  cflags = ["-DGTEST_USE_OWN_TR1_TUPLE=1"],
+)
+
+cc_test(
+  name = "gtest_main_binary",
+  srcs = ["gtest_main.cc"],
+  deps = [
+      ":gtest",
+      "//third_party/gflags:gflags",
+      "//third_party/glog:glog",
+  ],
+  cflags = ["-DGTEST_USE_OWN_TR1_TUPLE=1"],
+)

@@ -1,0 +1,98 @@
+cc_headers(
+  name = "operators_headers",
+  srcs = Glob(["*.h"]),
+)
+
+cc_library(
+  name = "core_ops",
+  srcs = [
+      "accumulate_op.cc",
+      "accuracy_op.cc",
+      "averagepool_op.cc",
+      "conv_op.cc",
+      "cross_entropy_op.cc",
+      "depth_split_op.cc",
+      "dropout_op.cc",
+      "elementwise_op.cc",
+      "filler_op.cc",
+      "fully_connected_op.cc",
+      "l2_distance_op.cc",
+      "load_save_op.cc",
+      "local_response_normalization_op.cc",
+      "loss_op.cc",
+      "maxpool_op.cc",
+      "order_switch_ops.cc",
+      "relu_op.cc",
+      "softmax_op.cc",
+      "summarize_op.cc",
+      "tensor_protos_db_input.cc",
+      "utility_ops.cc",
+  ],
+  deps = [
+    ":operators_headers",
+    "//caffe2/core:core",
+    "//caffe2/utils:math",
+    "//caffe2/utils:proto_utils",
+  ],
+  whole_archive = True,
+)
+
+cuda_library(
+  name = "core_ops_gpu",
+  srcs = [
+      "accumulate_op.cu",
+      "accuracy_op.cu",
+      "averagepool_op.cu",
+      "conv_op.cu",
+      "cross_entropy_op.cu",
+      "depth_split_op.cu",
+      "dropout_op.cu",
+      "elementwise_op_gpu.cc",
+      "filler_op.cu",
+      "fully_connected_op_gpu.cc",
+      "l2_distance_op.cu",
+      "load_save_op.cu",
+      "local_response_normalization_op.cu",
+      "loss_op_gpu.cc",
+      "maxpool_op.cu",
+      "order_switch_ops.cu",
+      "relu_op.cu",
+      "softmax_op.cu",
+      "summarize_op.cu",
+      "tensor_protos_db_input_gpu.cc",
+      "utility_ops_gpu.cc",
+  ],
+  deps = [
+      ":operators_headers",
+      "//caffe2/core:core_gpu",
+      "//caffe2/utils:math_gpu",
+      "//caffe2/utils:proto_utils",
+  ],
+  whole_archive = True,
+)
+
+cc_library(
+  name = "core_ops_cudnn",
+  srcs = [
+      "softmax_op_cudnn.cc",
+  ],
+  deps = [
+      ":operators_headers",
+      "//caffe2/core:core_cudnn",
+      "//caffe2/core:core_gpu",
+      "//caffe2/utils:math_gpu",
+      "//third_party/cudnn:cudnn",
+  ],
+  whole_archive = True,
+)
+
+cc_test(
+  name = "core_ops_test",
+  srcs = Glob(["*_test.cc"]),
+  deps = [
+      ":core_ops",
+      ":core_ops_gpu",
+      ":core_ops_cudnn",
+      "//gtest:gtest_main",
+  ]
+)

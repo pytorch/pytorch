@@ -1,0 +1,7 @@
+cc_thirdparty_target(
+  name = "eigen",
+  srcs = ["BREW"],
+  commands=[],
+  # Eigen is a header-only library so there is no cc_obj_files.
+  cc_obj_files = [],
+)

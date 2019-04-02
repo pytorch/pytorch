@@ -1,0 +1,59 @@
+cc_library(
+  name = "caffe2_python",
+  srcs = ["caffe2_python.cc"],
+  deps = [
+      "//caffe2/core:core",
+      "//caffe2/db:db",
+      "//caffe2/operators:core_ops",
+      "//caffe2/operators:core_ops_cudnn",
+      "//caffe2/operators:core_ops_gpu",
+      "//caffe2/image:image_ops",
+      "//caffe2/image:image_ops_gpu",
+      "//caffe2/sgd:sgd_ops",
+      "//caffe2/sgd:sgd_ops_gpu",
+  ],
+  external_libs = Env.PYTHON_LIBS,
+  shared = True,
+)
+
+py_library(
+  name = "pycaffe2",
+  srcs = [
+      "__init__.py",
+      "caffe_translator.py",
+      "core.py",
+      "core_gradients.py",
+      "device_checker.py",
+      "gradient_checker.py",
+      "net_drawer.py",
+      "utils.py",
+      "visualize.py",
+      "workspace.py",
+  ],
+  deps = [
+      ":caffe2_python",
+      "//caffe/proto:caffe_proto_py",
+      "//caffe2/proto:caffe2_proto_py",
+      "//pycaffe2/mint:mint",
+  ],
+)
+
+py_test(
+  name = "workspace_test",
+  srcs = [
+      "workspace_test.py",
+  ],
+  deps = [
+      ":pycaffe2",
+  ],
+)
+
+py_test(
+  name = "caffe_translator_test",
+  srcs = [
+      "caffe_translator_test.py",
+  ],
+  deps = [
+      ":pycaffe2",
+  ],
+)
