@@ -3513,10 +3513,10 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: cross(Tensor self, Tensor other, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
+- func: cross(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
-- func: cross(Tensor self, Tensor other, int dim=-1) -> Tensor
+- func: cross(Tensor self, Tensor other, int? dim=None) -> Tensor
   matches_jit_signature: True
   variants: method, function
 
