@@ -1071,6 +1071,16 @@ struct GraphFuser {
             producer->node(), before_check)) {
       return false;
     }
+
+    // If the number of kernel args could exceed the limit, skip.
+    if ((before_check->inputs().size() +
+         before_check->outputs().size() +
+         producer->node()->inputs().size() +
+         producer->node()->outputs().size())
+        > fusion_kernel_args_limit) {
+      return false;
+    }
+
     // Fusion groups can be merged with concat's group if and only if
     // - the value they produce isn't already coming from a concat and
     // - the fusion group does not contain GradSumToSize
@@ -1118,11 +1128,8 @@ struct GraphFuser {
         if (!canFuseWithConcat(input, fused_cat)) {
           continue;
         }
-        auto maybe_group = tryFuse(fused_cat, input);
-        if( !maybe_group ) {
-          continue;
-        }
         any_fused = true;
+        auto maybe_group = tryFuse(fused_cat, input);
         AT_ASSERT(maybe_group && maybe_group == fused_cat);
         // We could have destroyed multiple inputs when performing this fusion,
         // so we have to recompute the list and iterate over it again.
