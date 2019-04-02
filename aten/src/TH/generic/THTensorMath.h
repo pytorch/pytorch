@@ -80,7 +80,6 @@ TH_API void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension);
 TH_API void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension);
 TH_API void THTensor_(sign)(THTensor *r_, THTensor *t);
 TH_API accreal THTensor_(trace)(THTensor *t);
-TH_API void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, int dimension);
 
 TH_API void THTensor_(cmax)(THTensor *r, THTensor *t, THTensor *src);
 TH_API void THTensor_(cmin)(THTensor *r, THTensor *t, THTensor *src);
