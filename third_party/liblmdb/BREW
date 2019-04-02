@@ -1,0 +1,8 @@
+cc_thirdparty_target(
+  name = "lmdb",
+  srcs = ["BREW"],
+  commands=[],
+  cc_obj_files = [
+    "-llmdb"
+  ],
+)

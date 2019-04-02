@@ -1,0 +1,17 @@
+# Build file for the old caffe protocol buffers.
+
+proto_library(
+    name = 'caffe_proto',
+    srcs = ['caffe.proto'],
+    deps = [
+      "//third_party/google:protobuf",
+    ]
+)
+
+filegroup(
+    name = "caffe_proto_py",
+    srcs = ["__init__.py"],
+    deps = [
+        "//caffe:caffe_python",
+    ]
+)

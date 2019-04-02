@@ -1,0 +1,6 @@
+cc_thirdparty_target(
+  name="glog",
+  srcs=["BREW"],
+  commands=[],
+  cc_obj_files=["-lglog"],
+)
