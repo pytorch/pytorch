@@ -3228,13 +3228,23 @@ a")
         def foo(x):
             return 3 + x.contiguous()
 
-        x = torch.rand(1, dtype=torch.float, requires_grad=True)
+        # contiguous case
+        x = torch.ones(5, 5, dtype=torch.float, requires_grad=True)
         out = foo(x)
         self.assertEqual(out, x + 3)
 
-        grad = torch.randn(1, dtype=torch.float)
+        grad = torch.randn(5, 5, dtype=torch.float)
         out.backward(grad)
         self.assertEqual(x.grad, grad)
+
+        # non-contiguous case
+        x = torch.ones(5, 5, dtype=torch.float, requires_grad=True)
+        out = foo(x.transpose(0, 1))
+        self.assertEqual(out, x + 3)
+
+        grad = torch.randn(5, 5, dtype=torch.float)
+        out.backward(grad)
+        self.assertEqual(x.grad, grad.transpose(1, 0))
 
     def test_advancedindex(self):
         def consec(size, start=0):
