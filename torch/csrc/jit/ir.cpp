@@ -777,8 +777,8 @@ bool Node::matches(
 bool Node::mustBeNone() const {
   return kind_ == prim::AutogradZero ||
       (kind_ == prim::Constant && !this->hasAttributes() &&
-       (output()->type()->cast<OptionalType>() ||
-        output()->type() == NoneType::get()));
+       output()->type()->cast<OptionalType>()) ||
+      output()->type() == NoneType::get();
 }
 
 void Node::dump() const {

@@ -4598,9 +4598,11 @@ a")
             return y
 
         res = fn(t)
-        self.assertEqual(x, t)
+        self.assertEqual(res, t)
+        g = fn.graph_for(t)
         with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
             res = fn(None)
+        g = fn.graph_for(None)
         self.assertEqual(list(g.nodes())[0].output().type().str(), "Tensor")
 
     def test_while_write_outer_then_read(self):
