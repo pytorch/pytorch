@@ -2541,6 +2541,9 @@
 
 - func: native_clone(Tensor self) -> Tensor
   matches_jit_signature: True
+  cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
   dispatch:
     SparseCPU: clone_sparse
     SparseCUDA: clone_sparse
@@ -2587,6 +2590,9 @@
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   matches_jit_signature: True
+  cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
   variants: method, function
 
 - func: sub(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
