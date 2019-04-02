@@ -324,12 +324,10 @@ struct ModuleValue : public SugaredValue {
     py::object py_module = py::cast(module);
     if (py::object attr = py::getattr(py_module, field.c_str(), py::none())) {
       if (py::isinstance<py::function>(attr) &&
-          py::hasattr(attr, "_is_parameter_list") &&
-          py::cast<bool>(py::getattr(attr, "_is_parameter_list"))) {
-        std::string weight_names = field + "_names";
-        auto namer = py::getattr(py_module, weight_names.c_str(), py::none());
-        AT_ASSERT(!namer.is_none());
-        return std::make_shared<ConstantParameterList>(module, namer());
+          py::hasattr(attr, "_parameter_names_fn")) {
+        py::function namer = py::getattr(attr, "_parameter_names_fn");
+        auto fn_self = py::getattr(attr, "__self__");
+        return std::make_shared<ConstantParameterList>(module, namer(fn_self));
       }
       if (py::isinstance<py::function>(attr) ||
           py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||

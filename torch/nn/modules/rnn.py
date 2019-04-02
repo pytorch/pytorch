@@ -133,12 +133,12 @@ class RNNBase(Module):
         for weight in self.parameters():
             init.uniform_(weight, -stdv, stdv)
 
-    @_parameter_list
-    def _get_flat_weights(self):
-        return self._flat_weights
-
     def _get_flat_weights_names(self):
         return [weight for weights in self._all_weights for weight in weights]
+
+    @_parameter_list(_get_flat_weights_names)
+    def _get_flat_weights(self):
+        return self._flat_weights
 
     @weak_script_method
     def check_input(self, input, batch_sizes):
