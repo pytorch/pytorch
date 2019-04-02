@@ -5,7 +5,6 @@ from __future__ import unicode_literals
 
 import unittest
 import torch
-from torch import Tensor
 
 from common_utils import IS_WINDOWS, \
     skipIfRocm, IS_SANDCASTLE
