@@ -537,8 +537,10 @@ class ShapePropagator {
       case aten::_unwrap_optional: {
         auto input_ivalue = toIValue(node->input());
         if (input_ivalue && input_ivalue->isNone()) {
+          // early return if input ivalue is None
           return;
         }
+        return;
       }
       default:
         break; // fall-through
