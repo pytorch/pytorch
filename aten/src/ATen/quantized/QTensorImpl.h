@@ -14,9 +14,7 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
       bool is_variable,
       QuantizerPtr quantizer);
 
-  // FIXME: need to find a better return type, maybe
-  // std::shared_ptr<at::Quantizer> Fix after deciding on how to expose this in
-  // python frontend
+  // TODO: Expose in PyTorch Frontend
   QuantizerPtr quantizer() {
     return quantizer_;
   }
