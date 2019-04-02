@@ -14,9 +14,9 @@ into two categories:
 Once you finish implementing a feature or bug-fix, please send a Pull Request to
 https://github.com/pytorch/pytorch
 
-If you are not familiar with creating a Pull Request, here are some guides:
-- http://stackoverflow.com/questions/14680711/how-to-do-a-github-pull-request
-- https://help.github.com/articles/creating-a-pull-request/
+This document covers some of the more technical aspects of contributing
+to PyTorch.  For more non-technical guidance about how to contribute to
+PyTorch, see the [Contributing Guide](docs/source/community/contribution_guide.rst).
 
 ## Developing PyTorch
 
@@ -35,6 +35,17 @@ pip uninstall torch # run this command twice
 git clone https://github.com/pytorch/pytorch
 cd pytorch
 ```
+
+2.1. If you already have PyTorch from source, update it:
+
+```bash
+git pull --rebase
+git submodule sync --recursive
+git submodule update --init --recursive
+```
+
+If you want to have no-op incremental rebuilds (which are fast), see the section below titled "Make no-op build fast."
+
 
 3. Install PyTorch in `develop` mode:
 
@@ -319,6 +330,27 @@ be on your `PATH`, otherwise `ccache` will emit the following error:
 
     ccache: error: Could not find compiler "nvcc" in PATH
 
+For example, here is how to install/configure `ccache` on Ubuntu:
+
+```bash
+# install ccache
+sudo apt install ccache
+
+# update symlinks and create/re-create nvcc link
+sudo /usr/sbin/update-ccache-symlinks
+sudo ln -s /usr/bin/ccache /usr/lib/ccache/nvcc
+
+# config: cache dir is ~/.ccache, conf file ~/.ccache/ccache.conf
+# max size of cache
+ccache -M 25Gi  # -M 0 for unlimited
+# unlimited number of files
+ccache -F 0
+
+# deploy (and add to ~/.bashrc for later)
+export PATH="/usr/lib/ccache:$PATH"
+export CUDA_NVCC_EXECUTABLE=/usr/lib/ccache/nvcc
+```
+
 ## CUDA Development tips
 
 If you are working on the CUDA code, here are some useful CUDA debugging tips:
@@ -479,9 +511,12 @@ formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 
   ```bash
-  pip install flake8-mypy
   ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
   ```
+
+You'll need to install an appropriately configured flake8; see
+[Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
+for documentation on how to do this.
 
 ## Caffe2 notes
 

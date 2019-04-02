@@ -35,6 +35,15 @@ class C10_API Scalar {
 
 #undef DEFINE_IMPLICIT_CTOR
 
+// Value* is both implicitly convertible to SymbolicVariable and bool which
+// causes ambiguosity error. Specialized constructor for bool resolves this problem.
+template <typename T,
+       typename std::enable_if<std::is_same<T, bool>::value, bool>::type* = nullptr>
+Scalar(T vv)
+: tag(Tag::HAS_i) {
+  v.i = convert<decltype(v.i), bool>(vv);
+}
+
 #define DEFINE_IMPLICIT_COMPLEX_CTOR(type, name, member) \
   Scalar(type vv) : tag(Tag::HAS_##member) {             \
     v.member[0] = c10::convert<double>(vv.real());       \

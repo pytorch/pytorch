@@ -43,10 +43,10 @@ void ArgumentSpecCreator::scan(
     instructions_.emplace_back(ENTER_OBJECT);
     for (size_t i = 0; i < cls->numAttributes(); ++i) {
       auto key = cls->name() + cls->attributeNames().at(i);
-      if (0 == written_slots.count(key)) {
+      // it is only safe to specialize because someone might have written to it
+      if (!written_slots.count(key)) {
         scan(cls->containedTypes().at(i), depth + 1, written_slots);
       } else {
-        // unsafe to specialize because someone might have written to it
         instructions_.emplace_back(SKIP);
       }
     }
@@ -95,55 +95,62 @@ void ArgumentSpecCreator::dump() const {
         std::cout << "] ";
         break;
       case ENTER_TUPLE:
-        std::cout << "T[";
+        std::cout << "Tuple[";
         break;
       case ENTER_OBJECT:
-        std::cout << "o[";
+        std::cout << "Object[";
         break;
       case SKIP:
-        std::cout << "s ";
+        std::cout << "Skip ";
         break;
       case SPECIALIZE_TENSOR:
-        std::cout << "t ";
+        std::cout << "SpecializeTensor ";
         break;
     }
   }
+  std::cout << "\n";
 }
 
 ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
     const {
   ArgumentSpec spec(num_tensors_);
-  const IValue* stack[DEPTH_LIMIT];
+  const IValue* stack[DEPTH_LIMIT]; // The stack of IValue lists
+  // The stack gets initialized with the input list
   stack[0] = last(input, num_inputs_).begin();
-  size_t stack_i = 0;
-  size_t offset = 0;
+  size_t stack_top = 0; // offset to the top of the stack
   for (Inst inst : instructions_) {
     switch (inst) {
       case SPECIALIZE_TENSOR:
-        spec.addTensor(*stack[stack_i]++, offset, with_grad);
+        // consume a tensor and add to the argspec
+        spec.addTensor(*stack[stack_top]++, with_grad);
         break;
       case ENTER_TUPLE: {
-        const IValue* iv = stack[stack_i++]++;
+        // consume tuple
+        const IValue* iv = stack[stack_top]++;
         AT_ASSERT(iv->isTuple());
         // see [argspec refcounting]
         auto p = *reinterpret_cast<const at::ivalue::Tuple* const*>(iv);
         auto tup_ptr = &p->elements()[0];
-        stack[stack_i] = tup_ptr;
+        // push list of tuple elements to the stack
+        stack[++stack_top] = tup_ptr;
       } break;
       case ENTER_OBJECT: {
-        const IValue* iv = stack[stack_i++]++;
+        // consume object
+        const IValue* iv = stack[stack_top]++;
         AT_ASSERT(iv->isObject());
         iv->toObject();
         // see [argspec refcounting]
         auto p = *reinterpret_cast<const at::ivalue::Object* const*>(iv);
         auto obj_ptr = &p->slots()[0];
-        stack[stack_i] = obj_ptr;
+        // push list of object elements to the stack
+        stack[++stack_top] = obj_ptr;
       } break;
       case SKIP:
-        stack[stack_i]++;
+        // consume and skip an element
+        stack[stack_top]++;
         break;
       case LEAVE:
-        --stack_i;
+        --stack_top;
         break;
     }
   }
@@ -161,13 +168,14 @@ std::vector<TypePtr> ArgumentSpecCreator::getSpecializedTypes(
   result_stack.emplace_back();
   std::vector<const TypePtr*> input_stack = {input_types.data()};
   std::vector<std::function<TypePtr()>> aggregate_creators;
-  size_t offset = 0;
+
+  size_t arg_spec_offset = 0; // number of specialized tensors seen so far
 
   for (Inst inst : instructions_) {
     switch (inst) {
       case SPECIALIZE_TENSOR: {
         input_stack.back()++;
-        auto& arg = spec.at(offset++);
+        auto& arg = spec.at(arg_spec_offset++);
         if (!arg.defined()) {
           result_stack.back().emplace_back(AutogradZeroTensorType::get());
         } else {

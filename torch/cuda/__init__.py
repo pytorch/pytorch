@@ -648,7 +648,7 @@ torch._storage_classes.add(ByteStorage)
 torch._storage_classes.add(HalfStorage)
 torch._storage_classes.add(BoolStorage)
 
-from . import sparse
-from . import profiler
-from . import nvtx
-from .streams import Stream, Event
+from . import sparse  # noqa: F401
+from . import profiler  # noqa: F401
+from . import nvtx  # noqa: F401
+from .streams import Stream, Event  # noqa: F401
