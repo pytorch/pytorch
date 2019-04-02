@@ -152,6 +152,7 @@ def add_torch_libs():
         "torch/csrc/distributed/Module.cpp",
         "torch/csrc/distributed/c10d/init.cpp",
         "torch/csrc/distributed/c10d/ddp.cpp",
+        "torch/csrc/distributed/c10d/reducer.cpp",
     ] + [":generate-code=" + x for x in GENERATED_CPP])
     libtorch_python_sources = sets.to_list(sets.difference(
         sets.make(globbed_sources),
