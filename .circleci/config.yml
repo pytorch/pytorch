@@ -22,7 +22,7 @@ setup_linux_system_environment: &setup_linux_system_environment
   name: Set Up System Environment
   no_output_timeout: "1h"
   command: |
-    set -e
+    set -ex
 
     # Set up CircleCI GPG keys for apt, if needed
     curl -L https://packagecloud.io/circleci/trusty/gpgkey | sudo apt-key add -
@@ -33,7 +33,21 @@ install_official_git_client: &install_official_git_client
   name: Install Official Git Client
   no_output_timeout: "1h"
   command: |
-    set -e
+    set -ex
+
+    sudo systemctl stop apt-daily.service
+    sudo systemctl kill --kill-who=all apt-daily.service
+
+    # wait until `apt-get updated` has been killed
+    while ! (sudo systemctl list-units --all apt-daily.service | fgrep -q dead)
+    do
+      sleep 1;
+    done
+
+    cat /etc/apt/sources.list
+    sudo sed -i 's#archive.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
+    sudo sed -i 's#security.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
+    cat /etc/apt/sources.list
 
     ps ax | grep apt
     sudo apt-get -q -y update
