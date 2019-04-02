@@ -221,7 +221,6 @@ def parse_arguments(args, func_variants, declaration, func_return):
     corresponding_topts[2]['default'] = '{}'
 
     def check_topt_representation(topt_representation):
-
         for idx, supported_topt in enumerate(supported_topt_arguments):
             matches = True
             for i, topt in enumerate(supported_topt):
