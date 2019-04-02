@@ -4,6 +4,7 @@
   variants: function
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   device_guard: False
   return: argument 0
   options:
@@ -41,6 +42,7 @@
   variants: function
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   options:
     - arguments:
       - THTensor* self
@@ -57,6 +59,7 @@
     - function
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   device_guard: False
   return: bool
   arguments:
@@ -124,6 +127,7 @@
     - function
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   arguments:
     - THTensor* self
 ]]
@@ -243,6 +247,7 @@
     - function
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   device_guard: False
   return: argument 0
   arguments:
@@ -1669,6 +1674,7 @@
   return: self
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   arguments:
@@ -2461,8 +2467,9 @@
     - CPU
     - CUDA
   return: self
-  cpu_bool: True
   variants: function
+  cpu_bool: True
+  cuda_bool: True
   options:
     - cname: random
       arguments:
@@ -2726,6 +2733,7 @@
   return: THTensor*
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   options:
@@ -2750,6 +2758,8 @@
   cname: catArray
   variants: [function]
   cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
   return: self
   arguments:
     - arg: THTensor* self
