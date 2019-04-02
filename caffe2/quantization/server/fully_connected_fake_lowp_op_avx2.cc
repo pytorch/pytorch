@@ -93,7 +93,7 @@ void fp32_to_bfp16_round(const float* source, size_t size, float* dest) {
         reinterpret_cast<__m256i*>(&dest[i]), _mm256_and_si256(wmask, v32int));
   }
   for (auto i = (size / 8) * 8; i < size; i++) {
-    alignas(8) float tmp[8];
+    alignas(64) float tmp[8];
     __m256i v32int = _mm256_add_epi32(
         _mm256_set1_epi32(*reinterpret_cast<const int*>(&source[i])), woffset);
     _mm256_store_si256(

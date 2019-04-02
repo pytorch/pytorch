@@ -202,6 +202,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
             {'name': 'dtype', 'type': 'ScalarType', 'is_nullable': False, 'annotation': None},
             {'name': 'layout', 'type': 'Layout', 'is_nullable': False, 'annotation': None},
             {'name': 'device', 'type': 'Device', 'is_nullable': False, 'annotation': None},
+            {'name': 'pin_memory', 'type': 'bool', 'is_nullable': False, 'annotation': None},
         ]
     ]
     supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[0]))
@@ -229,7 +230,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
         return None
 
     def is_tensor_option(argument):
-        return argument['name'] in ['dtype', 'layout', 'device']
+        return argument['name'] in ['dtype', 'layout', 'device', 'pin_memory']
 
     new_arguments = []
     idx = 0
