@@ -35,8 +35,11 @@ install_official_git_client: &install_official_git_client
   command: |
     set -ex
 
-    sudo systemctl stop apt-daily.service
-    sudo systemctl kill --kill-who=all apt-daily.service
+    sudo systemctl stop apt-daily.service || true
+    sudo systemctl kill --kill-who=all apt-daily.service || true
+
+    sudo systemctl stop unattended-upgrades.service || true
+    sudo systemctl kill --kill-who=all unattended-upgrades.service || true
 
     # wait until `apt-get updated` has been killed
     while ! (systemctl list-units --all apt-daily.service | fgrep -q dead)
@@ -44,14 +47,12 @@ install_official_git_client: &install_official_git_client
       sleep 1;
     done
 
+    while ! (systemctl list-units --all unattended-upgrades.service | fgrep -q dead)
+    do
+      sleep 1;
+    done
+
     systemctl list-units --all | cat
-
-    sudo killall apt-get || true
-    sudo killall dpkg || true
-
-    sudo rm /var/lib/apt/lists/lock || true
-    sudo rm /var/cache/apt/archives/lock || true
-    sudo rm /var/lib/dpkg/lock || true
 
     cat /etc/apt/sources.list
     sudo sed -i 's#archive.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
