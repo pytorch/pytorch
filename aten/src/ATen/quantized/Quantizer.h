@@ -1,9 +1,9 @@
 #pragma once
 
+#include <ATen/core/Tensor.h>
 #include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <ATen/core/Tensor.h>
 
 #include <cmath>
 #include <memory>
@@ -21,7 +21,6 @@ using RealTensor = Tensor;
 struct Quantizer;
 using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
 
-
 /**
  * Quantizer is the class for storing all the information
  * that's necessary to perform quantize and dequantize
@@ -33,10 +32,10 @@ using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
  * QTensorImpl will hold a pointer to Quantizer so that we can support
  * different quantization schemes on Tensor.
  *
- * For example, the most common quantization scheme, Affine Quantization, requires
- * scale and zero_point as parameters, we'll store scale and zero_point inside
- * the instance and we can use it to quantize a float Tensor or dequantize a
- * quantized Tensor.
+ * For example, the most common quantization scheme, Affine Quantization,
+ * requires scale and zero_point as parameters, we'll store scale and zero_point
+ * inside the instance and we can use it to quantize a float Tensor or
+ * dequantize a quantized Tensor.
  *
  * When you add new types of leaf Quantizer class, please also
  * make sure to add a corresponding QScheme enum since
@@ -82,7 +81,7 @@ struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
  * the most commonly used scheme in this category.
  */
 struct CAFFE2_API UniformQuantizer : public Quantizer {
-  explicit UniformQuantizer(QScheme qscheme): Quantizer(qscheme) {}
+  explicit UniformQuantizer(QScheme qscheme) : Quantizer(qscheme) {}
 };
 
 /**
@@ -91,7 +90,7 @@ struct CAFFE2_API UniformQuantizer : public Quantizer {
  * value. K-means quantization is a representative example in this category.
  */
 struct CAFFE2_API NonUniformQuantizer : public Quantizer {
-  explicit NonUniformQuantizer(QScheme qscheme): Quantizer(qscheme) {}
+  explicit NonUniformQuantizer(QScheme qscheme) : Quantizer(qscheme) {}
 };
 
 // There is also StochasticQuantizer which is uniform but not affine
@@ -105,7 +104,7 @@ struct CAFFE2_API NonUniformQuantizer : public Quantizer {
  * X = (Y - zero_point) / scale
  */
 struct CAFFE2_API AffineQuantizer : public UniformQuantizer {
-  explicit AffineQuantizer(QScheme qscheme): UniformQuantizer(qscheme) {}
+  explicit AffineQuantizer(QScheme qscheme) : UniformQuantizer(qscheme) {}
 };
 
 /**
@@ -118,15 +117,16 @@ struct CAFFE2_API AffineQuantizer : public UniformQuantizer {
  * X = Y / scale
  */
 struct CAFFE2_API SymmetricQuantizer : public UniformQuantizer {
-  explicit SymmetricQuantizer(QScheme qscheme): UniformQuantizer(qscheme) {}
+  explicit SymmetricQuantizer(QScheme qscheme) : UniformQuantizer(qscheme) {}
 };
 
 /**
  * PerTensorSymmetricQuantizer stores a single scale number which is
  * used for quantizing all the values in the given Tensor
  */
-struct CAFFE2_API PerTensorSymmetricQuantizer: public SymmetricQuantizer {
-  explicit PerTensorSymmetricQuantizer(float scale) : SymmetricQuantizer(kPerTensorSymmetric), scale_(scale) {}
+struct CAFFE2_API PerTensorSymmetricQuantizer : public SymmetricQuantizer {
+  explicit PerTensorSymmetricQuantizer(float scale)
+      : SymmetricQuantizer(kPerTensorSymmetric), scale_(scale) {}
   float scale_{1.0};
 };
 
@@ -134,15 +134,20 @@ struct CAFFE2_API PerTensorSymmetricQuantizer: public SymmetricQuantizer {
  * PerChannelSymmetricQuantizer stores a vector of scale number and
  * applys symmetric quantization using different scales on each channel.
  *
- * Also note that per channel quantization is mostly applied to output channels of
- * weights since per-input channel of weight quantization or per-channel quantization
- * for activations can't be efficiently supported in most of processors since
- * it requires each multiplication result within a single dot-product
- * to have a different scale.
+ * Also note that per channel quantization is mostly applied to output channels
+ * of weights since per-input channel of weight quantization or per-channel
+ * quantization for activations can't be efficiently supported in most of
+ * processors since it requires each multiplication result within a single
+ * dot-product to have a different scale.
  */
-struct CAFFE2_API PerChannelSymmetricQuantizer: public SymmetricQuantizer {
-  explicit PerChannelSymmetricQuantizer(const std::vector<float> scales, const std::vector<int64_t> axis): SymmetricQuantizer(kPerChannelSymmetric), scales_(scales), axis_(axis) {
-    AT_CHECK(axis_.size() == 1, "Per channel symmetric quantization in multiple axis is not supported yet.");
+struct CAFFE2_API PerChannelSymmetricQuantizer : public SymmetricQuantizer {
+  explicit PerChannelSymmetricQuantizer(
+      const std::vector<float> scales,
+      const std::vector<int64_t> axis)
+      : SymmetricQuantizer(kPerChannelSymmetric), scales_(scales), axis_(axis) {
+    AT_CHECK(
+        axis_.size() == 1,
+        "Per channel symmetric quantization in multiple axis is not supported yet.");
   }
 
   std::vector<float> scales() const {
@@ -153,7 +158,7 @@ struct CAFFE2_API PerChannelSymmetricQuantizer: public SymmetricQuantizer {
     return axis_;
   }
 
-private:
+ private:
   const std::vector<float> scales_;
   const std::vector<int64_t> axis_;
 };
@@ -162,8 +167,11 @@ private:
  * PerTensorAffineQuantizer stores a scale and a zero_point, which is used for
  * all the values in the Tensor.
  */
-struct CAFFE2_API PerTensorAffineQuantizer: public AffineQuantizer{
-  explicit PerTensorAffineQuantizer(float scale, uint8_t zero_point): AffineQuantizer(kPerTensorAffine), scale_(scale), zero_point_(zero_point) {}
+struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
+  explicit PerTensorAffineQuantizer(float scale, uint8_t zero_point)
+      : AffineQuantizer(kPerTensorAffine),
+        scale_(scale),
+        zero_point_(zero_point) {}
 
   virtual QTensor quantize(RealTensor tensor);
   virtual RealTensor dequantize(QTensor tensor);
@@ -176,7 +184,7 @@ struct CAFFE2_API PerTensorAffineQuantizer: public AffineQuantizer{
     return zero_point_;
   }
 
-private:
+ private:
   const float scale_;
   const uint8_t zero_point_;
 };
@@ -186,9 +194,18 @@ private:
  * except that we have an independent scale and zero_point parameter
  * for each channel.
  */
-struct CAFFE2_API PerChannelAffineQuantizer: public AffineQuantizer {
-  explicit PerChannelAffineQuantizer(const std::vector<float> scales, const std::vector<uint8_t> zero_points, const std::vector<int64_t> axis): AffineQuantizer(kPerChannelAffine), scales_(scales), zero_points_(zero_points), axis_(axis) {
-    AT_CHECK(axis_.size() == 1, "Per channel affine quantization in multiple axis is not supported yet.");
+struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
+  explicit PerChannelAffineQuantizer(
+      const std::vector<float> scales,
+      const std::vector<uint8_t> zero_points,
+      const std::vector<int64_t> axis)
+      : AffineQuantizer(kPerChannelAffine),
+        scales_(scales),
+        zero_points_(zero_points),
+        axis_(axis) {
+    AT_CHECK(
+        axis_.size() == 1,
+        "Per channel affine quantization in multiple axis is not supported yet.");
   }
 
   std::vector<float> scales() const {
@@ -203,7 +220,7 @@ struct CAFFE2_API PerChannelAffineQuantizer: public AffineQuantizer {
     return axis_;
   }
 
-private:
+ private:
   const std::vector<float> scales_;
   const std::vector<uint8_t> zero_points_;
   const std::vector<int64_t> axis_;
@@ -219,12 +236,16 @@ CAFFE2_API QTensorImpl* get_qtensorimpl(const QTensor& self);
 // Quantize a float value into a uint8 value given scale and zero_point
 CAFFE2_API qint8 quantize_uint8(float scale, uint8_t zero_point, float value);
 
-// double and int64_t are because of the native function API, we only have these argument
-// types right now in native functions
-CAFFE2_API QuantizerPtr make_per_tensor_affine_quantizer(double scale, int64_t zero_point);
+// double and int64_t are because of the native function API, we only have these
+// argument types right now in native functions
+CAFFE2_API QuantizerPtr
+make_per_tensor_affine_quantizer(double scale, int64_t zero_point);
 
 // Create a QTensor given arguments for normal Tensor and a quantizer
 QTensor new_qtensor(
-    IntArrayRef sizes, const TensorOptions& options, bool is_variable, QuantizerPtr quantizer);
+    IntArrayRef sizes,
+    const TensorOptions& options,
+    bool is_variable,
+    QuantizerPtr quantizer);
 
 } // namespace at

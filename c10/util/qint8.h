@@ -10,8 +10,7 @@ namespace c10 {
  */
 struct alignas(1) qint8 {
   uint8_t val_;
-  /* implicit */ qint8(uint8_t val=0) : val_(val) {}
-
+  explicit qint8(uint8_t val) : val_(val) {}
 };
 
 } // namespace c10

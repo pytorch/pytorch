@@ -1,12 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <ATen/test/test_assert.h>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <sstream>
-#include <cmath>
 #include <type_traits>
-#include <ATen/test/test_assert.h>
 // For quantize_uint8
 #include <ATen/quantized/Quantizer.h>
 
@@ -30,7 +30,8 @@ TEST(TestQTensor, QuantDequantAPIs) {
   auto r_data = r.data<float>();
   auto qr_data = qr.data<qint8>();
   for (auto i = 0; i < num_elements; ++i) {
-    ASSERT_EQ(quantize_uint8(scale, zero_point, r_data[i]).val_, qr_data[i].val_);
+    ASSERT_EQ(
+        quantize_uint8(scale, zero_point, r_data[i]).val_, qr_data[i].val_);
   }
 
   // Check for correct dequantization

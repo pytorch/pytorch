@@ -114,10 +114,10 @@ private:
     }
   }
 
-  // the AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT macro just gives a 'i' or 'd' argument
-  // for each type to specify if it is stored as a integer or a double.
-  // We need this workaround here to extract the value in the scalar losslessly
-  // because in some cases like 'sum' Torch promotes float to double
+  // the AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT macro just gives a 'i' or
+  // 'd' argument for each type to specify if it is stored as a integer or a
+  // double. We need this workaround here to extract the value in the scalar
+  // losslessly because in some cases like 'sum' Torch promotes float to double
   // and will complain if we downcast it with toFloat, causing it
   // to lose precision
   double extract_d(const at::Scalar & s) {
@@ -135,7 +135,7 @@ private:
           assignToValue<ctype>(dst, at::convert<ctype,decltype(value)>(value)); \
         } break;
       AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(DEFINE_CASE)
-      #undef DEFINE_CASE
+#undef DEFINE_CASE
       default:
         CAFFE_THROW("Unknown ATen Type");
     }
