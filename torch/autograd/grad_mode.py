@@ -13,6 +13,8 @@ class no_grad(object):
 
     Also functions as a decorator.
 
+    # yf225 TODO: fix comment
+
 
     Example::
 
@@ -28,12 +30,18 @@ class no_grad(object):
         >>> z.requires_grad
         False
     """
+    def __init__(self, update_version=True):
+        self.update_version = update_version
+
     def __enter__(self):
-        self.prev = torch.is_grad_enabled()
+        self.prev_grad_enabled = torch.is_grad_enabled()
+        self.prev_version_update_enabled = torch.is_version_update_enabled()
         torch._C.set_grad_enabled(False)
+        torch.set_version_update_enabled(self.update_version)
 
     def __exit__(self, *args):
-        torch.set_grad_enabled(self.prev)
+        torch.set_grad_enabled(self.prev_grad_enabled)
+        torch.set_version_update_enabled(self.prev_version_update_enabled)
         return False
 
     def __call__(self, func):

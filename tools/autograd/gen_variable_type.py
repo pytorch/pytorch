@@ -206,7 +206,8 @@ uint32_t ${tensor_name}_saved_version = ${tensor_name}.current_version();
 """)
 
 CHECK_VERSION = CodeTemplate("""\
-AT_ASSERT(${tensor_name}.current_version() > ${tensor_name}_saved_version);
+if (at::VersionUpdateMode::is_enabled())
+  AT_ASSERT(${tensor_name}.current_version() > ${tensor_name}_saved_version);
 """)
 
 CONDITIONAL = CodeTemplate("""\

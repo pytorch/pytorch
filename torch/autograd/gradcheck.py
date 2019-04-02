@@ -64,8 +64,6 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
 
     # TODO: compare structure
     for x_tensor, d_tensor in zip(x_tensors, j_tensors):
-        # need data here to get around the version check because without .data,
-        # the following code updates version but doesn't change content
         if x_tensor.is_sparse:
             def get_stride(size):
                 dim = len(size)
@@ -97,14 +95,19 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                     r = (outb - outa) / (2 * eps)
                     d_tensor[d_idx] = r.detach().reshape(-1)
         else:
-            x_tensor = x_tensor.data
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
                 orig = x_tensor[x_idx].item()
-                x_tensor[x_idx] = orig - eps
+                # We don't want in-place changes to `x_tensor` to update its version counter,
+                # because call sites of `get_numerical_jacobian(...)` expects `input`'s
+                # version counter(s) to be preserved by the function call.
+                with torch.no_grad(update_version=False):
+                    x_tensor[x_idx] = orig - eps
                 outa = fn(input).clone()
-                x_tensor[x_idx] = orig + eps
+                with torch.no_grad(update_version=False):
+                    x_tensor[x_idx] = orig + eps
                 outb = fn(input).clone()
-                x_tensor[x_idx] = orig
+                with torch.no_grad(update_version=False):
+                    x_tensor[x_idx] = orig
                 r = (outb - outa) / (2 * eps)
                 d_tensor[d_idx] = r.detach().reshape(-1)
 
