@@ -90,13 +90,15 @@ struct FunctionSchema {
       std::vector<Argument> arguments,
       std::vector<Argument> returns,
       bool is_vararg = false,
-      bool is_varret = false)
+      bool is_varret = false,
+      bool is_custom_op = false)
       : name_(std::move(name)),
         overload_name_(std::move(overload_name)),
         arguments_(std::move(arguments)),
         returns_(std::move(returns)),
         is_vararg_(is_vararg),
-        is_varret_(is_varret) {}
+        is_varret_(is_varret),
+        is_custom_op_(is_custom_op) {}
 
   FunctionSchema(
       Symbol name,
@@ -126,6 +128,11 @@ private:
   const bool is_vararg_;
   const bool is_varret_;
 
+  // Built-in ops should always have correct alias annotations on their schema,
+  // but custom ops may infer a schema without annotations. In this case, we
+  // must be
+  const bool is_custom_op_;
+
 public:
   const std::string& name() const {
     return name_;
@@ -146,12 +153,17 @@ public:
     return is_varret_;
   }
   bool is_mutable() const {
-    return std::any_of(
-        arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
-          const auto& aliasInfo = arg.alias_info();
-          return aliasInfo && aliasInfo.value().isWrite();
-        });
+    return is_custom_op_ ||
+        std::any_of(
+               arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
+                 const auto& aliasInfo = arg.alias_info();
+                 return aliasInfo && aliasInfo.value().isWrite();
+               });
   }
+  bool is_custom_op() const {
+    return is_custom_op_;
+  }
+
   c10::optional<int> argumentIndexWithName(const std::string& name) const {
     for(size_t i = 0; i < arguments().size(); ++i) {
       if(name == arguments()[i].name())

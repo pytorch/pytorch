@@ -846,9 +846,15 @@ bool Node::hasSideEffects() const {
     case prim::SetAttr:
     case aten::warn:
     case prim::AddStatValue:
-     case prim::TimePoint:
+    case prim::TimePoint:
       return true;
   }
+  // Custom ops may have arbitrary side effects
+  const auto schema = maybeSchema();
+  if (schema && schema->is_custom_op()) {
+    return true;
+  }
+
   return false;
 }
 
