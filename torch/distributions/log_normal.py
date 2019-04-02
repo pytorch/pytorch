@@ -1,4 +1,3 @@
-import torch
 from torch.distributions import constraints
 from torch.distributions.transforms import ExpTransform
 from torch.distributions.normal import Normal

@@ -16,53 +16,6 @@ namespace {
   }
 }
 
-// These native operations are not "really" native; they're actually just bridge
-// functions that decide whether or not to call native sparse functions, or
-// TH functions.  This file should be temporary; when all of TH gets ported, we
-// can just use the native mechanism straight.
-
-// TODO: Maybe the foo_ variants should call th_foo_
-
-Tensor clone(const Tensor& self) {
-  if (_has_native(self)) {
-    return native_clone(self);
-  } else {
-    return legacy::th::_th_clone(self);
-  }
-}
-
-Tensor& resize_as_(Tensor& self, const Tensor& the_template) {
-  if (_has_native(self)) {
-    return native_resize_as_(self, the_template);
-  } else {
-    return legacy::th::_th_resize_as_(self, the_template);
-  }
-}
-
-Tensor& pow_out(Tensor& result, const Tensor& self, Scalar exponent) {
-  if (_has_native(self)) {
-    return native_pow_out(result, self, exponent);
-  } else {
-    return legacy::th::_th_pow_out(result, self, exponent);
-  }
-}
-
-Tensor pow(const Tensor& self, Scalar exponent) {
-  if (_has_native(self)) {
-    return native_pow(self, exponent);
-  } else {
-    return legacy::th::_th_pow(self, exponent);
-  }
-}
-
-Tensor& zero_(Tensor& self) {
-  if (_has_native(self)) {
-    return native_zero_(self);
-  } else {
-    return legacy::th::_th_zero_(self);
-  }
-}
-
 // Note [Multiple dispatch to sparse]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // In an ideal world, we would use direct support for multiple dispatch to

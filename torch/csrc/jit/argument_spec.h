@@ -66,12 +66,13 @@ static_assert(
 struct ArgumentSpec {
   ArgumentSpec(size_t num_flat_inputs) {
     hash_code = num_flat_inputs;
-    args.resize(num_flat_inputs);
+    args.reserve(num_flat_inputs);
   }
 
-  void addTensor(const IValue& input, size_t& offset, bool with_grad) {
+  void addTensor(const IValue& input, bool with_grad) {
     AT_ASSERT(input.isTensor());
-    auto& arg = args.at(offset);
+    args.emplace_back();
+    auto& arg = args.back();
     // Initialize all fields to 0. This is convenient, because e.g.
     // requires_grad() can be checked even on tensors AND will make
     // padding bits all 0s.
@@ -89,7 +90,6 @@ struct ArgumentSpec {
       arg.type_ = static_cast<unsigned>(t->scalar_type());
     }
     combineHash(arg);
-    offset++;
   }
 
   void combineHash(const ArgumentInfo& arg) {
@@ -134,12 +134,18 @@ struct ArgumentSpec {
 // of simple instructions to compute the ArgumentSpec given a set of
 // input tensors.
 struct ArgumentSpecCreator {
+  // instructs acts on a stack of a list of input IValues
+  // at the beginning the stack contains a single list of the inputs to the
+  // function the ENTER_ instructs descend into subobjects and push new lists
+  // onto the stack
   enum Inst : char {
-    ENTER_TUPLE,
-    ENTER_OBJECT,
-    LEAVE,
-    SKIP,
-    SPECIALIZE_TENSOR,
+    ENTER_TUPLE, // consume a tuple ivalue from the top-most list, and push the
+                 // list of its elements onto the stack as a new list
+    ENTER_OBJECT, // same as ENTER_TUPLE, but the input is a class
+    LEAVE, // pop the top-most list from the stack
+    SKIP, // consume an element from the top-most list, and discard
+    SPECIALIZE_TENSOR, // consume a tensor for the top-most list, and
+                       // add it to the ArgSpec key being created
   };
   ArgumentSpecCreator(Graph& graph);
   ArgumentSpec create(bool with_grad, const Stack& stack) const;
