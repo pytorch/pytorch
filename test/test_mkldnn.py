@@ -1,7 +1,9 @@
 import torch
+import unittest
 from common_utils import TestCase, run_tests
 
 
+@unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMkldnn(TestCase):
     def test_conversion(self):
         for cpu_tensor in [torch.randn(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu')),

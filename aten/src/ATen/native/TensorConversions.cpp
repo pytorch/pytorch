@@ -82,7 +82,7 @@ Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy)
 
 Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   AT_ASSERT(input_.layout() != c10::kStrided);
-  if (input_.is_sparse()) {
+  if (input_.layout() == c10::kSparse) {
     auto input = input_.coalesce();
     return grad.sparse_mask(at::SparseTensorRef(input));
   } else if (input_.layout() == c10::kMkldnn) {

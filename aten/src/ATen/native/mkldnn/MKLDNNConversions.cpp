@@ -11,7 +11,7 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
   ideep::tensor& stensor = itensor_from_mkldnn(mkldnn_tensor);
   auto dims = stensor.get_dims();
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
-  Tensor cpu_tensor = at::zeros(
+  Tensor cpu_tensor = at::empty(
     std::vector<int64_t>(dims.begin(), dims.end()),
     mkldnn_tensor.options().layout(c10::kStrided));
   stensor.reorder_to(cpu_tensor.template data<float>());
@@ -23,6 +23,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
              "dense_to_mkldnn expects dense CPU tensor input");
   AT_ASSERTM(cpu_tensor.scalar_type() == ScalarType::Float,
              "dense_to_mkldnn expects float tensor input");
+  // TODO: consider to convert non-contiguous tensor to `ideep::tensor` directly.
   auto cpu_tensor_cont = cpu_tensor.contiguous();
   Tensor mkldnn_tensor = new_with_sizes_mkldnn(cpu_tensor_cont.sizes(), cpu_tensor_cont.options());
   ideep::tensor& dtensor = itensor_from_mkldnn(mkldnn_tensor);
