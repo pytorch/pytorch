@@ -362,7 +362,6 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     else:
         fm.write(env['Type'] + ".cpp", SPARSE_TYPE_DERIVED_CPP, env)
     fm.write(env['Type'] + ".h", TYPE_DERIVED_H, env)
-    sys.stderr.write('"' + env['Type'] + '.h",\n')
 
     type_register = TYPE_REGISTER.substitute(backend=env['Backend'], scalar_type=scalar_name, type_name=env['Type'])
     if 'CPU' in env['DenseBackend']:

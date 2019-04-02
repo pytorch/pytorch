@@ -203,7 +203,6 @@ docs/dev
 *.sst
 *.ldb
 LOCK
-LOG*
 CURRENT
 MANIFEST-*
 

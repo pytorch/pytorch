@@ -3,7 +3,6 @@ import io
 import os
 import math
 import random
-import operator
 import copy
 import shutil
 import torch
@@ -17,7 +16,7 @@ import gzip
 import types
 import textwrap
 import re
-from torch._utils_internal import get_file_path, get_file_path_2
+from torch._utils_internal import get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from torch._six import inf, nan, string_classes, istuple
@@ -60,11 +59,11 @@ with warnings.catch_warnings(record=True) as warns:
 class FilelikeMock(object):
     def __init__(self, data, has_fileno=True, has_readinto=False):
         if has_readinto:
-            setattr(self, 'readinto', self.readinto_opt)
+            self.readinto = self.readinto_opt
         if has_fileno:
             # Python 2's StringIO.StringIO has no fileno attribute.
             # This is used to test that.
-            setattr(self, 'fileno', self.fileno_opt)
+            self.fileno = self.fileno_opt
 
         self.calls = set()
         self.bytesio = io.BytesIO(data)
@@ -1052,7 +1051,7 @@ class _TestTorchMixin(object):
             "std", "sum", "var", "max", "min"]
 
         def normfn_attr(t, dim, keepdim=False, out=None):
-            attr = getattr(torch, "norm")
+            attr = torch.norm
             return attr(t, 2, dim, keepdim, out=out)
 
         for fn_name in dim_red_fns:
@@ -1746,44 +1745,43 @@ class _TestTorchMixin(object):
             _test_mm(n, m, p, torch.int64, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int64))
 
     @staticmethod
-    def _test_btrifact(self, cast):
+    def _test_lu(self, cast):
         from common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
 
         def run_test(matrix_size, batches, cast):
             a = cast(fullrank(matrix_size, *batches))
-            a_LU_info, pivots_info, info_ = a.btrifact_with_info()
+            a_LU_info, pivots_info, info_ = a.lu(get_infos=True)
             self.assertEqual(a_LU_info.size(), torch.Size(batches + (matrix_size, matrix_size)))
             self.assertEqual(pivots_info.size(), torch.Size(batches + (matrix_size,)))
             self.assertEqual(info_.size(), torch.Size(batches))
             self.assertEqual(info_.abs().sum(), 0)
-            a_LU, pivots = a.btrifact()
+            a_LU, pivots = a.lu()
             self.assertEqual(a_LU, a_LU_info)
             self.assertEqual(pivots_info, pivots)
             if a.is_cuda:
-                a_LU_info_nopiv, nopiv, info_nopiv = a.btrifact_with_info(pivot=False)
-                self.assertIsNone(nopiv)
+                a_LU_info_nopiv, nopiv, info_nopiv = a.lu(pivot=False, get_infos=True)
+                self.assertEqual(nopiv, cast(torch.zeros(a.shape[:-1], dtype=torch.int32)))
                 self.assertEqual(info_, info_nopiv)
-            P, L, U = torch.btriunpack(a_LU, pivots)
+            P, L, U = torch.lu_unpack(a_LU, pivots)
             self.assertEqual(P.matmul(L.matmul(U)), a)
 
-        for ms, batch in product([3, 5, 7], [(2,), (3,), (3, 5)]):
+        for ms, batch in product([3, 5, 7], [(), (2,), (3,), (3, 5)]):
             run_test(ms, batch, cast)
 
         # Info should be positive for rank deficient matrices
-        a = cast(fullrank(3, 5))
+        a = cast(torch.ones(5, 3, 3))
         if not (a.is_cuda and any(x in torch.version.cuda for x in ['8.0', '9.2'])):
-            a[0, 1] = 2 * a[0, 0]  # Row 2 of a[0] is 2 times Row 1 of a[0], thereby causing a rank deficiency
-            self.assertGreater(a.btrifact_with_info()[2][0], 0)
+            self.assertGreater(a.lu(get_infos=True)[2][0], 0)
 
         # Error checking, no pivoting variant on CPU
         with self.assertRaisesRegex(RuntimeError,
-                                    'btrifact without pivoting is not implemented on the CPU'):
-            torch.btrifact(torch.empty(1, 2, 2), pivot=False)
+                                    'lu without pivoting is not implemented on the CPU'):
+            torch.lu(torch.empty(1, 2, 2), pivot=False)
 
     @skipIfNoLapack
     @skipIfRocm
-    def test_btrifact(self):
-        self._test_btrifact(self, lambda t: t)
+    def test_lu(self):
+        self._test_lu(self, lambda t: t)
 
     @staticmethod
     def _test_btrisolve(self, cast):
@@ -1797,7 +1795,7 @@ class _TestTorchMixin(object):
                                (-1.56, 4.00),
                                (9.81, -4.09)))
         a, b = cast(a), cast(b)
-        LU_data, pivots, info = a.btrifact_with_info()
+        LU_data, pivots, info = a.lu(get_infos=True)
         self.assertEqual(info.abs().sum(), 0)
         x = torch.btrisolve(b, LU_data, pivots)
         b_ = torch.bmm(a, x.unsqueeze(2)).squeeze()
@@ -1808,22 +1806,21 @@ class _TestTorchMixin(object):
         self._test_btrisolve(self, lambda t: t)
 
     @staticmethod
-    def _test_btriunpack(self, cast):
+    def _test_lu_unpack(self, cast):
         def run_test(shape, cast):
             a = cast(torch.randn(*shape))
-            a_lu, p = torch.btrifact(a.reshape(-1, shape[-1], shape[-1]))
-            a_lu = a_lu.reshape_as(a)
-            p = p.reshape(a.shape[:-1])
-            p_ref, l_ref, u_ref = torch.btriunpack(a_lu, p)
+            a_lu, p = torch.lu(a)
+            p_ref, l_ref, u_ref = torch.lu_unpack(a_lu, p)
             self.assertEqual(p_ref.matmul(l_ref.matmul(u_ref)), a)
 
+        run_test((3, 3), cast)
         run_test((5, 3, 3), cast)
         run_test((7, 3, 5, 5), cast)
         run_test((7, 5, 3, 3, 3), cast)
 
     @skipIfNoLapack
-    def test_btriunpack(self):
-        self._test_btriunpack(self, lambda t: t)
+    def test_lu_unpack(self):
+        self._test_lu_unpack(self, lambda t: t)
 
     def test_bmm(self):
         num_batches = 10
@@ -2034,7 +2031,6 @@ class _TestTorchMixin(object):
     def _test_int_pow(self, cast):
         if not TEST_NUMPY:
             return
-        import numpy as np
 
         def check_against_np(tensor, exp):
             tensor_np = tensor.cpu().numpy()
@@ -2649,6 +2645,10 @@ class _TestTorchMixin(object):
         rqr = qr.dequantize()
         for i in range(num_elements):
             self.assertEqual(r[i], rqr[i])
+        # Testing item
+        r = torch.ones(1, dtype=torch.float)
+        qr = r.quantize_linear(scale, zero_point)
+        self.assertEqual(qr.item(), 1)
 
     def test_to(self):
         def test_copy_behavior(t, non_blocking=False):
@@ -3308,6 +3308,40 @@ class _TestTorchMixin(object):
     def test_multinomial(self):
         self._test_multinomial(self, torch.FloatTensor)
 
+    @staticmethod
+    def _test_multinomial_alias(self, cast):
+        # Get probs vector to use in setup
+        def get_probs(length, is_contiguous):
+            probs = torch.softmax(torch.randn(length), 0)
+            if not is_contiguous:
+                probs = torch.softmax(torch.randn(length, 2), 0)[:, 1]
+            assert not (is_contiguous ^ probs.is_contiguous()), "contiguity requirement not met"
+            return cast(probs)
+
+        for is_contiguous in [True, False]:
+            probs = get_probs(4, is_contiguous)
+            alias_table, prob_table = torch._multinomial_alias_setup(probs)
+            for n_samples in [-1, 1, 10]:
+                if n_samples > 0:
+                    samples = torch._multinomial_alias_draw(prob_table, alias_table, n_samples)
+                    self.assertEqual(prob_table.size(), torch.Size([4]), "size mismatch: probability table")
+                    self.assertEqual(alias_table.size(), torch.Size([4]), "size mismatch: alias table")
+                    self.assertEqual(samples.size(), torch.Size([n_samples]), "wrong number of samples")
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "cannot sample <= 0 samples"):
+                        torch._multinomial_alias_draw(prob_table, alias_table, n_samples)
+
+            with self.assertRaisesRegex(RuntimeError, "expected 1-D"):
+                probs = probs.view(2, 2)
+                torch._multinomial_alias_setup(probs)
+
+            with self.assertRaisesRegex(RuntimeError, "expected 1-D"):
+                a_t, p_t = torch._multinomial_alias_setup(probs)
+                torch._multinomial_alias_draw(p_t.view(2, 2), a_t.view(2, 2))
+
+    def test_multinomial_alias(self):
+        self._test_multinomial_alias(self, lambda t: t)
+
     def _spawn_method(self, method, arg):
         try:
             mp.set_start_method('spawn')
@@ -3849,14 +3883,14 @@ class _TestTorchMixin(object):
 
             for lhs in lhsTensors:
                 lhs_expanded = lhs.expand(*(torch.Size(full_batch_dims) + torch.Size(lhs_mat_dims)))
-                lhs_expanded_matmul_fn = getattr(lhs_expanded, "matmul")
+                lhs_expanded_matmul_fn = lhs_expanded.matmul
                 for rhs in rhsTensors:
                     rhs_expanded = ((rhs if len(rhs_dims) != 1 else rhs.unsqueeze(-1)).
                                     expand(*(torch.Size(full_batch_dims) + torch.Size(rhs_mat_dims))))
                     truth = maybe_squeeze_result(lhs_expanded, rhs_expanded, lhs_expanded_matmul_fn(rhs_expanded))
                     for l in (lhs, lhs_expanded):
                         for r in (rhs, rhs_expanded):
-                            l_matmul_fn = getattr(l, "matmul")
+                            l_matmul_fn = l.matmul
                             result = maybe_squeeze_result(l, r, l_matmul_fn(r))
                             self.assertEqual(truth, result)
                             # test torch.matmul function as well
@@ -4683,7 +4717,6 @@ class _TestTorchMixin(object):
         # Test non-contiguous inputs.
         if not TEST_NUMPY:
             return
-        import numpy
         from numpy.linalg import solve
         A = cast(random_fullrank_matrix_distinct_singular_value(2, 2)).permute(1, 0, 2)
         b = cast(torch.randn(2, 2, 2)).permute(2, 1, 0)
@@ -4755,10 +4788,13 @@ class _TestTorchMixin(object):
             A = torch.randn(3, 3, device=A_device)
             err_str = "Expected b and A to be on the same device"
             with self.assertRaisesRegex(RuntimeError, err_str):
-                torch.gesv(b, A)
+                torch.solve(b, A)
 
             with self.assertRaisesRegex(RuntimeError, err_str):
                 torch.cholesky_solve(b, A)
+
+            with self.assertRaisesRegex(RuntimeError, err_str):
+                torch.triangular_solve(b, A)
 
     @skipIfNoLapack
     def test_qr(self):
@@ -6229,7 +6265,6 @@ class _TestTorchMixin(object):
             # Test non-contiguous inputs.
             if not TEST_NUMPY:
                 return
-            import numpy
             from numpy.linalg import solve
             A = random_symmetric_pd_matrix(2, 2)
             b = torch.randn(2, 2, 2)
@@ -7462,10 +7497,10 @@ class _TestTorchMixin(object):
         self.assertEqual(ret1.V, ret[2])
 
         # test gesv
-        ret = a.gesv(a)
+        ret = a.solve(a)
         self.assertEqual(ret.solution, ret[0])
         self.assertEqual(ret.LU, ret[1])
-        ret1 = torch.gesv(a, a, out=tuple(ret))
+        ret1 = torch.solve(a, a, out=tuple(ret))
         self.assertEqual(ret1.solution, ret1[0])
         self.assertEqual(ret1.LU, ret1[1])
         self.assertEqual(ret1.solution, ret[0])
@@ -7977,12 +8012,12 @@ class _TestTorchMixin(object):
             self.assertEqual(torch.tensor(0., device=device), fn(torch.dot, (0,), (0,)))
 
             if torch._C.has_lapack:
-                # btrifact
-                A_LU, pivots = fn(torch.btrifact, (0, 5, 5))
+                # lu
+                A_LU, pivots = fn(torch.lu, (0, 5, 5))
                 self.assertEqual([(0, 5, 5), (0, 5)], [A_LU.shape, pivots.shape])
-                A_LU, pivots = fn(torch.btrifact, (0, 0, 0))
+                A_LU, pivots = fn(torch.lu, (0, 0, 0))
                 self.assertEqual([(0, 0, 0), (0, 0)], [A_LU.shape, pivots.shape])
-                A_LU, pivots = fn(torch.btrifact, (2, 0, 0))
+                A_LU, pivots = fn(torch.lu, (2, 0, 0))
                 self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
     @skipIfRocm
@@ -9795,6 +9830,40 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertTrue(pinned.is_pinned())
         self.assertEqual(pinned, x)
         self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_pin_memory_from_constructor(self):
+
+        def _get_like(t, **kwargs):
+            return [
+                torch.rand_like(t, **kwargs),
+                torch.randn_like(t, **kwargs),
+                torch.empty_like(t, **kwargs),
+                torch.full_like(t, 4, **kwargs),
+                torch.zeros_like(t, **kwargs),
+                torch.ones_like(t, **kwargs),
+            ]
+
+        def _get_tensors(**kwargs):
+            return [
+                torch.tensor([10,11], **kwargs),
+                torch.randn(3, 5, **kwargs),
+                torch.rand(3, **kwargs),
+                # torch.randint(3,5, **kwargs), // unsupported
+                torch.zeros(3, **kwargs),
+                torch.randperm(3, **kwargs),
+                torch.empty(6, **kwargs),
+                torch.ones(6, **kwargs),
+                torch.eye(6, **kwargs),
+                torch.arange(3, 5, **kwargs),]
+
+        pinned_tensors = _get_tensors(pin_memory=True) + _get_like(torch.empty(5, dtype=torch.float64), pin_memory=True)
+        for x in pinned_tensors:
+            self.assertTrue(x.is_pinned())
+
+        tensors = _get_tensors() + _get_like(torch.empty(5, dtype=torch.float64, pin_memory=True))
+        for x in tensors:
+            self.assertFalse(x.is_pinned())
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_unresizable(self):

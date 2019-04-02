@@ -1,5 +1,4 @@
 import math
-from numbers import Number
 
 import torch
 from torch._six import inf, nan

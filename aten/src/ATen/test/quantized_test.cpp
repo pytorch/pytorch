@@ -1,18 +1,18 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <ATen/test/test_assert.h>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <sstream>
-#include <cmath>
 #include <type_traits>
-#include <ATen/test/test_assert.h>
 // For quantize_uint8
 #include <ATen/quantized/Quantizer.h>
 
 using namespace at;
 
-TEST(TestQTensor, First) {
+TEST(TestQTensor, QuantDequantAPIs) {
   auto num_elements = 10;
   Tensor r = at::ones({num_elements});
   const float scale = 1.0;
@@ -30,7 +30,8 @@ TEST(TestQTensor, First) {
   auto r_data = r.data<float>();
   auto qr_data = qr.data<qint8>();
   for (auto i = 0; i < num_elements; ++i) {
-    ASSERT_EQ(quantize_uint8(scale, zero_point, r_data[i]), qr_data[i]);
+    ASSERT_EQ(
+        quantize_uint8(scale, zero_point, r_data[i]).val_, qr_data[i].val_);
   }
 
   // Check for correct dequantization
@@ -39,4 +40,12 @@ TEST(TestQTensor, First) {
   for (auto i = 0; i < num_elements; ++i) {
     ASSERT_EQ(r_data[i], rqr_data[i]);
   }
+}
+
+TEST(TestQTensor, Item) {
+  Tensor r = at::ones({1});
+  const float scale = 1;
+  const int32_t zero_point = 2;
+  Tensor qr = r.quantize_linear(scale, zero_point);
+  ASSERT_EQ(r.item().to<float>(), qr.item().to<float>());
 }
