@@ -428,7 +428,7 @@ void AliasDb::analyzeImpl(Node* node) {
     }
   }
 
-  if (schema.is_inferred_from_custom_op()) {
+  if (schema.is_custom_op()) {
     // If the schema eixsts but explicitly lacks aliasing information, it
     // should be analyzed as a custom op.
     return analyzeCustomOp(node);

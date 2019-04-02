@@ -89,13 +89,7 @@ FunctionSchema createFunctionSchemaFromTraits(std::string name, std::string over
  auto arguments = createArguments<ParameterTypes>::call();
  auto returns = createReturns<ReturnType>::call();
 
- return {std::move(name),
-         std::move(overload_name),
-         std::move(arguments),
-         std::move(returns),
-         /*is_vararg=*/false,
-         /*is_varret=*/false,
-         /*is_inferred_from_custom_op=*/true};
+ return {std::move(name), std::move(overload_name), std::move(arguments), std::move(returns)};
 }
 }
 

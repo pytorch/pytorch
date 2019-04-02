@@ -209,6 +209,14 @@ void testCustomOperators() {
 
     tracer::abandon();
   }
+  {
+    // Try to create an op using a reserved namespace
+    ASSERT_THROWS_WITH(
+        createOperator(
+            "aten::op(float[] f) -> int",
+            [](const std::vector<double>& f) -> int64_t { return f.size(); }),
+        "Tried to register a custom operator to a reserved namespace");
+  }
 }
 
 void testCustomOperatorAliasing() {
@@ -220,7 +228,7 @@ void testCustomOperatorAliasing() {
   auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::aliasing"));
   auto& op = ops.front();
 
-  ASSERT_FALSE(op->schema().is_inferred_from_custom_op());
+  ASSERT_TRUE(op->schema().is_custom_op());
 
   {
     auto graph = std::make_shared<Graph>();
@@ -250,6 +258,22 @@ graph(%x: Tensor, %y: Tensor):
   # CHECK: foo::aliasing
   %ret : Tensor = foo::aliasing(%x, %y)
   return (%x)
+  )IR";
+    script::parseIR(text, graph.get());
+    EliminateDeadCode(graph);
+
+    testing::FileCheck().run(text, *graph);
+  }
+  {
+    RegisterOperators reg(
+        {createOperator("foo::no_input", []() -> double { return 4.0; })});
+    // DCE should not remove a custom op
+    auto graph = std::make_shared<Graph>();
+    const auto text = R"IR(
+graph(%x: Tensor, %y: Tensor):
+  # CHECK: foo::no_input
+  %ret : int = foo::no_input()
+  return (%ret)
   )IR";
     script::parseIR(text, graph.get());
     EliminateDeadCode(graph);
