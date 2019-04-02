@@ -2370,8 +2370,8 @@ class _TestTorchMixin(object):
     def test_cross_with_and_without_dim(self):
         x = torch.rand(100, 3)
         y = torch.rand(100, 3)
-        res1 = torch.cross(x, y, dim = 1)
-        res2 = torch.cross(x, y, dim = -1)
+        res1 = torch.cross(x, y, dim=1)
+        res2 = torch.cross(x, y, dim=-1)
         res3 = torch.cross(x, y)
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
@@ -2388,13 +2388,13 @@ class _TestTorchMixin(object):
             lambda: torch.cross(torch.rand(5, 4), torch.rand(5, 4)))
         self.assertRaisesRegex(
             RuntimeError, "dimension 0 does not have size 3",
-            lambda: torch.cross(torch.rand(5, 4, 3), torch.rand(5, 4, 3), dim = 0))
+            lambda: torch.cross(torch.rand(5, 4, 3), torch.rand(5, 4, 3), dim=0))
         self.assertRaisesRegex(
             RuntimeError, "dimension -1 does not have size 3",
-            lambda: torch.cross(torch.rand(5, 3, 4), torch.rand(5, 3, 4), dim = -1))
+            lambda: torch.cross(torch.rand(5, 3, 4), torch.rand(5, 3, 4), dim=-1))
         self.assertRaisesRegex(
             IndexError, "Dimension out of range",
-            lambda: torch.cross(torch.rand(5, 3, 4), torch.rand(5, 3, 4), dim = -5))
+            lambda: torch.cross(torch.rand(5, 3, 4), torch.rand(5, 3, 4), dim=-5))
 
     def test_zeros(self):
         res1 = torch.zeros(100, 100)

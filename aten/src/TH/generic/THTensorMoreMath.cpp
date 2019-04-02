@@ -1000,7 +1000,7 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
 }
 
 #define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)				\
-  void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, scalar_t value)	\
+  void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, scalar_t value) \
   {									\
     THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);		\
     TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t,			\
