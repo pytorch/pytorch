@@ -19,7 +19,7 @@ QTensorImpl* get_qtensorimpl(const QTensor& self) {
   AT_ASSERTM(
       !self.is_variable(),
       "_internal_get_QTensorImpl: should not be a variable");
-  // TODO: uncomment after is_quantized() is implmeented
+  // TODO: uncomment after is_quantized() is implemented
   // AT_ASSERTM(self.is_quantized(), "_internal_get_QTensorImpl: not a quantized
   // tensor");
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
@@ -60,7 +60,7 @@ qint8 quantize_uint8(float scale, uint8_t zero_point, float value) {
   // cases away from zero, and can be consistent with SIMD implementations for
   // example in x86 using _mm512_cvtps_epi32 or mm512_round_ps with
   // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
-  auto r = zero_point + static_cast<int32_t>(std::nearbyint(value / scale));
+  uint8_t r = zero_point + static_cast<int32_t>(std::nearbyint(value / scale));
   r = std::max(r, qmin);
   r = std::min(r, qmax);
   return static_cast<qint8>(r);
