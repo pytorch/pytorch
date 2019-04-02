@@ -1534,9 +1534,6 @@ template class ConvDNNLowPOp<uint8_t, true>;
 template class ConvDNNLowPOp<uint16_t, false>;
 template class ConvDNNLowPOp<uint16_t, true>;
 
-OPERATOR_SCHEMA(ConvRelu).NumInputs(2, 3).NumOutputs(1).TensorInferenceFunction(
-    ConvPoolOpBase<CPUContext>::TensorInferenceForConv);
-
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv, DNNLOWP, ConvDNNLowPOp<uint8_t, false>);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     ConvRelu,

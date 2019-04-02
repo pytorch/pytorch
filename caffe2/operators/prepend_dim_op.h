@@ -23,6 +23,7 @@ class PrependDimOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = Input(0);
+    auto* output = Output(0);
 
     CAFFE_ENFORCE(input.dim() > 0, "Input must be at least 1D.");
     CAFFE_ENFORCE(
@@ -36,9 +37,9 @@ class PrependDimOp : public Operator<Context> {
     for (int i = 1; i < input.sizes().size(); ++i) {
       actual_new_shape[i + 1] = input.size(i);
     }
-    auto* output = Output(0, actual_new_shape, at::dtype(input.dtype()));
+    output->Resize(actual_new_shape);
 
-    if (!IsInputOutputAlias(0, 0)) {
+    if (output != &input) {
       // If we are not doing in-place computation, a copy is needed.
       context_.CopyItemsSameDevice(
           input.dtype(),
@@ -63,6 +64,7 @@ class MergeDimOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& input = Input(0);
+    auto* output = Output(0);
 
     CAFFE_ENFORCE(input.dim() > 1, "Input must be at least 2D.");
 
@@ -71,9 +73,9 @@ class MergeDimOp : public Operator<Context> {
     for (int i = 1; i < input.sizes().size() - 1; ++i) {
       actual_new_shape[i] = input.size(i + 1);
     }
-    auto* output = Output(0, actual_new_shape, at::dtype(input.dtype()));
+    output->Resize(actual_new_shape);
 
-    if (!IsInputOutputAlias(0, 0)) {
+    if (output != &input) {
       // If we are not doing in-place computation, a copy is needed.
       context_.CopyItemsSameDevice(
           input.dtype(),
