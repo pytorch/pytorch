@@ -1,5 +1,5 @@
 from common_utils import TestCase, run_tests
-from torch.utils.tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 import tempfile
 
 
