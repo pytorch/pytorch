@@ -300,7 +300,10 @@ def init_process_group(backend,
             build-time configurations, valid values include ``mpi``, ``gloo``,
             and ``nccl``. This field should be given as a lowercase string
             (e.g., ``"gloo"``), which can also be accessed via
-            :class:`Backend` attributes (e.g., ``Backend.GLOO``).
+            :class:`Backend` attributes (e.g., ``Backend.GLOO``). If using
+            multiple processes per machine with ``nccl`` backend, each process
+            must have exclusive access to every GPU it uses, as sharing GPUs
+            between processes can result in deadlocks.
         init_method (str, optional): URL specifying how to initialize the
                                      process group.
         world_size (int, optional): Number of processes participating in
@@ -812,8 +815,7 @@ def all_reduce(tensor,
                async_op=False):
     """
     Reduces the tensor data across all machines in such a way that all get
-    the final result. If using ``nccl`` backend, :attr:`tensor` in each process
-    need to reside on a different GPU, otherwise NCCL could hang.
+    the final result.
 
     After the call ``tensor`` is going to be bitwise identical in all processes.
 
@@ -1014,9 +1016,7 @@ def all_gather(tensor_list,
                group=group.WORLD,
                async_op=False):
     """
-    Gathers tensors from the whole group in a list. If using ``nccl`` backend,
-    :attr:`tensor` in each process need to reside on a different GPU, otherwise
-    NCCL could hang.
+    Gathers tensors from the whole group in a list.
 
     Arguments:
         tensor_list (list[Tensor]): Output list. It should contain
