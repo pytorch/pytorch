@@ -17,7 +17,8 @@ class LambdaPostHook : public torch::autograd::FunctionPostHook {
   using variable_list = std::vector<torch::autograd::Variable>;
 
  public:
-  /* implicit */ LambdaPostHook(std::function<void(void)> fn) : fn_(fn) {}
+  /* implicit */ LambdaPostHook(std::function<void(void)> fn)
+      : fn_(std::move(fn)) {}
 
   variable_list operator()(
       const variable_list& outputs,
@@ -356,7 +357,7 @@ void Reducer::prepare_for_backward(
 
   // Seed queue with the grad functions of all outputs.
   for (const auto& output : outputs) {
-    auto grad_fn = output.grad_fn();
+    const auto& grad_fn = output.grad_fn();
     if (grad_fn) {
       queue.push_back(grad_fn.get());
     }
