@@ -30,6 +30,26 @@ bool is_set_to(const Tensor& self, const Tensor & tensor) {
   return at::legacy::th::_th_is_set_to(self, tensor);
 }
 
+Tensor clone(const Tensor& self) {
+  return legacy::th::_th_clone(self);
+}
+
+Tensor& resize_as_(Tensor& self, const Tensor& the_template) {
+  return legacy::th::_th_resize_as_(self, the_template);
+}
+
+Tensor& pow_out(Tensor& result, const Tensor& self, Scalar exponent) {
+  return legacy::th::_th_pow_out(result, self, exponent);
+}
+
+Tensor pow(const Tensor& self, Scalar exponent) {
+  return legacy::th::_th_pow(self, exponent);
+}
+
+Tensor& zero_(Tensor& self) {
+  return legacy::th::_th_zero_(self);
+}
+
 Tensor & masked_fill_(Tensor& self, const Tensor & mask, Scalar value) {
   return at::legacy::th::_th_masked_fill_(self, mask, value);
 }
