@@ -111,9 +111,6 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 # Answer: No. Since we restore `x_tensor`'s original content at the end of this
                 # code block, from the caller's perspective this function doesn't change `x_tensor`'s
                 # content and doesn't update its version, which maintains the invariant.
-                At the end, we restore `x_tensor` to its original value, thus
-                # preserving the invariant that if `x_tensor`'s version is not updated, its
-                # content is not changed.
                 with torch.no_grad(update_version=False):
                     x_tensor[x_idx] = orig - eps
                 outa = fn(input).clone()
