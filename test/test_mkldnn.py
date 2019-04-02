@@ -4,6 +4,7 @@ from common_utils import TestCase, run_tests
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 import warnings
 
+
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMkldnn(TestCase):
     def test_conversion(self):
@@ -19,13 +20,6 @@ class TestMkldnn(TestCase):
             self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
             self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size())
             self.assertTrue(mkldnn_tensor.data_ptr() != 0)
-            # compare the grad with and without mkldnn conversion
-            cpu_tensor.sum().backward()
-            grad_without_mkldnn = cpu_tensor.grad.clone().detach()
-            cpu_tensor.grad.data.zero_()
-            cpu_tensor_1.sum().backward()
-            grad_with_mkldnn = cpu_tensor.grad.data
-            self.assertEqual(grad_without_mkldnn, grad_with_mkldnn)
 
     def test_unsupported(self):
         # unsupported types and unsupported types with gpu
