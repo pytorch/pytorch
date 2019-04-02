@@ -2249,6 +2249,9 @@ class TestCuda(TestCase):
         samples = probs.multinomial(1000000, replacement=True)
         self.assertGreater(probs[samples].min().item(), 0)
 
+    def test_multinomial_alias(self):
+        _TestTorchMixin._test_multinomial_alias(self, lambda t: t.cuda())
+
     @staticmethod
     def mute():
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
