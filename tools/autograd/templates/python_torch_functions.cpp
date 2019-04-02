@@ -96,11 +96,11 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "arange(Scalar end, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "arange(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "arange(Scalar end, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "arange(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   });
 
-  ParsedArgs<8> parsed_args;
+  ParsedArgs<9> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
 
   if (r.idx == 0) {
@@ -112,12 +112,14 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
           .dtype(scalarType)
           .device(r.device(4))
           .layout(r.layout(3).layout)
-          .requires_grad(r.toBool(5));
+          .requires_grad(r.toBool(6))
+          .pinned_memory(r.toBool(5));
       return wrap(dispatch_arange(end, options));
     } else {
+      AT_ASSERTM(!r.toBool(5), " `pin_memory` and `out` parameters are incompatible");
       check_out_type_matches(r.tensor(1), r.scalartype(2), r.isNone(2), r.layout(3), r.isNone(3),
                              r.device(4), r.isNone(4));
-      return wrap(dispatch_arange(r.scalar(0), r.tensor(1)).set_requires_grad(r.toBool(5)));
+      return wrap(dispatch_arange(r.scalar(0), r.tensor(1)).set_requires_grad(r.toBool(6)));
     }
   } else if (r.idx == 1) {
     if (r.isNone(3)) {
@@ -130,12 +132,14 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
           .dtype(scalarType)
           .device(r.device(6))
           .layout(r.layout(5).layout)
-          .requires_grad(r.toBool(7));
+          .requires_grad(r.toBool(8))
+          .pinned_memory(r.toBool(7));
       return wrap(dispatch_arange(start, end, step, options));
     } else {
+      AT_ASSERTM(!r.toBool(7), " `pin_memory` and `out` parameters are incompatible");
       check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4), r.layout(5), r.isNone(5),
                                r.device(6), r.isNone(6));
-      return wrap(dispatch_arange(r.scalar(0), r.scalar(1), r.scalar(2), r.tensor(3)).set_requires_grad(r.toBool(7)));
+      return wrap(dispatch_arange(r.scalar(0), r.scalar(1), r.scalar(2), r.tensor(3)).set_requires_grad(r.toBool(8)));
     }
   }
   Py_RETURN_NONE;

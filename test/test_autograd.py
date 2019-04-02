@@ -2285,6 +2285,15 @@ class TestAutograd(TestCase):
         _test_complex((1, 2, 3, 4, 2), 2)
         _test_complex((2, 1, 3, 4, 3, 2), 3)
 
+    def test_gradcheck_fail_when_no_differentiable_outputs_and_num_grad_not_zero(self):
+        def autograd_fn(input):
+            output = torch.detach(input)
+            self.assertFalse(output.requires_grad)
+            return output
+
+        f_args_variable = torch.ones(S, S, requires_grad=True)
+        self.assertRaisesRegex(RuntimeError, 'Numerical gradient for function expected to be zero', lambda: gradcheck(autograd_fn, f_args_variable, eps=1e-6, atol=PRECISION))
+
     def test_variable_traverse(self):
         def get_out_and_unrefed_cycle():
             inp = torch.randn(10, requires_grad=True)
