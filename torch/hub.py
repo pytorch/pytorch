@@ -285,20 +285,14 @@ def load(github, model, force_reload=False, *args, **kwargs):
 
 def _download_url_to_file(url, dst, hash_prefix, progress):
     file_size = None
-    if requests_available:
-        u = urlopen(url, stream=True)
-        if hasattr(u.headers, "Content-Length"):
-            file_size = int(u.headers["Content-Length"])
-        u = u.raw
+    u = urlopen(url)
+    meta = u.info()
+    if hasattr(meta, 'getheaders'):
+        content_length = meta.getheaders("Content-Length")
     else:
-        u = urlopen(url)
-        meta = u.info()
-        if hasattr(meta, 'getheaders'):
-            content_length = meta.getheaders("Content-Length")
-        else:
-            content_length = meta.get_all("Content-Length")
-        if content_length is not None and len(content_length) > 0:
-            file_size = int(content_length[0])
+        content_length = meta.get_all("Content-Length")
+    if content_length is not None and len(content_length) > 0:
+        file_size = int(content_length[0])
 
     f = tempfile.NamedTemporaryFile(delete=False)
     try:

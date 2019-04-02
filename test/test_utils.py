@@ -522,9 +522,5 @@ class TestHub(TestCase):
         entry_lists = hub.list('pytorch/vision', force_reload=True)
         self.assertObjectIn('resnet18', entry_lists)
 
-    def test_show_entry_doc(self):
-        entry_doc = hub.show('pytorch/vision', 'resnet18')
-        self.assertRegex(entry_doc, r'Resnet18')
-
 if __name__ == '__main__':
     run_tests()
