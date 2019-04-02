@@ -30,6 +30,26 @@ bool is_set_to(const Tensor& self, const Tensor & tensor) {
   return at::legacy::th::_th_is_set_to(self, tensor);
 }
 
+Tensor clone(const Tensor& self) {
+  return legacy::th::_th_clone(self);
+}
+
+Tensor& resize_as_(Tensor& self, const Tensor& the_template) {
+  return legacy::th::_th_resize_as_(self, the_template);
+}
+
+Tensor& pow_out(Tensor& result, const Tensor& self, Scalar exponent) {
+  return legacy::th::_th_pow_out(result, self, exponent);
+}
+
+Tensor pow(const Tensor& self, Scalar exponent) {
+  return legacy::th::_th_pow(self, exponent);
+}
+
+Tensor& zero_(Tensor& self) {
+  return legacy::th::_th_zero_(self);
+}
+
 Tensor & masked_fill_(Tensor& self, const Tensor & mask, Scalar value) {
   return at::legacy::th::_th_masked_fill_(self, mask, value);
 }
@@ -494,6 +514,14 @@ Tensor & ormqr_out(Tensor & result, const Tensor & self, const Tensor & input2, 
 
 Tensor ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose) {
   return at::legacy::th::_th_ormqr(self, input2, input3, left, transpose);
+}
+
+std::tuple<Tensor,Tensor> _multinomial_alias_setup(const Tensor & probs) {
+  return at::legacy::th::_th_multinomial_alias_setup(probs);
+}
+
+Tensor _multinomial_alias_draw(const Tensor & q, const Tensor & J, int64_t num_samples, Generator * generator) {
+  return at::legacy::th::_th_multinomial_alias_draw(q, J, num_samples, generator);
 }
 
 Tensor & btrisolve_out(Tensor & result, const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
