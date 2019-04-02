@@ -2541,6 +2541,7 @@
 
 - func: clone(Tensor self) -> Tensor
   matches_jit_signature: True
+  variants: function, method
   cpu_half: True
   cpu_bool: True
   cuda_bool: True
