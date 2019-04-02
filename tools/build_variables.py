@@ -54,7 +54,6 @@ libtorch_sources = [
     "torch/csrc/jit/constants.cpp",
     "torch/csrc/jit/node_hashing.cpp",
     "torch/csrc/jit/export.cpp",
-    "torch/csrc/jit/function_schema_parser.cpp",
     "torch/csrc/jit/pickler.cpp",
     "torch/csrc/jit/graph_executor.cpp",
     "torch/csrc/jit/import.cpp",
@@ -98,7 +97,6 @@ libtorch_sources = [
     "torch/csrc/jit/script/edit_distance.cpp",
     "torch/csrc/jit/script/logging.cpp",
     "torch/csrc/jit/script/final_returns.cpp",
-    "torch/csrc/jit/script/schema_type_parser.cpp",
     "torch/csrc/jit/script/script_type_parser.cpp",
     "torch/csrc/jit/script/sugared_value.cpp",
     "torch/csrc/jit/script/schema_matching.cpp",
@@ -108,7 +106,6 @@ libtorch_sources = [
     "torch/csrc/jit/import_source.cpp",
     "torch/csrc/jit/hooks_for_testing.cpp",
     "torch/csrc/jit/script/builtin_functions.cpp",
-    "torch/csrc/jit/script/lexer.cpp",
     "torch/csrc/jit/script/module.cpp",
     "torch/csrc/jit/tracer.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
@@ -148,6 +145,10 @@ def add_torch_libs():
             "torch/csrc/distributed/**/*.cpp",
             # top-level hook of extension registration lives in a separate file
             "torch/csrc/stub.cpp",
+            # exclude files that are already included in ATen/core
+            "torch/csrc/jit/function_schema_parser.cpp",
+            "torch/csrc/jit/script/schema_type_parser.cpp",
+            "torch/csrc/jit/script/lexer.cpp",
         ],
     ) + [
         "torch/csrc/distributed/Module.cpp",
