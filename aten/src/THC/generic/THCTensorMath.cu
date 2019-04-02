@@ -242,6 +242,8 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   }
 }
 
+#if !defined(THC_REAL_IS_BOOL) /* non bool only part */
+
 void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
                           THCTensor *self)
 {
@@ -363,5 +365,7 @@ accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
   THCTensor_(free)(state, diag);
   return trace;
 }
+
+#endif
 
 #endif
