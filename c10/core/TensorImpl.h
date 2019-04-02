@@ -139,7 +139,7 @@ struct C10_API AutogradMetaInterface {
 };
 
 // NOTE [ Version Counter Sharing ]
-// 
+//
 // Every Tensor has a version counter. Version counters are incremented
 // whenever the data or shape of a tensor changes through non-Variable type dispatch.
 // These are typically in-place operations. Version counters are used to
