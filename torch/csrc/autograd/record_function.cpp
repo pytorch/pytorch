@@ -69,6 +69,7 @@ void RecordFunction::processCallbacks() {
   for (const auto& cb : start_callbacks) {
     cb(*this);
   }
+  inputs_cb_ = nullptr;
 }
 
 RecordFunction::~RecordFunction() {

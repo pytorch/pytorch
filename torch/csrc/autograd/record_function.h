@@ -64,6 +64,9 @@ struct TORCH_API RecordFunction {
     return sequence_nr_;
   }
 
+  // Returns a list of function inputs,
+  // WARNING: can be used only from within start callbacks
+  // in the current RecordFunction object
   const std::vector<c10::IValue>& inputs() const {
     if (inputs_cb_ && !inputs_initialized_) {
       inputs_ = inputs_cb_();

@@ -209,6 +209,11 @@ if (${cond}) {
 RECORD_FUNCTION = CodeTemplate("""\
 profiler::RecordFunction profiler("${name}", Function::peek_at_next_sequence_nr());""")
 
+RECORD_FUNCTION_WITH_INPUTS = CodeTemplate("""\
+profiler::RecordFunction profiler("${name}", Function::peek_at_next_sequence_nr(),
+  [&]() -> jit::Stack { return {${input_names}}; });
+""")
+
 SELECT = CodeTemplate("""\
 if (${cond}) {
   ${true}
@@ -847,12 +852,25 @@ def emit_body(declaration):
             return []
         return ['increment_version({});'.format(arg['name']) for arg in differentiable_outputs]
 
+    def check_record_function_input_type(simple_type):
+        return simple_type in ['Tensor', 'Scalar']
+
+    def record_function_input_names():
+        return ', '.join([
+            arg['name'] for arg in declaration['arguments']
+            if check_record_function_input_type(arg['simple_type'])])
+
     env = {}
     combined = nested_dict(env, declaration)
 
     body = []
     if base_name not in DONT_PROFILE:
-        body.append(RECORD_FUNCTION.substitute(combined))
+        input_names = record_function_input_names()
+        if len(input_names) > 0:
+            body.append(
+                RECORD_FUNCTION_WITH_INPUTS.substitute(combined, input_names=input_names))
+        else:
+            body.append(RECORD_FUNCTION.substitute(combined))
     if strategy != 'use_type':
         body.extend(unpack_args(env, declaration))
     if requires_derivative:

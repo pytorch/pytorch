@@ -316,7 +316,11 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) co
 }
 
 Tensor VariableType::detach(const Tensor & self) const {
-  profiler::RecordFunction profiler("detach");
+  profiler::RecordFunction profiler("detach", [&self]() {
+    jit::Stack inputs;
+    jit::push(inputs, self);
+    return inputs;
+  });
   torch::jit::Node* node = nullptr;
   if (jit::tracer::isTracing()) {
     auto& graph = jit::tracer::getTracingState()->graph;
@@ -336,7 +340,11 @@ Tensor VariableType::detach(const Tensor & self) const {
 }
 
 Tensor & VariableType::detach_(Tensor & self) const {
-  profiler::RecordFunction profiler("detach_");
+  profiler::RecordFunction profiler("detach_", [&self]() {
+    jit::Stack inputs;
+    jit::push(inputs, self);
+    return inputs;
+  });
   torch::jit::Node* node = nullptr;
   if (jit::tracer::isTracing()) {
     auto& graph = jit::tracer::getTracingState()->graph;

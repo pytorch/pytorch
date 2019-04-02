@@ -140,7 +140,15 @@ RegisterOperators reg({
     Operator(
         "aten::split(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]",
         [](Stack& stack) {
-          autograd::profiler::RecordFunction record("split_with_sizes");
+          autograd::profiler::RecordFunction record("split_with_sizes", [&stack]() {
+            Stack inputs;
+            const auto& inputs_arr = last(stack, 3);
+            inputs.insert(
+              inputs.end(),
+              inputs_arr.begin(),
+              inputs_arr.end());
+            return inputs;
+          });
           auto result = at::split_with_sizes(
               (std::move(peek(stack, 0, 3))).toTensor(),
               (std::move(peek(stack, 1, 3))).toIntList()->elements(),
@@ -155,7 +163,11 @@ RegisterOperators reg({
     Operator(
         "aten::size(Tensor self) -> int[]",
         [](Stack& stack) {
-          autograd::profiler::RecordFunction record("sizes");
+          autograd::profiler::RecordFunction record("sizes", [&stack]() {
+            Stack inputs;
+            push(inputs, peek(stack, 0, 1));
+            return inputs;
+          });
           auto t = std::move(pop(stack)).toTensor();
           pack(stack, t.sizes().vec());
           return 0;
@@ -163,7 +175,12 @@ RegisterOperators reg({
     Operator(
         "aten::list_with_default(int[] list, int[] defaults) -> int[]",
         [](Stack& stack) {
-          autograd::profiler::RecordFunction record("sizes");
+          autograd::profiler::RecordFunction record("sizes", [&stack]() {
+            Stack inputs;
+            push(inputs, peek(stack, 0, 2));
+            push(inputs, peek(stack, 1, 2));
+            return inputs;
+          });
           auto list = peek(stack, 0, 2).toIntListRef();
           auto defaults = peek(stack, 1, 2).toIntListRef();
           drop(stack, 2);
