@@ -97,9 +97,23 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
         else:
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
                 orig = x_tensor[x_idx].item()
-                # We don't want in-place changes to `x_tensor` to update its version
-                # counter, because call sites of `get_numerical_jacobian(...)` expects
-                # `input`'s version counter(s) to not be changed by the function call.
+
+                # Here we use `torch.no_grad(update_version=False)` to disable version update
+                # in `x_tensor`'s in-place operations. There are two potential concerns here:
+                #
+                # 1. Does it affect the gradient calculations in `fn(input)`?
+                # Answer: No. Since we always modify `x_tensor`'s value *before* passing it into
+                # the graph via `fn(input)`, the in-place operation will not cause any incorrect
+                # gradient calculations in `fn(input)`.
+                #
+                # 2. Does it break the invariant that "we must update a tensor's version if its
+                # content changes"?
+                # Answer: No. Since we restore `x_tensor`'s original content at the end of this
+                # code block, from the caller's perspective this function doesn't change `x_tensor`'s
+                # content and doesn't update its version, which maintains the invariant.
+                At the end, we restore `x_tensor` to its original value, thus
+                # preserving the invariant that if `x_tensor`'s version is not updated, its
+                # content is not changed.
                 with torch.no_grad(update_version=False):
                     x_tensor[x_idx] = orig - eps
                 outa = fn(input).clone()
