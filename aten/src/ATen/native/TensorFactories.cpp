@@ -736,7 +736,7 @@ AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
 #undef TENSOR
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<long> size, const TensorOptions& options) {
-    AT_CHECK(!options.pinned_memory(), "pin_memory is incompatible with from_file");
+    AT_CHECK(!options.pinned_memory(), "tensors constructed from a file cannot be pinned");
     size_t my_size = 0;
     if (size.has_value())
     {
