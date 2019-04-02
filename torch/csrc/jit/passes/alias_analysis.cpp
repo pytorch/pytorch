@@ -428,7 +428,7 @@ void AliasDb::analyzeImpl(Node* node) {
     }
   }
 
-  if (schema.is_custom_op()) {
+  if (schema.has_alias_annotation()) {
     return analyzeCustomOp(node);
   }
 
