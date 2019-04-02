@@ -53,7 +53,7 @@ class Bernoulli(ExponentialFamily):
         if 'logits' in self.__dict__:
             new.logits = self.logits.expand(batch_shape)
             new._param = new.logits
-        else:
+        if 'probs' in self.__dict__:
             new.probs = self.probs.expand(batch_shape)
             new._param = new.probs
         super(Bernoulli, new).__init__(batch_shape, validate_args=False)
