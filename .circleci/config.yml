@@ -251,19 +251,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
         docker pull ${DOCKER_IMAGE} >/dev/null
 
-        DOCKER_IMAGE_BASE_NAME=$(basename "${DOCKER_IMAGE}")
-        export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_OSSCI_LINUX_BUILD_S3_BUCKET_V1}
-        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_OSSCI_LINUX_BUILD_S3_BUCKET_V1}
-        set +e
-        retcode=$(aws s3 ls s3://ossci-linux-build/pytorch/base/${DOCKER_IMAGE_BASE_NAME}.tar)
-        set -e
-        if [ -z "$retcode" ]; then
-          docker save -o "${DOCKER_IMAGE_BASE_NAME}.tar" "${DOCKER_IMAGE}"
-          aws s3 cp "${DOCKER_IMAGE_BASE_NAME}.tar" "s3://ossci-linux-build/pytorch/base/${DOCKER_IMAGE_BASE_NAME}.tar" --acl public-read --only-show-errors
-          echo "Docker image is uploaded to S3."
-          rm "${DOCKER_IMAGE_BASE_NAME}.tar"
-        fi
-        echo "Docker image download link: https://s3.amazonaws.com/ossci-linux-build/pytorch/base/${DOCKER_IMAGE_BASE_NAME}.tar. To use this image, please follow the instructions at https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md#reproducing-linux-ci-errors-locally."
+        DOCKER_IMAGE=${DOCKER_IMAGE} DOCKER_IMAGE_TYPE=pytorch/base source /home/circleci/project/.circleci/scripts/upload_docker_image_to_s3.sh
 
         export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
@@ -299,19 +287,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
 
-        COMMIT_DOCKER_IMAGE_BASE_NAME=$(basename "${COMMIT_DOCKER_IMAGE}")
-        export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_OSSCI_LINUX_BUILD_S3_BUCKET_V1}
-        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_OSSCI_LINUX_BUILD_S3_BUCKET_V1}
-        set +e
-        retcode=$(aws s3 ls s3://ossci-linux-build/pytorch/intermediate/${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar)
-        set -e
-        if [ -z "$retcode" ]; then
-          docker save -o "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" "${COMMIT_DOCKER_IMAGE}"
-          aws s3 cp "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" "s3://ossci-linux-build/pytorch/intermediate/${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" --acl public-read --only-show-errors
-          echo "Docker image is uploaded to S3."
-          rm "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar"
-        fi
-        echo "Docker image download link: https://s3.amazonaws.com/ossci-linux-build/pytorch/intermediate/${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar. To use this image, please follow the instructions at https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md#reproducing-linux-ci-errors-locally."
+        DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE} DOCKER_IMAGE_TYPE=pytorch/intermediate source /home/circleci/project/.circleci/scripts/upload_docker_image_to_s3.sh
 
         if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
           export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -371,19 +347,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
         docker pull ${DOCKER_IMAGE} >/dev/null
 
-        DOCKER_IMAGE_BASE_NAME=$(basename "${DOCKER_IMAGE}")
-        export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_OSSCI_LINUX_BUILD_S3_BUCKET_V1}
-        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_OSSCI_LINUX_BUILD_S3_BUCKET_V1}
-        set +e
-        retcode=$(aws s3 ls s3://ossci-linux-build/caffe2/base/${DOCKER_IMAGE_BASE_NAME}.tar)
-        set -e
-        if [ -z "$retcode" ]; then
-          docker save -o "${DOCKER_IMAGE_BASE_NAME}.tar" "${DOCKER_IMAGE}"
-          aws s3 cp "${DOCKER_IMAGE_BASE_NAME}.tar" "s3://ossci-linux-build/caffe2/base/${DOCKER_IMAGE_BASE_NAME}.tar" --acl public-read --only-show-errors
-          echo "Docker image is uploaded to S3."
-          rm "${DOCKER_IMAGE_BASE_NAME}.tar"
-        fi
-        echo "Docker image download link: https://s3.amazonaws.com/ossci-linux-build/caffe2/base/${DOCKER_IMAGE_BASE_NAME}.tar. To use this image, please follow the instructions at https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md#reproducing-linux-ci-errors-locally."
+        DOCKER_IMAGE=${DOCKER_IMAGE} DOCKER_IMAGE_TYPE=caffe2/base source /home/circleci/project/.circleci/scripts/upload_docker_image_to_s3.sh
 
         export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
@@ -456,19 +420,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
 
-        COMMIT_DOCKER_IMAGE_BASE_NAME=$(basename "${COMMIT_DOCKER_IMAGE}")
-        export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_OSSCI_LINUX_BUILD_S3_BUCKET_V1}
-        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_OSSCI_LINUX_BUILD_S3_BUCKET_V1}
-        set +e
-        retcode=$(aws s3 ls s3://ossci-linux-build/caffe2/intermediate/${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar)
-        set -e
-        if [ -z "$retcode" ]; then
-          docker save -o "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" "${COMMIT_DOCKER_IMAGE}"
-          aws s3 cp "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" "s3://ossci-linux-build/caffe2/intermediate/${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar" --acl public-read --only-show-errors
-          echo "Docker image is uploaded to S3."
-          rm "${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar"
-        fi
-        echo "Docker image download link: https://s3.amazonaws.com/ossci-linux-build/caffe2/intermediate/${COMMIT_DOCKER_IMAGE_BASE_NAME}.tar. To use this image, please follow the instructions at https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md#reproducing-linux-ci-errors-locally."
+        DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE} DOCKER_IMAGE_TYPE=caffe2/intermediate source /home/circleci/project/.circleci/scripts/upload_docker_image_to_s3.sh
 
         if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
           export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
