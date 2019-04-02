@@ -3887,7 +3887,8 @@ class _TestTorchMixin(object):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         x1 = torch.arange(100)
         x2 = torch.arange(200).view(100, 2)
-        for x, device in zip([x1, x1, x2, x2], 2 * devices):
+        n = len(devices)
+        for x, device in zip([*[x1] * n, *[x2] * n], 2 * devices):
             x = x.to(device)
             w = torch.arange(100, device=device).float()
 
