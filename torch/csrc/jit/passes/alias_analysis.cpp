@@ -758,6 +758,11 @@ void AliasDb::addToContainedElements(
     return;
   }
 
+  // wildcards tracked separately
+  if (isWildcard(elem)) {
+    return;
+  }
+
   AT_ASSERT(isContainerType(container->type()));
 
   auto elemEl = getOrCreateElement(elem);
