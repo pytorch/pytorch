@@ -18,6 +18,7 @@
 #include <c10/core/TensorOptions.h>
 #include <TH/THRandom.h>
 #include <TH/THGenerator.hpp>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -93,7 +94,13 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
   check_size_nonnegative(size);
 
-  auto* allocator = at::getCPUAllocator();
+  c10::Allocator* allocator;
+  if (options.pinned_memory()) {
+    allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
+  } else {
+    allocator = at::getCPUAllocator();
+  }
+
   int64_t nelements = prod_intlist(size);
   auto dtype = options.dtype();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
@@ -141,7 +148,7 @@ Tensor& empty_out(Tensor& result, IntArrayRef size) {
     return target_type.copy(self, non_blocking);                 \
   }
 
-AT_FORALL_SCALAR_TYPES(DEFINE_CAST_OP)
+AT_FORALL_SCALAR_TYPES_AND_BOOL(DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 

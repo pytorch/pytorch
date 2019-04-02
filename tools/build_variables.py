@@ -45,6 +45,7 @@ libtorch_sources = [
     "torch/csrc/autograd/grad_mode.cpp",
     "torch/csrc/autograd/input_buffer.cpp",
     "torch/csrc/autograd/profiler.cpp",
+    "torch/csrc/autograd/record_function.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
     "torch/csrc/Exceptions.cpp",
@@ -82,6 +83,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/lower_tuples.cpp",
     "torch/csrc/jit/passes/peephole.cpp",
     "torch/csrc/jit/passes/python_print.cpp",
+    "torch/csrc/jit/passes/quantization.cpp",
     "torch/csrc/jit/passes/remove_expands.cpp",
     "torch/csrc/jit/passes/requires_grad_analysis.cpp",
     "torch/csrc/jit/passes/shape_analysis.cpp",
@@ -94,6 +96,7 @@ libtorch_sources = [
     "torch/csrc/jit/scope.cpp",
     "torch/csrc/jit/script/compiler.cpp",
     "torch/csrc/jit/script/edit_distance.cpp",
+    "torch/csrc/jit/script/logging.cpp",
     "torch/csrc/jit/script/final_returns.cpp",
     "torch/csrc/jit/script/schema_type_parser.cpp",
     "torch/csrc/jit/script/script_type_parser.cpp",
@@ -150,6 +153,7 @@ def add_torch_libs():
         "torch/csrc/distributed/Module.cpp",
         "torch/csrc/distributed/c10d/init.cpp",
         "torch/csrc/distributed/c10d/ddp.cpp",
+        "torch/csrc/distributed/c10d/reducer.cpp",
     ] + [":generate-code=" + x for x in GENERATED_CPP])
     libtorch_python_sources = sets.to_list(sets.difference(
         sets.make(globbed_sources),
