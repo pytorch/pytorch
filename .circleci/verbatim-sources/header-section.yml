@@ -44,7 +44,7 @@ install_official_git_client: &install_official_git_client
       sleep 1;
     done
 
-    systemctl list-units --all
+    systemctl list-units --all | cat
 
     sudo killall apt-get || true
     sudo killall dpkg || true
