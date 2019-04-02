@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/testing/file_check.h>
+#include <torch/csrc/jit/testing/utils.h>
 #include "test/cpp/jit/test_base.h"
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/interpreter.h"
@@ -162,66 +163,13 @@ std::pair<at::Tensor, at::Tensor> lstm(
   return {hy, cy};
 }
 
-TORCH_API std::vector<Node*> findAllNodes(
-    c10::ArrayRef<torch::jit::Block*> blocks,
-    Symbol kind,
-    bool recurse = true) {
-  std::vector<Node*> ret;
-  for (Block* block : blocks) {
-    for (Node* n : block->nodes()) {
-      if (n->kind() == kind) {
-        ret.push_back(n);
-      }
-      if (recurse) {
-        auto nodes = findAllNodes(n->blocks(), kind, recurse);
-        ret.insert(ret.end(), nodes.begin(), nodes.end());
-      }
-    }
-  }
-  return ret;
-}
+using namespace testing;
 
-TORCH_API std::vector<Node*> findAllNodes(
-    Block* block,
-    Symbol kind,
-    bool recurse = true) {
-  std::vector<Block*> blocks = {block};
-  return findAllNodes(blocks, kind, recurse);
-}
-
-TORCH_API Node* findNode(
-    c10::ArrayRef<torch::jit::Block*> blocks,
-    Symbol kind,
-    bool recurse = true) {
-  for (Block* block : blocks) {
-    for (Node* n : block->nodes()) {
-      if (n->kind() == kind) {
-        return n;
-      }
-      if (recurse) {
-        auto node = findNode(n->blocks(), kind, recurse);
-        if (node != nullptr) {
-          return node;
-        }
-      }
-    }
-  }
-  return nullptr;
-}
-
-TORCH_API Node* findNode(Block* block, Symbol kind, bool recurse = true) {
-  std::vector<Block*> blocks = {block};
-  return findNode(blocks, kind, recurse);
-}
-
-TORCH_API Node* findNode(Graph& g, Symbol kind, bool recurse=true) {
-  return findNode(g.block(), kind, recurse);
-}
-
-TORCH_API std::vector<Node*> findAllNodes(Graph& g, Symbol kind, bool recurse=true) {
-  return findAllNodes(g.block(), kind, recurse);
-}
-
+/**
+  !!!
+  findNode & findAllNodes to search a graph for a symbol
+  !!!
+**/
 
 } // namespace test
 } // namespace jit
