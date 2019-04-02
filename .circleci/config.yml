@@ -41,9 +41,8 @@ install_official_git_client: &install_official_git_client
     sudo rm /var/lib/dpkg/lock || true
 
     cat /etc/apt/sources.list
-    sudo sed -i 's|http://archive.ubuntu.com|http://us-east-1.ec2.archive.ubuntu.com|g' /etc/apt/sources.list
-    sed -i 's#archive.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
-    sed -i 's#security.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
+    sudo sed -i 's#archive.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
+    sudo sed -i 's#security.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
     cat /etc/apt/sources.list
 
     sudo apt-get -q -y update
