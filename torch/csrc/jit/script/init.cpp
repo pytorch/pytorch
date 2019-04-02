@@ -830,8 +830,6 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_method_names",
           [](Module& self) {
-            using Item =
-                torch::OrderedDict<std::string, std::unique_ptr<Method>>::Item;
             return fmap(
                 self.get_methods(), [](const std::unique_ptr<Method>& method) {
                   return method->name();
@@ -999,22 +997,22 @@ void initJitScriptBindings(PyObject* module) {
           &Method::debugDisableAutodiffSubgraphInlining)
       .def("schema", &Method::getSchema)
       .def("pretty_print_schema", &Method::pretty_print_schema)
-      .def("python_print", [](Method& m) {
-        std::ostringstream oss;
-        std::vector<at::Tensor> constants;
-        std::vector<ClassTypePtr> classes;
-        PythonPrint(oss, m, constants, classes, true);
-        return std::make_pair(oss.str(), std::move(constants));
-      })
-      .def_property_readonly(
-          "code",
-          [](Method& self) {
-            std::ostringstream ss;
-            std::vector<at::Tensor> tensors;
+      .def(
+          "python_print",
+          [](Method& m) {
+            std::ostringstream oss;
+            std::vector<at::Tensor> constants;
             std::vector<ClassTypePtr> classes;
-            PythonPrint(ss, self, tensors, classes, false);
-            return ss.str();
-          });
+            PythonPrint(oss, m, constants, classes, true);
+            return std::make_pair(oss.str(), std::move(constants));
+          })
+      .def_property_readonly("code", [](Method& self) {
+        std::ostringstream ss;
+        std::vector<at::Tensor> tensors;
+        std::vector<ClassTypePtr> classes;
+        PythonPrint(ss, self, tensors, classes, false);
+        return ss.str();
+      });
 
   m.def(
       "_jit_script_compile",
@@ -1130,9 +1128,10 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("checks_file"),
           py::arg("graph"));
 
-  m.def("_logging_set_logger", [](logging::LoggerBase* logger) {
-    return logging::setLogger(logger);
-  }, py::return_value_policy::reference);
+  m.def(
+      "_logging_set_logger",
+      [](logging::LoggerBase* logger) { return logging::setLogger(logger); },
+      py::return_value_policy::reference);
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
       m, "LoggerBase");
   py::enum_<logging::LockingLogger::AggregationType>(m, "AggregationType")
@@ -1151,7 +1150,6 @@ void initJitScriptBindings(PyObject* module) {
       logging::LoggerBase,
       std::shared_ptr<logging::NoopLogger>>(m, "NoopLogger")
       .def(py::init<>());
-
 }
 } // namespace script
 } // namespace jit
