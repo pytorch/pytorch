@@ -496,11 +496,11 @@ Tensor ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, 
   return at::legacy::th::_th_ormqr(self, input2, input3, left, transpose);
 }
 
-Tensor & btrisolve_out(Tensor & result, const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
+Tensor & lu_solve_out(Tensor & result, const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
   return at::legacy::th::_th_btrisolve_out(result, self, LU_data, LU_pivots);
 }
 
-Tensor btrisolve(const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
+Tensor lu_solve(const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
   return at::legacy::th::_th_btrisolve(self, LU_data, LU_pivots);
 }
 

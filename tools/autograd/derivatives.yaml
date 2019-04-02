@@ -192,9 +192,6 @@
   self: grad.bmm(mat2.transpose(1, 2))
   mat2: self.transpose(1, 2).bmm(grad)
 
-- name: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots)
-  self: not_implemented("btrisolve")
-
 - name: cat(TensorList tensors, int64_t dim)
   tensors: cat_tensors_backward(grad, to_args_sizes(tensors), dim)
 
@@ -466,6 +463,9 @@
 
 - name: _lu_with_info(Tensor self, bool pivot, bool check_errors)
   self: not_implemented("lu_with_info")
+
+- name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots)
+  self: not_implemented("lu_solve")
 
 - name: masked_fill_(Tensor self, Tensor mask, Scalar value)
   self: grad.clone().masked_fill_(mask, 0)
