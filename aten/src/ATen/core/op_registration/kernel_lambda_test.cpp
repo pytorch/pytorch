@@ -67,6 +67,12 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernel_whenRegistered_then
   expectCallsIncrement(TensorType1());
 }
 
+TEST(OperatorRegistrationTest_LambdaBasedKernel, givenOutOfLineKernel_whenRegistered_thenCanBeCalled) {
+  auto my_kernel = [] (Tensor, int64_t i) {return i+1;};
+  auto registrar = RegisterOperators().op(opSchema, kernel(my_kernel), dispatchKey(TensorType1()));
+  expectCallsIncrement(TensorType1());
+}
+
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
       .op(opSchema, kernel([] (Tensor, int64_t i) {return i+1;}), dispatchKey(TensorType1()))
