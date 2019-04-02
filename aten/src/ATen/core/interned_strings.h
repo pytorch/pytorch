@@ -246,6 +246,10 @@ struct CAFFE2_API Symbol {
   bool is_prim() const;
   bool is_onnx() const;
   bool is_user() const;
+  // Does this symbol live in one of the above built-in namespaces?
+  // If not, that means that this symbol came from the user, through the
+  // defintiion of a custom operator.
+  bool is_builtin_ns() const;
 
   // So we can switch on this
   constexpr operator unique_t() const {
@@ -310,6 +314,9 @@ inline bool Symbol::is_aten() const { return ns() == namespaces::aten; }
 inline bool Symbol::is_prim() const { return ns() == namespaces::prim; }
 inline bool Symbol::is_onnx() const { return ns() == namespaces::onnx; }
 inline bool Symbol::is_user() const { return ns() == namespaces::user; }
+inline bool Symbol::is_builtin_ns() const {
+  return is_attr() || is_aten() || is_prim() || is_onnx() || is_user();
+}
 
 } // namespace c10
 

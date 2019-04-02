@@ -90,15 +90,13 @@ struct FunctionSchema {
       std::vector<Argument> arguments,
       std::vector<Argument> returns,
       bool is_vararg = false,
-      bool is_varret = false,
-      bool is_inferred_from_custom_op = false)
+      bool is_varret = false)
       : name_(std::move(name)),
         overload_name_(std::move(overload_name)),
         arguments_(std::move(arguments)),
         returns_(std::move(returns)),
         is_vararg_(is_vararg),
-        is_varret_(is_varret),
-        is_inferred_from_custom_op_(is_inferred_from_custom_op) {}
+        is_varret_(is_varret) {}
 
   FunctionSchema(
       Symbol name,
@@ -128,12 +126,6 @@ private:
   const bool is_vararg_;
   const bool is_varret_;
 
-  // True if this schema was inferred for a custom operator. Custom ops infer
-  // a schema without alias annotations, so we need to:
-  //   1) know that the schema information is incomplete
-  //   2) treat the op conservatively w.r.t. aliasing and mutation
-  const bool is_inferred_from_custom_op_;
-
 public:
   const std::string& name() const {
     return name_;
@@ -154,15 +146,15 @@ public:
     return is_varret_;
   }
   bool is_mutable() const {
-    return is_inferred_from_custom_op_ ||
+    return is_custom_op() ||
         std::any_of(
             arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
               const auto& aliasInfo = arg.alias_info();
               return aliasInfo && aliasInfo.value().isWrite();
             });
   }
-  bool is_inferred_from_custom_op() const {
-    return is_inferred_from_custom_op_;
+  bool is_custom_op() const {
+    return !Symbol::fromQualString(name_).is_builtin_ns();
   }
 
   c10::optional<int> argumentIndexWithName(const std::string& name) const {

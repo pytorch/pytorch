@@ -850,8 +850,7 @@ bool Node::hasSideEffects() const {
       return true;
   }
   // Custom ops may have arbitrary side effects
-  const auto schema = maybeSchema();
-  if (schema && schema->is_inferred_from_custom_op()) {
+  if (!kind_.is_builtin_ns()) {
     return true;
   }
 

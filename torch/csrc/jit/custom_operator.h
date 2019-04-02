@@ -180,6 +180,12 @@ Operator createOperator(
       std::tuple_size<ArgumentTuple>::value;
 
   auto schema = torch::jit::detail::inferAndCheckSchema<Traits>(schemaOrName);
+  Symbol name = Symbol::fromQualString(schema.name());
+  if (name.is_builtin_ns()) {
+    AT_ERROR(
+        "Tried to register a custom operator to a reserved namespace: ",
+        name.ns().toUnqualString());
+  }
 
   return Operator(schema, [implementation, schema](Stack& stack) {
     ArgumentTuple tuple;
