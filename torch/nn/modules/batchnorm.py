@@ -60,7 +60,7 @@ class _BatchNorm(Module):
     def forward(self, input):
         self._check_input_dim(input)
 
-        exponential_average_factor = 0.0
+        exponential_average_factor = 0.0 if self.momentum is None else self.momentum
 
         if self.training and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None

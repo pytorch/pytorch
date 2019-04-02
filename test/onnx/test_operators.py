@@ -480,7 +480,7 @@ class TestOperators(TestCase):
 
     def test_batchnorm_noaffine(self):
         x = torch.randn(128, 128, 1, 1, requires_grad=True)
-        self.assertONNX(nn.BatchNorm2d(128, affine=False), x)
+        self.assertONNX(nn.BatchNorm2d(128, affine=False, momentum=0.3), x)
 
     def test_embedding_bags(self):
         emb_bag = nn.EmbeddingBag(10, 8)
