@@ -3837,6 +3837,14 @@
   matches_jit_signature: True
   variants: method, function
 
+- func: _multinomial_alias_setup(Tensor probs) -> (Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function
+
+- func: _multinomial_alias_draw(Tensor J, Tensor q, int num_samples, *, Generator? generator=None) -> Tensor
+  matches_jit_signature: True
+  variants: function
+
 - func: lgamma(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
