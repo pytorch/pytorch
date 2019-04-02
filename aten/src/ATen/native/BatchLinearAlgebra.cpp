@@ -51,8 +51,8 @@ void lapackSolve(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, 
 }
 
 template<class scalar_t>
-void lapackGetrf(int m, int n, scalar_t *a, int lda, int *ipiv, int *info) {
-  AT_ERROR("getrf only takes float or double Tensors");
+void lapackLu(int m, int n, scalar_t *a, int lda, int *ipiv, int *info) {
+  AT_ERROR("lu only takes float or double Tensors");
 }
 
 template<class scalar_t>
@@ -92,11 +92,11 @@ template<> void lapackGetri<float>(int n, float *a, int lda, int *ipiv, float *w
   sgetri_(&n, a, &lda, ipiv, work, &lwork, info);
 }
 
-template<> void lapackGetrf<double>(int m, int n, double *a, int lda, int *ipiv, int *info) {
+template<> void lapackLu<double>(int m, int n, double *a, int lda, int *ipiv, int *info) {
   dgetrf_(&m, &n, a, &lda, ipiv, info);
 }
 
-template<> void lapackGetrf<float>(int m, int n, float *a, int lda, int *ipiv, int *info) {
+template<> void lapackLu<float>(int m, int n, float *a, int lda, int *ipiv, int *info) {
   sgetrf_(&m, &n, a, &lda, ipiv, info);
 }
 
@@ -219,7 +219,7 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
   for (int64_t i = 0; i < batch_size; i++) {
     int info;
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    lapackGetrf<scalar_t>(n, n, self_working_ptr, n, ipiv.data<int>(), &info);
+    lapackLu<scalar_t>(n, n, self_working_ptr, n, ipiv.data<int>(), &info);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -406,41 +406,44 @@ Tensor& cholesky_out(Tensor &result, const Tensor &self, bool upper) {
   return result;
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ btrifact ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
-static void apply_btrifact(Tensor& self, Tensor& pivots, Tensor& infos) {
+static void apply_lu(Tensor& self, Tensor& pivots, Tensor& infos) {
 #ifndef USE_LAPACK
-  AT_ERROR("btrifact: LAPACK library not found in compilation");
+  AT_ERROR("lu: LAPACK library not found in compilation");
 #else
   auto self_data = self.data<scalar_t>();
-  auto self_matrix_stride = matrixStride(self);
-  auto batch_size = batchCount(self);
-
   auto pivots_data = pivots.data<int>();
-  auto pivots_matrix_stride = pivots.size(-1);
   auto infos_data = infos.data<int>();
 
   auto n = self.size(-1);
 
-  for (int64_t i = 0; i < batch_size; i++) {
-    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    int* pivots_working_ptr = &pivots_data[i * pivots_matrix_stride];
-    int* infos_working_ptr = &infos_data[i];
-    lapackGetrf<scalar_t>(n, n, self_working_ptr, n, pivots_working_ptr, infos_working_ptr);
+  if (self.dim() == 2) {
+    lapackLu<scalar_t>(n, n, self_data, n, pivots_data, infos_data);
+  } else {
+    auto self_matrix_stride = matrixStride(self);
+    auto batch_size = batchCount(self);
+    auto pivots_matrix_stride = pivots.size(-1);
+    for (int64_t i = 0; i < batch_size; i++) {
+      scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+      int* pivots_working_ptr = &pivots_data[i * pivots_matrix_stride];
+      int* infos_working_ptr = &infos_data[i];
+      lapackLu<scalar_t>(n, n, self_working_ptr, n, pivots_working_ptr, infos_working_ptr);
+    }
   }
 #endif
 }
 
-std::tuple<Tensor, Tensor, Tensor> _btrifact_helper_cpu(const Tensor& self, bool pivot) {
-  AT_CHECK(pivot, "btrifact without pivoting is not implemented on the CPU");
-  AT_CHECK(self.dim() > 2,
-           "expected tensor with more than 2 dimensions, got size: ", self.sizes(),
+std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pivot, bool check_errors) {
+  AT_CHECK(pivot, "lu without pivoting is not implemented on the CPU");
+  AT_CHECK(self.dim() >= 2,
+           "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
            " instead");
   squareCheckInputs(self);
   auto req_size = self.sizes().vec();
   req_size.pop_back();
-  auto pivots_tensor = at::zeros(req_size, self.options().dtype(kInt));
+  auto pivots_tensor = at::empty(req_size, self.options().dtype(kInt));
   req_size.pop_back();
   auto infos_tensor = at::zeros(req_size, self.options().dtype(kInt));
 
@@ -449,53 +452,18 @@ std::tuple<Tensor, Tensor, Tensor> _btrifact_helper_cpu(const Tensor& self, bool
     self_working_copy = at::empty_like(self);
   } else {
     self_working_copy = cloneBatchedColumnMajor(self);
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "btrifact_cpu", [&]{
-      apply_btrifact<scalar_t>(self_working_copy, pivots_tensor, infos_tensor);
+    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_cpu", [&]{
+      apply_lu<scalar_t>(self_working_copy, pivots_tensor, infos_tensor);
     });
   }
+  if (check_errors) {
+    if (self.dim() == 2) {
+      singleCheckErrors(infos_tensor.item<int64_t>(), "lu");
+    } else {
+      batchCheckErrors(infos_tensor, "lu");
+    }
+  }
   return std::make_tuple(self_working_copy, pivots_tensor, infos_tensor);
-}
-
-std::tuple<Tensor, Tensor> btrifact(const Tensor& self, bool pivot) {
-  Tensor LU_fact, pivots, infos;
-  std::tie(LU_fact, pivots, infos) = at::_btrifact_helper(self, pivot);
-  batchCheckErrors(infos, "btrifact");
-  return std::make_tuple(LU_fact, pivots);
-}
-
-std::tuple<Tensor&, Tensor&> btrifact_out(
-    Tensor& A_LU,
-    Tensor& pivots,
-    const Tensor& self,
-    bool pivot) {
-  Tensor infos, A_LU_tmp, pivots_tmp;
-  std::tie(A_LU_tmp, pivots_tmp, infos) = at::_btrifact_helper(self, pivot);
-  batchCheckErrors(infos, "btrifact");
-  A_LU.resize_as_(A_LU_tmp).copy_(A_LU_tmp);
-  pivots.resize_as_(pivots_tmp).copy_(pivots_tmp);
-  return std::tuple<Tensor&, Tensor&>(A_LU, pivots);
-}
-
-std::tuple<Tensor, Tensor, Tensor> btrifact_with_info(
-    const Tensor& self,
-    bool pivot) {
-  Tensor LU_fact, pivots, infos;
-  std::tie(LU_fact, pivots, infos) = at::_btrifact_helper(self, pivot);
-  return std::make_tuple(LU_fact, pivots, infos);
-}
-
-std::tuple<Tensor&, Tensor&, Tensor&> btrifact_with_info_out(
-    Tensor& A_LU,
-    Tensor& pivots,
-    Tensor& info,
-    const Tensor& self,
-    bool pivot) {
-  Tensor info_tmp, A_LU_tmp, pivots_tmp;
-  std::tie(A_LU_tmp, pivots_tmp, info_tmp) = at::_btrifact_helper(self, pivot);
-  A_LU.resize_as_(A_LU_tmp).copy_(A_LU_tmp);
-  pivots.resize_as_(pivots_tmp).copy_(pivots_tmp);
-  info.resize_as_(info_tmp).copy_(info_tmp);
-  return std::tuple<Tensor&, Tensor&, Tensor&>(A_LU, pivots, info);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

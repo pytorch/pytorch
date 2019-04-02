@@ -192,12 +192,6 @@
   self: grad.bmm(mat2.transpose(1, 2))
   mat2: self.transpose(1, 2).bmm(grad)
 
-- name: btrifact(Tensor self, bool pivot)
-  self: not_implemented("btrifact")
-
-- name: btrifact_with_info(Tensor self, bool pivot)
-  self: not_implemented("btrifact_with_info")
-
 - name: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots)
   self: not_implemented("btrisolve")
 
@@ -469,6 +463,9 @@
 - name: lt_(Tensor self, Tensor other)
   self: zeros_like(self)
   other: zeros_like(other)
+
+- name: _lu_with_info(Tensor self, bool pivot, bool check_errors)
+  self: not_implemented("lu_with_info")
 
 - name: masked_fill_(Tensor self, Tensor mask, Scalar value)
   self: grad.clone().masked_fill_(mask, 0)
