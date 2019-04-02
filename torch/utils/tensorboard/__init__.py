@@ -1,6 +1,5 @@
 """A module for visualization with tensorboard
 """
 
-from tensorboard.compat.tensorboard.record_writer import RecordWriter
-from .torchvis import TorchVis
+from tensorboard.writer.record_writer import RecordWriter
 from .writer import FileWriter, SummaryWriter

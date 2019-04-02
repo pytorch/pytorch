@@ -16,10 +16,6 @@ def make_np(x):
         return np.array([x])
     if 'torch' in str(type(x)):
         return prepare_pytorch(x)
-    if 'chainer' in str(type(x)):
-        return prepare_chainer(x)
-    if 'mxnet' in str(type(x)):
-        return prepare_mxnet(x)
     raise NotImplementedError(
         'Got {}, but expected numpy array or torch tensor.'.format(type(x)))
 
@@ -32,23 +28,7 @@ def prepare_pytorch(x):
     return x
 
 
-def prepare_theano(x):
-    import theano
-    pass
-
-
 def prepare_caffe2(x):
     from caffe2.python import workspace
     x = workspace.FetchBlob(x)
-    return x
-
-
-def prepare_mxnet(x):
-    x = x.asnumpy()
-    return x
-
-
-def prepare_chainer(x):
-    import chainer
-    x = chainer.cuda.to_cpu(x.data)
     return x
