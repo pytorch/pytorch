@@ -181,7 +181,7 @@ std::vector<Node*> findAllNodes(
   return ret;
 }
 
-std::vector<Node*> findAllNodes(
+TORCH_API std::vector<Node*> findAllNodes(
     Block* block,
     Symbol kind,
     bool recurse = true) {
@@ -189,7 +189,7 @@ std::vector<Node*> findAllNodes(
   return findAllNodes(blocks, kind, recurse);
 }
 
-Node* findNode(
+TORCH_API Node* findNode(
     c10::ArrayRef<torch::jit::Block*> blocks,
     Symbol kind,
     bool recurse = true) {
@@ -209,16 +209,16 @@ Node* findNode(
   return nullptr;
 }
 
-Node* findNode(Block* block, Symbol kind, bool recurse = true) {
+TORCH_API Node* findNode(Block* block, Symbol kind, bool recurse = true) {
   std::vector<Block*> blocks = {block};
   return findNode(blocks, kind, recurse);
 }
 
-Node* findNode(Graph& g, Symbol kind, bool recurse=true) {
+TORCH_API Node* findNode(Graph& g, Symbol kind, bool recurse=true) {
   return findNode(g.block(), kind, recurse);
 }
 
-std::vector<Node*> findAllNodes(Graph& g, Symbol kind, bool recurse=true) {
+TORCH_API std::vector<Node*> findAllNodes(Graph& g, Symbol kind, bool recurse=true) {
   return findAllNodes(g.block(), kind, recurse);
 }
 
