@@ -1527,7 +1527,8 @@ protected:
 //    numel
 //    data type pointer
 //    autograd metadata pointer
-//    version counter
+//    version counter (word 0)
+//    version counter (word 1)
 //    PyObject pointer
 //    miscellaneous bitfield
 //
