@@ -58,10 +58,6 @@ install_official_git_client: &install_official_git_client
     sudo sed -i 's#security.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
     cat /etc/apt/sources.list
 
-    ps ax | grep apt
-    sudo apt-get -q -y update
-    sudo apt-get -q -y install openssh-client git
-
 install_doc_push_script: &install_doc_push_script
   name: Install the doc push script
   no_output_timeout: "2m"
