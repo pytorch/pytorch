@@ -165,12 +165,6 @@ std::pair<at::Tensor, at::Tensor> lstm(
 
 using namespace testing;
 
-/**
-  !!!
-  findNode & findAllNodes to search a graph for a symbol
-  !!!
-**/
-
 } // namespace test
 } // namespace jit
 } // namespace torch
