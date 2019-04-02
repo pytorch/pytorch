@@ -1,0 +1,117 @@
+syntax = "proto2";
+
+package caffe2;
+
+// option optimize_for = LITE_RUNTIME;
+
+message TensorProto {
+  // The dimensions in the tensor.
+  repeated int32 dims = 1;
+  enum DataType {
+    FLOAT = 1;
+    INT32 = 2;
+    BYTE = 3;
+    STRING = 4;
+  }
+  optional DataType data_type = 2 [default = FLOAT];
+  repeated float float_data = 3 [packed = true];
+  repeated int32 int32_data = 4 [packed = true];
+  optional bytes byte_data = 5;
+  repeated bytes string_data = 6;
+  optional string name = 7;
+}
+
+message TensorProtos {
+  repeated TensorProto protos = 1;
+}
+
+message Argument {
+  optional string name = 1;
+  optional float f = 2;
+  optional int32 i = 3;
+  optional string s = 4;
+  repeated float floats = 5;
+  repeated int32 ints = 6;
+  repeated string strings = 7;
+}
+
+enum DeviceType {
+  CPU = 0; // In default, we will use CPU.
+  CUDA = 1;    // CUDA, with custom kernels.
+}
+
+message DeviceOption {
+  // Options that need to be carried out before running the execution.
+  optional DeviceType device_type = 1 [ default = CPU ];
+  // the cuda gpu id. If the device is not CUDA, this field will simply be
+  // ignored.
+  optional int32 cuda_gpu_id = 2;
+  // The random seed to start the device random number generator with.
+  optional uint32 random_seed = 3;
+}
+
+message OperatorDef {
+  repeated string inputs = 1; // the name of the input blobs
+  repeated string outputs = 2; // the name of output top blobs
+  optional string name = 3; // the layer name
+  optional string type = 4; // the layer type
+
+  repeated Argument args = 5;
+
+  optional DeviceOption device_option = 6;
+
+  // For most networks, don't do extensions. Instead, pack the parameters into
+  // the three categories listed above, and document them clearly in the source
+  // code.
+  extensions 1000 to max;
+}
+
+message NetDef {
+  optional string name = 1; // the network's name
+  repeated OperatorDef operators = 2; // a bunch of operators.
+
+  // net_type and net_args are implementation-specific parameters that we want
+  // to pass to specialized implementations. If you do not care about this, you
+  // don't need to set them.
+  optional string net_type = 3; // the type of network that we run this with.
+  // the number of workers, if the operators in the network is to be carried out
+  // in parallel.
+  optional int32 num_workers = 4;
+  // The device option for the network. If a network has a specific device
+  // option and one of its operators does not have it set, we will copy over the
+  // device option to the operator. This allows us to basically avoid putting
+  // device options at every operator.
+  optional DeviceOption device_option = 5;
+}
+
+// ExecutionStep is actually a sort-of-hacky way we simulate iteration right
+// now.
+message ExecutionStep {
+  // ExecutionStep should either contain a set of substeps, or a set of
+  // network names to run in this execution step. They should NOT both be set
+  // at the same time.
+  optional string name = 1;
+  repeated ExecutionStep substeps = 2;
+  repeated string networks = 3;
+  optional int32 iterations = 4;
+}
+
+message PlanDef {
+  // All the networks that are used in this execution. Note that networks should
+  // be orderd in the way they are executed, i.e. for a layer in a network, all
+  // its input blobs should already have been initialized by the layers or
+  // networks defined before it.
+  optional string name = 1;
+  repeated NetDef networks = 2;
+  repeated ExecutionStep execution_steps = 3;
+}
+
+// ClientDef is a model we use to ship a pre-trained model. This contains two
+// parts basically: one set of parameters, and one network.
+message SimpleClientDef {
+  optional string name = 1;
+  optional NetDef init_net = 2;
+  optional NetDef main_net = 3;
+  optional string input = 4;
+  optional string output = 5;
+}

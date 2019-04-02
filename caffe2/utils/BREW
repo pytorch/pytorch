@@ -1,0 +1,70 @@
+cc_library(
+  name = "math",
+  srcs = [
+      "math_cpu.cc",
+  ],
+  hdrs = [
+      "cblas.h",
+      "math.h",
+      "mkl_alternate.h",
+  ],
+  cflags = [ "-DEIGEN_NO_DEBUG", ],
+  deps = [
+      "//third_party/eigen3:eigen",
+      "//caffe2/core:core",
+  ],
+)
+
+cuda_library(
+  name = "math_gpu",
+  srcs = [
+    "math_gpu.cu",
+  ],
+  deps = [
+      ":math",
+      "//caffe2/core:core_gpu",
+  ],
+)
+
+cc_library(
+  name = "proto_utils",
+  srcs = ["proto_utils.cc"],
+  hdrs = [
+      "proto_utils.h",
+  ],
+  deps = [
+      "//caffe2/proto:caffe2_proto",
+      "//third_party/glog:glog",
+  ],
+)
+
+cc_test(
+  name = "math_test",
+  srcs = [
+      "math_test.cc",
+  ],
+  deps = [
+      ":math",
+      "//caffe2/proto:caffe2_proto",
+      "//gtest:gtest_main",
+      "//caffe2/core:core",
+  ],
+)
+
+cc_headers(
+  name = "simple_queue",
+  srcs = [
+      "simple_queue.h"
+  ],
+)
+
+cc_test(
+  name = "simple_queue_test",
+  srcs = [
+      "simple_queue_test.cc",
+  ],
+  deps = [
+      ":simple_queue",
+      "//gtest:gtest_main",
+  ],
+)

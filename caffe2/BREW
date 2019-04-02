@@ -1,0 +1,4 @@
+filegroup(
+    name = "caffe2_python",
+    srcs = ["__init__.py"],
+)
