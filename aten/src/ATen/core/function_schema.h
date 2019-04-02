@@ -91,14 +91,14 @@ struct FunctionSchema {
       std::vector<Argument> returns,
       bool is_vararg = false,
       bool is_varret = false,
-      bool is_custom_op = false)
+      bool has_alias_annotation = true)
       : name_(std::move(name)),
         overload_name_(std::move(overload_name)),
         arguments_(std::move(arguments)),
         returns_(std::move(returns)),
         is_vararg_(is_vararg),
         is_varret_(is_varret),
-        is_custom_op_(is_custom_op) {}
+        has_alias_annotation_(has_alias_annotation) {}
 
   FunctionSchema(
       Symbol name,
@@ -133,7 +133,7 @@ private:
   // need to
   //   1) know which schemas were generated from custom ops
   //   2) treat custom ops conservatively w.r.t. aliasing and mutation
-  const bool is_custom_op_;
+  const bool has_alias_annotation_;
 
 public:
   const std::string& name() const {
@@ -155,15 +155,15 @@ public:
     return is_varret_;
   }
   bool is_mutable() const {
-    return is_custom_op_ ||
+    return has_alias_annotation_ ||
         std::any_of(
                arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
                  const auto& aliasInfo = arg.alias_info();
                  return aliasInfo && aliasInfo.value().isWrite();
                });
   }
-  bool is_custom_op() const {
-    return is_custom_op_;
+  bool has_alias_annotation() const {
+    return has_alias_annotation_;
   }
 
   c10::optional<int> argumentIndexWithName(const std::string& name) const {

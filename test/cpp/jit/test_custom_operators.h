@@ -220,8 +220,7 @@ void testCustomOperatorAliasing() {
   auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::aliasing"));
   auto& op = ops.front();
 
-  // We should recognize it as a custom op
-  ASSERT_TRUE(op->schema().is_custom_op());
+  ASSERT_TRUE(op->schema().has_alias_annotation());
 
   {
     auto graph = std::make_shared<Graph>();
