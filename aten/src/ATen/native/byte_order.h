@@ -4,7 +4,10 @@
 #include <cstdint>
 #include <cstddef>
 #include <THHalf.h>
+#include <iostream>
 
+namespace at {
+namespace native {
 enum THPByteOrder {
   THP_LITTLE_ENDIAN = 0,
   THP_BIG_ENDIAN = 1
@@ -12,8 +15,7 @@ enum THPByteOrder {
 
 THPByteOrder THP_nativeByteOrder();
 
-
-
+void THP_decodeBuffer(uint8_t* dst, const uint8_t* src, THPByteOrder order, size_t len);
 void THP_decodeBuffer(int16_t* dst, const uint8_t* src, THPByteOrder order, size_t len);
 void THP_decodeBuffer(int32_t* dst, const uint8_t* src, THPByteOrder order, size_t len);
 void THP_decodeBuffer(int64_t* dst, const uint8_t* src, THPByteOrder order, size_t len);
@@ -24,7 +26,11 @@ void THP_decodeBuffer(bool* dst, const uint8_t* src, THPByteOrder order, size_t 
 
 template <typename scalar_t>
  void THP_decodeBuffer(scalar_t* dst, const uint8_t* src, THPByteOrder order, size_t len) {
-   THP_decodeBuffer(dst, src, order, len);
+   std::cout << __PRETTY_FUNCTION__ << "\n";
+   std::cout << typeid(dst).name() << '\n';
+   std::cout << typeid(src).name() << '\n';
+   std::cout << typeid(order).name() << '\n';
+   // THP_decodeBuffer(dst, src, order, len);
  }
 
 void THP_decodeInt16Buffer(int16_t* dst, const uint8_t* src, THPByteOrder order, size_t len);
@@ -40,5 +46,7 @@ void THP_encodeInt32Buffer(uint8_t* dst, const int32_t* src, THPByteOrder order,
 void THP_encodeInt64Buffer(uint8_t* dst, const int64_t* src, THPByteOrder order, size_t len);
 void THP_encodeFloatBuffer(uint8_t* dst, const float* src, THPByteOrder order, size_t len);
 void THP_encodeDoubleBuffer(uint8_t* dst, const double* src, THPByteOrder order, size_t len);
+}
+}
 
 #endif

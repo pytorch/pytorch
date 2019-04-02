@@ -1,10 +1,14 @@
-#include <torch/csrc/byte_order.h>
+#include <ATen/native/byte_order.h>
 
 #include <cstring>
 
 #if defined(_MSC_VER)
 #include <stdlib.h>
 #endif
+
+
+namespace at {
+namespace native {
 
 static inline void swapBytes16(void *ptr)
 {
@@ -105,6 +109,9 @@ THPByteOrder THP_nativeByteOrder()
   return *(uint8_t*)&x ? THP_LITTLE_ENDIAN : THP_BIG_ENDIAN;
 }
 
+void THP_decodeBuffer(uint8_t* dst, const uint8_t* src, THPByteOrder order, size_t len) {
+  memcpy(dst, src, len);
+}
 
 void THP_decodeBuffer(int16_t* dst, const uint8_t* src, THPByteOrder order, size_t len) {
   THP_decodeInt16Buffer(dst, src, order, len);
@@ -251,4 +258,7 @@ void THP_encodeDoubleBuffer(uint8_t* dst, const double* src, THPByteOrder order,
       dst += sizeof(double);
     }
   }
+}
+
+}
 }

@@ -24,7 +24,7 @@ __all__ = [
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
-    'ShortTensor', 'CharTensor', 'ByteTensor', 'Tensor',
+    'ShortTensor', 'CharTensor', 'ByteTensor', 'Tensor', 'from_buffer2',
 ]
 
 ################################################################################
@@ -174,6 +174,7 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
+
 # If you edit these imports, please update torch/__init__.py.in as well
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed
 from .serialization import save, load
@@ -253,6 +254,13 @@ for name in dir(_C._VariableFunctions):
     if name.startswith('__'):
         continue
     globals()[name] = getattr(_C._VariableFunctions, name)
+
+
+# Support deprecated way of accepting bytes
+def from_buffer(to_bytes, *args, **kwargs):
+    if isinstance(to_bytes, bytearray):
+        to_bytes = bytes(to_bytes)
+    return _C._VariableFunctions.from_buffer(to_bytes, *args, **kwargs)
 
 ################################################################################
 # Import interface functions defined in Python

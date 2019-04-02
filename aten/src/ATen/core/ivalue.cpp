@@ -75,6 +75,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printList(out, v.toTuple(), "(", ")");
     case IValue::Tag::IntList:
       return printList(out, v.toIntList(), "[", "]");
+    case IValue::Tag::Int8List:
+        return printList(out, v.toInt8List(), "[", "]");
     case IValue::Tag::DoubleList:
       return printList(out, v.toDoubleList(), "[", "]");
     case IValue::Tag::BoolList:

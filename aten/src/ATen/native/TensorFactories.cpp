@@ -21,6 +21,8 @@
 #include <TH/THAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
+#include <ATen/native/byte_order.h>
+// ~/local/pytorch_wp2/aten/src/
 
 #include <algorithm>
 #include <cmath>
@@ -89,36 +91,71 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Tensor from_buffer(std::vector<uint8_t> bytes, std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions & options)
-{
+Tensor from_buffer(
+    std::string bytes,
+    c10::optional<std::string> byte_order,
+    c10::optional<int64_t> count,
+    c10::optional<int64_t> offset,
+    const TensorOptions& options) {
+  // AT_CHECK(!options.pinned_memory(), "pin_memory is incompatible with
+  // from_buffer");
   AT_ASSERT(options.backend() == Backend::CPU);
-  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
+  AT_ASSERT(
+      !options
+           .is_variable()); // is_variable should have been 'unpacked'  // TODO:
+                            // remove this when Variable and Tensor are merged
   // check_size_nonnegative(size);
 
-  c10::Allocator* allocator;
-  if (options.pinned_memory()) {
-    allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
+  size_t my_count = 0;
+  if (count.has_value()) {
+    my_count = count.value();
   } else {
-    allocator = at::getCPUAllocator();
+    std::cout << bytes.length() << " / " << options.dtype().itemsize() << " "
+              << options.dtype().name() << " Derrive size from bytes\n";
+    my_count =
+        (bytes.length() - offset.value_or(0)) / options.dtype().itemsize();
   }
 
-  int64_t nelements = size.value();
-  auto dtype = options.dtype();
-  auto storage_impl = c10::make_intrusive<StorageImpl>(
-    dtype,
-    nelements,
-    allocator->allocate(nelements * dtype.itemsize()),
-    allocator,
-    /*resizeable=*/true);
+  // THPByteOrder byte_order = THP_nativeByteOrder();
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId(), false);
-  // Default TensorImpl has size [0]
+  THPByteOrder byte_order_flag;
+  if (!byte_order.has_value()) {
+    byte_order_flag = THP_nativeByteOrder();
+  } else if (byte_order.value() == "native") {
+    byte_order_flag = THP_nativeByteOrder();
+  } else if (byte_order.value() == "big") {
+    byte_order_flag = THP_BIG_ENDIAN;
+  } else if (byte_order.value() == "little") {
+    byte_order_flag = THP_LITTLE_ENDIAN;
+  } else {
+    AT_ERROR("Invalid byte_order");
+    // PyErr_Format(PyExc_ValueError,
+    //   "invalid byte_order '%s' (expected 'big', 'little', or 'native')",
+    //   byte_order_str);
+    // return nullptr;
+  }
 
-    tensor.unsafeGetTensorImpl()->set_sizes_contiguous({size.value()});
+  uint8_t* src = (uint8_t*)bytes.data();
 
-  return tensor;
+  std::cout << "Resulted tensor size is " << my_count << "\n";
+  auto result = at::empty({my_count}, options);
+
+  AT_DISPATCH_ALL_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::Bool,
+      result.scalar_type(),
+      "from_buffer",
+      [&]() -> void {
+        scalar_t* result_data = result.data<scalar_t>();
+        THP_decodeBuffer(
+            result_data,
+            (uint8_t*)(src + offset.value_or(0)),
+            byte_order,
+            my_count);
+      });
+
+  return result;
 }
-
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<long> size, const TensorOptions& options) {
     AT_CHECK(!options.pinned_memory(), "pin_memory is incompatible with from_file");

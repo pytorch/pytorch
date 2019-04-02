@@ -9416,6 +9416,35 @@ class _TestTorchMixin(object):
         self.assertEqual(bools.size(), 4)
         self.assertEqual(bools.tolist(), [False, True, True, True])
 
+    def test_torch_from_buffer(self):
+        a = bytearray([1, 2, 3, 4])
+        self.assertEqual(torch.from_buffer(a, 'big', dtype=torch.uint8).tolist(), [1, 2, 3, 4])
+        shorts = torch.from_buffer(a, 'big',dtype=torch.short)
+        self.assertEqual(shorts.numel(), 2)
+        self.assertEqual(shorts.tolist(), [258, 772])
+        ints = torch.from_buffer(a, 'little', dtype=torch.int)
+        self.assertEqual(ints.numel(), 1)
+        self.assertEqual(ints[0], 67305985)
+        f = bytearray([0x40, 0x10, 0x00, 0x00])
+        floats = torch.from_buffer(f, 'big', dtype=torch.float)
+        self.assertEqual(floats.numel(), 1)
+        self.assertEqual(floats[0], 2.25)
+
+        f = bytearray([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x40])
+        bools = torch.from_buffer(f, 'big', dtype=torch.bool)
+        self.assertEqual(bools.numel(), 8)
+        self.assertEqual(bools.tolist(), [False, True, True, True, True, True, True, True])
+        # self.assertEqual(bools.type(), 'torch.BoolStorage')
+
+        f = bytearray(b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9')
+        bools = torch.from_buffer(f, 'big', dtype=torch.bool)
+        self.assertEqual(bools.numel(), 19)
+
+        f = bytearray(b'\0x4A')
+        bools = torch.from_buffer(f, 'big', dtype=torch.bool)
+        self.assertEqual(bools.numel(), 4)
+        self.assertEqual(bools.tolist(), [False, True, True, True])
+
     def test_storage_casts(self):
         storage = torch.IntStorage([-1, 0, 1, 2, 3, 4])
         self.assertEqual(storage.size(), 6)
