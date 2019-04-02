@@ -354,6 +354,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
                 weight_proto_file, "wb", lambda f: f.write(v))
     else:
         raise RuntimeError('Unknown export type')
+
     return torch_out
 
 

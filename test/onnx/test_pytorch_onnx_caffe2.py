@@ -1348,6 +1348,45 @@ class TestCaffe2Backend(unittest.TestCase):
         inputs = (torch.tensor(rois), torch.tensor(deltas), torch.tensor(im_info))
         self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
 
+    def test_c2_inference_lstm(self):
+        num_layers = 4
+        seq_lens = 6
+        emb_lens = 10
+        has_bias = True
+        batch_first = True
+        is_bidirectional=True
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, lstm_in):
+                a, b, c = torch.ops._caffe2.InferenceLSTM(
+                  lstm_in, num_layers, has_bias, batch_first, is_bidirectional
+                )
+                return a, b, c
+
+        num_directions = 2
+        bsz = 5
+        hidden_size = 7
+        hx = np.zeros((num_layers * num_directions, bsz, hidden_size), dtype=np.float32)
+        inputs = np.random.randn(bsz, seq_lens, emb_lens).astype(np.float32)
+        torch_lstm = torch.nn.LSTM(
+            emb_lens,
+            hidden_size,
+            batch_first=batch_first,
+            bidirectional=is_bidirectional,
+            bias=has_bias,
+            num_layers=num_layers,
+        )
+        lstm_in = [
+            torch.from_numpy(inputs),
+            torch.from_numpy(hx),
+            torch.from_numpy(hx),
+        ] + [param.detach() for param in torch_lstm._flat_weights]
+
+        self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3)
+
 
 # a bit of metaprogramming to set up all the rnn tests
 

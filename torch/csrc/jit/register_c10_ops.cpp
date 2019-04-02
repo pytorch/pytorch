@@ -73,10 +73,8 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
                 reinterpret_cast<ListType*>(type.get())->getElementType();
             if (elem_type->isSubclass(TypeKind::TensorType)) {
               AT_ASSERT(iter->isTensorList());
-              tracer::addInputs(
-                  node,
-                  args[i].name().c_str(),
-                  iter->toTensorList()->elements());
+              at::ArrayRef<at::Tensor> tensor_list(iter->toTensorListRef());
+              tracer::addInputs(node, args[i].name().c_str(), tensor_list);
             } else if (elem_type->kind() == TypeKind::FloatType) {
               AT_ASSERT(iter->isDoubleList());
               tracer::addInputs(

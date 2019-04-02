@@ -274,21 +274,18 @@ void BlockToONNX(
           new_node->removeInput(tensor_input_num);
         } else if (type->kind() == TypeKind::ListType) {
           const auto& list_node = node->inputs()[input_index]->node();
-          // std::cout << "===>: " << list_node->kind().toQualString() << std::endl;
           AT_ASSERT(list_node->kind() == prim::ListConstruct);
           const auto& elem_type = reinterpret_cast<ListType*>(type.get())->getElementType();
           if (elem_type->isSubclass(TypeKind::TensorType)) {
             // FIXME
-            throw std::runtime_error("not supported yet!");
-            //while (input_index < node->inputs().size()) {
-            //  if (node->inputs()[input_index]->type()->isSubclass(TypeKind::TensorType)) {
-            //    ++input_index;
-            //    ++tensor_input_num;
-            //  } else {
-            //    break;
-            //  }
-            //}
-            //continue;
+            // throw std::runtime_error("not supported yet!");
+            int index_to_remove = tensor_input_num;
+            const auto& tensor_list = new_node->inputs()[tensor_input_num]->node()->inputs();
+            for (const auto& t : tensor_list) {
+              new_node->addInput(t);
+            }
+            new_node->removeInput(tensor_input_num);
+            continue;
           } else if (elem_type->kind() == TypeKind::IntType || elem_type->kind() == TypeKind::BoolType) {
             throw std::runtime_error("not supported yet!");
             //std::vector<int64_t> values;
