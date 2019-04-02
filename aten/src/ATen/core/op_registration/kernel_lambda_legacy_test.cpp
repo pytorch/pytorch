@@ -67,6 +67,13 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernel_whenRegistere
   expectCallsIncrement(TensorType1());
 }
 
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernel_whenRegisteredInConstructor_thenCanBeCalled) {
+  auto registrar = RegisterOperators(opSchema, [] (const Tensor& tensor, int64_t input) -> int64_t {
+      return input + 1;
+    });
+  expectCallsIncrement(TensorType1());
+}
+
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
       .op(opSchema, [] (const Tensor& tensor, int64_t input) -> int64_t {

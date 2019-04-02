@@ -88,6 +88,11 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegiste
   expectCallsIncrement(TensorType1());
 }
 
+TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegisteredInConstructor_thenCanBeCalled) {
+  auto registrar = RegisterOperators(opSchema, &incrementKernel);
+  expectCallsIncrement(TensorType1());
+}
+
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
       .op(opSchema, &incrementKernel)
