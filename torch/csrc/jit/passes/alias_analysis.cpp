@@ -428,7 +428,7 @@ void AliasDb::analyzeImpl(Node* node) {
     }
   }
 
-  if (!schema.has_alias_annotation()) {
+  if (schema.is_inferred_from_custom_op()) {
     // If the schema eixsts but explicitly lacks aliasing information, it
     // should be analyzed as a custom op.
     return analyzeCustomOp(node);
@@ -522,6 +522,11 @@ void AliasDb::analyzeImpl(Node* node) {
 }
 // Register the fact that `n` writes to `v`.
 void AliasDb::registerWrite(const Value* v, Node* n) {
+  if (!shouldAnnotate(v)) {
+    // don't need to register a write if the value isn't mutable
+    return;
+  }
+
   numWrites_++;
 
   if (isWildcard(v)) {
