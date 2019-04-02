@@ -13,6 +13,7 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <cstddef>
 #include <memory>
