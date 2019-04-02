@@ -638,8 +638,6 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
 def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode and input.type().kind() != "CompleteTensorType":
         return _unimplemented("max_pool1d_with_indices", "input size not accesible")
-    if set(_single(dilation)) != {1}:
-        return _unimplemented("max_pool1d_with_indices", "dilation")
     if stride is None:
         stride = kernel_size
     padding = tuple(_single(padding))
@@ -651,7 +649,8 @@ def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
     r, indices = g.op("MaxPool", input, outputs=2,
                       kernel_shape_i=_single(kernel_size),
                       pads_i=padding,
-                      strides_i=_single(stride))
+                      strides_i=_single(stride),
+                      dilations_i=_single(dilation))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened.
     # In ONNX the indices are computed as a flatten 1-D tensor,
@@ -678,8 +677,6 @@ def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
 def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode and input.type().kind() != "CompleteTensorType":
         return _unimplemented("max_pool2d_with_indices", "input size not accesible")
-    if set(_pair(dilation)) != {1}:
-        return _unimplemented("max_pool2d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
     padding = tuple(_pair(padding))
@@ -691,7 +688,8 @@ def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
     r, indices = g.op("MaxPool", input, outputs=2,
                       kernel_shape_i=_pair(kernel_size),
                       pads_i=padding,
-                      strides_i=_pair(stride))
+                      strides_i=_pair(stride),
+                      dilations_i=_pair(dilation))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened
     # See comment in max_pool1d_with_indices for details.
@@ -708,8 +706,6 @@ def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
 def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode and input.type().kind() != "CompleteTensorType":
         return _unimplemented("max_pool3d_with_indices", "input size not accesible")
-    if set(_triple(dilation)) != {1}:
-        return _unimplemented("max_pool3d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
     padding = tuple(_triple(padding))
@@ -721,7 +717,8 @@ def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
     r, indices = g.op("MaxPool", input, outputs=2,
                       kernel_shape_i=_triple(kernel_size),
                       pads_i=padding,
-                      strides_i=_triple(stride))
+                      strides_i=_triple(stride),
+                      dilations_i=_triple(dilation))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened
     # See comment in max_pool1d_with_indices for details.
