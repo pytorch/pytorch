@@ -51,6 +51,7 @@ REGISTER_CPU_OPERATOR(
     ScatterWeightedSum,
     ScatterWeightedSumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<CPUContext>);
+REGISTER_CPU_OPERATOR(Scatter, ScatterOp<CPUContext>);
 
 REGISTER_CPU_OPERATOR(LengthsToShape, LengthsToShapeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(HasElements, HasElementsOp<CPUContext>);
@@ -369,6 +370,35 @@ Currently only works on CPU because of access to INDICES.
         "Update slices, with shape len(INDICES) + shape(X_0)[1:]")
     .Output(0, "DATA", "Has to be exactly the same tensor as the input 0");
 
+OPERATOR_SCHEMA(Scatter)
+    .NumInputs(3)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .SetDoc(R"DOC(
+Update slices of the tensor in-place by overriding current value.
+
+Note: The op pretty much ignores the exact shapes of the input arguments and
+cares only about sizes. It's done for performance consideration to avoid
+unnecessary reshapes. Only first dimension of X_0 is important, let's call it
+N. If M is the total size of X_0 and K is the size of INDICES then X_i is
+assumed to be of shape K x (M / N) regardless of the real shape.
+
+Note: Each update in INDICES is applied independently which means that if
+duplicated elements are present in INDICES arbitrary one will win.
+
+Currently only works on CPU because of access to INDICES.
+)DOC")
+    .Input(0, "DATA", "Tensor to be updated.")
+    .Input(
+        1,
+        "INDICES",
+        "1-D list of indices on the first dimension"
+        "of X_0 that need to be updated")
+    .Input(
+        2,
+        "UPDATES",
+        "Update slices, with shape len(INDICES) + shape(X_0)[1:]")
+    .Output(0, "OUTPUT", "The updated output.");
 
 OPERATOR_SCHEMA(HasElements)
     .NumInputs(1)
@@ -739,6 +769,7 @@ REGISTER_GRADIENT(Sum, GetSumGradient);
 
 SHOULD_NOT_DO_GRADIENT(ScatterWeightedSum);
 SHOULD_NOT_DO_GRADIENT(ScatterAssign);
+SHOULD_NOT_DO_GRADIENT(Scatter);
 
 class GetWeightedSumGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

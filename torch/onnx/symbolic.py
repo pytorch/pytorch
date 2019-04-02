@@ -1721,7 +1721,7 @@ def scatter_add(g, self, dim, index, src):
     dtype = self.type().scalarType()
     dtype = scalar_type_to_onnx.index(cast_pytorch_to_onnx[dtype])
     dims = self.type().sizes()
-    to_add = torch.ones(dims)
+    to_add = torch.zeros(dims)
     to_add = g.op("Constant", value_t=to_add)
     to_add = scatter(g, to_add, dim, index, src)
     return add(g, self, to_add)

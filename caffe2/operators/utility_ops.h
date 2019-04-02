@@ -739,6 +739,122 @@ class ScatterAssignOp : public Operator<Context> {
 };
 
 template <class Context>
+class ScatterOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  virtual ~ScatterOp() {}
+
+  template <class... Args>
+  explicit ScatterOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        runners_({{{TensorProto_DataType_INT32, TensorProto_DataType_FLOAT},
+                   &ScatterOp::DoRun<int32_t, float>},
+                  {{TensorProto_DataType_INT32, TensorProto_DataType_FLOAT16},
+                   &ScatterOp::DoRun<int32_t, at::Half>},
+                  {{TensorProto_DataType_INT32, TensorProto_DataType_UINT8},
+                   &ScatterOp::DoRun<int32_t, uint8_t>},
+                  {{TensorProto_DataType_INT32, TensorProto_DataType_INT32},
+                   &ScatterOp::DoRun<int32_t, int32_t>},
+                  {{TensorProto_DataType_INT32, TensorProto_DataType_INT64},
+                   &ScatterOp::DoRun<int32_t, int64_t>},
+                  {{TensorProto_DataType_INT64, TensorProto_DataType_FLOAT},
+                   &ScatterOp::DoRun<int64_t, float>},
+                  {{TensorProto_DataType_INT64, TensorProto_DataType_FLOAT16},
+                   &ScatterOp::DoRun<int64_t, at::Half>},
+                  {{TensorProto_DataType_INT64, TensorProto_DataType_UINT8},
+                   &ScatterOp::DoRun<int64_t, uint8_t>},
+                  {{TensorProto_DataType_INT64, TensorProto_DataType_INT32},
+                   &ScatterOp::DoRun<int64_t, int32_t>},
+                  {{TensorProto_DataType_INT64, TensorProto_DataType_INT64},
+                   &ScatterOp::DoRun<int64_t, int64_t>}}) {}
+
+  bool RunOnDevice() override {
+    const auto& data = Input(DATA);
+    const auto& slices = Input(SLICES);
+    auto& indices = Input(INDICES);
+
+    const auto dataType = TypeMetaToDataType(data.dtype());
+    const auto slicesType = TypeMetaToDataType(slices.dtype());
+    const auto indicesType = TypeMetaToDataType(indices.dtype());
+    auto* output = Output(0);
+
+    auto runner = GetRunner(dataType, slicesType, indicesType);
+    (this->*runner)();
+    return true;
+  }
+
+ private:
+  typedef void (ScatterOp::*RunnerType)();
+  typedef std::
+      map<std::pair<TensorProto_DataType, TensorProto_DataType>, RunnerType>
+          RunnerMap;
+
+  RunnerMap runners_;
+
+  RunnerType GetRunner(
+      const TensorProto_DataType dataType,
+      const TensorProto_DataType slicesType,
+      const TensorProto_DataType indicesType) {
+    CAFFE_ENFORCE_EQ(dataType, slicesType, "Data and slice types must match");
+    auto it = runners_.find({indicesType, dataType});
+    CAFFE_ENFORCE(
+        it != runners_.end(),
+        "Could not find the runner corresponding to indicesType, dataType = ",
+        indicesType,
+        " ",
+        dataType);
+    return it->second;
+  }
+
+  template <typename Index, typename T>
+  void DoRun() {
+    auto& input = Input(DATA);
+    auto& indices = Input(INDICES);
+    auto& slices = Input(SLICES);
+    auto* output = Output(0);
+
+    output->ResizeLike(input);
+    output->CopyFrom(input);
+
+    CAFFE_ENFORCE_GT(input.dim(), 0, "X0 has to be at least the vector");
+    int64_t M = input.numel();
+    int64_t N = input.size(0);
+    int64_t K = indices.numel();
+    int64_t block_size = M / N;
+    //CAFFE_ENFORCE_EQ(slices.numel(), block_size * K);
+    // TODO(dzhulgakov): it can be made to work with arbitrary data type by
+    // using raw_mutable_data
+    T* input_data = input.template mutable_data<T>();
+    const Index* idxs = indices.template data<Index>();
+    const T* slicesData = slices.template data<T>();
+    T* output_data = output->template mutable_data<T>(); 
+
+    DoScatter(input_data, idxs, slicesData, output_data, N, K, block_size);
+  }
+
+  template <typename Index, typename T>
+  void DoScatter(
+      T* input_data,
+      const Index* idxs,
+      const T* slicesData,
+      T* output_data,
+      int64_t N,
+      int64_t K,
+      int64_t block_size) {
+    for (int i = 0; i < K; ++i) {
+      Index idx = idxs[i];
+      // double-checking the indices, but it's fine as it's DCHECK only
+      DCHECK(0 <= idx && idx < N)
+          << "Index out of bounds: " << idx << ", range 0 to " << N;
+      context_.template CopySameDevice<T>(
+          block_size, slicesData + block_size * i, output_data + block_size * idx);
+    }
+  }
+
+  INPUT_TAGS(DATA, INDICES, SLICES);
+};
+
+template <class Context>
 class LengthsToSegmentIdsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
