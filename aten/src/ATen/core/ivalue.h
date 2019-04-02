@@ -90,7 +90,6 @@ struct CAFFE2_API Tuple : public List<IValue> {
   }
 };
 using IntList = List<int64_t>;
-using Int8List = List<int8_t>;
 using TensorList = List<at::Tensor>;
 using DoubleList = List<double>;
 using BoolList = List<bool>;
@@ -114,7 +113,6 @@ struct Object;
   _(Bool) \
   _(Tuple) \
   _(IntList) \
-  _(Int8List) \
   _(DoubleList) \
   _(BoolList) \
   _(String) \
@@ -314,28 +312,7 @@ struct CAFFE2_API IValue final {
     return toIntrusivePtr<ivalue::IntList>();
   }
 
-  // Int8List
-  IValue(c10::intrusive_ptr<ivalue::Int8List> v);
-  IValue(std::vector<int8_t> v);
-  IValue(at::ArrayRef<int8_t> v)
-  : IValue(v.vec()) {}
-  bool isInt8List() const { return Tag::Int8List == tag; }
-  c10::intrusive_ptr<ivalue::Int8List> toInt8List() && {
-    AT_ASSERT(isInt8List());
-    return moveToIntrusivePtr<ivalue::Int8List>();
-  }
-  c10::intrusive_ptr<ivalue::Int8List> toInt8List() const & {
-    AT_ASSERT(isInt8List());
-    return toIntrusivePtr<ivalue::Int8List>();
-  }
-
-  std::vector<uint8_t> toUint8Vector() const & {
-    std::vector<uint8_t> x;
-    return x;
-  }
-
   const std::vector<int64_t>& toIntListRef() const;
-  const std::vector<int8_t>& toInt8ListRef() const;
   const std::vector<double>& toDoubleListRef() const;
   const std::vector<bool>& toBoolListRef() const;
   const std::vector<at::Tensor>& toTensorListRef() const;
@@ -800,7 +777,6 @@ DEFINE_TO(bool, toBool)
 DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob);
 DEFINE_TO(c10::intrusive_ptr<ivalue::DoubleList>, toDoubleList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::IntList>, toIntList)
-DEFINE_TO(c10::intrusive_ptr<ivalue::Int8List>, toInt8List)
 DEFINE_TO(c10::intrusive_ptr<ivalue::BoolList>, toBoolList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::TensorList>, toTensorList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::GenericList>, toGenericList)
@@ -809,7 +785,6 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(std::vector<int64_t>, toIntListRef)
-DEFINE_TO(std::vector<int8_t>, toInt8ListRef)
 DEFINE_TO(std::vector<double>, toDoubleListRef)
 DEFINE_TO(std::vector<bool>, toBoolListRef)
 DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
@@ -870,13 +845,6 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::IntList> v)
 inline IValue::IValue(std::vector<int64_t> v)
 : IValue(ivalue::IntList::create(std::move(v))) {}
 
-inline IValue::IValue(c10::intrusive_ptr<ivalue::Int8List> v)
-: tag(Tag::Int8List), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
-}
-inline IValue::IValue(std::vector<int8_t> v)
-: IValue(ivalue::Int8List::create(std::move(v))) {}
-
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
 : tag(Tag::String), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
@@ -930,10 +898,6 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
 
 inline const std::vector<int64_t>& IValue::toIntListRef() const {
   return toIntList()->elements();
-}
-
-inline const std::vector<int8_t>& IValue::toInt8ListRef() const {
-  return toInt8List()->elements();
 }
 
 inline const std::vector<double>& IValue::toDoubleListRef() const {
