@@ -523,7 +523,7 @@ Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, const Tensor &
 
 Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntArrayRef sizes, IntArrayRef strides, const Scalar & alpha) {
   // if input was column-major, return grad as column-order for efficiency
-  if (strides[0] == 1 && strides[1] == sizes[0]) {
+  if (strides[0] == 1 && strides[1] == sizes[0] && !mat1.is_sparse()) {
     return maybe_multiply(grad.t().mm(mat1).t(), alpha);
   } else {
     return maybe_multiply(mat1.t().mm(grad), alpha);
