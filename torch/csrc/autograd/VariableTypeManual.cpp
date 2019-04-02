@@ -269,14 +269,16 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
     grad_fn->src_type = &src.type();
     grad_fn->src_device = src.device();
   }
-  uint32_t self_saved_version = self.current_version();
+  uint32_t self_saved_version = as_variable_ref(self).current_version();
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     if (self.is_sparse() && src.is_sparse()) baseType->copy_sparse_to_sparse_(self_, src_, non_blocking);
     else if (!self.is_sparse() && !src.is_sparse()) baseType->s_copy_(self_, src_, non_blocking);
     else AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ", self.type(), " and src type = ", src.type());
   }
-  if (at::VersionUpdateMode::is_enabled()) AT_ASSERT(self.current_version() > self_saved_version);
+  if (at::VersionUpdateMode::is_enabled())
+    AT_ASSERT(as_variable_ref(self).current_version() > self_saved_version);
+
   rebase_history(as_variable_ref( self ), std::move(grad_fn));
   if(torch::jit::tracer::isTracing()) {
     jit::tracer::setOutput(output, self);

@@ -12,7 +12,6 @@ from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck, gradgradcheck
 from .grad_mode import no_grad, enable_grad, set_grad_enabled
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
-from .version_update_mode import no_version_update
 from . import profiler
 
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']

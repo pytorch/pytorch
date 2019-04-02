@@ -108,15 +108,15 @@ int64_t Variable::Impl::get_device_slow() const {
 
 void Variable::Impl::set_version_counter(
   const c10::VariableVersion& version_counter) noexcept {
-  data_.set_version_counter(version_counter);
+  data_.unsafeGetTensorImpl()->set_version_counter(version_counter);
 }
 
 const c10::VariableVersion& Variable::Impl::version_counter() const noexcept {
-  return data_.version_counter();
+  return data_.unsafeGetTensorImpl()->version_counter();
 }
 
 void Variable::Impl::bump_version() noexcept {
-  data_.bump_version();
+  data_.unsafeGetTensorImpl()->bump_version();
 }
 
 std::shared_ptr<Function> Variable::grad_accumulator() const {
@@ -189,10 +189,10 @@ void Variable::Impl::set_data(const at::Tensor &new_data) {
 
   // `var.set_data(...)` is not supposed to affect `var`'s version counter, so we save
   // the original version counter and restore it after replacing the underlying tensor.
-  auto saved_version_ = data_.current_version();
+  auto saved_version_ = data_.unsafeGetTensorImpl()->version_counter().current_version();
   auto new_data_copy = at::Tensor(new_data.getIntrusivePtr()->shallow_copy_and_detach());
   data_ = std::move(new_data_copy);
-  data_.set_version_counter(saved_version_);
+  data_.unsafeGetTensorImpl()->set_version_counter(saved_version_);
 }
 
 void Variable::Impl::release_resources() {

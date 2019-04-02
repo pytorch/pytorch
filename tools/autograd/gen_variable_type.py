@@ -202,12 +202,12 @@ ${fn}_history(${differentiable_outputs}, grad_fn);
 """)
 
 SAVE_VERSION = CodeTemplate("""\
-uint32_t ${tensor_name}_saved_version = ${tensor_name}.current_version();
+uint32_t ${tensor_name}_saved_version = as_variable_ref(${tensor_name}).current_version();
 """)
 
 CHECK_VERSION = CodeTemplate("""\
 if (at::VersionUpdateMode::is_enabled())
-  AT_ASSERT(${tensor_name}.current_version() > ${tensor_name}_saved_version);
+  AT_ASSERT(as_variable_ref(${tensor_name}).current_version() > ${tensor_name}_saved_version);
 """)
 
 CONDITIONAL = CodeTemplate("""\

@@ -196,8 +196,7 @@ if (${name}.defined()) {
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 
 VERSION_INCREMENT_TEMPLATE = CodeTemplate("""\
-if (at::VersionUpdateMode::is_enabled()) ${tensor_name}.bump_version();
-// ${tensor_name}.bump_version();
+if (at::VersionUpdateMode::is_enabled()) ${tensor_name}.unsafeGetTensorImpl()->bump_version();
 """)
 
 

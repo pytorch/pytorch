@@ -99,7 +99,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 orig = x_tensor[x_idx].item()
                 # We don't want in-place changes to `x_tensor` to update its version
                 # counter, because call sites of `get_numerical_jacobian(...)` expects
-                # `input`'s version counter(s) to be preserved by the function call.
+                # `input`'s version counter(s) to not be changed by the function call.
                 with torch.no_grad(update_version=False):
                     x_tensor[x_idx] = orig - eps
                 outa = fn(input).clone()

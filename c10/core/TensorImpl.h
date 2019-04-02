@@ -152,8 +152,7 @@ struct C10_API AutogradMetaInterface {
 //
 // Version counters are not shared when:
 //
-// 1. We replace a `Variable`'s underlying `Tensor` by calling `set_data(...)`,
-// 2. We create a new `Variable` from a `Tensor` by calling `make_variable(...)`.
+// 1. We replace a `Variable`'s underlying `Tensor` by calling `set_data(...)`.
 struct C10_API VariableVersion {
  public:
   // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
