@@ -2486,6 +2486,45 @@
         - int64_t to
 ]]
 [[
+  name: _th_multinomial_alias_setup
+  cname: multinomialAliasSetup
+  variants:
+    - function
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  return: argument 1,2
+  arguments:
+    - arg: THTensor* probs
+    - arg: THIndexTensor* J
+      output: True
+    - arg: THTensor* q
+      output: True
+]]
+[[
+  name: _th_multinomial_alias_draw
+  cname: multinomialAliasDraw
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - function
+  return: argument 0
+  arguments:
+    - arg: THIndexTensor* result
+      output: True
+    - arg: THGenerator* generator
+      default: nullptr
+      kwarg_only: True
+    - THTensor* q
+    - THIndexTensor* J
+    - long num_samples
+]]
+[[
   name: _th_multinomial
   cname: multinomial
   types:

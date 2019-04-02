@@ -22,6 +22,8 @@ from .functional import *
 from .serialization import save as save, load as load
 from .autograd import no_grad as no_grad, enable_grad as enable_grad, \
     set_grad_enabled as set_grad_enabled
+from . import cuda as cuda
+from . import optim as optim
 
 class dtype: ...
 
@@ -35,7 +37,14 @@ _int = builtins.int
 _float = builtins.float
 
 class device:
-   def __init__(self, device: Union[_int, str, None]=None) -> None: ...
+    type: str
+    index: _int
+
+    @overload
+    def __init__(self, device: Union[_int, str]) -> None: ...
+
+    @overload
+    def __init__(self, type: str, index: _int) -> None: ...
 
 class Generator: ...
 
