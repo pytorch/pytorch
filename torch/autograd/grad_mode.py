@@ -22,7 +22,7 @@ class no_grad(object):
             If ``False``, in-place operations on any tensor within the context will
             not update the tensor's version counter, which is useful when we are
             aware of the possibly incorrect gradient calculations, but still want to
-            prevent version update from happening. E.g., `get_numerical_jacobian`
+            prevent version update from happening. E.g., `get_numerical_jacobian(...)`
             makes small finite changes to the input tensors of a graph and forward
             them through the graph to compute numerical gradients, before restoring
             the input tensors to their original values. It wants the original version
