@@ -1015,7 +1015,7 @@
 - func: full_like(Tensor self, Scalar fill_value, *, ScalarType dtype, Layout layout, Device device, bool pin_memory) -> Tensor
   matches_jit_signature: True
 
-- func: from_file(str filename, *, bool? shared=None, int? size=0, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   matches_jit_signature: True
   dispatch:
     CPU: from_file
