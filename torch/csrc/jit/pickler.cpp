@@ -338,8 +338,15 @@ OpCode Unpickler::readInstruction() {
       // Look back to see if the last opcode was an IntList class
       if (last_opcode_ == OpCode::NEWOBJ) {
         // It's a list specialization, the enum ID of which is on the stack
-        PicklerClass cls =
-            static_cast<PicklerClass>(uint8_t(stack_.back().toInt()));
+        AT_CHECK(
+            stack_.size() > 0,
+            "Unpickler found an empty stack when it expected a value");
+        auto value = stack_.back().toInt();
+        AT_CHECK(
+            value >= 0 && value <= std::numeric_limits<uint8_t>::max(),
+            "Unpickler could not decode PicklerClass for ",
+            value);
+        PicklerClass cls = static_cast<PicklerClass>(uint8_t(value));
         if (cls == PicklerClass::INTLIST) {
           stack_.emplace_back(std::vector<int64_t>());
         }
