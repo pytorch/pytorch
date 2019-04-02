@@ -35,6 +35,14 @@ install_official_git_client: &install_official_git_client
   command: |
     set -ex
 
+    sudo systemctl stop apt-daily.service
+    sudo systemctl kill --kill-who=all apt-daily.service
+
+    while ! (systemctl list-units --all apt-daily.service | fgrep -q dead)
+    do
+      sleep 1;
+    done
+
     sudo killall apt-get || true
     sudo rm /var/lib/apt/lists/lock || true
     sudo rm /var/cache/apt/archives/lock || true
