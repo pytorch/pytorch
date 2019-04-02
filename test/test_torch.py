@@ -3885,8 +3885,10 @@ class _TestTorchMixin(object):
 
     def test_choice(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in devices:
-            x = torch.arange(100, device=device)
+        x1 = torch.arange(100)
+        x2 = torch.arange(200).view(100, 2)
+        for x, device in zip([x1, x1, x2, x2], 2 * devices):
+            x = x.to(device)
             w = torch.arange(100, device=device).float()
 
             ############## Reproducibility ##############
@@ -3925,27 +3927,27 @@ class _TestTorchMixin(object):
             # This setup only works for sampling WITH replacement
             w = torch.cat((torch.ones(1), torch.zeros(99))).float().to(device)
             res = torch.choice(x, w, replace=True, k=25)
-            self.assertTrue((res == 0).all())
+            self.assertTrue((res == res[0]).all())
 
             # 2 - Squashed weights
             w = torch.cat((torch.ones(25), torch.zeros(75))).float().to(device)
             res = torch.choice(x, w, replace=True, k=25)
-            self.assertTrue((res < 25).all())
+            self.assertTrue((res.view(-1) < 25 * x.dim()).all())
 
             w = torch.cat((torch.ones(25), torch.zeros(75))).float().to(device)
             res = torch.choice(x, w, replace=False, k=25)
-            self.assertTrue((res < 25).all())
+            self.assertTrue((res.view(-1) < 25 * x.dim()).all())
 
             ############### Correctness ################
 
             # 1 - UNIFORM Sampling WITHOUT replacement - Different values
             res = torch.choice(x, replace=False, k=95)
-            self.assertTrue((res[:, None] == res).sum() == 95)
+            self.assertTrue((res == res.unsqueeze(1)).sum() == 95 * x.dim())
 
             # 1 - WEIGHTED Sampling WITHOUT replacement - Different values
             w = torch.arange(100).float().to(device)
             res = torch.choice(x, w, replace=False, k=95)
-            self.assertTrue((res[:, None] == res).sum() == 95)
+            self.assertTrue((res == res.unsqueeze(1)).sum() == 95 * x.dim())
 
     def test_random(self):
         # This test is flaky with p<=(2/(ub-lb))^200=6e-36

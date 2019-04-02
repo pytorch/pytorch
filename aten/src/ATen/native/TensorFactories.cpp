@@ -863,7 +863,7 @@ Tensor sampling_with_replacement(
   const Tensor& weights,
   int64_t k
 ){
-  int n = x.numel();
+  int n = x.size(0);
   Tensor samples;
 
   if (weights.numel() == 0){
