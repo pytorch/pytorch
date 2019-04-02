@@ -8,12 +8,14 @@ Publishing models
 Pytorch Hub supports publishing pre-trained models(model definitions and pre-trained weights)
 to a github repository by adding a simple ``hubconf.py`` file;
 
-``hubconf.py`` can have multiple entrypoints. Each entrypoint is defined as a python function with
-the following signature.
+``hubconf.py`` can have multiple entrypoints. Each entrypoint is a pre-trained model you want to
+publish, defined as a python function with the following signature.
 
 ::
 
     def entrypoint_name(pretrained=False, *args, **kwargs):
+        # pretrained is required keyword argument.
+        # args & kwargs are optional, for models which take positional/keyword arguments.
         ...
 
 How to implement an entrypoint?
@@ -24,62 +26,64 @@ for ``resnet18`` model. You can see a full script in
 
 ::
 
-    dependencies = ['torch', 'math']
+    dependencies = ['torch']
 
-    def resnet18(pretrained=False, *args, **kwargs):
+    def resnet18(pretrained=False, **kwargs):
         """
         Resnet18 model
-        pretrained (bool): a recommended kwargs for all entrypoints
-        args & kwargs are arguments for the function
+        pretrained (bool): a required kwargs for all entrypoints
+        kwargs are arguments for the function
         """
-        ######## Call the model in the repo ###############
+        # Call the model in the repo
         from torchvision.models.resnet import resnet18 as _resnet18
-        model = _resnet18(*args, **kwargs)
-        ######## End of call ##############################
-        # The following logic is REQUIRED
-        if pretrained:
-            # For weights saved in local repo
-            # model.load_state_dict(<path_to_saved_file>)
-
-            # For weights saved elsewhere
-            checkpoint = 'https://download.pytorch.org/models/resnet18-5c106cde.pth'
-            model.load_state_dict(model_zoo.load_url(checkpoint, progress=False))
+        model = _resnet18(pretrained=pretrained, **kwargs)
         return model
 
+
 - ``dependencies`` variable is a **list** of package names required to to run the model.
-- Pretrained weights can either be stored local in the github repo, or loadable by
-  ``model_zoo.load()``.
 - ``pretrained`` controls whether to load the pre-trained weights provided by repo owners.
 - ``args`` and ``kwargs`` are passed along to the real callable function.
-- Docstring of the function works as a help message, explaining what does the model do and what
-  are the allowed arguments.
+- Docstring of the function works as a help message. It explains what does the model do and what
+  are the allowed positional/keyword arguments. It's highly recommended to add a few examples here.
 - Entrypoint function should **ALWAYS** return a model(nn.module).
+- Pretrained weights can either be stored local in the github repo, or loadable by
+  ``torch.hub.load_state_dict_from_url()``. In the example above ``torchvision.models.resnet.resnet18``
+  handles ``pretrained``, you can also optionally put the following logic in the entrypoint.
+
+::
+    # The following logic is REQUIRED if pretrained is not handled by _resnet18
+    if pretrained:
+        # For checkpoint saved in local repo
+        model.load_state_dict(<path_to_saved_checkpoint>)
+
+        # For checkpoint saved elsewhere
+        checkpoint = 'https://download.pytorch.org/models/resnet18-5c106cde.pth'
+        model.load_state_dict(torch.hub.load_state_dict_from_url(checkpoint, progress=False))
+
+
 
 Important Notice
 ^^^^^^^^^^^^^^^^
 
 - The published models should be at least in a branch/tag. It can't be a random commit.
 
+
 Loading models from Hub
 -----------------------
 
-Users can load the pre-trained models using ``torch.hub.load()`` API.
+Pytorch Hub provides convenient APIs to explore all available models in hub through ``torch.hub.list()``,
+show docstring and examples through ``torch.hub.show()`` and load the pre-trained models using ``torch.hub.load()``
 
 
 .. automodule:: torch.hub
+
+.. autofunction:: list
+
+.. autofunction:: show
+
 .. autofunction:: load
 
-Here's an example loading ``resnet18`` entrypoint from ``pytorch/vision`` repo.
-
-::
-
-    hub_model = hub.load(
-        'pytorch/vision:master', # repo_owner/repo_name:branch
-        'resnet18', # entrypoint
-        1234, # args for callable [not applicable to resnet]
-        pretrained=True) # kwargs for callable
-
-Where are my downloaded model & weights saved?
+Where are my downloaded models saved?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The locations are used in the order of
