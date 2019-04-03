@@ -1,6 +1,7 @@
 #pragma once
 
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/core/dispatch/Dispatcher.h>
@@ -43,4 +44,16 @@ inline void expectDoesntFindKernel(const char* op_name, c10::TensorTypeId dispat
 inline void expectDoesntFindOperator(const char* op_name) {
   auto op = c10::Dispatcher::singleton().findSchema(op_name, "");
   EXPECT_FALSE(op.has_value());
+}
+
+template<class Exception, class Functor>
+inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
+  try {
+    std::forward<Functor>(functor)();
+  } catch (const Exception& e) {
+    EXPECT_THAT(e.what(), testing::HasSubstr(expectMessageContains));
+    return;
+  }
+  ADD_FAILURE() << "Expected to throw exception containing \""
+    << expectMessageContains << "\" but didn't throw";
 }

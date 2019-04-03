@@ -387,7 +387,6 @@ void registerOperator(Operator&& op) {
           ". File a bug to add a case for this operator.\n");
     }
   }
-
   getRegistry().registerOperator(std::move(op));
 }
 
@@ -467,8 +466,6 @@ bool Operator::matches(const Node* node) const {
 
   // too many inputs
   if (!schema().is_vararg() && actuals.size() != formals.size()) {
-    // std::cout << "not all inputs used\n" << input_i << " " << inputs_size <<
-    // "\n";
     return false;
   }
 
