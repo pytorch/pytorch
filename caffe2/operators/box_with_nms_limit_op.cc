@@ -306,7 +306,7 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
       "float nms, "
       "int detections_per_im, "
       "bool soft_nms_enabled, "
-      "string soft_nms_method, "
+      "str soft_nms_method, "
       "float soft_nms_sigma, "
       "float soft_nms_min_score_thres, "
       "bool rotated"
