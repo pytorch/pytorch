@@ -267,27 +267,28 @@ __global__ void DepthwiseConv2dBackpropInputGPUKernelNCHW(
   }
 }
 
-class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext> {
+template <int kernel>
+class DepthwiseConvOp final : public ConvPoolOpBase<CUDAContext> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(CUDAContext);
-  Depthwise3x3ConvOp(const OperatorDef& operator_def, Workspace* ws)
+  DepthwiseConvOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CUDAContext>(operator_def, ws),
         cudnn_wrapper_(&context_) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NCHW,
-        "Depthwise3x3ConvOp only supports NCHW order");
+        "DepthwiseConvOp only supports NCHW order");
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&bias_desc_));
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&top_desc_for_bias_));
   }
 
-  ~Depthwise3x3ConvOp() {
+  ~DepthwiseConvOp() {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(bias_desc_));
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(top_desc_for_bias_));
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
     const Tensor& X = Input(0);
-    auto& filter = Input(1);
+    const Tensor& filter = Input(1);
     const int N = X.dim32(0), C = X.dim32(1);
     CAFFE_ENFORCE_EQ(X.dim(), filter.dim());
     const int M = filter.dim32(0);
@@ -296,8 +297,8 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext> {
     CAFFE_ENFORCE_EQ(C, X.dim32(1));
     CAFFE_ENFORCE_EQ(C, this->group_);
     CAFFE_ENFORCE_GT(this->group_, 1);
-    CAFFE_ENFORCE_EQ(this->kernel_w(), 3);
-    CAFFE_ENFORCE_EQ(this->kernel_h(), 3);
+    CAFFE_ENFORCE_EQ(this->kernel_w(), kernel);
+    CAFFE_ENFORCE_EQ(this->kernel_h(), kernel);
     CAFFE_ENFORCE_EQ(this->stride_h(), this->stride_w());
     auto sizes = ConvPoolOpBase<CUDAContext>::GetOutputSize(X, filter.dim32(0));
     Tensor* Y = Output(0, sizes, at::dtype<float>());
@@ -306,15 +307,15 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext> {
     args.in_rows = X.dim32(2);
     args.in_cols = X.dim32(3);
     args.in_depth = X.dim32(1);
-    args.filter_cols = 3;
-    args.filter_rows = 3;
+    args.filter_cols = kernel;
+    args.filter_rows = kernel;
     args.stride = this->stride_w();
     args.pad_rows = this->pad_t();
     args.pad_cols = this->pad_l();
     args.out_rows = Y->dim32(2);
     args.out_cols = Y->dim32(3);
     args.out_depth = Y->dim32(1);
-    DepthwiseConv2dGPUKernelNCHW<float, 3, 3>
+    DepthwiseConv2dGPUKernelNCHW<float, kernel, kernel>
         <<<CAFFE_GET_BLOCKS(Y->size()),
            CAFFE_CUDA_NUM_THREADS,
            0,
@@ -341,7 +342,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext> {
           M,
           Y->dim32(2),
           Y->dim32(3)));
-      auto& bias = Input(2);
+      const Tensor& bias = Input(2);
       CAFFE_ENFORCE_EQ(bias.dim(), 1);
       CAFFE_ENFORCE_EQ(bias.dim32(0), M);
       CUDNN_ENFORCE(cudnnAddTensor(
@@ -363,10 +364,11 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CUDAContext> {
   cudnnTensorDescriptor_t top_desc_for_bias_;
 };
 
-class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
+template <int kernel>
+class DepthwiseConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(CUDAContext);
-  Depthwise3x3ConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
+  DepthwiseConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : cudnn_wrapper_(&context_),
         ConvPoolOpBase<CUDAContext>(operator_def, ws),
         no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
@@ -375,12 +377,12 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
         "If bias is not present, you should not have 3 grad output.");
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NCHW,
-        "Depthwise3x3ConvGradientOp only supports NCHW order");
+        "DepthwiseConvGradientOp only supports NCHW order");
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&bias_desc_));
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&top_desc_for_bias_));
   }
 
-  ~Depthwise3x3ConvGradientOp() {
+  ~DepthwiseConvGradientOp() {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(bias_desc_));
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(top_desc_for_bias_));
   }
@@ -404,8 +406,8 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
     args.in_rows = X.dim32(2);
     args.in_cols = X.dim32(3);
     args.in_depth = X.dim32(1);
-    args.filter_cols = 3;
-    args.filter_rows = 3;
+    args.filter_cols = kernel;
+    args.filter_rows = kernel;
     args.stride = this->stride_w();
     args.pad_rows = this->pad_t();
     args.pad_cols = this->pad_l();
@@ -420,26 +422,26 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
         X.sizes(),
         at::dtype<float>());
     math::Set<float, CUDAContext>(
-        dfilter->size(), 0, dfilter->mutable_data<float>(), &context_);
-    DepthwiseConv2dBackpropFilterGPUKernelNCHW<float, 3, 3>
+        dfilter->size(), 0, dfilter->template mutable_data<float>(), &context_);
+    DepthwiseConv2dBackpropFilterGPUKernelNCHW<float, kernel, kernel>
         <<<CAFFE_GET_BLOCKS(dY.size()),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context_.cuda_stream()>>>(
             args,
-            dY.data<float>(),
-            X.data<float>(),
-            dfilter->mutable_data<float>(),
+            dY.template data<float>(),
+            X.template data<float>(),
+            dfilter->template mutable_data<float>(),
             dY.size());
-    DepthwiseConv2dBackpropInputGPUKernelNCHW<float, 3, 3>
+    DepthwiseConv2dBackpropInputGPUKernelNCHW<float, kernel, kernel>
         <<<CAFFE_GET_BLOCKS(dX->size()),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context_.cuda_stream()>>>(
             args,
-            dY.data<float>(),
-            filter.data<float>(),
-            dX->mutable_data<float>(),
+            dY.template data<float>(),
+            filter.template data<float>(),
+            dX->template mutable_data<float>(),
             dX->size());
     if (!no_bias_) {
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
@@ -464,10 +466,10 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
           cudnn_wrapper_.inline_cudnn_handle(),
           cudnnTypeWrapper<float>::kOne(),
           top_desc_for_bias_,
-          dY.data<float>(),
+          dY.template data<float>(),
           cudnnTypeWrapper<float>::kZero(),
           bias_desc_,
-          dbias->mutable_data<float>()));
+          dbias->template mutable_data<float>()));
     }
     return true;
   }
@@ -483,10 +485,24 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
   OUTPUT_TAGS(FILTER_GRAD, BIAS_OR_INPUT_GRAD, INPUT_GRAD);
 };
 
+using Depthwise3x3ConvOp = DepthwiseConvOp<3>;
+using Depthwise3x3ConvGradientOp = DepthwiseConvGradientOp<3>;
 REGISTER_CUDA_OPERATOR_WITH_ENGINE(Conv, DEPTHWISE_3x3, Depthwise3x3ConvOp);
 REGISTER_CUDA_OPERATOR_WITH_ENGINE(
     ConvGradient,
     DEPTHWISE_3x3,
     Depthwise3x3ConvGradientOp);
+
+REGISTER_CUDA_OPERATOR_WITH_ENGINE(Conv, DEPTHWISE_5x5, DepthwiseConvOp<5>);
+REGISTER_CUDA_OPERATOR_WITH_ENGINE(
+    ConvGradient,
+    DEPTHWISE_5x5,
+    DepthwiseConvGradientOp<5>);
+
+REGISTER_CUDA_OPERATOR_WITH_ENGINE(Conv, DEPTHWISE_7x7, DepthwiseConvOp<7>);
+REGISTER_CUDA_OPERATOR_WITH_ENGINE(
+    ConvGradient,
+    DEPTHWISE_7x7,
+    DepthwiseConvGradientOp<7>);
 
 } // namespace caffe2
