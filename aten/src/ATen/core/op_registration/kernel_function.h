@@ -40,9 +40,11 @@ namespace detail {
  */
 template<class FuncType, FuncType* kernel_func>
 inline constexpr auto kernel() ->
-// enable_if: only enable it if FuncType is actually a function, but not a stack based KernelFunction.
-guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value,
+// enable_if: only enable it if FuncType is actually a function
+guts::enable_if_t<guts::is_function_type<FuncType>::value,
 decltype(kernel<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>())> {
+  static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+
   return kernel<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>();
 }
 
