@@ -114,20 +114,17 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 # code block, from the caller's perspective this function doesn't change `x_tensor`'s
                 # content and doesn't update its version, which maintains the invariant.
                 torch._C.set_version_update_enabled(False)
-                with torch.no_grad():  # yf225 TODO: do we actually need this?
-                    x_tensor[x_idx] = orig - eps
+                x_tensor[x_idx] = orig - eps
                 torch._C.set_version_update_enabled(True)
                 outa = fn(input).clone()
 
                 torch._C.set_version_update_enabled(False)
-                with torch.no_grad():  # yf225 TODO: do we actually need this?
-                    x_tensor[x_idx] = orig + eps
+                x_tensor[x_idx] = orig + eps
                 torch._C.set_version_update_enabled(True)
                 outb = fn(input).clone()
 
                 torch._C.set_version_update_enabled(False)
-                with torch.no_grad():  # yf225 TODO: do we actually need this?
-                    x_tensor[x_idx] = orig
+                x_tensor[x_idx] = orig
                 torch._C.set_version_update_enabled(True)
 
                 r = (outb - outa) / (2 * eps)
