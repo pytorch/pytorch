@@ -51,6 +51,12 @@ __global__ void GeneratePreNMSUprightBoxesKernel(
     // Loading the anchor a
     // float4 is a struct with float x,y,z,w
     const float4 anchor = d_anchors[a];
+    printf(
+        "[Debug] GeneratePreNMSUprightBoxesKernel d_anchors[a](%f, %f, %f, %f)\n",
+        anchor.x,
+        anchor.z,
+        anchor.y,
+        anchor.w);
     // x1,y1,x2,y2 :coordinates of anchor a, shifted for position (h,w)
     const float shift_w = feat_stride * w;
     float x1 = shift_w + anchor.x;
@@ -121,6 +127,13 @@ __global__ void GeneratePreNMSUprightBoxesKernel(
     d_boxes_keep_flags[out_index] = keep_box;
     d_out_boxes[out_index] = {x1, y1, x2, y2};
 
+    printf(
+        "[Debug] GeneratePreNMSUprightBoxesKernel (%f, %f, %f, %f)\n",
+        x1,
+        y1,
+        x2,
+        y2);
+
     // d_inout_scores size: (num_images,KA)
     if (!keep_box)
       d_inout_scores[image_index * KA + ibox] = FLT_MIN; // for NMS
@@ -174,6 +187,13 @@ __global__ void GeneratePreNMSRotatedBoxesKernel(
     // RotatedBox in [ctr_x, ctr_y, w, h, angle] format.
     // Zero shift for width, height and angle.
     RotatedBox box = d_anchors[a];
+    printf(
+        "[Debug] GeneratePreNMSRotatedBoxesKernel d_anchors[a](%f, %f, %f, %f, %f)\n",
+        box.x_ctr,
+        box.y_ctr,
+        box.w,
+        box.h,
+        box.a);
     box.x_ctr += feat_stride * w; // x_ctr shifted for w
     box.y_ctr += feat_stride * h; // y_ctr shifted for h
 
@@ -260,6 +280,14 @@ __global__ void GeneratePreNMSRotatedBoxesKernel(
     const int out_index = image_index * prenms_nboxes + ibox;
     d_boxes_keep_flags[out_index] = keep_box;
     d_out_boxes[out_index] = box;
+
+    printf(
+        "[Debug] GeneratePreNMSRotatedBoxesKernel (%f, %f, %f, %f, %f)\n",
+        box.x_ctr,
+        box.y_ctr,
+        box.w,
+        box.h,
+        box.a);
 
     // d_inout_scores size: (num_images,KA)
     if (!keep_box) {
@@ -669,5 +697,4 @@ REGISTER_CUDA_OPERATOR(GenerateProposals, GenerateProposalsOp<CUDAContext>);
 
 C10_REGISTER_CAFFE2_OPERATOR_CUDA(
     GenerateProposals,
-    caffe2::GenerateProposalsOp<caffe2::CUDAContext>
-);
+    caffe2::GenerateProposalsOp<caffe2::CUDAContext>);

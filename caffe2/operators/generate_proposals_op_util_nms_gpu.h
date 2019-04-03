@@ -33,7 +33,11 @@ CAFFE2_API void nms_gpu_upright(
     TensorCPU& host_delete_mask,
     CUDAContext* context);
 
-struct RotatedBox {
+struct
+    // #ifndef __HIP_PLATFORM_HCC__
+    //     __align__(16)
+    // #endif
+    RotatedBox {
   float x_ctr, y_ctr, w, h, a;
 };
 

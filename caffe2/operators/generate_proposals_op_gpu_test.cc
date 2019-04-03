@@ -232,9 +232,9 @@ TEST(GenerateProposalsTest, TestRealDownSampledGPU) {
           .maxCoeff(),
       0,
       1e-4);
+  CAFFE_ENFORCE(0 == 1);
 }
 
-#if defined(CV_MAJOR_VERSION) && (CV_MAJOR_VERSION >= 3)
 TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0GPU) {
   // Similar to TestRealDownSampledGPU but for rotated boxes with angle info.
   if (!HasCudaGPU())
@@ -345,7 +345,8 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0GPU) {
   // Results should exactly be the same as TestRealDownSampledGPU since
   // angle = 0 for all boxes and clip_angle_thresh > 0 (which means
   // all horizontal boxes will be clipped to maintain backward compatibility).
-  ERMatXf rois_gt_xyxy(18, 5);
+  int num_rows = 18;
+  ERMatXf rois_gt_xyxy(num_rows, 5);
   rois_gt_xyxy << 0, 0, 0, 79, 59, 0, 0, 5.0005703f, 51.6324f, 42.6950f, 0,
       24.13628387f, 7.51243401f, 79, 45.0663f, 0, 0, 7.50924301f, 67.4779f,
       45.0336, 0, 0, 23.09477997f, 50.61448669f, 59, 0, 0, 39.52141571f,
@@ -356,16 +357,14 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0GPU) {
       50.61448669f, 59, 1, 0, 39.52141571f, 51.44710541f, 59, 1, 23.57396317f,
       29.98791885f, 79, 59, 1, 0, 41.90219116f, 79, 59, 1, 0, 23.30098343f,
       78.2413f, 58.7287f;
-  ERMatXf rois_gt(rois_gt_xyxy.rows(), 6);
+  ERMatXf rois_gt(num_rows, 6);
   // Batch ID
-  rois_gt.block(0, 0, rois_gt.rows(), 1) =
-      rois_gt_xyxy.block(0, 0, rois_gt.rows(), 0);
+  rois_gt.block(0, 0, num_rows, 1) = rois_gt_xyxy.block(0, 0, num_rows, 1);
   // rois_gt in [x_ctr, y_ctr, w, h] format
-  rois_gt.block(0, 1, rois_gt.rows(), 4) = utils::bbox_xyxy_to_ctrwh(
-      rois_gt_xyxy.block(0, 1, rois_gt.rows(), 4).array());
+  rois_gt.block(0, 1, num_rows, 4) =
+      utils::bbox_xyxy_to_ctrwh(rois_gt_xyxy.block(0, 1, num_rows, 4).array());
   // Angle
-  rois_gt.block(0, 5, rois_gt.rows(), 1) =
-      ERMatXf::Constant(rois_gt.rows(), 1, angle);
+  rois_gt.block(0, 5, num_rows, 1) = ERMatXf::Constant(num_rows, 1, angle);
 
   vector<float> rois_probs_gt{2.66913995e-02f,
                               5.44218998e-03f,
@@ -413,7 +412,19 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0GPU) {
   EXPECT_EQ(rois.sizes(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
   auto rois_data =
       Eigen::Map<const ERMatXf>(rois.data<float>(), rois.dim(0), rois.dim(1));
-  EXPECT_NEAR((rois_data.matrix() - rois_gt).cwiseAbs().maxCoeff(), 0, 1e-4);
+
+  // if ((rois_data.matrix() - rois_gt).cwiseAbs().maxCoeff() < 1.0)
+  {
+    //   google::InitGoogleLogging("TestRealDownSampledRotatedAngle0GPU");
+    printf("[Debug] logging from TestRealDownSampledRotatedAngle0GPU\n");
+    LOG(ERROR) << "[Debug] Exception from TestRealDownSampledRotatedAngle0GPU:";
+    LOG(ERROR) << "rois_data.matrix():";
+    LOG(ERROR) << rois_data.matrix();
+    LOG(ERROR) << "rois_gt:";
+    LOG(ERROR) << rois_gt;
+  }
+  // DEBUG Jenkins
+  // EXPECT_NEAR((rois_data.matrix() - rois_gt).cwiseAbs().maxCoeff(), 0, 1e-4);
 
   // test rois_probs
   Blob* rois_probs_blob = ws.GetBlob("rois_probs");
@@ -425,18 +436,35 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0GPU) {
       rois_probs.sizes(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
   auto rois_probs_data =
       ConstEigenVectorArrayMap<float>(rois_probs.data<float>(), rois.dim(0));
+
+  // if ((rois_probs_data.matrix() - utils::AsEArrXt(rois_probs_gt).matrix())
+  //         .cwiseAbs()
+  //         .maxCoeff() < 1e-3)
+  {
+    LOG(ERROR) << "[Debug] TestRealDownSampledRotatedAngle0GPU:";
+    LOG(ERROR) << "rois_probs_data.matrix():";
+    LOG(ERROR) << rois_probs_data.matrix();
+    LOG(ERROR) << "utils::AsEArrXt(rois_probs_gt).matrix():";
+    LOG(ERROR) << utils::AsEArrXt(rois_probs_gt).matrix();
+  }
   EXPECT_NEAR(
       (rois_probs_data.matrix() - utils::AsEArrXt(rois_probs_gt).matrix())
           .cwiseAbs()
           .maxCoeff(),
       0,
       1e-4);
+  CAFFE_ENFORCE(0 == 1);
 }
 
 TEST(GenerateProposalsTest, TestRealDownSampledRotatedGPU) {
   // Similar to TestRealDownSampledGPU but for rotated boxes with angle info.
   if (!HasCudaGPU())
     return;
+
+#define TEST_FAKE_ROTATED_KERNEL
+#ifdef TEST_FAKE_ROTATED_KERNEL
+  return;
+#endif
 
   const float angle = 45.0;
   const float delta_angle = 0.174533; // 0.174533 radians -> 10 degrees
@@ -541,33 +569,26 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedGPU) {
   im_info.insert(im_info.begin(), im_info.begin(), im_info.end());
 
   ERMatXf rois_gt(26, 6);
-  rois_gt <<
-      0, 6.55346, 25.3227, 253.447, 291.446, expected_angle,
-      0, 55.3932, 33.3369, 253.731, 289.158, expected_angle,
-      0, 6.48163, 24.3478, 92.3015, 38.6944, expected_angle,
-      0, 70.3089, 26.7894, 92.3453, 38.5539, expected_angle,
-      0, 22.3067, 26.7714, 92.3424, 38.5243, expected_angle,
-      0, 54.084, 26.8413, 92.3938, 38.798, expected_angle,
-      0, 38.2894, 26.798, 92.3318, 38.4873, expected_angle,
-      0, 5.33962, 42.2077, 92.5497, 38.2259, expected_angle,
-      0, 6.36709, 58.24, 92.16, 37.4372, expected_angle,
-      0, 69.65, 48.6713, 92.1521, 37.3668, expected_angle,
-      0, 20.4147, 44.4783, 91.7111, 34.0295, expected_angle,
-      0, 33.079, 41.5149, 92.3244, 36.4278, expected_angle,
-      0, 41.8235, 37.291, 90.2815, 34.872, expected_angle,
-      1, 6.55346, 25.3227, 253.447, 291.446, expected_angle,
-      1, 55.3932, 33.3369, 253.731, 289.158, expected_angle,
-      1, 6.48163, 24.3478, 92.3015, 38.6944, expected_angle,
-      1, 70.3089, 26.7894, 92.3453, 38.5539, expected_angle,
-      1, 22.3067, 26.7714, 92.3424, 38.5243, expected_angle,
-      1, 54.084, 26.8413, 92.3938, 38.798, expected_angle,
-      1, 38.2894, 26.798, 92.3318, 38.4873, expected_angle,
-      1, 5.33962, 42.2077, 92.5497, 38.2259, expected_angle,
-      1, 6.36709, 58.24, 92.16, 37.4372, expected_angle,
-      1, 69.65, 48.6713, 92.1521, 37.3668, expected_angle,
-      1, 20.4147, 44.4783, 91.7111, 34.0295, expected_angle,
-      1, 33.079, 41.5149, 92.3244, 36.4278, expected_angle,
-      1, 41.8235, 37.291, 90.2815, 34.872, expected_angle;
+  rois_gt << 0, 6.55346, 25.3227, 253.447, 291.446, expected_angle, 0, 55.3932,
+      33.3369, 253.731, 289.158, expected_angle, 0, 6.48163, 24.3478, 92.3015,
+      38.6944, expected_angle, 0, 70.3089, 26.7894, 92.3453, 38.5539,
+      expected_angle, 0, 22.3067, 26.7714, 92.3424, 38.5243, expected_angle, 0,
+      54.084, 26.8413, 92.3938, 38.798, expected_angle, 0, 38.2894, 26.798,
+      92.3318, 38.4873, expected_angle, 0, 5.33962, 42.2077, 92.5497, 38.2259,
+      expected_angle, 0, 6.36709, 58.24, 92.16, 37.4372, expected_angle, 0,
+      69.65, 48.6713, 92.1521, 37.3668, expected_angle, 0, 20.4147, 44.4783,
+      91.7111, 34.0295, expected_angle, 0, 33.079, 41.5149, 92.3244, 36.4278,
+      expected_angle, 0, 41.8235, 37.291, 90.2815, 34.872, expected_angle, 1,
+      6.55346, 25.3227, 253.447, 291.446, expected_angle, 1, 55.3932, 33.3369,
+      253.731, 289.158, expected_angle, 1, 6.48163, 24.3478, 92.3015, 38.6944,
+      expected_angle, 1, 70.3089, 26.7894, 92.3453, 38.5539, expected_angle, 1,
+      22.3067, 26.7714, 92.3424, 38.5243, expected_angle, 1, 54.084, 26.8413,
+      92.3938, 38.798, expected_angle, 1, 38.2894, 26.798, 92.3318, 38.4873,
+      expected_angle, 1, 5.33962, 42.2077, 92.5497, 38.2259, expected_angle, 1,
+      6.36709, 58.24, 92.16, 37.4372, expected_angle, 1, 69.65, 48.6713,
+      92.1521, 37.3668, expected_angle, 1, 20.4147, 44.4783, 91.7111, 34.0295,
+      expected_angle, 1, 33.079, 41.5149, 92.3244, 36.4278, expected_angle, 1,
+      41.8235, 37.291, 90.2815, 34.872, expected_angle;
 
   vector<float> rois_probs_gt{2.66913995e-02f,
                               5.621e-03f,
@@ -637,6 +658,5 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedGPU) {
       0,
       1e-4);
 }
-#endif // CV_MAJOR_VERSION >= 3
 
 } // namespace caffe2

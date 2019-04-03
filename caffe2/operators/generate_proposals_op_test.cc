@@ -512,22 +512,24 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
   // Results should exactly be the same as TestRealDownSampled since
   // angle = 0 for all boxes and clip_angle_thresh > 0 (which means
   // all horizontal boxes will be clipped to maintain backward compatibility).
-  ERMatXf rois_gt_xyxy(9, 5);
+  int num_rows = 9;
+  ERMatXf rois_gt_xyxy(num_rows, 5);
   rois_gt_xyxy << 0, 0, 0, 79, 59, 0, 0, 5.0005703f, 51.6324f, 42.6950f, 0,
       24.13628387f, 7.51243401f, 79, 45.0663f, 0, 0, 7.50924301f, 67.4779f,
       45.0336, 0, 0, 23.09477997f, 50.61448669f, 59, 0, 0, 39.52141571f,
       51.44710541f, 59, 0, 23.57396317f, 29.98791885f, 79, 59, 0, 0,
       41.90219116f, 79, 59, 0, 0, 23.30098343f, 78.2413f, 58.7287f;
-  ERMatXf rois_gt(rois_gt_xyxy.rows(), 6);
+  ERMatXf rois_gt(num_rows, 6);
+
   // Batch ID
   rois_gt.block(0, 0, rois_gt.rows(), 1) =
       rois_gt_xyxy.block(0, 0, rois_gt.rows(), 1);
+
   // rois_gt in [x_ctr, y_ctr, w, h] format
-  rois_gt.block(0, 1, rois_gt.rows(), 4) = utils::bbox_xyxy_to_ctrwh(
-      rois_gt_xyxy.block(0, 1, rois_gt.rows(), 4).array());
+  rois_gt.block(0, 1, num_rows, 4) =
+      utils::bbox_xyxy_to_ctrwh(rois_gt_xyxy.block(0, 1, num_rows, 4).array());
   // Angle
-  rois_gt.block(0, 5, rois_gt.rows(), 1) =
-      ERMatXf::Constant(rois_gt.rows(), 1, angle);
+  rois_gt.block(0, 5, num_rows, 1) = ERMatXf::Constant(num_rows, 1, angle);
   vector<float> rois_probs_gt{2.66913995e-02f,
                               5.44218998e-03f,
                               1.20544003e-03f,

@@ -17,6 +17,9 @@ struct
 #define BOXES_PER_THREAD (8 * sizeof(int))
 #define CHUNK_SIZE 2000
 
+#define ENABLE_FAKE_ROTATED_KERNEL_DISABLED
+#define ENABLE_PSEUDO_ROTATED_KERNEL_DISABLED
+
 const dim3 CAFFE_CUDA_NUM_THREADS_2D = {
     static_cast<unsigned int>(CAFFE_CUDA_NUM_THREADS_2D_DIMX),
     static_cast<unsigned int>(CAFFE_CUDA_NUM_THREADS_2D_DIMY),
@@ -82,6 +85,14 @@ __launch_bounds__(
           const float w = fdimf(xx2 + 1.0f, xx1);
           const float h = fdimf(yy2 + 1.0f, yy1);
           const float intersection = w * h;
+
+          printf(
+              "[Debug] NMSKernel: inter(%f,%f,%f,%f)=%f\n",
+              xx1,
+              yy1,
+              xx2,
+              yy2,
+              intersection);
 
           // Testing for a/b > t
           // eq with a > b*t (b is !=0)
@@ -221,6 +232,21 @@ __device__ __forceinline__ void get_rotated_vertices(
     pts[i].y = cosTheta * y[i] - sinTheta * x[i] + box->y_ctr;
   }
 }
+
+#ifdef ENABLE_PSEUDO_ROTATED_KERNEL
+__device__ __forceinline__ void pseudo_get_rotated_vertices(
+    const RotatedBox* box,
+    Point* pts) {
+  pts[0].x = box->x_ctr - (box->w - 1.0) / 2;
+  pts[0].y = box->y_ctr - (box->h - 1.0) / 2;
+  pts[1].x = box->x_ctr - (box->w - 1.0) / 2;
+  pts[1].y = box->y_ctr + (box->h - 1.0) / 2;
+  pts[2].x = box->x_ctr + (box->w - 1.0) / 2;
+  pts[2].y = box->y_ctr + (box->h - 1.0) / 2;
+  pts[3].x = box->x_ctr + (box->w - 1.0) / 2;
+  pts[3].y = box->y_ctr - (box->h - 1.0) / 2;
+}
+#endif
 
 __device__ __forceinline__ bool is_point_within_rect(
     const Point* pt,
@@ -385,6 +411,199 @@ __device__ __forceinline__ float polygon_area(const Point* pts, int count) {
   return area;
 }
 
+#ifdef ENABLE_FAKE_ROTATED_KERNEL
+__launch_bounds__(
+    CAFFE_CUDA_NUM_THREADS_2D_DIMX* CAFFE_CUDA_NUM_THREADS_2D_DIMY,
+    4) __global__
+    void FakeRotatedNMSKernel(
+        const RotatedBox* d_desc_sorted_boxes,
+        const int nboxes,
+        const float thresh,
+        const int mask_ld,
+        int* d_delete_mask) {
+  // Storing boxes used by this CUDA block in the shared memory
+  // __shared__ RotatedBox shared_i_boxes[CAFFE_CUDA_NUM_THREADS_2D_DIMX];
+  // Use Box instead of RotatedBox here [DEBUG]
+  __shared__ Box shared_i_boxes[CAFFE_CUDA_NUM_THREADS_2D_DIMX];
+  // Same thing with areas
+  __shared__ float shared_i_areas[CAFFE_CUDA_NUM_THREADS_2D_DIMX];
+  // The condition of the for loop is common to all threads in the block
+  // This is necessary to be able to call __syncthreads() inside of the loop
+  for (int i_block_offset = blockIdx.x * blockDim.x; i_block_offset < nboxes;
+       i_block_offset += blockDim.x * gridDim.x) {
+    const int i_to_load = i_block_offset + threadIdx.x;
+    if (i_to_load < nboxes) {
+      // One 1D line load the boxes for x-dimension
+      if (threadIdx.y == 0) {
+        const RotatedBox box = d_desc_sorted_boxes[i_to_load];
+        shared_i_areas[threadIdx.x] = box.w * box.h;
+        Box b;
+        b.x1 = box.x_ctr - (box.w - 1.0) / 2;
+        b.x2 = box.x_ctr + (box.w - 1.0) / 2;
+        b.y1 = box.y_ctr - (box.h - 1.0) / 2;
+        b.y2 = box.y_ctr + (box.h - 1.0) / 2;
+        shared_i_boxes[threadIdx.x] = b;
+      }
+    }
+    __syncthreads();
+    const int i = i_block_offset + threadIdx.x;
+    for (int j_thread_offset =
+             BOXES_PER_THREAD * (blockIdx.y * blockDim.y + threadIdx.y);
+         j_thread_offset < nboxes;
+         j_thread_offset += BOXES_PER_THREAD * blockDim.y * gridDim.y) {
+      // Note : We can do everything using multiplication,
+      // and use fp16 - we are comparing against a low precision
+      // threshold
+      int above_thresh = 0;
+      bool valid = false;
+      for (int ib = 0; ib < BOXES_PER_THREAD; ++ib) {
+        // This thread will compare Box i and Box j
+        const int j = j_thread_offset + ib;
+        if (i < j && i < nboxes && j < nboxes) {
+          valid = true;
+          const RotatedBox j_box = d_desc_sorted_boxes[j];
+          const Box i_box = shared_i_boxes[threadIdx.x];
+          const float j_area = j_box.w * j_box.h;
+          const float i_area = shared_i_areas[threadIdx.x];
+          // The following code will not be valid with empty boxes
+          if (i_area == 0.0f || j_area == 0.0f)
+            continue;
+          const float xx1 = fmaxf(i_box.x1, j_box.x_ctr - (j_box.w - 1.0) / 2);
+          const float yy1 = fmaxf(i_box.y1, j_box.y_ctr - (j_box.h - 1.0) / 2);
+          const float xx2 = fminf(i_box.x2, j_box.x_ctr + (j_box.w - 1.0) / 2);
+          const float yy2 = fminf(i_box.y2, j_box.y_ctr + (j_box.h - 1.0) / 2);
+
+          // fdimf computes the positive difference between xx2+1 and xx1
+          const float w = fdimf(xx2 + 1.0f, xx1);
+          const float h = fdimf(yy2 + 1.0f, yy1);
+          const float intersection = w * h;
+
+          printf(
+              "[Debug] FakeRotatedNMSKernel: inter(%f,%f,%f,%f)=%f\n",
+              xx1,
+              yy1,
+              xx2,
+              yy2,
+              intersection);
+
+          // Testing for a/b > t
+          // eq with a > b*t (b is !=0)
+          // avoiding divisions
+          const float a = intersection;
+          const float b = i_area + j_area - intersection;
+          const float bt = b * thresh;
+          // eq. to if ovr > thresh
+          if (a > bt) {
+            // we have score[j] <= score[i]
+            above_thresh |= (1U << ib);
+          }
+        }
+      }
+      if (valid)
+        d_delete_mask[i * mask_ld + j_thread_offset / BOXES_PER_THREAD] =
+            above_thresh;
+    }
+    __syncthreads(); // making sure everyone is done reading smem
+  }
+}
+#endif
+
+#ifdef ENABLE_PSEUDO_ROTATED_KERNEL
+__launch_bounds__(
+    CAFFE_CUDA_NUM_THREADS_2D_DIMX* CAFFE_CUDA_NUM_THREADS_2D_DIMY,
+    4) __global__
+    void PseudoRotatedNMSKernel(
+        const RotatedBox* d_desc_sorted_boxes,
+        const int nboxes,
+        const float thresh,
+        const int mask_ld,
+        int* d_delete_mask) {
+  // Storing box areas used by this CUDA block in the shared memory
+  __shared__ float shared_i_areas[CAFFE_CUDA_NUM_THREADS_2D_DIMX];
+  // Same thing with vertices of boxes
+  __shared__ Point shared_i_pts[CAFFE_CUDA_NUM_THREADS_2D_DIMX * 4];
+
+  // The condition of the for loop is common to all threads in the block
+  // This is necessary to be able to call __syncthreads() inside of the loop
+  for (int i_block_offset = blockIdx.x * blockDim.x; i_block_offset < nboxes;
+       i_block_offset += blockDim.x * gridDim.x) {
+    const int i_to_load = i_block_offset + threadIdx.x;
+    if (i_to_load < nboxes) {
+      // One 1D line load the boxes for x-dimension
+      if (threadIdx.y == 0) {
+        const RotatedBox box = d_desc_sorted_boxes[i_to_load];
+        shared_i_areas[threadIdx.x] = box.w * box.h;
+        // Here, 4 corresponds to 4 vertices of the rotated box.
+        pseudo_get_rotated_vertices(&box, &shared_i_pts[threadIdx.x * 4]);
+      }
+    }
+
+    __syncthreads();
+
+    Point intersection_pts[MAX_INTERSECTION_PTS];
+    Point j_pts[4];
+    const int i = i_block_offset + threadIdx.x;
+    for (int j_thread_offset =
+             BOXES_PER_THREAD * (blockIdx.y * blockDim.y + threadIdx.y);
+         j_thread_offset < nboxes;
+         j_thread_offset += BOXES_PER_THREAD * blockDim.y * gridDim.y) {
+      int above_thresh = 0;
+      bool valid = false;
+      for (int ib = 0; ib < BOXES_PER_THREAD; ++ib) {
+        // This thread will compare Box i and Box j
+        const int j = j_thread_offset + ib;
+        if (i < j && i < nboxes && j < nboxes) {
+          valid = true;
+          const RotatedBox j_box = d_desc_sorted_boxes[j];
+          const float j_area = j_box.w * j_box.h;
+          const float i_area = shared_i_areas[threadIdx.x];
+          // The following code will not be valid with empty boxes
+          if (i_area == 0.0f || j_area == 0.0f) {
+            continue;
+          }
+
+          const Point* i_pts = &shared_i_pts[threadIdx.x * 4];
+          pseudo_get_rotated_vertices(&j_box, j_pts);
+
+          // int count = get_intersection_points(i_pts, j_pts,
+          // intersection_pts);
+
+          // reorder_points(intersection_pts, count);
+          // const float intersection = polygon_area(intersection_pts, count);
+          const float xx1 = fmaxf(i_pts[0].x, j_pts[0].x);
+          const float yy1 = fmaxf(i_pts[0].y, j_pts[0].y);
+          const float xx2 = fminf(i_pts[2].x, j_pts[2].x);
+          const float yy2 = fminf(i_pts[2].y, j_pts[2].y);
+
+          // fdimf computes the positive difference between xx2+1 and xx1
+          const float w = fdimf(xx2 + 1.0f, xx1);
+          const float h = fdimf(yy2 + 1.0f, yy1);
+          const float intersection = w * h;
+
+          printf("[Debug] PseudoRotatedNMSKernel: inter=%f\n", intersection);
+
+          // Testing for a/b > t
+          // eq with a > b*t (b is !=0)
+          // avoiding divisions
+          const float a = intersection;
+          const float b = i_area + j_area - intersection;
+          const float bt = b * thresh;
+          // eq. to if ovr > thresh
+          if (a > bt) {
+            // we have score[j] <= score[i]
+            above_thresh |= (1U << ib);
+          }
+        }
+      }
+      if (valid)
+        d_delete_mask[i * mask_ld + j_thread_offset / BOXES_PER_THREAD] =
+            above_thresh;
+    }
+    __syncthreads(); // making sure everyone is done reading smem
+  }
+}
+#endif
+
 __launch_bounds__(
     CAFFE_CUDA_NUM_THREADS_2D_DIMX* CAFFE_CUDA_NUM_THREADS_2D_DIMY,
     4) __global__
@@ -409,6 +628,7 @@ __launch_bounds__(
       if (threadIdx.y == 0) {
         const RotatedBox box = d_desc_sorted_boxes[i_to_load];
         shared_i_areas[threadIdx.x] = box.w * box.h;
+        // Here, 4 corresponds to 4 vertices of the rotated box.
         get_rotated_vertices(&box, &shared_i_pts[threadIdx.x * 4]);
       }
     }
@@ -443,6 +663,8 @@ __launch_bounds__(
           reorder_points(intersection_pts, count);
           const float intersection = polygon_area(intersection_pts, count);
 
+          printf("[Debug] RotatedNMSKernel: inter=%f\n", intersection);
+
           // Testing for a/b > t
           // eq with a > b*t (b is !=0)
           // avoiding divisions
@@ -463,6 +685,7 @@ __launch_bounds__(
     __syncthreads(); // making sure everyone is done reading smem
   }
 }
+
 } // namespace
 
 void nms_gpu_rotated(
@@ -483,6 +706,17 @@ void nms_gpu_rotated(
       reinterpret_cast<const RotatedBox*>(d_desc_sorted_boxes_float_ptr);
   dev_delete_mask.Resize(N * mask_ld);
   int* d_delete_mask = dev_delete_mask.template mutable_data<int>();
+
+  /*#ifdef ENABLE_FAKE_ROTATED_KERNEL
+    FakeRotatedNMSKernel<<<
+  #endif
+
+  #ifdef ENABLE_PSEUDO_ROTATED_KERNEL
+      PseudoRotatedNMSKernel<<<
+  #endif
+  #ifdef ENABLE_ROTATED_KERNEL
+      RotatedNMSKernel<<<
+  #endif*/
   RotatedNMSKernel<<<
       CAFFE_GET_BLOCKS_2D(N, mask_ld),
       CAFFE_CUDA_NUM_THREADS_2D,
@@ -548,6 +782,12 @@ void nms_gpu_rotated(
       context->cuda_stream());
 
   *h_nkeep = nkeep;
+  // printf("[Debug] nkeep = %d\n", nkeep);
+  // printf("[Debug] h_keep_sorted_list:\n");
+  // for (int i = 0; i < nkeep; i++) {
+  //   printf("[%d]", h_keep_sorted_list[i]);
+  // }
+  // printf("\n");
 }
 
 void nms_gpu(
