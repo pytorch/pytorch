@@ -219,6 +219,15 @@ static int64_t dispatch_to_CLong(const Tensor & self) {
   return self.item<int64_t>();
 }
 
+static bool dispatch_to_Bool(const Tensor & self) {
+  AutoNoGIL no_gil;
+  OptionalDeviceGuard device_guard(device_of(self));
+  if (self.numel() != 1) {
+    throw ValueError("only one element tensors can be converted to Python scalars");
+  }
+  return self.item<bool>();
+}
+
 static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   jit::tracer::warn("Converting a tensor to a Python float", jit::tracer::WARN_PYTHON_DATAFLOW);
@@ -439,6 +448,8 @@ static PyObject * THPVariable_item(PyObject* self, PyObject* args)
     return wrap(dispatch_to_CDouble(self_));
   } else if (self_.is_complex()) {
     return wrap(dispatch_to_CComplexDouble(self_));
+  } else if (self_.scalar_type() == ScalarType::Bool) {
+    return wrap(dispatch_to_Bool(self_));
   } else {
     return wrap(dispatch_to_CLong(self_));
   }

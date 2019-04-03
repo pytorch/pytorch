@@ -209,16 +209,6 @@ void initPythonIRBindings(PyObject* module_) {
             db.dump();
           })
       .def(
-          "propagate_shapes",
-          [](std::shared_ptr<Graph> g,
-             std::vector<at::Tensor> inputs,
-             bool with_grad) {
-            setInputTypes(
-                *g,
-                ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
-            PropagateInputShapes(g);
-          })
-      .def(
           "_export_onnx",
           [](const std::shared_ptr<Graph> g,
              const std::map<std::string, at::Tensor>& initializers,
