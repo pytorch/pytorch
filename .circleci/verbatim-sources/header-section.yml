@@ -55,9 +55,6 @@ setup_linux_system_environment: &setup_linux_system_environment
     sudo apt-get purge -y unattended-upgrades
 
     cat /etc/apt/sources.list
-    sudo sed -i 's#archive.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
-    #sudo sed -i 's#security.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
-    cat /etc/apt/sources.list
 
     ps ax | grep apt
     ps ax | grep dpkg
