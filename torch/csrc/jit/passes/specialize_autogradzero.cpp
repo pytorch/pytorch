@@ -16,8 +16,7 @@ void specializeAutogradZero(Graph& g) {
 
   for (Value* input : g.inputs()) {
     const auto& tp = input->type();
-    if (tp->isSubtypeOf(AutogradZeroTensorType::get()) ||
-        tp->isSubtypeOf(NoneType::get())) {
+    if (tp->isSubtypeOf(AutogradZeroTensorType::get())) {
       state[input] = State::Zero;
     } else if (tp->isSubtypeOf(TensorType::get())) {
       state[input] = State::Nonzero;
