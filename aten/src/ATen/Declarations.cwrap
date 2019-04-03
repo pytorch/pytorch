@@ -111,6 +111,8 @@
 [[
   name: _th_nonzero
   cname: nonzero
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
