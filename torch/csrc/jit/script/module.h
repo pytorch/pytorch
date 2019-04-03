@@ -450,9 +450,7 @@ struct Module {
       AT_ERROR(
           "Attempting to assign submodule '",
           name,
-          "' but it is already a submodule of another ScriptModule '",
-          module->parent_->name(),
-          "'");
+          "' but it is already a submodule of another ScriptModule '", module->parent_->name(), "'");
     }
     module->parent_ = this;
     module->name_ = name;
