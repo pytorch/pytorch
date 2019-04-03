@@ -1,13 +1,9 @@
 import torch
 import torch.jit
-import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
 import unittest
 from caffe2.python import core
-from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
-    skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
-    freeze_rng_state, set_rng_seed
+from common_utils import TestCase, run_tests
 
 
 def canonical(graph):

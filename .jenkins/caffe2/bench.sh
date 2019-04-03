@@ -14,7 +14,7 @@ else
     num_gpus=0
 fi
 
-caffe2_pypath="$(cd /usr && python -c 'import os; import caffe2; print(os.path.dirname(os.path.realpath(caffe2.__file__)))')"
+caffe2_pypath="$(cd /usr && $PYTHON -c 'import os; import caffe2; print(os.path.dirname(os.path.realpath(caffe2.__file__)))')"
 # Resnet50
 if (( $num_gpus == 0 )); then
     "$PYTHON" "$caffe2_pypath/python/examples/resnet50_trainer.py" --train_data null --batch_size 128 --epoch_size 12800 --num_epochs 2 --use_cpu
