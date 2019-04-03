@@ -52,17 +52,6 @@ inline TensorImpl* resize_impl_cpu_(
   return self;
 }
 
-static inline int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides) {
-  int64_t storage_size = 1;
-  for (size_t dim = 0; dim < sizes.size(); ++dim) {
-    if (sizes[dim] == 0) {
-      return 0;
-    }
-    storage_size += strides[dim] * (sizes[dim] - 1);
-  }
-  return storage_size;
-}
-
 static inline void checkInBoundsForStorage(
     IntArrayRef size,
     IntArrayRef stride,

@@ -99,13 +99,16 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
     return out_tensor;
   }
 
-  auto flip_dims_t = at::CPU(kLong).tensorFromBlob(flip_dims.data(), {static_cast<int64_t>(flip_dims.size())});
+  auto flip_dims_t = at::from_blob(
+      flip_dims.data(), {static_cast<int64_t>(flip_dims.size())}, at::device(kCPU).dtype(kLong));
 
   auto shape = in_tensor.sizes().vec();
-  auto shape_t = at::CPU(kLong).tensorFromBlob(shape.data(), {static_cast<int64_t>(shape.size())});
+  auto shape_t = at::from_blob(
+      shape.data(), {static_cast<int64_t>(shape.size())}, at::device(kCPU).dtype(kLong));
 
   auto strides = in_tensor.strides().vec();
-  auto strides_t = at::CPU(kLong).tensorFromBlob(strides.data(), {static_cast<int64_t>(strides.size())});
+  auto strides_t = at::from_blob(
+      strides.data(), {static_cast<int64_t>(strides.size())}, at::device(kCPU).dtype(kLong));
 
   // stride_contiguous is the stride of non-contiguous tensor after calling contiguous(),
   // it is used to compute indices for each element in non-contiguous tensor
