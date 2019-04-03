@@ -485,7 +485,9 @@ struct DefaultCUDAAllocator final : public at::Allocator {
     }
     switch (g_cuda_memory_pool_type) {
       case CudaMemoryPoolType::NONE:
-        CUDA_ENFORCE(cudaMalloc(&ptr, nbytes));
+        if (nbytes != 0) {
+          CUDA_ENFORCE(cudaMalloc(&ptr, nbytes));
+        }
         if (FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
           g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
