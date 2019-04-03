@@ -739,27 +739,16 @@ AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<long> size, const TensorOptions& options) {
     AT_CHECK(!options.pinned_memory(), "tensors constructed from a file cannot be pinned");
-    size_t my_size = 0;
-    if (size.has_value())
-    {
-      my_size = size.value();
-    }
-    int flags = 0;
-    if (shared.has_value() && shared.value()) {
-      flags = TH_ALLOCATOR_MAPPED_SHARED;
-    }
-    size_t actual_size = -1;
+    size_t my_size = size.value_or(0);
+    int flags = shared.value_or(false) ? TH_ALLOCATOR_MAPPED_SHARED : 0;
     auto dtype = options.dtype();
     auto storage_impl = c10::make_intrusive<StorageImpl>(
       dtype,
       my_size,
       THMapAllocator::makeDataPtr(
-          filename.c_str(), flags, my_size * dtype.itemsize(), &actual_size),
+          filename.c_str(), flags, my_size * dtype.itemsize(), nullptr),
       /*allocator=*/nullptr,
       /*resizeable=*/false);
-    if (my_size <= 0) {
-      storage_impl->set_numel(actual_size / dtype.itemsize());
-    }
     auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId(), false);
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous({storage_impl->numel()});
     return tensor;
