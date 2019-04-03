@@ -97,8 +97,8 @@ class SyncBatchNorm(Function):
 
         return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
 
-    @staticmethod
-    def convert_sync_batchnorm(self, module, process_group=None):
+    @classmethod
+    def convert_sync_batchnorm(cls, module, process_group=None):
         r"""Helper function to convert `torch.nn.BatchNormND` layer in the model to
         `torch.nn.SyncBatchNorm` layer.
 
@@ -137,6 +137,6 @@ class SyncBatchNorm(Function):
             module_output.running_var = module.running_var
             module_output.num_batches_tracked = module.num_batches_tracked
         for name, child in module.named_children():
-            module_output.add_module(name, convert_sync_batchnorm(child))
+            module_output.add_module(name, self.convert_sync_batchnorm(child))
         del module
         return module_output

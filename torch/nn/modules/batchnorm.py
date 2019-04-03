@@ -356,7 +356,7 @@ class SyncBatchNorm(_BatchNorm):
     or Spatio-temporal Batch Normalization.
 
     Currently SyncBatchNorm only supports DistributedDataParallel with single GPU per process. Use
-    torch.nn.utils.convert_sync_batchnorm() to convert BatchNorm layer to SyncBatchNorm before wrapping
+    torch.nn.utils.SyncBatchNorm.convert_sync_batchnorm() to convert BatchNorm layer to SyncBatchNorm before wrapping
     Network with DDP.
 
     Args:
