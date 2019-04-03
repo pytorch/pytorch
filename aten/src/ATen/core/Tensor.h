@@ -663,7 +663,7 @@ class CAFFE2_API Tensor {
   Tensor & exponential_(double lambd=1, Generator * generator=nullptr);
   Tensor & geometric_(double p, Generator * generator=nullptr);
   Tensor diag(int64_t diagonal=0) const;
-  Tensor cross(const Tensor & other, int64_t dim=-1) const;
+  Tensor cross(const Tensor & other, c10::optional<int64_t> dim=c10::nullopt) const;
   Tensor triu(int64_t diagonal=0) const;
   Tensor tril(int64_t diagonal=0) const;
   Tensor trace() const;

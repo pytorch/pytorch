@@ -420,7 +420,7 @@ struct Converter<
 // In some versions of MSVC, there will be a compiler error when building.
 // C4146: unary minus operator applied to unsigned type, result still unsigned
 // C4804: unsafe use of type 'bool' in operation
-// It can be addressed by disabling the following warning. 
+// It can be addressed by disabling the following warning.
 #ifdef _MSC_VER
 #pragma warning( push )
 #pragma warning( disable : 4146 )
@@ -482,7 +482,8 @@ typename std::enable_if<is_complex_t<From>::value, bool>::type overflows(
 
 template <typename To, typename From>
 To checked_convert(From f, const char* name) {
-  if (overflows<To, From>(f)) {
+  // Converting to bool can't overflow so we exclude this case from checking.
+  if (!std::is_same<To, bool>::value && overflows<To, From>(f)) {
     std::ostringstream oss;
     oss << "value cannot be converted to type " << name
         << " without overflow: " << f;
