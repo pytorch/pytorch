@@ -3223,29 +3223,6 @@ a")
         def tuple_call():
             return foo((1, 2))
 
-    def test_contiguous(self):
-        @torch.jit.script
-        def foo(x):
-            return 3 + x.contiguous()
-
-        # contiguous case
-        x = torch.ones(5, 5, dtype=torch.float, requires_grad=True)
-        out = foo(x)
-        self.assertEqual(out, x + 3)
-
-        grad = torch.randn(5, 5, dtype=torch.float)
-        out.backward(grad)
-        self.assertEqual(x.grad, grad)
-
-        # non-contiguous case
-        x = torch.ones(5, 5, dtype=torch.float, requires_grad=True)
-        out = foo(x.transpose(0, 1))
-        self.assertEqual(out, x + 3)
-
-        grad = torch.randn(5, 5, dtype=torch.float)
-        out.backward(grad)
-        self.assertEqual(x.grad, grad.transpose(1, 0))
-
     def test_advancedindex(self):
         def consec(size, start=0):
             numel = torch.tensor(size).prod().item()
