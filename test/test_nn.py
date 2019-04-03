@@ -2049,6 +2049,27 @@ class TestNN(NNTestCase):
         self.assertTrue(embedding.weight.grad.is_sparse)
         self.assertEqual(embedding.weight.grad.shape, embedding.weight.shape)
 
+    def _test_embedding_dense_grad(self, dev):
+        embd = nn.Embedding(20, 20).to(dev)
+        weight = embd.weight
+
+        def fn_wrapper(dev):
+            def fn(weight):
+                inp = torch.tensor([[0, 1, 1, 2], [3, 5, 7, 11]], dtype=torch.long).to(dev)
+                return torch.nn.functional.embedding(inp, weight)
+            return fn
+
+        fn = fn_wrapper(dev)
+        _assertGradAndGradgradChecks(self, fn, (weight, ))
+
+    def test_embedding_dense_grad(self):
+        self._test_embedding_dense_grad("cpu")
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
+    def test_embedding_dense_grad_cuda(self):
+        self._test_embedding_dense_grad("cuda")
+
     def test_embedding_sparse_backward(self):
         embedding = nn.Embedding(10, 3, sparse=True)
         embedding.zero_grad()
@@ -2107,6 +2128,15 @@ class TestNN(NNTestCase):
                 indices = torch.LongTensor(other_indices + [padding_idx] * n)
                 pre = embedding.weight[padding_idx].clone()
                 embedding(indices).sum().backward()
+                after = (embedding.weight + embedding.weight.grad)[padding_idx]
+                embedding.zero_grad()
+                self.assertEqual(after, pre)
+
+                # test double backward
+                emb_sum = embedding(indices).sum()
+                emb_grad = torch.autograd.grad(outputs=emb_sum, inputs=list(embedding.parameters()), retain_graph=True)
+                scalar = emb_grad[0].sum() + emb_sum
+                scalar.backward()
                 after = (embedding.weight + embedding.weight.grad)[padding_idx]
                 embedding.zero_grad()
                 self.assertEqual(after, pre)

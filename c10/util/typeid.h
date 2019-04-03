@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <complex>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -10,18 +11,17 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <complex>
 #ifdef __GXX_RTTI
 #include <typeinfo>
 #endif
 
 #include <exception>
 
-#include "c10/util/Backtrace.h"
-#include "c10/util/Half.h"
 #include "c10/macros/Macros.h"
+#include "c10/util/Backtrace.h"
 #include "c10/util/C++17.h"
 #include "c10/util/Exception.h"
+#include "c10/util/Half.h"
 #include "c10/util/IdWrapper.h"
 
 #include "c10/util/Type.h"
@@ -44,10 +44,9 @@
 
 // Make at::Half a fundamental type.
 namespace std {
-template<>
-struct is_fundamental<at::Half> : std::true_type {
-};
-}  // namespace std
+template <>
+struct is_fundamental<at::Half> : std::true_type {};
+} // namespace std
 
 namespace caffe2 {
 
@@ -62,9 +61,7 @@ class C10_API TypeIdentifier final
  public:
   static TypeIdentifier createTypeId();
 
-  friend std::ostream& operator<<(
-      std::ostream& stream,
-      TypeIdentifier typeId);
+  friend std::ostream& operator<<(std::ostream& stream, TypeIdentifier typeId);
   friend bool operator<(TypeIdentifier lhs, TypeIdentifier rhs);
 
   // 0 is uint8_t (due to ScalarType BC constraint)
@@ -123,15 +120,22 @@ struct TypeMetaData final {
 
   TypeMetaData() = delete;
   constexpr TypeMetaData(
-    size_t itemsize,
-    New* newFn,
-    PlacementNew* placementNew,
-    Copy* copy,
-    PlacementDelete* placementDelete,
-    Delete* deleteFn,
-    TypeIdentifier id,
-    const char* name) noexcept
-  : itemsize_(itemsize), new_(newFn), placementNew_(placementNew), copy_(copy), placementDelete_(placementDelete), delete_(deleteFn), id_(id), name_(name) {}
+      size_t itemsize,
+      New* newFn,
+      PlacementNew* placementNew,
+      Copy* copy,
+      PlacementDelete* placementDelete,
+      Delete* deleteFn,
+      TypeIdentifier id,
+      const char* name) noexcept
+      : itemsize_(itemsize),
+        new_(newFn),
+        placementNew_(placementNew),
+        copy_(copy),
+        placementDelete_(placementDelete),
+        delete_(deleteFn),
+        id_(id),
+        name_(name) {}
 
   size_t itemsize_;
   New* new_;
@@ -167,21 +171,22 @@ inline void _PlacementNewNotDefault(void* /*ptr*/, size_t /*n*/) {
       " is not default-constructible.");
 }
 
-template<
+template <
     typename T,
     c10::guts::enable_if_t<std::is_default_constructible<T>::value>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
-  return
-    (std::is_fundamental<T>::value || std::is_pointer<T>::value)
-    ? nullptr
-    : &_PlacementNew<T>;
+  return (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+      ? nullptr
+      : &_PlacementNew<T>;
 }
 
-template<
+template <
     typename T,
     c10::guts::enable_if_t<!std::is_default_constructible<T>::value>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
-  static_assert(!std::is_fundamental<T>::value && !std::is_pointer<T>::value, "this should have picked the other SFINAE case");
+  static_assert(
+      !std::is_fundamental<T>::value && !std::is_pointer<T>::value,
+      "this should have picked the other SFINAE case");
   return &_PlacementNewNotDefault<T>;
 }
 
@@ -197,7 +202,7 @@ inline void* _NewNotDefault() {
       " is not default-constructible.");
 }
 
-template<
+template <
     typename T,
     c10::guts::enable_if_t<std::is_default_constructible<T>::value>* = nullptr>
 inline constexpr TypeMetaData::New* _PickNew() {
@@ -233,23 +238,22 @@ inline void _CopyNotAllowed(const void* /*src*/, void* /*dst*/, size_t /*n*/) {
       " does not allow assignment.");
 }
 
-template<
+template <
     typename T,
-    c10::guts::enable_if_t<std::is_copy_assignable<T>::value>* = nullptr
-    >
+    c10::guts::enable_if_t<std::is_copy_assignable<T>::value>* = nullptr>
 inline constexpr TypeMetaData::Copy* _PickCopy() {
-  return
-    (std::is_fundamental<T>::value || std::is_pointer<T>::value)
-    ? nullptr
-    : &_Copy<T>;
+  return (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+      ? nullptr
+      : &_Copy<T>;
 }
 
-template<
+template <
     typename T,
-    c10::guts::enable_if_t<!std::is_copy_assignable<T>::value>* = nullptr
-    >
+    c10::guts::enable_if_t<!std::is_copy_assignable<T>::value>* = nullptr>
 inline constexpr TypeMetaData::Copy* _PickCopy() {
-  static_assert(!std::is_fundamental<T>::value && !std::is_pointer<T>::value, "this should have picked the other SFINAE case");
+  static_assert(
+      !std::is_fundamental<T>::value && !std::is_pointer<T>::value,
+      "this should have picked the other SFINAE case");
   return &_CopyNotAllowed<T>;
 }
 
@@ -266,10 +270,9 @@ inline void _PlacementDelete(void* ptr, size_t n) {
 
 template <typename T>
 inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
-  return
-    (std::is_fundamental<T>::value || std::is_pointer<T>::value)
-    ? nullptr
-    : &_PlacementDelete<T>;
+  return (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+      ? nullptr
+      : &_PlacementDelete<T>;
 }
 
 template <typename T>
@@ -278,7 +281,7 @@ inline void _Delete(void* ptr) {
   delete typed_ptr;
 }
 
-template<class T>
+template <class T>
 inline constexpr TypeMetaData::Delete* _PickDelete() noexcept {
   return &_Delete<T>;
 }
@@ -297,18 +300,16 @@ constexpr const char* _typeName(const char* literalName) noexcept {
 }
 #endif
 
-template<class T>
+template <class T>
 inline TypeMetaData _makeTypeMetaDataInstance(const char* typeName) {
-  return {
-    sizeof(T),
-    _PickNew<T>(),
-    _PickPlacementNew<T>(),
-    _PickCopy<T>(),
-    _PickPlacementDelete<T>(),
-    _PickDelete<T>(),
-    TypeIdentifier::Get<T>(),
-    typeName
-  };
+  return {sizeof(T),
+          _PickNew<T>(),
+          _PickPlacementNew<T>(),
+          _PickCopy<T>(),
+          _PickPlacementDelete<T>(),
+          _PickDelete<T>(),
+          TypeIdentifier::Get<T>(),
+          typeName};
 }
 
 class _Uninitialized final {};
@@ -350,7 +351,8 @@ class C10_API TypeMeta {
  private:
   // TypeMeta can only be created by Make, making sure that we do not
   // create incorrectly mixed up TypeMeta objects.
-  explicit constexpr TypeMeta(const detail::TypeMetaData* data) noexcept : data_(data) {}
+  explicit constexpr TypeMeta(const detail::TypeMetaData* data) noexcept
+      : data_(data) {}
 
  public:
   /**
@@ -431,28 +433,30 @@ class C10_API TypeMeta {
     // disabled for compilers that don't know '-Wundefined-var-template' and
     // would error at our attempt to disable it.
 #ifndef _MSC_VER
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wpragmas"
-#  pragma GCC diagnostic ignored "-Wunknown-warning-option"
-#  pragma GCC diagnostic ignored "-Wundefined-var-template"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpragmas"
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#pragma GCC diagnostic ignored "-Wundefined-var-template"
 #endif
     return TypeMeta(_typeMetaDataInstance<T>());
 #ifndef _MSC_VER
-#  pragma GCC diagnostic pop
+#pragma GCC diagnostic pop
 #endif
   }
 
  private:
   const detail::TypeMetaData* data_;
 
-  template<class T>
+  template <class T>
   C10_API static const detail::TypeMetaData* _typeMetaDataInstance() noexcept;
 };
 
-template<>
-C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<detail::_Uninitialized>() noexcept;
+template <>
+C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<
+    detail::_Uninitialized>() noexcept;
 
-inline TypeMeta::TypeMeta() noexcept : data_(_typeMetaDataInstance<detail::_Uninitialized>()) {}
+inline TypeMeta::TypeMeta() noexcept
+    : data_(_typeMetaDataInstance<detail::_Uninitialized>()) {}
 
 inline bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return (lhs.data_ == rhs.data_);
@@ -492,14 +496,15 @@ inline std::ostream& operator<<(
 #define EXPORT_IF_NOT_GCC
 #endif
 
-#define _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, Counter)        \
-  namespace detail {                                                      \
-  const TypeMetaData MACRO_CONCAT(_typeMetaDataInstance_, Counter) =      \
-      _makeTypeMetaDataInstance<T>(_typeName<T>(#T));                     \
-  }                                                                       \
-  template<>                                                              \
-  EXPORT_IF_NOT_GCC const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
-    return &MACRO_CONCAT(detail::_typeMetaDataInstance_, Counter);        \
+#define _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, Counter)   \
+  namespace detail {                                                 \
+  const TypeMetaData MACRO_CONCAT(_typeMetaDataInstance_, Counter) = \
+      _makeTypeMetaDataInstance<T>(_typeName<T>(#T));                \
+  }                                                                  \
+  template <>                                                        \
+  EXPORT_IF_NOT_GCC const detail::TypeMetaData*                      \
+  TypeMeta::_typeMetaDataInstance<T>() noexcept {                    \
+    return &MACRO_CONCAT(detail::_typeMetaDataInstance_, Counter);   \
   }
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
@@ -516,43 +521,50 @@ inline std::ostream& operator<<(
  * for your own types to allocate dynamic ids for them.
  */
 #ifdef _MSC_VER
-#define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)              \
-  template <>                                                                 \
-  inline C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                 \
-    return TypeIdentifier(PreallocatedId);                                    \
-  }                                                                           \
-  namespace detail {                                                          \
-  C10_API extern const TypeMetaData                                           \
-      MACRO_CONCAT(_typeMetaDataInstance_preallocated_, PreallocatedId);      \
+#define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T) \
+  template <>                                                    \
+  inline C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {    \
+    return TypeIdentifier(PreallocatedId);                       \
+  }                                                              \
+  namespace detail {                                             \
+  C10_API extern const TypeMetaData MACRO_CONCAT(                \
+      _typeMetaDataInstance_preallocated_,                       \
+      PreallocatedId);                                           \
   }
-#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)               \
-  namespace detail {                                                          \
-  C10_EXPORT const TypeMetaData                                               \
-    MACRO_CONCAT(_typeMetaDataInstance_preallocated_, PreallocatedId)         \
-      = _makeTypeMetaDataInstance<T>(_typeName<T>(#T));                       \
-  }                                                                           \
-  template<>                                                                  \
-  C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept { \
-    return &MACRO_CONCAT(detail::_typeMetaDataInstance_preallocated_, PreallocatedId);   \
+#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)         \
+  namespace detail {                                                    \
+  C10_EXPORT const TypeMetaData MACRO_CONCAT(                           \
+      _typeMetaDataInstance_preallocated_,                              \
+      PreallocatedId) = _makeTypeMetaDataInstance<T>(_typeName<T>(#T)); \
+  }                                                                     \
+  template <>                                                           \
+  C10_EXPORT const detail::TypeMetaData*                                \
+  TypeMeta::_typeMetaDataInstance<T>() noexcept {                       \
+    return &MACRO_CONCAT(                                               \
+        detail::_typeMetaDataInstance_preallocated_, PreallocatedId);   \
   }
 #else // _MSC_VER
-#define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)              \
-  template <>                                                                 \
-  inline C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                 \
-    return TypeIdentifier(PreallocatedId);                                    \
-  }                                                                           \
-  namespace detail {                                                          \
-  C10_EXPORT extern const TypeMetaData                                        \
-      MACRO_CONCAT(_typeMetaDataInstance_preallocated_, PreallocatedId);      \
-  }                                                                           \
-  template<>                                                                  \
-  inline const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {    \
-    return &MACRO_CONCAT(detail::_typeMetaDataInstance_preallocated_, PreallocatedId);  \
+#define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)      \
+  template <>                                                         \
+  inline C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {         \
+    return TypeIdentifier(PreallocatedId);                            \
+  }                                                                   \
+  namespace detail {                                                  \
+  C10_EXPORT extern const TypeMetaData MACRO_CONCAT(                  \
+      _typeMetaDataInstance_preallocated_,                            \
+      PreallocatedId);                                                \
+  }                                                                   \
+  template <>                                                         \
+  inline const detail::TypeMetaData*                                  \
+  TypeMeta::_typeMetaDataInstance<T>() noexcept {                     \
+    return &MACRO_CONCAT(                                             \
+        detail::_typeMetaDataInstance_preallocated_, PreallocatedId); \
   }
-#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)               \
-  namespace detail {                                                          \
-  const TypeMetaData MACRO_CONCAT(_typeMetaDataInstance_preallocated_, PreallocatedId)  \
-      = _makeTypeMetaDataInstance<T>(_typeName<T>(#T));                       \
+#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)         \
+  namespace detail {                                                    \
+  const TypeMetaData MACRO_CONCAT(                                      \
+      _typeMetaDataInstance_preallocated_,                              \
+      PreallocatedId) = _makeTypeMetaDataInstance<T>(_typeName<T>(#T)); \
   }
 #endif
 

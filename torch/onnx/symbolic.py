@@ -1320,7 +1320,7 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
                     value_t=torch.tensor([const_value], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
 
 
-@parse_args('v', 'f', 'i', 'v', 'v','b')
+@parse_args('v', 'f', 'i', 'v', 'v', 'b')
 def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
