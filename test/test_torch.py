@@ -1769,7 +1769,6 @@ class _TestTorchMixin(object):
             torch.lu(torch.empty(1, 2, 2), pivot=False)
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_lu(self):
         self._test_lu(self, lambda t: t)
 
@@ -4565,7 +4564,6 @@ class _TestTorchMixin(object):
                 self.assertEqual(x.select(dim, i), res[i])
                 self.assertEqual(x.select(dim, i), res2[i])
 
-    @skipIfRocm
     def test_linspace(self):
         for device in torch.testing.get_all_device_types():
             _from = random.random()
@@ -7842,7 +7840,6 @@ class _TestTorchMixin(object):
             self.assertEqual([(0, 1, 3, 0)], [z.shape for z in torch.split(x, 0, dim=0)])
 
     # functions that operate over a dimension but don't reduce.
-    @skipIfRocm
     def test_dim_function_empty(self):
         for device in torch.testing.get_all_device_types():
             shape = (0, 1, 2, 0)
