@@ -137,8 +137,9 @@ option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside t
 
 # /Z7 override option
 # When generating debug symbols, CMake default to use the flag /Zi.
-# However, it is not compatible with sccache. So we need an option to turn it off.
-option(MSVC_Z7_OVERRIDE "Replace /Zi and /ZI with /Z7 when using MSVC" ON)
+# However, it is not compatible with sccache. So we rewrite it off.
+# But some users don't use sccache; this override is for them.
+option(MSVC_Z7_OVERRIDE "Work around sccache bug by replacing /Zi and /ZI with /Z7 when using MSVC (if you are not using sccache, you can turn this OFF)" ON)
 
 SET(ONNX_NAMESPACE "onnx_c2" CACHE STRING "onnx namespace")
 
