@@ -5,99 +5,105 @@
 #include <c10/util/Optional.h>
 #include <c10/util/typeid.h>
 
+#include <complex>
 #include <cstdint>
 #include <iostream>
-#include <complex>
 
 namespace c10 {
 
 // NB: Order matters for this macro; it is relied upon in
 // _promoteTypesLookup and the serialization format.
-#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(_) \
-_(uint8_t,Byte,i)  /* 0 */ \
-_(int8_t,Char,i)   /* 1 */ \
-_(int16_t,Short,i) /* 2 */ \
-_(int,Int,i)       /* 3 */ \
-_(int64_t,Long,i)  /* 4 */ \
-_(at::Half,Half,d) /* 5 */ \
-_(float,Float,d)   /* 6 */ \
-_(double,Double,d) /* 7 */ \
-_(at::ComplexHalf,ComplexHalf,z)        /* 8 */ \
-_(std::complex<float>,ComplexFloat,z)   /* 9 */ \
-_(std::complex<double>,ComplexDouble,z) /* 10 */ \
-_(bool,Bool,i)     /* 11 */
+#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(_)       \
+  _(uint8_t, Byte, i) /* 0 */                        \
+  _(int8_t, Char, i) /* 1 */                         \
+  _(int16_t, Short, i) /* 2 */                       \
+  _(int, Int, i) /* 3 */                             \
+  _(int64_t, Long, i) /* 4 */                        \
+  _(at::Half, Half, d) /* 5 */                       \
+  _(float, Float, d) /* 6 */                         \
+  _(double, Double, d) /* 7 */                       \
+  _(at::ComplexHalf, ComplexHalf, z) /* 8 */         \
+  _(std::complex<float>, ComplexFloat, z) /* 9 */    \
+  _(std::complex<double>, ComplexDouble, z) /* 10 */ \
+  _(bool, Bool, i) /* 11 */
 
 // If you want to support ComplexHalf for real, replace occurrences
 // of this macro with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX.  But
 // beware: convert() doesn't work for all the conversions you need...
 #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(_) \
-_(uint8_t,Byte,i)  \
-_(int8_t,Char,i)   \
-_(int16_t,Short,i) \
-_(int,Int,i)       \
-_(int64_t,Long,i)  \
-_(at::Half,Half,d) \
-_(float,Float,d)   \
-_(double,Double,d) \
-_(std::complex<float>,ComplexFloat,z) \
-_(std::complex<double>,ComplexDouble,z) \
-_(bool,Bool,i)
+  _(uint8_t, Byte, i)                                              \
+  _(int8_t, Char, i)                                               \
+  _(int16_t, Short, i)                                             \
+  _(int, Int, i)                                                   \
+  _(int64_t, Long, i)                                              \
+  _(at::Half, Half, d)                                             \
+  _(float, Float, d)                                               \
+  _(double, Double, d)                                             \
+  _(std::complex<float>, ComplexFloat, z)                          \
+  _(std::complex<double>, ComplexDouble, z)                        \
+  _(bool, Bool, i)
 
 #define AT_FORALL_SCALAR_TYPES(_) \
-_(uint8_t,Byte,i)  \
-_(int8_t,Char,i)   \
-_(int16_t,Short,i) \
-_(int,Int,i)       \
-_(int64_t,Long,i)  \
-_(at::Half,Half,d) \
-_(float,Float,d)   \
-_(double,Double,d)
+  _(uint8_t, Byte, i)             \
+  _(int8_t, Char, i)              \
+  _(int16_t, Short, i)            \
+  _(int, Int, i)                  \
+  _(int64_t, Long, i)             \
+  _(at::Half, Half, d)            \
+  _(float, Float, d)              \
+  _(double, Double, d)
 
 #define AT_FORALL_SCALAR_TYPES_AND_BOOL(_) \
-_(uint8_t,Byte,i)  \
-_(int8_t,Char,i)   \
-_(int16_t,Short,i) \
-_(int,Int,i)       \
-_(int64_t,Long,i)  \
-_(at::Half,Half,d) \
-_(float,Float,d)   \
-_(double,Double,d) \
-_(bool,Bool,i)
+  _(uint8_t, Byte, i)                      \
+  _(int8_t, Char, i)                       \
+  _(int16_t, Short, i)                     \
+  _(int, Int, i)                           \
+  _(int64_t, Long, i)                      \
+  _(at::Half, Half, d)                     \
+  _(float, Float, d)                       \
+  _(double, Double, d)                     \
+  _(bool, Bool, i)
 
 #define AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(_) \
-_(uint8_t,Byte,i) \
-_(int8_t,Char,i) \
-_(int16_t,Short,i) \
-_(int,Int,i) \
-_(int64_t,Long,i) \
-_(float,Float,d) \
-_(double,Double,d)
+  _(uint8_t, Byte, i)                         \
+  _(int8_t, Char, i)                          \
+  _(int16_t, Short, i)                        \
+  _(int, Int, i)                              \
+  _(int64_t, Long, i)                         \
+  _(float, Float, d)                          \
+  _(double, Double, d)
 
 enum class ScalarType : int8_t {
-#define DEFINE_ENUM(_1,n,_2) \
-  n,
+#define DEFINE_ENUM(_1, n, _2) n,
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ENUM)
 #undef DEFINE_ENUM
-  Undefined,
+      Undefined,
   NumOptions
 };
 
 static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
-#define DEFINE_CASE(ctype,name,_) \
-  case ScalarType:: name : return caffe2::TypeMeta::Make<ctype>();
+#define DEFINE_CASE(ctype, name, _) \
+  case ScalarType::name:            \
+    return caffe2::TypeMeta::Make<ctype>();
 
-  switch(scalar_type) {
+  switch (scalar_type) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
-    case ScalarType::Undefined: return caffe2::TypeMeta();
-    default: AT_ERROR("Unrecognized Scalartype ", scalar_type, " (please report this error)");
+    case ScalarType::Undefined:
+      return caffe2::TypeMeta();
+    default:
+      AT_ERROR(
+          "Unrecognized Scalartype ",
+          scalar_type,
+          " (please report this error)");
   }
 #undef DEFINE_CASE
 }
 
-static inline c10::optional<ScalarType> tryTypeMetaToScalarType(caffe2::TypeMeta dtype) {
-#define DEFINE_IF(ctype, name, _)                      \
+static inline c10::optional<ScalarType> tryTypeMetaToScalarType(
+    caffe2::TypeMeta dtype) {
+#define DEFINE_IF(ctype, name, _)                 \
   if (dtype == caffe2::TypeMeta::Make<ctype>()) { \
-    return {ScalarType::name};                         \
+    return {ScalarType::name};                    \
   }
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_IF)
 #undef DEFINE_IF
@@ -111,7 +117,8 @@ static inline ScalarType typeMetaToScalarType(caffe2::TypeMeta dtype) {
   if (auto scalar_type = tryTypeMetaToScalarType(dtype)) {
     return *scalar_type;
   }
-  AT_ERROR("Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
+  AT_ERROR(
+      "Unsupported TypeMeta in ATen: ", dtype, " (please report this error)");
 }
 
 static inline bool operator==(ScalarType t, caffe2::TypeMeta m) {
@@ -125,17 +132,18 @@ static inline bool operator==(caffe2::TypeMeta m, ScalarType t) {
   return t == m;
 }
 
-#define DEFINE_CONSTANT(_,name,_2) \
-constexpr ScalarType k##name = ScalarType::name;
+#define DEFINE_CONSTANT(_, name, _2) \
+  constexpr ScalarType k##name = ScalarType::name;
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CONSTANT)
 #undef DEFINE_CONSTANT
 
-static inline const char * toString(ScalarType t) {
-#define DEFINE_CASE(_,name,_2) \
-  case ScalarType:: name : return #name;
+static inline const char* toString(ScalarType t) {
+#define DEFINE_CASE(_, name, _2) \
+  case ScalarType::name:         \
+    return #name;
 
-  switch(t) {
+  switch (t) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
     default:
       return "UNKNOWN_SCALAR";
@@ -144,10 +152,11 @@ static inline const char * toString(ScalarType t) {
 }
 
 static inline size_t elementSize(ScalarType t) {
-#define CASE_ELEMENTSIZE_CASE(ctype,name,_2) \
-  case ScalarType:: name : return sizeof(ctype);
+#define CASE_ELEMENTSIZE_CASE(ctype, name, _2) \
+  case ScalarType::name:                       \
+    return sizeof(ctype);
 
-  switch(t) {
+  switch (t) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(CASE_ELEMENTSIZE_CASE)
     default:
       AT_ERROR("Unknown ScalarType");
@@ -156,23 +165,21 @@ static inline size_t elementSize(ScalarType t) {
 }
 
 static inline bool isIntegralType(ScalarType t) {
-  return (t == ScalarType::Byte ||
-          t == ScalarType::Char ||
-          t == ScalarType::Int ||
-          t == ScalarType::Long ||
-          t == ScalarType::Short);
+  return (
+      t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||
+      t == ScalarType::Long || t == ScalarType::Short);
 }
 
 static inline bool isFloatingType(ScalarType t) {
-  return (t == ScalarType::Double ||
-          t == ScalarType::Float ||
-          t == ScalarType::Half);
+  return (
+      t == ScalarType::Double || t == ScalarType::Float ||
+      t == ScalarType::Half);
 }
 
 static inline bool isComplexType(ScalarType t) {
-  return (t == ScalarType::ComplexHalf ||
-          t == ScalarType::ComplexFloat ||
-          t == ScalarType::ComplexDouble);
+  return (
+      t == ScalarType::ComplexHalf || t == ScalarType::ComplexFloat ||
+      t == ScalarType::ComplexDouble);
 }
 
 static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
@@ -191,27 +198,28 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
     return ScalarType::Undefined;
   }
   if (isComplexType(a) || isComplexType(b)) {
-    AT_ERROR("promoteTypes with complex numbers is not handled yet; figure out what the correct rules should be");
+    AT_ERROR(
+        "promoteTypes with complex numbers is not handled yet; figure out what the correct rules should be");
   }
 
-  // this matrix has to be consistent with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX so that's why we have to add
-  // undefined as we are not sure what is the corrent values for the type promotions in complex type cases.
-  static constexpr ScalarType _promoteTypesLookup
-      [static_cast<int>(ScalarType::NumOptions)]
-      [static_cast<int>(ScalarType::NumOptions)] = {
-            /* u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1 */
-    /* u1 */ { u1, i2, i2, i4, i8, f2, f4, f8, ud, ud, ud, u1 },
-    /* i1 */ { i2, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, i1 },
-    /* i2 */ { i2, i2, i2, i4, i8, f2, f4, f8, ud, ud, ud, i2 },
-    /* i4 */ { i4, i4, i4, i4, i8, f2, f4, f8, ud, ud, ud, i4 },
-    /* i8 */ { i8, i8, i8, i8, i8, f2, f4, f8, ud, ud, ud, i8 },
-    /* f2 */ { f2, f2, f2, f2, f2, f2, f4, f8, ud, ud, ud, f2 },
-    /* f4 */ { f4, f4, f4, f4, f4, f4, f4, f8, ud, ud, ud, f4 },
-    /* f8 */ { f8, f8, f8, f8, f8, f8, f8, f8, ud, ud, ud, f8 },
-    /* c2 */ { ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud },
-    /* c4 */ { ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud },
-    /* c8 */ { ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud },
-    /* b1 */ { u1, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, b1 },
+  // this matrix has to be consistent with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX
+  // so that's why we have to add undefined as we are not sure what is the
+  // corrent values for the type promotions in complex type cases.
+  static constexpr ScalarType _promoteTypesLookup[static_cast<int>(
+      ScalarType::NumOptions)][static_cast<int>(ScalarType::NumOptions)] = {
+      /* u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1 */
+      /* u1 */ {u1, i2, i2, i4, i8, f2, f4, f8, ud, ud, ud, u1},
+      /* i1 */ {i2, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, i1},
+      /* i2 */ {i2, i2, i2, i4, i8, f2, f4, f8, ud, ud, ud, i2},
+      /* i4 */ {i4, i4, i4, i4, i8, f2, f4, f8, ud, ud, ud, i4},
+      /* i8 */ {i8, i8, i8, i8, i8, f2, f4, f8, ud, ud, ud, i8},
+      /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, ud, ud, ud, f2},
+      /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, ud, ud, ud, f4},
+      /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, ud, ud, ud, f8},
+      /* c2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+      /* c4 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+      /* c8 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+      /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, b1},
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
 }
