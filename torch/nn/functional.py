@@ -1584,11 +1584,6 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
                       "and should now be `embedding_bag(input, weight, ...)`.")
         weight, input = input, weight
 
-    if per_sample_weights is not None and mode != 'sum':
-        raise NotImplementedError("embedding_bag: per_sample_weights was not None. "
-                                  "per_sample_weights is only supported for mode='sum' "
-                                  "(got mode='{}'). Please open a feature request on GitHub."
-                                  .format(mode))
     if per_sample_weights is not None and input.size() != per_sample_weights.size():
         raise ValueError("embedding_bag: If per_sample_weights ({}) is not None, "
                          "then it must have the same shape as the input ({})"
@@ -1647,6 +1642,12 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         #   torch.nembedding_renorm_
         # remove once script supports set_grad_enabled
         _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
+
+    if per_sample_weights is not None and mode != 'sum':
+        raise NotImplementedError("embedding_bag: per_sample_weights was not None. "
+                                  "per_sample_weights is only supported for mode='sum' "
+                                  "(got mode='{}'). Please open a feature request on GitHub."
+                                  .format(mode))
 
     ret, _, _, _ = torch.embedding_bag(
         weight,
