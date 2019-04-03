@@ -191,6 +191,7 @@ public:
   // `allow_tensor_metadata_change_` to false would prevent those changes from happening and is
   // undesirable.
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
+    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     auto impl = c10::make_intrusive<SparseTensorImpl>(type_id(), dtype());
     // TensorImpl general fields
     // Note that these fields are not used in sparse tensor code, and we copy them here only for completeness.

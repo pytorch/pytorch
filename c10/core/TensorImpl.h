@@ -886,6 +886,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // `allow_tensor_metadata_change_` to false would prevent those changes from happening and is
   // undesirable.
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
+    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id(), is_variable());
     impl->set_sizes_and_strides(sizes(), strides());
     impl->storage_offset_ = storage_offset_;
