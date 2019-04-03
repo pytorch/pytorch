@@ -94,6 +94,9 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                     r = (outb - outa) / (2 * eps)
                     d_tensor[d_idx] = r.detach().reshape(-1)
         else:
+            # We use `x_tensor.data` here to make sure small finite changes to `x_tensor`
+            # doesn't affect `x_tensor.grad_fn` in the original autograd graph.
+            x_tensor = x_tensor.data
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
                 orig = x_tensor[x_idx].item()
 
