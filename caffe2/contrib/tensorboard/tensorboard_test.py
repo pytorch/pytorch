@@ -91,9 +91,11 @@ class TensorboardTest(unittest.TestCase):
         for i, (event, net) in enumerate(zip(events, nets), start=1):
             self.assertEqual(event.step, i)
             self.assertEqual(event.wall_time, i)
-            self.assertEqual(
-                event.graph_def,
-                tb_exporter.nets_to_graph_def([net]).SerializeToString())
+            g = tf.GraphDef()
+            g.ParseFromString(event.graph_def)
+            self.assertMultiLineEqual(
+                str(g),
+                str(tb_exporter.nets_to_graph_def([net])))
 
 
 if __name__ == "__main__":
