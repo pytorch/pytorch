@@ -40,6 +40,8 @@ set CXX=sccache cl
 
 set CMAKE_GENERATOR=Ninja
 
+set BUILD_SHARED_LIBS=OFF
+
 if not "%USE_CUDA%"=="1" (
   if "%REBUILD%"=="" (
     set NO_CUDA=1
