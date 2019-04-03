@@ -482,7 +482,7 @@ ClassTypePtr ClassType::createModuleType() {
   return ClassTypePtr(new ClassType("Module", nullptr));
 }
 
-ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) {
+ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   auto ptr = ClassTypePtr(new ClassType(typename_, module_));
   AT_ASSERT(numAttributes() == refined_slots.size());
   for(size_t i = 0; i < attributeNames_.size(); ++i) {

@@ -394,7 +394,7 @@ struct Module {
     insert(
         name,
         attributes_,
-        ATTRIBUTE,
+        EntityType::ATTRIBUTE,
         appendSlot(name, TensorType::get(),std::move(v)));
   }
 
@@ -413,14 +413,14 @@ struct Module {
     insert(
         name,
         parameters_,
-        PARAMETER,
+        EntityType::PARAMETER,
         appendSlot(name, TensorType::get(), std::move(v)));
   }
   void register_attribute(
       const std::string& name,
       const TypePtr type,
       IValue ivalue) {
-    insert(name, attributes_, ATTRIBUTE, appendSlot(name, type, ivalue));
+    insert(name, attributes_, EntityType::ATTRIBUTE, appendSlot(name, type, ivalue));
   }
   void register_module(
       const std::string& name,
@@ -436,7 +436,7 @@ struct Module {
     module->parent_ = this;
     module->name_ = name;
     appendSlot(name, module->module_value_->type(), module->module_value_);
-    insert(name, modules_, MODULE, std::move(module));
+    insert(name, modules_, EntityType::MODULE, std::move(module));
   }
 
   Method& create_method(
@@ -451,7 +451,7 @@ struct Module {
         std::move(graph),
         std::move(member_inputs),
         nullptr));
-    return *insert(name, methods_, METHOD, std::move(method));
+    return *insert(name, methods_, EntityType::METHOD, std::move(method));
   }
 
   Method& create_method(
@@ -464,11 +464,11 @@ struct Module {
         std::make_shared<Graph>(),
         {},
         std::move(creator)));
-    return *insert(name, methods_, METHOD, std::move(method));
+    return *insert(name, methods_, EntityType::METHOD, std::move(method));
   }
 
   Slot parameter_slot(const std::string& name) const {
-    return parameters_[get_offset(name, PARAMETER)];
+    return parameters_[get_offset(name, EntityType::PARAMETER)];
   }
 
   void set_parameter(const std::string& name, at::Tensor v) {
@@ -480,7 +480,7 @@ struct Module {
   }
 
   IValue get_attribute(const std::string& name) const {
-    return attributes_[get_offset(name, ATTRIBUTE)].value();
+    return attributes_[get_offset(name, EntityType::ATTRIBUTE)].value();
   }
 
   autograd::Variable get_buffer(const std::string& name) const {
@@ -490,11 +490,11 @@ struct Module {
   // each module owns its method. The reference returned here
   // is guarenteed to stay valid until this module has been destroyed
   Method& get_method(const std::string& name) const {
-    return *methods_[get_offset(name, METHOD)];
+    return *methods_[get_offset(name, EntityType::METHOD)];
   }
 
   std::shared_ptr<Module> get_module(const std::string& name) const {
-    return modules_[get_offset(name, MODULE)];
+    return modules_[get_offset(name, EntityType::MODULE)];
   }
 
   c10::ArrayRef<std::shared_ptr<Module>> get_modules() const {
@@ -511,11 +511,11 @@ struct Module {
   }
 
   Slot* find_parameter(const std::string& name) {
-    auto offset = find_offset(name, PARAMETER);
+    auto offset = find_offset(name, EntityType::PARAMETER);
     return offset ? &parameters_[*offset] : nullptr;
   }
   Slot* find_attribute(const std::string& name) {
-    auto offset = find_offset(name, ATTRIBUTE);
+    auto offset = find_offset(name, EntityType::ATTRIBUTE);
     return offset ? &attributes_[*offset] : nullptr;
   }
   Slot* find_buffer(const std::string& name) {
@@ -526,11 +526,11 @@ struct Module {
     return nullptr;
   }
   std::shared_ptr<Module> find_module(const std::string& name) {
-    auto offset = find_offset(name, MODULE);
+    auto offset = find_offset(name, EntityType::MODULE);
     return offset ? modules_[*offset] : nullptr;
   }
   Method* find_method(const std::string& name) {
-    auto offset = find_offset(name, METHOD);
+    auto offset = find_offset(name, EntityType::METHOD);
     return offset ? methods_[*offset].get() : nullptr;
   }
   void apply(std::function<void(Module&)> fn) {
@@ -651,7 +651,7 @@ struct Module {
     }
   }
 
-  enum EntityType { MODULE, PARAMETER, ATTRIBUTE, METHOD };
+  enum class EntityType { MODULE, PARAMETER, ATTRIBUTE, METHOD };
 
   at::optional<EntityType> kind_of(const std::string& name) const {
     auto it = dict_.find(name);
@@ -668,13 +668,13 @@ struct Module {
 
   static const char* toString(EntityType t) {
     switch (t) {
-      case MODULE:
+      case EntityType::MODULE:
         return "module";
-      case PARAMETER:
+      case EntityType::PARAMETER:
         return "parameter";
-      case ATTRIBUTE:
-        return "attrbute";
-      case METHOD:
+      case EntityType::ATTRIBUTE:
+        return "attribute";
+      case EntityType::METHOD:
         return "method";
     }
     return nullptr;

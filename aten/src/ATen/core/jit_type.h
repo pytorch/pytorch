@@ -306,7 +306,7 @@ struct CAFFE2_API AutogradZeroTensorType : public TensorType {
            TensorType::isSubtypeOf(rhs);
   }
   std::string str() const override {
-    return "UndefinedTensor";
+    return "AutogradZeroTensor";
   }
 
   static const TypeKind Kind = TypeKind::AutogradZeroTensorType;
@@ -1222,7 +1222,7 @@ struct CAFFE2_API ClassType : public Type {
   // where it is know that there are not assignments to the objects slots
   // that would invalidate the refinement.
   // These variants are not registered in the global class table.
-  ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots);
+  ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:

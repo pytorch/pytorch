@@ -192,12 +192,6 @@
   self: grad.bmm(mat2.transpose(1, 2))
   mat2: self.transpose(1, 2).bmm(grad)
 
-- name: btrifact(Tensor self, bool pivot)
-  self: not_implemented("btrifact")
-
-- name: btrifact_with_info(Tensor self, bool pivot)
-  self: not_implemented("btrifact_with_info")
-
 - name: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots)
   self: not_implemented("btrisolve")
 
@@ -240,7 +234,7 @@
 - name: cosh(Tensor self)
   self: grad * self.sinh()
 
-- name: cross(Tensor self, Tensor other, int64_t dim)
+- name: cross(Tensor self, Tensor other, int64_t? dim)
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
 
@@ -469,6 +463,9 @@
 - name: lt_(Tensor self, Tensor other)
   self: zeros_like(self)
   other: zeros_like(other)
+
+- name: _lu_with_info(Tensor self, bool pivot, bool check_errors)
+  self: not_implemented("lu_with_info")
 
 - name: masked_fill_(Tensor self, Tensor mask, Scalar value)
   self: grad.clone().masked_fill_(mask, 0)
@@ -745,15 +742,15 @@
   self: slice_backward(grad, self.sizes(), dim, start, end, step)
 
 - name: slogdet(Tensor self)
-  self: slogdet_backward(grad, self, result0, result1)
+  self: slogdet_backward(grad, self, sign, logabsdet)
   output_differentiability: [false, true]
 
 - name: solve(Tensor self, Tensor A)
   self: solve_backward_self(grad, self, A)
-  A: solve_backward_A(grad, self, A, result0)
+  A: solve_backward_A(grad, self, A, solution)
 
 - name: sort(Tensor self, int64_t dim, bool descending)
-  self: index_select_backward(grad, dim, result1, self.sizes(), true)
+  self: index_select_backward(grad, dim, indices, self.sizes(), true)
 
 - name: split(Tensor self, int64_t split_size, int64_t dim)
   self: split_backward(grads, split_size, dim, self.sizes(), self.type())
@@ -839,7 +836,7 @@
   self: tanh_backward(grad, result)
 
 - name: topk(Tensor self, int64_t k, int64_t dim, bool largest, bool sorted)
-  self: index_select_backward(grad, dim, result1, self.sizes(), true)
+  self: index_select_backward(grad, dim, indices, self.sizes(), true)
 
 - name: trace(Tensor self)
   self: trace_backward(grad, self.sizes())
