@@ -7,6 +7,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <cstdlib>
 
 /*
  * This header adds some polyfills with C++14 and C++17 functionality
@@ -254,6 +255,26 @@ struct to_string_<T, void_t<decltype(std::to_string(std::declval<T>()))>> final 
 }
 template<class T> inline std::string to_string(T value) {
     return detail::to_string_<T>::call(value);
+}
+
+inline long long stoll(const std::string& str, std::size_t* pos = nullptr, int base = 10) {
+  char *str_end = nullptr;
+  const char* str_beg = str.c_str();
+  long long result = std::strtoll(str_beg, &str_end, base);
+  if (nullptr != pos) {
+    *pos = str_end - str_beg;
+  }
+  return result;
+}
+
+inline double stod(const std::string& str, std::size_t* pos = nullptr) {
+  char *str_end = nullptr;
+  const char* str_beg = str.c_str();
+  double result = std::strtof(str_beg, &str_end);
+  if (nullptr != pos) {
+    *pos = str_end - str_beg;
+  }
+  return result;
 }
 
 }}

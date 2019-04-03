@@ -704,7 +704,9 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   Symbol name() const {
     return typename_;
   }
-
+  const std::vector<IValue>& slots() const {
+    return slots_;
+  }
  private:
   const Symbol typename_;
   std::vector<IValue> slots_;

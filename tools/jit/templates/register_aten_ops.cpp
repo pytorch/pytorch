@@ -81,22 +81,32 @@ std::array<bool, N> as_bool_array(const std::vector<bool>& vec) {
 
 RegisterOperators reg({
   Operator(
-  "aten::get_device(Tensor self) -> int",
-  [](Stack & stack) {
-      autograd::profiler::RecordFunction record("get_device");
-      auto result = at::get_device(
-          (std::move(peek(stack, 0, 1))).toTensor()
-      );
-      drop(stack, 1);
-      pack(stack, std::move(result));
-      return 0;
-  }
+      "aten::get_device(Tensor self) -> int",
+      [](Stack & stack) {
+          autograd::profiler::RecordFunction record("get_device");
+          auto result = at::get_device(
+              (std::move(peek(stack, 0, 1))).toTensor()
+          );
+          drop(stack, 1);
+          pack(stack, std::move(result));
+          return 0;
+      }
   ),
   Operator(
       "aten::storage_offset(Tensor self) -> int",
       [](Stack & stack) {
           autograd::profiler::RecordFunction record("storage_offset");
           auto result = ((std::move(peek(stack, 0, 1))).toTensor()).storage_offset();
+          drop(stack, 1);
+          pack(stack, std::move(result));
+          return 0;
+      }
+  ),
+  Operator(
+      "aten::is_contiguous(Tensor self) -> bool",
+      [](Stack & stack) {
+          autograd::profiler::RecordFunction record("is_contiguous");
+          auto result = ((std::move(peek(stack, 0, 1))).toTensor()).is_contiguous();
           drop(stack, 1);
           pack(stack, std::move(result));
           return 0;
