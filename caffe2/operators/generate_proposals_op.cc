@@ -422,5 +422,5 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
       "int angle_bound_lo, "
       "int angle_bound_hi, "
       "float clip_angle_thresh"
-    ") -> (Tensor, Tensor)",
+    ") -> (Tensor output_0, Tensor output_1)",
     caffe2::GenerateProposalsOp<caffe2::CPUContext>);

@@ -57,5 +57,5 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
       "bool has_biases, "
       "bool batch_first, "
       "bool bidirectional"
-    ") -> (Tensor, Tensor, Tensor)",
+    ") -> (Tensor output, Tensor hidden, Tensor cell)",
     caffe2::InferenceLSTMOp);

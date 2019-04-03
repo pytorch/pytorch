@@ -311,11 +311,11 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
       "float soft_nms_min_score_thres, "
       "bool rotated"
     ") -> ("
-      "Tensor, " // scores
-      "Tensor, " // boxes
-      "Tensor, " //classes
-      "Tensor" // batch_splits
-      //"Tensor, " keeps
-      //"Tensor, " keeps_size
+      "Tensor scores, "
+      "Tensor boxes, "
+      "Tensor classes, "
+      "Tensor batch_splits"
+      //"Tensor keeps, "
+      //"Tensor keeps_size, "
     ")",
     caffe2::BoxWithNMSLimitOp<caffe2::CPUContext>);

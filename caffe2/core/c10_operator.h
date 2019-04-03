@@ -126,7 +126,7 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
  *
  * > C10_REGISTER_CAFFE2_OPERATOR_CPU(
  * >    C10MyOperator,
- * >    "_caffe2::C10MyOperator(Tensor input1, int argument2, float argument3) -> (Tensor, Tensor)"
+ * >    "_caffe2::C10MyOperator(Tensor input1, int argument2, float argument3) -> (Tensor output1, Tensor output2)"
  * >    caffe2::MyOperator<caffe2::CPUContext> // This is the caffe2 operator
  * >                                           // class template
  * > )
