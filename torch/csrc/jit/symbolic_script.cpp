@@ -929,11 +929,10 @@ bool isHelperFunction(const std::string& method_name) {
 }
 
 void loadModule(const std::shared_ptr<script::Module>& module) {
-  for (const auto& method_ : module->get_methods()) {
-    if (isHelperFunction(method_.key()))
+  for (const auto& method : module->get_methods()) {
+    if (isHelperFunction(method->name()))
       continue;
 
-    const auto& method = method_.value();
     GradientPair pair;
     pair.forward = method->graph();
 
