@@ -64,7 +64,6 @@ THC_API THCTensor *THCTensor_(newContiguous)(THCState *state, THCTensor *tensor)
 THC_API THCTensor *THCTensor_(newSelect)(THCState *state, THCTensor *tensor, int dimension_, int64_t sliceIndex_);
 THC_API THCTensor *THCTensor_(newNarrow)(THCState *state, THCTensor *tensor, int dimension_, int64_t firstIndex_, int64_t size_);
 THC_API THCTensor *THCTensor_(newTranspose)(THCState *state, THCTensor *tensor, int dimension1_, int dimension2_);
-THC_API THCTensor *THCTensor_(newUnfold)(THCState *state, THCTensor *tensor, int dimension_, int64_t size_, int64_t step_);
 THC_API THCTensor *THCTensor_(newFoldBatchDim)(THCState *state, THCTensor *input);
 
 // resize* methods simply resize the storage. So they may not retain the current data at current indices.

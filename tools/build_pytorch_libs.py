@@ -149,6 +149,7 @@ def run_cmake(version,
     cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
     ldflags = os.getenv('LDFLAGS', "")
     if IS_WINDOWS:
+        cmake_defines(cmake_args, MSVC_Z7_OVERRIDE=os.getenv('MSVC_Z7_OVERRIDE', "ON"))
         cflags += " /EHa"
 
     mkdir_p(install_dir)
