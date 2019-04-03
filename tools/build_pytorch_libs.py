@@ -266,7 +266,7 @@ def build_caffe2(version,
                        cwd=build_dir, env=my_env)
         else:
             j = max_jobs or str(multiprocessing.cpu_count())
-            check_call(['msbuild', 'INSTALL.vcxproj', '/p:Configuration={} /maxcpucount:{}'.format(build_type, j)],
+            check_call(['msbuild', 'INSTALL.vcxproj', '/p:Configuration={}'.format(build_type), '/maxcpucount:{}'.format(j)],
                        cwd=build_dir, env=my_env)
     else:
         if USE_NINJA:
