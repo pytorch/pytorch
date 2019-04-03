@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/irparser.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
@@ -75,7 +76,6 @@ bool loadPythonClasses() {
 
   return true;
 }
-
 } // anonymous namespace
 
 #if defined(_WIN32)
@@ -155,16 +155,6 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_canonicalize",
           [](const std::shared_ptr<Graph>& g) { return Canonicalize(g); })
       .def("_jit_pass_lint", LintGraph)
-      .def(
-          "_jit_pass_shape_analysis",
-          [](std::shared_ptr<Graph> graph,
-             std::vector<at::Tensor> inputs,
-             bool with_grad) {
-            setInputTypes(
-                *graph,
-                ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
-            PropagateInputShapes(graph);
-          })
       .def(
           "_jit_pass_complete_shape_analysis",
           [](std::shared_ptr<Graph> graph, py::tuple inputs, bool with_grad) {
@@ -377,6 +367,12 @@ void initJITBindings(PyObject* module) {
       },
       py::arg("qualified_name"));
 
+  m.def("parse_ir", [](const std::string& input) {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(input, &*graph);
+    return graph;
+  });
+
   py::class_<FunctionSchema>(m, "FunctionSchema")
       .def_property_readonly(
           "name", [](FunctionSchema& self) { return self.name(); })
@@ -492,6 +488,5 @@ void initJITBindings(PyObject* module) {
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
 }
-
 } // namespace jit
 } // namespace torch

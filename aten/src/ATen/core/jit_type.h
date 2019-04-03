@@ -1203,10 +1203,21 @@ struct CAFFE2_API ClassType : public Type {
     attributeTypes_.push_back(type);
   }
 
+  at::ArrayRef<std::string> attributeNames() const {
+    return attributeNames_;
+  }
+
   at::ArrayRef<TypePtr> containedTypes() const override {
     return attributeTypes_;
   }
 
+  // generate a refined version of this class.
+  // It has the same name but the slot Types are subtypes of
+  // the original slots. It is only valid to refine a class type in a context
+  // where it is know that there are not assignments to the objects slots
+  // that would invalidate the refinement.
+  // These variants are not registered in the global class table.
+  ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
