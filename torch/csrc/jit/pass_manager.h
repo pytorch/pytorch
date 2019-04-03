@@ -17,7 +17,7 @@ namespace torch {
 namespace jit {
 
 // A pass modifies a Graph in place.
-using Pass = std::function<void(std::shared_ptr<Graph>&)>;
+typedef void (*Pass)(std::shared_ptr<Graph>&);
 
 std::vector<Pass>& getPasses();
 
