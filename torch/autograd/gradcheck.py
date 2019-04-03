@@ -1,6 +1,7 @@
 import torch
 from torch._six import container_abcs, istuple
 import torch.testing
+import torch._autograd_internal
 from itertools import product
 import warnings
 
