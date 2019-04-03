@@ -265,6 +265,7 @@ def build_caffe2(version,
             check_call(['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--', '-j', str(j)],
                        cwd=build_dir, env=my_env)
         else:
+            j = max_jobs or str(multiprocessing.cpu_count())
             check_call(['msbuild', 'INSTALL.vcxproj', '/p:Configuration={} /maxcpucount:{}'.format(build_type, j)],
                        cwd=build_dir, env=my_env)
     else:
