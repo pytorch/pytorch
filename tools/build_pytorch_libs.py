@@ -258,14 +258,15 @@ def build_caffe2(version,
                   my_env)
     if IS_WINDOWS:
         build_cmd = ['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--']
-        # sccache will fail if all cores are used for compiling
-        j = max(1, multiprocessing.cpu_count() - 1)
-        if max_jobs is not None:
-            j = min(int(max_jobs), j)
         if USE_NINJA:
-            build_cmd += ['-j', str(j)]
-            check_call(build_cmd, cwd=build_dir, env=my_env)
+            # sccache will fail if all cores are used for compiling
+            j = max(1, multiprocessing.cpu_count() - 1)
+            if max_jobs is not None:
+                j = min(int(max_jobs), j)
+                build_cmd += ['-j', str(j)]
+                check_call(build_cmd, cwd=build_dir, env=my_env)
         else:
+            j = max_jobs or str(multiprocessing.cpu_count())
             build_cmd += ['/maxcpucount:{}'.format(j)]
             check_call(build_cmd, cwd=build_dir, env=my_env)
     else:
