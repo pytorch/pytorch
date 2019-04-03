@@ -25,6 +25,7 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/passes/verify_shape_analysis.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/symbolic_variable.h>
 #include <torch/csrc/jit/tracer.h>
@@ -483,6 +484,7 @@ struct GraphExecutorImpl {
     // that
     //          we can still execute using autograd).
     runOptimization(opt_graph, spec);
+    VerifyShapeAnalysis(opt_graph);
 
     // Phase 4. If this graph will be differentiated, we need to slice out the
     //          symbolically differentiable subgraphs for further optimizations.

@@ -70,6 +70,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/canonicalize.cpp",
     "torch/csrc/jit/passes/common_subexpression_elimination.cpp",
     "torch/csrc/jit/passes/constant_propagation.cpp",
+    "torch/csrc/jit/passes/verify_shape_analysis.cpp",
     "torch/csrc/jit/passes/constant_pooling.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",

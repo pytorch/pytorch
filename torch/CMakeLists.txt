@@ -144,6 +144,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/constant_propagation.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/verify_shape_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/constant_pooling.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/common_subexpression_elimination.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
