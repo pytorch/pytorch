@@ -406,8 +406,6 @@ struct Environment {
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"rangelist",
            std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
-          {"rangelist",
-           std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
       };
       auto it = globals.find(ident);
       if (it != globals.end()) {
