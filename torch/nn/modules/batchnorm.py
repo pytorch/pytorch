@@ -40,7 +40,6 @@ class _BatchNorm(Module):
             self.register_parameter('running_var', None)
             self.register_parameter('num_batches_tracked', None)
         self.reset_parameters()
-        print('I am done.\n')
 
     def reset_running_stats(self):
         if self.track_running_stats:
