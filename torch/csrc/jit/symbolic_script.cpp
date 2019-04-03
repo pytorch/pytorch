@@ -660,6 +660,7 @@ const std::vector<std::string> functions = {
 
             return torch.adaptive_avg_pool3d(self, output_size), backward
 
+
         def batch_norm(input : Tensor,
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
@@ -685,21 +686,27 @@ const std::vector<std::string> functions = {
             return output, backward
 
         def layer_norm(input : Tensor,
-                       normalied_shape : List[int],
+                       normalized_shape : List[int],
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
                        eps : float,
                        cudnn_enable : bool):
 
-            bn_out, save1, save2, impl_idx = torch._batch_norm_impl_index(
-                input, weight, bias, None, None, True,
-                0.0, eps, cudnn_enable)
-            has_weight = weight is not None
-            has_bias = bias is not None
+            input_ndim = input.dim()
+            normalized_ndim = len(normalized_shape)
+            n = 1
+            for i in range(input_ndim - normalized_ndim):
+                n *= input.size(i)
 
-            bn_out = bn_out.view(input.sizes())
+            input_reshape = input.contiguous().view(1, n, -1)
+
+            bn_out, save1, save2, impl_idx = torch._batch_norm_impl_index(
+                input_reshape, None, None, None, None, True,
+                0.0, eps, cudnn_enable)
+
+            bn_out = bn_out.view(input.size())
             if weight is not None and bias is not None:
-                output = bias.addcmul(bn_out, weight)
+                output = bias.addcmul(bn_out, weight, value=1)
             elif weight is not None:
                 output = bn_out.mul(weight)
             elif bias is not None:
@@ -708,16 +715,32 @@ const std::vector<std::string> functions = {
                 output = bn_out
 
             def backward(grad_output):
-                if weight is not None:
-                    grad_output = grad_output * torch.t(weight)
-                    weight = grad_output * torch.t(bn_out)
+                if weight is not None and bias is not None:
+                    grad_bn_out = grad_output * weight
+                    grad_weight = (grad_output * bn_out)._grad_sum_to_size(weight.size())
+                    grad_bias = grad_output._grad_sum_to_size(bias.size())
+                elif weight is not None:
+                    grad_bn_out = grad_output * weight
+                    grad_weight = (grad_output * bn_out)._grad_sum_to_size(weight.size())
+                    grad_bias = None
+                elif bias is not None:
+                    grad_bn_out = grad_output
+                    grad_weight= None
+                    grad_bias = grad_output._grad_sum_to_size(bias.size())
+                else:
+                    grad_bn_out = grad_output
+                    grad_weight= None
+                    grad_bias = None
 
-                grad_output = grad_output.reshape(input.sizes())
 
-                dinput, dweight, dbias = torch._batch_norm_impl_index_backward(
-                    impl_idx, input, grad_output, weight, None, None,
-                    save1, save2, True, eps, [True, has_weight, has_bias])
-                return dinput, None, dweight, dbias, None, None
+                grad_bn_out = grad_bn_out.contiguous().view(1, n, -1)
+
+                grad_input, _, _ = torch._batch_norm_impl_index_backward(
+                    impl_idx, input_reshape, grad_bn_out, None, None, None,
+                    save1, save2, True, eps, [True, False, False])
+
+                grad_input = grad_input.view(input.size())
+                return grad_input, None, grad_weight, grad_bias, None, None
 
             return output, backward
 
