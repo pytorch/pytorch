@@ -1,7 +1,5 @@
 import io
-import math
 import tempfile
-import re
 import unittest
 import sys
 from itertools import repeat
@@ -19,9 +17,9 @@ from torch._six import inf, nan
 from test_torch import _TestTorchMixin
 
 from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
-    run_additional_tri_tests, _compare_trilu_indices, _compare_large_trilu_indices
+    _compare_trilu_indices, _compare_large_trilu_indices
 from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
-    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, load_tests, iter_indices
+    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, load_tests
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -2250,6 +2248,9 @@ class TestCuda(TestCase):
         probs = torch.randn(1000000, device='cuda').clamp(min=0) * 3e-5
         samples = probs.multinomial(1000000, replacement=True)
         self.assertGreater(probs[samples].min().item(), 0)
+
+    def test_multinomial_alias(self):
+        _TestTorchMixin._test_multinomial_alias(self, lambda t: t.cuda())
 
     @staticmethod
     def mute():

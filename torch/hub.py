@@ -2,7 +2,6 @@ import importlib
 import os
 import shutil
 import sys
-import tempfile
 import zipfile
 
 if sys.version_info[0] == 2:
@@ -10,10 +9,7 @@ if sys.version_info[0] == 2:
     from urllib2 import urlopen  # noqa f811
 else:
     from urllib.request import urlopen
-    from urllib.parse import urlparse
-
-import torch
-import torch.utils.model_zoo as model_zoo
+    from urllib.parse import urlparse  # noqa: F401
 
 MASTER_BRANCH = 'master'
 ENV_TORCH_HUB_DIR = 'TORCH_HUB_DIR'

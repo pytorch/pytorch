@@ -22,7 +22,7 @@ setup_linux_system_environment: &setup_linux_system_environment
   name: Set Up System Environment
   no_output_timeout: "1h"
   command: |
-    set -e
+    set -ex
 
     # Set up CircleCI GPG keys for apt, if needed
     curl -L https://packagecloud.io/circleci/trusty/gpgkey | sudo apt-key add -
@@ -33,7 +33,17 @@ install_official_git_client: &install_official_git_client
   name: Install Official Git Client
   no_output_timeout: "1h"
   command: |
-    set -e
+    set -ex
+
+    sudo killall apt-get || true
+    sudo rm /var/lib/apt/lists/lock || true
+    sudo rm /var/cache/apt/archives/lock || true
+    sudo rm /var/lib/dpkg/lock || true
+
+    cat /etc/apt/sources.list
+    sudo sed -i 's#archive.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
+    sudo sed -i 's#security.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
+    cat /etc/apt/sources.list
 
     sudo apt-get -q -y update
     sudo apt-get -q -y install openssh-client git
