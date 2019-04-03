@@ -25,7 +25,7 @@ _(double,Double,d) /* 7 */ \
 _(at::ComplexHalf,ComplexHalf,z)        /* 8 */ \
 _(std::complex<float>,ComplexFloat,z)   /* 9 */ \
 _(std::complex<double>,ComplexDouble,z) /* 10 */ \
-_(bool,Bool,i) /* 11 */
+_(bool,Bool,i)     /* 11 */
 
 // If you want to support ComplexHalf for real, replace occurrences
 // of this macro with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX.  But
@@ -193,19 +193,25 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   if (isComplexType(a) || isComplexType(b)) {
     AT_ERROR("promoteTypes with complex numbers is not handled yet; figure out what the correct rules should be");
   }
+
+  // this matrix has to be consistent with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX so that's why we have to add
+  // undefined as we are not sure what is the corrent values for the type promotions in complex type cases.
   static constexpr ScalarType _promoteTypesLookup
       [static_cast<int>(ScalarType::NumOptions)]
       [static_cast<int>(ScalarType::NumOptions)] = {
-            /* u1  i1  i2  i4  i8  f2  f4  f8  b1 */
-    /* u1 */ { u1, i2, i2, i4, i8, f2, f4, f8, u1 },
-    /* i1 */ { i2, i1, i2, i4, i8, f2, f4, f8, i1 },
-    /* i2 */ { i2, i2, i2, i4, i8, f2, f4, f8, i2 },
-    /* i4 */ { i4, i4, i4, i4, i8, f2, f4, f8, i4 },
-    /* i8 */ { i8, i8, i8, i8, i8, f2, f4, f8, i8 },
-    /* f2 */ { f2, f2, f2, f2, f2, f2, f4, f8, f2 },
-    /* f4 */ { f4, f4, f4, f4, f4, f4, f4, f8, f4 },
-    /* f8 */ { f8, f8, f8, f8, f8, f8, f8, f8, f8 },
-    /* b1 */ { u1, i1, i2, i4, i8, f2, f4, f8, b1 },
+            /* u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1 */
+    /* u1 */ { u1, i2, i2, i4, i8, f2, f4, f8, ud, ud, ud, u1 },
+    /* i1 */ { i2, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, i1 },
+    /* i2 */ { i2, i2, i2, i4, i8, f2, f4, f8, ud, ud, ud, i2 },
+    /* i4 */ { i4, i4, i4, i4, i8, f2, f4, f8, ud, ud, ud, i4 },
+    /* i8 */ { i8, i8, i8, i8, i8, f2, f4, f8, ud, ud, ud, i8 },
+    /* f2 */ { f2, f2, f2, f2, f2, f2, f4, f8, ud, ud, ud, f2 },
+    /* f4 */ { f4, f4, f4, f4, f4, f4, f4, f8, ud, ud, ud, f4 },
+    /* f8 */ { f8, f8, f8, f8, f8, f8, f8, f8, ud, ud, ud, f8 },
+    /* c2 */ { ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud },
+    /* c4 */ { ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud },
+    /* c8 */ { ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud },
+    /* b1 */ { u1, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, b1 },
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
 }

@@ -234,7 +234,7 @@
 - name: cosh(Tensor self)
   self: grad * self.sinh()
 
-- name: cross(Tensor self, Tensor other, int64_t dim)
+- name: cross(Tensor self, Tensor other, int64_t? dim)
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
 

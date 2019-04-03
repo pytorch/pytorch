@@ -46,13 +46,15 @@ endif()
 # 1. Replace /Zi and /ZI with /Z7
 # 2. Switch off incremental linking in debug builds
 if (MSVC)
-  foreach(flag_var
-      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-    if(${flag_var} MATCHES "/Z[iI]")
-      string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
-    endif(${flag_var} MATCHES "/Z[iI]")
-  endforeach(flag_var)
+  if(MSVC_Z7_OVERRIDE)
+    foreach(flag_var
+        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+        CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+      if(${flag_var} MATCHES "/Z[iI]")
+        string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
+      endif(${flag_var} MATCHES "/Z[iI]")
+    endforeach(flag_var)
+  endif(MSVC_Z7_OVERRIDE)
   foreach(flag_var
       CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
       CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
@@ -330,16 +332,27 @@ if(BUILD_TEST)
 
   # For gtest, we will simply embed it into our test binaries, so we won't
   # need to install it.
-  set(BUILD_GTEST ON CACHE BOOL "Build gtest" FORCE)
   set(INSTALL_GTEST OFF CACHE BOOL "Install gtest." FORCE)
-  # We currently don't need gmock right now.
-  set(BUILD_GMOCK OFF CACHE BOOL "Build gmock." FORCE)
+  set(BUILD_GMOCK ON CACHE BOOL "Build gmock." FORCE)
   # For Windows, we will check the runtime used is correctly passed in.
   if (NOT CAFFE2_USE_MSVC_STATIC_RUNTIME)
       set(gtest_force_shared_crt ON CACHE BOOL "force shared crt on gtest" FORCE)
   endif()
+
+  # Add googletest subdirectory but make sure our INCLUDE_DIRECTORIES
+  # don't bleed into it. This is because libraries installed into the root conda
+  # env (e.g. MKL) add a global /opt/conda/include directory, and if there's
+  # gtest installed in conda, the third_party/googletest/**.cc source files
+  # would try to include headers from /opt/conda/include/gtest/**.h instead of
+  # its own. Once we have proper target-based include directories,
+  # this shouldn't be necessary anymore.
+  get_property(INC_DIR_temp DIRECTORY PROPERTY INCLUDE_DIRECTORIES)
+  set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES "")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest)
-  include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
+  set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES ${INC_DIR_temp})
+
+  include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
+  include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googlemock/include)
 
   # We will not need to test benchmark lib itself.
   set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "Disable benchmark testing as we don't need it.")
