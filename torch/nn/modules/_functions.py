@@ -96,7 +96,7 @@ class SyncBatchNorm(Function):
             grad_bias = None
 
         return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
-    
+
     @staticmethod
     def convert_sync_batchnorm(self, module, process_group=None):
         r"""Helper function to convert `torch.nn.BatchNormND` layer in the model to
