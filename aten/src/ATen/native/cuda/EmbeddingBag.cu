@@ -24,13 +24,15 @@ namespace native {
 
 namespace {
 
-// This kernel assumes that all input tensors except `weight` are contiguous.
+// This kernel assumes that all input tensors except `weight` and
+// per_sample_weights are contiguous.
 template <typename scalar_t>
 __global__ void EmbeddingBag_updateOutputKernel(
     int64_t *input, int64_t *offsets, scalar_t *weight, scalar_t *output,
     int64_t *offset2bag, int64_t numIndices, int64_t numBags,
     int64_t featureSize, int64_t weight_stide0, int64_t weight_stride1,
-    int mode, int64_t *bag_size, int64_t *max_indices) {
+    int mode, int64_t *bag_size, int64_t *max_indices,
+    scalar_t* per_sample_weights, int64_t per_sample_weights_stride) {
 
   // the strategy here is that each bag x feature is handled by a single thread
 
@@ -64,7 +66,13 @@ __global__ void EmbeddingBag_updateOutputKernel(
             maxWord = input[emb];
           }
         } else {
-          weightFeatSum += static_cast<accscalar_t>(weightValue);
+          if (per_sample_weights) {
+            accscalar_t scaleWeightBy = static_cast<accscalar_t>(
+                per_sample_weights[emb * per_sample_weights_stride]);
+            weightFeatSum += scaleWeightBy * static_cast<accscalar_t>(weightValue);
+          } else {
+            weightFeatSum += static_cast<accscalar_t>(weightValue);
+          }
         }
 
         bag_size_++;
@@ -331,9 +339,6 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
   checkSameGPU("embedding_bag_cuda", weight_arg, indices_arg);
   checkSameGPU("embedding_bag_cuda", weight_arg, offsets_arg);
 
-  AT_CHECK(!per_sample_weights.defined(),
-      "NYI: embedding_bag: CUDA per_sample_weights (see issue #4068)");
-
   int64_t numIndices = indices.size(0);
   int64_t numBags = offsets.size(0);
   int64_t featureSize = weight.size(1);
@@ -363,7 +368,9 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
         weight.data<scalar_t>(), output.data<scalar_t>(),
         offset2bag.data<int64_t>(), numIndices, numBags, featureSize,
         weight.stride(0), weight.stride(1), mode, bag_size.data<int64_t>(),
-        mode == MODE_MAX ? max_indices.data<int64_t>() : NULL);
+        mode == MODE_MAX ? max_indices.data<int64_t>() : NULL,
+        per_sample_weights.defined() ? per_sample_weights.data<scalar_t>() : NULL,
+        per_sample_weights.defined() ? per_sample_weights.stride(0) : 0);
   });
 
   THCudaCheck(cudaGetLastError());
