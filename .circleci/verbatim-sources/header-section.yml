@@ -27,26 +27,37 @@ setup_linux_system_environment: &setup_linux_system_environment
     # Set up CircleCI GPG keys for apt, if needed
     curl -L https://packagecloud.io/circleci/trusty/gpgkey | sudo apt-key add -
 
-# NOTE: We only perform the merge in build step and not in test step, because
-# all source files will be shared from build to test
-install_official_git_client: &install_official_git_client
-  name: Install Official Git Client
-  no_output_timeout: "1h"
-  command: |
-    set -ex
+    # Stop background apt updates.  Hypothetically, the kill should not
+    # be necessary, because stop is supposed to send a kill signal to
+    # the process, but we've added it for good luck.  Also
+    # hypothetically, it's supposed to be unnecessary to wait for
+    # the process to block.  We also have that line for good luck.
+    # If you like, try deleting them and seeing if it works.
+    sudo systemctl stop apt-daily.service || true
+    sudo systemctl kill --kill-who=all apt-daily.service || true
 
-    sudo killall apt-get || true
-    sudo rm /var/lib/apt/lists/lock || true
-    sudo rm /var/cache/apt/archives/lock || true
-    sudo rm /var/lib/dpkg/lock || true
+    sudo systemctl stop unattended-upgrades.service || true
+    sudo systemctl kill --kill-who=all unattended-upgrades.service || true
+
+    # wait until `apt-get update` has been killed
+    while systemctl is-active --quiet apt-daily.service
+    do
+      sleep 1;
+    done
+    while systemctl is-active --quiet unattended-upgrades.service
+    do
+      sleep 1;
+    done
+
+    # See if we actually were successful
+    systemctl list-units --all | cat
+
+    sudo apt-get purge -y unattended-upgrades
 
     cat /etc/apt/sources.list
-    sudo sed -i 's#archive.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
-    sudo sed -i 's#security.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
-    cat /etc/apt/sources.list
 
-    sudo apt-get -q -y update
-    sudo apt-get -q -y install openssh-client git
+    ps ax | grep apt
+    ps ax | grep dpkg
 
 install_doc_push_script: &install_doc_push_script
   name: Install the doc push script
@@ -189,24 +200,30 @@ setup_ci_environment: &setup_ci_environment
 
     # Set up NVIDIA docker repo
     curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-    echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-    echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-    echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+    echo "deb https://nvidia.github.io/libnvidia-container/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+    echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+    echo "deb https://nvidia.github.io/nvidia-docker/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
 
-    sudo apt-get -q -y update
-    sudo apt-get -q -y remove linux-image-generic linux-headers-generic linux-generic docker-ce
+    sudo apt-get -y update
+    sudo apt-get -y remove linux-image-generic linux-headers-generic linux-generic docker-ce
     # WARNING: Docker version is hardcoded here; you must update the
     # version number below for docker-ce and nvidia-docker2 to get newer
     # versions of Docker.  We hardcode these numbers because we kept
     # getting broken CI when Docker would update their docker version,
     # and nvidia-docker2 would be out of date for a day until they
     # released a newer version of their package.
-    sudo apt-get -q -y install \
+    #
+    # How to figure out what the correct versions of these packages are?
+    # My preferred method is to start a Docker instance of the correct
+    # Ubuntu version (e.g., docker run -it ubuntu:16.04) and then ask
+    # apt what the packages you need are.  Note that the CircleCI image
+    # comes with Docker.
+    sudo apt-get -y install \
       linux-headers-$(uname -r) \
       linux-image-generic \
       moreutils \
-      docker-ce=18.06.2~ce~3-0~ubuntu \
-      nvidia-docker2=2.0.3+docker18.06.2-1 \
+      docker-ce=5:18.09.4~3-0~ubuntu-xenial \
+      nvidia-docker2=2.0.3+docker18.09.4-1 \
       expect-dev
 
     sudo pkill -SIGHUP dockerd
@@ -214,8 +231,9 @@ setup_ci_environment: &setup_ci_environment
     sudo pip -q install awscli==1.16.35
 
     if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-      wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-410.79.run'
-      sudo /bin/bash ./NVIDIA-Linux-x86_64-410.79.run -s --no-drm
+      DRIVER_FN="NVIDIA-Linux-x86_64-410.104.run"
+      wget "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
+      sudo /bin/bash "$DRIVER_FN" -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
       nvidia-smi
     fi
 
