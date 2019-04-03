@@ -11,6 +11,9 @@
 
 namespace c10 {
 
+// TODO: check all usages of these macro and make sure
+// the use case makes sense for qint
+
 // NB: Order matters for this macro; it is relied upon in
 // _promoteTypesLookup and the serialization format.
 #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(_)       \
@@ -25,7 +28,8 @@ namespace c10 {
   _(at::ComplexHalf, ComplexHalf, z) /* 8 */         \
   _(std::complex<float>, ComplexFloat, z) /* 9 */    \
   _(std::complex<double>, ComplexDouble, z) /* 10 */ \
-  _(bool, Bool, i) /* 11 */
+  _(bool, Bool, i) /* 11 */                          \
+  _(c10::qint8, QInt8, i) /* 12 */
 
 // If you want to support ComplexHalf for real, replace occurrences
 // of this macro with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX.  But
@@ -41,6 +45,20 @@ namespace c10 {
   _(double, Double, d)                                             \
   _(std::complex<float>, ComplexFloat, z)                          \
   _(std::complex<double>, ComplexDouble, z)                        \
+  _(bool, Bool, i)                                                 \
+  _(c10::qint8, QInt8, i)
+
+#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_AND_QINT(_) \
+  _(uint8_t, Byte, i)                                                       \
+  _(int8_t, Char, i)                                                        \
+  _(int16_t, Short, i)                                                      \
+  _(int, Int, i)                                                            \
+  _(int64_t, Long, i)                                                       \
+  _(at::Half, Half, d)                                                      \
+  _(float, Float, d)                                                        \
+  _(double, Double, d)                                                      \
+  _(std::complex<float>, ComplexFloat, z)                                   \
+  _(std::complex<double>, ComplexDouble, z)                                 \
   _(bool, Bool, i)
 
 #define AT_FORALL_SCALAR_TYPES(_) \
@@ -51,17 +69,28 @@ namespace c10 {
   _(int64_t, Long, i)             \
   _(at::Half, Half, d)            \
   _(float, Float, d)              \
+  _(double, Double, d)            \
+  _(c10::qint8, QInt8, i)
+
+#define AT_FORALL_SCALAR_TYPES_EXCEPT_QINT(_) \
+  _(uint8_t, Byte, i)                         \
+  _(int8_t, Char, i)                          \
+  _(int16_t, Short, i)                        \
+  _(int, Int, i)                              \
+  _(int64_t, Long, i)                         \
+  _(at::Half, Half, d)                        \
+  _(float, Float, d)                          \
   _(double, Double, d)
 
-#define AT_FORALL_SCALAR_TYPES_AND_BOOL(_) \
-  _(uint8_t, Byte, i)                      \
-  _(int8_t, Char, i)                       \
-  _(int16_t, Short, i)                     \
-  _(int, Int, i)                           \
-  _(int64_t, Long, i)                      \
-  _(at::Half, Half, d)                     \
-  _(float, Float, d)                       \
-  _(double, Double, d)                     \
+#define AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(_) \
+  _(uint8_t, Byte, i)                                  \
+  _(int8_t, Char, i)                                   \
+  _(int16_t, Short, i)                                 \
+  _(int, Int, i)                                       \
+  _(int64_t, Long, i)                                  \
+  _(at::Half, Half, d)                                 \
+  _(float, Float, d)                                   \
+  _(double, Double, d)                                 \
   _(bool, Bool, i)
 
 #define AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(_) \
@@ -71,6 +100,16 @@ namespace c10 {
   _(int, Int, i)                              \
   _(int64_t, Long, i)                         \
   _(float, Float, d)                          \
+  _(double, Double, d)                        \
+  _(c10::qint8, QInt8, i)
+
+#define AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(_) \
+  _(uint8_t, Byte, i)                                  \
+  _(int8_t, Char, i)                                   \
+  _(int16_t, Short, i)                                 \
+  _(int, Int, i)                                       \
+  _(int64_t, Long, i)                                  \
+  _(float, Float, d)                                   \
   _(double, Double, d)
 
 enum class ScalarType : int8_t {
@@ -182,6 +221,11 @@ static inline bool isComplexType(ScalarType t) {
       t == ScalarType::ComplexDouble);
 }
 
+static inline bool isQIntType(ScalarType t) {
+  // Don't forget to extend this when adding new QInt types
+  return t == ScalarType::QInt8;
+}
+
 static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   // This is generated according to NumPy's promote_types
   constexpr auto u1 = ScalarType::Byte;
@@ -200,6 +244,11 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   if (isComplexType(a) || isComplexType(b)) {
     AT_ERROR(
         "promoteTypes with complex numbers is not handled yet; figure out what the correct rules should be");
+  }
+
+  if (isQIntType(a) || isQIntType(b)) {
+    AT_ERROR(
+        "promoteTypes with quantized numbers is not handled yet; figure out what the correct rules should be");
   }
 
   // this matrix has to be consistent with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX
