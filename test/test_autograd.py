@@ -2292,7 +2292,8 @@ class TestAutograd(TestCase):
             return output
 
         f_args_variable = torch.ones(S, S, requires_grad=True)
-        self.assertRaisesRegex(RuntimeError, 'Numerical gradient for function expected to be zero', lambda: gradcheck(autograd_fn, f_args_variable, eps=1e-6, atol=PRECISION))
+        self.assertRaisesRegex(RuntimeError, 'Numerical gradient for function expected to be zero',
+                               lambda: gradcheck(autograd_fn, f_args_variable, eps=1e-6, atol=PRECISION))
 
     def test_variable_traverse(self):
         def get_out_and_unrefed_cycle():

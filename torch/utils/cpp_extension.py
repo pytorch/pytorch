@@ -1026,6 +1026,7 @@ def _write_ninja_file(path,
         cuda_flags = common_cflags + COMMON_NVCC_FLAGS
         if IS_WINDOWS:
             cuda_flags = _nt_quote_args(cuda_flags)
+            cuda_flags += _nt_quote_args(extra_cuda_cflags)
         else:
             cuda_flags += ['--compiler-options', "'-fPIC'"]
             cuda_flags += extra_cuda_cflags
