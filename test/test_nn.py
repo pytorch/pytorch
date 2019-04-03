@@ -2308,12 +2308,17 @@ class TestNN(NNTestCase):
         if test_per_sample_weights:
             per_sample_weights = torch.randn(B, L, device=device, dtype=dtype)
 
-        output = es(input.view(-1), offsets)
+        output = es(input.view(-1), offsets, per_sample_weights.view(-1))
         if mode == 'sum':
-            ref_output = e(input).sum(1)
+            if test_per_sample_weights:
+                ref_output = (e(input) * per_sample_weights.unsqueeze(-1)).sum(1)
+            else:
+                ref_output = e(input).sum(1)
         elif mode == 'mean':
+            assert not test_per_sample_weights
             ref_output = e(input).mean(1)
         elif mode == 'max':
+            assert not test_per_sample_weights
             ref_output = e(input).max(1)[0]
 
         self.assertEqual(output, ref_output, dtype2prec[dtype])
@@ -2559,43 +2564,47 @@ class TestNN(NNTestCase):
             bags.append(reduction(embeddings.narrow(0, offset, length)))
         return torch.stack(bags)
 
-    def test_EmbeddingBag_per_sample_weights_failures(self):
+    @staticmethod
+    def _test_EmbeddingBag_per_sample_weights_failures(self, device='cpu'):
         # Failure 1: mismatched embeddings / per_sample_weights dtype
-        es = nn.EmbeddingBag(5, 2, mode='sum').to(dtype=torch.float)
-        input = torch.tensor([3, 1, 1, 1, 4, 0], dtype=torch.long)
-        offsets = torch.tensor([0, 0, 3, 3, 6], dtype=torch.long)
-        per_sample_weights = torch.randn_like(input, dtype=torch.double)
+        es = nn.EmbeddingBag(5, 2, mode='sum').to(dtype=torch.float, device=device)
+        input = torch.tensor([3, 1, 1, 1, 4, 0], dtype=torch.long, device=device)
+        offsets = torch.tensor([0, 0, 3, 3, 6], dtype=torch.long, device=device)
+        per_sample_weights = torch.randn_like(input, dtype=torch.double, device=device)
         with self.assertRaisesRegex(RuntimeError, 'have the same type as'):
             es(input, offsets, per_sample_weights)
 
         # Failure 2.1: input/per_sample_weights have different sizes (1d input)
-        es = nn.EmbeddingBag(5, 2, mode='sum').to(dtype=torch.float)
-        input = torch.tensor([3, 1, 1, 1, 4, 0], dtype=torch.long)
-        offsets = torch.tensor([0, 0, 3, 3, 6], dtype=torch.long)
-        per_sample_weights = torch.randn(5, dtype=torch.float)
+        input = torch.tensor([3, 1, 1, 1, 4, 0], dtype=torch.long, device=device)
+        offsets = torch.tensor([0, 0, 3, 3, 6], dtype=torch.long, device=device)
+        per_sample_weights = torch.randn(5, dtype=torch.float, device=device)
         with self.assertRaisesRegex(ValueError, 'same shape as the input'):
             es(input, offsets, per_sample_weights)
 
         # Failure 2.2: input/per_sample_weights have different sizes (2d input)
-        es = nn.EmbeddingBag(5, 2, mode='sum').to(dtype=torch.float)
-        input = torch.randint(5, (7, 3), dtype=torch.long)
+        input = torch.randint(5, (7, 3), dtype=torch.long, device=device)
         offsets = None
-        per_sample_weights = torch.randn(7 * 3, dtype=torch.float)
+        per_sample_weights = torch.randn(7 * 3, dtype=torch.float, device=device)
         with self.assertRaisesRegex(ValueError, 'same shape as the input'):
             es(input, offsets, per_sample_weights)
 
         # Failure 3: Unsupported per_sample_weights and mode=('max', 'mean')
         for unsupported_mode in ('max', 'mean'):
-            es = nn.EmbeddingBag(5, 2, mode=unsupported_mode).to(dtype=torch.float)
-            input = torch.randint(5, (7, 3), dtype=torch.long)
+            es = nn.EmbeddingBag(5, 2, mode=unsupported_mode).to(
+                dtype=torch.float, device=device)
+            input = torch.randint(5, (7, 3), dtype=torch.long, device=device)
             offsets = None
-            per_sample_weights = torch.randn(7 * 3, dtype=torch.float)
+            per_sample_weights = torch.randn(7 * 3, dtype=torch.float, device=device)
             with self.assertRaisesRegex(NotImplementedError,
                                         "only supported for mode='sum'"):
                 es(input, offsets, per_sample_weights)
 
-    def test_EmbeddingBag_per_sample_weights_and_offsets(self):
-        def test_per_sample_weights(mode, dtype, device='cpu'):
+    def test_EmbeddingBag_per_sample_weights_failures(self):
+        self._test_EmbeddingBag_per_sample_weights_failures(self)
+
+    @staticmethod
+    def _test_EmbeddingBag_per_sample_weights_and_offsets(self, device='cpu'):
+        def test_per_sample_weights(mode, dtype):
             es = nn.EmbeddingBag(5, 2, mode=mode).to(dtype=dtype, device=device)
             es.weight.data.copy_(
                 torch.arange(1, 11, device=device, dtype=dtype).view_as(es.weight))
@@ -2613,14 +2622,31 @@ class TestNN(NNTestCase):
         for dtype, mode in itertools.product(dtypes, modes):
             test_per_sample_weights(mode, dtype)
 
-    def test_EmbeddingBag_per_sample_weights_and_no_offsets(self):
+    def test_EmbeddingBag_per_sample_weights_and_offsets(self):
+        self._test_EmbeddingBag_per_sample_weights_and_offsets(self)
+
+    @staticmethod
+    def _test_EmbeddingBag_per_sample_weights_and_no_offsets(self, device='cpu'):
         dtypes = (torch.float, torch.double)
         modes = ('sum',)
         for dtype, mode in itertools.product(dtypes, modes):
             kwargs = dict(test_per_sample_weights=True, test_backward=False,
-                          mode=mode, dtype=dtype, device='cpu')
-            self._test_EmbeddingBag_vs_Embedding(3, 5, 7, 11, **kwargs)
-            self._test_EmbeddingBag_vs_Embedding(3, 5, 51, 21, **kwargs)
+                          mode=mode, dtype=dtype, device=device)
+
+            # Simple case
+            self._test_EmbeddingBag_vs_Embedding(2, 3, 5, 7, **kwargs)
+
+            # B * L > 1000
+            self._test_EmbeddingBag_vs_Embedding(2, 5, 53, 23, **kwargs)
+
+            # Large num_embedding
+            self._test_EmbeddingBag_vs_Embedding(101, 5, 3, 7, **kwargs)
+
+            # Large embedding_dim
+            self._test_EmbeddingBag_vs_Embedding(2, 101, 3, 7, **kwargs)
+
+    def test_EmbeddingBag_per_sample_weights_and_no_offsets(self):
+        self._test_EmbeddingBag_per_sample_weights_and_no_offsets(self)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
