@@ -1117,19 +1117,15 @@
 
 - func: _cufft_get_plan_cache_size() -> int
   matches_jit_signature: True
-  device_guard: False
 
 - func: _cufft_get_plan_cache_max_size() -> int
   matches_jit_signature: True
-  device_guard: False
 
 - func: _cufft_set_plan_cache_max_size(int max_size) -> void
   matches_jit_signature: True
-  device_guard: False
 
 - func: _cufft_clear_plan_cache() -> void
   matches_jit_signature: True
-  device_guard: False
 
 - func: index(Tensor self, Tensor?[] indices) -> Tensor
   matches_jit_signature: True
