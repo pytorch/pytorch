@@ -2615,6 +2615,7 @@ class TestNN(NNTestCase):
     def test_EmbeddingBag_per_sample_weights_failures(self):
         self._test_EmbeddingBag_per_sample_weights_failures(self)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_EmbeddingBag_per_sample_weights_failures_cuda(self):
         self._test_EmbeddingBag_per_sample_weights_failures(self, device='cuda')
 
@@ -2647,6 +2648,7 @@ class TestNN(NNTestCase):
     def test_EmbeddingBag_per_sample_weights_and_offsets(self):
         self._test_EmbeddingBag_per_sample_weights_and_offsets(self)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_EmbeddingBag_per_sample_weights_and_offsets_cuda(self):
         self._test_EmbeddingBag_per_sample_weights_and_offsets(self, device='cuda')
 
@@ -2674,6 +2676,7 @@ class TestNN(NNTestCase):
     def test_EmbeddingBag_per_sample_weights_and_no_offsets(self):
         self._test_EmbeddingBag_per_sample_weights_and_no_offsets(self)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_EmbeddingBag_per_sample_weights_and_no_offsets_cuda(self):
         self._test_EmbeddingBag_per_sample_weights_and_no_offsets(self, device='cuda')
 
