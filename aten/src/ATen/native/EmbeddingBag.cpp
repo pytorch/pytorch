@@ -481,7 +481,7 @@ Tensor _embedding_bag_sparse_backward(
                                        offset2bag, bag_size_);
   if (per_sample_weights.defined()) {
     AT_ASSERT(mode == MODE_SUM);
-    index_grad = index_grad * (per_sample_weights.unsqueeze(1));
+    index_grad *= per_sample_weights.unsqueeze(1);
   }
   return native::embedding_backward(index_grad, indices, num_weights, -1,
                                     scale_grad_by_freq, true);

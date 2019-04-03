@@ -2305,13 +2305,16 @@ class TestNN(NNTestCase):
         input = torch.randint(N, (B, L), device=device, dtype=torch.long)
         offsets = torch.arange(0, B, device=device, dtype=torch.long).mul_(L)
         grad_output = torch.rand(B, D, device=device, dtype=dtype)
-        per_sample_weights = None
+
         if test_per_sample_weights:
             # To prevent large gradients, weights should sum to 1 for each bag
             per_sample_weights = \
                 torch.randn(B, L, device=device, dtype=dtype).softmax(dim=-1)
+            output = es(input.view(-1), offsets, per_sample_weights.view(-1))
+        else:
+            output = es(input.view(-1), offsets)
+            per_sample_weights = None
 
-        output = es(input.view(-1), offsets, per_sample_weights.view(-1))
         if mode == 'sum':
             if test_per_sample_weights:
                 ref_output = (e(input) * per_sample_weights.unsqueeze(-1)).sum(1)
@@ -2600,7 +2603,7 @@ class TestNN(NNTestCase):
                 dtype=torch.float, device=device)
             input = torch.randint(5, (7, 3), dtype=torch.long, device=device)
             offsets = None
-            per_sample_weights = torch.randn(7 * 3, dtype=torch.float, device=device)
+            per_sample_weights = torch.randn(7, 3, dtype=torch.float, device=device)
             with self.assertRaisesRegex(NotImplementedError,
                                         "only supported for mode='sum'"):
                 es(input, offsets, per_sample_weights)
