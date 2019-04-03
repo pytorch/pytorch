@@ -646,11 +646,16 @@ def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         padding = padding + tuple(numpy.add(padding_ceil, padding))
     else:
         padding = padding * 2
-    r, indices = g.op("MaxPool", input, outputs=2,
-                      kernel_shape_i=_single(kernel_size),
-                      pads_i=padding,
-                      strides_i=_single(stride),
-                      dilations_i=_single(dilation))
+    kwargs = {
+        'outputs': 2,
+        'kernel_shape_i': _single(kernel_size),
+        'pads_i': padding,
+        'strides_i': _single(stride),
+    }
+    # add 'dilations' attribute only when it's needed because it is a relatively new
+    if set(_single(dilation)) != {1}:
+        kwargs['dilations_i'] = _single(dilation)
+    r, indices = g.op("MaxPool", input, **kwargs)
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened.
     # In ONNX the indices are computed as a flatten 1-D tensor,
@@ -685,11 +690,16 @@ def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         padding = padding + tuple(numpy.add(padding_ceil, padding))
     else:
         padding = padding * 2
-    r, indices = g.op("MaxPool", input, outputs=2,
-                      kernel_shape_i=_pair(kernel_size),
-                      pads_i=padding,
-                      strides_i=_pair(stride),
-                      dilations_i=_pair(dilation))
+    kwargs = {
+        'outputs': 2,
+        'kernel_shape_i': _pair(kernel_size),
+        'pads_i': padding,
+        'strides_i': _pair(stride),
+    }
+    # add 'dilations' attribute only when it's needed because it is a relatively new
+    if set(_pair(dilation)) != {1}:
+        kwargs['dilations_i'] = _pair(dilation)
+    r, indices = g.op("MaxPool", input, **kwargs)
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened
     # See comment in max_pool1d_with_indices for details.
@@ -714,11 +724,16 @@ def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
         padding = padding + tuple(numpy.add(padding_ceil, padding))
     else:
         padding = padding * 2
-    r, indices = g.op("MaxPool", input, outputs=2,
-                      kernel_shape_i=_triple(kernel_size),
-                      pads_i=padding,
-                      strides_i=_triple(stride),
-                      dilations_i=_triple(dilation))
+    kwargs = {
+        'outputs': 2,
+        'kernel_shape_i': _triple(kernel_size),
+        'pads_i': padding,
+        'strides_i': _triple(stride),
+    }
+    # add 'dilations' attribute only when it's needed because it is a relatively new
+    if set(_triple(dilation)) != {1}:
+        kwargs['dilations_i'] = _triple(dilation)
+    r, indices = g.op("MaxPool", input, **kwargs)
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened
     # See comment in max_pool1d_with_indices for details.
