@@ -541,7 +541,7 @@ struct CAFFE2_API Type {
   virtual Tensor & exponential_(Tensor & self, double lambd, Generator * generator) const = 0;
   virtual Tensor & geometric_(Tensor & self, double p, Generator * generator) const = 0;
   virtual Tensor diag(const Tensor & self, int64_t diagonal) const = 0;
-  virtual Tensor cross(const Tensor & self, const Tensor & other, int64_t dim) const = 0;
+  virtual Tensor cross(const Tensor & self, const Tensor & other, c10::optional<int64_t> dim) const = 0;
   virtual Tensor triu(const Tensor & self, int64_t diagonal) const = 0;
   virtual Tensor tril(const Tensor & self, int64_t diagonal) const = 0;
   virtual Tensor trace(const Tensor & self) const = 0;

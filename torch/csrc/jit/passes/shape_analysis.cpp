@@ -541,6 +541,12 @@ class ShapePropagator {
         setUnshapedType(node);
         return;
       }
+      case prim::GetAttr: {
+        auto cls = node->input()->type()->expect<ClassType>();
+        // propagate any type specializations encoded in the type of the class
+        node->output()->setType(cls->getAttribute(node->s(attr::name)));
+        return;
+      }
       case aten::_unwrap_optional: {
         // During analysis we don't want to pass None through here
         // to not mess up the expectation of the passes working
@@ -1017,11 +1023,9 @@ class ShapePropagator {
     };
 
     // Requirements:
-    //   dims           : 0 if dim is None, otherwise preserved if keepdim == false or 1 smaller otherwise
-    //   scalar type    : preserved
-    //   device         : preserved
-    //   tensor inputs  : 1
-    //   tensor outputs : 1
+    //   dims           : 0 if dim is None, otherwise preserved if keepdim ==
+    //   false or 1 smaller otherwise scalar type    : preserved device :
+    //   preserved tensor inputs  : 1 tensor outputs : 1
     // Additionally:
     //   - First input should be the only tensor input
     //   - Has a bool keepdim argument
@@ -1114,7 +1118,9 @@ class ShapePropagator {
         [](Node* node) -> type_vec_t {
           if (auto dim = node->get<std::vector<int64_t>>(attr::dim)) {
             return multidim_reduce_with_postprocess(
-                node, /*num_reduced_dim=*/dim->size(), /*upcast_integer=*/false);
+                node,
+                /*num_reduced_dim=*/dim->size(),
+                /*upcast_integer=*/false);
           }
           return {};
         }};
@@ -1176,14 +1182,14 @@ class ShapePropagator {
     //   - has ScalarType dtype, Layeout layout and Device device arguments
     static const register_formula_for like_factories_with_options{
         {
-            "aten::empty_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
-            "aten::full_like(Tensor self, Scalar fill_value, *, int dtype, int layout, Device device) -> Tensor",
-            "aten::ones_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
-            "aten::rand_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
-            "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device) -> Tensor",
-            "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device) -> Tensor",
-            "aten::randn_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
-            "aten::zeros_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
+            "aten::empty_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+            "aten::full_like(Tensor self, Scalar fill_value, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+            "aten::ones_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+            "aten::rand_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+            "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+            "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+            "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+            "aten::zeros_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto type = node->namedInput(attr::self)
@@ -1205,14 +1211,14 @@ class ShapePropagator {
     //   arguments
     static const register_formula_for size_factories_with_options{
         {
-            "aten::empty(int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
-            "aten::full(int[] size, Scalar fill_value, *, int? dtype, int? layout, Device? device) -> Tensor",
-            "aten::ones(int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
-            "aten::rand(int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
-            "aten::randn(int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
-            "aten::zeros(int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
-            "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
-            "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
+            "aten::empty(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::full(int[] size, Scalar fill_value, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::ones(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::zeros(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto maybe_size = node->get<std::vector<int64_t>>(attr::size)) {

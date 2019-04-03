@@ -1,9 +1,9 @@
 #pragma once
 
+#include <ATen/core/jit_type.h>
+#include <ATen/core/stack.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir.h>
-#include <ATen/core/stack.h>
-#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/variable_tensor_list.h>
 #include <torch/csrc/utils/hash.h>
 #include <iostream>
@@ -22,11 +22,11 @@ struct ArgumentInfo {
   friend struct ArgumentSpec;
   using plain_data_type = uint32_t;
 
-  bool isTensor() const {
-    return is_tensor_;
-  }
   bool defined() const {
     return defined_;
+  }
+  bool isNone() const {
+    return is_none_;
   }
   int device() const {
     return device_;
@@ -45,14 +45,20 @@ struct ArgumentInfo {
   operator TypePtr() const {
     if (!defined())
       return TensorType::get();
-    return DimensionedTensorType::create(type(), ConvertIntToCPUOrCUDA(device()), dim());
+    return DimensionedTensorType::create(
+        type(), ConvertIntToCPUOrCUDA(device()), dim());
   }
 
  private:
-  unsigned is_tensor_ : 1;
+  unsigned is_nontensor_optional_ : 1;
+    // =0 if it is an Optional[Tensor] or Tensor. =1 other optional type.
+    // if this is set, values below is_none_ must be 0
+    // Non-optional other types are not considered
+  unsigned is_none_ : 1;
+    // is_none_  =1 if an Optional[T] is None, remaining bits undefined
   unsigned defined_ : 1;
   unsigned requires_grad_ : 1;
-  unsigned : 5;
+  unsigned : 4;
   unsigned dim_ : 8;
   int device_ : 8; // NOTE: this needs to be signed because we use -1 to
                    // represent CPU
@@ -67,48 +73,47 @@ static_assert(
     "ArgumentInfo is expected to be a 32-bit struct");
 
 struct ArgumentSpec {
-  ArgumentSpec(
-      bool with_grad,
-      at::ArrayRef<IValue> inputs,
-      size_t num_flat_inputs) {
+  ArgumentSpec(size_t num_flat_inputs) {
     hash_code = num_flat_inputs;
-    args.resize(num_flat_inputs);
-    size_t offset = 0;
-    for (const auto& i : inputs) {
-      addInput(i, offset, with_grad);
-    }
-    AT_ASSERT(offset <= num_flat_inputs);
+    args.reserve(num_flat_inputs);
   }
 
-  void addInput(const IValue& input, size_t& offset, bool with_grad) {
-    auto& arg = args.at(offset);
+  void addNontensorOptional(const IValue& input) {
+    args.emplace_back();
+    auto& arg = args.back();
+    // Initialize all fields to 0. This is convenient, because e.g.
+    // requires_grad() can be checked even on tensors AND will make
+    // padding bits all 0s.
+    std::memset(&arg, 0, sizeof(ArgumentInfo));
+    arg.is_nontensor_optional_ = true;
+    arg.is_none_ = input.isNone();
+  }
+
+  void addTensor(const IValue& input, bool with_grad) {
+    args.emplace_back();
+    auto& arg = args.back();
     // Initialize all fields to 0. This is convenient, because e.g.
     // requires_grad() can be checked even on tensors AND will make
     // padding bits all 0s.
     std::memset(&arg, 0, sizeof(ArgumentInfo));
 
-    if (input.isTensor()) {
-      at::Tensor t = input.toTensor();
-      if ((arg.defined_ = t.defined())) {
-        arg.requires_grad_ = with_grad && autograd::Variable(t).requires_grad();
-        arg.dim_ = t.dim();
-        arg.device_ = t.is_cuda() ? t.get_device() : -1;
-        arg.type_ = static_cast<unsigned>(t.scalar_type());
-      }
-
-      arg.is_tensor_ = true;
-      combineHash(arg);
-      offset++;
-    } else if (input.isTuple()) {
-      for (const IValue& elem : input.toTuple()->elements()) {
-        addInput(elem, offset, with_grad);
-      }
+    if (input.isNone()) {
+      arg.is_none_ = 1;
     } else {
-      // NB: no need to set is_tensor to false, because we memset the struct to
-      // 0 above
-      combineHash(arg);
-      offset++;
+      AT_ASSERT(input.isTensor());
+      // [argspec refcounting] reinterpret the IValue to avoid having to refcount
+      // the Tensor microbenchmarks
+      // https://github.com/zdevito/pytorch/commit/21e7200a0a0fc456bea2f10e95b1781f83933d10
+      // show overhead in extra refcounting along this path
+      const at::Tensor* t = reinterpret_cast<const at::Tensor*>(&input);
+      if ((arg.defined_ = t->defined())) {
+	arg.requires_grad_ = with_grad && autograd::Variable(*t).requires_grad();
+	arg.dim_ = t->dim();
+	arg.device_ = t->is_cuda() ? t->get_device() : -1;
+	arg.type_ = static_cast<unsigned>(t->scalar_type());
+      }
     }
+    combineHash(arg);
   }
 
   void combineHash(const ArgumentInfo& arg) {
@@ -143,50 +148,50 @@ struct ArgumentSpec {
   size_t hashCode() const {
     return hash_code;
   }
-  // For every input of a given graph, returns a most detailed type that can be
-  // inferred for it based on this ArgumentSpec.
-  std::vector<TypePtr> getTypes(Graph& graph) const {
-    size_t offset = 0;
-    return fmap(
-        graph.inputs(), [&](Value* v) { return fillType(v->type(), offset); });
-  }
 
  private:
-  TypePtr fillType(TypePtr original, size_t& offset) const {
-    // We specialize OptionalType::ofTensor to TensorType.
-    // This allows us to do static analysis on None vs. defined tensors
-    // and we have spearate ArgumentSpecs for them, anyway.
-    if (original->isSubtypeOf(TensorType::get()) ||
-        original->isSubtypeOf(OptionalType::ofTensor())) {
-      auto& arg = args.at(offset++);
-      if (!arg.defined()) {
-        // Previously we specialized only TensorType, and undefined arguments
-        // were mapped to AutogradZeroTensorType. For OptionalType::ofTensor
-        // we prefer to have NoneType as the specialization. But passing None
-        // will cause the arg to not be defined. We leave the old behaviour
-        // as is.
-        if (original->isSubtypeOf(OptionalType::ofTensor())) {
-          return NoneType::get();
-        } else {
-          return AutogradZeroTensorType::get();
-        }
-      }
-      return DimensionedTensorType::create(
-          arg.type(),
-          ConvertIntToCPUOrCUDA(arg.device()),
-          arg.dim(),
-          arg.requires_grad());
-    } else if (auto tuple_type = original->cast<TupleType>()) {
-      return TupleType::create(fmap(
-          tuple_type->elements(),
-          [&](const TypePtr& subtype) { return fillType(subtype, offset); }));
-    } else {
-      offset++;
-      return original;
-    }
-  }
   size_t hash_code; // precomputed on construction
   std::vector<ArgumentInfo> args;
+};
+
+// ArgumentSpecCreator takes an initial graph and comes up with a set
+// of simple instructions to compute the ArgumentSpec given a set of
+// input tensors.
+struct ArgumentSpecCreator {
+  // instructs acts on a stack of a list of input IValues
+  // at the beginning the stack contains a single list of the inputs to the
+  // function the ENTER_ instructs descend into subobjects and push new lists
+  // onto the stack
+  enum Inst : char {
+    ENTER_TUPLE, // consume a tuple ivalue from the top-most list, and push the
+                 // list of its elements onto the stack as a new list
+    ENTER_OBJECT, // same as ENTER_TUPLE, but the input is a class
+    LEAVE, // pop the top-most list from the stack
+    SKIP, // consume an element from the top-most list, and discard
+    SPECIALIZE_TENSOR, // consume a tensor or optional tensor for the top-most
+                       // list, and add it to the ArgSpec key being created
+    SPECIALIZE_NONTENSOR_OPTIONAL,
+                       // consume a nontensor optional from the top-most list,
+                       // and add it to the ArgSpec key being created
+  };
+  ArgumentSpecCreator(Graph& graph);
+  ArgumentSpec create(bool with_grad, const Stack& stack) const;
+  void setInputTypes(Graph& g, const ArgumentSpec& spec) const;
+  std::vector<TypePtr> getSpecializedTypes(
+      Graph& graph,
+      const ArgumentSpec& spec) const;
+  void dump() const;
+  using WrittenSlots = std::unordered_set<std::string>;
+
+ private:
+  static constexpr size_t DEPTH_LIMIT = 128;
+  void scan(
+      const TypePtr& typ,
+      size_t depth,
+      const WrittenSlots& written_slots);
+  size_t num_inputs_;
+  size_t num_tensors_or_optionals_ = 0;
+  std::vector<Inst> instructions_;
 };
 
 // CompleteArgumentSpec represents one particular specialization.
@@ -198,11 +203,12 @@ struct ArgumentSpec {
 // API users should use ArgumentInfo
 struct CompleteArgumentInfoPOD {
   // total size is 64-bit
-  unsigned is_tensor : 8; // all other fields are invalid if this is false
+  unsigned is_tensor : 8; // all other fields except is_none are invalid if this is false
   unsigned type : 8; // scalar type
+  unsigned is_none : 1; // for optionals
   unsigned defined : 1;
   unsigned requires_grad : 1;
-  signed device : 14;
+  signed device : 13;
   uint32_t total_dims; // all TensorInfoPODs are in CompleteArgumentSpec's
                        // tensor_info() array. total_dims is the total number of
                        // dimensions seen so far in all previous members of
@@ -410,14 +416,6 @@ inline std::ostream& operator<<(
 
 inline CompleteArgumentInfo CompleteArgumentSpec::at(size_t i) const {
   return CompleteArgumentInfo(*this, i);
-}
-
-inline void setInputTypes(Graph& g, const ArgumentSpec& spec) {
-  auto input_types = spec.getTypes(g);
-  auto inputs = g.inputs();
-  for (size_t i = 0; i < inputs.size(); ++i) {
-    inputs[i]->setType(input_types[i]);
-  }
 }
 
 } // namespace jit
