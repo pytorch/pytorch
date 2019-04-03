@@ -189,6 +189,7 @@ scalar_types = [
     ('Long', 'int64_t', 'Long', False),
     ('Short', 'int16_t', 'Long', False),
     ('Half', 'Half', 'Double', True),
+    ('QInt8', 'qint8', 'Long', False),
 ]
 
 # shared environment for non-derived base classes Type.h Tensor.h Storage.h
