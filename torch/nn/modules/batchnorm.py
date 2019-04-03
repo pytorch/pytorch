@@ -40,6 +40,7 @@ class _BatchNorm(Module):
             self.register_parameter('running_var', None)
             self.register_parameter('num_batches_tracked', None)
         self.reset_parameters()
+        print('I am done.\n')
 
     def reset_running_stats(self):
         if self.track_running_stats:
@@ -59,8 +60,10 @@ class _BatchNorm(Module):
     @weak_script_method
     def forward(self, input):
         self._check_input_dim(input)
-
-        exponential_average_factor = 0.0 if self.momentum is None else self.momentum
+        if self.momentum is None:
+            exponential_average_factor = 0.0
+        else:
+             exponential_average_factor = self.momentum
 
         if self.training and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
