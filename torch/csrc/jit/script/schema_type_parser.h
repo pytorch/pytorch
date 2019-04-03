@@ -9,7 +9,7 @@ namespace script {
 using TypePtr = c10::TypePtr;
 using TypeAndAlias = std::pair<TypePtr, c10::optional<c10::AliasInfo>>;
 
-struct SchemaTypeParser {
+struct C10_API SchemaTypeParser {
   TypeAndAlias parseBaseType();
   c10::optional<c10::AliasInfo> parseAliasAnnotation();
   std::pair<TypePtr, c10::optional<c10::AliasInfo>> parseType();

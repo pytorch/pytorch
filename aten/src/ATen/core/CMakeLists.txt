@@ -8,19 +8,19 @@ EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 
 # Add files needed from jit folders
 LIST(APPEND ATen_CORE_HEADERS
-    torch/csrc/jit/function_schema_parser.h
-    torch/csrc/jit/source_range.h
-    torch/csrc/jit/source_location.h
-    torch/csrc/jit/script/lexer.h
-    torch/csrc/jit/script/parse_string_literal.h
-    torch/csrc/jit/script/schema_type_parser.h
-    torch/csrc/jit/script/error_report.h
-    torch/csrc/jit/script/tree.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/function_schema_parser.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/source_range.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/source_location.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/lexer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/parse_string_literal.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/schema_type_parser.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/error_report.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/tree.h
 )
 LIST(APPEND ATen_CORE_SRCS
-    torch/csrc/jit/function_schema_parser.cpp
-    torch/csrc/jit/script/lexer.cpp
-    torch/csrc/jit/script/schema_type_parser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/function_schema_parser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/lexer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/schema_type_parser.cpp
 )
 
 # Pass to parent
