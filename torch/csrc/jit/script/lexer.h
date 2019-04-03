@@ -111,7 +111,7 @@ enum TokenKind {
 #undef DEFINE_TOKEN
 };
 
-std::string kindToString(int kind);
+C10_API std::string kindToString(int kind);
 int stringToKind(const std::string& str);
 
 // nested hash tables that indicate char-by-char what is a valid token.
@@ -145,7 +145,7 @@ struct TokenTrie {
 
 // stuff that is shared against all TC lexers/parsers and is initialized only
 // once.
-struct SharedParserData {
+struct C10_API SharedParserData {
   SharedParserData() : head(new TokenTrie()) {
     std::stringstream ss;
     for (const char* c = valid_single_char_tokens; *c; c++) {
@@ -361,7 +361,7 @@ struct SharedParserData {
   TokenTrieRef head;
 };
 
-SharedParserData& sharedParserData();
+C10_API SharedParserData& sharedParserData();
 
 struct Token {
   int kind;
