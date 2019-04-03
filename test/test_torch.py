@@ -2642,6 +2642,8 @@ class _TestTorchMixin(object):
         qr = r.quantize_linear(scale, zero_point)
         self.assertEqual(qr.q_scale(), scale)
         self.assertEqual(qr.q_zero_point(), zero_point)
+        print('dir', dir(qr))
+        self.assertTrue(qr.is_quantized())
         rqr = qr.dequantize()
         for i in range(num_elements):
             self.assertEqual(r[i], rqr[i])

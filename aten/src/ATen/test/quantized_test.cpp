@@ -20,11 +20,7 @@ TEST(TestQTensor, QuantDequantAPIs) {
   Tensor qr = r.quantize_linear(scale, zero_point);
   ASSERT_EQ(qr.q_scale().to<float>(), scale);
   ASSERT_EQ(qr.q_zero_point().to<int32_t>(), zero_point);
-
-  // TODO: Uncomment when quantizer is ready
-  // auto* quantizer = static_cast<PerTensorAffineQuantizer*>(qr.quantizer());
-  // ASSERT_EQ(quantizer->scale(), scale);
-  // ASSERT_EQ(quantizer->zero_point(), zero_point);
+  ASSERT_TRUE(qr.is_quantized());
 
   // Check for correct quantization
   auto r_data = r.data<float>();
