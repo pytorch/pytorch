@@ -102,6 +102,13 @@ Value* getValueTrace(const IValue& var) {
     }
 
     // Didn't find it. Bake in a constant
+    if (ten.is_variable() && ten.requires_grad()) {
+      std::ostringstream oss;
+      oss << "Cannot insert a Tensor that requires grad as a constant. "
+          << "Consider making it a parameter or input, or detaching the gradient\n";
+      throw std::runtime_error(oss.str());
+    }
+
     Value* constant = state->graph->insertConstant(ten);
     recordSourceLocation(constant->node());
     constant->inferTypeFrom(ten);
@@ -229,7 +236,8 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
       return Tuple::create(std::move(elems));
     } else {
       AT_ERROR(
-          "Only tensors or tuples of tensors can be inputs to traced functions");
+          "Only tensors or tuples of tensors can be inputs to traced functions. Got ",
+          type);
     }
   };
   for (IValue& input : inputs) {
@@ -400,6 +408,7 @@ void addInputs(Node* n, const char* name, const at::TensorOptions& options) {
   addInputs(n, name, at::typeMetaToScalarType(options.dtype()));
   addInputs(n, name, options.layout());
   addInputs(n, name, options.device());
+  addInputs(n, name, options.pinned_memory());
 }
 
 void addInputs(Node* n, const char* name, at::IntArrayRef value) {
@@ -429,10 +438,7 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
 void addInputs(Node* n, const char* name, const ArrayRef<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
-void addInputs(
-    Node* n,
-    const char* name,
-    const std::vector<double>& value) {
+void addInputs(Node* n, const char* name, const std::vector<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
 

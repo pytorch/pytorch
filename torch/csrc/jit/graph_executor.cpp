@@ -32,6 +32,7 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/logging.h>
 
 #include <cstdint>
 #include <iterator>
@@ -292,7 +293,6 @@ Gradient getGradient(const Node* n) {
   grad.df_output_vjps = fmap<size_t>(n->is(attr::df_output_vjps));
   return grad;
 }
-
 } // anonymous namespace
 
 RegisterOperators reg_graph_executor_ops(
@@ -308,7 +308,6 @@ GraphExecutor* getGradExecutor(Operation& op) {
   }
   return nullptr;
 }
-
 } // namespace detail
 
 // a Graph can be created via tracing, or via a language-based frontend
@@ -342,7 +341,10 @@ struct GraphExecutorImpl {
         optimize(optimize),
         num_inputs(this->graph->inputs().size()),
         arg_spec_creator_(*graph),
-        num_outputs(this->graph->outputs().size()) {}
+        num_outputs(this->graph->outputs().size()) {
+          logging::getLogger()->addStatValue(
+              logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
+        }
 
   // entry point where execution begins
   void run(Stack& stack) {
@@ -352,6 +354,9 @@ struct GraphExecutorImpl {
         num_inputs,
         " inputs, but got only ",
         stack.size());
+
+    logging::getLogger()->addStatValue(
+        logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
     if (tracer::isTracing()) {
       return runTraced(stack);
@@ -419,10 +424,15 @@ struct GraphExecutorImpl {
     {
       std::lock_guard<std::mutex> lock(compile_mutex);
       auto it = plan_cache.find(spec);
-      if (it != plan_cache.end())
+      if (it != plan_cache.end()) {
+        logging::getLogger()->addStatValue(
+            logging::runtime_counters::EXECUTION_PLAN_CACHE_HIT, 1.0);
         return it->second;
+      }
       auto plan = compileSpec(spec);
       auto r = plan_cache.emplace(std::move(spec), std::move(plan));
+      logging::getLogger()->addStatValue(
+          logging::runtime_counters::EXECUTION_PLAN_CACHE_MISS, 1.0);
       return r.first->second;
     }
   }
@@ -481,6 +491,7 @@ struct GraphExecutorImpl {
     ConstantPooling(graph);
 
     PeepholeOptimize(graph);
+    ConstantPropagation(graph);
 
     // Unroll small loops, and eliminate expressions that are the same at every
     // iteration.
@@ -619,6 +630,5 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g) {
   CanonicalizeOps(g);
   EliminateDeadCode(g);
 }
-
 } // namespace jit
 } // namespace torch
