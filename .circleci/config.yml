@@ -56,7 +56,7 @@ setup_linux_system_environment: &setup_linux_system_environment
 
     cat /etc/apt/sources.list
     sudo sed -i 's#archive.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
-    sudo sed -i 's#security.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
+    #sudo sed -i 's#security.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
     cat /etc/apt/sources.list
 
     ps ax | grep apt
@@ -207,8 +207,8 @@ setup_ci_environment: &setup_ci_environment
     echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
     echo "deb https://nvidia.github.io/nvidia-docker/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
 
-    sudo apt-get -q -y update
-    sudo apt-get -q -y remove linux-image-generic linux-headers-generic linux-generic docker-ce
+    sudo apt-get -y update
+    sudo apt-get -y remove linux-image-generic linux-headers-generic linux-generic docker-ce
     # WARNING: Docker version is hardcoded here; you must update the
     # version number below for docker-ce and nvidia-docker2 to get newer
     # versions of Docker.  We hardcode these numbers because we kept
@@ -221,7 +221,7 @@ setup_ci_environment: &setup_ci_environment
     # Ubuntu version (e.g., docker run -it ubuntu:16.04) and then ask
     # apt what the packages you need are.  Note that the CircleCI image
     # comes with Docker.
-    sudo apt-get -q -y install \
+    sudo apt-get -y install \
       linux-headers-$(uname -r) \
       linux-image-generic \
       moreutils \
