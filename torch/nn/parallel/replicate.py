@@ -253,14 +253,15 @@ def replicate(network, devices, detach=False):
     :attr:`devices` must be satisfy the following conditions:
 
     1. :attr:`devices` must be a 2D list,
-    2. `devices[0]` must match the :attr:`network`'s devices, in any order.
-    3. All `devices[i]` must have the same length.
+    2. ``devices[0]`` must match the :attr:`network`'s devices, in any order.
+    3. All ``devices[i]`` must have the same length.
 
-    For example, :attr:`network` is a `Sequential` module with two `Linear`
-    layers stored on `cuda:0` and `cuda:1` respectively. Setting :attr:`devices`
-    to `[[0, 1], [2, 3], [4, 5]]` will replicate :attr:`network` three times
-    with replicas stored on devices `[cuda:0, cuda:1]`, `[cuda:2, cuda:3]`, and
-    `[cuda:4, cuda:5]` respectively.
+    For example, :attr:`network` is a ``Sequential`` module with two ``Linear``
+    layers stored on ``cuda:0`` and ``cuda:1`` respectively. Setting
+    :attr:`devices` to ``[[0, 1], [2, 3], [4, 5]]`` will replicate
+    :attr:`network` three times with replicas stored on devices
+    ``[cuda:0, cuda:1]``, ``[cuda:2, cuda:3]``, and ``[cuda:4, cuda:5]``
+    respectively.
 
 
     Args:

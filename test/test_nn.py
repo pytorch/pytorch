@@ -3386,7 +3386,7 @@ class TestNN(NNTestCase):
             with self.assertRaisesRegex(AssertionError, msg):
                 f(devices)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_replicate_tensor_grouping_multi_gpu(self):
         from torch.nn.parallel.replicate import _group_by_device
 
