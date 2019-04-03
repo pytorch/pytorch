@@ -63,6 +63,8 @@ factory_common_args = parse_kwargs("""
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
+    pin_memory (bool, optional): If set, returned tensor would be allocated in
+        the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
 factory_like_common_args = parse_kwargs("""
@@ -75,6 +77,8 @@ factory_like_common_args = parse_kwargs("""
         Default: if ``None``, defaults to the device of :attr:`input`.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
+    pin_memory (bool, optional): If set, returned tensor would be allocated in
+        the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
 factory_data_common_args = parse_kwargs("""
@@ -88,6 +92,8 @@ factory_data_common_args = parse_kwargs("""
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
+    pin_memory (bool, optional): If set, returned tensor would be allocated in
+        the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
 add_docstr(torch.abs,
@@ -3964,7 +3970,7 @@ Example::
 
 add_docstr(torch.tensor,
            r"""
-tensor(data, dtype=None, device=None, requires_grad=False) -> Tensor
+tensor(data, dtype=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
 Constructs a tensor with :attr:`data`.
 
@@ -3988,6 +3994,7 @@ Args:
     {dtype}
     {device}
     {requires_grad}
+    {pin_memory}
 
 
 Example::
@@ -5546,7 +5553,7 @@ Example::
 
 add_docstr(torch.empty,
            r"""
-empty(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+empty(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
 Returns a tensor filled with uninitialized data. The shape of the tensor is
 defined by the variable argument :attr:`sizes`.
@@ -5559,6 +5566,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
+    {pin_memory}
 
 Example::
 
