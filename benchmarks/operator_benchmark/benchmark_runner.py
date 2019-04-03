@@ -10,12 +10,6 @@ from caffe2.python import workspace
 
 from caffe2.benchmarks.operator_benchmark import benchmark_core
 
-import caffe2.benchmarks.operator_benchmark.benchmark_caffe2
-import caffe2.benchmarks.operator_benchmark.benchmark_pytorch
-
-import caffe2.benchmarks.operator_benchmark.ops.add
-import caffe2.benchmarks.operator_benchmark.ops.matmul
-
 """Performance microbenchmarks's main binary.
 
 This is the main function for running performance microbenchmark tests.
