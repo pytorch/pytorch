@@ -200,13 +200,6 @@ THCTensor *THCTensor_(newTranspose)(THCState *state, THCTensor *tensor, int dime
   return self;
 }
 
-THCTensor *THCTensor_(newUnfold)(THCState *state, THCTensor *tensor, int dimension_, int64_t size_, int64_t step_)
-{
-  THCTensor *self = THCTensor_(newWithTensor)(state, tensor);
-  THCTensor_(unfold)(state, self, NULL, dimension_, size_, step_);
-  return self;
-}
-
 THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, at::IntArrayRef size)
 {
   ptrdiff_t numel = THCTensor_(nElement)(state, tensor);

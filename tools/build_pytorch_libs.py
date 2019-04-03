@@ -149,6 +149,7 @@ def run_cmake(version,
     cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
     ldflags = os.getenv('LDFLAGS', "")
     if IS_WINDOWS:
+        cmake_defines(cmake_args, MSVC_Z7_OVERRIDE=os.getenv('MSVC_Z7_OVERRIDE', "ON"))
         cflags += " /EHa"
 
     mkdir_p(install_dir)
@@ -265,6 +266,7 @@ def build_caffe2(version,
             check_call(['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--', '-j', str(j)],
                        cwd=build_dir, env=my_env)
         else:
+            j = max_jobs or str(multiprocessing.cpu_count())
             check_call(['msbuild', 'INSTALL.vcxproj', '/p:Configuration={} /maxcpucount:{}'.format(build_type, j)],
                        cwd=build_dir, env=my_env)
     else:
