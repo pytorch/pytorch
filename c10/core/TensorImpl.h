@@ -149,7 +149,7 @@ struct C10_API AutogradMetaInterface {
 // 1. A view shares the version counter of the base Variable,
 // 2. Detached variables share the version counter of the source,
 // 3. Unpacked saved variables share the version counter of the source,
-// 4. Calling `set_data(...)` on variables shares the version counter with the source.
+// 4. `set_data(...)` on variables shares the version counter with the source data tensor.
 struct C10_API VariableVersion {
  public:
   // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
