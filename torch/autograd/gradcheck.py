@@ -97,7 +97,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
                 orig = x_tensor[x_idx].item()
 
-                # Here we use `torch.no_grad(update_version=False)` to disable version update
+                # Here we use `torch._C.set_version_update_enabled(...)` to disable version update
                 # in `x_tensor`'s in-place operations. There are two potential concerns here:
                 #
                 # 1. Does it affect the gradient calculations in `fn(input)`?
@@ -110,14 +110,13 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 # Answer: No. Since we restore `x_tensor`'s original content at the end of this
                 # code block, from the caller's perspective this function doesn't change `x_tensor`'s
                 # content and doesn't update its version, which maintains the invariant.
-                with torch.no_grad(update_version=False):
-                    x_tensor[x_idx] = orig - eps
+                torch._C.set_version_update_enabled(False)
+                x_tensor[x_idx] = orig - eps
                 outa = fn(input).clone()
-                with torch.no_grad(update_version=False):
-                    x_tensor[x_idx] = orig + eps
+                x_tensor[x_idx] = orig + eps
                 outb = fn(input).clone()
-                with torch.no_grad(update_version=False):
-                    x_tensor[x_idx] = orig
+                x_tensor[x_idx] = orig
+                torch._C.set_version_update_enabled(True)
                 r = (outb - outa) / (2 * eps)
                 d_tensor[d_idx] = r.detach().reshape(-1)
 

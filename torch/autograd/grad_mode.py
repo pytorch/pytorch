@@ -13,23 +13,6 @@ class no_grad(object):
 
     Also functions as a decorator.
 
-    Arguments:
-        update_version (bool, optional):
-            If ``True``, in-place operations on any tensor within the context will
-            update the tensor's version counter, which is used for detecting
-            modifications to saved autograd variables that can result in incorrect
-            gradient calculations.
-            If ``False``, in-place operations on any tensor within the context will
-            not update the tensor's version counter, which is useful when we are
-            aware of the possibly incorrect gradient calculations, but still want to
-            prevent version update from happening. E.g., `get_numerical_jacobian(...)`
-            makes small finite changes to the input tensors of a graph and forward
-            them through the graph to compute numerical gradients, before restoring
-            the input tensors to their original values. It wants the original version
-            counter values of the input tensors to always be preserved, so that making
-            small finite changes to the input tensors (and restoring the original
-            values later) doesn't invalidate the input tensors in the autograd graph.
-            Default: ``True``.
 
     Example::
 
@@ -44,25 +27,13 @@ class no_grad(object):
         >>> z = doubler(x)
         >>> z.requires_grad
         False
-        >>> x._version
-        0
-        >>> with torch.no_grad(update_version=False):
-        ...   x.add_(1)
-        >>> x._version
-        0
     """
-    def __init__(self, update_version=True):
-        self.update_version = update_version
-
     def __enter__(self):
-        self.prev_grad_enabled = torch.is_grad_enabled()
-        self.prev_version_update_enabled = torch.is_version_update_enabled()
+        self.prev = torch.is_grad_enabled()
         torch._C.set_grad_enabled(False)
-        torch.set_version_update_enabled(self.update_version)
 
     def __exit__(self, *args):
-        torch.set_grad_enabled(self.prev_grad_enabled)
-        torch.set_version_update_enabled(self.prev_version_update_enabled)
+        torch.set_grad_enabled(self.prev)
         return False
 
     def __call__(self, func):
