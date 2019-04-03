@@ -1,4 +1,4 @@
-from test_pytorch_common import TestCase, run_tests, skipIfNoLapack, flatten
+from test_pytorch_common import TestCase, run_tests, flatten
 
 import torch
 import torch.onnx
@@ -10,11 +10,9 @@ import itertools
 import io
 import unittest
 import inspect
-import argparse
 import glob
 import os
 import shutil
-import sys
 import common_utils as common
 
 

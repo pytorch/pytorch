@@ -1060,7 +1060,7 @@ inline Tensor & Tensor::geometric_(double p, Generator * generator) {
 inline Tensor Tensor::diag(int64_t diagonal) const {
     return type().diag(*this, diagonal);
 }
-inline Tensor Tensor::cross(const Tensor & other, int64_t dim) const {
+inline Tensor Tensor::cross(const Tensor & other, c10::optional<int64_t> dim) const {
     return type().cross(*this, other, dim);
 }
 inline Tensor Tensor::triu(int64_t diagonal) const {
@@ -1170,12 +1170,6 @@ inline Tensor Tensor::orgqr(const Tensor & input2) const {
 }
 inline Tensor Tensor::ormqr(const Tensor & input2, const Tensor & input3, bool left, bool transpose) const {
     return type().ormqr(*this, input2, input3, left, transpose);
-}
-inline std::tuple<Tensor,Tensor> Tensor::btrifact(bool pivot) const {
-    return type().btrifact(*this, pivot);
-}
-inline std::tuple<Tensor,Tensor,Tensor> Tensor::btrifact_with_info(bool pivot) const {
-    return type().btrifact_with_info(*this, pivot);
 }
 inline Tensor Tensor::btrisolve(const Tensor & LU_data, const Tensor & LU_pivots) const {
     return type().btrisolve(*this, LU_data, LU_pivots);
