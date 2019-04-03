@@ -29,9 +29,6 @@ void prelu_cuda_kernel_share_weights(
 }
 
 template <typename scalar_t>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(512)
-#endif
 __global__ void prelu_cuda_kernel_multi_weights(
   scalar_t* result_data,
   const scalar_t* input_data,
@@ -115,9 +112,6 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
 // prelu backward
 // -----------------------------------
 template <typename scalar_t>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(512)
-#endif
 void prelu_cuda_backward_kernel_share_weights(
   const Tensor& input,
   const Tensor& grad_out,
@@ -141,9 +135,6 @@ void prelu_cuda_backward_kernel_share_weights(
 }
 
 template <typename scalar_t>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(512)
-#endif
 __global__ void prelu_cuda_backward_kernel_multi_weights(
   const scalar_t* input_data,
   const scalar_t* weight_data,
