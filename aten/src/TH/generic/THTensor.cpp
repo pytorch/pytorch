@@ -193,13 +193,6 @@ THTensor *THTensor_(newTranspose)(THTensor *tensor, int dimension1_, int dimensi
   return self;
 }
 
-THTensor *THTensor_(newUnfold)(THTensor *tensor, int dimension_, int64_t size_, int64_t step_)
-{
-  THTensor *self = THTensor_(newWithTensor)(tensor);
-  THTensor_(unfold)(self, NULL, dimension_, size_, step_);
-  return self;
-}
-
 THTensor *THTensor_(newView)(THTensor *tensor, at::IntArrayRef size)
 {
   ptrdiff_t numel = THTensor_(nElement)(tensor);
