@@ -2159,13 +2159,12 @@ class TestAutograd(TestCase):
             run_functional_checks(self, "test_cdist", "cdist", f,
                                   True, f_args_variable, f_args_tensor)
 
-
     def test_std_backward_in_std_mean(self):
         dim = 1
         input1 = torch.randn(5, 7, 3, requires_grad=True)
         input2 = deepcopy(input1)
-        std1, mean1 = torch.std_mean(input1, dim = dim)
-        std2 = input2.std(dim = dim)
+        std1, mean1 = torch.std_mean(input1, dim=dim)
+        std2 = input2.std(dim=dim)
         grad = torch.randn(5, 3, requires_grad=True)
         torch.autograd.backward(std1, grad)
         torch.autograd.backward(std2, grad)
@@ -2175,8 +2174,8 @@ class TestAutograd(TestCase):
         dim = 0
         input1 = torch.randn(5, 3, requires_grad=True)
         input2 = deepcopy(input1)
-        std1, mean1 = torch.std_mean(input1, dim = dim)
-        mean2 = input2.mean(dim = dim)
+        std1, mean1 = torch.std_mean(input1, dim=dim)
+        mean2 = input2.mean(dim=dim)
         grad = torch.randn(5, 3, requires_grad=True)
         torch.autograd.backward(mean1, grad)
         torch.autograd.backward(mean2, grad)
@@ -2186,8 +2185,8 @@ class TestAutograd(TestCase):
         dim = 0
         input1 = torch.randn(4, 3, requires_grad=True)
         input2 = deepcopy(input1)
-        var1, mean1 = torch.var_mean(input1, dim = dim)
-        var2 = input2.var(dim = dim)
+        var1, mean1 = torch.var_mean(input1, dim=dim)
+        var2 = input2.var(dim=dim)
         grad = torch.randn(4, 3, requires_grad=True)
         torch.autograd.backward(var1, grad)
         torch.autograd.backward(var2, grad)
@@ -2197,8 +2196,8 @@ class TestAutograd(TestCase):
         dim = 2
         input1 = torch.randn(3, 4, 6, requires_grad=True)
         input2 = deepcopy(input1)
-        var1, mean1 = torch.var_mean(input1, dim = dim)
-        mean2 = input2.mean(dim = dim)
+        var1, mean1 = torch.var_mean(input1, dim=dim)
+        mean2 = input2.mean(dim=dim)
         grad = torch.randn(3, 4, requires_grad=True)
         torch.autograd.backward(mean1, grad)
         torch.autograd.backward(mean2, grad)
@@ -2221,7 +2220,6 @@ class TestAutograd(TestCase):
         torch.autograd.backward(r1, grad)
         torch.autograd.backward(r2, grad)
         self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
-
 
     @skipIfNoLapack
     def test_cholesky(self):
