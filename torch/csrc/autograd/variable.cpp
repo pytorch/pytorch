@@ -194,8 +194,8 @@ Variable::DifferentiableViewImpl::DifferentiableViewImpl(Variable base, at::Tens
     diff_view_meta->base_ = diff_view_meta->base_.base();
   }
   diff_view_meta->is_view_ = true;
-  this->set_version_counter(diff_view_meta->base_.version_counter());
-  diff_view_meta->attr_version = this->version_counter().current_version();
+  data_.unsafeGetTensorImpl()->set_version_counter(diff_view_meta->base_.version_counter());
+  diff_view_meta->attr_version = data_.unsafeGetTensorImpl()->version_counter().current_version();
 }
 
 const std::shared_ptr<Function>& Variable::grad_fn() const {
