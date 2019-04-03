@@ -174,10 +174,8 @@ void Variable::Impl::set_data(const at::Tensor &new_data) {
   type_id_ = new_data.type().type_id();
   is_variable_ = true;
 
-  auto saved_version_ = data_.unsafeGetTensorImpl()->version_counter().current_version();
   auto new_data_copy = at::Tensor(new_data.getIntrusivePtr()->shallow_copy_and_detach());
   data_ = std::move(new_data_copy);
-  data_.unsafeGetTensorImpl()->set_version_counter(saved_version_);
 }
 
 void Variable::Impl::release_resources() {
