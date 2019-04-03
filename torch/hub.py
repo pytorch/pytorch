@@ -103,6 +103,10 @@ def _download_archive_zip(url, filename):
 
 def _load_attr_from_module(module_name, func_name):
     m = importlib.import_module(module_name)
+
+    if m is None:
+        raise RuntimeError('Cannot find module {}'.format(module_name))
+
     # Check if callable is defined in the module
     if func_name not in dir(m):
         return None
@@ -114,8 +118,7 @@ def _setup_hubdir():
     if hub_dir is None:
         hub_dir = os.getenv(ENV_TORCH_HUB_DIR, DEFAULT_TORCH_HUB_DIR)
 
-    if '~' in hub_dir:
-        hub_dir = os.path.expanduser(hub_dir)
+    hub_dir = os.path.expanduser(hub_dir)
 
     if not os.path.exists(hub_dir):
         os.makedirs(hub_dir)
