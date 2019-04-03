@@ -1754,7 +1754,7 @@ RegisterOperators reg2({
         [](Stack& stack) {
           int64_t x;
           pop(stack, x);
-          push(stack, static_cast<int64_t>(std::abs(x)));
+          push(stack, std::abs(x));
           return 0;
         }),
     Operator(
