@@ -89,12 +89,7 @@ bool isDifferentiable(Node* n) {
   if (n->matches(
           "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor")) {
     return n->get<std::vector<int64_t>>(attr::size) &&
-        n->is_constant(attr::implicit) &&
-        n->namedInput(attr::self)->type()->cast<CompleteTensorType>();
-  }
-  if (n->matches("aten::view(Tensor self, int[] size) -> Tensor")) {
-    return n->get<std::vector<int64_t>>(attr::size) &&
-        n->namedInput(attr::self)->type()->cast<CompleteTensorType>();
+        n->is_constant(attr::implicit);
   }
 
   auto schema = n->maybeSchema();
@@ -402,10 +397,10 @@ class GradientHelper {
 // later. It is ok to replace any backward function with known-zero inputs with
 // something that produces known-zero outputs. This function encloses each
 // know-linear backward function in a 'GradOf' sub-block so that we can perform
-// optimizations using this information. In particular, specializeAutogradZero will
-// observe if all the inputs to the linear block are AutogradZeroTensor, which the
-// autograd uses to represent zeros, and then propagate the zeros to the outputs
-// of the block.
+// optimizations using this information. In particular, specializeAutogradZero
+// will observe if all the inputs to the linear block are AutogradZeroTensor,
+// which the autograd uses to represent zeros, and then propagate the zeros to
+// the outputs of the block.
 static std::vector<Value*> linearGradientForNode(
     Node* node,
     ArrayRef<Value*> grad_values) {
