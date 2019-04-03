@@ -769,6 +769,18 @@ inline Tensor Tensor::to_sparse(int64_t sparse_dim) const {
 inline Tensor Tensor::to_sparse() const {
     return type().to_sparse(*this);
 }
+inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point) const {
+    return type().quantize_linear(*this, scale, zero_point);
+}
+inline Tensor Tensor::dequantize() const {
+    return type().dequantize(*this);
+}
+inline Scalar Tensor::q_scale() const {
+    return type().q_scale(*this);
+}
+inline Scalar Tensor::q_zero_point() const {
+    return type().q_zero_point(*this);
+}
 inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy) const {
     return type().to(*this, options, non_blocking, copy);
 }
@@ -1347,7 +1359,10 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
     return item().to##name();     \
   }
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_AND_QINT(DEFINE_ITEM)
 #undef DEFINE_ITEM
+
+// TODO: after is_quantized() is implemented,
+// implement item() (returnning a float) for quantized Tensor
 
 } //namespace at
