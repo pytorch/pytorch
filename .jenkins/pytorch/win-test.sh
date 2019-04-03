@@ -104,6 +104,9 @@ EOL
 
 cat >$TMP_DIR/ci_scripts/test_python_all_except_nn.bat <<EOL
 call %TMP_DIR%/ci_scripts/setup_pytorch_env.bat
+
+barf
+
 cd test/ && python run_test.py --exclude nn --verbose && cd ..
 EOL
 
