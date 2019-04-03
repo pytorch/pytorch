@@ -12,16 +12,21 @@ RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) = default;
 class RegisterOperators::OperatorRegistrar final {
 public:
   explicit OperatorRegistrar(FunctionSchema&& schema, c10::optional<TensorTypeId> dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction&& cache_creator)
-  : op_(Dispatcher::singleton().registerSchema(std::move(schema))), dispatch_key_(std::move(dispatch_key)), owns_registration_(true) {
-    if (dispatch_key_.has_value()) {
-      Dispatcher::singleton().registerKernel(op_, *dispatch_key_, kernel, std::move(cache_creator));
-    } else {
-      Dispatcher::singleton().registerFallbackKernel(op_, kernel, std::move(cache_creator));
+  : op_(Dispatcher::singleton().registerSchema(std::move(schema))), dispatch_key_(std::move(dispatch_key)), has_kernel_(kernel != nullptr), owns_registration_(true) {
+    // either both, kernel and cache_creator, or none must be set.
+    AT_ASSERT((kernel != nullptr) == static_cast<bool>(cache_creator));
+
+    if (has_kernel_) {
+      if (dispatch_key_.has_value()) {
+        Dispatcher::singleton().registerKernel(op_, *dispatch_key_, kernel, std::move(cache_creator));
+      } else {
+        Dispatcher::singleton().registerFallbackKernel(op_, kernel, std::move(cache_creator));
+      }
     }
   }
 
   OperatorRegistrar(OperatorRegistrar&& rhs) noexcept
-  :  op_(std::move(rhs.op_)), dispatch_key_(std::move(rhs.dispatch_key_)), owns_registration_(rhs.owns_registration_) {
+  :  op_(std::move(rhs.op_)), dispatch_key_(std::move(rhs.dispatch_key_)), has_kernel_(rhs.has_kernel_), owns_registration_(rhs.owns_registration_) {
     rhs.owns_registration_ = false;
   }
 
@@ -32,10 +37,12 @@ public:
 
   ~OperatorRegistrar() {
     if (owns_registration_) {
-      if (dispatch_key_.has_value()) {
-        Dispatcher::singleton().deregisterKernel(op_, *dispatch_key_);
-      } else {
-        Dispatcher::singleton().deregisterFallbackKernel(op_);
+      if (has_kernel_) {
+        if (dispatch_key_.has_value()) {
+          Dispatcher::singleton().deregisterKernel(op_, *dispatch_key_);
+        } else {
+          Dispatcher::singleton().deregisterFallbackKernel(op_);
+        }
       }
       Dispatcher::singleton().deregisterSchema(op_);
     }
@@ -44,16 +51,17 @@ public:
 private:
   const OperatorHandle op_;
   const c10::optional<TensorTypeId> dispatch_key_;
+  bool has_kernel_;
   bool owns_registration_;
 };
 
 void RegisterOperators::registerOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config) {
-  // TODO Should we allow this and only register a schema without a kernel?
-  AT_CHECK(config.kernel_func != nullptr,
-      "Tried to register an operator with function schema ", toString(schema),
-      ", but didn't specify a kernel. Please add a c10::kernel<...>(...) parameter to the registration call.");
+  AT_CHECK(!config.dispatch_key.has_value() || config.kernel_func != nullptr,
+    "Tried to register an operator with a dispatch key but without a kernel. "
+    "Please either specify a kernel or omit the dispatch key to only register the schema.");
+
   // if kernel_func is set, so must be cache_creator_func, the API shouldn't allow anything else.
-  AT_ASSERT(static_cast<bool>(config.cache_creator_func));
+  AT_ASSERT((config.kernel_func != nullptr) == static_cast<bool>(config.cache_creator_func));
 
   if (config.inferred_function_schema.get() != nullptr) {
     assertSchemasHaveSameSignature(*config.inferred_function_schema, schema);
