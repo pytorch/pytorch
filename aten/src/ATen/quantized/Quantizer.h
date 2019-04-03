@@ -142,8 +142,8 @@ struct CAFFE2_API PerTensorSymmetricQuantizer : public SymmetricQuantizer {
  */
 struct CAFFE2_API PerChannelSymmetricQuantizer : public SymmetricQuantizer {
   explicit PerChannelSymmetricQuantizer(
-      const std::vector<float> scales,
-      const std::vector<int64_t> axis)
+      const std::vector<float>& scales,
+      const std::vector<int64_t>& axis)
       : SymmetricQuantizer(kPerChannelSymmetric), scales_(scales), axis_(axis) {
     AT_CHECK(
         axis_.size() == 1,
@@ -173,8 +173,8 @@ struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
         scale_(scale),
         zero_point_(zero_point) {}
 
-  virtual QTensor quantize(RealTensor tensor);
-  virtual RealTensor dequantize(QTensor tensor);
+  QTensor quantize(RealTensor tensor) override;
+  RealTensor dequantize(QTensor tensor) override;
 
   float scale() const {
     return scale_;
@@ -196,9 +196,9 @@ struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
  */
 struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
   explicit PerChannelAffineQuantizer(
-      const std::vector<float> scales,
-      const std::vector<uint8_t> zero_points,
-      const std::vector<int64_t> axis)
+      const std::vector<float>& scales,
+      const std::vector<uint8_t>& zero_points,
+      const std::vector<int64_t>& axis)
       : AffineQuantizer(kPerChannelAffine),
         scales_(scales),
         zero_points_(zero_points),
