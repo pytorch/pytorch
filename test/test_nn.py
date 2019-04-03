@@ -2296,8 +2296,9 @@ class TestNN(NNTestCase):
                                         device='cpu',
                                         dtype=torch.float,
                                         test_per_sample_weights=False,
-                                        sparse=True,
-                                        test_backward=True):
+                                        sparse=False,
+                                        test_backward=True,
+                                        backward_prec=None):
         es = nn.EmbeddingBag(N, D, mode=mode, sparse=sparse, max_norm=max_norm).to(device, dtype)
         e = nn.Embedding(N, D, max_norm=max_norm).to(device, dtype)
         e.weight.data.copy_(es.weight)
@@ -2328,7 +2329,10 @@ class TestNN(NNTestCase):
             es_weight_grad = es.weight.grad.data.to_dense()
 
         # We have more floating point error here because we are dealing with larger numbers
-        needed_prec = dtype2prec[dtype] * 2
+        if backward_prec is None:
+            needed_prec = dtype2prec[dtype] * 2
+        else:
+            needed_prec = backward_prec
         self.assertEqual(es_weight_grad, e.weight.grad, needed_prec)
 
     def _test_EmbeddingBag(self, cuda, mode, sparse, dtype=torch.double):
@@ -2616,11 +2620,13 @@ class TestNN(NNTestCase):
     def test_EmbeddingBag_per_sample_weights_and_no_offsets(self):
         dtypes = (torch.float, torch.double)
         modes = ('sum',)
-        for dtype, mode in itertools.product(dtypes, modes):
-            kwargs = dict(test_per_sample_weights=True, test_backward=False,
-                          mode=mode, dtype=dtype, device='cpu')
+        sparsity = (True, False)
+        for dtype, mode, sparse in itertools.product(dtypes, modes, sparsity):
+            kwargs = dict(test_per_sample_weights=True,
+                          mode=mode, dtype=dtype, device='cpu', sparse=sparse)
             self._test_EmbeddingBag_vs_Embedding(3, 5, 7, 11, **kwargs)
-            self._test_EmbeddingBag_vs_Embedding(3, 5, 51, 21, **kwargs)
+            # XXX: I don't know why the backward prec is so bad for float tensors
+            self._test_EmbeddingBag_vs_Embedding(3, 5, 51, 21, backward_prec=0.0004, **kwargs)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
