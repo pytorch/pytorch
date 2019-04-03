@@ -9863,7 +9863,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
         def _get_tensors(**kwargs):
             return [
-                torch.tensor([10,11], **kwargs),
+                torch.tensor([10, 11], **kwargs),
                 torch.randn(3, 5, **kwargs),
                 torch.rand(3, **kwargs),
                 # torch.randint(3,5, **kwargs), // unsupported
@@ -9872,7 +9872,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 torch.empty(6, **kwargs),
                 torch.ones(6, **kwargs),
                 torch.eye(6, **kwargs),
-                torch.arange(3, 5, **kwargs),]
+                torch.arange(3, 5, **kwargs), ]
 
         pinned_tensors = _get_tensors(pin_memory=True) + _get_like(torch.empty(5, dtype=torch.float64), pin_memory=True)
         for x in pinned_tensors:
