@@ -3,7 +3,6 @@ from os.path import dirname as dir, join, abspath
 import os
 
 root = dir(dir(__file__))
-print(root)
 CUSTOM_OP_TEST = abspath(join(root, 'test/custom_operator'))
 CUSTOM_OP_BUILD = join(CUSTOM_OP_TEST, 'build')
 env = os.environ.copy()
