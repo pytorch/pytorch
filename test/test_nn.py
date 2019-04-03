@@ -3339,15 +3339,17 @@ class TestNN(NNTestCase):
                 self.assertEqual(replica.net1.bias.get_device(), 2 * i)
                 self.assertEqual(replica.net2.weight.get_device(), 2 * i + 1)
                 self.assertEqual(replica.net2.bias.get_device(), 2 * i + 1)
-                self.assertEqual(replica.bn.running_mean.get_device(), i)
-                self.assertEqual(replica.bn.running_var.get_device(), i)
-                self.assertEqual(replica.bn.num_batches_tracked.get_device(), i)
+                self.assertEqual(replica.bn.running_mean.get_device(), 2 * i)
+                self.assertEqual(replica.bn.running_var.get_device(), 2 * i)
+                self.assertEqual(
+                    replica.bn.num_batches_tracked.get_device(), 2 * i)
 
                 replica_input = input.cuda(2 * i)
                 replica_output = replica(replica_input)
                 self.assertEqual(replica_output.get_device(), 2 * i + 1)
                 self.assertEqual(replica_output.cpu(), expected_output)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_replicate_device_indices(self):
         from torch.nn.parallel.replicate import _to_device_index as f
 
@@ -3384,6 +3386,7 @@ class TestNN(NNTestCase):
             with self.assertRaisesRegex(AssertionError, msg):
                 f(devices)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_replicate_tensor_grouping_multi_gpu(self):
         from torch.nn.parallel.replicate import _group_by_device
 
@@ -3402,7 +3405,13 @@ class TestNN(NNTestCase):
             self.assertEqual(grouped_devices, [[0, 2], [1, 3]])
             self.assertEqual(original_index, [[0, 1, 3], [2, 4]])
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+        msg = "missing from devices"
+        for devices in ([[0, 2], [1, 3]], [[1, 2], [0, 3]], [[2, 3], [0, 1]]):
+            with self.assertRaisesRegex(AssertionError, msg):
+                grouped_tensors, grouped_devices, original_index = \
+                    _group_by_device(tensors, devices)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_replicate_tensor_grouping(self):
         from torch.nn.parallel.replicate import _group_by_device
 

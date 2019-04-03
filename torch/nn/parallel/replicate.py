@@ -128,6 +128,13 @@ def _copy_scriptmodule_methods(modules, module_copies, module_indices):
 # meaning that grouped_tensors[i] will be broadcast to grouped_devices[i].
 def _group_by_device(tensors, devices):
     if isinstance(devices[0], list):
+        # all tensor devices must appear in devices[0]
+        missing_devs = [t.device.index for t in tensors
+                        if t.device.index not in devices[0]]
+        assert not missing_devs, (
+            "tensor devices {} are missing from devices[0] {}."
+        ).format(missing_devs, devices[0])
+
         # device id to output group index, this is necessary when `tensors` only
         # use a subset of devices in `devices[0]`
         dev_to_group_idx = {}
