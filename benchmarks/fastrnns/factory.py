@@ -372,7 +372,9 @@ def lstm_factory_premul(premul_cell, script):
         # type: (Tensor, Tuple[Tensor, Tensor], Tensor, Tensor, Tensor, Tensor) -> Tuple[Tensor, Tuple[Tensor, Tensor]]
         hx, cx = hidden
         outputs = []
-        inputs = torch.matmul(input, wih.t()).unbind(0)
+        inpSize = input.size()
+        inputs = torch.mm(input.view(-1, inpSize[2]), wih.t()) + bih
+        inputs = inputs.view(inpSize[0], inpSize[1], -1).unbind(0)
         hy, cy = hx[0], cx[0]
         for seq_idx in range(len(inputs)):
             hy, cy = premul_cell(inputs[seq_idx], (hy, cy), whh, bih, bhh)
