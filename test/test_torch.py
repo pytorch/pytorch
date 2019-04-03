@@ -2653,6 +2653,18 @@ class _TestTorchMixin(object):
                 if TEST_NUMPY:
                     assertEqual('cuda:1', lambda: torch.tensor(np.random.randn(2, 3), device='cuda:1'))
 
+    def test_qtensor(self):
+        num_elements = 10
+        r = torch.ones(num_elements, dtype=torch.float)
+        scale = 1.0
+        zero_point = 2
+        qr = r.quantize_linear(scale, zero_point)
+        self.assertEqual(qr.q_scale(), scale)
+        self.assertEqual(qr.q_zero_point(), zero_point)
+        rqr = qr.dequantize()
+        for i in range(num_elements):
+            self.assertEqual(r[i], rqr[i])
+
     def test_to(self):
         def test_copy_behavior(t, non_blocking=False):
             self.assertIs(t, t.to(t, non_blocking=non_blocking))
