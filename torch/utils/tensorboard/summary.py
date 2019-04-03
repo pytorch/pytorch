@@ -47,9 +47,10 @@ from tensorboard.compat.proto.summary_pb2 import HistogramProto
 from tensorboard.compat.proto.summary_pb2 import SummaryMetadata
 from tensorboard.compat.proto.tensor_pb2 import TensorProto
 from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
-from tensorboard.compat.proto.plugin_pr_curve_pb2 import PrCurvePluginData
-from tensorboard.compat.proto.plugin_text_pb2 import TextPluginData
-from tensorboard.compat.proto import layout_pb2
+# TODO: add back after the next tensorboard PR is landed
+# from tensorboard.compat.proto.plugin_pr_curve_pb2 import PrCurvePluginData
+# from tensorboard.compat.proto.plugin_text_pb2 import TextPluginData
+# from tensorboard.compat.proto import layout_pb2
 from .x2num import make_np
 from .utils import _prepare_video, convert_to_HWC
 
