@@ -114,7 +114,8 @@ template <typename scalar_t>
 __global__ void EmbeddingBag_accGradParametersKernel_sum_avg(
     int64_t *input, int64_t *indices, scalar_t *gradOutput,
     scalar_t *gradWeight, int64_t *offset2bag, int64_t *count, ptrdiff_t numel,
-    int64_t stride, int mode, const int64_t *bag_size) {
+    int64_t stride, int mode, const int64_t *bag_size,
+		scalar_t* per_sample_weights, int64_t per_sample_weights_stride) {
 
   using accscalar_t = acc_type<scalar_t, true>;
   int idx = blockIdx.x * 4 + threadIdx.y;
@@ -142,7 +143,10 @@ __global__ void EmbeddingBag_accGradParametersKernel_sum_avg(
       const int seq_number = offset2bag[origRow];
       const int gradOutputRow = ((int)seq_number) * stride;
 
-      const accscalar_t scale = count ? (accscalar_t)1.0 / count[idx] : 1.0;
+      accscalar_t scale = count ? (accscalar_t)1.0 / count[idx] : 1.0;
+			if (per_sample_weights) {
+				scale *= per_sample_weights[origRow * per_sample_weights_stride];
+			}
 
       accscalar_t gradient[SZ];
       accscalar_t weight[SZ];
@@ -187,7 +191,8 @@ Tensor embedding_bag_backward_cuda_sum_avg(
                                    const Tensor &offset2bag,
                                    const Tensor &bag_size,
                                    int64_t num_weights,
-                                   bool scale_grad_by_freq, int64_t mode) {
+                                   bool scale_grad_by_freq, int64_t mode,
+                                   const Tensor& per_sample_weights) {
 
   auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.options());
 
@@ -263,7 +268,9 @@ Tensor embedding_bag_backward_cuda_sum_avg(
             grad.data<scalar_t>(), grad_weight.data<scalar_t>(),
             offset2bag.data<int64_t>(),
             count.defined() ? count.data<int64_t>() : nullptr, numel, stride,
-            mode, bag_size.data<int64_t>());
+            mode, bag_size.data<int64_t>(),
+            per_sample_weights.defined() ? per_sample_weights.data<scalar_t>() : NULL,
+            per_sample_weights.defined() ? per_sample_weights.stride(0) : 0);
       });
 
   THCudaCheck(cudaGetLastError());
@@ -398,14 +405,16 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
   checkSameGPU("embedding_bag_cuda", grad_arg, offsets_arg);
   checkSameGPU("embedding_bag_cuda", grad_arg, indices_arg);
 
-  AT_ASSERT(!per_sample_weights.defined());
 
   switch (mode) {
     case MODE_SUM:
     case MODE_MEAN:
-      return embedding_bag_backward_cuda_sum_avg(grad, indices, offset2bag, bag_size_, num_weights, scale_grad_by_freq, mode);
+      if (mode == MODE_MEAN)
+        AT_ASSERT(!per_sample_weights.defined());
+      return embedding_bag_backward_cuda_sum_avg(grad, indices, offset2bag, bag_size_, num_weights, scale_grad_by_freq, mode, per_sample_weights);
 
     case MODE_MAX:
+      AT_ASSERT(!per_sample_weights.defined());
       return embedding_bag_backward_cuda_max(grad, max_indices, num_weights);
 
     default:
