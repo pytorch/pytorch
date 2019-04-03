@@ -171,7 +171,7 @@ template <typename Implementation>
 Operator createOperator(
     const std::string& schemaOrName,
     Implementation&& implementation,
-    Operator::Options options = Operator::Options()) {
+    OperatorOptions options = OperatorOptions()) {
   using Traits = c10::guts::infer_function_traits_t<Implementation>;
   using ArgumentTypes =
       c10::guts::typelist::map_t<decay_t, typename Traits::parameter_types>;

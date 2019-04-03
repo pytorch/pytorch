@@ -351,10 +351,16 @@ void AliasDb::analyze(Node* node) {
 // the registered analyzer.
 bool AliasDb::tryRegisteredAnalysis(Node* node) {
   const Operator& op = getOperatorFor(node);
-  auto analyzer = op.options().aliasAnalysis();
-  if (analyzer) {
-    (this->*analyzer)(node);
-    return true;
+  auto analysis = op.options().aliasAnalysis();
+  switch (analysis) {
+    case AliasAnalysisKind::CREATOR:
+      analyzeCreator(node);
+      return true;
+    case AliasAnalysisKind::EXTRACTOR:
+      analyzeExtractor(node);
+      return true;
+    case AliasAnalysisKind::DEFAULT:
+      return false;
   }
   return false;
 }

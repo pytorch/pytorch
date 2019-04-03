@@ -605,7 +605,7 @@ void testMemoryDAG() {
 }
 
 void testAliasRegistration() {
-  auto opts = Operator::Options().aliasAnalysis(&AliasDb::analyzeCreator);
+  auto opts = OperatorOptions().aliasAnalysis(AliasAnalysisKind::CREATOR);
   RegisterOperators reg({
       createOperator(
         "foo::rand", [](at::Tensor) -> at::Tensor {
