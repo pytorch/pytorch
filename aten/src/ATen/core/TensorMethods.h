@@ -1362,6 +1362,11 @@ inline bool is_quantized(Tensor self) {
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
 #undef DEFINE_CAST
 
+inline uint8_t* Tensor::int_repr() const {
+  AT_CHECK(is_quantized(), "int_repr() only works on QTensor.");
+  return static_cast<uint8_t*>(this->data_ptr());
+}
+
 #define DEFINE_ITEM(T, name, _)   \
   template <>                     \
   inline T Tensor::item() const { \

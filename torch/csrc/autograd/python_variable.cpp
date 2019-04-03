@@ -231,6 +231,22 @@ int THPVariable_set_data(THPVariable *self, PyObject *data)
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
+static PyObject * THPVariable_get_int_repr(THPVariable *self)
+{
+  HANDLE_TH_ERRORS
+  /// NOTE: Previously, if we change the tensor metadata (e.g. sizes / strides /
+  /// storage / storage_offset) of a tensor created from `.data`, those metadata
+  /// in the original tensor will also be updated. However, the new behavior is that
+  /// those metadata changes to the `.data` tensor will not update the original tensor
+  /// anymore, and here we need to set `allow_tensor_metadata_change_` to false to
+  /// make such changes explicitly illegal, in order to prevent users from changing
+  /// metadata of the `.data` tensor and expecting the original tensor to also
+  /// be updated.
+  auto& self_ = self->cdata;
+  return torch::autograd::utils::wrap(self_.int_repr());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_get_grad(THPVariable *self)
 {
   HANDLE_TH_ERRORS
@@ -427,6 +443,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"_grad_fn", (getter)THPVariable_get_grad_fn, (setter)THPVariable_set_grad_fn, nullptr, nullptr},
   {"is_leaf", (getter)THPVariable_is_leaf, nullptr, nullptr, nullptr},
   {"data", (getter)THPVariable_get_data, (setter)THPVariable_set_data, nullptr, nullptr},
+  {"int_repr", (getter)THPVariable_get_int_repr, nullptr, nullptr, nullptr},
   {"_grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, nullptr, nullptr}, // only for legacy reasons
   {"grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, nullptr, nullptr},
   {"_base", (getter)THPVariable_get_base, nullptr, nullptr, nullptr},

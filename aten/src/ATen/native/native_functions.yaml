@@ -267,6 +267,11 @@
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   matches_jit_signature: True
   variants: function, method
+  dispatch:
+    CPU: as_strided_tensorimpl
+    CUDA: as_strided_tensorimpl
+    AffineCPU: as_strided_qtensorimpl
+    PerChannelAffineCPU: as_strided_qtensorimpl
   device_guard: False
 
 - func: as_strided_(Tensor(a!) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a!)

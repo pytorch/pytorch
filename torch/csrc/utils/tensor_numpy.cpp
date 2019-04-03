@@ -62,7 +62,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
         "can't convert sparse tensor to numpy. Use Tensor.to_dense() to "
         "convert to a dense tensor first.");
   }
-  if (tensor.type().backend() != Backend::CPU) {
+  if (tensor.type().backend() != Backend::CPU && tensor.type().backend() != Backend::AffineCPU && tensor.type().backend() != Backend::PerChannelAffineCPU) {
       throw TypeError("NumPy conversion for %s is not supported", tensor.type().toString());
   }
   auto dtype = aten_to_dtype(tensor.scalar_type());
@@ -157,6 +157,7 @@ static int aten_to_dtype(const ScalarType scalar_type) {
     case kChar: return NPY_INT8;
     case kByte: return NPY_UINT8;
     case kBool: return NPY_BOOL;
+    case kQInt8: return NPY_UINT8;
     default:
       throw ValueError("Got unsupported ScalarType ", toString(scalar_type));
   }

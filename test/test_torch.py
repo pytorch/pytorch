@@ -2662,13 +2662,28 @@ class _TestTorchMixin(object):
         self.assertEqual(qr.q_scale(), scale)
         self.assertEqual(qr.q_zero_point(), zero_point)
         self.assertTrue(qr.is_quantized)
+        # numpy
+        for num in qr.numpy():
+            self.assertEqual(num, 3)
+        for num in qr[2:].numpy():
+            self.assertEqual(num, 3)
+        # int_repr
+        for num in qr.int_repr():
+            self.assertEqual(num, 3)
+        for num in qr[2:].int_repr():
+            self.assertEqual(num, 3)
+        # dequantize
         rqr = qr.dequantize()
         for i in range(num_elements):
             self.assertEqual(r[i], rqr[i])
-        # Testing item
+        # Scalar Tensor
+        # item
         r = torch.ones(1, dtype=torch.float)
         qr = r.quantize_linear(scale, zero_point)
         self.assertEqual(qr.item(), 1)
+        self.assertEqual(qr[0].item(), 1)
+        self.assertEqual(qr.numpy()[0], 3)
+
 
     def test_to(self):
         def test_copy_behavior(t, non_blocking=False):

@@ -254,6 +254,8 @@ class CAFFE2_API Tensor {
   template<typename T>
   T * data() const;
 
+  uint8_t* int_repr() const;
+
   template <typename T>
   T item() const;
 
