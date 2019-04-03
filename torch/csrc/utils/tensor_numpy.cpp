@@ -156,6 +156,7 @@ static int aten_to_dtype(const ScalarType scalar_type) {
     case kShort: return NPY_INT16;
     case kChar: return NPY_INT8;
     case kByte: return NPY_UINT8;
+    case kBool: return NPY_BOOL;
     default:
       throw ValueError("Got unsupported ScalarType ", toString(scalar_type));
   }
@@ -170,6 +171,7 @@ ScalarType numpy_dtype_to_aten(int dtype) {
     case NPY_INT16: return kShort;
     case NPY_INT8: return kChar;
     case NPY_UINT8: return kByte;
+    case NPY_BOOL: return kBool;
     default:
       // Workaround: MSVC does not support two switch cases that have the same value
       if (dtype == NPY_LONGLONG || dtype == NPY_INT64) {
