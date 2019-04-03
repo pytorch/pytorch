@@ -2305,13 +2305,16 @@ class TestNN(NNTestCase):
         input = torch.randint(N, (B, L), device=device, dtype=torch.long)
         offsets = torch.arange(0, B, device=device, dtype=torch.long).mul_(L)
         grad_output = torch.rand(B, D, device=device, dtype=dtype)
-        per_sample_weights = None
+
         if test_per_sample_weights:
             # To prevent large gradients, weights should sum to 1 for each bag
             per_sample_weights = \
                 torch.randn(B, L, device=device, dtype=dtype).softmax(dim=-1)
+            output = es(input.view(-1), offsets, per_sample_weights.view(-1))
+        else:
+            output = es(input.view(-1), offsets)
+            per_sample_weights = None
 
-        output = es(input.view(-1), offsets, per_sample_weights.view(-1))
         if mode == 'sum':
             if test_per_sample_weights:
                 ref_output = (e(input) * per_sample_weights.unsqueeze(-1)).sum(1)
@@ -2577,8 +2580,12 @@ class TestNN(NNTestCase):
         input = torch.tensor([3, 1, 1, 1, 4, 0], dtype=torch.long, device=device)
         offsets = torch.tensor([0, 0, 3, 3, 6], dtype=torch.long, device=device)
         per_sample_weights = torch.randn_like(input, dtype=torch.double, device=device)
-        with self.assertRaisesRegex(RuntimeError, 'have the same type as'):
-            es(input, offsets, per_sample_weights)
+        if device == 'cpu':
+            with self.assertRaisesRegex(RuntimeError, 'have the same type as'):
+                es(input, offsets, per_sample_weights)
+        else:
+            with self.assertRaisesRegex(RuntimeError, 'expected scalar type'):
+                es(input, offsets, per_sample_weights)
 
         # Failure 2.1: input/per_sample_weights have different sizes (1d input)
         input = torch.tensor([3, 1, 1, 1, 4, 0], dtype=torch.long, device=device)
@@ -2600,13 +2607,16 @@ class TestNN(NNTestCase):
                 dtype=torch.float, device=device)
             input = torch.randint(5, (7, 3), dtype=torch.long, device=device)
             offsets = None
-            per_sample_weights = torch.randn(7 * 3, dtype=torch.float, device=device)
+            per_sample_weights = torch.randn(7, 3, dtype=torch.float, device=device)
             with self.assertRaisesRegex(NotImplementedError,
                                         "only supported for mode='sum'"):
                 es(input, offsets, per_sample_weights)
 
     def test_EmbeddingBag_per_sample_weights_failures(self):
         self._test_EmbeddingBag_per_sample_weights_failures(self)
+
+    def test_EmbeddingBag_per_sample_weights_failures_cuda(self):
+        self._test_EmbeddingBag_per_sample_weights_failures(self, device='cuda')
 
     @staticmethod
     def _test_EmbeddingBag_per_sample_weights_and_offsets(self, device='cpu'):
@@ -2637,6 +2647,9 @@ class TestNN(NNTestCase):
     def test_EmbeddingBag_per_sample_weights_and_offsets(self):
         self._test_EmbeddingBag_per_sample_weights_and_offsets(self)
 
+    def test_EmbeddingBag_per_sample_weights_and_offsets_cuda(self):
+        self._test_EmbeddingBag_per_sample_weights_and_offsets(self, device='cuda')
+
     @staticmethod
     def _test_EmbeddingBag_per_sample_weights_and_no_offsets(self, device='cpu'):
         dtypes = (torch.float, torch.double)
@@ -2660,6 +2673,9 @@ class TestNN(NNTestCase):
 
     def test_EmbeddingBag_per_sample_weights_and_no_offsets(self):
         self._test_EmbeddingBag_per_sample_weights_and_no_offsets(self)
+
+    def test_EmbeddingBag_per_sample_weights_and_no_offsets_cuda(self):
+        self._test_EmbeddingBag_per_sample_weights_and_no_offsets(self, device='cuda')
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)

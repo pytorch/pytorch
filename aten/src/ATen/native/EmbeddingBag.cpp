@@ -289,11 +289,6 @@ Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices,
   checkScalarType("embedding_bag", offset2bag_arg, kLong);
   checkContiguous("embedding_bag", offset2bag_arg);
 
-  if (per_sample_weights.defined() &&
-      per_sample_weights.device().type() != DeviceType::CPU) {
-    AT_ERROR("NYI: _embedding_bag_backward: per_sample_weights only supported for CPU");
-  }
-
   if (sparse) {
     return at::_embedding_bag_sparse_backward(
         grad, indices, offsets, offset2bag, bag_size_, num_weights,
@@ -481,7 +476,7 @@ Tensor _embedding_bag_sparse_backward(
                                        offset2bag, bag_size_);
   if (per_sample_weights.defined()) {
     AT_ASSERT(mode == MODE_SUM);
-    index_grad = index_grad * (per_sample_weights.unsqueeze(1));
+    index_grad *= per_sample_weights.unsqueeze(1);
   }
   return native::embedding_backward(index_grad, indices, num_weights, -1,
                                     scale_grad_by_freq, true);
