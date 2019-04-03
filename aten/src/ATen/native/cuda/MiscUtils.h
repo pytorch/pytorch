@@ -55,11 +55,14 @@ static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
 // wrapped in a Storage
 template<class T>
 static inline Storage pin_memory(int64_t size, Tensor dummy) {
-  int64_t adjusted_size = size * sizeof(T);
   auto* allocator = cuda::getPinnedMemoryAllocator();
-  auto& backend = dummy.type().toBackend(Backend::CPU).toScalarType(kByte);
-  return backend.storageWithAllocator(adjusted_size, allocator);
+  auto storage = Storage(
+      caffe2::TypeMeta::Make<T>(),
+      size,
+      allocator,
+      /*resizable=*/false
+  );
 }
-  
+
 } // namespace native
 } // namespace at
