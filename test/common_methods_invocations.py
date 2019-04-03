@@ -538,6 +538,8 @@ def method_tests():
         ('norm', (), (3, 0, True), 'keepdim_3_dim_scalar', (), [1]),
         ('clone', (S, M, S), NO_ARGS),
         ('clone', (), NO_ARGS, 'scalar'),
+        ('contiguous', (S, S), NO_ARGS, '', (True,)),
+        ('contiguous', torch.randn(S, S).transpose(0, 1), NO_ARGS, 'not_contiguous', (True,)),
         ('dist', (S, S, S), ((S, S, S),)),
         ('dist', (S, S, S), ((S,),), 'broadcast_rhs'),
         ('dist', (S,), ((S, S, S),), 'broadcast_lhs'),
