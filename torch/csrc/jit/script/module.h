@@ -1,15 +1,14 @@
 #pragma once
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/jit/argument_spec.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/named_value.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/source_range.h>
 #include <torch/csrc/jit/script/slot.h>
-
+#include <torch/csrc/jit/source_range.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
@@ -51,8 +50,8 @@ using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
 struct Module;
 
-using ModuleLookup = std::function<std::shared_ptr<Module>(
-    const std::vector<std::string>&)>;
+using ModuleLookup =
+    std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
 
 struct Method {
   Method(
@@ -137,6 +136,14 @@ struct Method {
     return graph()->addInput()->setType(type);
   }
 
+  static void setInputTensorTypes(Graph& g, const Stack& stack) {
+    AT_ASSERT(stack.size() == g.inputs().size());
+    for (size_t i = 0; i < stack.size(); ++i) {
+      g.inputs().at(i)->setType(
+          DimensionedTensorType::create(stack.at(i).toTensor()));
+    }
+  }
+
   std::shared_ptr<Graph> propagate_shapes(
       std::vector<at::Tensor> inputs,
       bool with_grad = false) {
@@ -149,8 +156,7 @@ struct Method {
     for (const Slot& inp : initial_ivalues_) {
       stack.push_back(*inp);
     }
-    const auto size = stack.size();
-    setInputTypes(*retval, ArgumentSpec(with_grad, stack, size));
+    setInputTensorTypes(*retval, stack);
     PropagateInputShapes(retval);
     return retval;
   }
@@ -167,9 +173,7 @@ struct Method {
       }
     }
     if (propagate) {
-      setInputTypes(
-          *retval,
-          ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
+      setInputTensorTypes(*retval, fmap<IValue>(inputs));
       PropagateInputShapes(retval);
     }
     AT_ASSERT(retval->inputs().size() == inputs.size());
@@ -288,16 +292,16 @@ struct Method {
       if (pos < inputs.size()) {
         if (!isSubvalueOf(inputs[pos], argument.type())) {
           AT_ERROR(
-            "Expected value of type ",
-            *argument.type(),
-            " for argument '",
-            argument.name(),
-            "' in position ",
-            pos,
-            ", but instead got value of type ",
-            attemptToRecoverType(inputs[pos])->str(),
-            ". Declaration: ",
-            schema);
+              "Expected value of type ",
+              *argument.type(),
+              " for argument '",
+              argument.name(),
+              "' in position ",
+              pos,
+              ", but instead got value of type ",
+              attemptToRecoverType(inputs[pos])->str(),
+              ". Declaration: ",
+              schema);
         }
       } else if (argument.default_value()) {
         inputs.push_back(*argument.default_value());
@@ -375,7 +379,8 @@ struct NamedIValue {
   const TypePtr& type() const {
     return type_;
   }
-private:
+
+ private:
   const std::string name_;
   const TypePtr type_;
   std::unique_ptr<IValue> ivalue_;
@@ -497,12 +502,10 @@ struct Module {
   const torch::OrderedDict<std::string, NamedModule>& get_modules() const {
     return modules;
   }
-  const torch::OrderedDict<std::string, NamedIValue>& get_parameters()
-      const {
+  const torch::OrderedDict<std::string, NamedIValue>& get_parameters() const {
     return parameters;
   }
-  const torch::OrderedDict<std::string, NamedIValue>& get_attributes()
-      const {
+  const torch::OrderedDict<std::string, NamedIValue>& get_attributes() const {
     return attributes;
   }
   const torch::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods()
@@ -630,9 +633,7 @@ struct Module {
       if (!kv.value().type()->isSubtypeOf(TensorType::get())) {
         continue;
       }
-      curr->register_buffer(
-          kv.key(),
-          kv.value().slot()->toTensor());
+      curr->register_buffer(kv.key(), kv.value().slot()->toTensor());
       parameter_remap[kv.value().slot()] = curr->find_buffer(kv.key())->slot();
     }
     for (auto& kv : modules) {
