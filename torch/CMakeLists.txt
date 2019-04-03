@@ -123,6 +123,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
   ${TORCH_SRC_DIR}/csrc/jit/pickler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp
@@ -268,12 +269,6 @@ target_compile_definitions(torch PUBLIC _THP_CORE)
 
 # until they can be unified, keep these lists synced with setup.py
 if(MSVC)
-  if (${CMAKE_BUILD_TYPE} MATCHES "Debug")
-    set (MSVC_RUNTIME_LIBRARY_FLAG "/MDd")
-  else()
-    set (MSVC_RUNTIME_LIBRARY_FLAG "/MD")
-  endif()
-
   target_compile_options(torch PUBLIC
     ${MSVC_RUNTIME_LIBRARY_OPTION}
     /Z7
