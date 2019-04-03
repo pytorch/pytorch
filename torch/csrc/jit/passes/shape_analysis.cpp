@@ -528,6 +528,12 @@ class ShapePropagator {
         setUnshapedType(node);
         return;
       }
+      case prim::GetAttr: {
+        auto cls = node->input()->type()->expect<ClassType>();
+        // propagate any type specializations encoded in the type of the class
+        node->output()->setType(cls->getAttribute(node->s(attr::name)));
+        return;
+      }
       case aten::_unwrap_optional: {
         auto input_ivalue = toIValue(node->input());
         if (input_ivalue && input_ivalue->isNone()) {
@@ -997,11 +1003,9 @@ class ShapePropagator {
     };
 
     // Requirements:
-    //   dims           : 0 if dim is None, otherwise preserved if keepdim == false or 1 smaller otherwise
-    //   scalar type    : preserved
-    //   device         : preserved
-    //   tensor inputs  : 1
-    //   tensor outputs : 1
+    //   dims           : 0 if dim is None, otherwise preserved if keepdim ==
+    //   false or 1 smaller otherwise scalar type    : preserved device :
+    //   preserved tensor inputs  : 1 tensor outputs : 1
     // Additionally:
     //   - First input should be the only tensor input
     //   - Has a bool keepdim argument
@@ -1094,7 +1098,9 @@ class ShapePropagator {
         [](Node* node) -> type_vec_t {
           if (auto dim = node->get<std::vector<int64_t>>(attr::dim)) {
             return multidim_reduce_with_postprocess(
-                node, /*num_reduced_dim=*/dim->size(), /*upcast_integer=*/false);
+                node,
+                /*num_reduced_dim=*/dim->size(),
+                /*upcast_integer=*/false);
           }
           return {};
         }};

@@ -1190,6 +1190,10 @@ void addGlobalMethods(py::module& m) {
         NetBase* net = gWorkspace->GetNet(net_name);
         net->DetachObserver(observer);
       });
+  m.def("clear_global_net_observer", []() {
+    py::gil_scoped_release g;
+    caffe2::ClearGlobalNetObservers();
+  });
   m.def("num_observers_on_net", [](const std::string& net_name) {
     CAFFE_ENFORCE(gWorkspace);
     CAFFE_ENFORCE(gWorkspace->GetNet(net_name), "Can't find net ", net_name);
@@ -1225,6 +1229,22 @@ void addGlobalMethods(py::module& m) {
     CAFFE_ENFORCE(ParseProtoFromLargeString(op_def.cast<std::string>(), &def));
     py::gil_scoped_release g;
     CAFFE_ENFORCE(gWorkspace->RunOperatorOnce(def));
+    return true;
+  });
+  // Run an operator multiple times.
+  // This is needed for microbenchmarking as we want the benchmark loop to be in
+  // C++ to minimize overhead.
+  m.def("run_operator_multiple", [](const py::bytes& op_def, int num_runs) {
+    CAFFE_ENFORCE(gWorkspace);
+    OperatorDef def;
+    CAFFE_ENFORCE(ParseProtoFromLargeString(op_def.cast<std::string>(), &def));
+    py::gil_scoped_release g;
+    std::unique_ptr<OperatorBase> op(CreateOperator(def, gWorkspace));
+    for (int i = 0; i < num_runs; i++) {
+      if (!op->Run()) {
+        return false;
+      }
+    }
     return true;
   });
   m.def(

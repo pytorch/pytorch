@@ -180,7 +180,7 @@ extension_backends = ['MSNPU', 'XLA']
 
 # scalar_name, c_type, accreal, is_floating_type
 scalar_types = [
-    ('Bool', 'uint8_t', 'BoolAccrealNotDefined', False),
+    ('Bool', 'bool', 'BoolAccrealNotDefined', False),
     ('Byte', 'uint8_t', 'Long', False),
     ('Char', 'int8_t', 'Long', False),
     ('Double', 'double', 'Double', True),
