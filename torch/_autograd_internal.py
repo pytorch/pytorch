@@ -1,5 +1,6 @@
 import torch
 
+
 class no_version_update(object):
     r"""
     Context-manager that disables version update when an in-place operation on a
@@ -7,8 +8,8 @@ class no_version_update(object):
 
     Without this context, in-place operations on a tensor will update the tensor's
     version counter, which is used for detecting modifications to saved autograd
-    variables that can result in incorrect gradient calculations.  
-    
+    variables that can result in incorrect gradient calculations.
+
     With this context, in-place operations on a tensor will not update the tensor's
     version counter, which is useful when we are aware of the possibly incorrect
     gradient calculations, but still want to prevent version update from happening.
@@ -28,9 +29,9 @@ class no_version_update(object):
         tensor(2.)
         >>> x._version
         1
-        >>> with torch._autograd_internal.no_version_update():   
+        >>> with torch._autograd_internal.no_version_update():
         ...   x.add_(1)
-        >>> x._version  
+        >>> x._version
         1
     """
     def __enter__(self):
