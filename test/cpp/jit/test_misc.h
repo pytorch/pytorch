@@ -359,7 +359,7 @@ void testCustomFusion() {
   graph->registerOutput(d.value());
 
   torch::jit::overrideCanFuseOnCPU(true);
-  CustomFuseGraph(graph, [](Node* n) { return true; }, Symbol::fromQualString("prim::FusionGroup"));
+  CustomFuseGraph(graph, [](Node* n) { return n->kind() != prim::Param; }, Symbol::fromQualString("prim::FusionGroup"));
   torch::jit::overrideCanFuseOnCPU(false);
 
   const auto& nodes = graph->nodes();
@@ -675,20 +675,31 @@ void testNoneSchemaMatch() {
   AT_ASSERT(std::distance(nodes.begin(), nodes.end()) == 1);
 }
 
+static int testPassValue = 0;
 void fakePass(std::shared_ptr<Graph>&g) {
+  testPassValue++;
   return;
 }
 
 RegisterPass p(fakePass);
 
 void testPassManagement() {
-  auto hit = false;
-  for (const auto& p : getPasses()) {
-    if (p == fakePass) {
-      hit = true;
-    }
-  }
-  AT_ASSERT(hit);
+  std::shared_ptr<Graph> graph = std::make_shared<Graph>(); 
+  script::parseIR(
+      R"IR(
+graph(%a):
+  return (%a))IR",
+      &*graph);
+
+  std::vector<IValue> stack = { IValue(torch::randn({22}, at::kCPU)) };
+  auto run = [&](std::shared_ptr<Graph>& graph, std::vector<IValue> stack) {
+    Code code(graph);
+    InterpreterState interp(code);
+    interp.run(stack);
+    return stack;
+  };
+  run(graph, stack);
+  AT_ASSERT(testPassValue);
 }
 
 } // namespace test

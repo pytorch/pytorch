@@ -169,14 +169,15 @@ struct GraphFuser {
   Block* block_;
   std::unique_ptr<AliasDb> aliasDb_;
   std::shared_ptr<Graph> graph_;
-  std::function<bool(Node*)> callback_ = nullptr;
+  using FusionCallback = std::function<bool(Node*)>;
+  FusionCallback callback_ = [&](Node* n) { return isFusableDefault(n) };
   Symbol kind_ = prim::FusionGroup;
 
   GraphFuser(Block* block, std::shared_ptr<Graph> graph)
       : block_(block), graph_(std::move(graph)) {}
 
   // Custom passes require kind to specified
-  GraphFuser(Block* block, std::shared_ptr<Graph> graph, std::function<bool(Node*)> callback, Symbol kind)
+  GraphFuser(Block* block, std::shared_ptr<Graph> graph, FusionCallback callback, Symbol kind)
       : block_(block), graph_(std::move(graph)), callback_(callback), kind_(kind) {}
 
   value_list tensorInputs(Node* node) {
@@ -193,20 +194,13 @@ struct GraphFuser {
   }
 
   bool isFusable(Node* node) {
-    if (callback_) {
-      return isFusableCallback(node);
-    }
-    return isFusableMap(node) || isFusableBatchNorm(node);
+    return callback_(node);
   }
 
-  bool isFusableCallback(Node* node) {
-    AT_ASSERT(callback_ != nullptr);
-    // Ever denoting a prim::Param as fusable is broken,
-    // this simply saves the user defined callback_ the effort.
-    if (node->kind() == prim::Param) {
-      return false;
-    }
-    return callback_(node);
+  // Default fusability check - used when the user doesn't pass in
+  // a callback.
+  bool isFusableDefault(Node* node) {
+    return isFusableMap(node) || isFusableBatchNorm(node);
   }
 
   bool isFusableMap(Node* node) {
