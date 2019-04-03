@@ -19,6 +19,7 @@
 #include <c10/util/SmallVector.h>
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 #include <iostream>
 #include <limits>
@@ -1841,6 +1842,31 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__and__, a& b),
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),
+
+    Operator(
+        "prim::abs(int x) -> int",
+        [](Stack& stack) {
+          int64_t x;
+          pop(stack, x);
+          push(stack, std::abs(x));
+          return 0;
+        }),
+    Operator(
+        "prim::abs(float x) -> float",
+        [](Stack& stack) {
+          float x;
+          pop(stack, x);
+          push(stack, std::abs(x));
+          return 0;
+        }),
+    Operator(
+        "prim::abs(Tensor x) -> Tensor",
+        [](Stack& stack) {
+          at::Tensor x;
+          pop(stack, x);
+          push(stack, x.abs());
+          return 0;
+        }),
 
     // NB: This is the python truediv operation
     Operator(

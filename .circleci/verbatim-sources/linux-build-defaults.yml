@@ -7,12 +7,10 @@
 pytorch_linux_build_defaults: &pytorch_linux_build_defaults
   resource_class: large
   machine:
-    image: default
+    image: ubuntu-1604:201903-01
   steps:
   - run:
       <<: *setup_linux_system_environment
-  - run:
-      <<: *install_official_git_client
   - checkout
   - run:
       <<: *setup_ci_environment
@@ -45,7 +43,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
 
 pytorch_linux_test_defaults: &pytorch_linux_test_defaults
   machine:
-    image: default
+    image: ubuntu-1604:201903-01
   steps:
   - run:
       <<: *setup_linux_system_environment
@@ -78,12 +76,10 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
 caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   resource_class: large
   machine:
-    image: default
+    image: ubuntu-1604:201903-01
   steps:
   - run:
       <<: *setup_linux_system_environment
-  - run:
-      <<: *install_official_git_client
   - checkout
   - run:
       <<: *setup_ci_environment
@@ -142,7 +138,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
 
 caffe2_linux_test_defaults: &caffe2_linux_test_defaults
   machine:
-    image: default
+    image: ubuntu-1604:201903-01
   steps:
   - run:
       <<: *setup_linux_system_environment
