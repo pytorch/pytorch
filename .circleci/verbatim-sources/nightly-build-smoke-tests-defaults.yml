@@ -10,8 +10,6 @@ smoke_linux_test: &smoke_linux_test
   - run:
       <<: *setup_linux_system_environment
   - run:
-      <<: *install_official_git_client
-  - run:
       <<: *setup_ci_environment
   - run:
       <<: *binary_populate_env

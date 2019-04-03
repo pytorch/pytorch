@@ -27,18 +27,13 @@ setup_linux_system_environment: &setup_linux_system_environment
     # Set up CircleCI GPG keys for apt, if needed
     curl -L https://packagecloud.io/circleci/trusty/gpgkey | sudo apt-key add -
 
-# NOTE: We only perform the merge in build step and not in test step, because
-# all source files will be shared from build to test
-install_official_git_client: &install_official_git_client
-  name: Install Official Git Client
-  no_output_timeout: "1h"
-  command: |
-    set -ex
+    # Stop background apt updates
+    sudo systemctl stop apt-daily.service || true
+    sudo systemctl kill --kill-who=all apt-daily.service || true
 
-    sudo systemctl stop apt-daily.service
-    sudo systemctl kill --kill-who=all apt-daily.service
+    sudo apt-get purge -y unattended-upgrades
 
-    # wait until `apt-get updated` has been killed
+    # wait until `apt-get update` has been killed
     while ! (systemctl list-units --all apt-daily.service | fgrep -q dead)
     do
       sleep 1;
@@ -46,21 +41,13 @@ install_official_git_client: &install_official_git_client
 
     systemctl list-units --all | cat
 
-    sudo killall apt-get || true
-    sudo killall dpkg || true
-
-    sudo rm /var/lib/apt/lists/lock || true
-    sudo rm /var/cache/apt/archives/lock || true
-    sudo rm /var/lib/dpkg/lock || true
-
     cat /etc/apt/sources.list
     sudo sed -i 's#archive.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
     sudo sed -i 's#security.ubuntu.com/ubuntu#us-east-1.ec2.archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list
     cat /etc/apt/sources.list
 
     ps ax | grep apt
-    sudo apt-get -q -y update
-    sudo apt-get -q -y install openssh-client git
+    ps ax | grep dpkg
 
 install_doc_push_script: &install_doc_push_script
   name: Install the doc push script
@@ -298,8 +285,6 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
   steps:
   - run:
       <<: *setup_linux_system_environment
-  - run:
-      <<: *install_official_git_client
   - checkout
   - run:
       <<: *setup_ci_environment
@@ -362,8 +347,6 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   steps:
   - run:
       <<: *setup_linux_system_environment
-  - run:
-      <<: *install_official_git_client
   - checkout
   - run:
       <<: *setup_ci_environment
@@ -1093,8 +1076,6 @@ smoke_linux_test: &smoke_linux_test
   steps:
   - run:
       <<: *setup_linux_system_environment
-  - run:
-      <<: *install_official_git_client
   - run:
       <<: *setup_ci_environment
   - run:

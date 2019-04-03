@@ -11,8 +11,6 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
   steps:
   - run:
       <<: *setup_linux_system_environment
-  - run:
-      <<: *install_official_git_client
   - checkout
   - run:
       <<: *setup_ci_environment
@@ -75,8 +73,6 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   steps:
   - run:
       <<: *setup_linux_system_environment
-  - run:
-      <<: *install_official_git_client
   - checkout
   - run:
       <<: *setup_ci_environment
