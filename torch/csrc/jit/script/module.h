@@ -1,12 +1,13 @@
 #pragma once
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/jit/argument_spec.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/named_value.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/script/slot.h>
 #include <torch/csrc/jit/source_range.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -49,8 +50,8 @@ using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
 struct Module;
 
-using ModuleLookup = std::function<std::shared_ptr<Module>(
-    const std::vector<std::string>&)>;
+using ModuleLookup =
+    std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
 
 struct Method {
   Method(
@@ -58,7 +59,7 @@ struct Method {
       std::string name,
       bool optimize,
       std::shared_ptr<Graph> graph,
-      std::vector<IValue*> initial_members,
+      std::vector<Slot> initial_members,
       std::function<void(Method&)> method_creator)
       : owner_(owner),
         name_(std::move(name)),
@@ -120,12 +121,12 @@ struct Method {
   size_t num_inputs() const {
     return graph()->inputs().size() - initial_ivalues_.size();
   }
-  TORCH_API Value* get_or_add_parameter(IValue* slot) {
+  TORCH_API Value* get_or_add_parameter(Slot slot) {
     AT_ASSERT(slot->isTensor());
     return get_or_add_attribute(TensorType::get(), slot);
   }
 
-  TORCH_API Value* get_or_add_attribute(TypePtr type, IValue* slot) {
+  TORCH_API Value* get_or_add_attribute(TypePtr type, Slot slot) {
     auto it = initial_ivalue_index.find(slot);
     if (it != initial_ivalue_index.end()) {
       return graph()->inputs().at(it->second);
@@ -133,6 +134,14 @@ struct Method {
     initial_ivalues_.push_back(slot);
     initial_ivalue_index[slot] = graph()->inputs().size();
     return graph()->addInput()->setType(type);
+  }
+
+  static void setInputTensorTypes(Graph& g, const Stack& stack) {
+    AT_ASSERT(stack.size() == g.inputs().size());
+    for (size_t i = 0; i < stack.size(); ++i) {
+      g.inputs().at(i)->setType(
+          DimensionedTensorType::create(stack.at(i).toTensor()));
+    }
   }
 
   std::shared_ptr<Graph> propagate_shapes(
@@ -144,11 +153,10 @@ struct Method {
     for (at::Tensor& i : inputs) {
       stack.emplace_back(std::move(i));
     }
-    for (IValue* inp : initial_ivalues_) {
+    for (const Slot& inp : initial_ivalues_) {
       stack.push_back(*inp);
     }
-    const auto size = stack.size();
-    setInputTypes(*retval, ArgumentSpec(with_grad, stack, size));
+    setInputTensorTypes(*retval, stack);
     PropagateInputShapes(retval);
     return retval;
   }
@@ -165,9 +173,7 @@ struct Method {
       }
     }
     if (propagate) {
-      setInputTypes(
-          *retval,
-          ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
+      setInputTensorTypes(*retval, fmap<IValue>(inputs));
       PropagateInputShapes(retval);
     }
     AT_ASSERT(retval->inputs().size() == inputs.size());
@@ -195,7 +201,7 @@ struct Method {
     return retval;
   }
 
-  const std::vector<IValue*>& initial_ivalues() const {
+  const std::vector<Slot>& initial_ivalues() const {
     return initial_ivalues_;
   }
 
@@ -286,16 +292,16 @@ struct Method {
       if (pos < inputs.size()) {
         if (!isSubvalueOf(inputs[pos], argument.type())) {
           AT_ERROR(
-            "Expected value of type ",
-            *argument.type(),
-            " for argument '",
-            argument.name(),
-            "' in position ",
-            pos,
-            ", but instead got value of type ",
-            attemptToRecoverType(inputs[pos])->str(),
-            ". Declaration: ",
-            schema);
+              "Expected value of type ",
+              *argument.type(),
+              " for argument '",
+              argument.name(),
+              "' in position ",
+              pos,
+              ", but instead got value of type ",
+              attemptToRecoverType(inputs[pos])->str(),
+              ". Declaration: ",
+              schema);
         }
       } else if (argument.default_value()) {
         inputs.push_back(*argument.default_value());
@@ -324,11 +330,11 @@ struct Method {
   // each is a pointer to a slot in the module that owns this parameter
   // parameters and submodules can only be _added_ to script Modules to ensure
   // these pointers always stay valid
-  std::vector<IValue*> initial_ivalues_;
+  std::vector<Slot> initial_ivalues_;
 
   // map from a IValue* in initial_ivalues to the offset it appears at
   // in graph. used to accelerate get_or_add_parameter
-  std::unordered_map<IValue*, size_t> initial_ivalue_index;
+  std::unordered_map<Slot, size_t> initial_ivalue_index;
 
   // TODO: support that case where we allow _writes_ to parameters from
   // compiled functions.
@@ -361,15 +367,23 @@ struct NamedModule {
 struct NamedIValue {
   NamedIValue(std::string name, TypePtr type, IValue ivalue)
       : name_(name),
-        type(type),
-        ivalue(torch::make_unique<IValue>(std::move(ivalue))) {}
+        type_(type),
+        ivalue_(torch::make_unique<IValue>(std::move(ivalue))) {}
 
-  IValue* slot() const {
-    return ivalue.get();
+  Slot slot() const {
+    return Slot(ivalue_.get());
   }
+  const std::string& name() const {
+    return name_;
+  }
+  const TypePtr& type() const {
+    return type_;
+  }
+
+ private:
   const std::string name_;
-  const TypePtr type;
-  std::unique_ptr<IValue> ivalue;
+  const TypePtr type_;
+  std::unique_ptr<IValue> ivalue_;
 };
 
 struct Module {
@@ -397,7 +411,7 @@ struct Module {
 
   void register_buffer(const std::string& name, autograd::Variable v) {
     if (auto b = attributes.find(name)) {
-      AT_ASSERT(b->type->isSubtypeOf(TensorType::get()));
+      AT_ASSERT(b->type()->isSubtypeOf(TensorType::get()));
       *b->slot() = v;
       return;
     }
@@ -432,7 +446,7 @@ struct Module {
   Method& create_method(
       const std::string& name,
       std::shared_ptr<Graph> graph,
-      std::vector<IValue*> member_inputs) {
+      std::vector<Slot> member_inputs) {
     AT_ASSERT(graph);
     std::unique_ptr<Method> method(new Method(
         this,
@@ -457,7 +471,7 @@ struct Module {
     return *methods.insert(name, std::move(method));
   }
 
-  IValue* parameter_slot(const std::string& name) const {
+  Slot parameter_slot(const std::string& name) const {
     return parameters[name].slot();
   }
 
@@ -470,6 +484,9 @@ struct Module {
   }
   autograd::Variable get_buffer(const std::string& name) const {
     return autograd::as_variable_ref(attributes.find(name)->slot()->toTensor());
+  }
+  IValue get_attribute(const std::string& name) const {
+    return *attributes.find(name)->slot();
   }
 
   // each module owns its method. The reference returned here
@@ -485,12 +502,10 @@ struct Module {
   const torch::OrderedDict<std::string, NamedModule>& get_modules() const {
     return modules;
   }
-  const torch::OrderedDict<std::string, NamedIValue>& get_parameters()
-      const {
+  const torch::OrderedDict<std::string, NamedIValue>& get_parameters() const {
     return parameters;
   }
-  const torch::OrderedDict<std::string, NamedIValue>& get_attributes()
-      const {
+  const torch::OrderedDict<std::string, NamedIValue>& get_attributes() const {
     return attributes;
   }
   const torch::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods()
@@ -506,7 +521,7 @@ struct Module {
   }
   NamedIValue* find_buffer(const std::string& name) {
     auto b = attributes.find(name);
-    if (b && b->type->isSubtypeOf(TensorType::get())) {
+    if (b && b->type()->isSubtypeOf(TensorType::get())) {
       return b;
     }
     return nullptr;
@@ -604,7 +619,7 @@ struct Module {
       ModuleLookup module_lookup,
       // parameter_remap is needed when a parent module uses a parameter of a
       // submodule
-      std::unordered_map<IValue*, IValue*>& parameter_remap,
+      std::unordered_map<Slot, Slot>& parameter_remap,
       std::vector<std::string> names = {}) const {
     auto curr = module_lookup(names);
     for (auto& kv : parameters) {
@@ -615,12 +630,10 @@ struct Module {
       parameter_remap[kv.value().slot()] = curr->parameter_slot(kv.key());
     }
     for (auto& kv : attributes) {
-      if (!kv.value().type->isSubtypeOf(TensorType::get())) {
+      if (!kv.value().type()->isSubtypeOf(TensorType::get())) {
         continue;
       }
-      curr->register_buffer(
-          kv.key(),
-          kv.value().slot()->toTensor());
+      curr->register_buffer(kv.key(), kv.value().slot()->toTensor());
       parameter_remap[kv.value().slot()] = curr->find_buffer(kv.key())->slot();
     }
     for (auto& kv : modules) {
@@ -631,7 +644,7 @@ struct Module {
       names.pop_back();
     }
     for (auto& kv : methods) {
-      std::vector<IValue*> initial_ivalues;
+      std::vector<Slot> initial_ivalues;
       for (auto& p : kv.value()->initial_ivalues()) {
         initial_ivalues.push_back(parameter_remap.at(p));
       }

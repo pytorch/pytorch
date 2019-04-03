@@ -1,7 +1,5 @@
 import io
-import math
 import tempfile
-import re
 import unittest
 import sys
 from itertools import repeat
@@ -19,9 +17,9 @@ from torch._six import inf, nan
 from test_torch import _TestTorchMixin
 
 from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
-    run_additional_tri_tests, _compare_trilu_indices, _compare_large_trilu_indices
+    _compare_trilu_indices, _compare_large_trilu_indices
 from common_utils import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
-    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, load_tests, iter_indices
+    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, TEST_NUMPY, TEST_WITH_ROCM, load_tests
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -2251,6 +2249,9 @@ class TestCuda(TestCase):
         samples = probs.multinomial(1000000, replacement=True)
         self.assertGreater(probs[samples].min().item(), 0)
 
+    def test_multinomial_alias(self):
+        _TestTorchMixin._test_multinomial_alias(self, lambda t: t.cuda())
+
     @staticmethod
     def mute():
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
@@ -2361,8 +2362,8 @@ class TestCuda(TestCase):
 
     @skipIfRocm
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_btrifact(self):
-        _TestTorchMixin._test_btrifact(self, lambda t: t.cuda())
+    def test_lu(self):
+        _TestTorchMixin._test_lu(self, lambda t: t.cuda())
 
     @skipIfRocm
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
@@ -2371,8 +2372,8 @@ class TestCuda(TestCase):
 
     @skipIfRocm
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    def test_btriunpack(self):
-        _TestTorchMixin._test_btriunpack(self, lambda t: t.cuda())
+    def test_lu_unpack(self):
+        _TestTorchMixin._test_lu_unpack(self, lambda t: t.cuda())
 
     def test_dim_reduction(self):
         _TestTorchMixin._test_dim_reduction(self, lambda t: t.cuda())

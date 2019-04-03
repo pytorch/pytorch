@@ -17,6 +17,8 @@ new_common_args = parse_kwargs("""
         Default: if None, same :class:`torch.device` as this tensor.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
+    pin_memory (bool, optional): If set, returned tensor would be allocated in
+        the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
 add_docstr_all('new_tensor',
@@ -484,20 +486,6 @@ add_docstr_all('bmm',
 bmm(batch2) -> Tensor
 
 See :func:`torch.bmm`
-""")
-
-add_docstr_all('btrifact',
-               r"""
-btrifact(pivot=True) -> (Tensor, Tensor)
-
-See :func:`torch.btrifact`
-""")
-
-add_docstr_all('btrifact_with_info',
-               r"""
-btrifact_with_info(pivot=True) -> (Tensor, Tensor, Tensor)
-
-See :func:`torch.btrifact_with_info`
 """)
 
 add_docstr_all('btrisolve',
@@ -1017,13 +1005,6 @@ add_docstr_all('ger',
 ger(vec2) -> Tensor
 
 See :func:`torch.ger`
-""")
-
-add_docstr_all('solve',
-               r"""
-solve(A) -> Tensor, Tensor
-
-See :func:`torch.solve`
 """)
 
 add_docstr_all('indices',
@@ -2228,6 +2209,13 @@ Example::
 
 """)
 
+add_docstr_all('solve',
+               r"""
+solve(A) -> Tensor, Tensor
+
+See :func:`torch.solve`
+""")
+
 add_docstr_all('sort',
                r"""
 sort(dim=-1, descending=False) -> (Tensor, LongTensor)
@@ -3125,7 +3113,7 @@ Example::
     >>> f = torch.rand(10, requires_grad=True, device="cuda")
     >>> f.is_leaf
     True
-    # f requires grad, has not operation creating it
+    # f requires grad, has no operation creating it
 
 
 """)
