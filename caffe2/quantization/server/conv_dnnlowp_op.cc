@@ -1224,7 +1224,9 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             out_qparams_.zero_point,
             in_qparams_[INPUT].zero_point,
             filter_zero_points_.data(),
-            row_offsets_.data() + tid * row_offset_size_per_thread,
+            filter_zero_points_[0]
+                ? row_offsets_.data() + tid * row_offset_size_per_thread
+                : nullptr,
             column_offsets_->data(),
             b_quantized_data_,
             conv_p.OC,
@@ -1234,7 +1236,9 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
             conv_p,
             reinterpret_cast<const uint8_t*>(Xdata),
             in_qparams_[INPUT].zero_point,
-            row_offsets_.data() + tid * row_offset_size_per_thread,
+            filter_zero_points_[0]
+                ? row_offsets_.data() + tid * row_offset_size_per_thread
+                : nullptr,
             *Wq_gconv_packed_,
             Y_uint8_data,
             Y_int32->data(),
