@@ -42,7 +42,7 @@ from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from torch.testing import FileCheck
-from torch._C import TensorType
+from torch._C import TensorType, parse_ir
 from copy import deepcopy
 import random
 from typing import List, Dict, Optional, Tuple
@@ -281,6 +281,8 @@ class JitTestCase(TestCase):
         torch._C._jit_set_emit_module_hook(self.emitModuleHook)
 
     def emitModuleHook(self, module):
+        import zipfile
+
         def copy_structure_and_params(m):
             c = torch.jit.ScriptModule()
             for name, v in m._get_parameters():
@@ -294,7 +296,24 @@ class JitTestCase(TestCase):
         # disable the hook while we parse code, otherwise we will re-enter the hook
         with self.disableModuleHook():
             try:
-                pp, constant_table = module._python_print()
+                if len(module.code) == 0:
+                    # short-circuit if this is an empty module
+                    return
+                # save the module to a buffer
+                buffer = io.BytesIO()
+                torch.jit.save(module, buffer)
+
+                # copy the data in the buffer so we can restore it later. This
+                # is because py2 and py3 have different semantics with zipfile
+                # and it's easier to just work with a fresh copy each time.
+                buffer_copy = buffer.getvalue()
+
+                # crack open the zip format to get at the main module code
+                archive = zipfile.ZipFile(buffer)
+                main_module = archive.open('archive/code/archive.py')
+                main_module_code = ""
+                for line in main_module:
+                    main_module_code += line.decode()
             except RuntimeError as e:
                 se = str(e)
                 if "could not export python function" not in se and \
@@ -302,12 +321,24 @@ class JitTestCase(TestCase):
                     raise
                 else:
                     return
-            ppv = "op_version_set = 0\n{}".format(pp)
-            sm = copy_structure_and_params(module)
-            torch._C._jit_import_methods(sm, ppv, constant_table)
-            pp2, _ = sm._python_print()
-            if pp != pp2:
-                self.assertMultiLineEqual(pp, pp2)
+
+            # import the model again (from a the copy we made of the original)
+            buffer2 = io.BytesIO(buffer_copy)
+            imported = torch.jit.load(buffer2)
+
+            # save it again
+            saved_module_buffer_2 = io.BytesIO()
+            torch.jit.save(imported, saved_module_buffer_2)
+
+            saved_module_buffer_2.seek(0)
+            archive2 = zipfile.ZipFile(saved_module_buffer_2)
+            main_module_2 = archive2.open('archive/code/archive.py')
+
+            main_module_2_code = ""
+            for line in main_module_2:
+                main_module_2_code += line.decode()
+
+            self.assertMultiLineEqual(main_module_code, main_module_2_code)
 
     def getExportImportCopy(self, m, also_test_file=True, map_location=None):
         buffer = io.BytesIO()
@@ -755,6 +786,62 @@ class TestJit(JitTestCase):
         trace = torch.jit.trace(f, (b, c))
         self.run_pass('peephole', trace.graph)
         self.assertTrue(len(list(trace.graph.nodes())) == 0)
+
+    def test_peephole_optimize_shape_ops(self):
+        def test_input(func, input, result):
+            self.assertEqual(func(input), result)
+            gre = func.graph_for(input)
+            FileCheck().check_not("prim::If").run(gre)
+
+        def test_dim():
+            @torch.jit.script
+            def func(x):
+                if x.dim() == 1:
+                    return 1
+                else:
+                    return 2
+
+            test_input(func, torch.tensor([0.5]), 1)
+            test_input(func, torch.tensor([[0.5]]), 2)
+        test_dim()
+
+        def test_dtype():
+            @torch.jit.script
+            def func(x):
+                if x.dtype == torch.float32:
+                    return 1
+                else:
+                    return 2
+
+            test_input(func, torch.tensor(0.5, dtype=torch.float32), 1)
+            test_input(func, torch.tensor(0.5, dtype=torch.int64), 2)
+        test_dtype()
+
+        def test_device():
+            @torch.jit.script
+            def func_1(x):
+                if x.device == torch.device('cuda:0'):
+                    a = 0
+                else:
+                    a = 1
+                return a
+
+            @torch.jit.script
+            def func_2(x):
+                if x.is_cuda:
+                    a = 0
+                else:
+                    a = 1
+                return a
+
+            test_input(func_1, torch.tensor(0.5), 1)
+            test_input(func_2, torch.tensor(0.5), 1)
+
+            if RUN_CUDA:
+                test_input(func_1, torch.tensor(0.5, device="cuda:0"), 0)
+                test_input(func_2, torch.tensor(0.5, device="cuda:0"), 0)
+
+        test_device()
 
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
@@ -1837,17 +1924,18 @@ class TestJit(JitTestCase):
 
     def test_tuple_specialization(self):
         @torch.jit.script
-        def f(t):
-            # type: (Tuple[Tensor, Tensor]) -> Tensor
-            x, y = t
+        def f(t, s):
+            # type: (Tuple[Tensor, Tuple[int, Tensor]], str) -> Tensor
+            x, t2 = t
+            _, y = t2
             return x + y
 
-        t = torch.randn(2, 2), torch.randn(2, 2)
-        f(t)
-        graph = f.graph_for(t)
+        t = torch.randn(2, 2), (1, torch.randn(2, 2)),
+        f(t, "hi")
+        graph = f.graph_for(t, "hi")
         input_types = list(next(graph.inputs()).type().elements())
-        for t in input_types:
-            self.assertEqual(t.kind(), 'DimensionedTensorType')
+        self.assertEqual(input_types[0].kind(), 'DimensionedTensorType')
+        self.assertEqual(input_types[1].elements()[1].kind(), 'DimensionedTensorType')
 
     def test_constant_prop_simple(self):
         @torch.jit.script
@@ -3394,13 +3482,11 @@ a")
         # test that shape analysis is written correctly for sum with IntArrayRef[1] dim argument
         self.run_pass('constant_propagation', func.graph)
         self.run_pass('constant_propagation', func2.graph)
-        torch._C._jit_pass_shape_analysis(
-            func.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
-        torch._C._jit_pass_shape_analysis(
-            func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
-        self.assertTrue(func.graph.findNode("aten::sum").output().type().kind()
+        g = func._get_method('forward').propagate_shapes((torch.zeros(1, 1, 1, 1, 4),), False)
+        g2 = func2._get_method('forward').propagate_shapes((torch.zeros(1, 1, 1, 1, 4),), False)
+        self.assertTrue(g.findNode("aten::sum").output().type().kind()
                         == "DimensionedTensorType")
-        self.assertTrue(func2.graph.findNode("aten::sum").output().type().kind()
+        self.assertTrue(g2.findNode("aten::sum").output().type().kind()
                         == "DimensionedTensorType")
 
     def test_cat(self):
@@ -4098,9 +4184,9 @@ a")
                 torch.mul(x, y, out=z)
                 return z
 
-            torch._C._jit_pass_shape_analysis(
-                test.graph, (torch.zeros(2, 1), torch.zeros(1, 2), torch.zeros(1, 1, 1)), False)
-            self.assertTrue(next(test.graph.outputs()).type() == TensorType.get())
+            graph = test._get_method('forward').propagate_shapes(
+                (torch.zeros(2, 1), torch.zeros(1, 2), torch.zeros(1, 1, 1)), False)
+            self.assertTrue(next(graph.outputs()).type() == TensorType.get())
         out_op_graph_input()
 
         def test_resize():
@@ -4117,10 +4203,8 @@ a")
                     after_resize_alias = b.add_(1)
                 return after_resize_alias
 
-            g = test.graph
-            self.run_pass('constant_propagation', g)
-            torch._C._jit_pass_shape_analysis(
-                g, (torch.zeros(1, 1),), False)
+            self.run_pass('constant_propagation', test.graph)
+            g = test._get_method('forward').propagate_shapes((torch.zeros(1, 1),), False)
             resize_node = g.findNode("aten::resize_")
             # first input and output of b.resize_ is b
             self.assertTrue(next(resize_node.inputs()).type() == TensorType.get())
@@ -4144,8 +4228,7 @@ a")
 
             g = test.graph
             self.run_pass('constant_propagation', g)
-            torch._C._jit_pass_shape_analysis(
-                g, (torch.zeros(1, 1),), False)
+            g = test._get_method('forward').propagate_shapes((torch.zeros(1, 1),), False)
 
             # x doesn't alias a resized op so it shouldn't be set to base Tensor type
             self.assertTrue(next(g.inputs()).type() != TensorType.get())
@@ -4199,8 +4282,8 @@ a")
             return x.view(T, B, C)
 
         x = torch.randn(3, 1, 5, requires_grad=True)
-        graph = torch.jit.script(fn).graph
-        torch._C._jit_pass_shape_analysis(graph, (x,), False)
+        fn = torch.jit.script(fn)
+        graph = fn._get_method('forward').propagate_shapes((x,), False)
         a = next(graph.outputs()).type().kind()
         self.assertTrue(next(graph.outputs()).type().kind() != 'TensorType')
 
@@ -4948,6 +5031,26 @@ a")
                 code = funcs_template.format(func=func, scalar1=scalar1, scalar2=scalar2)
                 run_test(code)
 
+    def test_number_abs(self):
+        def func1(x):
+            # type: (float) -> float
+            return abs(x)
+
+        def func2(x):
+            # type: (int) -> int
+            return abs(x)
+
+        def func3(x):
+            return abs(x)
+
+        self.checkScript(func1, (-3.14,))
+        self.checkScript(func1, (3.14,))
+        self.checkScript(func2, (-10,))
+        self.checkScript(func2, (10,))
+        self.checkScript(func3, (torch.tensor([-5, -10, -20]),))
+        self.checkScript(func3, (torch.tensor([5, 10, 20]),))
+        self.checkScript(func3, (torch.tensor([-5, 10, -20]),))
+
     def test_number_div(self):
         self.checkScript(div_int_future, (), optimize=True)
         self.checkScript(div_float_future, (), optimize=True)
@@ -5562,6 +5665,14 @@ a")
         m2.sub2.a.data.zero_()
         self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
 
+    def test_irparser(self):
+        graph_str = """graph(%0 : Double(5, 5)):
+          # CHECK: aten::relu
+          %1 : Double(5, 5) = aten::relu(%0)
+          return (%1)
+        """
+        FileCheck().run(graph_str, parse_ir(graph_str))
+
     def test_filecheck(self):
         def test_check():
             file = "232"
@@ -5653,6 +5764,59 @@ a")
             fb = FileCheck().check_count("2", 2).check_not("1").check_count("2", 2)
             with self.assertRaisesRegex(RuntimeError, 'Expected to not find "1"'):
                 fb.run("22 1 22")
+
+    def test_filecheck_parse(self):
+        def test_check():
+            file = """
+                # CHECK: 2
+                # CHECK: 3
+                # CHECK: 2
+                232
+                """
+            FileCheck().run(checks_file=file, test_file=file)
+            file = """
+                # CHECK: 232
+                232
+                """
+            FileCheck().run(file, "232")
+            with self.assertRaisesRegex(RuntimeError, 'Expected to find "232"'):
+                FileCheck().run(file, "22")
+            with self.assertRaisesRegex(RuntimeError, 'Expected to find "22"'):
+                FileCheck().run("# CHECK: 22", "23")
+        test_check()
+
+        def test_check_count():
+            file = "22222"
+            FileCheck().run("# CHECK-COUNT-5: 2", file)
+            FileCheck().run("# CHECK-COUNT-EXACTLY-5: 2", file)
+            FileCheck().run("# CHECK-COUNT-2: 22", file)
+            FileCheck().run("# CHECK-COUNT-1: 222", file)
+
+            with self.assertRaisesRegex(RuntimeError, 'Expected to not find'):
+                FileCheck().run("# CHECK-COUNT-EXACTLY-2: 2", file)
+        test_check_count()
+
+        def test_check_same():
+            file = "22\n33"
+            FileCheck().run("# CHECK-SAME: 22", file)
+
+            with self.assertRaisesRegex(RuntimeError, "Expected to not find"):
+                FileCheck().run("# CHECK-SAME: 33", file)
+
+            file = "22  1  3"
+
+            FileCheck().run("# CHECK: 2\n # CHECK-SAME: 3", file)
+            FileCheck().run("# CHECK-COUNT-2: 2\n # CHECK-SAME: 3", file)
+        test_check_same()
+
+        def test_bad_input():
+            with self.assertRaisesRegex(RuntimeError, "Check for bad input"):
+                FileCheck().run("", "1")
+
+            with self.assertRaisesRegex(RuntimeError, "Could not parse check"):
+                FileCheck().run("# CHECK1", "")
+
+        test_bad_input()
 
     def test_script_module_call_noscript(self):
         class M(torch.jit.ScriptModule):
@@ -6560,7 +6724,7 @@ a")
             return torch.cat(c)
 
         b = torch.zeros(2, 4)
-        test_list.graph.propagate_shapes((b,), False)
+        test_list._get_method('forward').propagate_shapes((b,), False)
 
     def test_if_supertype(self):
         @torch.jit.script
@@ -6577,8 +6741,8 @@ a")
         b = torch.zeros(2, 4, dtype=torch.long)
         c = torch.zeros(2, 4, dtype=torch.float)
 
-        tensor_unifying.graph.propagate_shapes((a, b, c), False)
-        if_outputs = list(tensor_unifying.graph.findNode("prim::If").outputs())
+        graph = tensor_unifying._get_method('forward').propagate_shapes((a, b, c), False)
+        if_outputs = list(graph.findNode("prim::If").outputs())
         self.assertTrue(if_outputs[0].type().str() == "Float(*, *)")
         self.assertTrue(if_outputs[1].type().str() == "Tensor")
         self.assertTrue(if_outputs[2].type().str() == "Tensor")
@@ -8892,7 +9056,7 @@ a")
                 return torch.jit._unwrap_optional(None)
 
     def test_indexing_error(self):
-        with self.assertRaisesRegex(RuntimeError, "only supported on lists, dictionaries, tensors, and tuples"):
+        with self.assertRaisesRegex(RuntimeError, "only supported on List, Dict, Tensor, Tuple, and str"):
             @torch.jit.script
             def test_wrong_type():
                 a = 8
@@ -10123,6 +10287,43 @@ a")
         with self.capture_stdout() as captured:
             print(fn(x, scale, shift))
 
+    def test_string_index(self):
+        def fn(x):
+            # type: (str) -> str
+            return x[2]
+
+        self.checkScript(fn, ("abcde",))
+
+    def test_ord(self):
+        def fn(x):
+            # type: (str) -> int
+            return ord(x)
+
+        self.checkScript(fn, ("h"))
+        self.checkScript(fn, ("y"))
+
+    def test_string_slicing(self):
+        def fn1(x):
+            # type: (str) -> str
+            return x[1:3]
+
+        def fn2(x):
+            # type: (str) -> str
+            return x[-1:3]
+
+        def fn3(x):
+            # type: (str) -> str
+            return x[3:1]
+
+        def fn4(x):
+            # type: (str) -> str
+            return x[3:100]
+
+        self.checkScript(fn1, ("abcdefghi",))
+        self.checkScript(fn2, ("abcdefghi",))
+        self.checkScript(fn3, ("abcdefghi",))
+        self.checkScript(fn4, ("abcdefghi",))
+
     def test_non_final_return(self):
 
         def simple(x):
@@ -10600,6 +10801,7 @@ a")
         self.assertEqual(m.int64_max, imported.int64_max)
         self.assertEqual(m.int64_min, imported.int64_min)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: TemporaryFileName on Windows")
     def test_serialization_sharing(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -13147,6 +13349,30 @@ class TestClassType(JitTestCase):
 
         self.assertEqual(x, f2.x)
         self.assertEqual(y, f2.y)
+
+    def test_class_specialization(self):
+        @torch.jit.script  # noqa: B903
+        class Foo(object):
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        def use_foo(foo, foo2, tup):
+            # type: (Foo, Foo, Tuple[Foo, Foo]) -> Tensor
+            a, b = tup
+            return foo.x + foo2.y + a.x + b.y
+
+        # create from python
+        x = torch.ones(2, 3)
+        y = torch.zeros(2, 3)
+        f = Foo(x, y)
+        f2 = Foo(x * 2, y * 3)
+        f3 = Foo(x * 4, y * 4)
+
+        input = (f, f2, (f, f3))
+        sfoo = self.checkScript(use_foo, input)
+        graphstr = str(sfoo.graph_for(*input))
+        FileCheck().check_count("Double(*, *) = prim::GetAttr", 4).run(graphstr)
 
 
 class TestLogging(JitTestCase):

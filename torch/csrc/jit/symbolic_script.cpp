@@ -404,7 +404,7 @@ const std::vector<std::string> functions = {
 
         def contiguous(self):
             def backward(grad_output):
-                return None
+                return grad_output
 
             return self.contiguous(), backward
 

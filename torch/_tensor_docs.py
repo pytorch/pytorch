@@ -17,6 +17,8 @@ new_common_args = parse_kwargs("""
         Default: if None, same :class:`torch.device` as this tensor.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
+    pin_memory (bool, optional): If set, returned tensor would be allocated in
+        the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
 add_docstr_all('new_tensor',
@@ -3111,7 +3113,7 @@ Example::
     >>> f = torch.rand(10, requires_grad=True, device="cuda")
     >>> f.is_leaf
     True
-    # f requires grad, has not operation creating it
+    # f requires grad, has no operation creating it
 
 
 """)
