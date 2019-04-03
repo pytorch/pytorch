@@ -138,6 +138,7 @@ struct PythonArgs {
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
   inline std::string string(int i);
+  inline c10::optional<std::string> toStringOptional(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
@@ -424,6 +425,12 @@ inline c10::optional<bool> PythonArgs::toBoolOptional(int i) {
   if (!args[i])
     return c10::nullopt;
   return toBool(i);
+}
+
+inline c10::optional<std::string> PythonArgs::toStringOptional(int i) {
+  if (!args[i])
+    return c10::nullopt;
+  return string(i);
 }
 
 inline double PythonArgs::toDouble(int i) {

@@ -39,7 +39,7 @@ TYPE_MAP = {
     'std::array<bool,3>': 'bool[3]',
     'std::array<bool,4>': 'bool[4]',
     'std::string': 'str',
-    # 'std::string?': 'str?',
+    'std::string?': 'str?',
     'Scalar': 'Scalar',
     'Scalar?': 'Scalar?',
     'Tensor': 'Tensor',
@@ -112,6 +112,7 @@ FROM_IVALUE = {
     'int64_t': '{}.toInt()',
     'int64_t?': '{}.toOptional<int64_t>()',
     'std::string': '{}.toString()->string()',
+    'std::string?': '{}.toOptional<std::string>()',
     'Generator': 'nullptr',
     'std::vector<uint8_t>': '{}.toUint8Vector()',
     # 'std::vector<uint8_t>': '{}.toUint8Vector()', VITALYF

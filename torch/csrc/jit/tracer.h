@@ -108,6 +108,10 @@ TORCH_API void addInputs(Node* n, const char* name, const std::string& value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
+    const c10::optional<std::string> value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
     const at::SparseTensorRef& value);
 TORCH_API void addInputs(
     Node* n,

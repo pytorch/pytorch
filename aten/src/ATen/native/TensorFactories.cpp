@@ -150,7 +150,7 @@ Tensor from_buffer(
         THP_decodeBuffer(
             result_data,
             (uint8_t*)(src + offset.value_or(0)),
-            byte_order,
+            byte_order_flag,
             my_count);
       });
 

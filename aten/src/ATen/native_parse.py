@@ -76,6 +76,9 @@ def type_argument_translations(arg):
     # Enables str by translating to legacy std::string.
     elif t == 'str':
         t = 'std::string'
+    elif t == 'str?':
+        t = 'std::string?'
+        default = 'None'
     elif t == 'double':
         raise RuntimeError("Please use float and not double. "
                            "See [temp translations] for details.")

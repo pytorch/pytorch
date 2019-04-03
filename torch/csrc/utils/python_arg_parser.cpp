@@ -261,8 +261,8 @@ void FunctionParameter::set_default_str(const std::string& str) {
       throw std::runtime_error("invalid device: " + str);
     }
   } else if (type_ == ParameterType::STRING) {
-    if (str != "None" || str != "") {
-      throw std::runtime_error("invalid default string: " + str);
+    if (str != "None" && str != "" && str != "c10::nullopt") {
+      throw std::runtime_error("invalid default string: '" + str + "'");
     }
   }
 }

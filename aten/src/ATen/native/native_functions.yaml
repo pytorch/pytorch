@@ -25,7 +25,7 @@
   matches_jit_signature: True
   variants: function
 
-- func: from_buffer(str bytes, str byte_order, *, int? count=0, int? offset=0, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: from_buffer(str bytes, str? byte_order=None, *, int? count=0, int? offset=0, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   matches_jit_signature: True
   cpu_half: True
   cpu_bool: True

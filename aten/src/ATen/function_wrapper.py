@@ -940,6 +940,10 @@ def create_generic(top_env, declarations):
         ))
 
     def native_get_formals(option, include_constants=False):
+        if option['name'] == 'from_buffer':
+            print("native_get_formals")
+            import json
+            print(json.dumps(option, indent=4))
         # type: (FunctionOption, bool) -> List[AtFormal]
         seen = set()  # type: Set[str]
         pos_args = []

@@ -9452,7 +9452,7 @@ class _TestTorchMixin(object):
 
     def test_torch_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
-        self.assertEqual(torch.from_buffer(a, 'big', dtype=torch.uint8).tolist(), [1, 2, 3, 4])
+        self.assertEqual(torch.from_buffer(a, dtype=torch.uint8).tolist(), [1, 2, 3, 4])
         shorts = torch.from_buffer(a, 'big',dtype=torch.short)
         self.assertEqual(shorts.numel(), 2)
         self.assertEqual(shorts.tolist(), [258, 772])
