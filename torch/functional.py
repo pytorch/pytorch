@@ -821,6 +821,7 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     return lu_unpack(LU_data=LU_data, LU_pivots=LU_pivots,
                      unpack_data=unpack_data, unpack_pivots=unpack_pivots)
 
+
 def btrisolve(b, LU_data, LU_pivots, out=None):
     r"""Solves the system of equations :math:`Ax = b` using the partially pivoted LU
     factorization of :math:`A` given by :attr:`LU_data` and :attr:`LU_pivots`.
