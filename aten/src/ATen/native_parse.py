@@ -343,7 +343,6 @@ def has_sparse_dispatches(dispatches):
             return True
     return False
 
-
 def parse_native_yaml(path):
     with open(path, 'r') as f:
         return yaml.load(f, Loader=Loader)
@@ -382,6 +381,7 @@ def run(paths):
                 declaration['matches_jit_signature'] = func.get('matches_jit_signature', False)
                 declaration['cpu_half'] = func.get('cpu_half', False)
                 declaration['cpu_bool'] = func.get('cpu_bool', False)
+                declaration['cuda_bool'] = func.get('cuda_bool', False)
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
                 declaration['arguments'] = func.get('arguments', arguments)
