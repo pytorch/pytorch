@@ -5,7 +5,7 @@ namespace torch {
 namespace jit {
 namespace testing {
 
-TORCH_API std::vector<Node*> findAllNodes(
+std::vector<Node*> findAllNodes(
     c10::ArrayRef<torch::jit::Block*> blocks,
     Symbol kind,
     bool recurse = true) {
@@ -24,7 +24,7 @@ TORCH_API std::vector<Node*> findAllNodes(
   return ret;
 }
 
-TORCH_API std::vector<Node*> findAllNodes(
+std::vector<Node*> findAllNodes(
     Block* block,
     Symbol kind,
     bool recurse = true) {
@@ -32,7 +32,7 @@ TORCH_API std::vector<Node*> findAllNodes(
   return findAllNodes(blocks, kind, recurse);
 }
 
-TORCH_API Node* findNode(
+Node* findNode(
     c10::ArrayRef<torch::jit::Block*> blocks,
     Symbol kind,
     bool recurse = true) {
@@ -52,19 +52,16 @@ TORCH_API Node* findNode(
   return nullptr;
 }
 
-TORCH_API Node* findNode(Block* block, Symbol kind, bool recurse = true) {
+Node* findNode(Block* block, Symbol kind, bool recurse = true) {
   std::vector<Block*> blocks = {block};
   return findNode(blocks, kind, recurse);
 }
 
-TORCH_API Node* findNode(Graph& g, Symbol kind, bool recurse = true) {
+Node* findNode(Graph& g, Symbol kind, bool recurse = true) {
   return findNode(g.block(), kind, recurse);
 }
 
-TORCH_API std::vector<Node*> findAllNodes(
-    Graph& g,
-    Symbol kind,
-    bool recurse = true) {
+std::vector<Node*> findAllNodes(Graph& g, Symbol kind, bool recurse = true) {
   return findAllNodes(g.block(), kind, recurse);
 }
 
