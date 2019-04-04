@@ -35,9 +35,9 @@ class no_version_update(object):
         1
     """
     def __enter__(self):
-        self.prev = torch.is_version_update_enabled()
-        torch._C.set_version_update_enabled(False)
+        self.prev = torch._C._is_version_update_enabled()
+        torch._C._set_version_update_enabled(False)
 
     def __exit__(self, *args):
-        torch._C.set_version_update_enabled(self.prev)
+        torch._C._set_version_update_enabled(self.prev)
         return False
