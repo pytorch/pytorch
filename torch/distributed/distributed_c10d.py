@@ -1167,6 +1167,7 @@ def scatter(tensor,
     else:
         work.wait()
 
+
 def reduce_scatter_multigpu(output_tensor_list,
                             input_tensor_lists,
                             group=group.WORLD,
