@@ -175,7 +175,7 @@ struct SymbolicVariable {
         *this, rhs);
   }
   SymbolicVariable size_if_not_equal(const SymbolicVariable other) const {
-    return create(aten::_size_if_not_equal, {*this, other})[0].toType(OptionalType::create(ListType::ofInts()));
+    return create(aten::_size_if_not_equal, {this->size(), other.size()})[0].toType(OptionalType::create(ListType::ofInts()));
   }
   SymbolicVariable narrow(int dim, int64_t start, int64_t length) const {
     return create(

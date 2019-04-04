@@ -595,12 +595,12 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "aten::_size_if_not_equal(Tensor self, Tensor other) -> int[]?",
+         "aten::_size_if_not_equal(int[] self_size, int[] other_size) -> int[]?",
          [](Stack& stack) {
-           at::Tensor self, other;
-           pop(stack, self, other);
-	   const auto s = self.sizes();
-	   if (s == other.sizes()) {
+	   IValue self_size, other_size;
+	   pop(stack, self_size, other_size);
+	   const auto s = self_size.toIntList()->elements();
+	   if (s == self_size.toIntList()->elements()) {
 	     push(stack, IValue());
 	   } else {
 	     push(stack, s);

@@ -471,8 +471,8 @@ const std::vector<std::string> functions = {
 
         def mul(self, other):
             result = self * other
-            self_size = torch._size_if_not_equal(self, result)
-            other_size = torch._size_if_not_equal(other, result)
+            self_size = torch._size_if_not_equal(self.size(), result.size())
+            other_size = torch._size_if_not_equal(other.size(), result.size())
 
             def backward(grad_output):
                 # self & other are used in backward. No need to pass in their size
