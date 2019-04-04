@@ -35,7 +35,6 @@ struct PyTensorType {
   THPDtype* dtype;
   THPLayout* layout;
   bool is_cuda;
-  bool is_quantized;
   char name[64];
   int backend;
   int scalar_type;
@@ -118,14 +117,6 @@ PyObject *Tensor_is_sparse(PyTensorType *self) {
   }
 }
 
-PyObject *Tensor_is_quantized(PyTensorType* self) {
-  if (self->is_quantized) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-}
-
 static struct PyMethodDef metaclass_methods[] = {
   {"__instancecheck__", (PyCFunction)Tensor_instancecheck, METH_O, nullptr},
   {nullptr}
@@ -138,7 +129,6 @@ static struct PyGetSetDef metaclass_properties[] = {
   {"layout",       (getter)Tensor_layout, nullptr, nullptr, nullptr},
   {"is_cuda",      (getter)Tensor_is_cuda, nullptr, nullptr, nullptr},
   {"is_sparse",    (getter)Tensor_is_sparse, nullptr, nullptr, nullptr},
-  {"is_quantized",    (getter)Tensor_is_quantized, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
@@ -215,7 +205,6 @@ static void set_type(PyTensorType& type_obj, Backend backend, ScalarType scalarT
   type_obj.layout = torch::getLayout(backend);
   type_obj.dtype = torch::getDtype(scalarType);
   type_obj.is_cuda = (backend == at::Backend::CUDA || backend == at::Backend::SparseCUDA);
-  type_obj.is_quantized = (backend == at::Backend::AffineCPU || backend == at::Backend::PerChannelAffineCPU);
 }
 
 static void set_name(PyTensorType& type_obj, const std::string& name) {

@@ -12,17 +12,17 @@ QTensor quantize_linear_cpu(const RealTensor& self, double scale, int64_t zero_p
   return quantizer->quantize(self);
 }
 
-RealTensor dequantize_(const QTensor& self) {
+RealTensor dequantize_quant(const QTensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
-Scalar q_scale_(const QTensor& self) {
+Scalar q_scale_quant(const QTensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   AT_ASSERT(quantizer->qscheme() == kPerTensorAffine);
   return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer.get())->scale());
 }
 
-Scalar q_zero_point_(const QTensor& self) {
+Scalar q_zero_point_quant(const QTensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   AT_ASSERT(quantizer->qscheme() == kPerTensorAffine);
   return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer.get())->zero_point());

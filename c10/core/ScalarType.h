@@ -61,18 +61,6 @@ namespace c10 {
   _(std::complex<double>, ComplexDouble, z)                                 \
   _(bool, Bool, i)
 
-#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_QINT_FLOAT(_) \
-  _(uint8_t, Byte, i)                                                         \
-  _(int8_t, Char, i)                                                          \
-  _(int16_t, Short, i)                                                        \
-  _(int, Int, i)                                                              \
-  _(int64_t, Long, i)                                                         \
-  _(at::Half, Half, d)                                                        \
-  _(double, Double, d)                                                        \
-  _(std::complex<float>, ComplexFloat, z)                                     \
-  _(std::complex<double>, ComplexDouble, z)                                   \
-  _(bool, Bool, i)
-
 #define AT_FORALL_SCALAR_TYPES(_) \
   _(uint8_t, Byte, i)             \
   _(int8_t, Char, i)              \

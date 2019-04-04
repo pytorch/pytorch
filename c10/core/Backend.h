@@ -174,8 +174,9 @@ static inline Backend backendToCPU(Backend b) {
     case Backend::XLA:
       return Backend::CPU;
     case Backend::AffineCPU:
+      return Backend::AffineCPU;
     case Backend::PerChannelAffineCPU:
-      return Backend::CPU;
+      return Backend::PerChannelAffineCPU;
     case Backend::Undefined:
       return Backend::Undefined;
     default:
@@ -195,9 +196,6 @@ static inline Backend backendToCUDA(Backend b) {
     case Backend::SparseCUDA:
     case Backend::SparseHIP:
       return Backend::SparseCUDA;
-    case Backend::AffineCPU:
-    case Backend::PerChannelAffineCPU:
-      return Backend::CUDA;
     case Backend::Undefined:
       return Backend::Undefined;
     default:
@@ -217,9 +215,6 @@ static inline Backend backendToHIP(Backend b) {
     case Backend::SparseCUDA:
     case Backend::SparseHIP:
       return Backend::SparseHIP;
-    case Backend::AffineCPU:
-    case Backend::PerChannelAffineCPU:
-      return Backend::HIP;
     case Backend::Undefined:
       return Backend::Undefined;
     default:
