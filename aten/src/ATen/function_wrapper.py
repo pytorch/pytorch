@@ -494,6 +494,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'cpu_half': bool,
     'deprecated': bool,
     'cpu_bool': bool,
+    'cuda_bool': bool,
     # See Note [field_name versus name]
     'field_name': str,
     'formals_list': List[AtFormal],
@@ -1563,6 +1564,9 @@ def create_derived(backend_type_env, declarations):
         # type: (FunctionOption) -> None
         pair = (backend_type_env['Backend'],
                 backend_type_env['ScalarName'])
+        # Skip generating TH code for QInt8
+        if pair[1] == 'QInt8':
+            return
         if pair in option['backend_type_pairs']:
             env = nested_dict(option, backend_type_env)
             body = emit_body(env, option)  # type: ignore

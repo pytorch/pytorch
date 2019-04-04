@@ -566,6 +566,10 @@ class CAFFE2_API Tensor {
   std::vector<Tensor> unbind(int64_t dim=0) const;
   Tensor to_sparse(int64_t sparse_dim) const;
   Tensor to_sparse() const;
+  Tensor quantize_linear(double scale, int64_t zero_point) const;
+  Tensor dequantize() const;
+  Scalar q_scale() const;
+  Scalar q_zero_point() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
@@ -663,7 +667,7 @@ class CAFFE2_API Tensor {
   Tensor & exponential_(double lambd=1, Generator * generator=nullptr);
   Tensor & geometric_(double p, Generator * generator=nullptr);
   Tensor diag(int64_t diagonal=0) const;
-  Tensor cross(const Tensor & other, int64_t dim=-1) const;
+  Tensor cross(const Tensor & other, c10::optional<int64_t> dim=c10::nullopt) const;
   Tensor triu(int64_t diagonal=0) const;
   Tensor tril(int64_t diagonal=0) const;
   Tensor trace() const;
@@ -700,8 +704,6 @@ class CAFFE2_API Tensor {
   std::tuple<Tensor,Tensor> geqrf() const;
   Tensor orgqr(const Tensor & input2) const;
   Tensor ormqr(const Tensor & input2, const Tensor & input3, bool left=true, bool transpose=false) const;
-  std::tuple<Tensor,Tensor> btrifact(bool pivot=true) const;
-  std::tuple<Tensor,Tensor,Tensor> btrifact_with_info(bool pivot=true) const;
   Tensor btrisolve(const Tensor & LU_data, const Tensor & LU_pivots) const;
   Tensor multinomial(int64_t num_samples, bool replacement=false, Generator * generator=nullptr) const;
   Tensor lgamma() const;

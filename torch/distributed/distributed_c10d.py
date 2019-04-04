@@ -3,7 +3,10 @@ import warnings
 from torch._six import string_classes
 from datetime import timedelta
 
-from .rendezvous import rendezvous, register_rendezvous_handler
+# This module is wildcard imported from torch.distributed.
+# TODO: specify __all__
+
+from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
 from . import BroadcastOptions, AllreduceOptions, ReduceOptions, \
     ScatterOptions, GatherOptions
 from . import ReduceOp
@@ -297,7 +300,10 @@ def init_process_group(backend,
             build-time configurations, valid values include ``mpi``, ``gloo``,
             and ``nccl``. This field should be given as a lowercase string
             (e.g., ``"gloo"``), which can also be accessed via
-            :class:`Backend` attributes (e.g., ``Backend.GLOO``).
+            :class:`Backend` attributes (e.g., ``Backend.GLOO``). If using
+            multiple processes per machine with ``nccl`` backend, each process
+            must have exclusive access to every GPU it uses, as sharing GPUs
+            between processes can result in deadlocks.
         init_method (str, optional): URL specifying how to initialize the
                                      process group.
         world_size (int, optional): Number of processes participating in

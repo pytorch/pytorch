@@ -1,9 +1,6 @@
-import numbers
-
 import torch
-from torch._C import TensorType, ListType, OptionalType
+from torch._C import ListType, OptionalType
 from torch.nn.modules.utils import _single, _pair, _triple
-from torch.nn.utils.rnn import PackedSequence
 import warnings
 
 import torch.onnx
@@ -11,9 +8,7 @@ import torch.onnx
 # ONNX symbolics
 import torch.onnx.utils
 
-from collections import Iterable
 from functools import partial, wraps
-import itertools
 
 import numpy
 import math
@@ -81,6 +76,8 @@ def _parse_arg(value, desc):
         return int(tval)
     elif desc == 'f':
         return float(tval)
+    elif desc == 'b':
+        return bool(tval)
     elif desc == 't':
         return tval
     elif desc == 'is':
@@ -475,7 +472,7 @@ def view(g, self, size):
     if _is_value(size):
         shape = size
     else:
-        if self.isTensor():
+        if self.isCompleteTensor():
             self_sizes = self.type().sizes()
             if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
                 return g.op("Flatten", self, axis_i=1)
@@ -546,6 +543,14 @@ def prelu(g, self, weight):
 
 def relu(g, input):
     return g.op("Relu", input)
+
+
+def ceil(g, input):
+    return g.op("Ceil", input)
+
+
+def floor(g, input):
+    return g.op("Floor", input)
 
 
 @parse_args('v', 't', 't')
@@ -922,7 +927,7 @@ def le(g, input, other):
 
 
 def where(g, condition, self, other):
-    return g.op("ATen", condition, self, other, operator_s="where")
+    return g.op("Where", condition, self, other)
 
 
 @parse_args('v', 'i', 'i')
@@ -1061,10 +1066,10 @@ def index_put(g, self, indices_list_value, values, accumulate):
 
 
 def type_as(g, self, other):
-    if self.isTensor() and other.isTensor() and self.type().scalarType() == other.type().scalarType():
+    if self.isCompleteTensor() and other.isCompleteTensor() and self.type().scalarType() == other.type().scalarType():
         return self
 
-    if other.isTensor():
+    if other.isCompleteTensor():
         other_type_name = other.type().scalarType()
         return g.op("Cast", self, to_i=cast_pytorch_to_onnx[other_type_name])
     else:
@@ -1205,11 +1210,10 @@ def conv_tbc(g, input, weight, bias, pad):
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
 
 
-@parse_args('v', 'i', 'i', 'i')
-def _unique(g, input, sorted, return_inverse, return_counts):
+@parse_args('v', 'i', 'i')
+def _unique(g, input, sorted, return_inverse):
     return g.op("ATen", input, operator_s="_unique", sorted_i=sorted,
-                return_inverse_i=return_inverse, return_counts_i=return_counts,
-                outputs=3)
+                return_inverse_i=return_inverse, outputs=2)
 
 
 # Metaprogram symbolics for each ATen native specialized cast operator.
@@ -1277,49 +1281,50 @@ scalar_type_to_onnx = [
 ]
 
 
-@parse_args('v', 'i', 'v', 'v')
-def zeros(g, sizes, dtype, layout, device):
+@parse_args('v', 'i', 'v', 'v', 'b')
+def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device and layout in ONNX, so we ignore it
     return g.op("ConstantOfShape", sizes,
-                value_t=torch.tensor(0, dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
 
 
-@parse_args('v', 'i', 'v', 'v')
-def zeros_like(g, input, dtype, layout, device):
+@parse_args('v', 'i', 'v', 'v', 'b')
+def zeros_like(g, input, dtype, layout, device, pin_memory=False):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor(0, dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
 
 
-@parse_args('v', 'i', 'v', 'v')
-def ones(g, sizes, dtype, layout, device):
+@parse_args('v', 'i', 'v', 'v', 'b')
+def ones(g, sizes, dtype, layout, device, pin_memory=False):
     return g.op("ConstantOfShape", sizes,
-                value_t=torch.tensor(1, dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
 
 
-@parse_args('v', 'i', 'v', 'v')
-def ones_like(g, input, dtype, layout, device):
+@parse_args('v', 'i', 'v', 'v', 'b')
+def ones_like(g, input, dtype, layout, device, pin_memory=False):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor(1, dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
 
 
-def full(g, sizes, value, dtype, layout, device):
+def full(g, sizes, value, dtype, layout, device, pin_memory=False):
     const_value = _maybe_get_const(value, 't')
     if _is_value(const_value):
-        tmp = zeros(sizes, dtype, layout, device)
+        tmp = zeros(sizes, dtype, layout, device, pin_memory=pin_memory)
         return add(tmp, value, g.op("Constant", value_t=torch.tensor(1)))
     else:
         dtype = _get_const(dtype, 'i', 'dtype')
+        pin_memory = _get_const(pin_memory, 'b', 'pin_memory')
         return g.op("ConstantOfShape", sizes,
-                    value_t=torch.tensor(const_value, dtype=scalar_type_to_pytorch_type[dtype]))
+                    value_t=torch.tensor([const_value], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
 
 
-@parse_args('v', 'f', 'i', 'v', 'v')
-def full_like(g, input, fill_value, dtype, layout, device):
+@parse_args('v', 'f', 'i', 'v', 'v', 'b')
+def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor(fill_value, dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([fill_value], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
 
 
 @parse_args('v', 'v', 'v', 'v', 'i')
@@ -1382,6 +1387,11 @@ def to(g, self, *args):
         dtype = _get_const(args[0], 'i', 'dtype')
         # Layout and device are ignored
         return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
+    elif len(args) == 6:
+        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool) -> Tensor
+        dtype = _get_const(args[0], 'i', 'dtype')
+        # Layout and device are ignored
+        return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
     else:
         raise NotImplementedError("Unknown aten::to signature")
 
@@ -1391,7 +1401,7 @@ def repeat(g, self, repeats):
         repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
     const_repeats = _maybe_get_const(repeats, 'is')
 
-    if self.isTensor() and not _is_value(const_repeats):
+    if self.isCompleteTensor() and not _is_value(const_repeats):
         sizes = self.type().sizes()
         diff_dims = len(const_repeats) - len(sizes)
         if diff_dims > 0:

@@ -141,6 +141,7 @@ view of a storage and defines numeric operations on it.
 
    .. autoattribute:: is_cuda
    .. autoattribute:: device
+   .. autoattribute:: grad
 
    .. automethod:: abs
    .. automethod:: abs_
@@ -164,16 +165,19 @@ view of a storage and defines numeric operations on it.
    .. automethod:: apply_
    .. automethod:: argmax
    .. automethod:: argmin
+   .. automethod:: argsort
    .. automethod:: asin
    .. automethod:: asin_
    .. automethod:: atan
    .. automethod:: atan2
    .. automethod:: atan2_
    .. automethod:: atan_
+   .. automethod:: backward
    .. automethod:: baddbmm
    .. automethod:: baddbmm_
    .. automethod:: bernoulli
    .. automethod:: bernoulli_
+   .. automethod:: bincount
    .. automethod:: bmm
    .. automethod:: byte
    .. automethod:: btrifact
@@ -201,9 +205,17 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumprod
    .. automethod:: cumsum
    .. automethod:: data_ptr
+   .. automethod:: dequantize
    .. automethod:: det
+   .. automethod:: dense_dim
+   .. automethod:: detach
+   .. automethod:: detach_
    .. automethod:: diag
    .. automethod:: diag_embed
+   .. automethod:: diagflat
+   .. automethod:: diagonal
+   .. automethod:: digamma
+   .. automethod:: digamma_
    .. automethod:: dim
    .. automethod:: dist
    .. automethod:: div
@@ -228,6 +240,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: expand
    .. automethod:: expand_as
    .. automethod:: exponential_
+   .. automethod:: fft
    .. automethod:: fill_
    .. automethod:: flatten
    .. automethod:: flip
@@ -250,7 +263,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: gt
    .. automethod:: gt_
    .. automethod:: half
+   .. automethod:: hardshrink
    .. automethod:: histc
+   .. automethod:: ifft
    .. automethod:: index_add_
    .. automethod:: index_add
    .. automethod:: index_copy_
@@ -260,13 +275,18 @@ view of a storage and defines numeric operations on it.
    .. automethod:: index_put_
    .. automethod:: index_put
    .. automethod:: index_select
+   .. automethod:: indices
    .. automethod:: int
    .. automethod:: inverse
+   .. automethod:: irfft
    .. automethod:: is_contiguous
    .. automethod:: is_floating_point
+   .. automethod:: is_leaf
    .. automethod:: is_pinned
    .. automethod:: is_set_to
+   .. automethod:: is_shared
    .. automethod:: is_signed
+   .. automethod:: is_sparse
    .. automethod:: item
    .. automethod:: kthvalue
    .. automethod:: le
@@ -287,6 +307,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: long
    .. automethod:: lt
    .. automethod:: lt_
+   .. automethod:: lu
    .. automethod:: map_
    .. automethod:: masked_scatter_
    .. automethod:: masked_scatter
@@ -308,6 +329,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: mvlgamma
    .. automethod:: mvlgamma_
    .. automethod:: narrow
+   .. automethod:: narrow_copy
    .. automethod:: ndimension
    .. automethod:: ne
    .. automethod:: ne_
@@ -333,26 +355,34 @@ view of a storage and defines numeric operations on it.
    .. automethod:: pstrf
    .. automethod:: put_
    .. automethod:: qr
+   .. automethod:: quantize_linear
+   .. automethod:: q_scale
+   .. automethod:: q_zero_point
    .. automethod:: random_
    .. automethod:: reciprocal
    .. automethod:: reciprocal_
+   .. automethod:: register_hook
    .. automethod:: remainder
    .. automethod:: remainder_
    .. automethod:: renorm
    .. automethod:: renorm_
    .. automethod:: repeat
+   .. automethod:: requires_grad
    .. automethod:: requires_grad_
    .. automethod:: reshape
    .. automethod:: reshape_as
    .. automethod:: resize_
    .. automethod:: resize_as_
+   .. automethod:: retain_grad
+   .. automethod:: rfft
    .. automethod:: roll
+   .. automethod:: rot90
    .. automethod:: round
    .. automethod:: round_
    .. automethod:: rsqrt
    .. automethod:: rsqrt_
-   .. automethod:: scatter_
    .. automethod:: scatter
+   .. automethod:: scatter_
    .. automethod:: scatter_add_
    .. automethod:: scatter_add
    .. automethod:: select
@@ -373,11 +403,13 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sort
    .. automethod:: split
    .. automethod:: sparse_mask
+   .. automethod:: sparse_dim
    .. automethod:: sqrt
    .. automethod:: sqrt_
    .. automethod:: squeeze
    .. automethod:: squeeze_
    .. automethod:: std
+   .. automethod:: stft
    .. automethod:: storage
    .. automethod:: storage_offset
    .. automethod:: storage_type
@@ -385,6 +417,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sub
    .. automethod:: sub_
    .. automethod:: sum
+   .. automethod:: sum_to_size
    .. automethod:: svd
    .. automethod:: symeig
    .. automethod:: t
@@ -411,14 +444,17 @@ view of a storage and defines numeric operations on it.
    .. automethod:: trunc_
    .. automethod:: type
    .. automethod:: type_as
+   .. automethod:: unbind
    .. automethod:: unfold
    .. automethod:: uniform_
    .. automethod:: unique
    .. automethod:: unsqueeze
    .. automethod:: unsqueeze_
+   .. automethod:: values
    .. automethod:: var
    .. automethod:: view
    .. automethod:: view_as
+   .. automethod:: where
    .. automethod:: zero_
 
 .. class:: ByteTensor()
