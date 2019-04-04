@@ -100,7 +100,7 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Sc
     self_scaled = self;
     scale_v = grad / norm;
   } else if (std::isinf(p)) {
-    self_scaled = self.sign() * (self.abs() == norm).toType(self.type());
+    self_scaled = self.sign() * (self.abs() == norm).type_as(self);
     scale_v = grad.clone();
   } else if (p < 2.0) {
     self_scaled = self.sign() * self.abs().pow(p - 1);
@@ -711,7 +711,7 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
 }
 
 Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &grads,
-                                 IntArrayRef split_sizes, int64_t dim, IntArrayRef sizes, const Type &type) {
+                                 IntArrayRef split_sizes, int64_t dim, IntArrayRef sizes, const at::TensorOptions &options) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
 
   // it's possible some of the grads are not defined (represents tensors of all 0s).
@@ -724,7 +724,7 @@ Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &g
       auto length = split_sizes[j];
       auto grad_size = sizes.vec();
       grad_size[dim] = length;
-      grads_all_defined[j] = at::zeros(grad_size, type);
+      grads_all_defined[j] = at::zeros(grad_size, options);
     }
   }
 
@@ -733,13 +733,13 @@ Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &g
 }
 
 Tensor split_backward(const std::vector<torch::autograd::Variable> &grads,
-                      int64_t split_size, int64_t dim, IntArrayRef sizes, const Type &type) {
+                      int64_t split_size, int64_t dim, IntArrayRef sizes, const at::TensorOptions &options) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
   int64_t dim_size = sizes[dim];
   int64_t num_splits = grads.size();
   std::vector<int64_t> split_sizes(num_splits, split_size);
   split_sizes[num_splits - 1] = split_size - (split_size * num_splits - dim_size);
-  return split_with_sizes_backward(grads, split_sizes, dim, sizes, type);
+  return split_with_sizes_backward(grads, split_sizes, dim, sizes, options);
 }
 
 Tensor max_pool_double_backward(const Tensor & grad, const Tensor & indices, int dim) {
@@ -857,7 +857,7 @@ Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & i
 
 Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
   auto d = (input - target).abs();
-  auto grad_input = grad * (d < 1).toType(grad.type());
+  auto grad_input = grad * (d < 1).type_as(grad);
   if (reduction == Reduction::Mean) {
     grad_input /= input.numel();
   }
@@ -930,7 +930,7 @@ Tensor soft_margin_loss_double_backward_grad_output(const Tensor & grad, const T
 
 Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scalar beta, Scalar threshold) {
   auto x = (input * beta);
-  return sigmoid_backward(grad, x.sigmoid()) * (x < threshold).toType(grad.type()) * beta;
+  return sigmoid_backward(grad, x.sigmoid()) * (x < threshold).type_as(grad) * beta;
 }
 
 
