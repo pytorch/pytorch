@@ -18,7 +18,7 @@ void check_all_parameters(
     AT_ASSERT(predicate(parameter.slot()->toTensor()));
   }
   for (const auto& child : module.get_modules()) {
-    check_all_parameters(module, predicate);
+    check_all_parameters(*child.module, predicate);
   }
 }
 } // namespace helpers

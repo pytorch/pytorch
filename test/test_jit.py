@@ -9956,7 +9956,7 @@ a")
             def __init__(self):
                 super(OtherStrong, self).__init__()
                 self.weak = weak
-                self.weak2 = Weak()
+                self.weak2 = weak
 
             @torch.jit.script_method
             def forward(self, x):
@@ -9973,7 +9973,7 @@ a")
 
         other_strong_mod = OtherStrong()
 
-        self.assertIsNot(other_strong_mod.weak, other_strong_mod.weak2)
+        self.assertIs(other_strong_mod.weak, other_strong_mod.weak2)
 
         with self.assertRaisesRegex(RuntimeError, "Attempted to inline a Module with param"):
             strong_mod = Strong()
