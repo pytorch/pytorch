@@ -8352,6 +8352,42 @@ class _TestTorchMixin(object):
         t1.set_(t2)
         self.assertEqual(t1.storage()._cdata, t2.storage()._cdata)
 
+    def test_tensor_set_errors(self):
+        f_cpu = torch.randn((2, 3), dtype=torch.float32)
+        d_cpu = torch.randn((2, 3), dtype=torch.float64)
+
+        # change dtype
+        self.assertRaises(RuntimeError, lambda: f_cpu.set_(d_cpu.storage()))
+        self.assertRaises(RuntimeError,
+                          lambda: f_cpu.set_(d_cpu.storage(), 0, d_cpu.size(), d_cpu.stride()))
+        self.assertRaises(RuntimeError, lambda: f_cpu.set_(d_cpu))
+
+        # change device
+        if torch.cuda.is_available():
+            f_cuda = torch.randn((2, 3), dtype=torch.float32, device='cuda')
+
+            # cpu -> cuda
+            self.assertRaises(RuntimeError, lambda: f_cpu.set_(f_cuda.storage()))
+            self.assertRaises(RuntimeError,
+                              lambda: f_cpu.set_(f_cuda.storage(), 0, f_cuda.size(), f_cuda.stride()))
+            self.assertRaises(RuntimeError, lambda: f_cpu.set_(f_cuda))
+
+            # cuda -> cpu
+            self.assertRaises(RuntimeError, lambda: f_cuda.set_(f_cpu.storage()))
+            self.assertRaises(RuntimeError,
+                              lambda: f_cuda.set_(f_cpu.storage(), 0, f_cpu.size(), f_cpu.stride()))
+            self.assertRaises(RuntimeError, lambda: f_cuda.set_(f_cpu))
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, 'less than 2 GPUs detected')
+    def test_tensor_set_errors_multigpu(self):
+        f_cuda0 = torch.randn((2, 3), dtype=torch.float32, device='cuda:0')
+        f_cuda1 = torch.randn((2, 3), dtype=torch.float32, device='cuda:1')
+
+        self.assertRaises(RuntimeError, lambda: f_cuda0.set_(f_cuda1.storage()))
+        self.assertRaises(RuntimeError,
+                          lambda: f_cuda0.set_(f_cuda1.storage(), 0, f_cuda1.size(), f_cuda1.stride()))
+        self.assertRaises(RuntimeError, lambda: f_cuda0.set_(f_cuda1))
+
     def test_equal(self):
         # Contiguous, 1D
         t1 = torch.Tensor((3, 4, 9, 10))
