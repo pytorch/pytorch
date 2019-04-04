@@ -339,8 +339,3 @@ BLAS and LAPACK Operations
 Utilities
 ----------------------------------
 .. autofunction:: compiled_with_cxx11_abi
-
-Configuration
-----------------------------------
-.. automodule:: torch.__config__
-.. autofunction:: show
