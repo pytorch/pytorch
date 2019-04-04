@@ -404,7 +404,7 @@ const std::vector<std::string> functions = {
 
         def contiguous(self):
             def backward(grad_output):
-                return None
+                return grad_output
 
             return self.contiguous(), backward
 
@@ -929,11 +929,10 @@ bool isHelperFunction(const std::string& method_name) {
 }
 
 void loadModule(const std::shared_ptr<script::Module>& module) {
-  for (const auto& method_ : module->get_methods()) {
-    if (isHelperFunction(method_.key()))
+  for (const auto& method : module->get_methods()) {
+    if (isHelperFunction(method->name()))
       continue;
 
-    const auto& method = method_.value();
     GradientPair pair;
     pair.forward = method->graph();
 
@@ -1008,6 +1007,8 @@ c10::optional<GradientPair> gradientInfoForSchema(
     //    value since scalar/int aren't differentiable either way.
     //
     c10::ReplaceAll(schema_str, "Scalar", "float");
+    // For debugging AD change:
+    // std::cout << "Looking for " << schema_str << std::endl;
 
     auto sym_script_it = schema_to_graphs.find(schema_str);
 
