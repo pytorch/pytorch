@@ -217,7 +217,7 @@ THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, at::IntArrayR
   // on the current device [via THCTensor_(new)] and then swapping out the storage later can change
   // the device out from under the tensor.  Having the device be consistent through a Tensor's lifetime
   // is an invariant we wish to keep to support caching, simplicity, etc.
-  auto storage = THStorage_wrap(tensor->storage().unsafeGetStorageImpl());
+  auto storage = tensor->storage();
   THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     std::move(storage),
     at::CUDATensorId(),
