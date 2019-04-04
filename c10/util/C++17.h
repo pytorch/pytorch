@@ -257,23 +257,21 @@ template<class T> inline std::string to_string(T value) {
     return detail::to_string_<T>::call(value);
 }
 
-inline long long stoll(const std::string& str, std::size_t* pos = nullptr, int base = 10) {
-  char *str_end = nullptr;
-  const char* str_beg = str.c_str();
-  long long result = std::strtoll(str_beg, &str_end, base);
-  if (nullptr != pos) {
-    *pos = str_end - str_beg;
-  }
+inline long long stoll(const std::string& str) {
+  // std::stoll doesn't exist in our Android environment, we need to implement
+  // it ourselves.
+  std::istringstream s(str);
+  long long result;
+  s >> result;
   return result;
 }
 
-inline double stod(const std::string& str, std::size_t* pos = nullptr) {
-  char *str_end = nullptr;
-  const char* str_beg = str.c_str();
-  double result = std::strtof(str_beg, &str_end);
-  if (nullptr != pos) {
-    *pos = str_end - str_beg;
-  }
+inline double stod(const std::string& str) {
+  // std::stod doesn't exist in our Android environment, we need to implement
+  // it ourselves.
+  std::istringstream s(str);
+  double result;
+  s >> result;
   return result;
 }
 
