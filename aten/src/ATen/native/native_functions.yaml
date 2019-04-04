@@ -989,6 +989,12 @@
 - func: fill_(Tensor(a!) self, Scalar value) -> Tensor(a!)
   matches_jit_signature: True
   variants: function, method
+  cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
+  dispatch:
+    CPU: _fill__cpu
+    CUDA: _fill__cuda
 
 - func: fill_(Tensor(a!) self, Tensor value) -> Tensor(a!)
   matches_jit_signature: True
