@@ -124,6 +124,36 @@ def scalar(name, scalar, collections=None):
     return Summary(value=[Summary.Value(tag=name, simple_value=scalar)])
 
 
+def histogram_raw(name, min, max, num, sum, sum_squares, bucket_limits, bucket_counts):
+    # pylint: disable=line-too-long
+    """Outputs a `Summary` protocol buffer with a histogram.
+    The generated
+    [`Summary`](https://www.tensorflow.org/code/tensorflow/core/framework/summary.proto)
+    has one summary value containing a histogram for `values`.
+    Args:
+      name: A name for the generated node. Will also serve as a series name in
+        TensorBoard.
+      min: A float or int min value
+      max: A float or int max value
+      num: Int number of values
+      sum: Float or int sum of all values
+      sum_squares: Float or int sum of squares for all values
+      bucket_limits: A numeric `Tensor` with upper value per bucket
+      bucket_counts: A numeric `Tensor` with number of values per bucket
+    Returns:
+      A scalar `Tensor` of type `string`. The serialized `Summary` protocol
+      buffer.
+    """
+    hist = HistogramProto(min=min,
+                          max=max,
+                          num=num,
+                          sum=sum,
+                          sum_squares=sum_squares,
+                          bucket_limit=bucket_limits,
+                          bucket=bucket_counts)
+    return Summary(value=[Summary.Value(tag=name, histo=hist)])
+
+
 def histogram(name, values, bins, max_bins=None):
     # pylint: disable=line-too-long
     """Outputs a `Summary` protocol buffer with a histogram.
@@ -390,8 +420,8 @@ def custom_scalars(layout):
 
 def text(tag, text):
     import json
-    PluginData = SummaryMetadata.PluginData(
-        plugin_name='text', content=TextPluginData(version=0).SerializeToString())
+    PluginData = [SummaryMetadata.PluginData(
+        plugin_name='text', content=TextPluginData(version=0).SerializeToString())]
     smd = SummaryMetadata(plugin_data=PluginData)
     tensor = TensorProto(dtype='DT_STRING',
                          string_val=[text.encode(encoding='utf_8')],
@@ -400,13 +430,13 @@ def text(tag, text):
 
 
 def pr_curve_raw(tag, tp, fp, tn, fn, precision, recall, num_thresholds=127, weights=None):
-    if num_thresholds > 127:  # wierd, value > 127 breaks protobuf
+    if num_thresholds > 127:  # weird, value > 127 breaks protobuf
         num_thresholds = 127
     data = np.stack((tp, fp, tn, fn, precision, recall))
     pr_curve_plugin_data = PrCurvePluginData(
         version=0, num_thresholds=num_thresholds).SerializeToString()
-    PluginData = SummaryMetadata.PluginData(
-        plugin_name='pr_curves', content=pr_curve_plugin_data)
+    PluginData = [SummaryMetadata.PluginData(
+        plugin_name='pr_curves', content=pr_curve_plugin_data)]
     smd = SummaryMetadata(plugin_data=PluginData)
     tensor = TensorProto(dtype='DT_FLOAT',
                          float_val=data.reshape(-1).tolist(),
@@ -422,8 +452,8 @@ def pr_curve(tag, labels, predictions, num_thresholds=127, weights=None):
                          num_thresholds=num_thresholds, weights=weights)
     pr_curve_plugin_data = PrCurvePluginData(
         version=0, num_thresholds=num_thresholds).SerializeToString()
-    PluginData = SummaryMetadata.PluginData(
-        plugin_name='pr_curves', content=pr_curve_plugin_data)
+    PluginData = [SummaryMetadata.PluginData(
+        plugin_name='pr_curves', content=pr_curve_plugin_data)]
     smd = SummaryMetadata(plugin_data=PluginData)
     tensor = TensorProto(dtype='DT_FLOAT',
                          float_val=data.reshape(-1).tolist(),

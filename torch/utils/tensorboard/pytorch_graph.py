@@ -49,10 +49,10 @@ class Node_py(Node_base):
                 io_tensorSize_list = []
                 for n in list_of_node:
                     io_uniqueName_list.append(n.uniqueName())
-                    if n.type().kind() in ['DynamicType', 'ListType']:  # segfault
-                        io_tensorSize_list.append(None)
-                    else:
+                    if n.type().kind() == 'CompleteTensorType':
                         io_tensorSize_list.append(n.type().sizes())
+                    else:
+                        io_tensorSize_list.append(None)
 
                 setattr(self, m, io_uniqueName_list)
                 setattr(self, m + 'TensorSize', io_tensorSize_list)
@@ -148,11 +148,12 @@ class Graph_py(object):
                                     attributes=v.attributes))
 
             if v.tensorSize and len(v.tensorSize) > 0:  # assume data is float32, only parameter is counted
-                node_stats.append(NodeExecStats(node_name=v.uniqueName,
-                                                all_start_micros=int(time.time() * 1e7),
-                                                all_end_rel_micros=42,
-                                                memory=[AllocatorMemoryUsed(allocator_name="cpu",
-                                                                            total_bytes=np.prod(v.tensorSize) * 4)]))
+                node_stats.append(
+                    NodeExecStats(node_name=v.uniqueName,
+                                  all_start_micros=int(time.time() * 1e7),
+                                  all_end_rel_micros=42,
+                                  memory=[AllocatorMemoryUsed(allocator_name="cpu",
+                                                              total_bytes=int(np.prod(v.tensorSize)) * 4)]))
 
         return nodes, node_stats
 
@@ -184,8 +185,53 @@ def parse(graph, args=None, omit_useless_nodes=True):
     return nodes_py.to_proto()
 
 
-def graph(model, args, verbose=False, omit_useless_nodes=True):
+def graph(model, args, verbose=False, **kwargs):
     import torch
+
+    def _optimize_trace(trace, operator_export_type):
+        trace.set_graph(_optimize_graph(trace.graph(), operator_export_type))
+
+    def _optimize_graph(graph, operator_export_type):
+        # torch._C._jit_pass_remove_inplace_ops(graph)
+        # we record now record some ops like ones/zeros
+        # into a trace where we previously recorded constants
+        # use constant prop to maintain our current level of onnx support
+        # without implementing symbolics for all of them
+        torch._C._jit_pass_constant_propagation(graph)
+        torch.onnx.utils._split_tensor_list_constants(graph, graph)
+        # run dce to eliminate dead parts of the graph that might have been
+        # left behind by things like symbolic_override
+        torch._C._jit_pass_dce(graph)
+        torch._C._jit_pass_lint(graph)
+
+        # torch._C._jit_pass_canonicalize_ops(graph)
+        torch._C._jit_pass_lint(graph)
+
+        torch._C._jit_pass_peephole(graph, True)
+        torch._C._jit_pass_lint(graph)
+
+        # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
+        torch._C._jit_pass_prepare_division_for_onnx(graph)
+        # onnx only supports tensors, so we turn all out number types into tensors
+        torch._C._jit_pass_erase_number_types(graph)
+        # onnx does not support tuples, so try to remove them
+        torch._C._jit_pass_lower_all_tuples(graph)
+        torch._C._jit_pass_peephole(graph, True)
+        torch._C._jit_pass_lint(graph)
+
+        if operator_export_type != torch.onnx.utils.OperatorExportTypes.RAW:
+            graph = torch._C._jit_pass_onnx(graph, operator_export_type)
+            torch._C._jit_pass_lint(graph)
+            # torch._C._jit_pass_onnx_peephole(graph)
+            torch._C._jit_pass_lint(graph)
+        torch._C._jit_pass_dce(graph)
+        torch._C._jit_pass_lint(graph)
+        torch._C._jit_pass_fixup_onnx_loops(graph)
+        torch._C._jit_pass_lint(graph)
+        graph = torch._C._jit_pass_canonicalize(graph)
+        torch._C._jit_pass_lint(graph)
+        return graph
+
     assert LooseVersion(torch.__version__) >= LooseVersion("1.0.0"),\
         'This version of tensorboardX requires pytorch>=1.0.0.'
 
@@ -194,7 +240,7 @@ def graph(model, args, verbose=False, omit_useless_nodes=True):
             trace, _ = torch.jit.get_trace_graph(model, args)
         except RuntimeError:
             print('Error occurs, No graph saved')
-            _ = model(args)  # don't catch, just print the error message
+            _ = model(*args)  # don't catch, just print the error message
             print("Checking if it's onnx problem...")
             try:
                 import tempfile
@@ -204,7 +250,15 @@ def graph(model, args, verbose=False, omit_useless_nodes=True):
                 print("Your model fails onnx too, please report to onnx team")
             return GraphDef(versions=VersionDef(producer=22))
 
-    torch.onnx._optimize_trace(trace, torch.onnx.utils.OperatorExportTypes.ONNX)
+    if 'operator_export_type' not in kwargs:
+        operator_export_type = torch.onnx.utils.OperatorExportTypes.ONNX
+    else:
+        operator_export_type = getattr(torch.onnx.utils.OperatorExportTypes, kwargs['operator_export_type'])
+
+    if 'omit_useless_nodes' not in kwargs:
+        omit_useless_nodes = True
+
+    _optimize_trace(trace, operator_export_type)
 
     graph = trace.graph()
     if verbose:

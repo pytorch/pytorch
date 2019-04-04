@@ -55,13 +55,13 @@ def _prepare_video(V):
     if not is_power2(V.shape[0]):
         len_addition = int(2**V.shape[0].bit_length() - V.shape[0])
         V = np.concatenate(
-            (V, np.zeros(shape=(len_addition, c, t, h, w))), axis=0)
+            (V, np.zeros(shape=(len_addition, t, c, h, w))), axis=0)
 
     n_rows = 2**((b.bit_length() - 1) // 2)
-    n_cols = b // n_rows
+    n_cols = V.shape[0] // n_rows
 
-    V = np.reshape(V, newshape=(n_rows, n_cols, c, t, h, w))
-    V = np.transpose(V, axes=(3, 0, 4, 1, 5, 2))
+    V = np.reshape(V, newshape=(n_rows, n_cols, t, c, h, w))
+    V = np.transpose(V, axes=(2, 0, 4, 1, 5, 3))
     V = np.reshape(V, newshape=(t, n_rows * h, n_cols * w, c))
 
     return V
@@ -97,8 +97,10 @@ def make_grid(I, ncols=8):
 
 def convert_to_HWC(tensor, input_format):  # tensor: numpy array
     import numpy as np
-    assert(len(set(input_format)) == len(input_format)), "You can not use the same dimension shordhand twice."
-    assert(len(tensor.shape) == len(input_format)), "size of input tensor and input format are different"
+    assert(len(set(input_format)) == len(input_format)), "You can not use the same dimension shordhand twice. \
+        input_format: {}".format(input_format)
+    assert(len(tensor.shape) == len(input_format)), "size of input tensor and input format are different. \
+        tensor shape: {}, input_format: {}".format(tensor.shape, input_format)
     input_format = input_format.upper()
 
     if len(input_format) == 4:
