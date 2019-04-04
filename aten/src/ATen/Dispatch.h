@@ -41,9 +41,9 @@ inline at::ScalarType scalar_type(at::ScalarType s) {
   return s;
 }
 
-C10_DEPRECATED_MESSAGE("passing at::Type to an AT_DISPATCH macro is deprecated, " \
+C10_DEPRECATED_MESSAGE("passing at::DeprecatedTypeProperties to an AT_DISPATCH macro is deprecated, " \
                        "pass an at::ScalarType instead")
-inline at::ScalarType scalar_type(const at::Type &t) {
+inline at::ScalarType scalar_type(const at::DeprecatedTypeProperties &t) {
   return t.scalarType();
 }
 

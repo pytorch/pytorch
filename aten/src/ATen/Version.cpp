@@ -37,7 +37,7 @@ std::string show_config() {
 
 #if defined(_MSC_VER)
   {
-    ss << "  - MSVC " << _MSC_FULL_VER << "\n"
+    ss << "  - MSVC " << _MSC_FULL_VER << "\n";
   }
 #endif
 

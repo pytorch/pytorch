@@ -304,7 +304,14 @@ bool SupportsLosslessConversion(const InputType& value) {
   return static_cast<InputType>(static_cast<TargetType>(value)) == value;
 }
 }
+bool operator==(const TensorProto& l, const TensorProto& r) {
+  return l.SerializeAsString() == r.SerializeAsString();
+}
 
+std::ostream& operator<<(std::ostream& output, const TensorProto& n) {
+  output << n.SerializeAsString();
+  return output;
+}
 bool operator==(const NetDef& l, const NetDef& r) {
   return l.SerializeAsString() == r.SerializeAsString();
 }
@@ -404,6 +411,7 @@ INSTANTIATE_GET_REPEATED_ARGUMENT(uint16_t, ints, true)
 INSTANTIATE_GET_REPEATED_ARGUMENT(size_t, ints, true)
 INSTANTIATE_GET_REPEATED_ARGUMENT(string, strings, false)
 INSTANTIATE_GET_REPEATED_ARGUMENT(NetDef, nets, false)
+INSTANTIATE_GET_REPEATED_ARGUMENT(TensorProto, tensors, false)
 #undef INSTANTIATE_GET_REPEATED_ARGUMENT
 
 #define CAFFE2_MAKE_SINGULAR_ARGUMENT(T, fieldname)                      \

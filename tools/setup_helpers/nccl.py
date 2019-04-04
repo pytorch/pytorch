@@ -1,7 +1,5 @@
 import os
 import glob
-import warnings
-from itertools import chain
 
 from .env import IS_WINDOWS, IS_DARWIN, IS_CONDA, CONDA_DIR, check_negative_env_flag, \
     gather_paths

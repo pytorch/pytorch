@@ -3,7 +3,6 @@ import copy
 import torch
 
 from torch.cuda.comm import broadcast_coalesced
-from torch.cuda import nccl
 import torch.distributed as dist
 
 if dist.is_available():
