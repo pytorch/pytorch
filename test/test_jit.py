@@ -1499,7 +1499,6 @@ class TestJit(JitTestCase):
     def test_cpp_cuda(self):
         from cpp.jit import tests_setup
         tests_setup.setup()
-        run_cuda = True
         torch._C._jit_run_cpp_tests(run_cuda=True)
         tests_setup.shutdown()
 
