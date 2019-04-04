@@ -139,7 +139,7 @@ void createTensorToParameterNameMap(
   }
   for (const auto& elem : module.get_modules()) {
     createTensorToParameterNameMap(
-        *elem, QualifiedName::create(prefix, elem->name()), result);
+        *elem.module, QualifiedName::create(prefix, elem.name), result);
   }
 }
 

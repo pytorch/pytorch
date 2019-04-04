@@ -51,8 +51,9 @@ void InputArchive::read(
 }
 
 void InputArchive::read(const std::string& key, InputArchive& archive) {
-  if (auto named_module = module_->find_module(key)) {
-    archive.module_ = std::move(named_module);
+  if (auto* named_module = module_->find_module(key)) {
+    AT_ASSERT(named_module->module != nullptr);
+    archive.module_ = std::move(named_module->module);
   } else {
     AT_ERROR("No such serialized submodule: '", key, "'");
   }
