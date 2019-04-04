@@ -753,10 +753,10 @@
   self: index_select_backward(grad, dim, indices, self.sizes(), true)
 
 - name: split(Tensor self, int64_t split_size, int64_t dim)
-  self: split_backward(grads, split_size, dim, self.sizes(), self.type())
+  self: split_backward(grads, split_size, dim, self.sizes(), self.options())
 
 - name: split_with_sizes(Tensor self, IntArrayRef split_sizes, int64_t dim)
-  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.type())
+  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
 
 - name: sqrt(Tensor self)
   self: grad / (2 * result)
@@ -1199,7 +1199,7 @@
 
 - name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output)
   grad_output: elu_backward(grad, alpha, scale, input_scale, output)
-  output: grad * grad_output * input_scale * (output < 0).toType(grad.type())
+  output: grad * grad_output * input_scale * (output < 0).type_as(grad)
 
 - name: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, IntArrayRef kernel_size, IntArrayRef output_size, Tensor indices)
   grad_output: max_pool_double_backward(grad, indices, 2)
