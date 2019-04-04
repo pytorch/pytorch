@@ -122,13 +122,13 @@ void Module::to_impl(
     const c10::optional<at::ScalarType>& dtype,
     bool non_blocking) {
   // First call `to()` on every child module.
-  for (auto& child : modules) {
-    child->module->to_impl(device, dtype, non_blocking);
+  for (auto& child : get_modules()) {
+    child.module->to_impl(device, dtype, non_blocking);
   }
   // Then convert every of our parameters.
-  for (auto& parameter : parameters) {
+  for (auto& parameter : get_parameters()) {
     // Need to access the `at::Tensor` as a `Variable` here.
-    autograd::Variable variable = parameter.value().slot()->toTensor();
+    autograd::Variable variable = parameter.slot()->toTensor();
     at::Tensor data = variable.data();
     // Use the data's original device or dtype if not supplied here.
     auto new_data = data.to(

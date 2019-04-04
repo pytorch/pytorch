@@ -11,11 +11,11 @@ from . import BroadcastOptions, AllreduceOptions, ReduceOptions, \
     ScatterOptions, GatherOptions
 from . import ReduceOp
 from . import PrefixStore
-from . import ProcessGroupGloo
 
 
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
+_GLOO_AVAILABLE = True
 
 
 try:
@@ -27,6 +27,11 @@ try:
     from. import ProcessGroupNCCL
 except ImportError:
     _NCCL_AVAILABLE = False
+
+try:
+    from. import ProcessGroupGloo
+except ImportError:
+    _GLOO_AVAILABLE = False
 
 
 class Backend(object):
@@ -230,7 +235,7 @@ def _check_tensor_list(param, param_name):
 
 def is_mpi_available():
     """
-    Checks if MPI is available
+    Checks if the MPI backend is available.
 
     """
     return _MPI_AVAILABLE
@@ -238,10 +243,18 @@ def is_mpi_available():
 
 def is_nccl_available():
     """
-    Checks if NCCL is available
+    Checks if the NCCL backend is available.
 
     """
     return _NCCL_AVAILABLE
+
+
+def is_gloo_available():
+    """
+    Checks if the Gloo backend is available.
+
+    """
+    return _GLOO_AVAILABLE
 
 
 def is_initialized():
@@ -390,7 +403,8 @@ def _new_process_group_helper(world_size,
                               group_ranks,
                               in_group,
                               group_name,
-                              timeout=_default_pg_timeout):
+                              timeout=_default_pg_timeout,
+                              backend=None):
     """
     Create a new distributed process group. And the new process group can be
     used to perform collective operations.
@@ -413,8 +427,12 @@ def _new_process_group_helper(world_size,
                            "datetime.timedelta")
 
     default_backend, default_store = _pg_map[_default_pg]
+    if backend is None:
+        backend = default_backend
+    else:
+        backend = Backend(backend)
 
-    if default_backend == Backend.MPI:
+    if backend == Backend.MPI:
         if not is_mpi_available():
             raise RuntimeError("Distributed package doesn't have MPI built in")
         pg = ProcessGroupMPI(group_ranks)
@@ -424,7 +442,7 @@ def _new_process_group_helper(world_size,
         # Create the prefix store
         store = PrefixStore(group_name, default_store)
 
-        if default_backend == Backend.GLOO:
+        if backend == Backend.GLOO:
             pg = ProcessGroupGloo(
                 store,
                 rank,
@@ -432,7 +450,7 @@ def _new_process_group_helper(world_size,
                 timeout=timeout)
             _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
-        elif default_backend == Backend.NCCL:
+        elif backend == Backend.NCCL:
             if not is_nccl_available():
                 raise RuntimeError("Distributed package doesn't have NCCL "
                                    "built in")
@@ -1197,7 +1215,7 @@ def barrier(group=group.WORLD,
         work.wait()
 
 
-def new_group(ranks=None, timeout=_default_pg_timeout):
+def new_group(ranks=None, timeout=_default_pg_timeout, backend=None):
     """
     Creates a new distributed group.
 
@@ -1211,6 +1229,12 @@ def new_group(ranks=None, timeout=_default_pg_timeout):
         timeout (timedelta, optional): Timeout for operations executed against
             the process group. Default value equals 30 minutes.
             This is only applicable for the ``gloo`` backend.
+        backend (str or Backend, optional): The backend to use. Depending on
+            build-time configurations, valid values are ``gloo`` and ``nccl``.
+            By default uses the same backend as the global group. This field
+            should be given as a lowercase string (e.g., ``"gloo"``), which can
+            also be accessed via :class:`Backend` attributes (e.g.,
+            ``Backend.GLOO``).
 
     Returns:
         A handle of distributed group that can be given to collective calls.
@@ -1270,12 +1294,15 @@ def new_group(ranks=None, timeout=_default_pg_timeout):
             return GroupMember.NON_GROUP_MEMBER
 
         if default_backend != Backend.MPI:
+            if backend is None:
+                backend = default_backend
             pg = _new_process_group_helper(group_world_size,
                                            group_rank,
                                            input_ranks,
                                            True,
                                            group_name,
-                                           timeout=timeout)
+                                           timeout=timeout,
+                                           backend=backend)
 
     # Create the global rank to group rank mapping
     _pg_group_ranks[pg] = {}
