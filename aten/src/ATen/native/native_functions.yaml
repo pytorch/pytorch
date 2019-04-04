@@ -2357,6 +2357,24 @@
     CPU: _unique_dim_cpu
     CUDA: _unique_dim_cuda
 
+# _unique and _unique_dim are fragile and modifying them easily cause internal break
+# below two operators are a temporary hack for adding return_counts support
+# Please don't rely on these two operators, they will be removed soon
+
+- func: _unique2_temporary_will_remove_soon(Tensor self, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: _unique2_cpu
+    CUDA: _unique2_cuda
+
+- func: _unique_dim2_temporary_will_remove_soon(Tensor self, int dim, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: _unique_dim2_cpu
+    CUDA: _unique_dim2_cuda
+
 - func: _unsafe_view(Tensor self, int[] size) -> Tensor
   matches_jit_signature: True
 
