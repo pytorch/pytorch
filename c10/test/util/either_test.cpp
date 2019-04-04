@@ -95,7 +95,7 @@ std::vector<std::function<void(either<Left, Right>&)>> EXPECT_IS_RIGHT(const Rig
 template<class Value>
 std::vector<std::function<void(Value&)>> EXPECT_IS(const Value& v) {
   return {
-    [&] (auto& obj) {
+    [&] (Value& obj) {
       return obj == v;
     }
   };
@@ -123,10 +123,10 @@ TEST(EitherTest, SpaceUsage) {
 
 TEST(EitherTest, givenLeft) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a(4);
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a = 4;
         test(a);
       },
@@ -137,10 +137,10 @@ TEST(EitherTest, givenLeft) {
 
 TEST(EitherTest, givenRight) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a("4");
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a = string("4");
         test(a);
       }
@@ -151,10 +151,10 @@ TEST(EitherTest, givenRight) {
 
 TEST(EitherTest, givenMakeLeft) {
     test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a = make_left<int, string>(4);
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<int, string>&)> test) {
         auto a = make_left<int, string>(4);
         test(a);
       },
@@ -165,10 +165,10 @@ TEST(EitherTest, givenMakeLeft) {
 
 TEST(EitherTest, givenMakeLeftWithSameType) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, int>&)> test) {
         either<int, int> a = make_left<int, int>(4);
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<int, int>&)> test) {
         auto a = make_left<int, int>(4);
         test(a);
       },
@@ -179,10 +179,10 @@ TEST(EitherTest, givenMakeLeftWithSameType) {
 
 TEST(EitherTest, givenMakeRight) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a = make_right<int, string>("4");
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<int, string>&)> test) {
         auto a = make_right<int, string>("4");
         test(a);
       }
@@ -193,10 +193,10 @@ TEST(EitherTest, givenMakeRight) {
 
 TEST(EitherTest, givenMakeRightWithSameType) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_right<string, string>("4");
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<string, string>&)> test) {
         auto a = make_right<string, string>("4");
         test(a);
       }
@@ -207,10 +207,10 @@ TEST(EitherTest, givenMakeRightWithSameType) {
 
 TEST(EitherTest, givenMovableOnlyMakeLeft) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<MovableOnly, string>&)> test) {
         either<MovableOnly, string> a = make_left<MovableOnly, string>(3);
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<MovableOnly, string>&)> test) {
         auto a = make_left<MovableOnly, string>(3);
         test(a);
       },
@@ -221,10 +221,10 @@ TEST(EitherTest, givenMovableOnlyMakeLeft) {
 
 TEST(EitherTest, givenMovableOnlyMakeRight) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, MovableOnly>&)> test) {
         either<int, MovableOnly> a = make_right<int, MovableOnly>(3);
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<int, MovableOnly>&)> test) {
         auto a = make_right<int, MovableOnly>(3);
         test(a);
       }
@@ -235,10 +235,10 @@ TEST(EitherTest, givenMovableOnlyMakeRight) {
 
 TEST(EitherTest, givenMultiParamMakeLeft) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<pair<int, int>, string>&)> test) {
         either<pair<int, int>, string> a = make_left<pair<int, int>, string>(5, 6);
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<pair<int, int>, string>&)> test) {
         auto a = make_left<pair<int, int>, string>(5, 6);
         test(a);
       },
@@ -249,10 +249,10 @@ TEST(EitherTest, givenMultiParamMakeLeft) {
 
 TEST(EitherTest, givenMultiParamMakeRight) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, pair<int, int>>&)> test) {
         either<int, pair<int, int>> a = make_right<int, pair<int, int>>(5, 6);
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<int, pair<int, int>>&)> test) {
         auto a = make_right<int, pair<int, int>>(5, 6);
         test(a);
       }
@@ -263,7 +263,7 @@ TEST(EitherTest, givenMultiParamMakeRight) {
 
 TEST(EitherTest, givenLeftCopyConstructedFromValue_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, int>&)> test) {
         string a = "4";
         either<string, int> b(a);
         test(b);
@@ -275,7 +275,7 @@ TEST(EitherTest, givenLeftCopyConstructedFromValue_thenNewIsCorrect) {
 
 TEST(EitherTest, givenLeftCopyConstructedFromValue_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(string&)> test) {
         string a = "4";
         either<string, int> b(a);
         test(a);
@@ -287,7 +287,7 @@ TEST(EitherTest, givenLeftCopyConstructedFromValue_thenOldIsCorrect) {
 
 TEST(EitherTest, givenRightCopyConstructedFromValue_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, string>&)> test) {
         string a = "4";
         either<int, string> b(a);
         test(b);
@@ -299,7 +299,7 @@ TEST(EitherTest, givenRightCopyConstructedFromValue_thenNewIsCorrect) {
 
 TEST(EitherTest, givenRightCopyConstructedFromValue_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(string&)> test) {
         string a = "4";
         either<int, string> b(a);
         test(a);
@@ -311,7 +311,7 @@ TEST(EitherTest, givenRightCopyConstructedFromValue_thenOldIsCorrect) {
 
 TEST(EitherTest, givenLeftMoveConstructedFromValue_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<MovableOnly, int>&)> test) {
         MovableOnly a(3);
         either<MovableOnly, int> b(std::move(a));
         test(b);
@@ -323,7 +323,7 @@ TEST(EitherTest, givenLeftMoveConstructedFromValue_thenNewIsCorrect) {
 
 TEST(EitherTest, givenLeftMoveConstructedFromValue_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(MovableOnly&)> test) {
         MovableOnly a(3);
         either<MovableOnly, int> b(std::move(a));
         test(a);  // NOLINT(bugprone-use-after-move)
@@ -335,7 +335,7 @@ TEST(EitherTest, givenLeftMoveConstructedFromValue_thenOldIsCorrect) {
 
 TEST(EitherTest, givenRightMoveConstructedFromValue_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, MovableOnly>&)> test) {
         MovableOnly a(3);
         either<int, MovableOnly> b(std::move(a));
         test(b);
@@ -347,7 +347,7 @@ TEST(EitherTest, givenRightMoveConstructedFromValue_thenNewIsCorrect) {
 
 TEST(EitherTest, givenRightMoveConstructedFromValue_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(MovableOnly&)> test) {
         MovableOnly a(3);
         either<int, MovableOnly> b(std::move(a));
         test(a);  // NOLINT(bugprone-use-after-move)
@@ -359,12 +359,12 @@ TEST(EitherTest, givenRightMoveConstructedFromValue_thenOldIsCorrect) {
 
 TEST(EitherTest, givenLeftCopyAssignedFromValue_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, int>&)> test) {
         string a = "4";
         either<string, int> b(2);
         b = a;
         test(b);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<string, int>&)> test) {
         string a = "4";
         either<string, int> b("2");
         b = a;
@@ -377,12 +377,12 @@ TEST(EitherTest, givenLeftCopyAssignedFromValue_thenNewIsCorrect) {
 
 TEST(EitherTest, givenLeftCopyAssignedFromValue_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(string&)> test) {
         string a = "4";
         either<string, int> b(2);
         b = a;
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(string&)> test) {
         string a = "4";
         either<string, int> b("2");
         b = a;
@@ -395,12 +395,12 @@ TEST(EitherTest, givenLeftCopyAssignedFromValue_thenOldIsCorrect) {
 
 TEST(EitherTest, givenRightCopyAssignedFromValue_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, string>&)> test) {
         string a = "4";
         either<int, string> b(2);
         b = a;
         test(b);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<int, string>&)> test) {
         string a = "4";
         either<int, string> b("2");
         b = a;
@@ -413,12 +413,12 @@ TEST(EitherTest, givenRightCopyAssignedFromValue_thenNewIsCorrect) {
 
 TEST(EitherTest, givenRightCopyAssignedFromValue_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(string&)> test) {
         string a = "4";
         either<int, string> b(2);
         b = a;
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(string&)> test) {
         string a = "4";
         either<int, string> b("2");
         b = a;
@@ -431,12 +431,12 @@ TEST(EitherTest, givenRightCopyAssignedFromValue_thenOldIsCorrect) {
 
 TEST(EitherTest, givenLeftMoveAssignedFromValue_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<MovableOnly, string>&)> test) {
         MovableOnly a(3);
         either<MovableOnly, string> b(2);
         b = std::move(a);
         test(b);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<MovableOnly, string>&)> test) {
         MovableOnly a(3);
         either<MovableOnly, string> b(MovableOnly(2));
         b = std::move(a);
@@ -449,12 +449,12 @@ TEST(EitherTest, givenLeftMoveAssignedFromValue_thenNewIsCorrect) {
 
 TEST(EitherTest, givenLeftMoveAssignedFromValue_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(MovableOnly&)> test) {
         MovableOnly a(3);
         either<MovableOnly, string> b("2");
         b = std::move(a);
         test(a);  // NOLINT(bugprone-use-after-move)
-      }, [] (const auto& test) {
+      }, [] (std::function<void(MovableOnly&)> test) {
         MovableOnly a(3);
         either<MovableOnly, string> b(MovableOnly(0));
         b = std::move(a);
@@ -467,12 +467,12 @@ TEST(EitherTest, givenLeftMoveAssignedFromValue_thenOldIsCorrect) {
 
 TEST(EitherTest, givenRightMoveAssignedFromValue_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, MovableOnly>&)> test) {
         MovableOnly a(3);
         either<string, MovableOnly> b("2");
         b = std::move(a);
         test(b);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<string, MovableOnly>&)> test) {
         MovableOnly a(3);
         either<string, MovableOnly> b(MovableOnly(2));
         b = std::move(a);
@@ -485,12 +485,12 @@ TEST(EitherTest, givenRightMoveAssignedFromValue_thenNewIsCorrect) {
 
 TEST(EitherTest, givenRightMoveAssignedFromValue_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(MovableOnly&)> test) {
         MovableOnly a(3);
         either<string, MovableOnly> b("2");
         b = std::move(a);
         test(a);  // NOLINT(bugprone-use-after-move)
-      }, [] (const auto& test) {
+      }, [] (std::function<void(MovableOnly&)> test) {
         MovableOnly a(3);
         either<string, MovableOnly> b(MovableOnly(2));
         b = std::move(a);
@@ -503,7 +503,7 @@ TEST(EitherTest, givenRightMoveAssignedFromValue_thenOldIsCorrect) {
 
 TEST(EitherTest, givenLeftCopyConstructed_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, int>&)> test) {
         either<string, int> a("4");
         either<string, int> b(a);
         test(b);
@@ -515,7 +515,7 @@ TEST(EitherTest, givenLeftCopyConstructed_thenNewIsCorrect) {
 
 TEST(EitherTest, givenLeftCopyConstructed_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, int>&)> test) {
         either<string, int> a("4");
         either<string, int> b(a);
         test(a);
@@ -527,7 +527,7 @@ TEST(EitherTest, givenLeftCopyConstructed_thenOldIsCorrect) {
 
 TEST(EitherTest, givenLeftCopyConstructed_withSameType_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_left<string, string>("4");
         either<string, string> b(a);
         test(b);
@@ -539,7 +539,7 @@ TEST(EitherTest, givenLeftCopyConstructed_withSameType_thenNewIsCorrect) {
 
 TEST(EitherTest, givenLeftCopyConstructed_withSameType_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_left<string, string>("4");
         either<string, string> b(a);
         test(a);
@@ -551,7 +551,7 @@ TEST(EitherTest, givenLeftCopyConstructed_withSameType_thenOldIsCorrect) {
 
 TEST(EitherTest, givenRightCopyConstructed_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a("4");
         either<int, string> b(a);
         test(b);
@@ -564,7 +564,7 @@ TEST(EitherTest, givenRightCopyConstructed_thenNewIsCorrect) {
 
 TEST(EitherTest, givenRightCopyConstructed_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a("4");
         either<int, string> b(a);
         test(a);
@@ -576,7 +576,7 @@ TEST(EitherTest, givenRightCopyConstructed_thenOldIsCorrect) {
 
 TEST(EitherTest, givenRightCopyConstructed_withSameType_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_right<string, string>("4");
         either<string, string> b(a);
         test(b);
@@ -589,7 +589,7 @@ TEST(EitherTest, givenRightCopyConstructed_withSameType_thenNewIsCorrect) {
 
 TEST(EitherTest, givenRightCopyConstructed_withSameType_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_right<string, string>("4");
         either<string, string> b(a);
         test(a);
@@ -601,7 +601,7 @@ TEST(EitherTest, givenRightCopyConstructed_withSameType_thenOldIsCorrect) {
 
 TEST(EitherTest, givenLeftMoveConstructed_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<MovableOnly, int>&)> test) {
         either<MovableOnly, int> a(MovableOnly(3));
         either<MovableOnly, int> b(std::move(a));
         test(b);
@@ -613,7 +613,7 @@ TEST(EitherTest, givenLeftMoveConstructed_thenNewIsCorrect) {
 
 TEST(EitherTest, givenLeftMoveConstructed_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<MovableOnly, int>&)> test) {
         either<MovableOnly, int> a(MovableOnly(3));
         either<MovableOnly, int> b(std::move(a));
         test(a);  // NOLINT(bugprone-use-after-move)
@@ -625,7 +625,7 @@ TEST(EitherTest, givenLeftMoveConstructed_thenOldIsCorrect) {
 
 TEST(EitherTest, givenLeftMoveConstructed_withSameType_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
         either<MovableOnly, MovableOnly> a = make_left<MovableOnly, MovableOnly>(MovableOnly(3));
         either<MovableOnly, MovableOnly> b(std::move(a));
         test(b);
@@ -637,7 +637,7 @@ TEST(EitherTest, givenLeftMoveConstructed_withSameType_thenNewIsCorrect) {
 
 TEST(EitherTest, givenLeftMoveConstructed_withSameType_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
         either<MovableOnly, MovableOnly> a = make_left<MovableOnly, MovableOnly>(MovableOnly(3));
         either<MovableOnly, MovableOnly> b(std::move(a));
         test(a);  // NOLINT(bugprone-use-after-move)
@@ -649,7 +649,7 @@ TEST(EitherTest, givenLeftMoveConstructed_withSameType_thenOldIsCorrect) {
 
 TEST(EitherTest, givenRightMoveConstructed_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, MovableOnly>&)> test) {
         either<int, MovableOnly> a(MovableOnly(3));
         either<int, MovableOnly> b(std::move(a));
         test(b);
@@ -661,7 +661,7 @@ TEST(EitherTest, givenRightMoveConstructed_thenNewIsCorrect) {
 
 TEST(EitherTest, givenRightMoveConstructed_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, MovableOnly>&)> test) {
         either<int, MovableOnly> a(MovableOnly(3));
         either<int, MovableOnly> b(std::move(a));
         test(a);  // NOLINT(bugprone-use-after-move)
@@ -673,7 +673,7 @@ TEST(EitherTest, givenRightMoveConstructed_thenOldIsCorrect) {
 
 TEST(EitherTest, givenRightMoveConstructed_withSameType_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
         either<MovableOnly, MovableOnly> a = make_right<MovableOnly, MovableOnly>(MovableOnly(3));
         either<MovableOnly, MovableOnly> b(std::move(a));
         test(b);
@@ -685,7 +685,7 @@ TEST(EitherTest, givenRightMoveConstructed_withSameType_thenNewIsCorrect) {
 
 TEST(EitherTest, givenRightMoveConstructed_withSameType_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
         either<MovableOnly, MovableOnly> a = make_right<MovableOnly, MovableOnly>(MovableOnly(3));
         either<MovableOnly, MovableOnly> b(std::move(a));
         test(a);  // NOLINT(bugprone-use-after-move)
@@ -697,12 +697,12 @@ TEST(EitherTest, givenRightMoveConstructed_withSameType_thenOldIsCorrect) {
 
 TEST(EitherTest, givenLeftCopyAssigned_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, int>&)> test) {
         either<string, int> a("4");
         either<string, int> b(2);
         b = a;
         test(b);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<string, int>&)> test) {
         either<string, int> a("4");
         either<string, int> b("2");
         b = a;
@@ -715,12 +715,12 @@ TEST(EitherTest, givenLeftCopyAssigned_thenNewIsCorrect) {
 
 TEST(EitherTest, givenLeftCopyAssigned_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, int>&)> test) {
         either<string, int> a("4");
         either<string, int> b(2);
         b = a;
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<string, int>&)> test) {
         either<string, int> a("4");
         either<string, int> b("2");
         b = a;
@@ -733,12 +733,12 @@ TEST(EitherTest, givenLeftCopyAssigned_thenOldIsCorrect) {
 
 TEST(EitherTest, givenLeftCopyAssigned_withSameType_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_left<string, string>("4");
         either<string, string> b = make_right<string, string>("2");
         b = a;
         test(b);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_left<string, string>("4");
         either<string, string> b = make_left<string, string>("2");
         b = a;
@@ -751,12 +751,12 @@ TEST(EitherTest, givenLeftCopyAssigned_withSameType_thenNewIsCorrect) {
 
 TEST(EitherTest, givenLeftCopyAssigned_withSameType_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_left<string, string>("4");
         either<string, string> b = make_right<string, string>("2");
         b = a;
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_left<string, string>("4");
         either<string, string> b = make_left<string, string>("2");
         b = a;
@@ -769,12 +769,12 @@ TEST(EitherTest, givenLeftCopyAssigned_withSameType_thenOldIsCorrect) {
 
 TEST(EitherTest, givenRightCopyAssigned_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a("4");
         either<int, string> b(2);
         b = a;
         test(b);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a("4");
         either<int, string> b("2");
         b = a;
@@ -787,12 +787,12 @@ TEST(EitherTest, givenRightCopyAssigned_thenNewIsCorrect) {
 
 TEST(EitherTest, givenRightCopyAssigned_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a("4");
         either<int, string> b(2);
         b = a;
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a("4");
         either<int, string> b("2");
         b = a;
@@ -805,12 +805,12 @@ TEST(EitherTest, givenRightCopyAssigned_thenOldIsCorrect) {
 
 TEST(EitherTest, givenRightCopyAssigned_withSameType_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_right<string, string>("4");
         either<string, string> b = make_left<string, string>("2");
         b = a;
         test(b);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_right<string, string>("4");
         either<string, string> b = make_right<string, string>("2");
         b = a;
@@ -823,12 +823,12 @@ TEST(EitherTest, givenRightCopyAssigned_withSameType_thenNewIsCorrect) {
 
 TEST(EitherTest, givenRightCopyAssigned_withSameType_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_right<string, string>("4");
         either<string, string> b = make_left<string, string>("2");
         b = a;
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<string, string>&)> test) {
         either<string, string> a = make_right<string, string>("4");
         either<string, string> b = make_right<string, string>("2");
         b = a;
@@ -841,12 +841,12 @@ TEST(EitherTest, givenRightCopyAssigned_withSameType_thenOldIsCorrect) {
 
 TEST(EitherTest, givenLeftMoveAssigned_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<MovableOnly, string>&)> test) {
         either<MovableOnly, string> a(MovableOnly(3));
         either<MovableOnly, string> b(2);
         b = std::move(a);
         test(b);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<MovableOnly, string>&)> test) {
         either<MovableOnly, string> a(MovableOnly(3));
         either<MovableOnly, string> b(MovableOnly(2));
         b = std::move(a);
@@ -859,12 +859,12 @@ TEST(EitherTest, givenLeftMoveAssigned_thenNewIsCorrect) {
 
 TEST(EitherTest, givenLeftMoveAssigned_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<MovableOnly, string>&)> test) {
         either<MovableOnly, string> a(MovableOnly(3));
         either<MovableOnly, string> b(2);
         b = std::move(a);
         test(a);  // NOLINT(bugprone-use-after-move)
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<MovableOnly, string>&)> test) {
         either<MovableOnly, string> a(MovableOnly(3));
         either<MovableOnly, string> b(MovableOnly(2));
         b = std::move(a);
@@ -877,12 +877,12 @@ TEST(EitherTest, givenLeftMoveAssigned_thenOldIsCorrect) {
 
 TEST(EitherTest, givenLeftMoveAssigned_withSameType_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
         either<MovableOnly, MovableOnly> a = make_left<MovableOnly, MovableOnly>(3);
         either<MovableOnly, MovableOnly> b = make_right<MovableOnly, MovableOnly>(2);
         b = std::move(a);
         test(b);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
         either<MovableOnly, MovableOnly> a = make_left<MovableOnly, MovableOnly>(3);
         either<MovableOnly, MovableOnly> b = make_left<MovableOnly, MovableOnly>(2);
         b = std::move(a);
@@ -895,12 +895,12 @@ TEST(EitherTest, givenLeftMoveAssigned_withSameType_thenNewIsCorrect) {
 
 TEST(EitherTest, givenLeftMoveAssigned_withSameType_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
         either<MovableOnly, MovableOnly> a = make_left<MovableOnly, MovableOnly>(3);
         either<MovableOnly, MovableOnly> b = make_right<MovableOnly, MovableOnly>(2);
         b = std::move(a);
         test(a);  // NOLINT(bugprone-use-after-move)
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
         either<MovableOnly, MovableOnly> a = make_left<MovableOnly, MovableOnly>(3);
         either<MovableOnly, MovableOnly> b = make_left<MovableOnly, MovableOnly>(2);
         b = std::move(a);
@@ -913,12 +913,12 @@ TEST(EitherTest, givenLeftMoveAssigned_withSameType_thenOldIsCorrect) {
 
 TEST(EitherTest, givenRightMoveAssigned_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, MovableOnly>&)> test) {
         either<string, MovableOnly> a(MovableOnly(3));
         either<string, MovableOnly> b("2");
         b = std::move(a);
         test(b);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<string, MovableOnly>&)> test) {
         either<string, MovableOnly> a(MovableOnly(3));
         either<string, MovableOnly> b(MovableOnly(2));
         b = std::move(a);
@@ -931,12 +931,12 @@ TEST(EitherTest, givenRightMoveAssigned_thenNewIsCorrect) {
 
 TEST(EitherTest, givenRightMoveAssigned_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<string, MovableOnly>&)> test) {
         either<string, MovableOnly> a(MovableOnly(3));
         either<string, MovableOnly> b("2");
         b = std::move(a);
         test(a);  // NOLINT(bugprone-use-after-move)
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<string, MovableOnly>&)> test) {
         either<string, MovableOnly> a(MovableOnly(3));
         either<string, MovableOnly> b(MovableOnly(2));
         b = std::move(a);
@@ -949,12 +949,12 @@ TEST(EitherTest, givenRightMoveAssigned_thenOldIsCorrect) {
 
 TEST(EitherTest, givenRightMoveAssigned_withSameType_thenNewIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
         either<MovableOnly, MovableOnly> a = make_right<MovableOnly, MovableOnly>(3);
         either<MovableOnly, MovableOnly> b = make_left<MovableOnly, MovableOnly>(2);
         b = std::move(a);
         test(b);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
         either<MovableOnly, MovableOnly> a = make_right<MovableOnly, MovableOnly>(3);
         either<MovableOnly, MovableOnly> b = make_right<MovableOnly, MovableOnly>(2);
         b = std::move(a);
@@ -967,12 +967,12 @@ TEST(EitherTest, givenRightMoveAssigned_withSameType_thenNewIsCorrect) {
 
 TEST(EitherTest, givenRightMoveAssigned_withSameType_thenOldIsCorrect) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
         either<MovableOnly, MovableOnly> a = make_right<MovableOnly, MovableOnly>(3);
         either<MovableOnly, MovableOnly> b = make_left<MovableOnly, MovableOnly>(2);
         b = std::move(a);
         test(a);  // NOLINT(bugprone-use-after-move)
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<MovableOnly, MovableOnly>&)> test) {
         either<MovableOnly, MovableOnly> a = make_right<MovableOnly, MovableOnly>(3);
         either<MovableOnly, MovableOnly> b = make_right<MovableOnly, MovableOnly>(2);
         b = std::move(a);
@@ -985,11 +985,11 @@ TEST(EitherTest, givenRightMoveAssigned_withSameType_thenOldIsCorrect) {
 
 TEST(EitherTest, givenLeft_whenModified_thenValueIsChanged) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a(4);
         a.left() = 5;
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a(4);
         a.left() = 5;
         test(a);
@@ -1001,11 +1001,11 @@ TEST(EitherTest, givenLeft_whenModified_thenValueIsChanged) {
 
 TEST(EitherTest, givenRight_whenModified_thenValueIsChanged) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a("4");
         a.right() = "5";
         test(a);
-      }, [] (const auto& test) {
+      }, [] (std::function<void(either<int, string>&)> test) {
         either<int, string> a("4");
         a.right() = "5";
         test(a);
@@ -1017,7 +1017,7 @@ TEST(EitherTest, givenRight_whenModified_thenValueIsChanged) {
 
 TEST(EitherTest, canEmplaceConstructLeft) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<tuple<int, int>, tuple<int, string, int>>&)> test) {
         either<tuple<int, int>, tuple<int, string, int>> a(2, 3);
         test(a);
       }
@@ -1028,7 +1028,7 @@ TEST(EitherTest, canEmplaceConstructLeft) {
 
 TEST(EitherTest, canEmplaceConstructRight) {
   test_with_matrix({
-      [] (const auto& test) {
+      [] (std::function<void(either<tuple<int, int>, tuple<int, string, int>>&)> test) {
         either<tuple<int, int>, tuple<int, string, int>> a(2, "3", 4);
         test(a);
       }
