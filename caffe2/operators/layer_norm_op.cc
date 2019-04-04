@@ -188,7 +188,13 @@ to the end.)
 
 C10_REGISTER_CAFFE2_OPERATOR_CPU(
     LayerNorm,
-    "_caffe2::LayerNorm(Tensor input, int axis, float epsilon) -> (Tensor output, Tensor mean, Tensor stdev)",
+    (std::vector<c10::Argument>{
+        c10::Argument("input"),
+        c10::Argument("axis", c10::IntType::get()),
+        c10::Argument("epsilon", c10::FloatType::get())}),
+    (std::vector<c10::Argument>{c10::Argument("output"),
+                                c10::Argument("mean"),
+                                c10::Argument("stdev")}),
     caffe2::LayerNormOp<caffe2::CPUContext>)
 
 namespace caffe2 {
