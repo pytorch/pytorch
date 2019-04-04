@@ -39,7 +39,11 @@ Tensor& _clamp_min_out_cuda(Tensor& result, const Tensor& self, Scalar min) {
   return _th_clamp_min_out(result, self, min);
 }
 
-// These are just forwarding stubs
+Tensor& _fill__cuda(Tensor& self, Scalar value) {
+  return at::legacy::th::_th_fill_(self, value);
+}
+
+  // These are just forwarding stubs
 
 #define IMPLEMENT_UNARY_OP_PREQUEL(op)                           \
   Tensor& _##op##__cuda(Tensor& self) {                          \
