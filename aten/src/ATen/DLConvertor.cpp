@@ -178,6 +178,13 @@ Tensor fromDLPack(const DLManagedTensor* src) {
   auto deleter = [src](void* self) {
     src->deleter(const_cast<DLManagedTensor*>(src));
   };
+  if (!src->dl_tensor.strides) {
+    return at::from_blob(src->dl_tensor.data,
+        IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
+        deleter,
+        at::device(device_type).dtype(stype));
+  }
+
   return at::from_blob(
       src->dl_tensor.data,
       IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
