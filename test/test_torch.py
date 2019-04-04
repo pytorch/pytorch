@@ -10506,57 +10506,87 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         torch.set_flush_denormal(False)
 
     def test_unique(self):
-        x = torch.LongTensor([1, 2, 3, 2, 8, 5, 2, 3])
-        expected_unique = torch.LongTensor([1, 2, 3, 5, 8])
-        expected_inverse = torch.LongTensor([0, 1, 2, 1, 4, 3, 1, 2])
+        def run_test(device):
+            x = torch.tensor([1, 2, 3, 2, 8, 5, 2, 3], device=device)
+            expected_unique = torch.tensor([1, 2, 3, 5, 8], device=device)
+            expected_inverse = torch.tensor([0, 1, 2, 1, 4, 3, 1, 2], device=device)
+            expected_counts = torch.tensor([1, 3, 2, 1, 1], device=device)
 
-        x_unique = torch.unique(x)
-        self.assertEqual(
-            expected_unique.tolist(), sorted(x_unique.tolist()))
+            x_unique = torch.unique(x)
+            self.assertEqual(
+                expected_unique.tolist(), sorted(x_unique.tolist()))
 
-        x_unique, x_inverse = x.unique(return_inverse=True)
-        self.assertEqual(
-            expected_unique.tolist(), sorted(x_unique.tolist()))
-        self.assertEqual(expected_inverse.numel(), x_inverse.numel())
+            x_unique, x_inverse = x.unique(return_inverse=True)
+            self.assertEqual(
+                expected_unique.tolist(), sorted(x_unique.tolist()))
+            self.assertEqual(expected_inverse.numel(), x_inverse.numel())
 
-        x_unique = x.unique(sorted=True)
-        self.assertEqual(expected_unique, x_unique)
+            x_unique = x.unique(sorted=True)
+            self.assertEqual(expected_unique, x_unique)
 
-        x_unique, x_inverse = torch.unique(
-            x, sorted=True, return_inverse=True)
-        self.assertEqual(expected_unique, x_unique)
-        self.assertEqual(expected_inverse, x_inverse)
+            x_unique, _, x_counts = torch._unique2_temporary_will_remove_soon(x, sorted=True, return_counts=True)
+            self.assertEqual(expected_counts, x_counts)
 
-        # Tests per-element unique on a higher rank tensor.
-        y = x.view(2, 2, 2)
-        y_unique, y_inverse = y.unique(sorted=True, return_inverse=True)
-        self.assertEqual(expected_unique, y_unique)
-        self.assertEqual(expected_inverse.view(y.size()), y_inverse)
+            x_unique, x_inverse = torch.unique(
+                x, sorted=True, return_inverse=True)
+            self.assertEqual(expected_unique, x_unique)
+            self.assertEqual(expected_inverse, x_inverse)
 
-        # Tests unique on other types.
-        int_unique, int_inverse = torch.unique(
-            torch.IntTensor([2, 1, 2]), sorted=True, return_inverse=True)
-        self.assertEqual(torch.IntTensor([1, 2]), int_unique)
-        self.assertEqual(torch.LongTensor([1, 0, 1]), int_inverse)
+            x_unique, x_inverse, x_counts = torch._unique2_temporary_will_remove_soon(
+                x, sorted=True, return_inverse=True, return_counts=True)
+            self.assertEqual(expected_unique, x_unique)
+            self.assertEqual(expected_inverse, x_inverse)
+            self.assertEqual(expected_counts, x_counts)
 
-        double_unique, double_inverse = torch.unique(
-            torch.DoubleTensor([2., 1.5, 2.1, 2.]),
-            sorted=True,
-            return_inverse=True,
-        )
-        self.assertEqual(torch.DoubleTensor([1.5, 2., 2.1]), double_unique)
-        self.assertEqual(torch.LongTensor([1, 0, 2, 1]), double_inverse)
+            # Tests per-element unique on a higher rank tensor.
+            y = x.view(2, 2, 2)
+            y_unique, y_inverse = y.unique(sorted=True, return_inverse=True)
+            self.assertEqual(expected_unique, y_unique)
+            self.assertEqual(expected_inverse.view(y.size()), y_inverse)
 
-        byte_unique, byte_inverse = torch.unique(
-            torch.ByteTensor([133, 7, 7, 7, 42, 128]),
-            sorted=True,
-            return_inverse=True,
-        )
-        self.assertEqual(torch.ByteTensor([7, 42, 128, 133]), byte_unique)
-        self.assertEqual(torch.LongTensor([3, 0, 0, 0, 1, 2]), byte_inverse)
+            y_unique, y_inverse, y_counts = torch._unique2_temporary_will_remove_soon(
+                y, sorted=True, return_inverse=True, return_counts=True)
+            self.assertEqual(expected_unique, y_unique)
+            self.assertEqual(expected_inverse.view(y.size()), y_inverse)
+            self.assertEqual(expected_counts, y_counts)
+
+            # Tests unique on other types.
+            int_unique, int_inverse, int_counts = torch._unique2_temporary_will_remove_soon(
+                torch.tensor([2, 1, 2], dtype=torch.int, device=device),
+                sorted=True,
+                return_inverse=True,
+                return_counts=True
+            )
+            self.assertEqual(torch.tensor([1, 2], dtype=torch.int, device=device), int_unique)
+            self.assertEqual(torch.tensor([1, 0, 1], dtype=torch.long, device=device), int_inverse)
+            self.assertEqual(torch.tensor([1, 2], dtype=torch.long, device=device), int_counts)
+
+            double_unique, double_inverse, double_counts = torch._unique2_temporary_will_remove_soon(
+                torch.tensor([2., 1.5, 2.1, 2.], dtype=torch.double, device=device),
+                sorted=True,
+                return_inverse=True,
+                return_counts=True
+            )
+            self.assertEqual(torch.tensor([1.5, 2., 2.1], dtype=torch.double, device=device), double_unique)
+            self.assertEqual(torch.tensor([1, 0, 2, 1], dtype=torch.long, device=device), double_inverse)
+            self.assertEqual(torch.tensor([1, 2, 1], dtype=torch.long, device=device), double_counts)
+
+            byte_unique, byte_inverse, byte_counts = torch._unique2_temporary_will_remove_soon(
+                torch.tensor([133, 7, 7, 7, 42, 128], dtype=torch.uint8, device=device),
+                sorted=True,
+                return_inverse=True,
+                return_counts=True
+            )
+            self.assertEqual(torch.tensor([7, 42, 128, 133], dtype=torch.uint8, device=device), byte_unique)
+            self.assertEqual(torch.tensor([3, 0, 0, 0, 1, 2], dtype=torch.long, device=device), byte_inverse)
+            self.assertEqual(torch.tensor([3, 1, 1, 1], dtype=torch.long, device=device), byte_counts)
+
+        run_test(torch.device('cpu'))
+        if torch.cuda.is_available():
+            run_test(torch.device('cuda'))
 
     def test_unique_dim(self):
-        def run_test(dtype=torch.float):
+        def run_test(dtype=torch.float, device=torch.device('cpu')):
             x = torch.tensor([[[1., 1.],
                                [0., 1.],
                                [2., 1.],
@@ -10564,19 +10594,27 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                               [[1., 1.],
                                [0., 1.],
                                [2., 1.],
-                               [0., 1.]]], dtype=dtype)
+                               [0., 1.]]],
+                             dtype=dtype,
+                             device=device)
             expected_unique_dim0 = torch.tensor([[[1., 1.],
                                                   [0., 1.],
                                                   [2., 1.],
-                                                  [0., 1.]]], dtype=dtype)
+                                                  [0., 1.]]],
+                                                dtype=dtype,
+                                                device=device)
             expected_inverse_dim0 = torch.tensor([0, 0])
+            expected_counts_dim0 = torch.tensor([2])
             expected_unique_dim1 = torch.tensor([[[0., 1.],
                                                   [1., 1.],
                                                   [2., 1.]],
                                                  [[0., 1.],
                                                   [1., 1.],
-                                                  [2., 1.]]], dtype=dtype)
+                                                  [2., 1.]]],
+                                                dtype=dtype,
+                                                device=device)
             expected_inverse_dim1 = torch.tensor([1, 0, 2, 0])
+            expected_counts_dim1 = torch.tensor([2, 1, 1])
             expected_unique_dim2 = torch.tensor([[[1., 1.],
                                                   [0., 1.],
                                                   [2., 1.],
@@ -10584,37 +10622,105 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                                                  [[1., 1.],
                                                   [0., 1.],
                                                   [2., 1.],
-                                                  [0., 1.]]], dtype=dtype)
+                                                  [0., 1.]]],
+                                                dtype=dtype,
+                                                device=device)
             expected_inverse_dim2 = torch.tensor([0, 1])
+            expected_counts_dim2 = torch.tensor([1, 1])
 
             # dim0
             x_unique = torch.unique(x, dim=0)
             self.assertEqual(expected_unique_dim0, x_unique)
 
-            x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=0)
+            x_unique, x_inverse = torch.unique(
+                x,
+                return_inverse=True,
+                dim=0)
             self.assertEqual(expected_unique_dim0, x_unique)
             self.assertEqual(expected_inverse_dim0, x_inverse)
+
+            x_unique, _, x_counts = torch._unique_dim2_temporary_will_remove_soon(
+                x,
+                return_inverse=False,
+                return_counts=True,
+                dim=0)
+            self.assertEqual(expected_unique_dim0, x_unique)
+            self.assertEqual(expected_counts_dim0, x_counts)
+
+            x_unique, x_inverse, x_counts = torch._unique_dim2_temporary_will_remove_soon(
+                x,
+                return_inverse=True,
+                return_counts=True,
+                dim=0)
+            self.assertEqual(expected_unique_dim0, x_unique)
+            self.assertEqual(expected_inverse_dim0, x_inverse)
+            self.assertEqual(expected_counts_dim0, x_counts)
 
             # dim1
             x_unique = torch.unique(x, dim=1)
             self.assertEqual(expected_unique_dim1, x_unique)
 
-            x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=1)
+            x_unique, x_inverse = torch.unique(
+                x,
+                return_inverse=True,
+                dim=1)
             self.assertEqual(expected_unique_dim1, x_unique)
             self.assertEqual(expected_inverse_dim1, x_inverse)
+
+            x_unique, _, x_counts = torch._unique_dim2_temporary_will_remove_soon(
+                x,
+                return_inverse=False,
+                return_counts=True,
+                dim=1)
+            self.assertEqual(expected_unique_dim1, x_unique)
+            self.assertEqual(expected_counts_dim1, x_counts)
+
+            x_unique, x_inverse, x_counts = torch._unique_dim2_temporary_will_remove_soon(
+                x,
+                return_inverse=True,
+                return_counts=True,
+                dim=1)
+            self.assertEqual(expected_unique_dim1, x_unique)
+            self.assertEqual(expected_inverse_dim1, x_inverse)
+            self.assertEqual(expected_counts_dim1, x_counts)
 
             # dim2
             x_unique = torch.unique(x, dim=2)
             self.assertEqual(expected_unique_dim2, x_unique)
 
-            x_unique, x_inverse = torch.unique(x, return_inverse=True, dim=2)
+            x_unique, x_inverse = torch.unique(
+                x,
+                return_inverse=True,
+                dim=2)
             self.assertEqual(expected_unique_dim2, x_unique)
             self.assertEqual(expected_inverse_dim2, x_inverse)
+
+            x_unique, _, x_counts = torch._unique_dim2_temporary_will_remove_soon(
+                x,
+                return_inverse=False,
+                return_counts=True,
+                dim=2)
+            self.assertEqual(expected_unique_dim2, x_unique)
+            self.assertEqual(expected_counts_dim2, x_counts)
+
+            x_unique, x_inverse, x_counts = torch._unique_dim2_temporary_will_remove_soon(
+                x,
+                return_inverse=True,
+                return_counts=True,
+                dim=2)
+            self.assertEqual(expected_unique_dim2, x_unique)
+            self.assertEqual(expected_inverse_dim2, x_inverse)
+            self.assertEqual(expected_counts_dim2, x_counts)
 
         run_test(torch.float)
         run_test(torch.double)
         run_test(torch.long)
         run_test(torch.uint8)
+        if torch.cuda.is_available():
+            run_test(torch.float, torch.device('cuda'))
+            run_test(torch.double, torch.device('cuda'))
+            run_test(torch.long, torch.device('cuda'))
+            run_test(torch.uint8, torch.device('cuda'))
 
     @staticmethod
     def _test_bincount(self, device):
