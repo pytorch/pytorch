@@ -126,6 +126,8 @@ CAFFE2_API void* maybe_data_ptr(const TensorArg& tensor);
 // on whether a subgeometry is contiguous.
 CAFFE2_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
 
+namespace detail {
 CAFFE2_API std::vector<int64_t> defaultStrides(IntArrayRef sizes);
 CAFFE2_API int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides);
-}
+} // namespace detail
+} // namespace at

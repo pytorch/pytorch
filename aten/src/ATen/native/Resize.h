@@ -57,7 +57,7 @@ static inline void checkInBoundsForStorage(
     IntArrayRef stride,
     int64_t storage_offset,
     const Storage& new_storage) {
-  int64_t storage_size = computeStorageSize(size, stride);
+  int64_t storage_size = detail::computeStorageSize(size, stride);
   if (storage_size == 0) {
     // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
     return;
