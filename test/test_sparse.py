@@ -940,13 +940,13 @@ class TestSparse(TestCase):
         nnz = i.size(1)
 
         # Non contiguous sparse indices tensor
-        x_ = self.sparse_tensor(i[:, ::2], v[:int((nnz + 2 - 1) / 2)], x.shape)
+        x_ = self.sparse_tensor(i[:, ::2], v[:int(nnz / 2)], x.shape)
         res = torch.add(y, r, x_)
         expected = y + r * self.safeToDense(x_)
         self.assertEqual(res, expected)
 
         # Non contiguous sparse values tensor
-        x_ = self.sparse_tensor(i[:, :int((nnz + 2 - 1) / 2)], v[::2], x.shape)
+        x_ = self.sparse_tensor(i[:, :int(nnz / 2)], v[::2], x.shape)
         res = torch.add(y, r, x_)
         expected = y + r * self.safeToDense(x_)
         self.assertEqual(res, expected)

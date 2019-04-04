@@ -27,33 +27,7 @@
  *      auto sample = uniform(gen);
  */
 
-/**
- * Note [Uniform Distribution Algorithm]
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * The following article summarizes all the problems that arises when one tries to get
- * floats from unsigned integer: 
- * https://experilous.com/1/blog/post/perfect-fast-random-floating-point-numbers
- * 
- * There are two broadly used/debated over methods when mapping unsigned ints
- * to float:
- *        method 1: Sample from [1.0, 2.0) and then subtract 10 from it. This involves 
- *                  losing entropy so that only ints from [0,2^mantissa) are picked. 
- *                  This gives [0.0, 1.0) range of floating point values. Check the 
- *                  article for more details.
- *        method 2: Divide by maximum int and get floats in range [0.0, 1.0] and then use
- *                  rejection sampling to get rid of the 1s to make it [0.0, 1.0).
- * 
- * The article argues that method 1 gives uniformly distributed floats but involves 
- * loss of absolute precision (e.g. it is very unlikely to produce 0.03125). On the 
- * other hand, method 2 results in non-uniform clumpiness, but can produce small values.
- * 
- * In PyTorch, we have selected the uniform distribution algorithm to be method 2 and 
- * our rational is that it still conforms to definition of uniform, i.e. the number of 
- * generated numbers on the [x,x+dx] segment is proportional to dx, as long as 
- * dx >> method granularity. The granularity would be gradually increasing 
- * from 2^-32 to 2^-25 for method 2, and would stay at 2^-24 for method 1. In addition
- * to the division, we squash 1.0s to just under 1 and hence, achieve the range [0.0,1.0). 
- */
+
 namespace at {
 
 // Using VectorType in Box-muller derived distributions to avoid
@@ -90,8 +64,13 @@ template <typename T>
 using dist_acctype = typename DistAccumType<T>::type;
 
 // Constants for uniform distribution
-constexpr float POW_2_32_INV = 1.0f/std::numeric_limits<uint32_t>::max();
-constexpr double POW_2_64_INV = 1.0/std::numeric_limits<uint64_t>::max();
+// doubles have 52 bits of mantissa (fractional part)
+static constexpr uint64_t DOUBLE_MASK = (1ULL << 53) - 1;
+static constexpr double DOUBLE_DIVISOR = 1.0 / (1ULL << 53);
+
+// floats have 23 bits of mantissa (fractional part)
+static constexpr uint32_t FLOAT_MASK = (1 << 24) - 1;
+static constexpr float FLOAT_DIVISOR = 1.0f / (1 << 24);
 
 /**
  * Samples a uniform distribution in the range [0,1) of type T
@@ -114,15 +93,11 @@ struct uniform_real_distribution {
   }
 
   C10_HOST inline dist_acctype<T> operator()(at::CPUGenerator* generator){
-    // See Note [Uniform Distribution Algorithm]
     dist_acctype<T> x;
     if(std::is_same<T, double>::value) {
-      x = generator->random64() * POW_2_64_INV;
+      x = (generator->random64() & DOUBLE_MASK) * DOUBLE_DIVISOR;
     } else {
-      x = generator->random() * POW_2_32_INV;
-    }
-    if (x == static_cast<T>(1.0)) {
-      x = std::nextafter(static_cast<T>(1.0), static_cast<T>(0.0));
+      x = (generator->random() & FLOAT_MASK) * FLOAT_DIVISOR;
     }
     return (x * (b - a) + a);
   }
@@ -157,11 +132,7 @@ struct normal_distribution {
       uniform_real_distribution<T> uniform(0.0, 1.0);
       const T theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * uniform(generator);
       T u1 = uniform(generator);
-      // extra pre-caution to make sure log never gets zero
-      if (u1 == static_cast<T>(0.0)) {
-        u1 = std::numeric_limits<T>::min();
-      }
-      T r = ::sqrt(static_cast<T>(-2.0) * ::log(u1));
+      T r = ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0)-u1));
       result[0] = r * ::cos(theta) * stdv + mean;
       result[1] = r * ::sin(theta) * stdv + mean;
     }
@@ -223,11 +194,7 @@ struct geometric_distribution {
   C10_HOST inline int operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     auto sample = uniform(generator);
-    // extra pre-caution to make sure log never gets zero
-    if (sample == static_cast<T>(0.0)) {
-      sample = std::numeric_limits<T>::min();
-    }
-    return static_cast<int>(::log(sample) / ::log(p)) + 1;
+    return static_cast<int>(::log(static_cast<T>(1.0)-sample) / ::log(p)) + 1;
   }
 
   private:
@@ -247,11 +214,7 @@ struct exponential_distribution {
   C10_HOST inline T operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     auto sample = uniform(generator);
-    // extra pre-caution to make sure log never gets zero
-    if (sample == static_cast<T>(0.0)) {
-      sample = std::numeric_limits<T>::min();
-    }
-    return static_cast<T>(-1.0) / lambda * ::log(sample);
+    return static_cast<T>(-1.0) / lambda * ::log(static_cast<T>(1.0)-sample);
   }
 
   private:

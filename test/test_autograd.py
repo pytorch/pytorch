@@ -1529,7 +1529,6 @@ class TestAutograd(TestCase):
 
     @skipIfRocm
     def test_ctc_loss(self):
-        torch.manual_seed(1)
         batch_size = 64
         num_labels = 101
         target_length = 15

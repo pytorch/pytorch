@@ -44,7 +44,7 @@ torch.backends.cudnn.disable_global_flags()
 
 
 parser = argparse.ArgumentParser(add_help=False)
-parser.add_argument('--seed', type=int, default=2147483647)
+parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 args, remaining = parser.parse_known_args()
 SEED = args.seed
@@ -337,7 +337,6 @@ class TestCase(expecttest.TestCase):
         # empty numel, but nnz > 0 makes the indices containing values.
         assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
 
-        self.setUp()
         v_size = [nnz] + list(size[sparse_dim:])
         v = torch.randn(*v_size, device=device)
         i = torch.rand(sparse_dim, nnz, device=device)

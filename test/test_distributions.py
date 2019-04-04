@@ -91,7 +91,6 @@ def is_all_nan(tensor):
 
 
 # Register all distributions for generic tests.
-torch.manual_seed(123)
 Example = namedtuple('Example', ['Dist', 'params'])
 EXAMPLES = [
     Example(Bernoulli, [
@@ -107,12 +106,12 @@ EXAMPLES = [
     ]),
     Example(Beta, [
         {
-            'concentration1': torch.rand(2, 3).exp().requires_grad_(),
-            'concentration0': torch.rand(2, 3).exp().requires_grad_(),
+            'concentration1': torch.randn(2, 3).exp().requires_grad_(),
+            'concentration0': torch.randn(2, 3).exp().requires_grad_(),
         },
         {
-            'concentration1': torch.rand(4).exp().requires_grad_(),
-            'concentration0': torch.rand(4).exp().requires_grad_(),
+            'concentration1': torch.randn(4).exp().requires_grad_(),
+            'concentration0': torch.randn(4).exp().requires_grad_(),
         },
     ]),
     Example(Categorical, [
@@ -151,29 +150,29 @@ EXAMPLES = [
          'scale': torch.tensor([[1.0], [1.0]])}
     ]),
     Example(Chi2, [
-        {'df': torch.rand(2, 3).exp().requires_grad_()},
-        {'df': torch.rand(1).exp().requires_grad_()},
+        {'df': torch.randn(2, 3).exp().requires_grad_()},
+        {'df': torch.randn(1).exp().requires_grad_()},
     ]),
     Example(StudentT, [
-        {'df': torch.rand(2, 3).exp().requires_grad_()},
-        {'df': torch.rand(1).exp().requires_grad_()},
+        {'df': torch.randn(2, 3).exp().requires_grad_()},
+        {'df': torch.randn(1).exp().requires_grad_()},
     ]),
     Example(Dirichlet, [
-        {'concentration': torch.rand(2, 3).exp().requires_grad_()},
-        {'concentration': torch.rand(4).exp().requires_grad_()},
+        {'concentration': torch.randn(2, 3).exp().requires_grad_()},
+        {'concentration': torch.randn(4).exp().requires_grad_()},
     ]),
     Example(Exponential, [
-        {'rate': torch.rand(5, 5).abs().requires_grad_()},
-        {'rate': torch.rand(1).abs().requires_grad_()},
+        {'rate': torch.randn(5, 5).abs().requires_grad_()},
+        {'rate': torch.randn(1).abs().requires_grad_()},
     ]),
     Example(FisherSnedecor, [
         {
-            'df1': torch.rand(5, 5).abs().requires_grad_(),
-            'df2': torch.rand(5, 5).abs().requires_grad_(),
+            'df1': torch.randn(5, 5).abs().requires_grad_(),
+            'df2': torch.randn(5, 5).abs().requires_grad_(),
         },
         {
-            'df1': torch.rand(1).abs().requires_grad_(),
-            'df2': torch.rand(1).abs().requires_grad_(),
+            'df1': torch.randn(1).abs().requires_grad_(),
+            'df2': torch.randn(1).abs().requires_grad_(),
         },
         {
             'df1': torch.tensor([1.0]),
@@ -182,22 +181,22 @@ EXAMPLES = [
     ]),
     Example(Gamma, [
         {
-            'concentration': torch.rand(2, 3).exp().requires_grad_(),
-            'rate': torch.rand(2, 3).exp().requires_grad_(),
+            'concentration': torch.randn(2, 3).exp().requires_grad_(),
+            'rate': torch.randn(2, 3).exp().requires_grad_(),
         },
         {
-            'concentration': torch.rand(1).exp().requires_grad_(),
-            'rate': torch.rand(1).exp().requires_grad_(),
+            'concentration': torch.randn(1).exp().requires_grad_(),
+            'rate': torch.randn(1).exp().requires_grad_(),
         },
     ]),
     Example(Gumbel, [
         {
             'loc': torch.randn(5, 5, requires_grad=True),
-            'scale': torch.rand(5, 5).abs().requires_grad_(),
+            'scale': torch.randn(5, 5).abs().requires_grad_(),
         },
         {
             'loc': torch.randn(1, requires_grad=True),
-            'scale': torch.rand(1).abs().requires_grad_(),
+            'scale': torch.randn(1).abs().requires_grad_(),
         },
     ]),
     Example(HalfCauchy, [
@@ -205,45 +204,45 @@ EXAMPLES = [
         {'scale': torch.tensor([[1.0], [1.0]])}
     ]),
     Example(HalfNormal, [
-        {'scale': torch.rand(5, 5).abs().requires_grad_()},
-        {'scale': torch.rand(1).abs().requires_grad_()},
+        {'scale': torch.randn(5, 5).abs().requires_grad_()},
+        {'scale': torch.randn(1).abs().requires_grad_()},
         {'scale': torch.tensor([1e-5, 1e-5], requires_grad=True)}
     ]),
     Example(Independent, [
         {
             'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
-                                        torch.rand(2, 3).abs().requires_grad_()),
+                                        torch.randn(2, 3).abs().requires_grad_()),
             'reinterpreted_batch_ndims': 0,
         },
         {
             'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
-                                        torch.rand(2, 3).abs().requires_grad_()),
+                                        torch.randn(2, 3).abs().requires_grad_()),
             'reinterpreted_batch_ndims': 1,
         },
         {
             'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
-                                        torch.rand(2, 3).abs().requires_grad_()),
+                                        torch.randn(2, 3).abs().requires_grad_()),
             'reinterpreted_batch_ndims': 2,
         },
         {
             'base_distribution': Normal(torch.randn(2, 3, 5, requires_grad=True),
-                                        torch.rand(2, 3, 5).abs().requires_grad_()),
+                                        torch.randn(2, 3, 5).abs().requires_grad_()),
             'reinterpreted_batch_ndims': 2,
         },
         {
             'base_distribution': Normal(torch.randn(2, 3, 5, requires_grad=True),
-                                        torch.rand(2, 3, 5).abs().requires_grad_()),
+                                        torch.randn(2, 3, 5).abs().requires_grad_()),
             'reinterpreted_batch_ndims': 3,
         },
     ]),
     Example(Laplace, [
         {
             'loc': torch.randn(5, 5, requires_grad=True),
-            'scale': torch.rand(5, 5).abs().requires_grad_(),
+            'scale': torch.randn(5, 5).abs().requires_grad_(),
         },
         {
             'loc': torch.randn(1, requires_grad=True),
-            'scale': torch.rand(1).abs().requires_grad_(),
+            'scale': torch.randn(1).abs().requires_grad_(),
         },
         {
             'loc': torch.tensor([1.0, 0.0], requires_grad=True),
@@ -253,11 +252,11 @@ EXAMPLES = [
     Example(LogNormal, [
         {
             'loc': torch.randn(5, 5, requires_grad=True),
-            'scale': torch.rand(5, 5).abs().requires_grad_(),
+            'scale': torch.randn(5, 5).abs().requires_grad_(),
         },
         {
             'loc': torch.randn(1, requires_grad=True),
-            'scale': torch.rand(1).abs().requires_grad_(),
+            'scale': torch.randn(1).abs().requires_grad_(),
         },
         {
             'loc': torch.tensor([1.0, 0.0], requires_grad=True),
@@ -267,11 +266,11 @@ EXAMPLES = [
     Example(LogisticNormal, [
         {
             'loc': torch.randn(5, 5).requires_grad_(),
-            'scale': torch.rand(5, 5).abs().requires_grad_(),
+            'scale': torch.randn(5, 5).abs().requires_grad_(),
         },
         {
             'loc': torch.randn(1).requires_grad_(),
-            'scale': torch.rand(1).abs().requires_grad_(),
+            'scale': torch.randn(1).abs().requires_grad_(),
         },
         {
             'loc': torch.tensor([1.0, 0.0], requires_grad=True),
@@ -315,11 +314,11 @@ EXAMPLES = [
     Example(Normal, [
         {
             'loc': torch.randn(5, 5, requires_grad=True),
-            'scale': torch.rand(5, 5).abs().requires_grad_(),
+            'scale': torch.randn(5, 5).abs().requires_grad_(),
         },
         {
             'loc': torch.randn(1, requires_grad=True),
-            'scale': torch.rand(1).abs().requires_grad_(),
+            'scale': torch.randn(1).abs().requires_grad_(),
         },
         {
             'loc': torch.tensor([1.0, 0.0], requires_grad=True),
@@ -347,10 +346,10 @@ EXAMPLES = [
     ]),
     Example(Poisson, [
         {
-            'rate': torch.rand(5, 5).abs().requires_grad_(),
+            'rate': torch.randn(5, 5).abs().requires_grad_(),
         },
         {
-            'rate': torch.rand(3).abs().requires_grad_(),
+            'rate': torch.randn(3).abs().requires_grad_(),
         },
         {
             'rate': 0.2,
@@ -387,23 +386,23 @@ EXAMPLES = [
     Example(TransformedDistribution, [
         {
             'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
-                                        torch.rand(2, 3).abs().requires_grad_()),
+                                        torch.randn(2, 3).abs().requires_grad_()),
             'transforms': [],
         },
         {
             'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
-                                        torch.rand(2, 3).abs().requires_grad_()),
+                                        torch.randn(2, 3).abs().requires_grad_()),
             'transforms': ExpTransform(),
         },
         {
             'base_distribution': Normal(torch.randn(2, 3, 5, requires_grad=True),
-                                        torch.rand(2, 3, 5).abs().requires_grad_()),
+                                        torch.randn(2, 3, 5).abs().requires_grad_()),
             'transforms': [AffineTransform(torch.randn(3, 5), torch.randn(3, 5)),
                            ExpTransform()],
         },
         {
             'base_distribution': Normal(torch.randn(2, 3, 5, requires_grad=True),
-                                        torch.rand(2, 3, 5).abs().requires_grad_()),
+                                        torch.randn(2, 3, 5).abs().requires_grad_()),
             'transforms': AffineTransform(1, 2),
         },
     ]),
@@ -695,7 +694,7 @@ class TestDistributions(TestCase):
         samples = np.array(samples)[:, 1]
 
         # Aggregate into bins filled with roughly zero-mean unit-variance RVs.
-        num_bins = 5
+        num_bins = 10
         samples_per_bin = len(samples) // num_bins
         bins = samples.reshape((num_bins, samples_per_bin)).mean(axis=1)
         stddev = samples_per_bin ** -0.5
@@ -805,7 +804,6 @@ class TestDistributions(TestCase):
                               "Please add {} to the EXAMPLES list in test_distributions.py".format(Dist.__name__))
 
     def test_distribution_expand(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
         shapes = [torch.Size(), torch.Size((2,)), torch.Size((2, 1))]
         for Dist, params in EXAMPLES:
             for param in params:
@@ -817,13 +815,9 @@ class TestDistributions(TestCase):
                     expanded = d.expand(batch_shape=list(expanded_shape))
                     sample = expanded.sample()
                     actual_shape = expanded.sample().shape
-                    expected = expanded.log_prob(sample)
-                    actual = d.log_prob(sample)
-                    expected[expected == float('inf')] = 0.
-                    actual[actual == float('inf')] = 0.
                     self.assertEqual(expanded.__class__, d.__class__)
                     self.assertEqual(d.sample().shape, original_shape)
-                    self.assertEqual(expected, actual, allow_inf=True)
+                    self.assertEqual(expanded.log_prob(sample), d.log_prob(sample))
                     self.assertEqual(actual_shape, expected_shape)
                     self.assertEqual(expanded.batch_shape, expanded_shape)
                     try:
@@ -837,7 +831,6 @@ class TestDistributions(TestCase):
                         pass
 
     def test_distribution_subclass_expand(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         expand_by = torch.Size((2,))
         for Dist, params in EXAMPLES:
 
@@ -1252,13 +1245,12 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(RelaxedOneHotCategorical, (temp, p))
 
     def test_relaxed_one_hot_categorical_2d(self):
-        set_rng_seed(10)  # see Note [Randomized statistical tests]
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
         temp = torch.tensor([3.0], requires_grad=True)
         # The lower the temperature, the more unstable the log_prob gradcheck is
         # w.r.t. the sample. Values below 0.25 empirically fail the default tol.
-        temp_2 = torch.tensor([0.35], requires_grad=True)
+        temp_2 = torch.tensor([0.25], requires_grad=True)
         p = torch.tensor(probabilities, requires_grad=True)
         s = torch.tensor(probabilities_1, requires_grad=True)
         self.assertEqual(RelaxedOneHotCategorical(temp, p).sample().size(), (2, 3))
@@ -1269,7 +1261,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_argmax_relaxed_categorical(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
 
         class ArgMax(object):
             def __init__(self, dist):
@@ -1323,7 +1315,7 @@ class TestDistributions(TestCase):
         self.assertEqual(uniform.cdf(below_low).item(), 0)
         self.assertEqual(uniform.cdf(above_high).item(), 1)
 
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(1)
         self._gradcheck_log_prob(Uniform, (low, high))
         self._gradcheck_log_prob(Uniform, (low, 1.0))
         self._gradcheck_log_prob(Uniform, (0.0, high))
@@ -1351,7 +1343,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Cauchy(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Cauchy(0.0, 1.0).sample((1,)).size(), (1,))
 
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(1)
         self._gradcheck_log_prob(Cauchy, (loc, scale))
         self._gradcheck_log_prob(Cauchy, (loc, 1.0))
         self._gradcheck_log_prob(Cauchy, (0.0, scale))
@@ -1377,7 +1369,7 @@ class TestDistributions(TestCase):
         self.assertEqual(HalfCauchy(scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(HalfCauchy(1.0).sample((1,)).size(), (1,))
 
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(1)
         self._gradcheck_log_prob(HalfCauchy, (scale,))
         self._gradcheck_log_prob(HalfCauchy, (1.0,))
 
@@ -1401,7 +1393,7 @@ class TestDistributions(TestCase):
         self.assertEqual(HalfNormal(50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of std
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(1)
         self.assertEqual(HalfNormal(std_delta).sample(sample_shape=(1, 2)),
                          torch.tensor([[[0.0, 0.0], [0.0, 0.0]]]),
                          prec=1e-4)
@@ -1427,12 +1419,11 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_halfnormal_sample(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for std in [0.1, 1.0, 10.0]:
             self._check_sampler_sampler(HalfNormal(std),
                                         scipy.stats.halfnorm(scale=std),
-                                        'HalfNormal(scale={})'.format(std),
-                                        failure_rate=1e-4)
+                                        'HalfNormal(scale={})'.format(std))
 
     def test_lognormal(self):
         mean = torch.randn(5, 5, requires_grad=True)
@@ -1449,7 +1440,7 @@ class TestDistributions(TestCase):
         self.assertEqual(LogNormal(-0.7, 50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(1)
         self.assertEqual(LogNormal(mean_delta, std_delta).sample(sample_shape=(1, 2)),
                          torch.tensor([[[math.exp(1), 1.0], [math.exp(1), 1.0]]]),
                          prec=1e-4)
@@ -1482,8 +1473,7 @@ class TestDistributions(TestCase):
         for mean, std in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(LogNormal(mean, std),
                                         scipy.stats.lognorm(scale=math.exp(mean), s=std),
-                                        'LogNormal(loc={}, scale={})'.format(mean, std),
-                                        failure_rate=1e-4)
+                                        'LogNormal(loc={}, scale={})'.format(mean, std))
 
     def test_logisticnormal(self):
         mean = torch.randn(5, 5).requires_grad_()
@@ -1500,7 +1490,7 @@ class TestDistributions(TestCase):
         self.assertEqual(LogisticNormal(-0.7, 50.0).sample((1,)).size(), (2,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(1)
         self.assertEqual(LogisticNormal(mean_delta, std_delta).sample(),
                          torch.tensor([math.exp(1) / (1. + 1. + math.exp(1)),
                                        1. / (1. + 1. + math.exp(1)),
@@ -1537,7 +1527,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_logisticnormal_sample(self):
-        set_rng_seed(24)  # see Note [Randomized statistical tests]
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         means = map(np.asarray, [(-1.0, -1.0), (0.0, 0.0), (1.0, 1.0)])
         covs = map(np.diag, [(0.1, 0.1), (1.0, 1.0), (10.0, 10.0)])
         for mean, cov in product(means, covs):
@@ -1549,8 +1539,7 @@ class TestDistributions(TestCase):
             self._check_sampler_sampler(
                 LogisticNormal(mean_th, std_th), ref_dist,
                 'LogisticNormal(loc={}, scale={})'.format(mean_th, std_th),
-                multivariate=True,
-                failure_rate=1e-4)
+                multivariate=True)
 
     def test_normal(self):
         loc = torch.randn(5, 5, requires_grad=True)
@@ -1567,7 +1556,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Normal(-0.7, 50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(1)
         self.assertEqual(Normal(loc_delta, scale_delta).sample(sample_shape=(1, 2)),
                          torch.tensor([[[1.0, 0.0], [1.0, 0.0]]]),
                          prec=1e-4)
@@ -1598,12 +1587,11 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_normal_sample(self):
-        set_rng_seed(4)  # see Note [Randomized statistical tests]
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for loc, scale in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Normal(loc, scale),
                                         scipy.stats.norm(loc=loc, scale=scale),
-                                        'Normal(mean={}, std={})'.format(loc, scale),
-                                        failure_rate=1e-4)
+                                        'Normal(mean={}, std={})'.format(loc, scale))
 
     def test_lowrank_multivariate_normal_shape(self):
         mean = torch.randn(5, 3, requires_grad=True)
@@ -1696,8 +1684,7 @@ class TestDistributions(TestCase):
         self._check_sampler_sampler(LowRankMultivariateNormal(mean, cov_factor, cov_diag),
                                     scipy.stats.multivariate_normal(mean.detach().numpy(), cov.detach().numpy()),
                                     'LowRankMultivariateNormal(loc={}, cov_factor={}, cov_diag={})'
-                                    .format(mean, cov_factor, cov_diag), multivariate=True,
-                                    failure_rate=1e-4)
+                                    .format(mean, cov_factor, cov_diag), multivariate=True)
 
     def test_lowrank_multivariate_normal_properties(self):
         loc = torch.randn(5)
@@ -1719,7 +1706,7 @@ class TestDistributions(TestCase):
         cov_factor = torch.randn(5, 2)
         cov_diag = torch.randn(5).abs()
         d = LowRankMultivariateNormal(mean, cov_factor, cov_diag)
-        samples = d.rsample((2000000,))
+        samples = d.rsample((100000,))
         empirical_mean = samples.mean(0)
         self.assertEqual(d.mean, empirical_mean, prec=0.01)
         empirical_var = samples.var(0)
@@ -1839,11 +1826,11 @@ class TestDistributions(TestCase):
         self.assertEqual(m.scale_tril, torch.cholesky(m.covariance_matrix, upper=False))
 
     def test_multivariate_normal_moments(self):
-        set_rng_seed(5)  # see Note [Randomized statistical tests]
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(5)
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
         d = MultivariateNormal(mean, scale_tril=scale_tril)
-        samples = d.rsample((2000000,))
+        samples = d.rsample((100000,))
         empirical_mean = samples.mean(0)
         self.assertEqual(d.mean, empirical_mean, prec=0.01)
         empirical_var = samples.var(0)
@@ -1899,7 +1886,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Laplace(-0.7, 50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(0)
         self.assertEqual(Laplace(loc_delta, scale_delta).sample(sample_shape=(1, 2)),
                          torch.tensor([[[1.0, 0.0], [1.0, 0.0]]]),
                          prec=1e-4)
@@ -1929,12 +1916,11 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_laplace_sample(self):
-        set_rng_seed(4)  # see Note [Randomized statistical tests]
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
         for loc, scale in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Laplace(loc, scale),
                                         scipy.stats.laplace(loc=loc, scale=scale),
-                                        'Laplace(loc={}, scale={})'.format(loc, scale),
-                                        failure_rate=1e-4)
+                                        'Laplace(loc={}, scale={})'.format(loc, scale))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gamma_shape(self):
@@ -1981,18 +1967,17 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gamma_sample(self):
-        set_rng_seed(7)  # see Note [Randomized statistical tests]
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Gamma(alpha, beta),
                                         scipy.stats.gamma(alpha, scale=1.0 / beta),
-                                        'Gamma(concentration={}, rate={})'.format(alpha, beta),
-                                        failure_rate=1e-4)
+                                        'Gamma(concentration={}, rate={})'.format(alpha, beta))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @skipIfRocm
     def test_gamma_gpu_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(0)
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             a, b = torch.tensor([alpha]).cuda(), torch.tensor([beta]).cuda()
             self._check_sampler_sampler(Gamma(a, b),
@@ -2025,12 +2010,11 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_pareto_sample(self):
-        set_rng_seed(2)  # see Note [Randomized statistical tests]
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
         for scale, alpha in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Pareto(scale, alpha),
                                         scipy.stats.pareto(alpha, scale=scale),
-                                        'Pareto(scale={}, alpha={})'.format(scale, alpha),
-                                        failure_rate=1e-5)
+                                        'Pareto(scale={}, alpha={})'.format(scale, alpha))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gumbel(self):
@@ -2055,12 +2039,11 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gumbel_sample(self):
-        set_rng_seed(4)  # see note [Randomized statistical tests]
+        set_rng_seed(1)  # see note [Randomized statistical tests]
         for loc, scale in product([-5.0, -1.0, -0.1, 0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Gumbel(loc, scale),
                                         scipy.stats.gumbel_r(loc=loc, scale=scale),
-                                        'Gumbel(loc={}, scale={})'.format(loc, scale),
-                                        failure_rate=1e-4)
+                                        'Gumbel(loc={}, scale={})'.format(loc, scale))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_fishersnedecor(self):
@@ -2091,8 +2074,7 @@ class TestDistributions(TestCase):
         for df1, df2 in product([0.1, 0.5, 1.0, 5.0, 10.0], [0.1, 0.5, 1.0, 5.0, 10.0]):
             self._check_sampler_sampler(FisherSnedecor(df1, df2),
                                         scipy.stats.f(df1, df2),
-                                        'FisherSnedecor(loc={}, scale={})'.format(df1, df2),
-                                        failure_rate=1e-5)
+                                        'FisherSnedecor(loc={}, scale={})'.format(df1, df2))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_chi2_shape(self):
@@ -2115,12 +2097,11 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_chi2_sample(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for df in [0.1, 1.0, 5.0]:
             self._check_sampler_sampler(Chi2(df),
                                         scipy.stats.chi2(df),
-                                        'Chi2(df={})'.format(df),
-                                        failure_rate=1e-4)
+                                        'Chi2(df={})'.format(df))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_studentT(self):
@@ -2146,12 +2127,11 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_studentT_sample(self):
-        set_rng_seed(12)  # see Note [Randomized statistical tests]
+        set_rng_seed(11)  # see Note [Randomized statistical tests]
         for df, loc, scale in product([0.1, 1.0, 5.0, 10.0], [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(StudentT(df=df, loc=loc, scale=scale),
                                         scipy.stats.t(df=df, loc=loc, scale=scale),
-                                        'StudentT(df={}, loc={}, scale={})'.format(df, loc, scale),
-                                        failure_rate=1e-5)
+                                        'StudentT(df={}, loc={}, scale={})'.format(df, loc, scale))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_studentT_log_prob(self):
@@ -2191,8 +2171,7 @@ class TestDistributions(TestCase):
         self._check_sampler_sampler(Dirichlet(alpha),
                                     scipy.stats.dirichlet(alpha.numpy()),
                                     'Dirichlet(alpha={})'.format(list(alpha)),
-                                    multivariate=True,
-                                    failure_rate=1e-4)
+                                    multivariate=True)
 
     def test_beta_shape(self):
         con1 = torch.randn(2, 3).exp().requires_grad_()
@@ -2219,12 +2198,11 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_beta_sample(self):
-        set_rng_seed(2)  # see Note [Randomized statistical tests]
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
         for con1, con0 in product([0.1, 1.0, 10.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Beta(con1, con0),
                                         scipy.stats.beta(con1, con0),
-                                        'Beta(alpha={}, beta={})'.format(con1, con0),
-                                        failure_rate=1e-5)
+                                        'Beta(alpha={}, beta={})'.format(con1, con0))
         # Check that small alphas do not cause NANs.
         for Tensor in [torch.FloatTensor, torch.DoubleTensor]:
             x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
@@ -2292,7 +2270,6 @@ class TestDistributions(TestCase):
                         pass
 
     def test_independent_expand(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
         for Dist, params in EXAMPLES:
             for param in params:
                 base_dist = Dist(**param)
@@ -2303,18 +2280,14 @@ class TestDistributions(TestCase):
                         expanded = indep_dist.expand(expanded_shape)
                         expanded_sample = expanded.sample()
                         expected_shape = expanded_shape + indep_dist.event_shape
-                        expected = expanded.log_prob(expanded_sample)
-                        actual = indep_dist.log_prob(expanded_sample)
-                        expected[expected == float('inf')] = 0.
-                        actual[actual == float('inf')] = 0.
                         self.assertEqual(expanded_sample.shape, expected_shape)
-                        self.assertEqual(expected, actual, allow_inf=True)
+                        self.assertEqual(expanded.log_prob(expanded_sample),
+                                         indep_dist.log_prob(expanded_sample))
                         self.assertEqual(expanded.event_shape, indep_dist.event_shape)
                         self.assertEqual(expanded.batch_shape, expanded_shape)
 
     def test_cdf_icdf_inverse(self):
         # Tests the invertibility property on the distributions
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
@@ -2324,8 +2297,6 @@ class TestDistributions(TestCase):
                     actual = dist.icdf(cdf)
                 except NotImplementedError:
                     continue
-                samples[samples == float('inf')] = 0.
-                actual[actual == float('inf')] = 0.
                 rel_error = torch.abs(actual - samples) / (1e-10 + torch.abs(samples))
                 self.assertLess(rel_error.max(), 1e-4, msg='\n'.join([
                     '{} example {}/{}, icdf(cdf(x)) != x'.format(Dist.__name__, i + 1, len(params)),
@@ -2354,7 +2325,6 @@ class TestDistributions(TestCase):
                     'cdf = {}'.format(cdfs),
                     'pdf = {}'.format(pdfs),
                     'grad(cdf) = {}'.format(cdfs_derivative),
-                    'param = {}'.format(param),
                 ]))
 
     def test_valid_parameter_broadcasting(self):
@@ -2573,7 +2543,6 @@ class TestRsample(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_dirichlet_on_diagonal(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
         num_samples = 20
         grid = [1e-1, 1e0, 1e1]
         for a0, a1, a2 in product(grid, grid, grid):
@@ -2593,7 +2562,7 @@ class TestRsample(TestCase):
             cdf_x = pdf(x, alpha, beta)
             expected_grad = -cdf_alpha / cdf_x
             rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
-            self.assertLess(np.max(rel_error), 0.002, '\n'.join([
+            self.assertLess(np.max(rel_error), 0.001, '\n'.join([
                 'Bad gradient dx[0]/dalpha[0] for Dirichlet([{}, {}, {}])'.format(a0, a1, a2),
                 'x {}'.format(x),
                 'expected {}'.format(expected_grad),
@@ -2653,7 +2622,7 @@ class TestRsample(TestCase):
             cdf_x = pdf(x, con1, con0)
             expected_grad = -cdf_beta / cdf_x
             rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
-            self.assertLess(np.max(rel_error), 0.006, '\n'.join([
+            self.assertLess(np.max(rel_error), 0.005, '\n'.join([
                 'Bad gradient dx/dcon0 for x ~ Beta({}, {})'.format(con1, con0),
                 'x {}'.format(x),
                 'expected {}'.format(expected_grad),
@@ -2697,7 +2666,6 @@ class TestRsample(TestCase):
             ], dim=-1)
 
         for a1, a2, a3 in product(alpha_grid, alpha_grid, alpha_grid):
-            set_rng_seed(5)  # see Note [Randomized statistical tests]
             alpha = torch.tensor([a1, a2, a3], requires_grad=True).expand(num_samples, 3)
             x = Dirichlet(alpha).rsample()
             dlogp_da = grad([Dirichlet(alpha).log_prob(x.detach()).sum()],
@@ -2718,7 +2686,7 @@ class TestRsample(TestCase):
             # This is a modification of the standard continuity equation, using the product rule to allow
             # expression in terms of log_prob rather than the less numerically stable log_prob.exp().
             error = dlogp_da + (dlogp_dx * v).sum(-1) + div_v
-            self.assertLess(torch.abs(error).max(), 0.006, '\n'.join([
+            self.assertLess(torch.abs(error).max(), 0.005, '\n'.join([
                 'Dirichlet([{}, {}, {}]) gradient violates continuity equation:'.format(a1, a2, a3),
                 'error = {}'.format(error),
             ]))
@@ -3431,7 +3399,7 @@ class TestKL(TestCase):
                 ]))
 
     def test_entropy_monte_carlo(self):
-        set_rng_seed(3)  # see Note [Randomized statistical tests]
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
@@ -3443,7 +3411,7 @@ class TestKL(TestCase):
                 expected = -dist.log_prob(x).mean(0)
                 ignore = (expected == inf) | (expected == -inf)
                 expected[ignore] = actual[ignore]
-                self.assertEqual(actual, expected, prec=0.35, message='\n'.join([
+                self.assertEqual(actual, expected, prec=0.2, message='\n'.join([
                     '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),
                     'Expected (monte carlo) {}'.format(expected),
                     'Actual (analytic) {}'.format(actual),
@@ -3673,9 +3641,8 @@ class TestLazyLogitsInitialization(TestCase):
 class TestAgainstScipy(TestCase):
     def setUp(self):
         super(TestAgainstScipy, self).setUp()
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
-        positive_var = torch.rand(20).exp()
-        positive_var2 = torch.rand(20).exp()
+        positive_var = torch.randn(20).exp()
+        positive_var2 = torch.randn(20).exp()
         random_var = torch.randn(20)
         simplex_tensor = softmax(torch.randn(20), dim=-1)
         self.distribution_pairs = [
@@ -4279,7 +4246,6 @@ class TestJit(TestCase):
             return values, sample
 
     def test_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for Dist, keys, values, sample in self._examples():
 
             def f(*values):
@@ -4308,7 +4274,6 @@ class TestJit(TestCase):
                 self.assertTrue(any(n.isNondeterministic() for n in traced_f.graph.nodes()))
 
     def test_rsample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for Dist, keys, values, sample in self._examples():
             if not Dist.has_rsample:
                 continue
@@ -4331,10 +4296,7 @@ class TestJit(TestCase):
             with torch.random.fork_rng():
                 sample = f(*values)
             traced_sample = traced_f(*values)
-
-            sample[sample == float('inf')] = 0.
-            traced_sample[traced_sample == float('inf')] = 0.
-            self.assertEqual(sample, traced_sample, allow_inf=True)
+            self.assertEqual(sample, traced_sample)
 
             # FIXME no nondeterministic nodes found in trace
             xfail = [Beta, Dirichlet]
@@ -4342,7 +4304,6 @@ class TestJit(TestCase):
                 self.assertTrue(any(n.isNondeterministic() for n in traced_f.graph.nodes()))
 
     def test_log_prob(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for Dist, keys, values, sample in self._examples():
             # FIXME traced functions produce incorrect results
             xfail = [LowRankMultivariateNormal, MultivariateNormal]
@@ -4360,9 +4321,7 @@ class TestJit(TestCase):
             values, sample = self._perturb(Dist, keys, values, sample)
             expected = f(sample, *values)
             actual = traced_f(sample, *values)
-            expected[expected == float('inf')] = 0.
-            actual[actual == float('inf')] = 0.
-            self.assertEqual(expected, actual, allow_inf=True,
+            self.assertEqual(expected, actual,
                              message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
     def test_enumerate_support(self):
@@ -4413,8 +4372,8 @@ class TestJit(TestCase):
 
     def test_variance(self):
         for Dist, keys, values, sample in self._examples():
-            if Dist in [Cauchy, HalfCauchy, StudentT]:
-                continue  # infinite variance, traced function for StudentT errors out
+            if Dist in [Cauchy, HalfCauchy]:
+                continue  # infinite variance
 
             def f(*values):
                 param = dict(zip(keys, values))

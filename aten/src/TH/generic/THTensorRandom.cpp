@@ -27,11 +27,9 @@ void THTensor_(random)(THTensor *self, at::Generator *_generator)
 #elif defined(TH_REAL_IS_LONG)
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (uint64_t)(gen->random64() % (LONG_MAX + 1ULL)););
 #elif defined(TH_REAL_IS_FLOAT)
-  at::uniform_real_distribution<float> uniform(0.0f, 1.0f);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (float)(uniform(gen)););
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (float)(gen->random() % ((1ULL << FLT_MANT_DIG) + 1)););
 #elif defined(TH_REAL_IS_DOUBLE)
-  at::uniform_real_distribution<double> uniform(0.0, 1.0);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (double)(uniform(gen)););
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (double)(gen->random64() % ((1ULL << DBL_MANT_DIG) + 1)););
 #elif defined(TH_REAL_IS_BOOL)
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (bool)(gen->random() % 2););
 #else
@@ -93,13 +91,8 @@ void THTensor_(normal)(THTensor *self, at::Generator *_generator, double mean, d
     // See Note [Thread-safety and Generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
 
-    #if defined(TH_REAL_IS_FLOAT)
-    at::normal_distribution<float> normal(mean, stddev);
-    TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)normal(gen););
-    #else
     at::normal_distribution<double> normal(mean, stddev);
     TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)normal(gen););
-    #endif
   }
 }
 
@@ -251,7 +244,6 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
 }
 void THTensor_(multinomialAliasDraw)(THLongTensor *self, at::Generator *_generator, THTensor *q, THLongTensor *J, int n_sample)
 {
-  std::lock_guard<std::mutex> lock(_generator->mutex);
   THArgCheck(q->dim() == 1, 1,
              "expected 1-D probability table, got %d-D probability table instead",
              q->dim());

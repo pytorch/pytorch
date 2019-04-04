@@ -37,47 +37,11 @@ std::unique_ptr<CPUGenerator> createCPUGenerator(uint64_t seed_val) {
 } // namespace detail
 
 /**
- * Defines mersenne twister seeding mechanism.
- * 
- * Our algorithm for seeding mt19937 is:
- *  - Take uint64_t seed value from the user and get three uint64_t-s
- *    from a splitmix64 generator
- *  - Give the three splitmix64 randoms to a Philox PRNG and get 
- *    MERSENNE_STATE_N*INIT_KEY_MULTIPLIER randoms from it
- *  - Use the philox randoms array to initialize mt19937.
- * 
- * Details of initialization problems are described in this research
- * paper: https://dl.acm.org/citation.cfm?id=1276928.
- * 
- * Moreover, Vigna also suggests that "initialization must be performed with a 
- * generator radically different in nature from the one initialized to avoid 
- * correlation on similar seeds": http://xoshiro.di.unimi.it/
- */
-
-at::mt19937 seedMersenneTwisterEngine(uint64_t seed_in) {
-  auto splitmix64 = [&seed_in]() {
-    uint64_t z = (seed_in += 0x9e3779b97f4a7c15);
-    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9;
-    z = (z ^ (z >> 27)) * 0x94d049bb133111eb;
-    return z ^ (z >> 31);
-  };
-  
-  uint64_t philox_seed = splitmix64();
-  uint64_t philox_subsequence = splitmix64();
-  uint64_t philox_offset = splitmix64();
-  Philox4_32_10 philox_engine(philox_seed, philox_subsequence, philox_offset);
-  // get 3x the amount of seed data needed for better state initialization
-  std::array<uint32_t, MERSENNE_STATE_N*INIT_KEY_MULTIPLIER> seed_data;
-  std::generate_n(seed_data.data(), seed_data.size(), std::ref(philox_engine));
-  return at::mt19937(seed_in, seed_data);
-}
-
-/**
  * CPUGenerator class implementation
  */
 CPUGenerator::CPUGenerator(uint64_t seed_in)
   : CloneableGenerator(Device(DeviceType::CPU)),
-    engine_(seedMersenneTwisterEngine(seed_in)) { }
+    engine_(seed_in) { }
 
 CPUGenerator::CPUGenerator(mt19937 engine_in)
   : CloneableGenerator(Device(DeviceType::CPU)),
@@ -88,7 +52,7 @@ CPUGenerator::CPUGenerator(mt19937 engine_in)
  * See Note [Thread-safety and Generators]
  */
 void CPUGenerator::set_current_seed(uint64_t seed) {
-  engine_ = mt19937(seedMersenneTwisterEngine(seed));
+  engine_ = mt19937(seed);
 }
 
 /**

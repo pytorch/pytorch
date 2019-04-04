@@ -2019,7 +2019,6 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_int_pow(self, cast):
-        torch.manual_seed(1)
         if not TEST_NUMPY:
             return
 
@@ -3686,7 +3685,7 @@ class _TestTorchMixin(object):
         for args in [(3,), (1, 3)]:  # (low,) and (low, high)
             self.assertIs(torch.int64, torch.randint(*args, size=size).dtype)
             self.assertIs(torch.int64, torch.randint(*args, size=size, layout=torch.strided).dtype)
-            self.assertIs(torch.int64, torch.randint(*args, size=size, generator=torch.random.default_generator).dtype)
+            self.assertIs(torch.int64, torch.randint(*args, size=size, generator=torch.default_generator).dtype)
             self.assertIs(torch.float32, torch.randint(*args, size=size, dtype=torch.float32).dtype)
             out = torch.empty(size, dtype=torch.float32)
             self.assertIs(torch.float32, torch.randint(*args, size=size, out=out).dtype)
@@ -6366,7 +6365,6 @@ class _TestTorchMixin(object):
     @staticmethod
     def _test_cholesky_solve_batched(self, cast):
         from common_utils import random_symmetric_pd_matrix
-        torch.manual_seed(123)
 
         def cholesky_solve_test_helper(A_dims, b_dims, cast, upper):
             A = cast(random_symmetric_pd_matrix(*A_dims))
@@ -8978,34 +8976,6 @@ class _TestTorchMixin(object):
         self.assertEqual(r[:, :50].std(), 4, 0.3)
         self.assertEqual(r[:, 50:].std(), 1, 0.2)
 
-    def test_generator_cpu(self):
-        # tests Generator API
-        # manual_seed, seed, initial_seed, get_state, set_state
-        g1 = torch.Generator()
-        g2 = torch.Generator()
-        g1.manual_seed(12345)
-        g2.manual_seed(12345)
-        self.assertEqual(g1.initial_seed(), g2.initial_seed())
-
-        g1.seed()
-        g2.seed()
-        self.assertNotEqual(g1.initial_seed(), g2.initial_seed())
-
-        g1 = torch.Generator(default=True)
-        g2_state = g2.get_state()
-        g2_randn = torch.randn(1, generator=g2)
-        g1.set_state(g2_state)
-        g1_randn = torch.randn(1)
-        self.assertEqual(g1_randn, g2_randn)
-
-        default_state = torch.Generator(default=True).get_state()
-        q = torch.Tensor(100)
-        g1_normal = q.normal_()
-        g2 = torch.Generator()
-        g2.set_state(default_state)
-        g2_normal = q.normal_(generator=g2)
-        self.assertEqual(g1_normal, g2_normal)
-
     def test_sobolengine_unscrambled_lowdim(self):
         engine_1d = torch.quasirandom.SobolEngine(1)
         expected_1d = torch.tensor([0.5, 0.75, 0.25, 0.375, 0.875, 0.625, 0.125, 0.1875, 0.6875, 0.9375])
@@ -9055,15 +9025,15 @@ class _TestTorchMixin(object):
 
     def test_sobolengine_scrambled_lowdim(self):
         engine_1d = torch.quasirandom.SobolEngine(1, scramble=True, seed=1729)
-        expected_1d = [0.28656727, 0.07349014, 0.57309633, 0.74601585, 0.24457809,
-                       0.39478949, 0.89634156, 0.98466802, 0.48616761, 0.15614678]
+        expected_1d = [0.16478512, 0.43221009, 0.84261382, 0.99750268, 0.27460563,
+                       0.01084163, 0.73373985, 0.65039611, 0.12329865, 0.35587373]
         actual_1d = engine_1d.draw(10)
         self.assertEqual(actual_1d.flatten(), torch.tensor(expected_1d))
         self.assertEqual(actual_1d.size(), torch.Size([10, 1]))
 
         engine_3d = torch.quasirandom.SobolEngine(3, scramble=True, seed=1729)
-        expected_3d = [0.48351198, 0.11474668, 0.66568112, 0.35685620, 0.92311049,
-                       0.54283994, 0.24215059, 0.73393250, 0.05042873, 0.41527727]
+        expected_3d = [0.32642800, 0.17881306, 0.68837059, 0.46492538, 0.91789097,
+                       0.58075899, 0.03642474, 0.68229187, 0.20051685, 0.30083340]
         actual_3d = engine_3d.draw(10)
         self.assertEqual(actual_3d[:, 2], torch.tensor(expected_3d))
         self.assertEqual(actual_3d.size(), torch.Size([10, 3]))
