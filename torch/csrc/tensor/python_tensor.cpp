@@ -71,7 +71,8 @@ static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs
   if (!aten_type) {
     throw unavailable_type(tensor_type);
   }
-  return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(*aten_type, args, kwargs));
+  auto scalar_type = static_cast<ScalarType>(tensor_type.scalar_type);
+  return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(*aten_type, scalar_type, args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -386,5 +387,9 @@ void set_default_tensor_type(const at::Type& type) {
 at::Type& get_default_tensor_type() {
   AT_ASSERT(default_tensor_type);
   return *default_tensor_type;
+}
+
+ScalarType get_default_scalar_type() {
+  return typeMetaToScalarType(get_default_dtype());
 }
 }} // namespace torch::tensors
