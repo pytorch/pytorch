@@ -49,8 +49,7 @@ const std::vector<std::string> functions = {
             self_size = self.size()
             self_numel = self.numel()
             def backward(grad_output):
-                grad_self = grad_output.expand(self_size) / self_numel
-                return grad_self
+                return grad_output.expand(self_size) / self_numel
 
             return torch.mean(self), backward
 
@@ -410,9 +409,7 @@ const std::vector<std::string> functions = {
 
         def dot(self, tensor):
             def backward(grad_output):
-                grad_self = grad_output * tensor
-                grad_tensor = grad_output * self
-                return grad_self, grad_tensor
+                return grad_output * tensor, grad_output * self
 
             return torch.dot(self, tensor), backward
 
@@ -420,8 +417,7 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 # Precomputed constant C = 2.0 / math.sqrt(math.pi)
                 C = 1.1283791670955126
-                grad_self =  C * torch.exp(- self * self) * grad_output
-                return grad_self
+                return C * torch.exp(- self * self) * grad_output
 
             return torch.erf(self), backward
 
@@ -481,9 +477,7 @@ const std::vector<std::string> functions = {
 
         def mv(self, vec):
             def backward(grad_output):
-                grad_self = grad_output.ger(vec)
-                grad_vec = self.t().mv(grad_output)
-                return grad_self, grad_vec
+                return grad_output.ger(vec), self.t().mv(grad_output)
 
             return torch.mv(self, vec), backward
 
@@ -548,15 +542,13 @@ const std::vector<std::string> functions = {
         def sqrt(self):
             result = torch.sqrt(self)
             def backward(grad_output):
-                grad_self = grad_output / (2 * result)
-                return grad_self
+                return grad_output / (2 * result)
 
             return result, backward
 
         def t(self):
             def backward(grad_output):
-                grad_self = torch.t(grad_output)
-                return grad_self
+                return torch.t(grad_output)
 
             return torch.t(self), backward
 
@@ -603,8 +595,7 @@ const std::vector<std::string> functions = {
                       dim0: int,
                       dim1: int):
             def backward(grad_output):
-                grad_self = torch.transpose(grad_output, dim0, dim1)
-                return grad_self, None, None
+                return torch.transpose(grad_output, dim0, dim1), None, None
 
             return torch.transpose(self, dim0, dim1), backward
 
@@ -612,8 +603,7 @@ const std::vector<std::string> functions = {
                  size: List[int]):
             self_size = self.size()
             def backward(grad_output):
-                grad_self = grad_output.reshape(self_size)
-                return grad_self, None
+                return grad_output.reshape(self_size), None
 
             return torch.view(self, size), backward
 
@@ -646,8 +636,7 @@ const std::vector<std::string> functions = {
         def sigmoid(self):
             result = torch.sigmoid(self)
             def backward(grad_output):
-                grad_self = (1 - result) * result * grad_output
-                return grad_self
+                return (1 - result) * result * grad_output
 
             return result, backward
 
@@ -656,8 +645,7 @@ const std::vector<std::string> functions = {
             result = torch.relu(self)
             self_size = self.size()
             def backward(grad_output):
-                grad_self = grad_output * (result > 0).type_as(result)
-                return grad_self
+                return grad_output * (result > 0).type_as(result)
 
             return result, backward
 
@@ -665,23 +653,20 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 # Precomputed constant C = -2.0 / math.sqrt(math.pi)
                 C = -1.1283791670955126
-                grad_self = C * torch.exp(-self * self) * grad_output
-                return grad_self
+                return C * torch.exp(-self * self) * grad_output
 
             return torch.erfc(self), backward
 
         def exp(self):
             result = torch.exp(self)
             def backward(grad_output):
-                grad_self = grad_output * result
-                return grad_self
+                return grad_output * result
 
             return result, backward
 
         def neg(self):
             def backward(grad_output):
-                grad_self = grad_output.neg()
-                return grad_self
+                return grad_output.neg()
 
             return torch.neg(self), backward
 
@@ -697,15 +682,13 @@ const std::vector<std::string> functions = {
 
         def type_as(self, other):
             def backward(grad_output):
-                grad_self = grad_output.type_as(self)
-                return grad_self, None
+                return grad_output.type_as(self), None
 
             return torch.type_as(self, other), backward
 
         def unsqueeze(self, dim: int):
             def backward(grad_output):
-                grad_self = grad_output.squeeze(dim)
-                return grad_self, None
+                return grad_output.squeeze(dim), None
 
             return torch.unsqueeze(self, dim), backward
 
@@ -741,100 +724,86 @@ const std::vector<std::string> functions = {
 
         def abs(self):
             def backward(grad_output):
-                grad_self = grad_output * self.sign()
-                return grad_self
+                return grad_output * self.sign()
 
             return torch.abs(self), backward
 
         def acos(self):
             def backward(grad_output):
-                grad_self = grad_output * -((-self * self + 1).rsqrt())
-                return grad_self
+                return grad_output * -((-self * self + 1).rsqrt())
 
             return torch.acos(self), backward
 
         def asin(self):
             def backward(grad_output):
-                grad_self = grad_output * (-self * self + 1).rsqrt()
-                return grad_self
+                return grad_output * (-self * self + 1).rsqrt()
 
             return torch.asin(self), backward
 
         def atan(self):
             def backward(grad_output):
-                grad_self = grad_output / (self * self + 1)
-                return grad_self
+                return grad_output / (self * self + 1)
 
             return torch.atan(self), backward
 
         def ceil(self):
             def backward(grad_output):
-                grad_self = torch.zeros_like(grad_output)
-                return grad_self
+                return torch.zeros_like(grad_output)
 
             return torch.ceil(self), backward
 
         def cos(self):
             def backward(grad_output):
-                grad_self = grad_output * -self.sin()
-                return grad_self
+                return grad_output * -self.sin()
 
             return torch.cos(self), backward
 
         def cosh(self):
             def backward(grad_output):
-                grad_self = grad_output * self.sinh()
-                return grad_self
+                return grad_output * self.sinh()
 
             return torch.cosh(self), backward
 
         def expm1(self):
             result = torch.expm1(self)
             def backward(grad_output):
-                grad_self = grad_output * (result + 1)
-                return grad_self
+                return grad_output * (result + 1)
 
             return result, backward
 
         def floor(self):
             def backward(grad_output):
-                grad_self = torch.zeros_like(grad_output)
-                return grad_self
+                return torch.zeros_like(grad_output)
 
             return torch.floor(self), backward
 
         def frac(self):
             def backward(grad_output):
-                grad_self = grad_output
-                return grad_self
+                return grad_output
 
             return torch.frac(self), backward
 
         def log(self):
             def backward(grad_output):
-                grad_self = grad_output.div(self)
-                return grad_self
+                return grad_output.div(self)
 
             return torch.log(self), backward
 
         def log10(self):
             def backward(grad_output):
-                grad_self = grad_output / (self * 2.3025850929940456)
-                return grad_self
+                return grad_output / (self * 2.3025850929940456)
 
             return torch.log10(self), backward
 
         def log1p(self):
             def backward(grad_output):
-                grad_self = grad_output / (self + 1)
-                return grad_self
+                return grad_output / (self + 1)
 
             return torch.log1p(self), backward
 
         def log2(self):
             def backward(grad_output):
-                grad_self = grad_output / (self * 0.6931471805599453)
-                return grad_self
+                return grad_output / (self * 0.6931471805599453)
 
             return torch.log2(self), backward
 
@@ -847,52 +816,45 @@ const std::vector<std::string> functions = {
         def reciprocal(self):
             result = torch.reciprocal(self)
             def backward(grad_output):
-                grad_self = -grad_output * result * result
-                return grad_self
+                return -grad_output * result * result
 
             return result, backward
 
         def round(self):
             def backward(grad_output):
-                grad_self = torch.zeros_like(grad_output)
-                return grad_self
+                return torch.zeros_like(grad_output)
 
             return torch.round(self), backward
 
         def rsqrt(self):
             result = torch.rsqrt(self)
             def backward(grad_output):
-                grad_self = -grad_output * result * result * result / 2
-                return grad_self
+                return -grad_output * result * result * result / 2
 
             return result, backward
 
         def sin(self):
             def backward(grad_output):
-                grad_self = grad_output * self.cos()
-                return grad_self
+                return grad_output * self.cos()
 
             return torch.sin(self), backward
 
         def sinh(self):
             def backward(grad_output):
-                grad_self = grad_output * self.cosh()
-                return grad_self
+                return grad_output * self.cosh()
 
             return torch.sinh(self), backward
 
         def tan(self):
             result = torch.tan(self)
             def backward(grad_output):
-                grad_self = grad_output * (1. + result * result)
-                return grad_self
+                return grad_output * (1. + result * result)
 
             return result, backward
 
         def trunc(self):
             def backward(grad_output):
-                grad_self = torch.zeros_like(grad_output)
-                return grad_self
+                return torch.zeros_like(grad_output)
 
             return torch.trunc(self), backward
 
@@ -900,8 +862,7 @@ const std::vector<std::string> functions = {
                               size: List[int]):
             self_size = self.size()
             def backward(grad_output):
-                grad_self = grad_output.expand(self_size)
-                return grad_self, None
+                return grad_output.expand(self_size), None
 
             return torch._grad_sum_to_size(self, size), backward
     )",
