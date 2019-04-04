@@ -85,7 +85,7 @@ static PyObject* Tensor_instancecheck(PyTensorType* self, PyObject* arg) {
     // be nullptr if you had a tensor of some type, in which case you can
     // skip initializign aten_type(), but TestAutograd.test_type_conversions
     // seems to violate this property (for whatever reason.)
-    if (&var.type() == self->aten_type()) {
+    if (&var.dispatch_type() == self->aten_type()) {
       Py_RETURN_TRUE;
     }
   }
@@ -346,7 +346,7 @@ void py_set_default_dtype(PyObject* obj) {
   if (THPDtype_Check(obj)) {
     auto &current_default = get_default_tensor_type();
     type = &get_tensor_type((THPDtype*)obj, torch::getLayout(current_default.backend()),
-                            torch::getDeviceType(current_default) == at::Device::Type::CUDA);
+                            current_default.device_type() == at::Device::Type::CUDA);
   } else {
     throw TypeError("invalid type object");
   }

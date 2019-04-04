@@ -69,7 +69,7 @@ struct CAFFE2_API OperandInfo {
   OperandInfo(const Tensor& t, const Type* type=nullptr)
     : tensor(t), type(const_cast<Type*>(type)) {
       if (t.defined() && !type) {
-        this->type = &t.type();
+        this->type = &t.dispatch_type();
       }
   }
 

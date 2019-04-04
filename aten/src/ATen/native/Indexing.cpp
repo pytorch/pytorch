@@ -190,7 +190,6 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size)
 
 static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
   auto strides = computeLinearStride(src);
-  Type& longType = src.type().toScalarType(kLong);
 
   // Compute the linear index by multiplying the indexing tensors by the
   // stride and summing them. All the indexing tensors have the same shape at
@@ -202,7 +201,7 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
     if (indices[i].defined()) {
       // Cast index to the longType matching src's backend
       // This allows us to support ie indexing a cuda tensor with a cpu tensor
-      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i)) * strides[i]).toType(longType);
+      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i)) * strides[i]).to(kLong);
       if (linearIndex.defined()) {
         linearIndex += index;
       } else {
@@ -220,13 +219,13 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
   // Compute the linear indices for the parts of the tensor not being indexed
   Tensor beforeIndex;
   if (emptyBefore > 0) {
-    auto index = at::arange(0, nElemBefore, longType) * strides[emptyBefore - 1];
+    auto index = at::arange(0, nElemBefore, src.options().dtype(kLong)) * strides[emptyBefore - 1];
     index = index.view(src.sizes().slice(0, emptyBefore));
     beforeIndex = unsqueezeN(index, 0, linearIndex.dim() + emptyAfter);
   }
   Tensor afterIndex;
   if (emptyAfter > 0) {
-    auto index = at::arange(0, nElemAfter, longType);
+    auto index = at::arange(0, nElemAfter, src.options().dtype(kLong));
     index = index.view(src.sizes().slice(src.dim() - emptyAfter, emptyAfter));
     afterIndex = unsqueezeN(index, linearIndex.dim() + emptyBefore, 0);
   }
@@ -408,7 +407,7 @@ static AdvancedIndex make_info(Tensor self, TensorList orig) {
 static std::unique_ptr<TensorIterator> make_index_iterator(const AdvancedIndex& info) {
   auto builder = TensorIterator::Builder();
   builder.dont_compute_common_dtype();
-  builder.add_output(Tensor(), &info.src.type());
+  builder.add_output(Tensor(), &info.src.dispatch_type());
   builder.add_input(info.src);
   for (auto& index : info.indices) {
     builder.add_input(index);
@@ -425,7 +424,7 @@ static std::unique_ptr<TensorIterator> make_index_put_iterator(const AdvancedInd
   builder.dont_compute_common_dtype();
   builder.dont_resize_outputs();
   builder.add_output(info.src);
-  builder.add_input(value, &info.src.type());
+  builder.add_input(value, &info.src.dispatch_type());
   for (auto& index : info.indices) {
     builder.add_input(index);
   }
