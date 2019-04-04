@@ -428,9 +428,8 @@ void AliasDb::analyzeImpl(Node* node) {
     }
   }
 
-  if (schema.is_custom_op()) {
-    // If the schema eixsts but explicitly lacks aliasing information, it
-    // should be analyzed as a custom op.
+  // see [custom operator aliasing]
+  if (!node->kind().is_aten() && !node->kind().is_prim()) {
     return analyzeCustomOp(node);
   }
 

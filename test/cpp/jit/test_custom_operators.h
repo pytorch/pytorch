@@ -228,8 +228,6 @@ void testCustomOperatorAliasing() {
   auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::aliasing"));
   auto& op = ops.front();
 
-  ASSERT_TRUE(op->schema().is_custom_op());
-
   {
     auto graph = std::make_shared<Graph>();
     script::parseIR(
