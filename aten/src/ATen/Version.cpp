@@ -10,11 +10,13 @@
 #include <ideep.hpp>
 #endif
 
+#include <caffe2/core/common.h>
+
 #include <sstream>
 
 namespace at {
 
-std::string detailed_version() {
+std::string show_config() {
   std::ostringstream ss;
   ss << "PyTorch built with:\n"; // TODO add the version of PyTorch
 
@@ -41,6 +43,8 @@ std::string detailed_version() {
 
 #if AT_MKL_ENABLED()
   {
+    // Magic buffer number is from MKL documentation
+    // https://software.intel.com/en-us/mkl-developer-reference-c-mkl-get-version-string
     char buf[198];
     mkl_get_version_string(buf, 198);
     ss << "  - " << buf << "\n";
@@ -94,9 +98,22 @@ std::string detailed_version() {
   ss << "  - LAPACK is enabled (usually provided by MKL)\n";
 #endif
 
+#if AT_NNPACK_ENABLED()
+  // TODO: No version; c.f. https://github.com/Maratyszcza/NNPACK/issues/165
+  ss << "  - NNPACK is enabled\n";
+#endif
+
   if (hasCUDA()) {
-    ss << detail::getCUDAHooks().detailedVersion();
+    ss << detail::getCUDAHooks().showConfig();
   }
+
+  ss << "  - Build settings: ";
+  for (const std::pair<std::string, std::string>& pair : caffe2::GetBuildOptions()) {
+    if (!pair.second.empty()) {
+      ss << pair.first << "=" << pair.second << ", ";
+    }
+  }
+  ss << "\n";
 
   // TODO: do HIP
   // TODO: do XLA

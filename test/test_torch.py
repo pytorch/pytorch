@@ -10464,9 +10464,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         run_test(torch.long)
         run_test(torch.uint8)
 
-    def test_detailed_version(self):
+    def test_show_config(self):
         # We can't usefully test the output; just make sure this doesn't crash
-        torch.backends.detailed_version()
+        torch.__config__.show()
 
     @staticmethod
     def _test_bincount(self, device):

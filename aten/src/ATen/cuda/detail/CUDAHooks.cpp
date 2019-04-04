@@ -16,6 +16,10 @@
 #include <ATen/cudnn/cudnn-wrapper.h>
 #endif
 
+#ifdef USE_MAGMA
+#include <magma.h>
+#endif
+
 #include <cuda.h>
 
 #include <sstream>
@@ -106,7 +110,7 @@ long CUDAHooks::versionCuDNN() const {
 #endif
 }
 
-std::string CUDAHooks::detailedVersion() const {
+std::string CUDAHooks::showConfig() const {
   std::ostringstream oss;
   oss << "  - CUDA Runtime " << (CUDART_VERSION / 1000) << "." << (CUDART_VERSION / 10 % 100) << "." << (CUDART_VERSION % 10) << "\n";
 #if AT_CUDNN_ENABLED()

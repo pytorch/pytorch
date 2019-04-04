@@ -299,10 +299,10 @@ PyObject *THPModule_hasDistributed(PyObject *_unused)
 #endif
 }
 
-static PyObject *THPModule_detailedVersion(PyObject *module)
+static PyObject *THPModule_showConfig(PyObject *module)
 {
   HANDLE_TH_ERRORS
-  return THPUtils_packString(at::detailed_version());
+  return THPUtils_packString(at::show_config());
   END_HANDLE_TH_ERRORS
 }
 
@@ -440,7 +440,7 @@ static PyMethodDef TorchMethods[] = {
   {"_crash_if_csrc_asan", (PyCFunction)THPModule_crashIfCsrcASAN, METH_O, nullptr},
   {"_crash_if_csrc_ubsan", (PyCFunction)THPModule_crashIfCsrcUBSAN, METH_O, nullptr},
   {"_crash_if_aten_asan", (PyCFunction)THPModule_crashIfATenASAN, METH_O, nullptr},
-  {"_detailed_version", (PyCFunction)THPModule_detailedVersion, METH_NOARGS, nullptr},
+  {"_show_config",    (PyCFunction)THPModule_showConfig, METH_NOARGS, nullptr},
   {"_set_backcompat_broadcast_warn", (PyCFunction)THPModule_setBackcompatBroadcastWarn, METH_O, nullptr},
   {"_get_backcompat_broadcast_warn", (PyCFunction)THPModule_getBackcompatBroadcastWarn, METH_NOARGS, nullptr},
   {"_set_backcompat_keepdim_warn", (PyCFunction)THPModule_setBackcompatKeepdimWarn, METH_O, nullptr},
