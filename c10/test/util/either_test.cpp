@@ -57,17 +57,17 @@ void test_with_matrix(std::vector<std::function<void(std::function<void(T&)>)>> 
 template<class Left, class Right>
 std::vector<std::function<void(either<Left, Right>&)>> EXPECT_IS_LEFT(const Left& expected) {
   return {
-    [&] (auto& obj) {
+    [&] (either<Left, Right>& obj) {
       EXPECT_TRUE(obj.is_left());
-    }, [&] (auto& obj) {
+    }, [&] (either<Left, Right>& obj) {
       EXPECT_FALSE(obj.is_right());
-    }, [&] (auto& obj) {
+    }, [&] (either<Left, Right>& obj) {
       EXPECT_EQ(expected, obj.left());
-    }, [&] (auto& obj) {
+    }, [&] (either<Left, Right>& obj) {
       EXPECT_EQ(expected, std::move(obj).left());
-    }, [&] (auto& obj) {
+    }, [&] (either<Left, Right>& obj) {
       EXPECT_ANY_THROW(obj.right());
-    }, [&] (auto& obj) {
+    }, [&] (either<Left, Right>& obj) {
       EXPECT_ANY_THROW(std::move(obj).right());
     }
   };
@@ -76,17 +76,17 @@ std::vector<std::function<void(either<Left, Right>&)>> EXPECT_IS_LEFT(const Left
 template<class Left, class Right>
 std::vector<std::function<void(either<Left, Right>&)>> EXPECT_IS_RIGHT(const Right& expected) {
   return {
-      [&] (auto& obj) {
+      [&] (either<Left, Right>& obj) {
         EXPECT_FALSE(obj.is_left());
-      }, [&] (auto& obj) {
+      }, [&] (either<Left, Right>& obj) {
         EXPECT_TRUE(obj.is_right());
-      }, [&] (auto& obj) {
+      }, [&] (either<Left, Right>& obj) {
         EXPECT_EQ(expected, obj.right());
-      }, [&] (auto& obj) {
+      }, [&] (either<Left, Right>& obj) {
         EXPECT_EQ(expected, std::move(obj).right());
-      }, [&] (auto& obj) {
+      }, [&] (either<Left, Right>& obj) {
         EXPECT_ANY_THROW(obj.left());
-      }, [&] (auto& obj) {
+      }, [&] (either<Left, Right>& obj) {
         EXPECT_ANY_THROW(std::move(obj).left());
       }
   };
