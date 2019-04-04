@@ -849,12 +849,14 @@ bool Node::hasSideEffects() const {
     case prim::TimePoint:
       return true;
   }
-  // Custom ops may have arbitrary side effects
-  if (!kind_.is_builtin_ns()) {
-    return true;
+  // All other builtin ops are known to be safe.
+  // see [custom operator aliasing]
+  if (kind_.is_aten() || kind_.is_prim() || kind_.is_onnx()) {
+    return false;
   }
 
-  return false;
+  // Custom ops may have arbitrary side effects
+  return true;
 }
 
 // Assign this node a topological position, to facilitate fast isBefore() and

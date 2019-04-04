@@ -316,6 +316,8 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
   THCudaCheck(cudaGetLastError());
 }
 
+#if !defined(THC_REAL_IS_BOOL) /* non bool only part */
+
 void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_t k){
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
   int nDimension = THCTensor_(nDimensionLegacyNoScalars)(state, src_);
@@ -363,5 +365,7 @@ accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
   THCTensor_(free)(state, diag);
   return trace;
 }
+
+#endif
 
 #endif

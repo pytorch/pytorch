@@ -350,11 +350,11 @@ struct GraphExecutorImpl {
         // disables all optimization
         optimize(optimize),
         num_inputs(this->graph->inputs().size()),
-        num_flat_inputs(countFlatInputs(graph)),
+        arg_spec_creator_(*graph),
         num_outputs(this->graph->outputs().size()) {
-    logging::getLogger()->addStatValue(
-        logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
-  }
+          logging::getLogger()->addStatValue(
+              logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
+        }
 
   // entry point where execution begins
   void run(Stack& stack) {
@@ -379,9 +379,9 @@ struct GraphExecutorImpl {
 
   std::shared_ptr<Graph> graphFor(const Stack& stack) const {
     AT_ASSERT(stack.size() >= num_inputs);
-    auto inputs = last(stack, num_inputs);
-    ArgumentSpec spec(
-        autograd::GradMode::is_enabled(), inputs, num_flat_inputs);
+
+    ArgumentSpec spec =
+        arg_spec_creator_.create(autograd::GradMode::is_enabled(), stack);
 
     if (!optimize) {
       AT_CHECK(fallback, "No graph found for given inputs");
@@ -429,10 +429,8 @@ struct GraphExecutorImpl {
   const ExecutionPlan& getOrCompile(const Stack& stack) {
     // outside lock guard, to minimize the time holding the lock on the fast
     // path ArgumentSpec even computes its hashCode here.
-    ArgumentSpec spec(
-        autograd::GradMode::is_enabled(),
-        last(stack, num_inputs),
-        num_flat_inputs);
+    ArgumentSpec spec =
+        arg_spec_creator_.create(autograd::GradMode::is_enabled(), stack);
     {
       std::lock_guard<std::mutex> lock(compile_mutex);
       auto it = plan_cache.find(spec);
@@ -451,7 +449,7 @@ struct GraphExecutorImpl {
 
   ExecutionPlan compileSpec(const ArgumentSpec& spec) {
     auto opt_graph = graph->copy();
-    setInputTypes(*opt_graph, spec);
+    arg_spec_creator_.setInputTypes(*opt_graph, spec);
 
     // Phase 1. Specialize to input definedness (this is very important for
     //          gradient graphs), and run required passes to bring the graph
@@ -550,8 +548,8 @@ struct GraphExecutorImpl {
     auto input_values = fmap(
         inputs, [](const IValue& v) { return tracer::getNestedValueTrace(v); });
 
-    ArgumentSpec spec(
-        autograd::GradMode::is_enabled(), inputs, num_flat_inputs);
+    ArgumentSpec spec =
+        arg_spec_creator_.create(autograd::GradMode::is_enabled(), stack);
     // NB: we could just run the fallback in here and call it a day, but that
     // would loose all the control flow information we have in the graph. Thus,
     // we run the fallback to get the correct output values, but we will
@@ -568,7 +566,7 @@ struct GraphExecutorImpl {
     // tracing and so we only do the type propgation if no concrete types have
     // been set.
     auto local_graph = this->graph->copy();
-    setInputTypes(*local_graph, spec);
+    arg_spec_creator_.setInputTypes(*local_graph, spec);
     PropagateInputShapes(local_graph);
     auto output_values =
         inlineCallTo(*state->graph, *local_graph, input_values);
@@ -588,8 +586,7 @@ struct GraphExecutorImpl {
   // Useful for debugging.
   const bool optimize;
   const size_t num_inputs;
-  const size_t num_flat_inputs; // Number of inputs, assuming all tuples would
-                                // be flattened.
+  ArgumentSpecCreator arg_spec_creator_;
   const size_t num_outputs;
 
   // Populated only when optimize is false (and in that case plan_cache will be
