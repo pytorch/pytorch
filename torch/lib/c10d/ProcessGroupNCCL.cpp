@@ -303,26 +303,26 @@ void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
     );
   }
 
-  auto const& first = tensors.front();
+  const auto& first = tensors.front();
 
   // Set for ensuring that tensors are on separate devices.
   std::unordered_set<decltype(first.get_device())> usedDevices;
   usedDevices.reserve(tensors.size());
 
-  for (auto const& t : tensors) {
+  for (const auto& t : tensors) {
     if (!t.is_cuda() || t.is_sparse()) {
       throw std::runtime_error("Tensors must be CUDA and dense");
     }
     if (t.scalar_type() != first.scalar_type()) {
       throw std::runtime_error("Tensors must have identical type");
     }
-    if (t.numel() != first.numel()) {
+    if (t.sizes() != first.sizes()) {
       throw std::runtime_error("Tensors must have identical size");
     }
     if (!t.is_contiguous()) {
       throw std::runtime_error("Tensors must be contiguous");
     }
-    auto const inserted = usedDevices.insert(t.get_device()).second;
+    const auto inserted = usedDevices.insert(t.get_device()).second;
     if (!inserted) {
       throw std::runtime_error("Tensors must be on distinct GPU devices");
     }
@@ -342,7 +342,7 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
       "Tensor list operands to scatter/gather must have the same length"
     );
   }
-  auto const num_devices = tensor_lists.size();
+  const auto num_devices = tensor_lists.size();
 
   std::vector<at::Tensor> flattened;
   flattened.resize(num_devices);
@@ -364,7 +364,7 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
       );
     }
 
-    for (auto const& t : tensor_lists[i]) {
+    for (const auto& t : tensor_lists[i]) {
       if (t.numel() != other[i].numel()) {
         throw std::runtime_error(
           "All tensor operands to scatter/gather must have the same size"
@@ -386,8 +386,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     Fn fn,
     PreProcess pre,
     PostProcess post) {
-  auto const devices = getDeviceList(inputs);
-  auto const key = getKeyFromDevices(devices);
+  const auto devices = getDeviceList(inputs);
+  const auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices);
 
   // First let NCCL streams wait for input tensors allocation streams
@@ -482,10 +482,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
   return collective(tensors, tensors,
     [&] (at::Tensor& input, at::Tensor& output,
          ncclComm_t comm, at::cuda::CUDAStream& stream) {
-      auto const root = opts.rootRank * tensors.size() + opts.rootTensor;
-      return ncclBroadcast(
+      const auto root = opts.rootRank * tensors.size() + opts.rootTensor;
+      return ncclBcast(
         input.data_ptr(),
-        output.data_ptr(),
         input.numel(),
         getNcclDataType(input.scalar_type()),
         root,
@@ -504,7 +503,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
   return collective(tensors, tensors,
     [&] (at::Tensor& input, at::Tensor& output,
          ncclComm_t comm, at::cuda::CUDAStream& stream) {
-      auto const root = opts.rootRank * tensors.size() + opts.rootTensor;
+      const auto root = opts.rootRank * tensors.size() + opts.rootTensor;
       return ncclReduce(
         input.data_ptr(),
         output.data_ptr(),
