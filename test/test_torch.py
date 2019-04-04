@@ -2665,6 +2665,95 @@ class _TestTorchMixin(object):
         for i in range(num_elements):
             self.assertEqual(r[i], rqr[i])
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
+    def test_device_guard(self):
+        # verify that all operators with `device_guard: False` behave properly with multiple devices.
+        # TODO: if we had operator introspection we could figure out this set of operators automatically...
+        current_device = torch.cuda.current_device()
+        device = torch.device('cuda:1') if current_device == 0 else torch.device('cuda:0')
+        x = torch.randn((1, 2, 3), device=device)
+        y = torch.zeros((1, 3, 2), device=device)
+        scalar = torch.tensor(5, device=device)
+
+        # property ops
+        torch.cudnn_is_acceptable(x)
+        x.is_distributed()
+        x.is_floating_point()
+        x.is_complex()
+        x.is_same_size(y)
+        x.is_signed()
+        x.size(0)
+        x.stride(0)
+        x.numel()
+        x.is_set_to(y)
+        x.data_ptr()
+        scalar.is_nonzero()
+
+        # sparse property ops
+        y[0][1] = 5
+        y_sparse = y.to_sparse()
+        y_sparse.sparse_dim()
+        y_sparse._dimI()
+        y_sparse.dense_dim()
+        y_sparse._dimV()
+        y_sparse._nnz()
+        y_sparse.is_coalesced()
+        y_sparse._indices()
+        y_sparse._values()
+        y_sparse.indices()
+        y_sparse.values()
+
+        # in-place ops
+        def inplace():
+            return torch.randn((1, 2, 3), device=device)
+        inplace().as_strided_(y.size(), y.stride())
+        inplace().resize_(y.size())
+        inplace().squeeze_()
+        inplace().squeeze_(0)
+        inplace().unsqueeze_(2)
+        inplace().transpose_(1, 2)
+        inplace().squeeze_().t_()
+        inplace().set_(x.storage())
+        inplace().set_(x.storage(), x.storage_offset(), x.size(), x.stride())
+        inplace().set_(x)
+        inplace().set_()
+        y_sparse._coalesced_(True)
+
+        # shape modification
+        x.as_strided(y.size(), y.stride())
+        x.expand((5, 2, 3))
+        x.expand_as(x)
+        x.sum_to_size((1,))
+        torch.broadcast_tensors(x , x)
+        x.reshape((1, 3, 2))
+        x.reshape_as(y)
+        x.squeeze()
+        x.squeeze(0)
+        x.squeeze().t()
+        x.transpose(1, 2)
+        x.unsqueeze(2)
+        x.view((1, 3, 2))
+        x.view_as(y)
+
+        # chunk, split, etc.
+        x.chunk(2, dim=1)
+        x.split(1, dim=2)
+        x.split_with_sizes([1, 2], dim=2)
+        x.unfold(dimension=2, size=1, step=1)
+
+        x.narrow(1, 1, 1)
+        x.select(1, 1)
+        torch.isnan(x)
+
+        torch.empty((1, 3, 2), out=y)
+        torch.empty_like(x)
+        torch.empty_like(x, dtype=torch.int64)
+
+        # to
+        x.to(x)
+        x.to(y)
+        x.to(x, copy=True)
+
     def test_to(self):
         def test_copy_behavior(t, non_blocking=False):
             self.assertIs(t, t.to(t, non_blocking=non_blocking))
@@ -2956,6 +3045,20 @@ class _TestTorchMixin(object):
                 x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
                 x.resize_(shape)
                 self.assertEqual(shape, x.shape)
+
+    def test_resize_as_all_dtypes_and_devices(self):
+        for device in torch.testing.get_all_device_types():
+            for dt in torch.testing.get_all_dtypes():
+                x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
+                y = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=dt, device=device)
+                x.resize_as_(y)
+                self.assertEqual(y.shape, x.shape)
+
+    def test_view_all_dtypes_and_devices(self):
+        for device in torch.testing.get_all_device_types():
+            for dt in torch.testing.get_all_dtypes():
+                x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
+                self.assertEqual(x.view(6).shape, [6])
 
     def test_fill_all_dtypes_and_devices(self):
         for device in torch.testing.get_all_device_types():
@@ -8262,6 +8365,42 @@ class _TestTorchMixin(object):
         t2 = torch.tensor([False, False], dtype=torch.bool)
         t1.set_(t2)
         self.assertEqual(t1.storage()._cdata, t2.storage()._cdata)
+
+    def test_tensor_set_errors(self):
+        f_cpu = torch.randn((2, 3), dtype=torch.float32)
+        d_cpu = torch.randn((2, 3), dtype=torch.float64)
+
+        # change dtype
+        self.assertRaises(RuntimeError, lambda: f_cpu.set_(d_cpu.storage()))
+        self.assertRaises(RuntimeError,
+                          lambda: f_cpu.set_(d_cpu.storage(), 0, d_cpu.size(), d_cpu.stride()))
+        self.assertRaises(RuntimeError, lambda: f_cpu.set_(d_cpu))
+
+        # change device
+        if torch.cuda.is_available():
+            f_cuda = torch.randn((2, 3), dtype=torch.float32, device='cuda')
+
+            # cpu -> cuda
+            self.assertRaises(RuntimeError, lambda: f_cpu.set_(f_cuda.storage()))
+            self.assertRaises(RuntimeError,
+                              lambda: f_cpu.set_(f_cuda.storage(), 0, f_cuda.size(), f_cuda.stride()))
+            self.assertRaises(RuntimeError, lambda: f_cpu.set_(f_cuda))
+
+            # cuda -> cpu
+            self.assertRaises(RuntimeError, lambda: f_cuda.set_(f_cpu.storage()))
+            self.assertRaises(RuntimeError,
+                              lambda: f_cuda.set_(f_cpu.storage(), 0, f_cpu.size(), f_cpu.stride()))
+            self.assertRaises(RuntimeError, lambda: f_cuda.set_(f_cpu))
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, 'less than 2 GPUs detected')
+    def test_tensor_set_errors_multigpu(self):
+        f_cuda0 = torch.randn((2, 3), dtype=torch.float32, device='cuda:0')
+        f_cuda1 = torch.randn((2, 3), dtype=torch.float32, device='cuda:1')
+
+        self.assertRaises(RuntimeError, lambda: f_cuda0.set_(f_cuda1.storage()))
+        self.assertRaises(RuntimeError,
+                          lambda: f_cuda0.set_(f_cuda1.storage(), 0, f_cuda1.size(), f_cuda1.stride()))
+        self.assertRaises(RuntimeError, lambda: f_cuda0.set_(f_cuda1))
 
     def test_equal(self):
         # Contiguous, 1D

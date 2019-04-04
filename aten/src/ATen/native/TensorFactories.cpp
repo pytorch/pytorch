@@ -140,12 +140,12 @@ Tensor& empty_out(Tensor& result, IntArrayRef size) {
 // specialized operators for each datatype.
 // TODO: remove when we have Type support in the IR
 
-#define DEFINE_CAST_OP(_1, n, _2)                                \
-  Tensor _cast_##n(const Tensor& self, bool non_blocking) {      \
-    auto& target_type = self.type().toScalarType(ScalarType::n); \
-    if (self.type() == target_type)                              \
-      return self;                                               \
-    return target_type.copy(self, non_blocking);                 \
+#define DEFINE_CAST_OP(_1, n, _2)                                         \
+  Tensor _cast_##n(const Tensor& self, bool non_blocking) {               \
+    auto& target_type = self.dispatch_type().toScalarType(ScalarType::n); \
+    if (self.dispatch_type() == target_type)                              \
+      return self;                                                        \
+    return target_type.copy(self, non_blocking);                          \
   }
 
 AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(DEFINE_CAST_OP)
