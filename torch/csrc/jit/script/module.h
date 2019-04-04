@@ -446,12 +446,19 @@ struct Module {
   void register_module(
       const std::string& name,
       std::shared_ptr<Module> module) {
-    if (module->parent_) {
-      AT_ERROR(
-          "Attempting to assign submodule '",
-          name,
-          "' but it is already a submodule of another ScriptModule '", module->parent_->name(), "'");
-    }
+    // We would like to enable more stringent error checking at this point,
+    // but because script functions are considered modules, it is possible
+    // to hit this situation without knowing it. For now this is disabled
+    // until a later PR that distinguishes script functions from script modules.
+    // See TestScript.test_submodule_twice for example failure
+    // if (module->parent_) {
+    //   AT_WARN(
+    //       "Attempting to assign submodule '",
+    //       name,
+    //       "' but it is already a submodule of another ScriptModule '", module->parent_->name(), "'",
+    //       " Modules of this form do not import and export correctly. This use is deprecated and may be"
+    //       " removed in a future version.");
+    // }
     module->parent_ = this;
     module->name_ = name;
     insert(name, modules_, EntityType::MODULE, std::move(module));
