@@ -66,10 +66,11 @@ struct DimCounter {
 };
 struct CAFFE2_API OperandInfo {
   OperandInfo() {}
-  OperandInfo(const Tensor& t, const Type* type=nullptr)
-    : tensor(t), type(const_cast<Type*>(type)) {
-      if (t.defined() && !type) {
-        this->type = &t.dispatch_type();
+  explicit OperandInfo(const Tensor& t, const Backend backend=Backend::Undefined, const ScalarType dtype=ScalarType::Undefined)
+    : tensor(t), backend(backend), dtype(dtype) {
+      if (t.defined() && (backend == Backend::Undefined || dtype == ScalarType::Undefined)) {
+        this->backend = t.type().backend();
+        this->dtype = t.scalar_type();
       }
   }
 
@@ -85,7 +86,25 @@ struct CAFFE2_API OperandInfo {
   /// input should be converted to this type if necessary. For outputs, this
   /// specifies which type to allocate. Note that there is very limited support
   /// for type conversions currently: they are only allowed for zero-dim tensors.
-  Type* type = nullptr;
+  Backend backend = Backend::Undefined;
+  ScalarType dtype = ScalarType::Undefined;
+
+  bool is_type_defined() {
+    return dtype != ScalarType::Undefined && backend != Backend::Undefined;
+  }
+
+  bool is_type_equal(Backend b, ScalarType s) {
+    return dtype == s && backend == b;
+  }
+
+  void set_type(Backend b, ScalarType s) {
+    dtype = s;
+    backend = b;
+  }
+
+  TensorOptions options() {
+    return TensorOptions(backendToDeviceType(backend)).dtype(dtype);
+  }
 
   /// The data pointer. This may be different from tensor.data_ptr() if the
   /// iterator is split.
@@ -148,13 +167,9 @@ struct CAFFE2_API TensorIterator {
   /// Accessors for each operand
   IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
   void* data_ptr(int arg) const;
-  const Type& type(int arg=0) const {
-    AT_ASSERT(operands_[arg].type);
-    return *operands_[arg].type;
-  }
-  ScalarType dtype(int arg=0) const { return type(arg).scalarType(); }
-  DeviceType device_type(int arg=0) const { return type(arg).device_type(); }
-  int64_t element_size(int arg) const { return type(arg).typeMeta().itemsize(); }
+  ScalarType dtype(int arg=0) const { return operands_[arg].dtype; }
+  DeviceType device_type(int arg=0) const { return backendToDeviceType(operands_[arg].backend); }
+  int64_t element_size(int arg) const { return elementSize(dtype(arg)); }
   bool is_scalar(int arg) const;
   bool is_cpu_scalar(int arg) const;
 
@@ -237,7 +252,7 @@ protected:
   void reorder_dimensions();
   void permute_dimensions(IntArrayRef perm);
   void compute_types();
-  Type& compute_common_type();
+  std::pair<Backend, ScalarType> compute_common_type();
   void allocate_outputs();
   void coalesce_dimensions();
 
@@ -261,13 +276,13 @@ struct TensorIterator::Builder {
 
   Builder() : iter_(new TensorIterator()) {};
 
-  void add_output(const Tensor& output, const Type* type=nullptr) {
-    iter_->operands_.emplace_back(output, type);
+  void add_output(const Tensor& output, const Backend backend=Backend::Undefined, const ScalarType dtype=ScalarType::Undefined) {
+    iter_->operands_.emplace_back(output, backend, dtype);
     iter_->num_outputs_++;
   }
 
-  void add_input(const Tensor& input, const Type* type=nullptr) {
-    iter_->operands_.emplace_back(input, type);
+  void add_input(const Tensor& input, const Backend backend=Backend::Undefined, const ScalarType dtype=ScalarType::Undefined) {
+    iter_->operands_.emplace_back(input, backend, dtype);
   }
 
   void dont_compute_common_dtype() {
