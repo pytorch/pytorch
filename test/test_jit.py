@@ -4657,35 +4657,70 @@ a")
 
     def test_optional_tensor(self):
         @torch.jit.script
-        def fn(x):
-            # type: (Optional[Tensor]) -> int
+        def fn(x, y):
+            # type: (Optional[Tensor], int) -> int
             if x is None:
-                return 1
+                return y
             else:
                 return 0
 
-        res = fn(None)
+        res = fn(None, 1)
         self.assertEqual(res, 1)
-        g = fn.graph_for(None)
+        g = fn.graph_for(None, 1)
         self.assertEqual(next(g.inputs()).type().kind(), 'NoneType')
         t = torch.ones(1)
-        res = fn(t)
+        res = fn(t, 1)
         self.assertEqual(res, 0)
-        g = fn.graph_for(t)
+        g = fn.graph_for(t, 1)
         self.assertEqual(next(g.inputs()).type().kind(), 'DimensionedTensorType')
 
         @torch.jit.script
-        def fn(x):
-            # type: (Optional[Tensor]) -> Tensor
-            y = torch.jit._unwrap_optional(x)
+        def fn(x, y):
+            # type: (Optional[Tensor], float) -> Tensor
+            y = torch.jit._unwrap_optional(x) * y
             return y
 
-        res = fn(t)
-        self.assertEqual(res, t)
+        res = fn(t, 2.0)
+        self.assertEqual(res, t * 2.0)
         with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
-            res = fn(None)
-        g = fn.graph_for(None)
+            res = fn(None, 2.0)
+        g = fn.graph_for(None, 2.0)
         self.assertEqual(next(g.nodes()).output().type().str(), "Tensor")
+
+    def test_optional_list(self):
+        @torch.jit.script
+        def fn(x, y):
+            # type: (Optional[List[int]], int) -> int
+            if x is None:
+                return y
+            else:
+                res = 0
+                for d in x:
+                    res += d
+                return res
+
+        res = fn(None, 1)
+        self.assertEqual(res, 1)
+        g = fn.graph_for(None, 1)
+        self.assertEqual(next(g.inputs()).type().kind(), 'NoneType')
+        l = [2, 3]
+        res = fn(l, 1)
+        self.assertEqual(res, 5)
+        g = fn.graph_for(l, 1)
+        self.assertEqual(next(g.inputs()).type().kind(), 'ListType')
+
+        @torch.jit.script
+        def fn(x, y):
+            # type: (Optional[List[int]], int) -> List[int]
+            l = torch.jit._unwrap_optional(x)
+            return l[:y]
+
+        res = fn(l, 1)
+        self.assertEqual(res, l[:1])
+        with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
+            res = fn(None, 1)
+        g = fn.graph_for(None, 1)
+        self.assertEqual(list(g.nodes())[-1].output().type().str(), "int[]")
 
     def test_while_write_outer_then_read(self):
         def func(a, b):
