@@ -60,7 +60,7 @@ bool SharedParserData::isBinary(int kind, int* prec) {
   return false;
 }
 
-int stringToKind(const std::string& str) {
+C10_EXPORT int stringToKind(const std::string& str) {
   static std::once_flag init_flag;
   static std::unordered_map<std::string, int> str_to_kind;
   std::call_once(init_flag, []() {
@@ -79,7 +79,7 @@ int stringToKind(const std::string& str) {
   }
 }
 
-std::string kindToString(int kind) {
+C10_EXPORT std::string kindToString(int kind) {
   if (kind < 256)
     return std::string(1, kind);
   switch (kind) {
@@ -93,7 +93,7 @@ std::string kindToString(int kind) {
   }
 }
 
-SharedParserData& sharedParserData() {
+C10_EXPORT SharedParserData& sharedParserData() {
   static SharedParserData data; // safely handles multi-threaded init
   return data;
 }
