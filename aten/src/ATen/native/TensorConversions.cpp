@@ -20,8 +20,8 @@ static inline Device ensure_has_index(Device device) {
 }
 
 static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking) {
-  return self.type().toBackend(options.backend()).toScalarType(typeMetaToScalarType(options.dtype()))
-                    .copy(self, non_blocking, options.device());
+  return self.dispatch_type().toBackend(options.backend()).toScalarType(typeMetaToScalarType(options.dtype()))
+                             .copy(self, non_blocking, options.device());
 }
 
 Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy) {
