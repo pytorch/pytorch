@@ -13,7 +13,7 @@ namespace jit {
 namespace detail {
 
 // Note: CPU fusion is currently disabled due to test flakiness
-bool cpu_fuser_enabled = false;
+bool cpu_fuser_enabled = true;
 
 } // namespace detail
 
