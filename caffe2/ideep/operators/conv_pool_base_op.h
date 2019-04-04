@@ -11,10 +11,7 @@ namespace caffe2 {
 class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
  public:
   IDEEPConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<IDEEPContext>(operator_def, ws) {
-    OPERATOR_NEEDS_FEATURE(
-        order_ == StorageOrder::NCHW, "Unsupported storage order.");
-  }
+     : ConvPoolOpBase<IDEEPContext>(operator_def, ws) {}
   virtual ~IDEEPConvPoolOpBase() {}
 
   inline const ideep::tensor& Input(int index) {
@@ -35,7 +32,7 @@ class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
   ideep::tensor::dims CalcOutputDims(
       const ideep::tensor& input,
       int output_channel) {
-    CAFFE_ENFORCE(input.get_descriptor().get_size() > 0);
+    CAFFE_ENFORCE_GT(input.get_size(), 0);
     ideep::tensor::dims output_dims;
     const auto input_dims = input.get_dims();
     std::vector<std::int64_t> input_Tdims(
@@ -43,7 +40,7 @@ class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
     InferOutputSize(
         input_Tdims,
         output_channel,
-        order_,
+        StorageOrder::NCHW, //order_,
         global_pooling_,
         legacy_pad_,
         dilation_,
