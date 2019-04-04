@@ -264,8 +264,8 @@ def build_caffe2(version,
             j = max(1, multiprocessing.cpu_count() - 1)
             if max_jobs is not None:
                 j = min(int(max_jobs), j)
-                build_cmd += ['-j', str(j)]
-                check_call(build_cmd, cwd=build_dir, env=my_env)
+            build_cmd += ['-j', str(j)]
+            check_call(build_cmd, cwd=build_dir, env=my_env)
         else:
             j = max_jobs or str(multiprocessing.cpu_count())
             build_cmd += ['/maxcpucount:{}'.format(j)]
