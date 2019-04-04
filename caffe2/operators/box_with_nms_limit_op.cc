@@ -298,25 +298,24 @@ SHOULD_NOT_DO_GRADIENT(BoxWithNMSLimit);
 
 C10_REGISTER_CAFFE2_OPERATOR_CPU(
     BoxWithNMSLimit,
-    (std::vector<c10::Argument>{
-        c10::Argument("scores"),
-        c10::Argument("boxes"),
-        c10::Argument("batch_splits"),
-        c10::Argument("score_thresh", FloatType::get()),
-        c10::Argument("nms", FloatType::get()),
-        c10::Argument("detections_per_im", IntType::get()),
-        c10::Argument("soft_nms_enabled", BoolType::get()),
-        c10::Argument("soft_nms_method", StringType::get()),
-        c10::Argument("soft_nms_sigma", FloatType::get()),
-        c10::Argument("soft_nms_min_score_thres", FloatType::get()),
-        c10::Argument("rotated", BoolType::get()),
-    }),
-    (std::vector<c10::Argument>{
-        c10::Argument("scores"),
-        c10::Argument("boxes"),
-        c10::Argument("classes"),
-        c10::Argument("batch_splits"),
-        // c10::Argument("keeps"),
-        // c10::Argument("keeps_size"),
-    }),
+    "_caffe2::BoxWithNMSLimit("
+      "Tensor scores, "
+      "Tensor boxes, "
+      "Tensor batch_splits, "
+      "float score_thresh, "
+      "float nms, "
+      "int detections_per_im, "
+      "bool soft_nms_enabled, "
+      "str soft_nms_method, "
+      "float soft_nms_sigma, "
+      "float soft_nms_min_score_thres, "
+      "bool rotated"
+    ") -> ("
+      "Tensor scores, "
+      "Tensor boxes, "
+      "Tensor classes, "
+      "Tensor batch_splits"
+      //"Tensor keeps, "
+      //"Tensor keeps_size, "
+    ")",
     caffe2::BoxWithNMSLimitOp<caffe2::CPUContext>);
