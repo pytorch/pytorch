@@ -153,6 +153,7 @@ def add_torch_libs():
             "torch/csrc/jit/function_schema_parser.cpp",
             "torch/csrc/jit/script/schema_type_parser.cpp",
             "torch/csrc/jit/script/lexer.cpp",
+            "torch/csrc/jit/script/strtod.cpp",
         ],
     ) + [
         "torch/csrc/distributed/Module.cpp",

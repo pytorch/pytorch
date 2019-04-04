@@ -12,6 +12,7 @@ LIST(APPEND ATen_CORE_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/source_range.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/source_location.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/lexer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/strtod.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/parse_string_literal.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/schema_type_parser.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/error_report.h
@@ -20,6 +21,7 @@ LIST(APPEND ATen_CORE_HEADERS
 LIST(APPEND ATen_CORE_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/function_schema_parser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/lexer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/strtod.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../torch/csrc/jit/script/schema_type_parser.cpp
 )
 

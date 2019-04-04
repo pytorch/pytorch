@@ -1,6 +1,7 @@
 #pragma once
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/tree.h>
+#include <torch/csrc/jit/script/strtod.h>
 
 #include <functional>
 #include <string>
@@ -739,7 +740,7 @@ struct Const : public Expr {
     return std::stoll(subtree(0)->stringValue());
   }
   double asFloatingPoint() const {
-    return SharedParserData::strtod_c(
+    return torch::jit::script::strtod_c(
         subtree(0)->stringValue().c_str(), nullptr);
   }
   const std::string& text() const {
