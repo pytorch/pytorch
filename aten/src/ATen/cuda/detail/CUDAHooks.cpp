@@ -33,6 +33,9 @@ std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
   THCState* thc_state = THCState_alloc();
 
   THCudaInit(thc_state);
+#ifdef USE_MAGMA
+  THCMagma_init(thc_state);
+#endif
   return std::unique_ptr<THCState, void (*)(THCState*)>(
       thc_state, [](THCState* p) {
         if (p)
