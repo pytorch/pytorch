@@ -2493,9 +2493,11 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         scale_factors = _ntuple(dim)(scale_factor)
         # math.floor might return float in py2.7
 
-        # need to cast input.size to int so that in tracing the result is an int
-        # and not a tensor
-        return [int(math.floor(int(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
+        # make scale_factor a tensor in tracing so constant doesn't get baked in
+        if torch._C._get_tracing_state():
+            return [(torch.floor(input.size(i + 2) * torch.tensor(scale_factors[i]))) for i in range(dim)]
+        else:
+            return [int(math.floor(int(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
 
     if mode in ('nearest', 'area'):
         if align_corners is not None:

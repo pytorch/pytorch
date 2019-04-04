@@ -7362,7 +7362,10 @@ a")
 
         f = test()
         # no failure
-        torch.jit.trace(f, (torch.zeros(1, 1, 28, 28),))
+        g = torch.jit.trace(f, (torch.zeros(1, 1, 28, 28),))
+        x = torch.zeros(1, 1, 14, 14)
+        # constants not baked in
+        self.assertEqual(g(x), f(x))
 
     def test_trace_nested_datatypes(self):
         @torch.jit.script
