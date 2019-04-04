@@ -129,7 +129,8 @@ def run_cmake(version,
               build_dir,
               my_env):
     cmake_args = [
-        get_cmake_command()
+        get_cmake_command(),
+        '--trace'
     ]
     if USE_NINJA:
         cmake_args.append('-GNinja')
