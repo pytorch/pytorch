@@ -47,7 +47,7 @@ struct unique_type_checker {
 };
 
 std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
-  auto & type = tensor.dispatch_type();
+  auto & type = tensor.type();
   if (type.is_cuda() && tensor.get_device() != devices[0])
     throw std::runtime_error("device of broadcasted tensor must appear as the "
                              "first on devices list");

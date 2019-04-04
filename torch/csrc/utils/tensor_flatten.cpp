@@ -18,8 +18,9 @@ std::vector<TensorGroup> take_tensors(
   size_t cur_group_size = 0;
 
   for (const auto & tensor : tensors) {
+    auto& type = tensor.type();
     size_t tensor_size;
-    if (tensor.is_sparse()) {
+    if (type.is_sparse()) {
       const auto& indices = tensor._indices();
       const auto& values = tensor._values();
       tensor_size = indices.numel() * indices.element_size() +
@@ -28,7 +29,7 @@ std::vector<TensorGroup> take_tensors(
       tensor_size = tensor.numel() * tensor.element_size();
     }
 
-    auto& type_group = groups[tensor.dispatch_type().ID()];
+    auto& type_group = groups[type.ID()];
     type_group.tensors.push_back(tensor);
 
     if (fine_grained) {
@@ -66,13 +67,13 @@ void reorder_tensors_like(std::vector<Tensor>& tensors, TensorList order) {
   AT_ASSERT(tensors.size() == order.size());
   std::unordered_map<at::Type*, std::vector<size_t>> type_indices;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; ++i)
-    type_indices[&tensors[i].dispatch_type()].push_back(i);
+    type_indices[&tensors[i].type()].push_back(i);
 
   std::unordered_map<at::Type*, size_t> type_used;
   std::vector<Tensor> ordered_tensors;
   ordered_tensors.reserve(tensors.size());
   for (auto & tmpl_tensor : order) {
-    auto * type = &tmpl_tensor.dispatch_type();
+    auto * type = &tmpl_tensor.type();
     auto & indices = type_indices[type];
     auto & used = type_used[type];
     ordered_tensors.push_back(tensors[indices[used++]]);

@@ -35,7 +35,7 @@ struct TypeAndSize {
   /* implicit */
   TypeAndSize(const Tensor & t)
     : sizes(t.sizes().vec())
-    , type(&t.dispatch_type()) {}
+    , type(&t.type()) {}
 
   Tensor zeros() { return at::zeros(sizes, *type); }
 

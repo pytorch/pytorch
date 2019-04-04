@@ -13,7 +13,6 @@ CAFFE2_API std::ostream& operator<<(std::ostream& out, Backend b);
 namespace at {
 
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Type& t);
-CAFFE2_API std::ostream& operator<<(std::ostream& out, const DeprecatedTypeProperties& t);
 CAFFE2_API std::ostream& print(
     std::ostream& stream,
     const Tensor& tensor,

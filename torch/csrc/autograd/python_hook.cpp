@@ -160,7 +160,7 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
   auto& original = ((THPVariable*)_original)->cdata.data();
   auto& result = ((THPVariable*)_result)->cdata.data();
 
-  if (original.type() != result.type()) {
+  if (original.type().ID() != result.type().ID()) {
     std::stringstream ss;
     auto name = hook_name(hook);
     ss << "hook '" << name << "' has changed the type of value (";
