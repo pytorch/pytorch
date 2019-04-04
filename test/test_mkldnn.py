@@ -1,11 +1,12 @@
 import torch
-import unittest
+# import unittest
 from common_utils import TestCase, run_tests
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 import warnings
 
 
-@unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+# Comment the line below to find out the CI machines having MKL-DNN build disabled
+# @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMkldnn(TestCase):
     def test_conversion(self):
         for cpu_tensor in [torch.randn(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu')),
