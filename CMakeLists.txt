@@ -190,7 +190,7 @@ if(NOT BUILD_TORCH)
 endif()
 
 if(NOT BUILDING_WITH_TORCH_LIBS)
-  message(FATAL_ERROR "BUILD_TORCH: ${BUILD_TORCH}")
+  message(FATAL_ERROR "BUILDING_WITH_TORCH_LIBS: ${BUILDING_WITH_TORCH_LIBS}")
 endif()
 
 # ---[ Utils
@@ -380,6 +380,14 @@ include_directories(BEFORE ${PROJECT_SOURCE_DIR})
 include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
+
+if(NOT BUILD_TORCH)
+  message(FATAL_ERROR "BUILD_TORCH: ${BUILD_TORCH}")
+endif()
+
+if(NOT BUILDING_WITH_TORCH_LIBS)
+  message(FATAL_ERROR "BUILDING_WITH_TORCH_LIBS: ${BUILDING_WITH_TORCH_LIBS}")
+endif()
 
 # ---[ Main build
 add_subdirectory(c10)
