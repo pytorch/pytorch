@@ -91,10 +91,7 @@ Tensor& _fill__cpu(Tensor& self, Scalar value) {
   auto iter = TensorIterator::unary_op(self, self);
   AT_DISPATCH_FLOATING_TYPES(iter->dtype(), "fill_cpu", [&]() {
     scalar_t fill_value = value.to<scalar_t>();
-    unary_kernel(
-        *iter,
-        [=](scalar_t a) -> scalar_t { return fill_value; }
-        );
+    unary_kernel(*iter, [=](scalar_t a) -> scalar_t { return fill_value; });
   });
   return self;
 }
