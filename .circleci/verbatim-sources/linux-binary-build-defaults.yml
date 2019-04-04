@@ -14,6 +14,16 @@ binary_linux_build: &binary_linux_build
         source /env
         retry yum -q -y install epel-release
         retry yum -q -y install expect moreutils
+  - run:
+      name: Upgrade gcc version (based on env var)
+      command: |
+        set -ex
+        source /env
+        if [[ "$DESIRED_GCC_ABI" == 'gccabi1' ]]; then
+          /builder/upgrade_gcc_abi.sh
+        else
+          echo "Not upgrading gcc version"
+        fi
 
 
   - run:

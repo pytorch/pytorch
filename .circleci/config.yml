@@ -595,6 +595,7 @@ binary_populate_env: &binary_populate_env
     export PACKAGE_TYPE="${configs[0]}"
     export DESIRED_PYTHON="${configs[1]}"
     export DESIRED_CUDA="${configs[2]}"
+    export DESIRED_GCC_ABI="${configs[3]}"
     if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
       export BUILD_PYTHONLESS=1
     fi
@@ -623,6 +624,7 @@ binary_populate_env: &binary_populate_env
     export DESIRED_CUDA="$DESIRED_CUDA"
     export LIBTORCH_VARIANT="$LIBTORCH_VARIANT"
     export BUILD_PYTHONLESS="$BUILD_PYTHONLESS"
+    export DESIRED_GCC_ABI="$DESIRED_GCC_ABI"
 
     export DATE="$DATE"
     export NIGHTLIES_DATE_PREAMBLE=1.0.0.dev
@@ -767,8 +769,6 @@ binary_run_in_docker: &binary_run_in_docker
     # Execute the test script that was populated by an earlier section
     export COMMAND='((echo "source /circleci_stuff/env && /circleci_stuff/ci_test_script.sh") | docker exec -i "$id" bash) 2>&1'
     echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
-
 # binary linux build defaults
 ##############################################################################
 binary_linux_build: &binary_linux_build
@@ -785,6 +785,16 @@ binary_linux_build: &binary_linux_build
         source /env
         retry yum -q -y install epel-release
         retry yum -q -y install expect moreutils
+  - run:
+      name: Upgrade gcc version (based on env var)
+      command: |
+        set -ex
+        source /env
+        if [[ "$DESIRED_GCC_ABI" == 'gccabi1' ]]; then
+          /builder/upgrade_gcc_abi.sh
+        else
+          echo "Not upgrading gcc version"
+        fi
 
 
   - run:
