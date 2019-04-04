@@ -236,6 +236,8 @@ class CAFFE2_API Caffe2Backend {
       OnnxNode* onnx_node,
       const ConversionContext& ctx);
 
+  Caffe2Ops CreateWhereOp(OnnxNode* onnx_node, const ConversionContext& ctx);
+
   Caffe2Ops CreateBatchNormalization(
       OnnxNode* onnx_node,
       const ConversionContext& ctx);

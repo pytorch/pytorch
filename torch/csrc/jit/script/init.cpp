@@ -13,11 +13,13 @@
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/import_source.h>
+#include <torch/csrc/jit/irparser.h>
 #include <torch/csrc/jit/passes/python_print.h>
-#include <torch/csrc/jit/passes/to_batch.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/script/parser.h>
+#include <torch/csrc/jit/tracer.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -28,6 +30,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <sstream>
@@ -270,9 +273,9 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
       size_t n_binders) override {
     // Add all module parameters as inputs to the graph
     std::vector<Value*> params;
-    const auto& param_list = module_->get_parameters().items();
+    const auto& param_list = module_->get_parameters();
     for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
-      const auto& param = (*it).value();
+      auto& param = *it;
       params.push_back(caller.get_or_add_initial_ivalue(&param));
     }
     auto list = caller.graph()->createList(TensorType::get(), params);
@@ -603,7 +606,7 @@ static void gatherParametersAndBuffers(
     std::vector<const NamedIValue*>& values,
     const Module& m) {
   for (auto& param : m.get_parameters()) {
-    values.push_back(&param.value());
+    values.push_back(&param);
   }
   for (auto& param : m.get_attributes()) {
     if (param->type()->isSubtypeOf(TensorType::get())) {
@@ -611,7 +614,7 @@ static void gatherParametersAndBuffers(
     }
   }
   for (const auto& sub : m.get_modules()) {
-    gatherParametersAndBuffers(values, *sub->module);
+    gatherParametersAndBuffers(values, *sub.module);
   }
 }
 
@@ -759,44 +762,50 @@ void initJitScriptBindings(PyObject* module) {
       .def("_set_parameter", &Module::set_parameter)
       .def("_get_parameter", &Module::get_parameter)
       .def("_get_buffer", &Module::get_buffer)
+      .def("_get_attribute", &Module::get_attribute)
       .def("_get_module", &Module::get_module)
       .def(
           "_get_modules",
           [](Module& self) -> py::tuple {
-            auto& modules = self.get_modules();
+            auto modules = self.get_modules();
             py::tuple result(modules.size());
             for (size_t i = 0; i < modules.size(); ++i) {
               auto& item = modules[i];
-              result[i] = std::make_pair(item.key(), item.value().module);
+              result[i] = std::make_pair(item.name, item.module);
             }
             return result;
           })
       .def(
           "_get_parameters",
           [](Module& self) -> py::tuple {
-            auto& parameters = self.get_parameters();
+            auto parameters = self.get_parameters();
             py::tuple result(parameters.size());
             for (size_t i = 0; i < parameters.size(); ++i) {
               auto& p = parameters[i];
               py::tuple r(2);
               result[i] = std::make_tuple(
-                  p.key(), autograd::as_variable_ref(p->slot()->toTensor()));
+                  p.name(), autograd::as_variable_ref(p.slot()->toTensor()));
             }
             return result;
           })
       .def(
           "_get_attributes",
           [](Module& self) -> py::tuple {
-            auto& attributes = self.get_attributes();
+            auto attributes = self.get_attributes();
             py::tuple result(attributes.size());
             for (size_t i = 0; i < attributes.size(); ++i) {
               auto& buffer = attributes[i];
               py::tuple r(3);
-              IValue v = *buffer->slot();
+              IValue v = *buffer.slot();
               result[i] = std::make_tuple(
-                  buffer.key(), buffer->type(), toPyObject(std::move(v)));
+                  buffer.name(), buffer.type(), toPyObject(std::move(v)));
             }
             return result;
+          })
+      .def(
+          "_has_attribute",
+          [](Module& self, const std::string& name) -> bool {
+            return self.find_attribute(name);
           })
       .def(
           "_has_parameter",
@@ -821,11 +830,10 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_method_names",
           [](Module& self) {
-            using Item =
-                torch::OrderedDict<std::string, std::unique_ptr<Method>>::Item;
-            return fmap(self.get_methods(), [](const Item& item) {
-              return (*item)->name();
-            });
+            return fmap(
+                self.get_methods(), [](const std::unique_ptr<Method>& method) {
+                  return method->name();
+                });
           })
       .def(
           "_create_method_from_graph",
@@ -995,22 +1003,22 @@ void initJitScriptBindings(PyObject* module) {
           &Method::debugDisableAutodiffSubgraphInlining)
       .def("schema", &Method::getSchema)
       .def("pretty_print_schema", &Method::pretty_print_schema)
-      .def("python_print", [](Method& m) {
-        std::ostringstream oss;
-        std::vector<at::Tensor> constants;
-        std::vector<ClassTypePtr> classes;
-        PythonPrint(oss, m, constants, classes, true);
-        return std::make_pair(oss.str(), std::move(constants));
-      })
-      .def_property_readonly(
-          "code",
-          [](Method& self) {
-            std::ostringstream ss;
-            std::vector<at::Tensor> tensors;
+      .def(
+          "python_print",
+          [](Method& m) {
+            std::ostringstream oss;
+            std::vector<at::Tensor> constants;
             std::vector<ClassTypePtr> classes;
-            PythonPrint(ss, self, tensors, classes, false);
-            return ss.str();
-          });
+            PythonPrint(oss, m, constants, classes, true);
+            return std::make_pair(oss.str(), std::move(constants));
+          })
+      .def_property_readonly("code", [](Method& self) {
+        std::ostringstream ss;
+        std::vector<at::Tensor> tensors;
+        std::vector<ClassTypePtr> classes;
+        PythonPrint(ss, self, tensors, classes, false);
+        return ss.str();
+      });
 
   m.def(
       "_jit_script_compile",
@@ -1107,9 +1115,47 @@ void initJitScriptBindings(PyObject* module) {
           [](testing::FileCheck& f, const std::string& str) {
             return f.run(str);
           })
-      .def("run", [](testing::FileCheck& f, const Graph& g) {
-        return f.run(g);
-      });
+      .def(
+          "run", [](testing::FileCheck& f, const Graph& g) { return f.run(g); })
+      .def(
+          "run",
+          [](testing::FileCheck& f,
+             const std::string& input,
+             const std::string& output) { return f.run(input, output); },
+          "Run",
+          py::arg("checks_file"),
+          py::arg("test_file"))
+      .def(
+          "run",
+          [](testing::FileCheck& f, const std::string& input, const Graph& g) {
+            return f.run(input, g);
+          },
+          "Run",
+          py::arg("checks_file"),
+          py::arg("graph"));
+
+  m.def(
+      "_logging_set_logger",
+      [](logging::LoggerBase* logger) { return logging::setLogger(logger); },
+      py::return_value_policy::reference);
+  py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
+      m, "LoggerBase");
+  py::enum_<logging::LockingLogger::AggregationType>(m, "AggregationType")
+      .value("SUM", logging::LockingLogger::AggregationType::SUM)
+      .value("AVG", logging::LockingLogger::AggregationType::AVG)
+      .export_values();
+  py::class_<
+      logging::LockingLogger,
+      logging::LoggerBase,
+      std::shared_ptr<logging::LockingLogger>>(m, "LockingLogger")
+      .def(py::init<>())
+      .def("set_aggregation_type", &logging::LockingLogger::setAggregationType)
+      .def("get_counter_val", &logging::LockingLogger::getCounterValue);
+  py::class_<
+      logging::NoopLogger,
+      logging::LoggerBase,
+      std::shared_ptr<logging::NoopLogger>>(m, "NoopLogger")
+      .def(py::init<>());
 }
 } // namespace script
 } // namespace jit

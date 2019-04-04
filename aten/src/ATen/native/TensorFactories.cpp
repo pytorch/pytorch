@@ -18,6 +18,7 @@
 #include <c10/core/TensorOptions.h>
 #include <TH/THRandom.h>
 #include <TH/THGenerator.hpp>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -93,7 +94,13 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
   check_size_nonnegative(size);
 
-  auto* allocator = at::getCPUAllocator();
+  c10::Allocator* allocator;
+  if (options.pinned_memory()) {
+    allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
+  } else {
+    allocator = at::getCPUAllocator();
+  }
+
   int64_t nelements = prod_intlist(size);
   auto dtype = options.dtype();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
@@ -133,15 +140,15 @@ Tensor& empty_out(Tensor& result, IntArrayRef size) {
 // specialized operators for each datatype.
 // TODO: remove when we have Type support in the IR
 
-#define DEFINE_CAST_OP(_1, n, _2)                                \
-  Tensor _cast_##n(const Tensor& self, bool non_blocking) {      \
-    auto& target_type = self.type().toScalarType(ScalarType::n); \
-    if (self.type() == target_type)                              \
-      return self;                                               \
-    return target_type.copy(self, non_blocking);                 \
+#define DEFINE_CAST_OP(_1, n, _2)                                         \
+  Tensor _cast_##n(const Tensor& self, bool non_blocking) {               \
+    auto& target_type = self.dispatch_type().toScalarType(ScalarType::n); \
+    if (self.dispatch_type() == target_type)                              \
+      return self;                                                        \
+    return target_type.copy(self, non_blocking);                          \
   }
 
-AT_FORALL_SCALAR_TYPES_AND_BOOL(DEFINE_CAST_OP)
+AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 
@@ -725,7 +732,7 @@ Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
       return tensor_cpu(values, options);                           \
     }                                                               \
   }
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
+AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(TENSOR)
 #undef TENSOR
 } // namespace native
 } // namespace at

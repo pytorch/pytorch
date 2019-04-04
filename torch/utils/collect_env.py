@@ -4,8 +4,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import re
 import subprocess
 import sys
-import time
-import datetime
 import os
 from collections import namedtuple
 
