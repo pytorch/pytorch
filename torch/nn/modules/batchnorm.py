@@ -62,7 +62,7 @@ class _BatchNorm(Module):
         if self.momentum is None:
             exponential_average_factor = 0.0
         else:
-             exponential_average_factor = self.momentum
+            exponential_average_factor = self.momentum
 
         if self.training and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
