@@ -129,8 +129,7 @@ def run_cmake(version,
               build_dir,
               my_env):
     cmake_args = [
-        get_cmake_command(),
-        '--trace'
+        get_cmake_command()
     ]
     if USE_NINJA:
         cmake_args.append('-GNinja')
@@ -258,6 +257,7 @@ def build_caffe2(version,
                   build_test,
                   build_dir,
                   my_env)
+    print('##########################################1############################################')
     if IS_WINDOWS:
         build_cmd = ['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--']
         if USE_NINJA:
@@ -266,10 +266,12 @@ def build_caffe2(version,
             if max_jobs is not None:
                 j = min(int(max_jobs), j)
                 build_cmd += ['-j', str(j)]
+                pprint(build_cmd)
                 check_call(build_cmd, cwd=build_dir, env=my_env)
         else:
             j = max_jobs or str(multiprocessing.cpu_count())
             build_cmd += ['/maxcpucount:{}'.format(j)]
+            pprint(build_cmd)
             check_call(build_cmd, cwd=build_dir, env=my_env)
     else:
         if USE_NINJA:
@@ -280,6 +282,7 @@ def build_caffe2(version,
         else:
             max_jobs = max_jobs or str(multiprocessing.cpu_count())
             check_call(['make', '-j', str(max_jobs), 'install'], cwd=build_dir, env=my_env)
+    print('##########################################2############################################')
 
     # in cmake, .cu compilation involves generating certain intermediates
     # such as .cu.o and .cu.depend, and these intermediates finally get compiled
