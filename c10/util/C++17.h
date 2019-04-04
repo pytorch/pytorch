@@ -258,21 +258,29 @@ template<class T> inline std::string to_string(T value) {
 }
 
 inline long long stoll(const std::string& str) {
+#if defined(C10_ANDROID)
   // std::stoll doesn't exist in our Android environment, we need to implement
   // it ourselves.
   std::istringstream s(str);
   long long result;
   s >> result;
   return result;
+#else
+  return std::stoll(str);
+#endif
 }
 
 inline double stod(const std::string& str) {
+#if defined(C10_ANDROID)
   // std::stod doesn't exist in our Android environment, we need to implement
   // it ourselves.
   std::istringstream s(str);
   double result;
   s >> result;
   return result;
+#else
+  return std::stod(str);
+#endif
 }
 
 }}
