@@ -626,7 +626,6 @@ class TestAutograd(TestCase):
                                     "calculating the gradient of a sparse Tensor argument to mm is not supported."):
             z.sum().backward()
 
-    @skipIfRocm
     def test_sparse_ctor_getter_backward(self):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
         def test(size, sparse_dim, nnz, device):
