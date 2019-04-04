@@ -2,6 +2,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
 #include <torch/csrc/jit/source_range.h>
+#include <ATen/core/Macros.h>
 #include <algorithm>
 #include <clocale>
 #include <iostream>
@@ -111,8 +112,8 @@ enum TokenKind {
 #undef DEFINE_TOKEN
 };
 
-C10_API std::string kindToString(int kind);
-int stringToKind(const std::string& str);
+CAFFE2_API std::string kindToString(int kind);
+CAFFE2_API int stringToKind(const std::string& str);
 
 // nested hash tables that indicate char-by-char what is a valid token.
 struct TokenTrie;
@@ -145,7 +146,7 @@ struct TokenTrie {
 
 // stuff that is shared against all TC lexers/parsers and is initialized only
 // once.
-struct C10_API SharedParserData {
+struct CAFFE2_API SharedParserData {
   SharedParserData() : head(new TokenTrie()) {
     std::stringstream ss;
     for (const char* c = valid_single_char_tokens; *c; c++) {
@@ -361,7 +362,7 @@ struct C10_API SharedParserData {
   TokenTrieRef head;
 };
 
-C10_API SharedParserData& sharedParserData();
+CAFFE2_API SharedParserData& sharedParserData();
 
 struct Token {
   int kind;

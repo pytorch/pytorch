@@ -4,6 +4,7 @@
 
 #include <c10/util/Optional.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/C++17.h>
 #include <iostream>
 
 namespace c10 {
@@ -14,13 +15,13 @@ namespace c10 {
   template<class Left, class Right>
   class C10_API either final {
   public:
-      template<class Head, class... Tail, std::enable_if_t<std::is_constructible<Left, Head, Tail...>::value && !std::is_constructible<Right, Head, Tail...>::value>* = nullptr>
+      template<class Head, class... Tail, c10::guts::enable_if_t<std::is_constructible<Left, Head, Tail...>::value && !std::is_constructible<Right, Head, Tail...>::value>* = nullptr>
       either(Head&& construct_left_head_arg, Tail&&... construct_left_tail_args) noexcept(noexcept(std::declval<either<Left, Right>>()._construct_left(std::forward<Head>(construct_left_head_arg), std::forward<Tail>(construct_left_tail_args)...)))
               : _side(Side::left) {
           _construct_left(std::forward<Head>(construct_left_head_arg), std::forward<Tail>(construct_left_tail_args)...);
       }
 
-      template<class Head, class... Tail, std::enable_if_t<!std::is_constructible<Left, Head, Tail...>::value && std::is_constructible<Right, Head, Tail...>::value>* = nullptr>
+      template<class Head, class... Tail, c10::guts::enable_if_t<!std::is_constructible<Left, Head, Tail...>::value && std::is_constructible<Right, Head, Tail...>::value>* = nullptr>
       either(Head&& construct_right_head_arg, Tail&&... construct_right_tail_args) noexcept(noexcept(std::declval<either<Left, Right>>()._construct_right(std::forward<Head>(construct_right_head_arg), std::forward<Tail>(construct_right_tail_args)...)))
           : _side(Side::right) {
         _construct_right(std::forward<Head>(construct_right_head_arg), std::forward<Tail>(construct_right_tail_args)...);
