@@ -172,7 +172,7 @@ struct CAFFE2_API SharedParserData {
 #else
   static double strtod_c(const char* str, const char** end) {
     std::istringstream s(str);
-    s.imbue(std::locale());
+    s.imbue(std::locale::classic());
     double result;
     s >> result;
     *end = str + s.tellg();
