@@ -16,7 +16,7 @@ struct InputMetadata {
   : type_{&type} , shape_{shape}, device_{device} { }
 
   InputMetadata(const at::Tensor& t)
-  : InputMetadata(t.type(), t.sizes(), t.device()) { }
+  : InputMetadata(t.dispatch_type(), t.sizes(), t.device()) { }
 
   bool is_valid() const {
     return type_ != nullptr;
