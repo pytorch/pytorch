@@ -259,27 +259,32 @@ def build_caffe2(version,
                   my_env)
     print('##########################################1############################################')
     if IS_WINDOWS:
+        print('##########################################3############################################')
         build_cmd = ['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--']
         if USE_NINJA:
+            print('##########################################6############################################')
             # sccache will fail if all cores are used for compiling
             j = max(1, multiprocessing.cpu_count() - 1)
             if max_jobs is not None:
                 j = min(int(max_jobs), j)
-                build_cmd += ['-j', str(j)]
+                build_cmd.extend(['-j', str(j)])
                 pprint(build_cmd)
                 check_call(build_cmd, cwd=build_dir, env=my_env)
         else:
+            print('##########################################7############################################')
             j = max_jobs or str(multiprocessing.cpu_count())
-            build_cmd += ['/maxcpucount:{}'.format(j)]
+            build_cmd.extend(['/maxcpucount:{}'.format(j)])
             pprint(build_cmd)
             check_call(build_cmd, cwd=build_dir, env=my_env)
     else:
+        print('##########################################4############################################')
         if USE_NINJA:
             ninja_cmd = ['ninja', 'install']
             if max_jobs is not None:
                 ninja_cmd += ['-j', max_jobs]
             check_call(ninja_cmd, cwd=build_dir, env=my_env)
         else:
+            print('##########################################5############################################')
             max_jobs = max_jobs or str(multiprocessing.cpu_count())
             check_call(['make', '-j', str(max_jobs), 'install'], cwd=build_dir, env=my_env)
     print('##########################################2############################################')
