@@ -17,6 +17,8 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
 
+#include <ATen/native/cpu/Loops.h>
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -87,10 +89,10 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
 
 Tensor& _fill__cpu(Tensor& self, Scalar value) {
   auto iter = TensorIterator::unary_op(self, self);
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "fill_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter->dtype(), "fill_cpu", [&]() {
     scalar_t fill_value = value.to<scalar_t>();
-    unary_vec(
-        iter,
+    unary_kernel(
+        *iter,
         [=](scalar_t a) -> scalar_t { return fill_value; }
         );
   });
