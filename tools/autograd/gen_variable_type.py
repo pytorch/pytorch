@@ -207,11 +207,10 @@ if (${cond}) {
 """)
 
 RECORD_FUNCTION = CodeTemplate("""\
-profiler::RecordFunction profiler("${name}", Function::peek_at_next_sequence_nr());""")
+profiler::RecordFunction guard("${name}", Function::peek_at_next_sequence_nr());""")
 
 RECORD_FUNCTION_WITH_INPUTS = CodeTemplate("""\
-profiler::RecordFunction profiler("${name}", Function::peek_at_next_sequence_nr(),
-  [&]() -> jit::Stack { return {${input_names}}; });
+RECORD_FUNCTION_WITH_INPUTS_SEQ("${name}", Function::peek_at_next_sequence_nr(), ${input_names});
 """)
 
 SELECT = CodeTemplate("""\

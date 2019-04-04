@@ -113,14 +113,8 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
   variable_list operator()(variable_list&& inputs) {
-    profiler::RecordFunction rec(this, [&inputs]() {
-      jit::Stack inputs_stack;
-      inputs_stack.insert(
-          inputs_stack.end(),
-          inputs.begin(),
-          inputs.end());
-      return inputs_stack;
-    });
+    RECORD_FUNCTION_WITH_INPUT_RANGE(this, inputs.begin(), inputs.end());
+
     return apply(std::move(inputs));
   }
 

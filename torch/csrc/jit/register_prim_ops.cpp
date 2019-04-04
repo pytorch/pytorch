@@ -660,11 +660,8 @@ RegisterOperators reg(
              return v->uses().size() > 0;
            });
            return [=](Stack& stack) {
-             autograd::profiler::RecordFunction record("chunk", [&stack](){
-               Stack inputs;
-               push(inputs, peek(stack, 0, 1));
-               return inputs;
-             });
+             RECORD_FUNCTION_WITH_STACK("chunk", last(stack, 1));
+
              at::Tensor t;
              pop(stack, t);
              auto result = at::chunk(t, chunks, dim);

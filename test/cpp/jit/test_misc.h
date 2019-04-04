@@ -577,11 +577,8 @@ void testTopologicalIndex() {
 }
 
 at::Tensor invokeTestRecordFunction(at::Tensor& t) {
-  autograd::profiler::RecordFunction guard("test", [t]() {
-    Stack st;
-    pack(st, t);
-    return st;
-  });
+  RECORD_FUNCTION_WITH_INPUTS("test", t);
+
   auto t2 = t.pow(2);
   return t2;
 }
@@ -593,23 +590,12 @@ static const auto invokeTestRecordFunction_JIT = R"JIT(
 )JIT";
 
 at::Tensor invokeTestRecordFunctionJIT(at::Tensor& t) {
-  autograd::profiler::RecordFunction guard("test", [t]() {
-    Stack st;
-    pack(st, t);
-    return st;
-  });
+  RECORD_FUNCTION_WITH_INPUTS("test", t);
 
   auto cu = std::make_shared<script::Module>();
   script::defineMethodsInModule(
       cu, invokeTestRecordFunction_JIT, script::nativeResolver, c10::nullopt);
-  auto graph = cu->get_method("forward").graph();
-  AT_CHECK(graph);
-  std::vector<IValue> stack({IValue(t)});
-  Code code(graph);
-  InterpreterState interp(code);
-  interp.run(stack);
-  auto t2 = pop(stack).toTensor();
-  return t2;
+  return cu->get_method("forward")({t}).toTensor();
 }
 
 using TracedTestInputs = std::vector<std::tuple<std::string, std::vector<std::vector<int64_t>>>>;
@@ -669,7 +655,7 @@ void testRecordFunction() {
           }
         }
         traced_inputs.push_back(std::make_tuple(std::string(getFullName(&fn)), sizes));
-      });
+      }, [](const autograd::profiler::RecordFunction&) {}, true);
 
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(true);
