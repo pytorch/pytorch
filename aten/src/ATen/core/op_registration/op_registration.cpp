@@ -56,8 +56,24 @@ private:
   bool owns_registration_;
 };
 
-void RegisterOperators::registerOp_(const std::string& schemaStr, detail::KernelRegistrationConfig&& config) {
-  registerOp_(torch::jit::parseSchema(schemaStr), std::move(config));
+void RegisterOperators::registerOp_(const std::string& schemaOrName, detail::KernelRegistrationConfig&& config) {
+  // If there is no '(' in the schema, we assume this is only the name (e.g.
+  // "foo::bar").
+  const auto bracketIndex = schemaOrName.find('(');
+  if (bracketIndex == std::string::npos) {
+    AT_ASSERTM(nullptr != config.inferred_function_schema.get(), "Cannot infer schema from this kernel function. Please explicitly specify the operator schema.");
+    FunctionSchema inferredSchema(
+      schemaOrName,
+      "", // TODO Handle overload names
+      config.inferred_function_schema->arguments(),
+      config.inferred_function_schema->returns(),
+      config.inferred_function_schema->is_vararg(),
+      config.inferred_function_schema->is_varret()
+    );
+    registerOp_(std::move(inferredSchema), std::move(config));
+  } else {
+    registerOp_(torch::jit::parseSchema(schemaOrName), std::move(config));
+  }
 }
 
 void RegisterOperators::registerOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config) {
