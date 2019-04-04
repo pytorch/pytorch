@@ -1,9 +1,7 @@
 import contextlib
 import warnings
 
-from .generator import Generator
-
-default_generator = Generator(default=True)
+default_generator = torch._C._GeneratorBase(default=True)
 
 
 def set_rng_state(new_state):

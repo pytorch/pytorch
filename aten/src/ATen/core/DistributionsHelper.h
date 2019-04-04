@@ -65,12 +65,12 @@ using dist_acctype = typename DistAccumType<T>::type;
 
 // Constants for uniform distribution
 // doubles have 52 bits of mantissa (fractional part)
-static constexpr uint64_t DOUBLE_MASK = (1ULL << 53) - 1;
-static constexpr double DOUBLE_DIVISOR = 1.0 / (1ULL << 53);
+constexpr uint64_t DOUBLE_MASK = (1ULL << 53) - 1;
+constexpr double DOUBLE_DIVISOR = 1.0 / (1ULL << 53);
 
 // floats have 23 bits of mantissa (fractional part)
-static constexpr uint32_t FLOAT_MASK = (1 << 24) - 1;
-static constexpr float FLOAT_DIVISOR = 1.0f / (1 << 24);
+constexpr uint32_t FLOAT_MASK = (1 << 24) - 1;
+constexpr float FLOAT_DIVISOR = 1.0f / (1 << 24);
 
 /**
  * Samples a uniform distribution in the range [0,1) of type T
