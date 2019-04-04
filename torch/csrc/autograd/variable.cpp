@@ -174,8 +174,13 @@ void Variable::Impl::set_data(const at::Tensor &new_data) {
   type_id_ = new_data.type().type_id();
   is_variable_ = true;
 
-  auto new_data_copy = at::Tensor(new_data.getIntrusivePtr()->shallow_copy_and_detach());
-  data_ = std::move(new_data_copy);
+  auto new_data_impl_copy = new_data.getIntrusivePtr()->shallow_copy_and_detach();
+  // Version counter is not shared when we replace a `Variable`'s underlying `Tensor`
+  // by calling `set_data(...)`. The original version of the `Variable` is always preserved.
+  // See NOTE [ Version Counter Sharing ] for details.
+  auto saved_version_ = data_.unsafeGetTensorImpl()->version_counter().current_version();
+  new_data_impl_copy->set_version_counter(saved_version_);
+  data_ = std::move(at::Tensor(new_data_impl_copy));
 }
 
 void Variable::Impl::release_resources() {

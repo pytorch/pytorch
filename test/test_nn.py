@@ -280,14 +280,9 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
 
             input_ip = deepcopy(input)
             input_ip_clone = input_ip.clone()
-            input_saved_version = input._version
-            input_ip_clone_saved_version = input_ip_clone._version
             with freeze_rng_state():
-                # in-place operations should change `input_ip_clone`'s version
                 output_ip = module_ip(input_ip_clone)
-            test_case.assertNotEqual(input_ip_clone._version, input_ip_clone_saved_version)
-            # Check that changes to `input_ip_clone`'s version doesn't affect `input`'s version
-            test_case.assertEqual(input._version, input_saved_version)
+            test_case.assertNotEqual(input_ip_clone._version, input_version)
             test_case.assertEqual(output, output_ip)
             grad = output.data.clone().normal_()
             input.grad.data.zero_()

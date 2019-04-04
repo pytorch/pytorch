@@ -141,15 +141,21 @@ struct C10_API AutogradMetaInterface {
 // NOTE [ Version Counter Sharing ]
 //
 // Every Tensor has a version counter. Version counters are incremented
-// whenever the data or shape of a tensor changes through non-Variable type dispatch.
+// whenever the data or shape of a tensor changes through Variable operations.
 // These are typically in-place operations. Version counters are used to
 // detect modifications to saved variables which would result in incorrect
 // gradient calculations. Version counters may be shared between Variables:
 //
 // 1. A view shares the version counter of the base Variable,
 // 2. Detached variables share the version counter of the source,
-// 3. Unpacked saved variables share the version counter of the source,
-// 4. `set_data(...)` on variables shares the version counter with the source data tensor.
+// 3. Unpacked saved variables share the version counter of the source.
+//
+// Version counters are not shared when:
+// 1. We replace a `Variable`'s underlying `Tensor` by calling `set_data(...)`.
+//
+// Note that we explicitly don't increment the version counter in non-Variable
+// operations, because it is a useful escape hatch when we want to change the
+// content of a Variable without invalidating it in the autograd graph.
 struct C10_API VariableVersion {
  public:
   // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
@@ -879,8 +885,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return std::move(autograd_meta_);
   }
 
-  // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
-  // because it is unique for each Variable.
+  // NOTE: `shallow_copy_and_detach()` does not copy the following TensorImpl fields:
+  // 1. the AutogradMeta pointer, because it is unique for each Variable.
+  // 2. the version counter, because although it lives in TensorImpl, the version counter is managed
+  // by autograd, and the call sites of `shallow_copy_and_detach()` (from autograd) should decide what
+  // the version counter should be for each new TensorImpl. See NOTE [ Version Counter Sharing ] for details.
+  //
   // NOTE: We don't set `allow_tensor_metadata_change_` to false here, because there are call sites
   // to this function that need to change the shallow copy's size or storage afterwards, and setting
   // `allow_tensor_metadata_change_` to false would prevent those changes from happening and is
@@ -892,7 +902,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     impl->storage_offset_ = storage_offset_;
     impl->is_wrapped_number_ = is_wrapped_number_;
     impl->reserved_ = reserved_;
-    impl->set_version_counter(version_counter());
     impl->refresh_numel();
     impl->refresh_contiguous();
     return impl;

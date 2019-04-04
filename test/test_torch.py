@@ -2148,7 +2148,6 @@ class _TestTorchMixin(object):
             ("bn,anm,bm->ba", l, w, r),  # as torch.bilinear
             ("... ii->...i  ", I),       # batch diagonal with spaces
         ]
-        A_saved_version = A._version
         for test in test_list:
             actual = torch.einsum(test[0], test[1:])
             expected = np.einsum(test[0], *[t.numpy() for t in test[1:]])
@@ -2165,7 +2164,7 @@ class _TestTorchMixin(object):
             if test[0] not in {"i,i->", "i,i->i", "ij,ij->ij"}:
                 gradcheck_inps = tuple(t.detach().requires_grad_() for t in test[1:])
                 self.assertTrue(torch.autograd.gradcheck(do_einsum, gradcheck_inps))
-            self.assertTrue(A._version == A_saved_version)  # check that we do not use inplace ops
+            self.assertTrue(A._version == 0)  # check that we do not use inplace ops
 
     def test_sum_all(self):
         def check_sum_all(tensor):

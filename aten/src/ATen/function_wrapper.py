@@ -45,7 +45,6 @@ ${return_type} ${api_name}(${type_method_formals}) const override;
 TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
 ${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
-    ${version_increment_stmts}
     Tensor ${broadcast_returns};
     std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
     return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
@@ -85,7 +84,6 @@ ${return_type} ${api_name}(${type_method_formals}) const override;
 TYPE_METHOD_DEFINITION_CONCRETE = CodeTemplate("""\
 ${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
-    ${version_increment_stmts}
     ${type_definition_body}
 }
 """)
@@ -97,7 +95,6 @@ ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const
 TYPE_DERIVED_DEFINITION = CodeTemplate("""\
 ${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
-    ${version_increment_stmts}
     ${type_definition_body}
 }
 """)
@@ -107,7 +104,6 @@ ${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formal
 TYPE_DERIVED_DEFINITION_NATIVE = CodeTemplate("""\
 ${return_type} ${Type}::${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
-    ${version_increment_stmts}
     ${return_call} at::native::${native_type_method_dispatch}(/* actuals */ ${actuals});
 }
 """)
@@ -123,7 +119,6 @@ ${return_call} at::native::${native_type_method_dispatch}(/* native_actuals */ $
 # Overrideable stubs to be used in user-extendable backends
 TYPE_DEFINITION_EXTENSION_BACKEND = CodeTemplate("""\
 ${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formals}) const {
-    ${version_increment_stmts}
     return ${Type}Dispatch::get_function<${return_type} (*)(${formals_types})>("${schema}")(${native_actuals});
 }
 """)
@@ -194,10 +189,6 @@ if (${name}.defined()) {
 }""")
 
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
-
-VERSION_INCREMENT_TEMPLATE = CodeTemplate("""\
-if (at::VersionUpdateMode::is_enabled()) ${tensor_name}.unsafeGetTensorImpl()->bump_version();
-""")
 
 
 class NYIError(Exception):
@@ -547,7 +538,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'with_gil': bool,
     'zero_dim_dispatch_when_scalar': str,
     'zero_dim_tensor_only': bool,
-    'version_increment_stmts': List[str],
 })
 
 OutputDeclaration = NamedTuple('OutputDeclaration', [
@@ -617,21 +607,6 @@ def to_return_type(arg, option):
         'type': rt,
         'dynamic_type': DYNAMIC_TYPE.get(arg['type'], arg['type']),
     }
-
-
-def emit_version_increment(option):
-    version_increment_stmts = []
-    # TH functions won't be called directly, but only from other functions that dispatch to them.
-    # The version counter is already bumped in the call site of the TH function, and we don't want
-    # to bump it again in the TH function.
-    if not option['mode'] == 'TH':
-        for formal in option['formals_list']:
-            arg_type = formal['type']
-            if NATIVE_DYNAMIC_TYPE.get(arg_type, arg_type) == 'Tensor' and 'const' not in arg_type:
-                version_increment_stmts.append(VERSION_INCREMENT_TEMPLATE.substitute(tensor_name=formal['name']))
-    if not version_increment_stmts:
-        version_increment_stmts.append("// Version increment omitted")
-    return version_increment_stmts
 
 
 def create_generic(top_env, declarations):
@@ -895,7 +870,6 @@ def create_generic(top_env, declarations):
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
             body = emit_nn_body(option)
-            option['version_increment_stmts'] = emit_version_increment(option)
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_CONCRETE.substitute(
                     env, type_definition_body=body))
@@ -931,7 +905,6 @@ def create_generic(top_env, declarations):
                                                         else 'size' if broadcast_dims else 'outplace')
             option['broadcast_modified_actuals'] = ['b_' + y if 'b_' + y in option['broadcast_returns'] else y
                                                     for y in option['actuals']]
-            option['version_increment_stmts'] = emit_version_increment(option)
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_BROADCAST.substitute(env))
 
@@ -1147,7 +1120,6 @@ def create_generic(top_env, declarations):
                 TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
         else:
             body = TYPE_DEFINITION_BODY_NATIVE.substitute(env)
-            option['version_increment_stmts'] = emit_version_increment(option)
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_CONCRETE.substitute(
                     env, type_definition_body=body))
@@ -1596,7 +1568,6 @@ def create_derived(backend_type_env, declarations):
             env = nested_dict(option, backend_type_env)
             body = emit_body(env, option)  # type: ignore
             option['type_definition_body'] = body
-            option['version_increment_stmts'] = emit_version_increment(option)
             type_object_declarations.append(
                 TYPE_DERIVED_DECLARATION.substitute(env))
             type_object_definitions.append(
@@ -1619,7 +1590,6 @@ def create_derived(backend_type_env, declarations):
                         TYPE_DERIVED_DEFINITION_NATIVE_MISSING.substitute(env))
                 else:
                     option['native_type_method_dispatch'] = native_dispatch
-                    option['version_increment_stmts'] = emit_version_increment(option)
                     type_object_definitions.append(
                         TYPE_DERIVED_DEFINITION_NATIVE.substitute(env))
 
@@ -1653,7 +1623,6 @@ def create_extension_backend(backend_type_env, declarations):
                         ["{} {}".format(f['dynamic_type'], f['name']) for f in option['formals_list']])
                     return_type = NATIVE_DYNAMIC_TYPE.get(option['return_type'], option['return_type'])
                     option['schema'] = "{}({}) -> {}".format(option['api_name'], schema_args, return_type)
-                    option['version_increment_stmts'] = emit_version_increment(option)
                     env = nested_dict(option, backend_type_env)
                     type_object_declarations.append(
                         TYPE_DERIVED_DECLARATION.substitute(env))

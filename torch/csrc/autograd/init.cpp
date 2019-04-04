@@ -1,6 +1,5 @@
 #include <torch/csrc/python_headers.h>
 
-#include <ATen/version_update_mode.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -96,34 +95,12 @@ static PyObject * is_anomaly_mode_enabled(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * _set_version_update_enabled(PyObject* _unused, PyObject *arg) {
-  HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
-  }
-  at::VersionUpdateMode::set_enabled(arg == Py_True);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * _is_version_update_enabled(PyObject* _unused, PyObject *arg) {
-  HANDLE_TH_ERRORS
-  if (at::VersionUpdateMode::is_enabled()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
 // autograd methods on torch._C
 static PyMethodDef methods[] = {
   {"set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, nullptr},
   {"is_grad_enabled", (PyCFunction)is_grad_enabled, METH_NOARGS, nullptr},
   {"set_anomaly_enabled", (PyCFunction)set_anomaly_mode_enabled, METH_O, nullptr},
   {"is_anomaly_enabled", (PyCFunction)is_anomaly_mode_enabled, METH_NOARGS, nullptr},
-  {"_set_version_update_enabled", (PyCFunction)_set_version_update_enabled, METH_O, nullptr},
-  {"_is_version_update_enabled", (PyCFunction)_is_version_update_enabled, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

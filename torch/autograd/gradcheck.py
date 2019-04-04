@@ -1,7 +1,6 @@
 import torch
 from torch._six import container_abcs, istuple
 import torch.testing
-import torch._autograd_internal
 from itertools import product
 import warnings
 
@@ -64,6 +63,8 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
 
     # TODO: compare structure
     for x_tensor, d_tensor in zip(x_tensors, j_tensors):
+        # need data here to get around the version check because without .data,
+        # the following code updates version but doesn't change content
         if x_tensor.is_sparse:
             def get_stride(size):
                 dim = len(size)
@@ -95,36 +96,14 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                     r = (outb - outa) / (2 * eps)
                     d_tensor[d_idx] = r.detach().reshape(-1)
         else:
-            # We use `x_tensor.data` here to make sure small finite changes to `x_tensor`
-            # doesn't affect `x_tensor.grad_fn` in the original autograd graph.
             x_tensor = x_tensor.data
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
                 orig = x_tensor[x_idx].item()
-
-                # Here we use `torch._autograd_internal.no_version_update()` to disable version update
-                # in `x_tensor`'s in-place operations. There are two potential concerns here:
-                #
-                # 1. Does it affect the gradient calculations in `fn(input)`?
-                # Answer: No. Since we always modify `x_tensor`'s value *before* passing it into
-                # the graph via `fn(input)`, the in-place operation will not cause any incorrect
-                # gradient calculations in `fn(input)`.
-                #
-                # 2. Does it break the invariant that "we must update a tensor's version if its
-                # content changes"?
-                # Answer: No. Since we restore `x_tensor`'s original content at the end of this
-                # code block, from the caller's perspective this function doesn't change `x_tensor`'s
-                # content and doesn't update its version, which maintains the invariant.
-                with torch._autograd_internal.no_version_update():
-                    x_tensor[x_idx] = orig - eps
+                x_tensor[x_idx] = orig - eps
                 outa = fn(input).clone()
-
-                with torch._autograd_internal.no_version_update():
-                    x_tensor[x_idx] = orig + eps
+                x_tensor[x_idx] = orig + eps
                 outb = fn(input).clone()
-
-                with torch._autograd_internal.no_version_update():
-                    x_tensor[x_idx] = orig
-
+                x_tensor[x_idx] = orig
                 r = (outb - outa) / (2 * eps)
                 d_tensor[d_idx] = r.detach().reshape(-1)
 

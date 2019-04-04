@@ -200,22 +200,6 @@ SET_HISTORY = CodeTemplate("""\
 ${fn}_history(${differentiable_outputs}, grad_fn);
 """)
 
-SAVE_VERSION = CodeTemplate("""\
-uint32_t ${tensor_name}_saved_version = as_variable_ref(${tensor_name}).current_version();
-""")
-
-CHECK_VERSION_NATIVE = CodeTemplate("""\
-if (at::VersionUpdateMode::is_enabled())
-  AT_ASSERT(as_variable_ref(${tensor_name}).current_version() > ${tensor_name}_saved_version);
-""")
-
-# TH functions won't be called directly, but only from other functions that dispatch to them.
-# The version counter is already bumped in the call site of the TH function, and we don't want
-# to bump it again in the TH function.
-CHECK_VERSION_TH = CodeTemplate("""\
-AT_ASSERT(as_variable_ref(${tensor_name}).current_version() == ${tensor_name}_saved_version);
-""")
-
 CONDITIONAL = CodeTemplate("""\
 if (${cond}) {
   ${statements}
@@ -858,18 +842,10 @@ def emit_body(declaration):
             return []
         return ['check_inplace({});'.format(arg['name']) for arg in differentiable_outputs]
 
-    def emit_save_version():
+    def emit_increment_version():
         if not modifies_arguments:
             return []
-        return [SAVE_VERSION.substitute(tensor_name=arg['name']) for arg in differentiable_outputs]
-
-    def emit_check_version():
-        if not modifies_arguments:
-            return []
-        if declaration['mode'] == 'TH':
-            return [CHECK_VERSION_TH.substitute(tensor_name=arg['name']) for arg in differentiable_outputs]
-        else:
-            return [CHECK_VERSION_NATIVE.substitute(tensor_name=arg['name']) for arg in differentiable_outputs]
+        return ['increment_version({});'.format(arg['name']) for arg in differentiable_outputs]
 
     env = {}
     combined = nested_dict(env, declaration)
@@ -887,12 +863,11 @@ def emit_body(declaration):
     pre_record_trace, post_record_trace = emit_record_trace(env)
 
     body.append(pre_record_trace)
-    if requires_derivative:
-        body.extend(emit_save_version())
     body.append(emit_call(env))
     if requires_derivative:
-        # rebase_history requires that the counter is incremented before it is called
-        body.extend(emit_check_version())
+        # set_flags has to appear after version_counter, because rebase_history
+        # requires that the counter is incremented before it is called
+        body.extend(emit_increment_version())
         body.append(emit_history())
     # post_record_trace must appear before save_outputs so that saved outputs
     # have their tracing state saved (that is setup by recordTrace)

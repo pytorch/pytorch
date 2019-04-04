@@ -3,7 +3,6 @@
 // ${generated_comment}
 
 #include <ATen/TypeExtendedInterface.h>
-#include <ATen/version_update_mode.h>
 
 namespace at {
 
