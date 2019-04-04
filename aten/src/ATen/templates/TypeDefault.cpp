@@ -58,10 +58,10 @@ Type & TypeDefault::toScalarType(ScalarType s) const {
   return at::globalContext().getNonVariableType(backend(),s);
 }
 Tensor TypeDefault::tensorWithAllocator(IntArrayRef sizes, Allocator* allocator) const {
-  return tensorWithAllocator(sizes, defaultStrides(sizes), std::move(allocator));
+  return tensorWithAllocator(sizes, detail::defaultStrides(sizes), std::move(allocator));
 }
 Tensor TypeDefault::tensorWithAllocator(IntArrayRef sizes, IntArrayRef strides, Allocator* allocator) const {
-  auto storage = storageWithAllocator(computeStorageSize(sizes, strides), std::move(allocator));
+  auto storage = storageWithAllocator(detail::computeStorageSize(sizes, strides), std::move(allocator));
   return at::empty({0}, options()).set_(storage, 0, sizes, strides);
 }
 

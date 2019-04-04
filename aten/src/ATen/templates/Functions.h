@@ -30,7 +30,7 @@ inline Tensor from_blob(
     const TensorOptions& options = {}) {
   auto storage = Storage(
       options.dtype(),
-      computeStorageSize(sizes, strides),
+      detail::computeStorageSize(sizes, strides),
       InefficientStdFunctionContext::makeDataPtr(
           data, deleter, options.device()),
       /*allocator=*/nullptr,
@@ -43,7 +43,7 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
-  return from_blob(data, sizes, defaultStrides(sizes), deleter, options);
+  return from_blob(data, sizes, detail::defaultStrides(sizes), deleter, options);
 }
 
 inline Tensor from_blob(
@@ -58,7 +58,7 @@ inline Tensor from_blob(
     void* data,
     IntArrayRef sizes,
     const TensorOptions& options = {}) {
-  return from_blob(data, sizes, defaultStrides(sizes), [](void*) {}, options);
+  return from_blob(data, sizes, detail::defaultStrides(sizes), [](void*) {}, options);
 }
 
 namespace detail {

@@ -235,6 +235,8 @@ bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
   return contig_if_nonempty;
 }
 
+namespace detail {
+
 std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
   std::vector<int64_t> strides(sizes.size());
   int64_t stride = 1;
@@ -257,5 +259,5 @@ int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides) {
   }
   return size;
 }
-
-}
+}  // namespace detail
+}  // namespace at
