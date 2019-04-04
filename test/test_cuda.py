@@ -1128,7 +1128,7 @@ class TestCuda(TestCase):
         for old_version, (_, t) in zip(versions, bc_tensors_t):
             self.assertEqual(t._version, old_version)
             t.zero_()
-            self.assertGreater(t._version, old_version)
+            self.assertEqual(t._version, old_version + 1)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     # Note: fails sometimes on the CI, passes on dual gfx906
@@ -1198,7 +1198,7 @@ class TestCuda(TestCase):
         for old_version, t in zip(versions, rc_tensors):
             self.assertEqual(t._version, old_version)
             t.zero_()
-            self.assertGreater(t._version, old_version)
+            self.assertEqual(t._version, old_version + 1)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_reduce_add_coalesced(self):
