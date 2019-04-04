@@ -83,6 +83,11 @@ inline bool operator==(const Argument& lhs, const Argument& rhs) {
           && lhs.alias_info() == rhs.alias_info();
 }
 
+struct OperatorName final {
+  std::string name;
+  std::string overload_name;
+};
+
 struct FunctionSchema {
   FunctionSchema(
       std::string name,
@@ -91,8 +96,7 @@ struct FunctionSchema {
       std::vector<Argument> returns,
       bool is_vararg = false,
       bool is_varret = false)
-      : name_(std::move(name)),
-        overload_name_(std::move(overload_name)),
+      : name_({std::move(name), std::move(overload_name)}),
         arguments_(std::move(arguments)),
         returns_(std::move(returns)),
         is_vararg_(is_vararg),
@@ -115,8 +119,7 @@ struct FunctionSchema {
             is_varret) {}
 
 private:
-  const std::string name_;
-  const std::string overload_name_;
+  OperatorName name_;
   const std::vector<Argument> arguments_;
   const std::vector<Argument> returns_;
   // if true then this schema takes an arbitrary number of additional arguments
@@ -128,10 +131,10 @@ private:
 
 public:
   const std::string& name() const {
-    return name_;
+    return name_.name;
   }
   const std::string& overload_name() const {
-    return overload_name_;
+    return name_.overload_name;
   }
   const std::vector<Argument>& arguments() const {
     return arguments_;

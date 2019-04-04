@@ -194,11 +194,11 @@ public:
 private:
   template<class... ConfigParameters>
   void op_(FunctionSchema&& schema, ConfigParameters&&... configParameters) {
-    registerOp_(std::move(schema), detail::make_registration_config(std::forward<ConfigParameters>(configParameters)...));
+    checkSchemaAndRegisterOp_(std::move(schema), detail::make_registration_config(std::forward<ConfigParameters>(configParameters)...));
   }
   template<class... ConfigParameters>
   void op_(const std::string& schemaOrName, ConfigParameters&&... configParameters) {
-    registerOp_(schemaOrName, detail::make_registration_config(std::forward<ConfigParameters>(configParameters)...));
+    checkSchemaAndRegisterOp_(schemaOrName, detail::make_registration_config(std::forward<ConfigParameters>(configParameters)...));
   }
 
   template<class FuncType>
@@ -206,8 +206,10 @@ private:
     op_(schemaOrName, kernel<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>(std::forward<FuncType>(func)));
   }
 
+  void checkSchemaAndRegisterOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config);
+  void checkSchemaAndRegisterOp_(const std::string& schemaOrName, detail::KernelRegistrationConfig&& config);
+
   void registerOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config);
-  void registerOp_(const std::string& schemaOrName, detail::KernelRegistrationConfig&& config);
 
   class OperatorRegistrar;
 

@@ -56,24 +56,33 @@ private:
   bool owns_registration_;
 };
 
-void RegisterOperators::registerOp_(const std::string& schemaOrName, detail::KernelRegistrationConfig&& config) {
-  // If there is no '(' in the schema, we assume this is only the name (e.g.
-  // "foo::bar").
-  const auto bracketIndex = schemaOrName.find('(');
-  if (bracketIndex == std::string::npos) {
+void RegisterOperators::checkSchemaAndRegisterOp_(const std::string& schemaOrNameStr, detail::KernelRegistrationConfig&& config) {
+  either<OperatorName, FunctionSchema> schemaOrName = torch::jit::parseSchemaOrName(schemaOrNameStr);
+  if (schemaOrName.is_right()) {
+    // schema was explicitly specified. Check it matches the inferred one and register the op.
+    checkSchemaAndRegisterOp_(std::move(schemaOrName).right(), std::move(config));
+  } else {
+    // schema wasn't explicitly specified. Take the inferred schema for registering the op.
     AT_ASSERTM(nullptr != config.inferred_function_schema.get(), "Cannot infer schema from this kernel function. Please explicitly specify the operator schema.");
+    OperatorName name = std::move(schemaOrName).left();
     FunctionSchema inferredSchema(
-      schemaOrName,
-      "", // TODO Handle overload names
+      std::move(name.name),
+      std::move(name.overload_name),
       config.inferred_function_schema->arguments(),
       config.inferred_function_schema->returns(),
       config.inferred_function_schema->is_vararg(),
       config.inferred_function_schema->is_varret()
     );
     registerOp_(std::move(inferredSchema), std::move(config));
-  } else {
-    registerOp_(torch::jit::parseSchema(schemaOrName), std::move(config));
   }
+}
+
+void RegisterOperators::checkSchemaAndRegisterOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config) {
+  if (config.inferred_function_schema.get() != nullptr) {
+    assertSchemasHaveSameSignature(*config.inferred_function_schema, schema);
+  }
+
+  registerOp_(std::move(schema), std::move(config));
 }
 
 void RegisterOperators::registerOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config) {
@@ -83,10 +92,6 @@ void RegisterOperators::registerOp_(FunctionSchema&& schema, detail::KernelRegis
 
   // if kernel_func is set, so must be cache_creator_func, the API shouldn't allow anything else.
   AT_ASSERT((config.kernel_func != nullptr) == static_cast<bool>(config.cache_creator_func));
-
-  if (config.inferred_function_schema.get() != nullptr) {
-    assertSchemasHaveSameSignature(*config.inferred_function_schema, schema);
-  }
 
   registrars_.emplace_back(std::move(schema), config.dispatch_key, config.kernel_func, std::move(config.cache_creator_func));
 }
