@@ -290,16 +290,15 @@ ProcessGroupGloo::ProcessGroupGloo(
 
 ProcessGroupGloo::~ProcessGroupGloo() {
   std::unique_lock<std::mutex> lock(workMutex_);
-  while (!workQueue_.empty()) {
-    workConsumeCV_.wait(lock);
-  }
+  workConsumeCV_.wait(lock, [&] { return workQueue_.empty(); });
 
   // Queue is empty, signal stop
   stop_ = true;
 
   // Release lock to allow threads to terminate
-  workProduceCV_.notify_all();
   lock.unlock();
+
+  workProduceCV_.notify_all();
 
   // Wait for worker threads to terminate
   for (auto& thread : threads_) {
@@ -322,10 +321,13 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 
     auto work = std::move(workQueue_.front());
     workQueue_.pop_front();
-    workConsumeCV_.notify_one();
-
     workInProgress_[workerIndex] = work;
     lock.unlock();
+
+    // Notify after releasing the lock so that the waiter
+    // does not immediately block.
+    workConsumeCV_.notify_one();
+
     AsyncWork::execute(std::move(work));
     lock.lock();
     workInProgress_[workerIndex] = nullptr;
@@ -335,6 +337,10 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 void ProcessGroupGloo::enqueue(std::shared_ptr<AsyncWork> work) {
   std::unique_lock<std::mutex> lock(workMutex_);
   workQueue_.push_back(std::move(work));
+  lock.unlock();
+
+  // Notify after releasing the lock so that the waiter
+  // does not immediately block.
   workProduceCV_.notify_one();
 }
 
