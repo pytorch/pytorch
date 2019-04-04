@@ -4526,13 +4526,48 @@ a")
 
         self.assertTrue(str(test_lhs_none_rhs_never.graph).count(': int = prim::Constant') == 1)
 
-    def test_explicit_bool_cast(self):
-        with self.assertRaisesRegex(RuntimeError, "expected a boolean"):
+    def test_conditional_casting(self):
+        def test_bool_cast_tensor(x):
+            if x:
+                return 1
+            else:
+                return 0
+
+        for make_one_dim in [True, False]:
+            for inp_val in [0.1, 0.0, -0.0, -0.1, -1, 0, 1]:
+                inp_val = [inp_val] if make_one_dim else inp_val
+                self.checkScript(test_bool_cast_tensor, (torch.tensor(inp_val),))
+
+        self.checkScriptRaisesRegex(test_bool_cast_tensor, (torch.tensor([1, 1]),), Exception,
+                                    "bool value of Tensor with more than one value")
+
+        def test_cast_int(x):
+            # type: (int) -> int
+            if x:
+                return 1
+            else:
+                return 0
+        self.checkScript(test_cast_int, (1,))
+        self.checkScript(test_cast_int, (0,))
+        self.checkScript(test_cast_int, (-1,))
+
+        def test_cast_float(x):
+            # type: (float) -> int
+            if x:
+                return 1
+            else:
+                return 0
+        self.checkScript(test_cast_float, (1.,))
+        self.checkScript(test_cast_float, (0.,))
+        self.checkScript(test_cast_float, (-1.,))
+
+        with self.assertRaisesRegex(RuntimeError, "expected a bool, int, float, or Tensor"):
             @torch.jit.script
-            def test_bool_cast(a):
-                if a:
-                    return a + 2
-                return a + 1
+            def test_bad_conditional(x):
+                if (1, 2):
+                    return
+                else:
+                    return 0
 
     def test_while_nonexistent_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
