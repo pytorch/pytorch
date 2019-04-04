@@ -203,7 +203,6 @@ THCTensor *THCTensor_(newTranspose)(THCState *state, THCTensor *tensor, int dime
 THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, at::IntArrayRef size)
 {
   ptrdiff_t numel = THCTensor_(nElement)(state, tensor);
-  THCTensor *self = THCTensor_(new)(state);
   auto inferred_size = at::infer_size(size, numel);
   auto stride = THTensor_compute_stride(tensor->sizes(),
                                         tensor->strides(),
@@ -212,7 +211,21 @@ THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, at::IntArrayR
     "not compatible with input tensor's size and stride (at least one dimension spans "
     "across two contiguous subspaces). Call .contiguous() before .view().");
   auto stride_value = *stride;
+
+  // NOTE: This path of constructing the Tensor directly with the viewed Storage is necessary
+  // to allow `view` not to have a device_guard.  Taking the common TH path of allocating a storage
+  // on the current device [via THCTensor_(new)] and then swapping out the storage later can change
+  // the device out from under the tensor.  Having the device be consistent through a Tensor's lifetime
+  // is an invariant we wish to keep to support caching, simplicity, etc.
+  auto storage = THStorage_wrap(tensor->storage().unsafeGetStorageImpl());
+  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+    std::move(storage),
+    at::CUDATensorId(),
+    false
+  ).release();
+
   THCTensor_setStorage(state, self, THTensor_getStoragePtr(tensor), tensor->storage_offset(), inferred_size, stride_value);
+
   return self;
 }
 
