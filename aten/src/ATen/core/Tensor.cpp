@@ -35,14 +35,14 @@ void Tensor::enforce_invariants() {
 
 void Tensor::print() const {
   if (defined()) {
-    std::cerr << "[" << type().toString() << " " << sizes() << "]" << std::endl;
+    std::cerr << "[" << dispatch_type().toString() << " " << sizes() << "]" << std::endl;
   } else {
     std::cerr << "[UndefinedTensor]" << std::endl;
   }
 }
 
 const char * Tensor::toString() const {
-  return type().toString();
+  return dispatch_type().toString();
 }
 
 } // namespace at
