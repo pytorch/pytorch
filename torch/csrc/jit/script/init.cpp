@@ -609,8 +609,8 @@ static void gatherParametersAndBuffers(
     values.push_back(&param);
   }
   for (auto& param : m.get_attributes()) {
-    if (param->type()->isSubtypeOf(TensorType::get())) {
-      values.push_back(&param.value());
+    if (param.type()->isSubtypeOf(TensorType::get())) {
+      values.push_back(&param);
     }
   }
   for (const auto& sub : m.get_modules()) {
