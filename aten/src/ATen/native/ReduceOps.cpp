@@ -67,7 +67,7 @@ static void allocate_reduction_result(
   if (result.defined()) {
     result.resize_(shape);
   } else {
-    result = at::empty(shape, self.type().toScalarType(dtype));
+    result = at::empty(shape, self.options().dtype(dtype));
   }
 }
 
