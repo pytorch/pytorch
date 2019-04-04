@@ -800,7 +800,7 @@
 - func: embedding_backward(Tensor grad, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor
   matches_jit_signature: True
 
-- func: embedding_dense_backward(Tensor grad, IndexTensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
+- func: embedding_dense_backward(Tensor grad_output, IndexTensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
   dispatch:
     CPU: embedding_dense_backward_cpu
     CUDA: embedding_dense_backward_cuda
@@ -1117,19 +1117,15 @@
 
 - func: _cufft_get_plan_cache_size() -> int
   matches_jit_signature: True
-  device_guard: False
 
 - func: _cufft_get_plan_cache_max_size() -> int
   matches_jit_signature: True
-  device_guard: False
 
 - func: _cufft_set_plan_cache_max_size(int max_size) -> void
   matches_jit_signature: True
-  device_guard: False
 
 - func: _cufft_clear_plan_cache() -> void
   matches_jit_signature: True
-  device_guard: False
 
 - func: index(Tensor self, Tensor?[] indices) -> Tensor
   matches_jit_signature: True
@@ -2369,6 +2365,24 @@
     CPU: _unique_dim_cpu
     CUDA: _unique_dim_cuda
 
+# _unique and _unique_dim are fragile and modifying them easily cause internal break
+# below two operators are a temporary hack for adding return_counts support
+# Please don't rely on these two operators, they will be removed soon
+
+- func: _unique2_temporary_will_remove_soon(Tensor self, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: _unique2_cpu
+    CUDA: _unique2_cuda
+
+- func: _unique_dim2_temporary_will_remove_soon(Tensor self, int dim, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: _unique_dim2_cpu
+    CUDA: _unique_dim2_cuda
+
 - func: _unsafe_view(Tensor self, int[] size) -> Tensor
   matches_jit_signature: True
 
@@ -3006,6 +3020,26 @@
     CPU: dense_to_sparse
     CUDA: dense_to_sparse
 
+- func: quantize_linear(Tensor self, float scale, int zero_point) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
+  requires_tensor: True
+
+- func: dequantize(Tensor self) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
+  requires_tensor: True
+
+- func: q_scale(Tensor self) -> Scalar
+  matches_jit_signature: True
+  variants: function, method
+  requires_tensor: True
+
+- func: q_zero_point(Tensor self) -> Scalar
+  matches_jit_signature: True
+  variants: function, method
+  requires_tensor: True
+
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
 # See NOTE [ TensorOptions Constructors ].
@@ -3168,7 +3202,6 @@
 - func: set_(Tensor(a!) self) -> Tensor(a!)
   matches_jit_signature: True
   variants: method
-  device_guard: False
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   matches_jit_signature: True
@@ -4073,7 +4106,6 @@
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
   matches_jit_signature: True
   variants: method
-  device_guard: False
 
 - func: equal(Tensor self, Tensor other) -> bool
   matches_jit_signature: True

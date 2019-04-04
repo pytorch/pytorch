@@ -256,6 +256,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
 
         workspace.SwitchWorkspace(old_ws_name)
 
+
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
            kernel=st.integers(3, 5),
@@ -396,6 +397,113 @@ class ConvFusionTest(hu.HypothesisTestCase):
         optimizeForMKLDNN(net)
         self.assertTrue(len(net.Proto().op) == 2)
         self.assertTrue(net.Proto().op[1].type == "ConvFusion")
+        workspace.RunNetOnce(net.Proto())
+        S2 = workspace.FetchBlob('S0')
+        if not np.allclose(S0, S2, atol=0.01, rtol=0.01):
+            print(S2.flatten())
+            print(S0.flatten())
+            print(np.max(np.abs(S2 - S0)))
+            self.assertTrue(False)
+
+        workspace.SwitchWorkspace(old_ws_name)
+
+    @given(stride=st.integers(1, 3),
+           pad=st.integers(0, 3),
+           kernel=st.integers(3, 5),
+           size=st.integers(8, 20),
+           input_channels=st.integers(7, 17),
+           output_channels=st.integers(5, 15),
+           batch_size=st.integers(1, 3),
+           use_bias=st.booleans(),
+           group=st.integers(2, 5),
+           **mu.gcs)
+    def test_convolution_grouped_sum_relu_fusion(self, stride, pad, kernel, size,
+                             input_channels, output_channels,
+                             batch_size, use_bias, group, gc, dc):
+        conv_S0 = core.CreateOperator(
+            "Conv",
+            ["SX0", "Sw0", "Sb0"] if use_bias else ["SX0", "Sw0"],
+            ["S0"],
+            stride=stride,
+            pad=pad,
+            kernel=kernel,
+            group=group,
+            device_option=dc[0]
+        )
+        conv = core.CreateOperator(
+            "Conv",
+            ["X0", "w0", "b0"] if use_bias else ["X0", "w0"],
+            ["Y0"],
+            stride=stride,
+            pad=pad,
+            kernel=kernel,
+            group=group,
+            device_option=dc[0]
+        )
+        sum = core.CreateOperator(
+            "Sum",
+            ["S0", "Y0"],
+            ["S0"],
+            device_option=dc[0]
+        )
+        relu = core.CreateOperator(
+            "Relu",
+            ["S0"],
+            ["S0"],
+            device_option=dc[0]
+        )
+
+        SX = np.random.rand(
+            batch_size, input_channels * group, size, size).astype(np.float32) - 0.5
+        Sw = np.random.rand(
+                output_channels * group, input_channels, kernel, kernel) \
+            .astype(np.float32) - 0.5
+        Sb = np.random.rand(output_channels * group).astype(np.float32) - 0.5
+        X = np.random.rand(
+            batch_size, input_channels * group, size, size).astype(np.float32) - 0.5
+        w = np.random.rand(
+                output_channels * group, input_channels, kernel, kernel) \
+            .astype(np.float32) - 0.5
+        b = np.random.rand(output_channels * group).astype(np.float32) - 0.5
+
+        old_ws_name = workspace.CurrentWorkspace()
+        workspace.SwitchWorkspace("_device_check_", True)
+        workspace.FeedBlob('SX0', SX, dc[0])
+        workspace.FeedBlob('Sw0', Sw, dc[0])
+        workspace.FeedBlob('Sb0', Sb, dc[0])
+        workspace.FeedBlob('X0', X, dc[0])
+        workspace.FeedBlob('w0', w, dc[0])
+        workspace.FeedBlob('b0', b, dc[0])
+        workspace.RunOperatorOnce(conv_S0)
+        workspace.RunOperatorOnce(conv)
+        workspace.RunOperatorOnce(sum)
+        workspace.RunOperatorOnce(relu)
+        S0 = workspace.FetchBlob('S0')
+
+        workspace.ResetWorkspace()
+        old_net = caffe2_pb2.NetDef()
+        conv_S0_old = caffe2_pb2.OperatorDef()
+        conv_S0_old.CopyFrom(conv_S0)
+        conv_S0_old.device_option.CopyFrom(dc[1])
+        conv_old = caffe2_pb2.OperatorDef()
+        conv_old.CopyFrom(conv)
+        conv_old.device_option.CopyFrom(dc[1])
+        sum_old = caffe2_pb2.OperatorDef()
+        sum_old.CopyFrom(sum)
+        sum_old.device_option.CopyFrom(dc[1])
+        relu_old = caffe2_pb2.OperatorDef()
+        relu_old.CopyFrom(relu)
+        relu_old.device_option.CopyFrom(dc[1])
+        old_net.op.extend([conv_S0_old, conv_old, sum_old, relu_old])
+        workspace.FeedBlob('SX0', SX, dc[1])
+        workspace.FeedBlob('Sw0', Sw, dc[1])
+        workspace.FeedBlob('Sb0', Sb, dc[1])
+        workspace.FeedBlob('X0', X, dc[1])
+        workspace.FeedBlob('w0', w, dc[1])
+        workspace.FeedBlob('b0', b, dc[1])
+        net = core.Net("net")
+        net.Proto().CopyFrom(old_net)
+        optimizeForIDEEP(net)
         workspace.RunNetOnce(net.Proto())
         S2 = workspace.FetchBlob('S0')
         if not np.allclose(S0, S2, atol=0.01, rtol=0.01):
