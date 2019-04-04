@@ -58,7 +58,7 @@ struct NamedIValue {
   NamedIValue(const std::string& name, TypePtr type, IValue ivalue)
       : name_(name),
         type_(type),
-        ivalue_(std::make_shared<IValue>(std::move(ivalue))) {}
+        ivalue_(torch::make_unique<IValue>(std::move(ivalue))) {}
 
   Slot slot() const {
     return Slot(ivalue_.get());
@@ -73,7 +73,7 @@ struct NamedIValue {
  private:
   std::string name_;
   TypePtr type_;
-  std::shared_ptr<IValue> ivalue_;
+  std::unique_ptr<IValue> ivalue_;
 };
 
 struct Method {
@@ -614,6 +614,7 @@ struct Module {
           parameter_remap,
       std::vector<std::string> names = {}) const {
     auto curr = module_lookup(names);
+    curr->parameters.reserve(get_parameters().size() + get_attributes().size());
     for (auto& kv : get_parameters()) {
       curr->register_parameter(
           /*name=*/kv.key(),
@@ -621,7 +622,7 @@ struct Module {
           /*is_buffer=*/false);
       parameter_remap[&kv.value()] = curr->find_parameter(kv.key());
     }
-    for (auto& kv : attributes) {
+    for (auto& kv : get_attributes()) {
       if (!kv.value().type()->isSubtypeOf(TensorType::get())) {
         continue;
       }
