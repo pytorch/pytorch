@@ -2685,7 +2685,7 @@ class TestScript(JitTestCase):
 
         @torch.jit.script
         def foo(x):
-            return x*x
+            return x * x
 
         class What(torch.jit.ScriptModule):
             def __init__(self, x):
