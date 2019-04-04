@@ -381,7 +381,7 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
     "_caffe2::RoIAlign("
       "Tensor features, "
       "Tensor rois, "
-      "string order, "
+      "str order, "
       "float spatial_scale, "
       "int pooled_h, "
       "int pooled_w, "
