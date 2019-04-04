@@ -60,7 +60,7 @@ class Reducer {
   void mark_variable_ready(
       size_t replica_index,
       size_t variable_index,
-      bool from_autograd = false);
+      bool called_from_autograd = false);
 
   void mark_bucket_ready(size_t bucket_index);
 
