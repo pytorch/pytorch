@@ -148,7 +148,7 @@ Tensor& empty_out(Tensor& result, IntArrayRef size) {
     return target_type.copy(self, non_blocking);                 \
   }
 
-AT_FORALL_SCALAR_TYPES_AND_BOOL(DEFINE_CAST_OP)
+AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 
@@ -732,7 +732,7 @@ Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
       return tensor_cpu(values, options);                           \
     }                                                               \
   }
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
+AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(TENSOR)
 #undef TENSOR
 } // namespace native
 } // namespace at
