@@ -158,7 +158,6 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
   }                                                                \
   }
 
-// TODO This macro should take a JIT schema string instead of a vector of inputs and outputs.
 #define C10_REGISTER_CAFFE2_OPERATOR_CPU(                                    \
     OperatorName, OperatorSchema, OperatorClass)                             \
   /* Register the op schema with the c10 dispatcher */                       \
