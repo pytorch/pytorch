@@ -15,10 +15,13 @@ namespace c10d {
 
 class Reducer {
  public:
-  // The constructor takes a vector<Variable> with model parameters for
-  // every model replica, hence the vector<vector<>>.
+  // The constructor takes a list of variables for every model replica.
+  // The bucket assignment for this reducer is specified as a list of
+  // buckets, each of which is specified as a list of indices into the
+  // variables list for **a single replica** (i.e. `variables[0]`).
   explicit Reducer(
-      std::vector<std::vector<torch::autograd::Variable>> variables,
+      std::vector<std::vector<torch::autograd::Variable>> replicas,
+      std::vector<std::vector<size_t>> buckets,
       std::shared_ptr<c10d::ProcessGroup> process_group);
 
   // To (re-)initialize bucket assignment, pass a list of buckets, each
@@ -43,7 +46,7 @@ class Reducer {
 
  protected:
   std::mutex mutex_;
-  std::vector<std::vector<torch::autograd::Variable>> variables_;
+  std::vector<std::vector<torch::autograd::Variable>> replicas_;
   std::shared_ptr<c10d::ProcessGroup> process_group_;
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Function>>>
@@ -54,7 +57,10 @@ class Reducer {
   bool has_queued_final_callback_;
   size_t next_bucket_;
 
-  void mark_variable_ready(size_t replica_index, size_t variable_index);
+  void mark_variable_ready(
+      size_t replica_index,
+      size_t variable_index,
+      bool from_autograd = false);
 
   void mark_bucket_ready(size_t bucket_index);
 
