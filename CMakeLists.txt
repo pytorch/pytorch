@@ -185,6 +185,14 @@ if (BUILD_ATEN_ONLY)
   set(USE_LMDB OFF)
 endif()
 
+if(NOT BUILD_TORCH)
+  message(FATAL_ERROR "BUILD_TORCH: ${BUILD_TORCH}")
+endif()
+
+if(NOT BUILDING_WITH_TORCH_LIBS)
+  message(FATAL_ERROR "BUILD_TORCH: ${BUILD_TORCH}")
+endif()
+
 # ---[ Utils
 # TODO: merge the following 3 files into cmake/public/utils.cmake.
 include(cmake/Utils.cmake)
