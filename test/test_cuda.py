@@ -1025,7 +1025,7 @@ class TestCuda(TestCase):
 
             self.assertEqual(x * y, 4.5)
             self.assertEqual(y * x, 4.5)
-            with self.assertRaisesRegex(RuntimeError, "doesn't match the desired type"):
+            with self.assertRaisesRegex(RuntimeError, "doesn't match the desired"):
                 y *= x
             x *= y
             self.assertEqual(x, 4.5)
@@ -2059,15 +2059,13 @@ class TestCuda(TestCase):
     def test_sum_cpu_gpu_mismatch(self):
         x = torch.randn(20, dtype=torch.float32, device='cuda')
         y = torch.randn(1, dtype=torch.float32)
-        with self.assertRaisesRegex(RuntimeError, 'expected type'
-                                    ' torch.FloatTensor but got'
-                                    ' torch.cuda.FloatTensor'):
+        with self.assertRaisesRegex(RuntimeError,
+                                    'expected backend CPU and dtype Float but got backend CUDA and dtype Float'):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
         # makeing sure half to float promotion is also properly working.
         x = x.half()
-        with self.assertRaisesRegex(RuntimeError, 'expected type'
-                                    ' torch.FloatTensor but got'
-                                    ' torch.cuda.HalfTensor'):
+        with self.assertRaisesRegex(RuntimeError,
+                                    'expected backend CPU and dtype Float but got backend CUDA and dtype Half'):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
 
     @skipIfRocm
