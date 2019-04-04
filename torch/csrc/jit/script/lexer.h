@@ -166,12 +166,22 @@ struct SharedParserData {
     static _locale_t loc = _create_locale(LC_ALL, "C");
     return _strtod_l(str, end, loc);
   }
+//TODO #elif defined(C10_ANDROID)
 #else
-  static double strtod_c(const char* str, char** end) {
-    /// NOLINTNEXTLINE(hicpp-signed-bitwise)
-    static locale_t loc = newlocale(LC_ALL_MASK, "C", nullptr);
-    return strtod_l(str, end, loc);
+  static double strtod_c(const char* str, const char** end) {
+    std::istringstream s(str);
+    s.imbue(std::locale::classic());
+    double result;
+    s >> result;
+    *end = str + s.tellg();
+    return result;
   }
+// TODO #else
+//   static double strtod_c(const char* str, char** end) {
+//     /// NOLINTNEXTLINE(hicpp-signed-bitwise)
+//     static locale_t loc = newlocale(LC_ALL_MASK, "C", nullptr);
+//     return strtod_l(str, end, loc);
+//   }
 #endif
   // 1. skip whitespace
   // 2. handle comment or newline
@@ -185,7 +195,7 @@ struct SharedParserData {
     if (first == '-' || first == '+' || isalpha(first))
       return false;
     const char* startptr = str.c_str() + start;
-    char* endptr;
+    const char* endptr;
     strtod_c(startptr, &endptr);
     *len = endptr - startptr;
     return *len > 0;
@@ -478,7 +488,7 @@ struct Lexer {
             indent_stack.pop_back();
             next_tokens.emplace_back(TK_DEDENT, r.range);
             if (indent_stack.size() == 0) {
-              reportError("invalid indent level " + std::to_string(depth), r);
+              reportError("invalid indent level " + c10::guts::to_string(depth), r);
             }
           }
           return; // We've already queued the tokens

@@ -7,6 +7,8 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <cstdlib>
+#include <c10/macros/Macros.h>
 
 /*
  * This header adds some polyfills with C++14 and C++17 functionality
@@ -254,6 +256,32 @@ struct to_string_<T, void_t<decltype(std::to_string(std::declval<T>()))>> final 
 }
 template<class T> inline std::string to_string(T value) {
     return detail::to_string_<T>::call(value);
+}
+
+inline long long stoll(const std::string& str) {
+#if defined(C10_ANDROID)
+  // std::stoll doesn't exist in our Android environment, we need to implement
+  // it ourselves.
+  std::istringstream s(str);
+  long long result;
+  s >> result;
+  return result;
+#else
+  return std::stoll(str);
+#endif
+}
+
+inline double stod(const std::string& str) {
+#if defined(C10_ANDROID)
+  // std::stod doesn't exist in our Android environment, we need to implement
+  // it ourselves.
+  std::istringstream s(str);
+  double result;
+  s >> result;
+  return result;
+#else
+  return std::stod(str);
+#endif
 }
 
 }}
