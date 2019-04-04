@@ -8,9 +8,9 @@
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/logging.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/jit_exception.h>
+#include <torch/csrc/jit/script/logging.h>
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/WrapDimUtils.h>
@@ -139,7 +139,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            at::Tensor a;
            pop(stack, a);
-           push(stack, a.item<int64_t>() != 0);
+           push(stack, a.is_nonzero());
            return 0;
          }),
      Operator(
@@ -889,46 +889,47 @@ RegisterOperators reg(
          userObj->setSlot(slot, std::move(v));
          return 0;
        };
-     })
-     });
+     })});
 
-RegisterOperators logging_operators({
-    Operator("prim::AddStatValue(str key, int val) -> ()", [](Stack& stack) {
-          auto val = pop(stack).toInt();
-          auto key = pop(stack).toString();
+RegisterOperators logging_operators(
+    {Operator(
+         "prim::AddStatValue(str key, int val) -> ()",
+         [](Stack& stack) {
+           auto val = pop(stack).toInt();
+           auto key = pop(stack).toString();
 
-          auto schema = parseSchema("prim::AddStatValue(str key, int val) -> ()");
-          // TODO: remove this custom tracing code once the custom op bugfix lands
-          if (jit::tracer::isTracing()) {
-            const auto& graph = tracer::getTracingState()->graph;
-            Node* node = graph->create(prim::AddStatValue, /*num_outputs=*/0);
-            tracer::recordSourceLocation(node);
-            node->addInput(insertConstant(*graph, key));
-            tracer::addInputs(node, "val", val);
-            graph->insertNode(node);
-          }
-          torch::jit::logging::getLogger()->addStatValue(*key, val);
-          return 0;
-    }),
-    Operator("prim::TimePoint() -> int", [](Stack& stack) {
-        auto schema = parseSchema("prim::TimePoint() -> int");
-        Node* node = nullptr;
-        // TODO: remove this custom tracing code once the custom op bugfix lands
-        if (jit::tracer::isTracing()) {
-            const auto& graph = tracer::getTracingState()->graph;
-            Node* node = graph->create(prim::TimePoint, /*num_outputs=*/0);
-            tracer::recordSourceLocation(node);
-            graph->insertNode(node);
-        }
-        auto output = autograd::profiler::getTime();
-        push(stack, output);
-        if (jit::tracer::isTracing()) {
-          jit::tracer::addOutput(node, output);
-        }
-        return 0;
-    })
-});
-
+           auto schema =
+               parseSchema("prim::AddStatValue(str key, int val) -> ()");
+           // TODO: remove this custom tracing code once the custom op bugfix
+           // lands
+           if (jit::tracer::isTracing()) {
+             const auto& graph = tracer::getTracingState()->graph;
+             Node* node = graph->create(prim::AddStatValue, /*num_outputs=*/0);
+             tracer::recordSourceLocation(node);
+             node->addInput(insertConstant(*graph, key));
+             tracer::addInputs(node, "val", val);
+             graph->insertNode(node);
+           }
+           torch::jit::logging::getLogger()->addStatValue(*key, val);
+           return 0;
+         }),
+     Operator("prim::TimePoint() -> int", [](Stack& stack) {
+       auto schema = parseSchema("prim::TimePoint() -> int");
+       Node* node = nullptr;
+       // TODO: remove this custom tracing code once the custom op bugfix lands
+       if (jit::tracer::isTracing()) {
+         const auto& graph = tracer::getTracingState()->graph;
+         Node* node = graph->create(prim::TimePoint, /*num_outputs=*/0);
+         tracer::recordSourceLocation(node);
+         graph->insertNode(node);
+       }
+       auto output = autograd::profiler::getTime();
+       push(stack, output);
+       if (jit::tracer::isTracing()) {
+         jit::tracer::addOutput(node, output);
+       }
+       return 0;
+     })});
 
 // define implementations for primitive number ops
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
@@ -1577,7 +1578,7 @@ int dictGetDefault(Stack& stack) {
   return 0;
 }
 
-template<typename T>
+template <typename T>
 int hashValue(Stack& stack) {
   auto value = pop(stack);
   auto hash = std::hash<T>()(value.to<T>());
@@ -1727,7 +1728,7 @@ RegisterOperators reg2({
 #undef CREATE_MUTABLE_LIST_OPS
 
 #define CREATE_LIST_OPS(decl_type, c_type)                                          \
-      Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),     \
+  Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),         \
       Operator(                                                                     \
           "aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type           \
           "[]",                                                                     \
@@ -1966,35 +1967,33 @@ RegisterOperators reg2({
           push(stack, t);
           return 0;
         }),
-#define CREATE_DICT_OPS(key_type)                                            \
-  Operator("aten::len(Dict(" key_type ", t) self) -> int", dictLen),         \
-      Operator(                                                              \
-          "aten::keys(Dict(" key_type ", t) self) -> " key_type "[](*)",     \
-          dictKeys),                                                         \
-      Operator(                                                              \
-          "aten::values(Dict(" key_type ", t) self) -> t[](*)", dictValues), \
-      Operator(                                                              \
-          "prim::DictIndex(Dict(" key_type ", t) self, " key_type            \
-          " key) -> t(*)",                                                   \
-          dictIndex),                                                        \
-      Operator(                                                              \
-          "aten::get(Dict(" key_type ", t) self, " key_type                  \
-          " key) -> t(*)?",                                                   \
-          dictGet),                                                          \
-      Operator(                                                              \
-          "aten::get(Dict(" key_type ", t) self, " key_type                  \
-          " key, t default_value) -> t(*)",                                  \
-          dictGetDefault),                                                   \
-      Operator(                                                              \
-          "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type           \
-          " idx, t v) -> ()",                                                \
+#define CREATE_DICT_OPS(key_type)                                             \
+  Operator("aten::len(Dict(" key_type ", t) self) -> int", dictLen),          \
+      Operator(                                                               \
+          "aten::keys(Dict(" key_type ", t) self) -> " key_type "[](*)",      \
+          dictKeys),                                                          \
+      Operator(                                                               \
+          "aten::values(Dict(" key_type ", t) self) -> t[](*)", dictValues),  \
+      Operator(                                                               \
+          "prim::DictIndex(Dict(" key_type ", t) self, " key_type             \
+          " key) -> t(*)",                                                    \
+          dictIndex),                                                         \
+      Operator(                                                               \
+          "aten::get(Dict(" key_type ", t) self, " key_type " key) -> t(*)?", \
+          dictGet),                                                           \
+      Operator(                                                               \
+          "aten::get(Dict(" key_type ", t) self, " key_type                   \
+          " key, t default_value) -> t(*)",                                   \
+          dictGetDefault),                                                    \
+      Operator(                                                               \
+          "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type            \
+          " idx, t v) -> ()",                                                 \
           dictSetItem)
 
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("float"),
 #undef CREATE_DICT_OPS
-
 
     Operator("aten::hash(str t) -> int", hashValue<std::string>),
     Operator("aten::hash(int t) -> int", hashValue<int>),
