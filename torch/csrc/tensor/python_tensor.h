@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/python_headers.h>
+#include <c10/core/ScalarType.h>
 
 namespace c10 {
 struct Device;
@@ -30,5 +31,8 @@ void py_set_default_dtype(PyObject* dtype_obj);
 // Gets the ATen type object for the default tensor type. Note that the
 // returned value will be a VariableType instance.
 at::Type& get_default_tensor_type();
+
+// Gets the ScalarType for the default tensor type.
+at::ScalarType get_default_scalar_type();
 
 }} // namespace torch::tensors

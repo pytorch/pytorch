@@ -769,7 +769,7 @@ void ScriptModuleSerializer::convertModule(
 
   for (const auto& elem : module.get_modules()) {
     torch::ModuleDef* sub_def = module_def->add_submodules();
-    convertModule(*elem, module_name.str(), elem->name(), sub_def);
+    convertModule(*elem.module, module_name.str(), elem.name, sub_def);
   }
 }
 
