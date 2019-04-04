@@ -2492,6 +2492,9 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             return size
         scale_factors = _ntuple(dim)(scale_factor)
         # math.floor might return float in py2.7
+
+        # need to cast input.size to int so that in tracing the result is an int
+        # and not a tensor
         return [int(math.floor(int(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
 
     if mode in ('nearest', 'area'):
