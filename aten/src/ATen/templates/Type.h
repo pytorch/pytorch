@@ -40,6 +40,7 @@ using TensorList = ArrayRef<Tensor>;
 
 class Context;
 struct Generator;
+struct Quantizer;
 
 static inline void noop_deleter(void*) {}
 

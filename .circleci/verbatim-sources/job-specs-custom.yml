@@ -6,7 +6,7 @@
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     machine:
-      image: default
+      image: ubuntu-1604:201903-01
     steps:
     - run:
         <<: *setup_linux_system_environment
@@ -37,7 +37,7 @@
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:291"
     resource_class: large
     machine:
-      image: default
+      image: ubuntu-1604:201903-01
     steps:
     - run:
         <<: *setup_linux_system_environment

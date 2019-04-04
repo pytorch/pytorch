@@ -40,6 +40,7 @@ using TensorList = ArrayRef<Tensor>;
 
 class Context;
 struct Generator;
+struct Quantizer;
 
 static inline void noop_deleter(void*) {}
 
@@ -53,6 +54,7 @@ enum class TypeID {
   CPULong,
   CPUShort,
   CPUHalf,
+  CPUQInt8,
   SparseCPUBool,
   SparseCPUByte,
   SparseCPUChar,
@@ -61,6 +63,7 @@ enum class TypeID {
   SparseCPUInt,
   SparseCPULong,
   SparseCPUShort,
+  SparseCPUQInt8,
   CUDABool,
   CUDAByte,
   CUDAChar,
@@ -70,6 +73,7 @@ enum class TypeID {
   CUDALong,
   CUDAShort,
   CUDAHalf,
+  CUDAQInt8,
   SparseCUDABool,
   SparseCUDAByte,
   SparseCUDAChar,
@@ -78,6 +82,7 @@ enum class TypeID {
   SparseCUDAInt,
   SparseCUDALong,
   SparseCUDAShort,
+  SparseCUDAQInt8,
   MSNPUBool,
   MSNPUByte,
   MSNPUChar,
@@ -87,6 +92,7 @@ enum class TypeID {
   MSNPULong,
   MSNPUShort,
   MSNPUHalf,
+  MSNPUQInt8,
   XLABool,
   XLAByte,
   XLAChar,
@@ -96,6 +102,7 @@ enum class TypeID {
   XLALong,
   XLAShort,
   XLAHalf,
+  XLAQInt8,
   CPUComplexFloat,
   CPUComplexDouble,
   CUDAComplexFloat,
@@ -443,6 +450,10 @@ struct CAFFE2_API Type {
   virtual std::vector<Tensor> unbind(const Tensor & self, int64_t dim) const = 0;
   virtual Tensor to_sparse(const Tensor & self, int64_t sparse_dim) const = 0;
   virtual Tensor to_sparse(const Tensor & self) const = 0;
+  virtual Tensor quantize_linear(const Tensor & self, double scale, int64_t zero_point) const = 0;
+  virtual Tensor dequantize(const Tensor & self) const = 0;
+  virtual Scalar q_scale(const Tensor & self) const = 0;
+  virtual Scalar q_zero_point(const Tensor & self) const = 0;
   virtual Tensor to(const Tensor & self, const TensorOptions & options, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
@@ -540,7 +551,7 @@ struct CAFFE2_API Type {
   virtual Tensor & exponential_(Tensor & self, double lambd, Generator * generator) const = 0;
   virtual Tensor & geometric_(Tensor & self, double p, Generator * generator) const = 0;
   virtual Tensor diag(const Tensor & self, int64_t diagonal) const = 0;
-  virtual Tensor cross(const Tensor & self, const Tensor & other, int64_t dim) const = 0;
+  virtual Tensor cross(const Tensor & self, const Tensor & other, c10::optional<int64_t> dim) const = 0;
   virtual Tensor triu(const Tensor & self, int64_t diagonal) const = 0;
   virtual Tensor tril(const Tensor & self, int64_t diagonal) const = 0;
   virtual Tensor trace(const Tensor & self) const = 0;
@@ -577,8 +588,6 @@ struct CAFFE2_API Type {
   virtual std::tuple<Tensor,Tensor> geqrf(const Tensor & self) const = 0;
   virtual Tensor orgqr(const Tensor & self, const Tensor & input2) const = 0;
   virtual Tensor ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose) const = 0;
-  virtual std::tuple<Tensor,Tensor> btrifact(const Tensor & self, bool pivot) const = 0;
-  virtual std::tuple<Tensor,Tensor,Tensor> btrifact_with_info(const Tensor & self, bool pivot) const = 0;
   virtual Tensor btrisolve(const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) const = 0;
   virtual Tensor multinomial(const Tensor & self, int64_t num_samples, bool replacement, Generator * generator) const = 0;
   virtual Tensor lgamma(const Tensor & self) const = 0;

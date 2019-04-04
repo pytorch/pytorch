@@ -130,7 +130,7 @@ ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
 # add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
-    return type().${api_name}(${method_actuals});
+    return dispatch_type().${api_name}(${method_actuals});
 }
 """)
 # add a method declaration in Functions.h
@@ -490,6 +490,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'cpu_half': bool,
     'deprecated': bool,
     'cpu_bool': bool,
+    'cuda_bool': bool,
     # See Note [field_name versus name]
     'field_name': str,
     'formals_list': List[AtFormal],
@@ -1559,6 +1560,9 @@ def create_derived(backend_type_env, declarations):
         # type: (FunctionOption) -> None
         pair = (backend_type_env['Backend'],
                 backend_type_env['ScalarName'])
+        # Skip generating TH code for QInt8
+        if pair[1] == 'QInt8':
+            return
         if pair in option['backend_type_pairs']:
             env = nested_dict(option, backend_type_env)
             body = emit_body(env, option)  # type: ignore

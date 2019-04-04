@@ -1,5 +1,4 @@
 import torch
-from torch import sparse
 
 import itertools
 import functools

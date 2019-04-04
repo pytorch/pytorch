@@ -1,7 +1,7 @@
-#include <ATen/core/dispatch/KernelRegistration.h>
-#include "caffe2/operators/experimental/c10/schemas/sigmoid_cross_entropy_with_logits.h"
-#include "caffe2/utils/math.h"
+#include <ATen/core/op_registration/op_registration.h>
+#include "caffe2/core/operator_c10wrapper.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/utils/math.h"
 
 using caffe2::Tensor;
 
@@ -69,11 +69,27 @@ void sigmoid_cross_entropy_with_logits_op_cpu_impl(
     out_ptr[i] = -value / inner_size;
   }
 }
-} // namespace
-} // namespace caffe2
 
-namespace c10 {
-C10_REGISTER_KERNEL(caffe2::ops::SigmoidCrossEntropyWithLogits)
-    .kernel<decltype(caffe2::sigmoid_cross_entropy_with_logits_op_cpu_impl), &caffe2::sigmoid_cross_entropy_with_logits_op_cpu_impl>()
-    .dispatchKey(CPUTensorId());
-} // namespace c10
+static auto registry = c10::RegisterOperators().op(
+    FunctionSchema(
+        "_c10_experimental::SigmoidCrossEntropyWithLogits",
+        "",
+        (std::vector<c10::Argument>{
+            c10::Argument("input1"),
+            c10::Argument("input2"),
+            c10::Argument("output"),
+            c10::Argument("log_D_trick", BoolType::get()),
+            c10::Argument("unjoined_lr_loss", BoolType::get())}),
+        (std::vector<c10::Argument>{})),
+    c10::kernel<
+        decltype(sigmoid_cross_entropy_with_logits_op_cpu_impl),
+        &sigmoid_cross_entropy_with_logits_op_cpu_impl>(),
+    c10::dispatchKey(CPUTensorId()));
+
+} // namespace
+
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::SigmoidCrossEntropyWithLogits",
+    C10SigmoidCrossEntropyWithLogits_DontUseThisOpYet)
+
+} // namespace caffe2
