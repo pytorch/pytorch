@@ -14,40 +14,21 @@ binary_linux_build: &binary_linux_build
         source /env
         retry yum -q -y install epel-release
         retry yum -q -y install expect moreutils
-
-
+  - run:
+      name: Upgrade gcc version (based on env var)
+      command: |
+        set -ex
+        source /env
+        if [[ "$DESIRED_GCC_ABI" == 'gccabi1' ]]; then
+          /builder/upgrade_gcc_abi.sh
+        else
+          echo "Not upgrading gcc version"
+        fi
   - run:
       name: Build
       no_output_timeout: "1h"
       command: |
-        echo "RUNNING ON $(uname -a) WITH $(nproc) CPUS AND $(free -m)"
-        set -ex
-        source /env
-
-        # Defaults here so they can be changed in one place
-        export MAX_JOBS=12
-
-        # Parse the parameters
-        if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
-          build_script='conda/build_pytorch.sh'
-        elif [[ "$DESIRED_CUDA" == cpu ]]; then
-          build_script='manywheel/build_cpu.sh'
-        else
-          build_script='manywheel/build.sh'
-        fi
-
-        # We want to call unbuffer, which calls tclsh which finds the expect
-        # package. The expect was installed by yum into /usr/bin so we want to
-        # find /usr/bin/tclsh, but this is shadowed by /opt/conda/bin/tclsh in
-        # the conda docker images.
-        if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
-          mkdir /just_tclsh_bin
-          ln -s /usr/bin/tclsh /just_tclsh_bin/tclsh
-          export PATH=/just_tclsh_bin:$PATH
-        fi
-
-        # Build the package
-        SKIP_ALL_TESTS=1 unbuffer "/builder/$build_script" | ts
+        source "/pytorch/.circleci/scripts/binary_linux_build.sh"
   - persist_to_workspace:
       root: /
       paths: final_pkgs
@@ -74,53 +55,17 @@ binary_linux_test: &binary_linux_test
       name: Prepare test code
       no_output_timeout: "1h"
       command: |
-        source /home/circleci/project/env
-        cat >/home/circleci/project/ci_test_script.sh <<EOL
-        # =================== The following code will be executed inside Docker container ===================
-        set -ex
-
-        # Set up Python
-        if [[ "$PACKAGE_TYPE" == conda ]]; then
-          retry conda create -qyn testenv python="$DESIRED_PYTHON"
-          source activate testenv >/dev/null
-        elif [[ "$DESIRED_PYTHON" == 2.7mu ]]; then
-          export PATH="/opt/python/cp27-cp27mu/bin:\$PATH"
+        if [[ -n "$CIRCLE_SHA1" ]]; then
+          # we are on a PR or on a master-merge, but not on a timed build
+          git_url="https://raw.githubusercontent.com/pytorch/pytorch/$CIRCLE_SHA1"
         else
-          python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
-          export PATH="/opt/python/cp\$python_nodot-cp\${python_nodot}m/bin:\$PATH"
+          # scheduled nightly binary builds. These run at 05:05 UTC every day. 
+          last_commit="$(git rev-list --before "$(date -u +%Y-%m-%d) 05:00" --max-count 1 HEAD)"
+          git_url="https://raw.githubusercontent.com/pytorch/pytorch/$last_commit"
         fi
-
-        # Clone the Pytorch branch
-        git clone https://github.com/pytorch/pytorch.git /pytorch
-        pushd /pytorch
-        if [[ -n "$CIRCLE_PR_NUMBER" ]]; then
-          # "smoke" binary build on PRs
-          git fetch --force origin "pull/${CIRCLE_PR_NUMBER}/head:remotes/origin/pull/${CIRCLE_PR_NUMBER}"
-          git reset --hard "$CIRCLE_SHA1"
-          git checkout -q -B "$CIRCLE_BRANCH"
-          git reset --hard "$CIRCLE_SHA1"
-        fi
-        git submodule update --init --recursive
-        popd
-
-        # Clone the Builder master repo
-        git clone -q https://github.com/pytorch/builder.git /builder
-
-        # Install the package
-        pkg="/final_pkgs/\$(ls /final_pkgs)"
-        if [[ "$PACKAGE_TYPE" == conda ]]; then
-          conda install -y "\$pkg" --offline
-        else
-          pip install "\$pkg"
-        fi
-
-        # Test the package
-        pushd /pytorch
-        /builder/run_tests.sh "$PACKAGE_TYPE" "$DESIRED_PYTHON" "$DESIRED_CUDA"
-        # =================== The above code will be executed inside Docker container ===================
-        EOL
-        echo "Prepared script to run in next step"
-        cat /home/circleci/project/ci_test_script.sh
+        curl -s "$git_url/.circleci/scripts/binary_linux_test.sh" -o "binary_linux_test.sh"
+        cat "binary_linux_test.sh"
+        source "binary_linux_test.sh"
   - run:
       <<: *binary_run_in_docker
 
@@ -142,36 +87,14 @@ binary_linux_upload: &binary_linux_upload
       name: Upload
       no_output_timeout: "10m"
       command: |
-        source /home/circleci/project/env
-        declare -x "AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}"
-        declare -x "AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}"
-        cat >/home/circleci/project/login_to_anaconda.sh <<EOL
-        set +x
-        echo "Trying to login to Anaconda"
-        yes | anaconda login \
-            --username "$PYTORCH_BINARY_PJH5_CONDA_USERNAME" \
-            --password "$PYTORCH_BINARY_PJH5_CONDA_PASSWORD"
-        set -x
-        EOL
-        chmod +x /home/circleci/project/login_to_anaconda.sh
-        set -ex
-        export PATH="$MINICONDA_ROOT/bin:$PATH"
-
-        # Upload the package to the final location
-        pushd /home/circleci/project/final_pkgs
-        if [[ "$PACKAGE_TYPE" == conda ]]; then
-          retry conda install -yq anaconda-client
-          retry timeout 30 /home/circleci/project/login_to_anaconda.sh
-          anaconda upload "$(ls)" -u pytorch --label main --no-progress --force
-        elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
-          retry pip install -q awscli
-          s3_dir="s3://pytorch/libtorch/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
-          for pkg in $(ls); do
-            retry aws s3 cp "$pkg" "$s3_dir" --acl public-read
-          done
+        if [[ -n "$CIRCLE_SHA1" ]]; then
+          # we are on a PR or on a master-merge, but not on a timed build
+          git_url="https://raw.githubusercontent.com/pytorch/pytorch/$CIRCLE_SHA1"
         else
-          retry pip install -q awscli
-          s3_dir="s3://pytorch/whl/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
-          retry aws s3 cp "$(ls)" "$s3_dir" --acl public-read
+          # scheduled nightly binary builds. These run at 05:05 UTC every day. 
+          last_commit="$(git rev-list --before "$(date -u +%Y-%m-%d) 05:00" --max-count 1 HEAD)"
+          git_url="https://raw.githubusercontent.com/pytorch/pytorch/$last_commit"
         fi
-
+        curl -s "$git_url/.circleci/scripts/binary_linux_upload.sh" -o "binary_linux_upload.sh"
+        cat "binary_linux_upload.sh"
+        source "binary_linux_upload.sh"
