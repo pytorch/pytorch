@@ -5,7 +5,7 @@
 //  index(Tensor self, indices) -> Tensor
 //  index_put_(Tensor self, indices, value, accumulate=false)
 //
-// The index is a TensorList containg kLong or kByte tensors or nulls. Byte
+// The index is a TensorList containg kLong, kBool or kByte tensors or nulls. Byte
 // tensors (boolean masks) are expanded to long tensors via nonzero(). Null
 // tensors signify that the dimension is not indexed.
 //
@@ -79,19 +79,19 @@ static void checkIndexTensorTypes(TensorList indices) {
   for (auto& tensor : indices) {
     if (tensor.defined()) {
       auto scalarType = tensor.scalar_type();
-      if (scalarType != kLong && scalarType != kByte) {
-          AT_INDEX_ERROR("tensors used as indices must be long or byte tensors");
+      if (scalarType != kLong && scalarType != kByte && scalarType != kBool) {
+          AT_INDEX_ERROR("tensors used as indices must be long, byte or bool tensors");
       }
     }
   }
 }
 
-static std::vector<Tensor> expandByteTensors(const Tensor & self, TensorList indices) {
-  // Expands byte tensors (masks) into the equivalent indexing by LongTensors
+static std::vector<Tensor> expandTensors(const Tensor & self, TensorList indices) {
+  // Expands ByteTensor (masks) or BoolTensor (masks) into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
   for (auto & index : indices) {
-    if (index.scalar_type() == kByte) {
-      // The sizes of the ByteTensor mask must match the sizes of the
+    if (index.scalar_type() == kByte || index.scalar_type() == kBool) {
+      // The sizes of the ByteTensor mask or bool tensor must match the sizes of the
       // corresponding dimensions in self
       for (int64_t j = 0; j < index.dim(); j++) {
         int64_t srcIdx = result.size() + j;
@@ -244,8 +244,8 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
 
 static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) {
   checkIndexTensorTypes(orig);
-  // first expand ByteTensor (boolean masks) into 1 or more LongTensors
-  auto indices = expandByteTensors(self, orig);
+  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
+  auto indices = expandTensors(self, orig);
   // next broadcast all index tensors together
   indices = expand_outplace(indices);
   // add missing null Tensors so that it matches self.dim()
@@ -378,8 +378,8 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
 
 static AdvancedIndex make_info(Tensor self, TensorList orig) {
   checkIndexTensorTypes(orig);
-  // first expand ByteTensor (boolean masks) into 1 or more LongTensors
-  auto indices = expandByteTensors(self, orig);
+  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
+  auto indices = expandTensors(self, orig);
   // next broadcast all index tensors together
   try {
     indices = expand_outplace(indices);
