@@ -206,13 +206,15 @@ public:
     impl->dense_dim_ = dense_dim();
     impl->indices_ = indices();
     impl->values_ = values();
-    impl->device_opt_ = device();
     impl->coalesced_ = coalesced();
     impl->refresh_numel();
     return impl;
   }
-private:
-    explicit SparseTensorImpl(at::TensorTypeId, const caffe2::TypeMeta&, at::Tensor indices, at::Tensor values);
+ private:
+  int64_t get_device_slow() const override {
+    return values_.get_device();
+  }
+
 };
 
 } // namespace at
