@@ -1,11 +1,7 @@
 from __future__ import print_function
-import multiprocessing
-import sys
 import os
-import inspect
 import collections
 import yaml
-import types
 import re
 import argparse
 
@@ -243,7 +239,11 @@ def generate_type_hints(fname, decls, is_tensor=False):
                 if a.get('kwarg_only', False) and render_kw_only_separator:
                     python_args.append('*')
                     render_kw_only_separator = False
-                python_args.append(arg_to_type_hint(a))
+                try:
+                    python_args.append(arg_to_type_hint(a))
+                except Exception:
+                    print("Error while processing function %s" % fname)
+                    raise
 
         if is_tensor:
             if 'self: Tensor' in python_args:

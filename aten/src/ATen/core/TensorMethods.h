@@ -775,6 +775,18 @@ inline Tensor Tensor::to_sparse(int64_t sparse_dim) const {
 inline Tensor Tensor::to_sparse() const {
     return type().to_sparse(*this);
 }
+inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point) const {
+    return type().quantize_linear(*this, scale, zero_point);
+}
+inline Tensor Tensor::dequantize() const {
+    return type().dequantize(*this);
+}
+inline Scalar Tensor::q_scale() const {
+    return type().q_scale(*this);
+}
+inline Scalar Tensor::q_zero_point() const {
+    return type().q_zero_point(*this);
+}
 inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy) const {
     return type().to(*this, options, non_blocking, copy);
 }
@@ -1066,7 +1078,7 @@ inline Tensor & Tensor::geometric_(double p, Generator * generator) {
 inline Tensor Tensor::diag(int64_t diagonal) const {
     return type().diag(*this, diagonal);
 }
-inline Tensor Tensor::cross(const Tensor & other, int64_t dim) const {
+inline Tensor Tensor::cross(const Tensor & other, c10::optional<int64_t> dim) const {
     return type().cross(*this, other, dim);
 }
 inline Tensor Tensor::triu(int64_t diagonal) const {
@@ -1176,12 +1188,6 @@ inline Tensor Tensor::orgqr(const Tensor & input2) const {
 }
 inline Tensor Tensor::ormqr(const Tensor & input2, const Tensor & input3, bool left, bool transpose) const {
     return type().ormqr(*this, input2, input3, left, transpose);
-}
-inline std::tuple<Tensor,Tensor> Tensor::btrifact(bool pivot) const {
-    return type().btrifact(*this, pivot);
-}
-inline std::tuple<Tensor,Tensor,Tensor> Tensor::btrifact_with_info(bool pivot) const {
-    return type().btrifact_with_info(*this, pivot);
 }
 inline Tensor Tensor::btrisolve(const Tensor & LU_data, const Tensor & LU_pivots) const {
     return type().btrisolve(*this, LU_data, LU_pivots);
@@ -1359,7 +1365,10 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
     return item().to##name();     \
   }
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_AND_QINT(DEFINE_ITEM)
 #undef DEFINE_ITEM
+
+// TODO: after is_quantized() is implemented,
+// implement item() (returnning a float) for quantized Tensor
 
 } //namespace at

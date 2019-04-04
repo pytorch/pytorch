@@ -414,6 +414,10 @@ class TestCase(expecttest.TestCase):
             self.assertEqual(x.item(), y, prec, message, allow_inf)
         elif isinstance(y, torch.Tensor) and isinstance(x, Number):
             self.assertEqual(x, y.item(), prec, message, allow_inf)
+        elif isinstance(x, torch.Tensor) and isinstance(y, numpy.bool_):
+            self.assertEqual(x.item(), y, prec, message, allow_inf)
+        elif isinstance(y, torch.Tensor) and isinstance(x, numpy.bool_):
+            self.assertEqual(x, y.item(), prec, message, allow_inf)
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
@@ -421,12 +425,7 @@ class TestCase(expecttest.TestCase):
                     if a.device.type == 'cpu' and a.dtype == torch.float16:
                         # CPU half tensors don't have the methods we need below
                         a = a.to(torch.float32)
-                    if TEST_WITH_ROCM:
-                        # Workaround for bug https://github.com/pytorch/pytorch/issues/16448
-                        # TODO: remove after the bug is resolved.
-                        b = b.to(a.dtype).to(a.device)
-                    else:
-                        b = b.to(a)
+                    b = b.to(a)
 
                     if (a.dtype == torch.bool) != (b.dtype == torch.bool):
                         raise TypeError("Was expecting both tensors to be bool type.")

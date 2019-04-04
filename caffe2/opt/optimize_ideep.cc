@@ -3,6 +3,7 @@
 #include "caffe2/opt/fusion.h"
 
 #ifdef CAFFE2_USE_MKLDNN
+#include <cpuinfo.h>
 #include "caffe2/ideep/ideep_utils.h"
 #endif
 
@@ -12,7 +13,7 @@ namespace opt {
 using namespace nom;
 
 #ifndef CAFFE2_USE_MKLDNN
-void OptimizeForIdeep(
+void OptimizeForMkldnn(
     repr::NNModule* nn,
     caffe2::Workspace* ws,
     bool training_mode) {
@@ -32,6 +33,15 @@ template <class T>
 T* getTensor(Blob* blob) {
   CAFFE_ENFORCE(blob, "Blob is invalid");
   if (blob && blob->template IsType<T>()) {
+    return blob->template GetMutable<T>();
+  }
+  return nullptr;
+}
+
+template <class T>
+T* getMutableTensor(Blob* blob) {
+  CAFFE_ENFORCE(blob, "Blob is invalid");
+  if (blob->template IsType<T>()) {
     return blob->template GetMutable<T>();
   }
   return nullptr;
@@ -69,10 +79,10 @@ bool isOnIdeepDevice(const repr::NeuralNetOperator& nnOp) {
 }
 
 bool shouldFuseConv(const repr::Conv& conv) {
-  return isOnIdeepDevice(conv) ? (conv.getGroup() <= 1) : false;
+  return isOnIdeepDevice(conv);
 }
 
-void removeStopGradientForInference(repr::NNModule *nn) {
+void removeStopGradientForInference(repr::NNModule* nn) {
   auto isStopGradientNode = [](const repr::NNGraph::NodeRef& node) {
     if (!repr::nn::is<repr::NeuralNetOperator>(node)) {
       return false;
@@ -101,10 +111,6 @@ void removeStopGradientForInference(repr::NNModule *nn) {
 }
 
 void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
-  // Fusion types:
-  // FUSION_CONV_RELU = 1
-  // FUSION_CONV_SUM = 2
-  // FUSION_CONV_SUM_RELU = 3
   auto conv = repr::nn::get<repr::Conv>(convNode);
   auto annotation = conv->getMutableAnnotation();
   if (!annotation || !isa<Caffe2Annotation>(annotation)) {
@@ -117,19 +123,18 @@ void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
   }
 
   if (op->type() == "ConvFusion") {
-    CAFFE_ENFORCE(fusion_type == 1, "Invalid nest fusion");
+    CAFFE_ENFORCE(fusion_type == FUSION_CONV_RELU, "Invalid nest fusion");
     for (auto& arg : *op->mutable_arg()) {
       if (arg.name() == "fusion_type") {
-        // Only from FUSION_CONV_SUM to FUSION_CONV_SUM_RELU
-        CAFFE_ENFORCE(arg.i() == 2, "Invalid nest fusion");
-        arg.set_i(3);
+        CAFFE_ENFORCE(arg.i() == FUSION_CONV_SUM, "Invalid nest fusion");
+        arg.set_i(FUSION_CONV_SUM_RELU);
         return;
       }
     }
     return;
   }
 
-  CAFFE_ENFORCE(fusion_type < 3, "Invalid fusion type");
+  CAFFE_ENFORCE_LT(fusion_type, FUSION_CONV_SUM_RELU, "Invalid fusion type");
   op->set_type("ConvFusion");
   auto* arg = op->add_arg();
   arg->set_name("fusion_type");
@@ -215,7 +220,7 @@ bool fuseConvBNAndAffChHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws)
       continue;                                                          \
     }                                                                    \
     name##Tensor.resize(name->get_dims(), name->get_data_type());        \
-    name##Tensor.reorder_from(*name);                                    \
+    name##Tensor.feed_from(*name);                                       \
     CAFFE_ENFORCE(                                                       \
       name##Tensor.is_public_format(), #name " not with public format"); \
     name##Data = static_cast<float*>(name##Tensor.get_data_handle());    \
@@ -254,8 +259,8 @@ bool fuseConvBNAndAffChHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws)
       }
     }
 
-    filter->reorder_from(filterTensor);
-    biasConv->reorder_from(biasConvTensor);
+    filter->feed_from(filterTensor);
+    biasConv->feed_from(biasConvTensor);
     nn->dataFlow.replaceNode(convOutput, bnOrAffChOutput);
 
     nn->dataFlow.deleteNode(bnOrAffChNode);
@@ -273,6 +278,7 @@ void fuseConvBNAndAffChForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
 }
 
 void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
+  CAFFE_ENFORCE(cpuinfo_initialize(), "failed to initialize cpuinfo");
   // Assume the order of nodes from getMutableNodes conforms to
   // the original topo order of operators
   auto allNodes = nn->dataFlow.getMutableNodes();
@@ -333,8 +339,13 @@ void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
     }
 
     auto conv = repr::nn::get<repr::Conv>(convNode);
-    if (!shouldFuseConv(*conv)) {
+    if (!isOnIdeepDevice(*conv)) {
       LOG(WARNING) << "Not a IDEEP operator";
+      continue;
+    }
+
+    if (conv->getGroup() > 1 && !cpuinfo_has_x86_avx512f()) {
+      LOG(WARNING) << "Not support conv sum fusion with grouped filter";
       continue;
     }
 
@@ -357,8 +368,7 @@ void fuseConvSumForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
     auto sumOutput = repr::nn::getOutputs(sumNode).front();
     nn->dataFlow.replaceNode(sumOutput, newOutput);
 
-    // 2 means FUSION_CONV_SUM
-    resetConvForFusion(convNode, 2);
+    resetConvForFusion(convNode, FUSION_CONV_SUM);
     nn->dataFlow.createEdge(sumInputX, convNode);
     nn->dataFlow.createEdge(convNode, newOutput);
 
@@ -396,8 +406,8 @@ void enforceFusionInplaceForIdeep(repr::NNModule* nn) {
 
     bool enforce_inplace = false;
     for (const auto& arg : op.arg()) {
-      // Only check FUSION_SUM & FUSION_SUM_RELU
-      if (arg.name() == "fusion_type" && (arg.i() == 2 || arg.i() == 3)) {
+      if (arg.name() == "fusion_type"
+          && (arg.i() == FUSION_CONV_SUM || arg.i() == FUSION_CONV_SUM_RELU)) {
         enforce_inplace = true;
         break;
       }
@@ -430,10 +440,10 @@ void enforceFusionInplaceForIdeep(repr::NNModule* nn) {
   }
 }
 
-void setPoolingInferenceMode(repr::NNModule *nn) {
+void setPoolingInferenceMode(repr::NNModule* nn) {
   for (auto node_pair : repr::nn::dataIterator<repr::MaxPool>(nn->dataFlow)) {
     repr::NNGraph::NodeRef maxPoolNode;
-    repr::MaxPool *maxPool;
+    repr::MaxPool* maxPool;
     std::tie(maxPool, maxPoolNode) = node_pair;
 
     if (!isOnIdeepDevice(*maxPool)) {
@@ -441,9 +451,9 @@ void setPoolingInferenceMode(repr::NNModule *nn) {
       continue;
     }
 
-    auto *op = getMutableOpDef(*maxPool);
+    auto* op = getMutableOpDef(*maxPool);
     bool found_training_mode = false;
-    for (auto &arg : *op->mutable_arg()) {
+    for (auto& arg : *op->mutable_arg()) {
       if (arg.name() == "training_mode") {
         arg.set_i(0);
         found_training_mode = true;
@@ -452,19 +462,149 @@ void setPoolingInferenceMode(repr::NNModule *nn) {
     }
 
     if (!found_training_mode) {
-      auto *arg = op->add_arg();
+      auto* arg = op->add_arg();
       arg->set_name("training_mode");
       arg->set_i(0);
     }
   }
 }
 
-void OptimizeForIdeep(
-    repr::NNModule* nn,
-    caffe2::Workspace* ws,
-    bool training_mode) {
+// Pre-convert filters format to expected one here
+// in order to avoid boring conversions during computations
+void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
+  for (auto& node : nn->dataFlow.getMutableNodes()) {
+    if (!repr::nn::is<repr::ConvTranspose>(node) &&
+        !repr::nn::is<repr::Conv>(node) && !repr::nn::is<repr::FC>(node)) {
+      continue;
+    }
+
+    auto* nnOp = repr::nn::get<repr::NeuralNetOperator>(node);
+    if (!isOnIdeepDevice(*nnOp)) {
+      LOG(INFO) << "Not a IDEEP operator";
+      continue;
+    }
+
+    auto inputs = repr::nn::getInputs(node);
+    if (inputs.size() < 2) {
+      LOG(WARNING) << "Invalid input size";
+      continue;
+    }
+
+    auto* filterBlob = getBlob(inputs[1], ws);
+    auto* filter = getMutableTensor<itensor>(filterBlob);
+    if (filter == nullptr) {
+      continue;
+    }
+
+    itensor::descriptor expectedDesc;
+    if (repr::nn::is<repr::ConvTranspose>(node)) {
+      if (filter->get_public_format() == ideep::format::iohw)
+        continue;
+      auto convTranspose = repr::nn::get<repr::ConvTranspose>(node);
+      auto initValue = [](vector<int>& v, vector<int> i) {
+        if (v.empty())
+          v = i;
+      };
+      auto strides = convTranspose->getStrides();
+      initValue(strides, {1, 1});
+      auto pads = convTranspose->getPads();
+      initValue(pads, {0, 0, 0, 0});
+      auto* op = getMutableOpDef(*convTranspose);
+      auto aalgorithm = ialgo::deconvolution_direct;
+      auto dataType = filter->get_data_type();
+      ideep::tensor::dims filter_dims_mkldnn{filter->get_dim(1),
+                                             filter->get_dim(0),
+                                             filter->get_dim(2),
+                                             filter->get_dim(3)};
+      expectedDesc =
+          ideep::convolution_transpose_forward::expected_weights_descriptor(
+              filter_dims_mkldnn,
+              dataType,
+              strides,
+              {pads[0], pads[1]},
+              {pads[2], pads[3]});
+
+      if (filter->get_descriptor() != expectedDesc) {
+        filter->set_public_format(ideep::format::iohw);
+        itensor&& newFilter(expectedDesc);
+        ideep::reorder::compute(*filter, newFilter);
+        newFilter.set_public_format(ideep::format::iohw);
+        filterBlob->Reset<itensor>(new itensor(newFilter));
+      }
+    } else if (repr::nn::is<repr::Conv>(node)) {
+      auto conv = repr::nn::get<repr::Conv>(node);
+      auto initValue = [](vector<int>& v, vector<int> i) {
+        if (v.empty())
+          v = i;
+      };
+      auto strides = conv->getStrides();
+      initValue(strides, {1, 1});
+      auto pads = conv->getPads();
+      initValue(pads, {0, 0, 0, 0});
+      auto dilations = conv->getDilations();
+      initValue(dilations, {1, 1});
+
+      auto* op = getMutableOpDef(*conv);
+      auto aalgorithm = ialgo::convolution_direct;
+      for (auto& arg : *op->mutable_arg()) {
+        if ((arg.name() == "conv_algorithm") &&
+            (arg.i() == CONV_ALGORITHM_WINOGRAD)) {
+          aalgorithm = ialgo::convolution_winograd;
+        }
+      }
+      auto dataType = filter->get_data_type();
+
+      filter->make_group(conv->getGroup());
+      expectedDesc = ideep::convolution_forward::expected_weights_descriptor(
+          filter->get_dims(),
+          dataType,
+          strides,
+          {pads[0], pads[1]},
+          {pads[2], pads[3]},
+          dilations,
+          conv->getGroup(),
+          aalgorithm);
+
+      if (filter->get_descriptor() != expectedDesc) {
+        itensor&& newFilter(expectedDesc);
+        ideep::reorder::compute(*filter, newFilter);
+        filterBlob->Reset<itensor>(new itensor(newFilter));
+      }
+      // convert weights for FC
+    } else if (repr::nn::is<repr::FC>(node)) {
+      auto fc = repr::nn::get<repr::FC>(node);
+      auto axis_w = fc->getAxisW();
+      if (axis_w != 1) {
+        auto f_dims = filter->get_dims();
+        auto f_dim0 = std::accumulate(
+            f_dims.begin(),
+            f_dims.begin() + axis_w,
+            1,
+            std::multiplies<itensor::dim_t>());
+        auto f_dim1 = std::accumulate(
+            f_dims.begin() + axis_w,
+            f_dims.end(),
+            1,
+            std::multiplies<itensor::dim_t>());
+        filter->reshape({f_dim0, f_dim1});
+      }
+
+      expectedDesc = ideep::inner_product_forward::expected_weights_descriptor(
+          filter->get_dims());
+
+      if (filter->get_descriptor() != expectedDesc) {
+        itensor&& newFilter(expectedDesc);
+        ideep::reorder::compute(filter->as_weights(), newFilter);
+        filterBlob->Reset<itensor>(new itensor(newFilter));
+      }
+    }
+  }
+}
+
+void OptimizeForMkldnn(repr::NNModule *nn, caffe2::Workspace *ws,
+                      bool training_mode) {
   if (training_mode) {
-    // Only support inference so far
+    preConvertFiltersFormat(nn, ws);
     return;
   }
 

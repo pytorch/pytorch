@@ -17,6 +17,8 @@ new_common_args = parse_kwargs("""
         Default: if None, same :class:`torch.device` as this tensor.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
+    pin_memory (bool, optional): If set, returned tensor would be allocated in
+        the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
 add_docstr_all('new_tensor',
@@ -486,20 +488,6 @@ bmm(batch2) -> Tensor
 See :func:`torch.bmm`
 """)
 
-add_docstr_all('btrifact',
-               r"""
-btrifact(pivot=True) -> (Tensor, Tensor)
-
-See :func:`torch.btrifact`
-""")
-
-add_docstr_all('btrifact_with_info',
-               r"""
-btrifact_with_info(pivot=True) -> (Tensor, Tensor, Tensor)
-
-See :func:`torch.btrifact_with_info`
-""")
-
 add_docstr_all('btrisolve',
                r"""
 btrisolve(LU_data, LU_pivots) -> Tensor
@@ -681,6 +669,13 @@ add_docstr_all('data_ptr',
 data_ptr() -> int
 
 Returns the address of the first element of :attr:`self` tensor.
+""")
+
+add_docstr_all('dequantize',
+               r"""
+dequantize() -> Tensor
+
+Given a quantized Tensor, dequantize it and return the dequantized float Tensor.
 """)
 
 add_docstr_all('dense_dim',
@@ -1017,13 +1012,6 @@ add_docstr_all('ger',
 ger(vec2) -> Tensor
 
 See :func:`torch.ger`
-""")
-
-add_docstr_all('solve',
-               r"""
-solve(A) -> Tensor, Tensor
-
-See :func:`torch.solve`
 """)
 
 add_docstr_all('indices',
@@ -1794,6 +1782,31 @@ qr() -> (Tensor, Tensor)
 See :func:`torch.qr`
 """)
 
+add_docstr_all('quantize_linear',
+               r"""
+quantize_linear(scale, zero_point) -> Tensor
+
+Quantize a float Tensor using affine quantization scheme with given scale and
+zero_point.
+returns the quantized Tensor.
+""")
+
+add_docstr_all('q_scale',
+               r"""
+q_scale() -> float
+
+Given a Tensor quantized by linear(affine) quantization,
+returns the scale of the underlying quantizer().
+""")
+
+add_docstr_all('q_zero_point',
+               r"""
+q_zero_point() -> int
+
+Given a Tensor quantized by linear(affine) quantization,
+returns the zero_point of the underlying quantizer().
+""")
+
 add_docstr_all('random_',
                r"""
 random_(from=0, to=None, *, generator=None) -> Tensor
@@ -2234,6 +2247,13 @@ Example::
     >>> torch.empty(3, 4, 5).size()
     torch.Size([3, 4, 5])
 
+""")
+
+add_docstr_all('solve',
+               r"""
+solve(A) -> Tensor, Tensor
+
+See :func:`torch.solve`
 """)
 
 add_docstr_all('sort',
@@ -3133,7 +3153,7 @@ Example::
     >>> f = torch.rand(10, requires_grad=True, device="cuda")
     >>> f.is_leaf
     True
-    # f requires grad, has not operation creating it
+    # f requires grad, has no operation creating it
 
 
 """)
