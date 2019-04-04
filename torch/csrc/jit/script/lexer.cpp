@@ -97,6 +97,7 @@ SharedParserData& sharedParserData() {
   static SharedParserData data; // safely handles multi-threaded init
   return data;
 }
+
 } // namespace script
 } // namespace jit
 } // namespace torch
