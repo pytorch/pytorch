@@ -1485,6 +1485,7 @@ class TestJit(JitTestCase):
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: JIT tests not yet supported on windows")
+    @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
     @skipIfRocm
     def test_cpp(self):
