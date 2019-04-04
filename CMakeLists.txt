@@ -185,14 +185,6 @@ if (BUILD_ATEN_ONLY)
   set(USE_LMDB OFF)
 endif()
 
-if(NOT BUILD_TORCH)
-  message(FATAL_ERROR "BUILD_TORCH: ${BUILD_TORCH}")
-endif()
-
-if(NOT BUILDING_WITH_TORCH_LIBS)
-  message(FATAL_ERROR "BUILDING_WITH_TORCH_LIBS: ${BUILDING_WITH_TORCH_LIBS}")
-endif()
-
 # ---[ Utils
 # TODO: merge the following 3 files into cmake/public/utils.cmake.
 include(cmake/Utils.cmake)
@@ -380,14 +372,6 @@ include_directories(BEFORE ${PROJECT_SOURCE_DIR})
 include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
-
-if(NOT BUILD_TORCH)
-  message(FATAL_ERROR "BUILD_TORCH: ${BUILD_TORCH}")
-endif()
-
-if(NOT BUILDING_WITH_TORCH_LIBS)
-  message(FATAL_ERROR "BUILDING_WITH_TORCH_LIBS: ${BUILDING_WITH_TORCH_LIBS}")
-endif()
 
 # ---[ Main build
 add_subdirectory(c10)

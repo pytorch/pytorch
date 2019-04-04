@@ -133,7 +133,7 @@ set CMAKE_GENERATOR=Ninja
 if not "%USE_CUDA%"=="1" (
   if "%REBUILD%"=="" (
     set NO_CUDA=1
-    python setup.py install
+    python setup.py install --cmake
   )
   if errorlevel 1 exit /b 1
   if not errorlevel 0 exit /b 1

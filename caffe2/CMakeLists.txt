@@ -54,14 +54,6 @@ else()
   # See cmake/Codegen.cmake for header installation
 endif()
 
-if(NOT BUILD_TORCH)
-  message(FATAL_ERROR "BUILD_TORCH: ${BUILD_TORCH}")
-endif()
-
-if(NOT BUILDING_WITH_TORCH_LIBS)
-  message(FATAL_ERROR "BUILDING_WITH_TORCH_LIBS: ${BUILDING_WITH_TORCH_LIBS}")
-endif()
-
 # ---[ Torch build
 if(BUILD_TORCH)
   add_subdirectory(../torch torch)
