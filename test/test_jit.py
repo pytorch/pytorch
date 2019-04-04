@@ -340,7 +340,6 @@ class JitTestCase(TestCase):
 
             self.assertMultiLineEqual(main_module_code, main_module_2_code)
 
-
     def getExportImportCopy(self, m, also_test_file=True, map_location=None):
         buffer = io.BytesIO()
         torch.jit.save(m, buffer)
