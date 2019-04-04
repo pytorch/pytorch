@@ -621,10 +621,14 @@ def to_return_type(arg, option):
 
 def emit_version_increment(option):
     version_increment_stmts = []
-    for formal in option['formals_list']:
-        arg_type = formal['type']
-        if NATIVE_DYNAMIC_TYPE.get(arg_type, arg_type) == 'Tensor' and 'const' not in arg_type:
-            version_increment_stmts.append(VERSION_INCREMENT_TEMPLATE.substitute(tensor_name=formal['name']))
+    # TH functions won't be called directly, but only from other functions that dispatch to them.
+    # The version counter is already bumped in the call site of the TH function, and we don't want
+    # to bump it again in the TH function.
+    if not option['mode'] == 'TH':
+        for formal in option['formals_list']:
+            arg_type = formal['type']
+            if NATIVE_DYNAMIC_TYPE.get(arg_type, arg_type) == 'Tensor' and 'const' not in arg_type:
+                version_increment_stmts.append(VERSION_INCREMENT_TEMPLATE.substitute(tensor_name=formal['name']))
     if not version_increment_stmts:
         version_increment_stmts.append("// Version increment omitted")
     return version_increment_stmts

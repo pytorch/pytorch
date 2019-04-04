@@ -204,9 +204,16 @@ SAVE_VERSION = CodeTemplate("""\
 uint32_t ${tensor_name}_saved_version = as_variable_ref(${tensor_name}).current_version();
 """)
 
-CHECK_VERSION = CodeTemplate("""\
+CHECK_VERSION_NATIVE = CodeTemplate("""\
 if (at::VersionUpdateMode::is_enabled())
   AT_ASSERT(as_variable_ref(${tensor_name}).current_version() > ${tensor_name}_saved_version);
+""")
+
+# TH functions won't be called directly, but only from other functions that dispatch to them.
+# The version counter is already bumped in the call site of the TH function, and we don't want
+# to bump it again in the TH function.
+CHECK_VERSION_TH = CodeTemplate("""\
+AT_ASSERT(as_variable_ref(${tensor_name}).current_version() == ${tensor_name}_saved_version);
 """)
 
 CONDITIONAL = CodeTemplate("""\
@@ -859,7 +866,10 @@ def emit_body(declaration):
     def emit_check_version():
         if not modifies_arguments:
             return []
-        return [CHECK_VERSION.substitute(tensor_name=arg['name']) for arg in differentiable_outputs]
+        if declaration['mode'] == 'TH':
+            return [CHECK_VERSION_TH.substitute(tensor_name=arg['name']) for arg in differentiable_outputs]
+        else:
+            return [CHECK_VERSION_NATIVE.substitute(tensor_name=arg['name']) for arg in differentiable_outputs]
 
     env = {}
     combined = nested_dict(env, declaration)
