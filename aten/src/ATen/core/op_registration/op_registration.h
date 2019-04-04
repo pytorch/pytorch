@@ -63,12 +63,12 @@ public:
    * >         c10::dispatchKey(CPUTensorId()));
    */
   template<class... ConfigParameters>
-  RegisterOperators op(const std::string& schema, ConfigParameters&&... configParameters) && {
+  RegisterOperators op(const std::string& schemaOrName, ConfigParameters&&... configParameters) && {
     static_assert(guts::conjunction<detail::is_registration_config_parameter<guts::decay_t<ConfigParameters>>...>::value,
       "Invalid argument passed to op(). Examples for valid arguments are c10::kernel(...) for defining a kernel "
       " and c10::dispatchKey(...) for defining a dispatch key. Please see the documentation for registering c10 operators.");
 
-    op_(schema, std::forward<ConfigParameters>(configParameters)...);
+    op_(schemaOrName, std::forward<ConfigParameters>(configParameters)...);
     return std::move(*this);
   }
 
@@ -89,18 +89,18 @@ public:
   C10_DEPRECATED_MESSAGE("Registering kernels via passing arguments to RegisterOperators(...) is deprecated. " \
                          "Please use RegisterOperators().op(...) instead.")
   // enable_if: only enable it if FuncType is actually a function, but not a stack based KernelFunction.
-  explicit RegisterOperators(guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value, const std::string&> schema, FuncType* func)
+  explicit RegisterOperators(guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value, const std::string&> schemaOrName, FuncType* func)
   : RegisterOperators() {
-    legacyAPIOp_(schema, func);
+    legacyAPIOp_(schemaOrName, func);
   }
 
   template<class FuncType>
   C10_DEPRECATED_MESSAGE("Registering kernels via passing arguments to RegisterOperators(...) is deprecated. " \
                          "Please use RegisterOperators().op(...) instead.")
   // enable_if: only enable it if FuncType is actually a functor
-  explicit RegisterOperators(guts::enable_if_t<guts::is_functor<FuncType>::value, const std::string&> schema, FuncType&& func)
+  explicit RegisterOperators(guts::enable_if_t<guts::is_functor<FuncType>::value, const std::string&> schemaOrName, FuncType&& func)
   : RegisterOperators() {
-    legacyAPIOp_(schema, std::forward<FuncType>(func));
+    legacyAPIOp_(schemaOrName, std::forward<FuncType>(func));
   }
 
   /**
@@ -139,12 +139,12 @@ public:
                           "Please use the new c10::kernel() based API instead.")
    // enable_if: only enable it if FuncType is actually a function, but not a stack based KernelFunction.
    guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value, RegisterOperators>
-   op(const std::string& schema, FuncType* func, OtherArgs...) && {
+   op(const std::string& schemaOrName, FuncType* func, OtherArgs...) && {
      // We intentionally don't extend this deprecated API to support dispatch keys
      // and the like to push people towards using the new API.
      static_assert(sizeof...(OtherArgs) == 0, "The deprecated function pointer based API to register kernels doesn't allow additional arguments for dispatch keys or other things. Please use the new c10::kernel() based API instead.");
 
-     legacyAPIOp_(schema, func);
+     legacyAPIOp_(schemaOrName, func);
      return std::move(*this);
    }
 
@@ -178,14 +178,14 @@ public:
                            "Please use the new c10::kernel() based API instead.")
     // enable_if: only enable it if FuncType is actually a functor
     guts::enable_if_t<guts::is_functor<FuncType>::value, RegisterOperators>
-    op(const std::string& schema, FuncType&& func, OtherArgs...) && {
+    op(const std::string& schemaOrName, FuncType&& func, OtherArgs...) && {
       // We intentionally don't extend this deprecated API to support dispatch keys
       // and the like to push people towards using the new API.
       static_assert(sizeof...(OtherArgs) == 0, "The deprecated lambda based API to register kernels doesn't allow additional arguments for dispatch keys or other things. Please use the new c10::kernel() based API instead.");
 
       static_assert(!std::is_base_of<OperatorKernel, FuncType>::value, "c10::OperatorKernel is part of the new kernel registration API and shouldn't be used together with the deprecated registration API. Please use the new c10::kernel() based API instead.");
 
-      legacyAPIOp_(schema, std::forward<FuncType>(func));
+      legacyAPIOp_(schemaOrName, std::forward<FuncType>(func));
       return std::move(*this);
     }
 
@@ -194,20 +194,22 @@ public:
 private:
   template<class... ConfigParameters>
   void op_(FunctionSchema&& schema, ConfigParameters&&... configParameters) {
-    registerOp_(std::move(schema), detail::make_registration_config(std::forward<ConfigParameters>(configParameters)...));
+    checkSchemaAndRegisterOp_(std::move(schema), detail::make_registration_config(std::forward<ConfigParameters>(configParameters)...));
   }
   template<class... ConfigParameters>
-  void op_(const std::string& schema, ConfigParameters&&... configParameters) {
-    registerOp_(schema, detail::make_registration_config(std::forward<ConfigParameters>(configParameters)...));
+  void op_(const std::string& schemaOrName, ConfigParameters&&... configParameters) {
+    checkSchemaAndRegisterOp_(schemaOrName, detail::make_registration_config(std::forward<ConfigParameters>(configParameters)...));
   }
 
   template<class FuncType>
-  void legacyAPIOp_(const std::string& schema, FuncType&& func) {
-    op_(schema, kernel<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>(std::forward<FuncType>(func)));
+  void legacyAPIOp_(const std::string& schemaOrName, FuncType&& func) {
+    op_(schemaOrName, kernel<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>(std::forward<FuncType>(func)));
   }
 
+  void checkSchemaAndRegisterOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config);
+  void checkSchemaAndRegisterOp_(const std::string& schemaOrName, detail::KernelRegistrationConfig&& config);
+
   void registerOp_(FunctionSchema&& schema, detail::KernelRegistrationConfig&& config);
-  void registerOp_(const std::string& schema, detail::KernelRegistrationConfig&& config);
 
   class OperatorRegistrar;
 
