@@ -2,6 +2,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
 #include <torch/csrc/jit/source_range.h>
+#include <c10/macros/Macros.h>
 #include <ATen/core/Macros.h>
 #include <algorithm>
 #include <clocale>
@@ -167,12 +168,22 @@ struct CAFFE2_API SharedParserData {
     static _locale_t loc = _create_locale(LC_ALL, "C");
     return _strtod_l(str, end, loc);
   }
+//TODO #elif defined(C10_ANDROID)
 #else
-  static double strtod_c(const char* str, char** end) {
-    /// NOLINTNEXTLINE(hicpp-signed-bitwise)
-    static locale_t loc = newlocale(LC_ALL_MASK, "C", nullptr);
-    return strtod_l(str, end, loc);
+  static double strtod_c(const char* str, const char** end) {
+    std::istringstream s(str);
+    s.imbue(std::locale());
+    double result;
+    s >> result;
+    *end = str + s.tellg();
+    return result;
   }
+// TODO #else
+//   static double strtod_c(const char* str, char** end) {
+//     /// NOLINTNEXTLINE(hicpp-signed-bitwise)
+//     static locale_t loc = newlocale(LC_ALL_MASK, "C", nullptr);
+//     return strtod_l(str, end, loc);
+//   }
 #endif
   // 1. skip whitespace
   // 2. handle comment or newline
@@ -186,7 +197,7 @@ struct CAFFE2_API SharedParserData {
     if (first == '-' || first == '+' || isalpha(first))
       return false;
     const char* startptr = str.c_str() + start;
-    char* endptr;
+    const char* endptr;
     strtod_c(startptr, &endptr);
     *len = endptr - startptr;
     return *len > 0;
