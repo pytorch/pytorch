@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 import numpy as np
 import time
 
-from caffe2.python import workspace, cnn, memonger, core
+from caffe2.python import workspace, cnn, memonger, core, test_util
 import caffe2.python.models.resnet as resnet
 import hypothesis.strategies as st
 from hypothesis import given, settings
@@ -106,6 +106,7 @@ class ResnetMemongerTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(loss1, optimized_loss1)
         np.testing.assert_almost_equal(conv1_w_grad, optim_conv1_w_grad)
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     def test_resnet_forward_only(self):
         model = cnn.CNNModelHelper(
             order="NCHW",
@@ -145,6 +146,7 @@ class ResnetMemongerTest(hu.HypothesisTestCase):
         self.assertTrue(num_shared_blobs < 7 and num_shared_blobs > 0)
         np.testing.assert_almost_equal(loss1, optimized_loss1)
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     def test_resnet_forward_only_fast_simplenet(self):
         '''
         Test C++ memonger that is only for simple nets

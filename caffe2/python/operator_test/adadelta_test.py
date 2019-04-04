@@ -10,7 +10,7 @@ from hypothesis import given, settings, HealthCheck
 import hypothesis.strategies as st
 import numpy as np
 
-from caffe2.python import core
+from caffe2.python import core, test_util
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
@@ -45,6 +45,7 @@ class TestAdadelta(serial.SerializedTestCase):
             return (param_out.astype(np.float32), mom_out.astype(np.float32),
                     mom_delta_out.astype(np.float32))
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @serial.given(inputs=hu.tensors(n=4),
            lr=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
@@ -73,6 +74,7 @@ class TestAdadelta(serial.SerializedTestCase):
 
     # Suppress filter_too_much health check.
     # Likely caused by `assume` call falling through too often.
+    @test_util.caffe2_disable_fp_exceptions_throw
     @settings(suppress_health_check=[HealthCheck.filter_too_much])
     @given(inputs=hu.tensors(n=4),
            lr=st.floats(min_value=0.01, max_value=0.99,

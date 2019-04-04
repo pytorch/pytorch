@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core
+from caffe2.python import core, test_util
 from hypothesis import given
 from hypothesis import strategies as st
 import caffe2.python.hypothesis_test_util as hu
@@ -15,6 +15,7 @@ import unittest
 
 class TestMathOps(serial.SerializedTestCase):
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(X=hu.tensor(),
            exponent=st.floats(min_value=2.0, max_value=3.0),
            **hu.gcs)

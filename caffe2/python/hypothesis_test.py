@@ -12,7 +12,7 @@ import hypothesis.strategies as st
 import unittest
 import os
 
-from caffe2.python import core, workspace, tt_core, dyndep
+from caffe2.python import core, test_util, workspace, tt_core, dyndep
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.proto import caffe2_pb2
 
@@ -566,6 +566,7 @@ class TestOperators(hu.HypothesisTestCase):
         w[np.abs(z) <= lambda1] = 0
         return (w, np.stack([n, z], axis=-1))
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(inputs=hu.tensors(n=4),
            in_place=st.booleans(),
            alpha=st.floats(min_value=0.01, max_value=0.1),
@@ -634,6 +635,7 @@ class TestOperators(hu.HypothesisTestCase):
         z = z.reshape(old_shape)
         return (w, np.stack([n, z], axis=-1))
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(inputs=hu.tensors(n=4),
            in_place=st.booleans(),
            alpha=st.floats(min_value=0.01, max_value=0.1),
@@ -662,6 +664,7 @@ class TestOperators(hu.HypothesisTestCase):
             gc, op, [var, nz, grad],
             partial(self._dense_gftrl, alpha, beta, lambda1, lambda2))
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(inputs=hu.tensors(n=4),
            alpha=st.floats(min_value=0.01, max_value=0.1),
            beta=st.floats(min_value=0.1, max_value=0.9),
@@ -704,6 +707,7 @@ class TestOperators(hu.HypothesisTestCase):
         return TestOperators._dense_ftrl(alpha, beta, lambda1, lambda2, w, nz,
                                          g)
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(inputs=hu.tensors(n=4),
            in_place=st.booleans(),
            alpha=st.floats(min_value=0.01, max_value=0.1),
@@ -733,6 +737,7 @@ class TestOperators(hu.HypothesisTestCase):
             gc, op, [var, nz, grad, alpha],
             partial(self._dense_ftrl_send_alpha_by_input, beta, lambda1, lambda2))
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(inputs=hu.tensors(n=4),
            alpha=st.floats(min_value=0.01, max_value=0.1),
            beta=st.floats(min_value=0.1, max_value=0.9),
@@ -1140,6 +1145,7 @@ class TestOperators(hu.HypothesisTestCase):
             inputs=[input_tensor],
             reference=sin_ref)
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(input_tensor=hu.arrays(
         dims=[10], elements=st.floats(allow_nan=False,
                                       allow_infinity=False)),

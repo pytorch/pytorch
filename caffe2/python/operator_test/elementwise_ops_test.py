@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, workspace
+from caffe2.python import core, test_util, workspace
 from hypothesis import given, assume
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
@@ -54,6 +54,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
     def test_log(self, n, m, gc, dc, seed):
@@ -79,6 +80,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(n=st.integers(0, 10), m=st.integers(4, 6),
            d=st.integers(2, 3), seed=st.integers(0, 1000), **hu.gcs)
     def test_powt(self, n, m, d, gc, dc, seed):
@@ -231,6 +233,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         )
         self.assertDeviceChecks(dc, op, [X], [0])
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(X=hu.tensor(dtype=np.float32), in_place=st.booleans(), **hu.gcs)
     def test_cbrt(self, X, in_place, gc, dc):
         op = core.CreateOperator(
@@ -556,6 +559,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self._test_binary_op("Mul", np.multiply, n, m,
                              k, t, -0.5, True, gc, dc)
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
            t=st.integers(0, 5), **hu.gcs)
     def test_div(self, n, m, k, t, gc, dc):
@@ -563,6 +567,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self._test_binary_op_in_place(
             "Div", np.divide, n, m, 1.0, True, False, gc, dc)
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(n=st.integers(1, 5), m=st.integers(1, 5), broadcast=st.booleans(),
            **hu.gcs)
     def test_div_legacy_grad(self, n, m, broadcast, gc, dc):

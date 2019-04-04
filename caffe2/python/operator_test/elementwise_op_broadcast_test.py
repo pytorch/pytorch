@@ -10,7 +10,7 @@ import numpy as np
 import operator
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace
+from caffe2.python import core, test_util, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
@@ -86,6 +86,7 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
     def test_broadcast_Sub(self, gc, dc):
         self.__test_binary_op(gc, dc, "Sub", operator.sub)
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @serial.given(**hu.gcs)
     def test_broadcast_powt(self, gc, dc):
         np.random.seed(101)

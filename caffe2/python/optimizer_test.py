@@ -11,7 +11,7 @@ from caffe2.python.optimizer_context import UseOptimizer
 from caffe2.python.optimizer_test_util import (
     OptimizerTestBase, LRModificationTestBase
 )
-from caffe2.python import core, workspace
+from caffe2.python import core, test_util, workspace
 from caffe2.python.test_util import TestCase
 import numpy as np
 from numpy.testing import assert_allclose, assert_equal
@@ -33,6 +33,10 @@ class TestLars(OptimizerTestBase, TestCase):
         for param in optimizer.get_auxiliary_parameters().shared:
             tensor = workspace.FetchBlob(param)
             np.testing.assert_allclose(np.array([1.0]), tensor, atol=1e-5)
+
+    @test_util.caffe2_disable_fp_exceptions_throw
+    def testDense(self):
+        super(TestLars, self).testDense()
 
 
 class TestMomentumSgd(OptimizerTestBase, TestCase):
@@ -135,6 +139,18 @@ class TestAdagrad(OptimizerTestBase, LRModificationTestBase, TestCase):
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         for param in optimizer.get_auxiliary_parameters().local:
             workspace.FetchBlob(param)
+
+    @test_util.caffe2_disable_fp_exceptions_throw
+    def testDense(self):
+        super(TestAdagrad, self).testDense()
+
+    @test_util.caffe2_disable_fp_exceptions_throw
+    def test_lr_injection(self):
+        super(TestAdagrad, self).test_lr_injection()
+
+    @test_util.caffe2_disable_fp_exceptions_throw
+    def test_global_norm_based_gradient_clipping(self):
+        super(TestAdagrad, self).test_global_norm_based_gradient_clipping()
 
 
 class TestRowWiseAdagrad(OptimizerTestBase, TestCase):

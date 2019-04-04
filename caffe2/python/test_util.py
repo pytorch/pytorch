@@ -49,7 +49,17 @@ def get_default_test_flags():
         '--caffe2_log_level=0',
         '--caffe2_cpu_allocator_do_zero_fill=0',
         '--caffe2_cpu_allocator_do_junk_fill=1',
+        '--caffe2_operator_throw_if_fp_exceptions=1',
     ]
+
+
+def caffe2_disable_fp_exceptions_throw(test_method):
+    # This decorator is used to disable the floating point exceptions check
+    # in a test method.
+    # Eventually, all tests should aim to have floating point exceptions
+    # check enabled.
+    test_method.__caffe2_disable_fp_exceptions_throw__ = True
+    return test_method
 
 
 def caffe2_flaky(test_method):
@@ -86,8 +96,16 @@ class TestCase(unittest.TestCase):
         elif (not is_flaky_test_mode() and is_flaky_test):
             raise unittest.SkipTest("Flaky tests are skipped in regular test mode")
 
+        disable_fp_exceptions_throw = getattr(test_method, "__caffe2_disable_fp_exceptions_throw__", False)
+        # Temporary disable floating point exceptions check if the test is marked
+        # with caffe2_disable_fp_exceptions_throw decorator.
+        if disable_fp_exceptions_throw:
+            workspace.GlobalInit(['caffe2', '--caffe2_operator_throw_if_fp_exceptions=0'])
+
         self.ws = workspace.C.Workspace()
         workspace.ResetWorkspace()
 
     def tearDown(self):
         workspace.ResetWorkspace()
+        # Re-enable floating point exceptions check.
+        workspace.GlobalInit(['caffe2', '--caffe2_operator_throw_if_fp_exceptions=1'])

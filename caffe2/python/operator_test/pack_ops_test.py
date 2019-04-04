@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, workspace
+from caffe2.python import core, test_util, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
@@ -184,6 +184,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
             device_option=gc))
         assert((workspace.FetchBlob('newd') == workspace.FetchBlob('d')).all())
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     def test_pad_minf(self):
         workspace.FeedBlob('l', np.array([1, 2, 3], dtype=np.int32))
         workspace.FeedBlob(

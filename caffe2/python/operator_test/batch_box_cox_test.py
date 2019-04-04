@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core
+from caffe2.python import core, test_util
 from hypothesis import given
 
 import caffe2.python.hypothesis_test_util as hu
@@ -53,6 +53,7 @@ def _inputs(draw):
 
 
 class TestBatchBoxCox(serial.SerializedTestCase):
+    @test_util.caffe2_disable_fp_exceptions_throw
     @serial.given(
         inputs=_inputs(),
         **hu.gcs_cpu_only
@@ -60,6 +61,7 @@ class TestBatchBoxCox(serial.SerializedTestCase):
     def test_batch_box_cox(self, inputs, gc, dc):
         self.batch_box_cox(inputs, gc, dc)
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(**hu.gcs_cpu_only)
     def test_lambda1_is_all_zero(self, gc, dc):
         inputs = (1, 1, [[2]], [0], [0])
@@ -71,6 +73,7 @@ class TestBatchBoxCox(serial.SerializedTestCase):
         inputs = (2, 3, [[1, 2, 3], [4, 5, 6]], [0, 0, 0], [0, 0, 0])
         self.batch_box_cox(inputs, gc, dc)
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(**hu.gcs_cpu_only)
     def test_lambda1_is_partially_zero(self, gc, dc):
         inputs = (1, 5, [[1, 2, 3, 4, 5]],
@@ -86,6 +89,7 @@ class TestBatchBoxCox(serial.SerializedTestCase):
                   [0, -.5, 0, .5, 0, 1, 0], [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
         self.batch_box_cox(inputs, gc, dc)
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(**hu.gcs_cpu_only)
     def test_bound_base_away_from_zero(self, gc, dc):
         inputs = (2, 3, [[1e-5, 1e-6, 1e-7], [1e-7, -1e-6, 1e-5]],

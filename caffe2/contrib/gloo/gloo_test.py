@@ -15,7 +15,7 @@ import pickle
 import tempfile
 import shutil
 
-from caffe2.python import core, workspace, dyndep
+from caffe2.python import core, test_util, workspace, dyndep
 import caffe2.python.hypothesis_test_util as hu
 from gloo.python import IoError
 
@@ -321,6 +321,7 @@ class TestCase(hu.HypothesisTestCase):
                     workspace.FetchBlob(blobs[i]),
                     (num_blobs * comm_size) * (num_blobs * comm_size - 1) / 2)
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(comm_size=st.integers(min_value=2, max_value=8),
            blob_size=st.integers(min_value=1e3, max_value=1e6),
            num_blobs=st.integers(min_value=1, max_value=4),
@@ -409,6 +410,7 @@ class TestCase(hu.HypothesisTestCase):
         for _tmp in range(4):
             workspace.RunNet(net.Name())
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(comm_size=st.integers(min_value=2, max_value=8),
            blob_size=st.integers(min_value=1e3, max_value=1e6),
            num_blobs=st.integers(min_value=1, max_value=4),

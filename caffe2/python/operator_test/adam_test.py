@@ -10,7 +10,7 @@ from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
 
-from caffe2.python import core
+from caffe2.python import core, test_util
 import caffe2.python.hypothesis_test_util as hu
 
 
@@ -47,6 +47,7 @@ class TestAdam(hu.HypothesisTestCase):
         else:
             return param_out, mom1_out, mom2_out
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(inputs=hu.tensors(n=4),
            ITER=st.integers(min_value=0, max_value=10000),
            LR=st.floats(min_value=0.01, max_value=0.99,
@@ -80,6 +81,7 @@ class TestAdam(hu.HypothesisTestCase):
                 beta1=beta1, beta2=beta2, epsilon=epsilon),
             input_device_options=input_device_options)
 
+    @test_util.caffe2_disable_fp_exceptions_throw
     @given(inputs=hu.tensors(n=4),
            ITER=st.integers(min_value=0, max_value=10000),
            LR=st.floats(min_value=0.01, max_value=0.99,
