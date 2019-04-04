@@ -478,6 +478,9 @@ If Statements
         else:
             r = 3 * a
 
+In addition to bools, floats, ints, and Tensors can be used in a conditional
+and will be implicitly casted to a boolean.
+
 While Loops
 
   ::

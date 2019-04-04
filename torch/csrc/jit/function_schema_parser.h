@@ -7,7 +7,7 @@
 namespace torch {
 namespace jit {
 
-C10_API ::c10::FunctionSchema parseSchema(const std::string& schema);
+CAFFE2_API ::c10::FunctionSchema parseSchema(const std::string& schema);
 
 } // namespace jit
 } // namespace torch

@@ -172,7 +172,7 @@ void Variable::Impl::set_data(const at::Tensor &new_data) {
 
   // Updates metadata
   data_type_ = new_data.type().typeMeta();
-  type_id_ = new_data.type().type_id();
+  type_id_ = new_data.dispatch_type().type_id();
   is_variable_ = true;
 
   auto new_data_copy = at::Tensor(new_data.getIntrusivePtr()->shallow_copy_and_detach());
@@ -214,7 +214,7 @@ const std::shared_ptr<Function>& Variable::grad_fn() const {
       fn->storage_offset = data().storage_offset();
       fn->set_next_edges(collect_next_edges(diff_view_meta->base_));
       fn->add_input_metadata(
-        diff_view_meta->base_.type()
+        diff_view_meta->base_.dispatch_type()
       , sizes() // Note: sizes(), not base_.sizes(), is intentional
       , diff_view_meta->base_.device());
       diff_view_meta->grad_fn_ = std::move(fn);
