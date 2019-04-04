@@ -79,11 +79,11 @@ bool loadPythonClasses() {
 } // anonymous namespace
 
 #if defined(_WIN32)
-void runJITCPPTests() {
+void runJITCPPTests(bool runCuda) {
   AT_ERROR("JIT tests not yet supported on Windows");
 }
 #else
-void runJITCPPTests();
+void runJITCPPTests(bool runCuda);
 #endif
 
 void initJITBindings(PyObject* module) {
@@ -182,14 +182,15 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph> graph) { CreateAutodiffSubgraphs(graph); })
       .def(
           "_jit_run_cpp_tests",
-          [] {
+          [](bool runCuda) {
             // We have to release the GIL inside this method, because if we
             // happen to initialize the autograd engine in these tests, the
             // newly spawned worker threads will try to initialize their
             // PyThreadState*, and they need the GIL for this.
             AutoNoGIL _no_gil;
-            return runJITCPPTests();
-          })
+            return runJITCPPTests(runCuda);
+          },
+          py::arg("run_cuda"))
       .def(
           "_jit_flatten",
           [](py::handle& obj) {

@@ -10,10 +10,9 @@ Method* ClassType::getMethod(const std::string& name) const {
 }
 
 std::vector<Method*> ClassType::methods() const {
-  const auto& methods = module_->get_methods();
   std::vector<Method*> ret;
-  for (const auto& pr : methods.items()) {
-    ret.push_back(pr.value().get());
+  for (const auto& pr : module_->get_methods()) {
+    ret.push_back(pr.get());
   }
   return ret;
 }
