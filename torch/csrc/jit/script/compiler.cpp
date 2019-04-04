@@ -399,9 +399,12 @@ struct Environment {
           {"_to_tensor",
            std::make_shared<CastValue>(TensorType::get(), prim::NumToTensor)},
           {"len", std::make_shared<BuiltinFunction>(aten::len, at::nullopt)},
+          {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
+          {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
+          {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"rangelist",
            std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
       };
@@ -1121,14 +1124,23 @@ struct to_ir {
   Value* emitCond(const Expr& cond) {
     Value* v = emitExpr(cond);
     if (!v->type()->isSubtypeOf(BoolType::get())) {
-      ErrorReport error(cond);
-      error << "expected a boolean expression for condition but found "
+      Value* cast_v = emitBuiltinCall(
+          cond.get()->range(),
+          *v->owningGraph(),
+          prim::Bool,
+          c10::nullopt,
+          {v},
+          {},
+          /*required*/ false);
+      if (cast_v == nullptr) {
+        ErrorReport error(cond);
+        error
+            << "expected a bool, int, float, or Tensor expression for condition but found "
             << v->type()->str();
-      if (v->type()->isSubtypeOf(TensorType::get())) {
-        error << ", to use a tensor in a boolean"
-              << " expression, explicitly cast it with `bool()`";
+        throw error;
+      } else {
+        v = cast_v;
       }
-      throw error;
     }
     return v;
   }
@@ -2711,11 +2723,20 @@ struct to_ir {
     } else if (auto dict_type = gatherable->type()->cast<DictType>()) {
       auto* idx = emitExpr(subscript_exprs[0]);
       return emitDictIndex(loc, gatherable, idx);
+    } else if (auto string_type = gatherable->type()->cast<StringType>()) {
+      auto* idx = emitExpr(subscript_exprs[0]);
+      return emitBuiltinCall(
+          loc,
+          *graph,
+          prim::StringIndex,
+          c10::nullopt,
+          {gatherable, idx},
+          {},
+          true);
     } else {
-      throw ErrorReport(loc)
-          << "Indexing only supported on lists, dictionaries, "
-             "tensors, and tuples, but got type '"
-          << gatherable->type()->str() << "'";
+      throw ErrorReport(loc) << "Indexing only supported on List, Dict, "
+                                "Tensor, Tuple, and str but got type '"
+                             << gatherable->type()->python_str() << "'";
     }
   }
 };

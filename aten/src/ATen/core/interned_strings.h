@@ -56,6 +56,7 @@ namespace c10 {
   _(prim, ListUnpack)              \
   _(prim, DictConstruct)           \
   _(prim, DictIndex)               \
+  _(prim, StringIndex)             \
   _(prim, NumToTensor)             \
   _(prim, ImplicitTensorToNum)     \
   _(prim, Bool)                    \
@@ -73,6 +74,7 @@ namespace c10 {
   _(prim, MMBatchSide)             \
   _(prim, min)                     \
   _(prim, max)                     \
+  _(prim, abs)                     \
   _(prim, rangelist)               \
   _(aten, _grad_sum_to_size)       \
   _(aten, _ncf_unsqueeze)          \
@@ -98,9 +100,11 @@ namespace c10 {
   _(aten, _set_item)               \
   _(aten, index_put_)              \
   _(aten, device)                  \
+  _(aten, hash)                    \
   _(aten, len)                     \
   _(aten, list)                    \
   _(aten, wait)                    \
+  _(aten, ord)                     \
   _(prim, unchecked_unwrap_optional)\
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \

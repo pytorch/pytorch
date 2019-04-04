@@ -1,8 +1,6 @@
 import math
 import torch
-from functools import reduce
-from sys import float_info
-from torch._six import inf, nan
+from torch._six import inf
 
 
 class __PrinterOptions(object):

@@ -567,6 +567,10 @@ class CAFFE2_API Tensor {
   Tensor to_sparse(int64_t sparse_dim) const;
   Tensor to_sparse() const;
   Tensor to_mkldnn() const;
+  Tensor quantize_linear(double scale, int64_t zero_point) const;
+  Tensor dequantize() const;
+  Scalar q_scale() const;
+  Scalar q_zero_point() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
@@ -664,7 +668,7 @@ class CAFFE2_API Tensor {
   Tensor & exponential_(double lambd=1, Generator * generator=nullptr);
   Tensor & geometric_(double p, Generator * generator=nullptr);
   Tensor diag(int64_t diagonal=0) const;
-  Tensor cross(const Tensor & other, int64_t dim=-1) const;
+  Tensor cross(const Tensor & other, c10::optional<int64_t> dim=c10::nullopt) const;
   Tensor triu(int64_t diagonal=0) const;
   Tensor tril(int64_t diagonal=0) const;
   Tensor trace() const;
