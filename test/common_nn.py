@@ -3112,7 +3112,6 @@ class TestBase(object):
                     elif isinstance(sizes, torch.Tensor):
                         return sizes.double()
                     else:
-                        torch.manual_seed(123)
                         return torch.randn(sizes)
 
                 self._arg_cache[name] = map_tensor_sizes(self._extra_kwargs[size_name])

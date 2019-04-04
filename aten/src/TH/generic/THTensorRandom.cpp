@@ -89,17 +89,16 @@ void THTensor_(normal)(THTensor *self, at::Generator *_generator, double mean, d
   if (size >= 16 && THTensor_(isContiguous)(self)) {
     THVector_(normal_fill)(THStorage_(data)(THTensor_getStoragePtr(self)) + self->storage_offset(), size, _generator, mean, stddev);
   } else {
-    //TODO: normal returns two samples at a time. utilize the second element.
     auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator().get());
     // See Note [Thread-safety and Generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
 
     #if defined(TH_REAL_IS_FLOAT)
     at::normal_distribution<float> normal(mean, stddev);
-    TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)normal(gen)[0];);
+    TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)normal(gen););
     #else
     at::normal_distribution<double> normal(mean, stddev);
-    TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)normal(gen)[0];);
+    TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)normal(gen););
     #endif
   }
 }
@@ -155,10 +154,9 @@ void THTensor_(logNormal)(THTensor *self, at::Generator *_generator, double mean
   auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator().get());
   // See Note [Thread-safety and Generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
-  //TODO: normal returns two samples at a time. utilize the second element.
   
   at::lognormal_distribution<double> logNormal(mean, stdv);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)logNormal(gen)[0];);
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)logNormal(gen););
 }
 
 void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor *q)

@@ -736,6 +736,7 @@ def random_symmetric_psd_matrix(l):
 
 
 def random_symmetric_pd_matrix(l, *batches):
+    torch.manual_seed(123)
     A = torch.randn(*(batches + (l, l)))
     return A.matmul(A.transpose(-2, -1)) + torch.eye(l) * 1e-5
 
@@ -752,6 +753,7 @@ def make_nonzero_det(A, sign=None, min_singular_value=0.1):
 
 
 def random_fullrank_matrix_distinct_singular_value(l, *batches, **kwargs):
+    torch.manual_seed(123)
     silent = kwargs.get("silent", False)
     if silent and not torch._C.has_lapack:
         return torch.ones(l, l)

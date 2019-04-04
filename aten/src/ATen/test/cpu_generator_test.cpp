@@ -3,8 +3,10 @@
 #include <ATen/ATen.h>
 #include <ATen/Utils.h>
 #include <ATen/CPUGenerator.h>
+#include <ATen/core/PhiloxRNGEngine.h>
 #include <thread>
 #include <limits>
+#include <random>
 
 using namespace at;
 
@@ -119,9 +121,9 @@ TEST(CPUGenerator, TestRNGForking) {
   ASSERT_EQ(target_value.sum().item<double>(), forked_value.sum().item<double>());
 }
 
-/*
-* Philox CPU Engine Tests
-*/
+/** 
+ * Philox CPU Engine Tests
+ */
 
 TEST(CPUGenerator, TestPhiloxEngineReproducibility) {
   // Test Description:
@@ -185,7 +187,7 @@ TEST(CPUGenerator, TestPhiloxEngineOffset3) {
   ASSERT_EQ(engine1(), engine2());
 }
 
-TEST(CUDAGenerator, TestPhiloxEngineIndex) {
+TEST(CPUGenerator, TestPhiloxEngineIndex) {
   // Test Description:
   //   Tests if thread indexing is working properly.
   //   create two engines with different thread index but same offset.
@@ -193,4 +195,38 @@ TEST(CUDAGenerator, TestPhiloxEngineIndex) {
   at::Philox4_32_10 engine1(123456, 0, 4);
   at::Philox4_32_10 engine2(123456, 1, 4);
   ASSERT_NE(engine1(), engine2());
+}
+
+/**
+ * MT19937 CPU Engine Tests
+ */
+
+TEST(CPUGenerator, TestMT19937EngineReproducibility) {
+  // Test Description:
+  //   Tests if same inputs give same results when compared
+  //   to std.
+  
+  // test with zero seed
+  at::mt19937 engine1(0);
+  std::mt19937 engine2(0);
+  for(int i = 0; i < 10000; i++) {
+    ASSERT_EQ(engine1(), engine2());
+  }
+
+  // test with large seed
+  engine1 = at::mt19937(2147483647);
+  engine2 = std::mt19937(2147483647);
+  for(int i = 0; i < 10000; i++) {
+    ASSERT_EQ(engine1(), engine2());
+  }
+
+  // test with random seed
+  std::random_device rd;
+  auto seed = rd();
+  engine1 = at::mt19937(seed);
+  engine2 = std::mt19937(seed);
+  for(int i = 0; i < 10000; i++) {
+    ASSERT_EQ(engine1(), engine2());
+  }
+  
 }

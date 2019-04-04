@@ -9,6 +9,7 @@ namespace at {
 struct CAFFE2_API CPUGenerator : public CloneableGenerator<CPUGenerator, Generator> {
   // Constructors
   CPUGenerator(uint64_t seed_in = default_rng_seed_val);
+  CPUGenerator(mt19937 engine_in);
 
   // CPUGenerator methods
   void set_current_seed(uint64_t seed) override;
@@ -18,7 +19,6 @@ struct CAFFE2_API CPUGenerator : public CloneableGenerator<CPUGenerator, Generat
   uint64_t random64();
 
 private:
-  uint64_t current_seed_;
   at::mt19937 engine_;
   CloneableGenerator<CPUGenerator, Generator>* clone_impl() const override;
 };

@@ -224,7 +224,7 @@ Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
 
         auto normal_lambda = [generator] () {
           at::normal_distribution<double> normal(0.0, 1.0);
-          return normal(generator)[0]; //TODO: normal returns two samples at a time. utilize the second element.
+          return normal(generator);
         };
         BaseSampler<double, decltype(normal_lambda)> standard_normal(normal_lambda);
         auto sample = sample_gamma<scalar_t, double, decltype(uniform_lambda), decltype(normal_lambda)>(alpha, standard_uniform, standard_normal);
@@ -254,7 +254,7 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, Generator *gen) {
 
         auto normal_lambda = [generator] () {
           at::normal_distribution<double> normal(0.0, 1.0);
-          return normal(generator)[0]; //TODO: normal returns two samples at a time. utilize the second element.
+          return normal(generator);
         };
         BaseSampler<double, decltype(normal_lambda)> standard_normal(normal_lambda);
         auto sample = sample_gamma<double, double, decltype(uniform_lambda), decltype(normal_lambda)>

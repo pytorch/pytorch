@@ -135,7 +135,6 @@ struct uniform_real_distribution {
 /**
  * Samples a normal distribution using the Box-Muller method
  * Takes mean and standard deviation as inputs
- * Outputs two samples at a time
  */
 template <typename T>
 struct normal_distribution {
@@ -150,26 +149,32 @@ struct normal_distribution {
     #endif
     mean = mean_in;
     stdv = stdv_in;
+    cache_index = 0;
   }
 
-  C10_HOST inline vect_type<T> operator()(at::CPUGenerator* generator){
-    uniform_real_distribution<T> uniform(0.0, 1.0);
-    vect_type<T> result;
-    const T theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * uniform(generator);
-    T u1 = uniform(generator);
-    // extra pre-caution to make sure log never gets zero
-    if (u1 == static_cast<T>(0.0)) {
-      u1 = std::numeric_limits<T>::min();
+  C10_HOST inline T operator()(at::CPUGenerator* generator){
+    if(cache_index == 0) {
+      uniform_real_distribution<T> uniform(0.0, 1.0);
+      const T theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * uniform(generator);
+      T u1 = uniform(generator);
+      // extra pre-caution to make sure log never gets zero
+      if (u1 == static_cast<T>(0.0)) {
+        u1 = std::numeric_limits<T>::min();
+      }
+      T r = ::sqrt(static_cast<T>(-2.0) * ::log(u1));
+      result[0] = r * ::cos(theta) * stdv + mean;
+      result[1] = r * ::sin(theta) * stdv + mean;
     }
-    T r = ::sqrt(static_cast<T>(-2.0) * ::log(u1));
-    result[0] = r * ::cos(theta) * stdv + mean;
-    result[1] = r * ::sin(theta) * stdv + mean;
-    return result;
+    T ret = result[cache_index];
+    cache_index = (cache_index + 1) & 1;
+    return ret;
   }
 
   private:
     T mean;
     T stdv;
+    vect_type<T> result;
+    uint32_t cache_index;
 };
 
 /**
@@ -294,13 +299,9 @@ struct lognormal_distribution {
     stdv = stdv_in;
   }
 
-  C10_HOST inline vect_type<T> operator()(at::CPUGenerator* generator){
+  C10_HOST inline T operator()(at::CPUGenerator* generator){
     normal_distribution<T> normal(mean, stdv);
-    vect_type<T> result;
-    vect_type<T> normal_vals = normal(generator);
-    result[0] = ::exp(normal_vals[0]);
-    result[1] = ::exp(normal_vals[1]);
-    return result;
+    return ::exp(normal(generator));
   }
 
   private:

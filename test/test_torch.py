@@ -6185,9 +6185,9 @@ class _TestTorchMixin(object):
     @staticmethod
     def _test_cholesky_solve_batched(self, cast):
         from common_utils import random_symmetric_pd_matrix
+        torch.manual_seed(123)
 
         def cholesky_solve_test_helper(A_dims, b_dims, cast, upper):
-            torch.manual_seed(123)
             A = cast(random_symmetric_pd_matrix(*A_dims))
             L = torch.cholesky(A, upper)
             b = cast(torch.randn(*b_dims))
@@ -8853,15 +8853,15 @@ class _TestTorchMixin(object):
 
     def test_sobolengine_scrambled_lowdim(self):
         engine_1d = torch.quasirandom.SobolEngine(1, scramble=True, seed=1729)
-        expected_1d = [0.16478512, 0.43221009, 0.84261382, 0.99750268, 0.27460563,
-                       0.01084163, 0.73373985, 0.65039611, 0.12329865, 0.35587373]
+        expected_1d = [0.28656727, 0.07349014, 0.57309633, 0.74601585, 0.24457809,
+                       0.39478949, 0.89634156, 0.98466802, 0.48616761, 0.15614678]
         actual_1d = engine_1d.draw(10)
         self.assertEqual(actual_1d.flatten(), torch.tensor(expected_1d))
         self.assertEqual(actual_1d.size(), torch.Size([10, 1]))
 
         engine_3d = torch.quasirandom.SobolEngine(3, scramble=True, seed=1729)
-        expected_3d = [0.32642800, 0.17881306, 0.68837059, 0.46492538, 0.91789097,
-                       0.58075899, 0.03642474, 0.68229187, 0.20051685, 0.30083340]
+        expected_3d = [0.48351198, 0.11474668, 0.66568112, 0.35685620, 0.92311049,
+                       0.54283994, 0.24215059, 0.73393250, 0.05042873, 0.41527727]
         actual_3d = engine_3d.draw(10)
         self.assertEqual(actual_3d[:, 2], torch.tensor(expected_3d))
         self.assertEqual(actual_3d.size(), torch.Size([10, 3]))
