@@ -56,10 +56,10 @@ static DLDataType getDLDataType(const Tensor& t) {
   return dtype;
 }
 
-static DLContext getDLContext(const Type& type, const int64_t& device_id) {
+static DLContext getDLContext(const Tensor& tensor, const int64_t& device_id) {
   DLContext ctx;
   ctx.device_id = device_id;
-  if (type.is_cuda()) {
+  if (tensor.is_cuda()) {
     ctx.device_type = DLDeviceType::kDLGPU;
   } else {
     ctx.device_type = DLDeviceType::kDLCPU;
@@ -161,7 +161,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   if (src.is_cuda()) {
     device_id = src.get_device();
   }
-  atDLMTensor->tensor.dl_tensor.ctx = getDLContext(src.type(), device_id);
+  atDLMTensor->tensor.dl_tensor.ctx = getDLContext(src, device_id);
   atDLMTensor->tensor.dl_tensor.ndim = src.dim();
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
   atDLMTensor->tensor.dl_tensor.shape =
