@@ -7349,6 +7349,21 @@ a")
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
+    def test_interpolate_trace(self):
+        class test(nn.Module):
+            def __init__(self):
+                super(test, self).__init__()
+                self.conv = nn.Conv2d(1, 32, kernel_size=3, padding=1)
+
+            def forward(self, x):
+                y = self.conv(x)
+                w = nn.functional.interpolate(y, mode='bilinear', align_corners=False, scale_factor=0.5)
+                return w
+
+        f = test()
+        # no failure
+        torch.jit.trace(f, (torch.zeros(1, 1, 28, 28),))
+
     def test_trace_nested_datatypes(self):
         @torch.jit.script
         def foo(x):
