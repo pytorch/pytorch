@@ -214,6 +214,60 @@ TEST(BoundShapeInference, ConcatMissingInput) {
       {spec.max_batch_size, 2, 60});
 }
 
+TEST(BoundShapeInference, Split) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Split", "", {"X"}, {"Y0", "Y1"}, {MakeArgument<int>("axis", 1)}));
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Split",
+      "",
+      {"X"},
+      {"Y2", "Y3", "Y4"},
+      {MakeArgument<int>("axis", 1),
+       MakeArgument<std::vector<int>>("split", {4, 30, 14})}));
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Split",
+      "",
+      {"X1"},
+      {"Y5", "Y6"},
+      {MakeArgument<int>("axis", 1), MakeArgument<int>("add_axis", 1)}));
+  BoundShapeSpec spec(20, 1000);
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "X",
+      makeTensorInfo(ShapeInfo::DimType::BATCH, {spec.max_batch_size, 48}));
+  shape_map.emplace(
+      "X1",
+      makeTensorInfo(ShapeInfo::DimType::BATCH, {spec.max_batch_size, 2, 48}));
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape, "X", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 48});
+  verifyShapeInfo(
+      out_shape, "X1", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 2, 48});
+  verifyShapeInfo(
+      out_shape,
+      "Y0",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size, 48 / 2});
+  verifyShapeInfo(
+      out_shape,
+      "Y1",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size, 48 / 2});
+  verifyShapeInfo(
+      out_shape, "Y2", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 4});
+  verifyShapeInfo(
+      out_shape, "Y3", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 30});
+  verifyShapeInfo(
+      out_shape, "Y4", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 14});
+  verifyShapeInfo(
+      out_shape, "Y5", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 48});
+  verifyShapeInfo(
+      out_shape, "Y6", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 48});
+}
+
 TEST(BoundShapeInference, FC) {
   NetDef net;
   net.add_op()->CopyFrom(
