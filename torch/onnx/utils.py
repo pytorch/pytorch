@@ -94,8 +94,8 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             opset version. Right now, supported stable opset version is 9.
             The opset_version must be _onnx_master_opset or in _onnx_stable_opsets
             which are defined in torch/onnx/symbolic.py
-        add_doc_string (bool, default False): if specified, adds a field 
-            "doc_string" in the exported model, with information about the stack 
+        add_doc_string (bool, default False): if specified, adds a field
+            "doc_string" in the exported model, with information about the stack
             trace.
     """
     if aten or export_raw_ir:
@@ -325,7 +325,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     # TODO: Don't allocate a in-memory string for the protobuf
     defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
     if export_params:
-        proto, export_map = graph._export_onnx(params_dict, opset_version, defer_weight_export, operator_export_type, not add_doc_string)
+        proto, export_map = graph._export_onnx(params_dict, opset_version, defer_weight_export, operator_export_type,
+                                               not add_doc_string)
     else:
         proto, export_map = graph._export_onnx({}, opset_version, False, operator_export_type, not add_doc_string)
 
