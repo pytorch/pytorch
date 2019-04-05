@@ -80,15 +80,15 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
               tracer::addInputs(
                   node,
                   args[i].name().c_str(),
-                  iter->toDoubleList()->elements());
+                  iter->toDoubleListRef());
             } else if (elem_type->kind() == TypeKind::IntType) {
               AT_ASSERT(iter->isIntList());
               tracer::addInputs(
-                  node, args[i].name().c_str(), iter->toIntList()->elements());
+                  node, args[i].name().c_str(), iter->toIntListRef());
             } else if (elem_type->kind() == TypeKind::BoolType) {
               AT_ASSERT(iter->isBoolList());
               tracer::addInputs(
-                  node, args[i].name().c_str(), iter->toBoolList()->elements());
+                  node, args[i].name().c_str(), iter->toBoolListRef());
             } else {
               throw std::runtime_error(
                   "unsupported input list type: " + elem_type->str());
