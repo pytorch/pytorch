@@ -716,9 +716,6 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   std::shared_ptr<ClassType> type() const {
     return type_;
   }
-  void appendSlot(IValue v) {
-    slots_.emplace_back(std::move(v));
-  }
 
  private:
   void resizeObject(size_t slot);
