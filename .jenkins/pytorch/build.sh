@@ -56,6 +56,18 @@ if ! which conda; then
   fi
 fi
 
+# Use special scripts for Android builds
+if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
+  export ANDROID_NDK=/opt/ndk
+  build_args=()
+  build_args+=("-DBUILD_BINARY=ON")
+  build_args+=("-DBUILD_TEST=ON")
+  build_args+=("-DUSE_OBSERVERS=ON")
+  build_args+=("-DUSE_ZSTD=ON")
+  ./scripts/build_android.sh ${build_args[@] "$@"
+  exit 0
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # When hcc runs out of memory, it silently exits without stopping
   # the build process, leaving undefined symbols in the shared lib
