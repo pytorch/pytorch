@@ -1,12 +1,7 @@
-import subprocess
-import re
-import os
-import sys
 import itertools
 from collections import defaultdict, namedtuple
 
 import torch
-from torch._six import FileNotFoundError
 
 
 class range(object):

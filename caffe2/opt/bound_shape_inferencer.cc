@@ -79,6 +79,14 @@ void BoundShapeInferencer::InferBoundShapeAndType(
     }
   }
 
+  // Doing a reverse pass to infer the input shapes if applicable
+  for (int i = net.op_size() - 1; i >= 0; --i) {
+    const auto& op = net.op(i);
+    if (op.type() == "Concat") {
+      InferConcatInputs(op);
+    }
+  }
+
   // Make sure shape has name
   EnsureShapeNames(&shape_info_);
 }
@@ -87,10 +95,16 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorShapeAndType(
     const std::string& name,
     ShapeInfo::DimType t,
     std::vector<int64_t> bound_dims,
-    TensorProto::DataType type) {
+    TensorProto::DataType type,
+    bool is_quantized) {
   auto rt = shape_info_.emplace(name, ShapeInfo());
   ShapeInfo& shape_info = rt.first->second;
   TensorShape& shape = shape_info.shape;
+  if (is_quantized) {
+    shape_info.is_quantized = true;
+    shape_info.q_info.scale = 1;
+    shape_info.q_info.offset = 0;
+  }
   if (!rt.second) {
     // Check shape consistency
     CAFFE_ENFORCE_EQ(shape.dims_size(), bound_dims.size());
@@ -154,12 +168,14 @@ void BoundShapeInferencer::InferLengthsRangeFill(const OperatorDef& op) {
       op.input(0),
       ShapeInfo::DimType::BATCH,
       {spec_.max_batch_size},
-      TensorProto_DataType_INT32);
+      TensorProto_DataType_INT32,
+      false);
   CheckAndSetTensorShapeAndType(
       op.output(0),
       ShapeInfo::DimType::SEQ,
       {spec_.max_seq_size},
-      TensorProto_DataType_INT32);
+      TensorProto_DataType_INT32,
+      false);
   current_dim_type_ = ShapeInfo::DimType::SEQ;
 }
 
@@ -191,7 +207,8 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
         op.input(weight),
         ShapeInfo::DimType::SEQ,
         {spec_.max_seq_size},
-        TensorProto_DataType_FLOAT);
+        TensorProto_DataType_FLOAT,
+        false);
   }
 
   // Bound inputs
@@ -199,12 +216,14 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
       op.input(1 + weight),
       ShapeInfo::DimType::SEQ,
       {spec_.max_seq_size},
-      TensorProto_DataType_INT64);
+      TensorProto_DataType_INT64,
+      false);
   CheckAndSetTensorShapeAndType(
       op.input(2 + weight),
       ShapeInfo::DimType::BATCH,
       {spec_.max_batch_size},
-      TensorProto_DataType_INT32);
+      TensorProto_DataType_INT32,
+      false);
 
   // Infer output
   CAFFE_ENFORCE_EQ(it->second.shape.dims_size(), 2);
@@ -221,7 +240,8 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
       op.output(0),
       ShapeInfo::DimType::BATCH,
       {spec_.max_batch_size, output_dim1},
-      TensorProto_DataType_FLOAT);
+      TensorProto_DataType_FLOAT,
+      false);
 }
 
 void BoundShapeInferencer::InferShape(const OperatorDef& op) {
@@ -239,6 +259,55 @@ void BoundShapeInferencer::InferReshape(const OperatorDef& op) {
     shape_info_[op.output(1)].dim_type = ShapeInfo::DimType::CONSTANT;
   }
 }
+
+void BoundShapeInferencer::InferConcatInputs(const OperatorDef& op) {
+  ArgumentHelper helper(op);
+  const auto add_axis = helper.GetSingleArgument<int32_t>("add_axis", 0);
+  if (add_axis) {
+    return;
+  } else if (op.output_size() == 0 || !shape_info_.count(op.output(0))) {
+    return;
+  }
+
+  const auto axis = helper.HasArgument("axis")
+      ? helper.GetSingleArgument<int32_t>("axis", -1)
+      : GetDimFromOrderString(
+            helper.GetSingleArgument<string>("order", "NCHW"));
+
+  const auto& shape_info = shape_info_.at(op.output(0));
+  int output_channel = shape_info.shape.dims(axis);
+  int missing_shape_infos = 0;
+  int channel_acc = 0;
+  std::string input_to_infer;
+  for (const auto& i : op.input()) {
+    const auto it = shape_info_.find(i);
+    if (it != shape_info_.end()) {
+      const auto& current_input_shape = it->second;
+      channel_acc += current_input_shape.shape.dims(axis);
+    } else if (missing_shape_infos) {
+      LOG(INFO) << "More than one missing shapes, previous one: "
+                << input_to_infer;
+      // We can only infer one missing input shape info
+      return;
+    } else {
+      ++missing_shape_infos;
+      input_to_infer = i;
+    }
+  }
+
+  if (missing_shape_infos && !input_to_infer.empty()) {
+    auto input_shape_info = shape_info;
+    input_shape_info.shape.set_dims(axis, output_channel - channel_acc);
+    shape_info_.emplace(input_to_infer, std::move(input_shape_info));
+
+    // Infer the shape of the second output of Concat
+    InferCommonOp(op);
+    if (op.output_size() > 1 && shape_info_.count(op.output(1))) {
+      shape_info_[op.output(1)].dim_type = ShapeInfo::DimType::CONSTANT;
+    }
+  }
+}
+
 // For concat net, if some inputs are missing and we have add_axis argument, it
 // means that all the inputs should be of the same dimension. In this case, we
 // can infer the shape of the missing inputs
@@ -336,7 +405,11 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
     current_dim_type_ = ShapeInfo::DimType::BATCH;
     current_max_batch_size_ = spec_.max_batch_size;
     CheckAndSetTensorShapeAndType(
-        op.input(0), ShapeInfo::DimType::BATCH, dims, w_shape.data_type());
+        op.input(0),
+        ShapeInfo::DimType::BATCH,
+        dims,
+        w_shape.data_type(),
+        false);
   } else {
     ShapeInfo& x_shape_info = x_it->second;
     if (x_shape_info.dim_type != ShapeInfo::DimType::BATCH) {
@@ -355,7 +428,8 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
       op.output(0),
       ShapeInfo::DimType::BATCH,
       ConvertToVec(output_shapes[0].dims()),
-      output_shapes[0].data_type());
+      output_shapes[0].data_type(),
+      false);
 }
 
 void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
@@ -378,7 +452,36 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
   std::vector<TensorShape> output_shapes;
     output_shapes = schema->InferTensor(op, input_shapes);
   int i = 0;
+  bool is_quantized =
+      !(op.type().compare(0, 4, "Int8")) && (op.type() != "Int8Dequantize");
+  TensorProto::DataType infered_data_type = TensorProto::UNDEFINED;
+  if (is_quantized) {
+    const static std::map<std::string, int> type_info_from_input = {
+        {"Int8Quantize", -1}, // Force this op's output to be uint8
+        {"Int8ConvRelu", 1},
+        {"Int8MaxPool", 0},
+        {"Int8AveragePool", 0},
+        {"Int8FC", 1},
+        {"Int8Conv", 1},
+        {"Int8SumRelu", 0}};
+    CAFFE_ENFORCE(
+        type_info_from_input.find(op.type()) != type_info_from_input.end(),
+        "Undefined quantized output data type, add it into type_info_from_input");
+    int target = type_info_from_input.find(op.type())->second;
+    if (target == -1) {
+      infered_data_type = TensorProto::UINT8;
+    } else {
+      CAFFE_ENFORCE(target < input_shapes.size());
+      infered_data_type = input_shapes[target].data_type();
+    }
+  } else if (op.type() == "Int8Dequantize") {
+    infered_data_type = TensorProto::FLOAT;
+  }
+
   for (const auto& shape : output_shapes) {
+    if (infered_data_type == TensorProto::UNDEFINED) {
+      infered_data_type = shape.data_type();
+    }
     if (shape.unknown_shape()) {
       ++i;
       continue;
@@ -387,7 +490,8 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
         op.output(i++),
         current_dim_type_,
         ConvertToVec(shape.dims()),
-        shape.data_type());
+        infered_data_type,
+        is_quantized);
   }
   } catch (const caffe2::EnforceNotMet& e) {
     LOG(ERROR) << "Enforce not met while inferring shapes for " << op.type()

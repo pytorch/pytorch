@@ -106,6 +106,20 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
     Tensor* Y = OutputTensorCPU_(0, sizes, at::dtype<uint8_t>());
     const int output_image_size = this->GetDimsSize(*Y);
 
+    // In Skylake, acc16 is not faster when N or K is smaller than 128
+    constexpr int SKYLAKE_ACC16_N_THRESHOLD_MIN = 128,
+                  SKYLAKE_ACC16_K_THRESHOLD_MIN = 128;
+    int acc16_n_threshold = FLAGS_caffe2_dnnlowp_acc16_n_threshold;
+    if (caffe2::GetCpuId().avx512f() &&
+        acc16_n_threshold < SKYLAKE_ACC16_N_THRESHOLD_MIN) {
+      acc16_n_threshold = SKYLAKE_ACC16_N_THRESHOLD_MIN;
+    }
+    int acc16_k_threshold = FLAGS_caffe2_dnnlowp_acc16_k_threshold;
+    if (caffe2::GetCpuId().avx512f() &&
+        acc16_k_threshold < SKYLAKE_ACC16_K_THRESHOLD_MIN) {
+      acc16_k_threshold = SKYLAKE_ACC16_K_THRESHOLD_MIN;
+    }
+
     if (N * output_image_size < FLAGS_caffe2_dnnlowp_acc16_m_threshold) {
       LOG(INFO) << "M " << N * output_image_size
                 << " of Conv layer with weight blob "
@@ -115,20 +129,18 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
       fallback_to_32_bit_accumulation_ = true;
       return true;
     }
-    if (num_out_channels / group_ < FLAGS_caffe2_dnnlowp_acc16_n_threshold) {
+    if (num_out_channels / group_ < acc16_n_threshold) {
       LOG(INFO) << "N " << num_out_channels / group_
                 << " of Conv layer with weight blob "
                 << this->debug_def().input(1) << " is smaller than threshold "
-                << FLAGS_caffe2_dnnlowp_acc16_n_threshold
-                << " . Falling back to acc32";
+                << acc16_n_threshold << " . Falling back to acc32";
       fallback_to_32_bit_accumulation_ = true;
       return true;
     }
-    if (kernel_dim < FLAGS_caffe2_dnnlowp_acc16_k_threshold) {
+    if (kernel_dim < acc16_k_threshold) {
       LOG(INFO) << "K " << kernel_dim << " of Conv layer with weight blob "
                 << this->debug_def().input(1) << " is smaller than threshold "
-                << FLAGS_caffe2_dnnlowp_acc16_k_threshold
-                << " . Falling back to acc32";
+                << acc16_k_threshold << " . Falling back to acc32";
       fallback_to_32_bit_accumulation_ = true;
       return true;
     }
@@ -479,9 +491,9 @@ static void conv_nhwc_acc16_ref_(
 }
 
 template <bool ReluFused>
-template <fbgemm::QuantizationGranularity Q_GRAN>
+template <typename PackAMatrix, fbgemm::QuantizationGranularity Q_GRAN>
 void ConvDNNLowPAcc16Op<ReluFused>::DispatchFBGEMM_(
-    fbgemm::PackAWithRowOffset<uint8_t, int16_t>& packA,
+    PackAMatrix& packA,
     const uint8_t* col_buffer_data,
     vector<int32_t>* Y_int32,
     uint8_t* Y_uint8_data) {
@@ -501,10 +513,11 @@ void ConvDNNLowPAcc16Op<ReluFused>::DispatchFBGEMM_(
       doNothingObj,
       this->requantization_multipliers_.data(),
       out_qparams_.zero_point,
-      in_qparams_[INPUT].zero_point,
+      // column_offsets_ empty means column_offsets_ are folded into bias
+      this->column_offsets_->empty() ? 0 : in_qparams_[INPUT].zero_point,
       this->filter_zero_points_.data(),
       packA.getRowOffsetBuffer(),
-      this->column_offsets_->data(),
+      this->column_offsets_->empty() ? nullptr : this->column_offsets_->data(),
       InputSize() == 3 ? this->b_quantized_data_ : nullptr,
       M,
       group_);
@@ -658,14 +671,21 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWC() {
     int row_offset_size_per_thread = -1;
     int x_pack_buf_size_per_thread = -1;
     if (Wq_acc16_packed_) {
-      row_offset_size_per_thread =
-          PackAWithRowOffset<uint8_t, int16_t>::rowOffsetBufferSize();
-      x_pack_buf_size_per_thread =
-          PackAWithRowOffset<uint8_t, int16_t>::packedBufferSize();
-      row_offsets_.resize(
-          dnnlowp_get_max_threads() * row_offset_size_per_thread);
-      X_pack_buf_.resize(
-          dnnlowp_get_max_threads() * x_pack_buf_size_per_thread);
+      if (!this->quantize_groupwise_ && this->filter_zero_points_[0] == 0) {
+        x_pack_buf_size_per_thread =
+            PackAMatrix<uint8_t, int16_t>::packedBufferSize();
+        X_pack_buf_.resize(
+            dnnlowp_get_max_threads() * x_pack_buf_size_per_thread);
+      } else {
+        row_offset_size_per_thread =
+            PackAWithRowOffset<uint8_t, int16_t>::rowOffsetBufferSize();
+        x_pack_buf_size_per_thread =
+            PackAWithRowOffset<uint8_t, int16_t>::packedBufferSize();
+        row_offsets_.resize(
+            dnnlowp_get_max_threads() * row_offset_size_per_thread);
+        X_pack_buf_.resize(
+            dnnlowp_get_max_threads() * x_pack_buf_size_per_thread);
+      }
     }
 
     uint8_t* Y_uint8_data = Y->template mutable_data<uint8_t>();
@@ -680,22 +700,50 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNHWC() {
       int tid = dnnlowp_get_thread_num();
 
       // no im2col fusion
-      PackAWithRowOffset<uint8_t, int16_t> packA(
-          matrix_op_t::NoTranspose,
-          N * output_image_size,
-          group_ * kernel_dim,
-          col_buffer_data,
-          group_ * kernel_dim,
-          X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
-          group_,
-          row_offsets_.data() + tid * row_offset_size_per_thread);
+      if (!this->quantize_groupwise_ && this->filter_zero_points_[0] == 0) {
+        PackAMatrix<uint8_t, int16_t> packA(
+            matrix_op_t::NoTranspose,
+            N * output_image_size,
+            group_ * kernel_dim,
+            col_buffer_data,
+            group_ * kernel_dim,
+            X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
+            group_);
 
-      if (this->quantize_groupwise_) {
-        DispatchFBGEMM_<QuantizationGranularity::GROUP>(
-            packA, col_buffer_data, Y_int32, Y_uint8_data);
+        if (this->quantize_groupwise_) {
+          DispatchFBGEMM_<
+              PackAMatrix<uint8_t, int16_t>,
+              QuantizationGranularity::GROUP>(
+              packA, col_buffer_data, Y_int32, Y_uint8_data);
+        } else {
+          DispatchFBGEMM_<
+              PackAMatrix<uint8_t, int16_t>,
+              QuantizationGranularity::TENSOR>(
+              packA, col_buffer_data, Y_int32, Y_uint8_data);
+        }
       } else {
-        DispatchFBGEMM_<QuantizationGranularity::TENSOR>(
-            packA, col_buffer_data, Y_int32, Y_uint8_data);
+        // no im2col fusion
+        PackAWithRowOffset<uint8_t, int16_t> packA(
+            matrix_op_t::NoTranspose,
+            N * output_image_size,
+            group_ * kernel_dim,
+            col_buffer_data,
+            group_ * kernel_dim,
+            X_pack_buf_.data() + tid * x_pack_buf_size_per_thread,
+            group_,
+            row_offsets_.data() + tid * row_offset_size_per_thread);
+
+        if (this->quantize_groupwise_) {
+          DispatchFBGEMM_<
+              PackAWithRowOffset<uint8_t, int16_t>,
+              QuantizationGranularity::GROUP>(
+              packA, col_buffer_data, Y_int32, Y_uint8_data);
+        } else {
+          DispatchFBGEMM_<
+              PackAWithRowOffset<uint8_t, int16_t>,
+              QuantizationGranularity::TENSOR>(
+              packA, col_buffer_data, Y_int32, Y_uint8_data);
+        }
       }
     } else {
       // slow path

@@ -56,6 +56,7 @@ namespace c10 {
   _(prim, ListUnpack)              \
   _(prim, DictConstruct)           \
   _(prim, DictIndex)               \
+  _(prim, StringIndex)             \
   _(prim, NumToTensor)             \
   _(prim, ImplicitTensorToNum)     \
   _(prim, Bool)                    \
@@ -73,6 +74,7 @@ namespace c10 {
   _(prim, MMBatchSide)             \
   _(prim, min)                     \
   _(prim, max)                     \
+  _(prim, abs)                     \
   _(prim, rangelist)               \
   _(aten, _grad_sum_to_size)       \
   _(aten, _ncf_unsqueeze)          \
@@ -86,6 +88,8 @@ namespace c10 {
   _(prim, CreateObject)            \
   _(prim, SetAttr)                 \
   _(prim, GetAttr)                 \
+  _(prim, AddStatValue)            \
+  _(prim, TimePoint)               \
   _(aten, append)                  \
   _(aten, item)                    \
   _(aten, format)                  \
@@ -93,12 +97,30 @@ namespace c10 {
   _(aten, __is__)                  \
   _(aten, __isnot__)               \
   _(aten, copy_)                   \
+  _(aten, t_)                      \
+  _(aten, addbmm_)                 \
+  _(aten, addcdiv_)                \
+  _(aten, addcmul_)                \
+  _(aten, addmv_)                  \
+  _(aten, addr_)                   \
+  _(aten, baddbmm_)                \
+  _(aten, ge_)                     \
+  _(aten, gt_)                     \
+  _(aten, le_)                     \
+  _(aten, lerp_)                   \
+  _(aten, lt_)                     \
+  _(aten, ne_)                     \
+  _(aten, transpose_)              \
+  _(aten, unsqueeze_)              \
   _(aten, _set_item)               \
+  _(aten, set_)                    \
   _(aten, index_put_)              \
   _(aten, device)                  \
+  _(aten, hash)                    \
   _(aten, len)                     \
   _(aten, list)                    \
   _(aten, wait)                    \
+  _(aten, ord)                     \
   _(prim, unchecked_unwrap_optional)\
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \

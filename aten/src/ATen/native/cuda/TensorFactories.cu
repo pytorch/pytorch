@@ -265,6 +265,9 @@ inline void get_coordinate_in_triu_trapezoid(
 
 template <typename scalar_t>
 __global__
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 void tril_indices_kernel(scalar_t * tensor,
                          int64_t row_offset,
                          int64_t m_first_row,
