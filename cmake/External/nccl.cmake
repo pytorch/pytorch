@@ -20,12 +20,10 @@ if (NOT __NCCL_INCLUDED)
       endif()
     endif()
   else()
-    if (TORCH_CUDA_ARCH_LIST)
-      torch_cuda_get_nvcc_gencode_flag(NVCC_GENCODE)
-      string(REPLACE "-gencode;" "-gencode=" NVCC_GENCODE "${NVCC_GENCODE}")
-      # this second replacement is needed when there are multiple archs
-      string(REPLACE ";-gencode" " -gencode" NVCC_GENCODE "${NVCC_GENCODE}")
-    endif()
+    torch_cuda_get_nvcc_gencode_flag(NVCC_GENCODE)
+    string(REPLACE "-gencode;" "-gencode=" NVCC_GENCODE "${NVCC_GENCODE}")
+    # this second replacement is needed when there are multiple archs
+    string(REPLACE ";-gencode" " -gencode" NVCC_GENCODE "${NVCC_GENCODE}")
 
     ExternalProject_Add(nccl_external
       SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/nccl/nccl

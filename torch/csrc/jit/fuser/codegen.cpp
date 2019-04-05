@@ -332,7 +332,7 @@ std::string generateKernel(
       env.d("nDim", nDim);
       env.s("scalar_type", scalarTypeName(desc.scalar_type));
       formals.push_back(
-          format("TensorInfo<${scalar_type},${nDim}> ${tensor}", env));
+          format("const TensorInfo<${scalar_type},${nDim}> ${tensor}", env));
       argument_loads.push_back(format(
           "*static_cast<TensorInfo<${scalar_type},${nDim}>*>(args[${formal_index}])",
           env));
@@ -393,6 +393,8 @@ std::string generateKernel(
             "access",
             format("__half2float(t${formal}.data[t${formal}_offset])", env));
         has_half_tensor = true;
+      } else if (use_cuda) {
+        env.s("access", format("__ldg(&t${formal}.data[t${formal}_offset])", env));
       } else {
         env.s("access", format("t${formal}.data[t${formal}_offset]", env));
       }

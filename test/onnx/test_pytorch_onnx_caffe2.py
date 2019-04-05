@@ -3,7 +3,6 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from functools import wraps
 import numpy as np
 import sys
 import unittest
@@ -11,6 +10,7 @@ import itertools
 
 import torch.onnx
 import torch.onnx.operators
+from torch.onnx import ExportTypes
 from torch import nn
 from torch.autograd import Variable, function
 import torch.utils.model_zoo as model_zoo
@@ -206,6 +206,57 @@ class TestCaffe2Backend(unittest.TestCase):
         model = MyModel()
         input = torch.randn(3, 4, requires_grad=True)
         self.run_model_test(model, train=False, batch_size=0, input=input)
+
+    def test_onnx_export_with_parameter_renaming(self):
+        class SimpleFcNet(nn.Module):
+            def __init__(self):
+                super(SimpleFcNet, self).__init__()
+                self.fc1 = nn.Linear(5, 10)
+
+            def forward(self, input):
+                return self.fc1(input)
+
+        model = SimpleFcNet()
+        input = torch.randn(7, 5)
+        output = model(input)
+
+        f = io.BytesIO()
+        # Note that the export call explicitly sets the names of not just the input,
+        # but also the parameters. This test checks that the model can be loaded and
+        # executed in Caffe2 backend correctly.
+        torch.onnx._export(model, input, f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE,
+                           input_names=['input1', 'parameter1', 'parameter2'])
+
+        f.seek(0)
+        model_c2 = c2.prepare_zip_archive(f)
+        result = model_c2.run(input.numpy())
+        np.testing.assert_almost_equal(output.data.cpu().numpy(), result[0], decimal=3)
+
+    def test_onnx_export_param_name_duplication(self):
+        class SimpleFcNet(nn.Module):
+            def __init__(self):
+                super(SimpleFcNet, self).__init__()
+                self.fc1 = nn.Linear(5, 10)
+
+            def forward(self, input):
+                return self.fc1(input)
+
+        model = SimpleFcNet()
+        input = torch.randn(7, 5)
+        output = model(input)
+
+        f = io.BytesIO()
+        # The export call explicitly sets the names of the input, and the first parameter.
+        # But note that the target first parameter name is the same as the second parameter name.
+        # This test checks that given this edge condition, the model can be loaded and executed
+        # in Caffe2 backend correctly.
+        torch.onnx._export(model, input, f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE,
+                           input_names=['input1', 'fc1.bias'], _retain_param_name=False)
+
+        f.seek(0)
+        model_c2 = c2.prepare_zip_archive(f)
+        result = model_c2.run(input.numpy())
+        np.testing.assert_almost_equal(output.data.cpu().numpy(), result[0], decimal=3)
 
     def test_lstm_cell(self):
         model = nn.LSTMCell(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE)
@@ -883,11 +934,20 @@ class TestCaffe2Backend(unittest.TestCase):
 
     # TODO: Add test cases for prod once Caffe2 has support for ReduceProd
     def test_softmax(self):
-        for i in range(7)[2:]:
-            model = nn.Softmax(dim=i - 1)
-            dims = [2] * (i - 2) + [3, 4]
-            input = torch.ones(*dims, requires_grad=True)
-            self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=input)
+        for i in range(2, 8):
+            for d in range(0, i - 1):
+                model = nn.Softmax(dim=d)
+                dims = [2] * (i - 2) + [3, 4]
+                input = torch.ones(*dims, requires_grad=True)
+                self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=input)
+
+    def test_softmax_dtype(self):
+        class SoftmaxModel(torch.nn.Module):
+            def forward(self, input):
+                return nn.functional.softmax(input, dim=0, dtype=torch.float64)
+
+        x = torch.randn(1, 2, 3, requires_grad=True, dtype=torch.float32)
+        self.run_model_test(SoftmaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_logsoftmax(self):
         for i in range(7)[2:]:
