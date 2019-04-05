@@ -8065,6 +8065,10 @@ a")
             return a + 1.0 - a
 
         self.checkScript(test_rand, ())
+        fn = torch.jit.script(test_rand)
+        fn()
+        g = fn.graph_for()
+        FileCheck().check("Double(*, *)").check_not("Float(*, *)").run(g)
 
     def test_erase_number_types(self):
         def func(a):
