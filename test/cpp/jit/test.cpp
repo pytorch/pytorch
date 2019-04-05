@@ -40,6 +40,7 @@ namespace jit {
   _(ControlFlow)                   \
   _(CreateAutodiffSubgraphs)       \
   _(CustomOperators)               \
+  _(CustomOperatorAliasing)        \
   _(Differentiate)                 \
   _(DifferentiateWithRequiresGrad) \
   _(DynamicDAG)                    \
