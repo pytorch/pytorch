@@ -11,7 +11,7 @@ from cimodel.lib.conf_tree import ConfigNode
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
 
-DOCKER_IMAGE_VERSION = 291
+DOCKER_IMAGE_VERSION = 300
 
 
 class Conf(object):
