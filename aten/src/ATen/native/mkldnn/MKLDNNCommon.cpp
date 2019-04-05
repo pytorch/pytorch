@@ -1,12 +1,44 @@
-#include <c10/core/OpaqueHandle.h>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/OpaqueTensorImpl.h>
 #include <c10/core/Allocator.h>
-#include "MKLDNNCommon.h"
 
 #if AT_MKLDNN_ENABLED()
 
 #include <ideep.hpp>
 
 namespace at { namespace native {
+
+/**
+ * `IntrusivePtrTargetWrapper` wraps a custom storage handle  of a tensor
+*  (as template param) and inherits `c10::intrusive_ptr_target` so that it
+*  can be used with `c10::intrusive_ptr`.
+ *
+ * It currently only supports wrapping the custom handle by:
+ * - Constructing with an existing custom handle by copy/move constructor.
+ *
+ * See `OpaqueTensorImpl::opaque_handle_`.
+ *
+ * NOTE: if this is generally useful we may want to move this to its own header.
+ */
+template <typename T>
+struct CAFFE2_API IntrusivePtrTargetWrapper : c10::intrusive_ptr_target {
+private:
+  T target_;
+
+public:
+  IntrusivePtrTargetWrapper() = delete;
+  IntrusivePtrTargetWrapper(const T& target): target_(target) {}
+  IntrusivePtrTargetWrapper(T&& target): target_(std::move(target)) {}
+
+  T& get_target() {
+    return target_;
+  }
+};
+
+using IDeepTensorWrapper = IntrusivePtrTargetWrapper<ideep::tensor>;
+using IDeepTensorWrapperPtr = c10::intrusive_ptr<IDeepTensorWrapper>;
+using MKLDNNTensorImpl = OpaqueTensorImpl<IDeepTensorWrapperPtr>;
+using MKLDNNTensor = Tensor;
 
 // Custom allocator using c10 CPU allocator for `ideep::tensor`
 struct AllocForMKLDNN {
@@ -23,14 +55,15 @@ struct AllocForMKLDNN {
   }
 };
 
-// Helper function to construct a `Storage` given allocated `ideep::tensor`.
-// The storage does not own the buffer. The assumption is that there would be
-// no reallocation from `ideep::tensor` later.
-c10::Storage new_with_itensor_storage(const ideep::tensor& it, const TensorOptions& options) {
-  c10::DataPtr data_ptr(it.get_data_handle(), c10::DeviceType::CPU);
-  return c10::Storage(
-    options.dtype(), it.get_size() / options.dtype().itemsize(),
-    std::move(data_ptr), /*allocator=*/nullptr, /*resizeable=*/false);
+Tensor new_with_itensor_mkldnn(ideep::tensor&& it, const TensorOptions& options) {
+  // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
+  // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
+  AT_ASSERT(!it.has_extra());
+  auto dims = it.get_dims();
+  IDeepTensorWrapperPtr handle = c10::make_intrusive<IDeepTensorWrapper>(std::move(it));
+  return detail::make_tensor<MKLDNNTensorImpl>(
+    MkldnnCPUTensorId(), options.dtype(), options.device(), handle,
+    std::vector<int64_t>(dims.begin(), dims.end()));
 }
 
 Tensor new_with_sizes_mkldnn(IntArrayRef sizes, const TensorOptions& options) {
@@ -42,23 +75,12 @@ Tensor new_with_sizes_mkldnn(IntArrayRef sizes, const TensorOptions& options) {
   return new_with_itensor_mkldnn(std::move(it), options);
 }
 
-Tensor new_with_itensor_mkldnn(ideep::tensor&& it, const TensorOptions& options) {
-  // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
-  // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
-  auto dims = it.get_dims();
-  c10::Storage storage(new_with_itensor_storage(it, options));
-  return detail::make_tensor<TensorImpl>(
-    std::move(storage), MkldnnCPUTensorId(), false,
-    c10::make_intrusive<c10::OpaqueHandle<ideep::tensor> >(std::move(it)),
-    std::vector<int64_t>(dims.begin(), dims.end()));
-}
-
-ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor) {
+ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
   AT_ASSERTM(mkldnn_tensor.type_id() == MkldnnCPUTensorId(),
              "mkldnn_to_dense expects MKL-DNN tensor input");
-  auto it_handle =
-    (OpaqueHandle<ideep::tensor>*)mkldnn_tensor.unsafeGetTensorImpl()->unsafe_opaque_handle();
-  return it_handle->get_handle();
+  AT_ASSERTM(!mkldnn_tensor.is_variable(), "_internal_get_MKLDNNImpl: should not be a variable");
+  MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
+  return mklimpl->unsafe_opaque_handle()->get_target();
 }
 
 }}

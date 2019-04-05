@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
-#include "MKLDNNCommon.h"
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
 
 namespace at { namespace native {
 
@@ -29,7 +29,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
   ideep::tensor& dtensor = itensor_from_mkldnn(mkldnn_tensor);
   dtensor.reorder_from(dtensor.get_dims(),
                        ideep::tensor::data_type::f32,
-                       (void*)(cpu_tensor_cont.template data<float>()));
+                       (cpu_tensor_cont.template data<float>()));
   return mkldnn_tensor;
 }
 
