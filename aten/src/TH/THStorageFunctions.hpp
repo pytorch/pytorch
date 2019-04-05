@@ -36,10 +36,3 @@ TH_API ptrdiff_t THStorage_size(const THStorage *self);
 
 TH_API void THStorage_retain(THStorage *storage);
 TH_API void THStorage_resize(THStorage *storage, ptrdiff_t size);
-
-// Returns a Storage given a StorageImpl. The StorageImpl remains valid after the
-// the Storage is destroyed.
-inline c10::Storage THStorage_wrap(THStorage* storage) {
-  c10::raw::intrusive_ptr::incref(storage);
-  return c10::Storage(c10::intrusive_ptr<c10::StorageImpl>::reclaim(storage));
-}
