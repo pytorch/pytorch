@@ -21,10 +21,8 @@ namespace native {
 // where info helps us identify singular matrices.
 static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor& self) {
   Tensor p, lu, info;
-  std::tie(lu, p, info) = self.unsqueeze(0).btrifact_with_info();
-  p.squeeze_(0);
-  lu.squeeze_(0);
-  int int_info = info.squeeze_().item<int32_t>();
+  std::tie(lu, p, info) = at::_lu_with_info(self, /*pivot=*/true, /*check_errors=*/false);
+  int int_info = info.item<int32_t>();
   AT_CHECK(int_info >= 0, "LU factorization (getrf) failed with info = ", int_info);
   auto n = self.size(0);
   auto num_exchanges = (at::arange(1, n + 1, p.options()) != p).nonzero().size(0);
@@ -159,7 +157,7 @@ Tensor& ger_out(Tensor& result, const Tensor& self, const Tensor& vec2) {
 
 Tensor mm(const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
-    return mat2.type().addmm(at::zeros({}, mat2.type()), self, mat2, 0, 1);
+    return at::zeros({}, mat2.options()).addmm(self, mat2, 0, 1);
   }
   return at::legacy::th::_th_mm(self, mat2);
 }
@@ -370,8 +368,9 @@ Tensor dot(const Tensor& self, const Tensor& tensor) {
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
   result.resize_({});
-  // dispatching through type ensures we don't allow mismatched types.
-  return self.type().fill_(result, self.dot(tensor));
+  AT_CHECK(result.scalar_type() == self.scalar_type(),
+           "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+  return result.fill_(self.dot(tensor));
 }
 
 /*

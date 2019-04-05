@@ -2,7 +2,6 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/jit/argument_spec.h>
-#include <torch/csrc/jit/batched/BatchTensor.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
@@ -32,7 +31,6 @@
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
-#include <torch/csrc/jit/passes/to_batch.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_arg_flatten.h>
@@ -81,11 +79,11 @@ bool loadPythonClasses() {
 } // anonymous namespace
 
 #if defined(_WIN32)
-void runJITCPPTests() {
+void runJITCPPTests(bool runCuda) {
   AT_ERROR("JIT tests not yet supported on Windows");
 }
 #else
-void runJITCPPTests();
+void runJITCPPTests(bool runCuda);
 #endif
 
 void initJITBindings(PyObject* module) {
@@ -122,7 +120,15 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
       .def(
           "_jit_pass_insert_observers",
-          [](std::shared_ptr<Graph>& g) { return InsertObserverNodes(g); })
+          [](std::shared_ptr<Graph>& g, py::function pyObserverFunction) {
+            // Create a new node that would be used in the insert observer pass:
+            // all observer nodes will be cloned from this one.
+            Node* new_node = g->createPythonOp(
+                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
+            InsertObserverNodes(g, new_node);
+            // We don't need this node anymore, don't forget to remove it.
+            new_node->destroy();
+          })
       .def(
           "_jit_pass_insert_fakequant",
           [](std::shared_ptr<Graph>& g) { return InsertFakeQuantNodes(g); })
@@ -150,16 +156,6 @@ void initJITBindings(PyObject* module) {
           [](const std::shared_ptr<Graph>& g) { return Canonicalize(g); })
       .def("_jit_pass_lint", LintGraph)
       .def(
-          "_jit_pass_shape_analysis",
-          [](std::shared_ptr<Graph> graph,
-             std::vector<at::Tensor> inputs,
-             bool with_grad) {
-            setInputTypes(
-                *graph,
-                ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
-            PropagateInputShapes(graph);
-          })
-      .def(
           "_jit_pass_complete_shape_analysis",
           [](std::shared_ptr<Graph> graph, py::tuple inputs, bool with_grad) {
             CompleteArgumentSpec spec(
@@ -186,14 +182,15 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph> graph) { CreateAutodiffSubgraphs(graph); })
       .def(
           "_jit_run_cpp_tests",
-          [] {
+          [](bool runCuda) {
             // We have to release the GIL inside this method, because if we
             // happen to initialize the autograd engine in these tests, the
             // newly spawned worker threads will try to initialize their
             // PyThreadState*, and they need the GIL for this.
             AutoNoGIL _no_gil;
-            return runJITCPPTests();
-          })
+            return runJITCPPTests(runCuda);
+          },
+          py::arg("run_cuda"))
       .def(
           "_jit_flatten",
           [](py::handle& obj) {
@@ -210,6 +207,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
+      .def("_jit_can_fuse_on_cpu", canFuseOnCPU)
+      .def("_jit_can_fuse_on_gpu", canFuseOnGPU)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def(
           "_jit_differentiate",
@@ -489,8 +488,6 @@ void initJITBindings(PyObject* module) {
   tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
-  initBatchTensorBindings(module);
-  initRegisterBatchOpsBindings(module);
 }
 } // namespace jit
 } // namespace torch

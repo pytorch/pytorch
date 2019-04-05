@@ -192,12 +192,6 @@
   self: grad.bmm(mat2.transpose(1, 2))
   mat2: self.transpose(1, 2).bmm(grad)
 
-- name: btrifact(Tensor self, bool pivot)
-  self: not_implemented("btrifact")
-
-- name: btrifact_with_info(Tensor self, bool pivot)
-  self: not_implemented("btrifact_with_info")
-
 - name: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots)
   self: not_implemented("btrisolve")
 
@@ -240,7 +234,7 @@
 - name: cosh(Tensor self)
   self: grad * self.sinh()
 
-- name: cross(Tensor self, Tensor other, int64_t dim)
+- name: cross(Tensor self, Tensor other, int64_t? dim)
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
 
@@ -469,6 +463,9 @@
 - name: lt_(Tensor self, Tensor other)
   self: zeros_like(self)
   other: zeros_like(other)
+
+- name: _lu_with_info(Tensor self, bool pivot, bool check_errors)
+  self: not_implemented("lu_with_info")
 
 - name: masked_fill_(Tensor self, Tensor mask, Scalar value)
   self: grad.clone().masked_fill_(mask, 0)
@@ -756,10 +753,10 @@
   self: index_select_backward(grad, dim, indices, self.sizes(), true)
 
 - name: split(Tensor self, int64_t split_size, int64_t dim)
-  self: split_backward(grads, split_size, dim, self.sizes(), self.type())
+  self: split_backward(grads, split_size, dim, self.sizes(), self.options())
 
 - name: split_with_sizes(Tensor self, IntArrayRef split_sizes, int64_t dim)
-  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.type())
+  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
 
 - name: sqrt(Tensor self)
   self: grad / (2 * result)
@@ -947,6 +944,9 @@
 - name: embedding(Tensor weight, Tensor indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse)
   indices: not_differentiable
   weight: embedding_backward(grad, indices, weight.size(0), padding_idx, scale_grad_by_freq, sparse)
+
+- name: embedding_dense_backward(Tensor grad_output, Tensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq)
+  grad_output: embedding_dense_double_backward(grad, indices)
 
 - name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int64_t mode, bool sparse)
   indices: not_differentiable
@@ -1199,7 +1199,7 @@
 
 - name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output)
   grad_output: elu_backward(grad, alpha, scale, input_scale, output)
-  output: grad * grad_output * input_scale * (output < 0).toType(grad.type())
+  output: grad * grad_output * input_scale * (output < 0).type_as(grad)
 
 - name: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, IntArrayRef kernel_size, IntArrayRef output_size, Tensor indices)
   grad_output: max_pool_double_backward(grad, indices, 2)
