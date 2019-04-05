@@ -3989,7 +3989,9 @@ class TestNN(NNTestCase):
             'block.conv1.bias': torch.arange(1, 4),
             'bn.running_mean': torch.randn(2),
         })
-        net.load_state_dict(state_dict)
+        incompatible_keys = net.load_state_dict(state_dict)
+        self.assertEqual(len(incompatible_keys.missing_keys), 0)
+        self.assertEqual(len(incompatible_keys.unexpected_keys), 0)
         self.assertEqual(net.linear1.weight.data, state_dict['linear1.weight'])
         self.assertEqual(net.block.conv1.bias.data, state_dict['block.conv1.bias'])
         self.assertEqual(net.bn.running_mean, state_dict['bn.running_mean'])
@@ -3997,18 +3999,38 @@ class TestNN(NNTestCase):
         state_dict = net.state_dict()
         state_dict.update({'extra': torch.ones(5)})
         self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
+        incompatible_keys = net.load_state_dict(state_dict, strict=False)
+        self.assertEqual(len(incompatible_keys.missing_keys), 0)
+        self.assertEqual(len(incompatible_keys.unexpected_keys), 1)
+        self.assertIn('extra', incompatible_keys.unexpected_keys)
 
         state_dict = net.state_dict()
         state_dict.update({'extra.param': torch.ones(5)})
         self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
+        incompatible_keys = net.load_state_dict(state_dict, strict=False)
+        self.assertEqual(len(incompatible_keys.missing_keys), 0)
+        self.assertEqual(len(incompatible_keys.unexpected_keys), 1)
+        self.assertIn('extra.param', incompatible_keys.unexpected_keys)
 
         state_dict = net.state_dict()
         del state_dict['linear1.weight']
         self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
+        incompatible_keys = net.load_state_dict(state_dict, strict=False)
+        self.assertEqual(len(incompatible_keys.missing_keys), 1)
+        self.assertEqual(len(incompatible_keys.unexpected_keys), 0)
+        self.assertIn('linear1.weight', incompatible_keys.missing_keys)
+        state_dict.update({'extra.param': torch.ones(5)})
+        self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
+        incompatible_keys = net.load_state_dict(state_dict, strict=False)
+        self.assertEqual(len(incompatible_keys.missing_keys), 1)
+        self.assertEqual(len(incompatible_keys.unexpected_keys), 1)
+        self.assertIn('linear1.weight', incompatible_keys.missing_keys)
+        self.assertIn('extra.param', incompatible_keys.unexpected_keys)
 
         state_dict = net.state_dict()
         state_dict.update({'bn.running_mean': torch.rand(14, 4)})  # wrong size
         self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
+        self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict, strict=False))
 
         state_dict = net.state_dict()
         old_state_dict = deepcopy(state_dict)
