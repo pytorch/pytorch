@@ -64,7 +64,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   build_args+=("-DBUILD_TEST=ON")
   build_args+=("-DUSE_OBSERVERS=ON")
   build_args+=("-DUSE_ZSTD=ON")
-  ./scripts/build_android.sh ${build_args[@] "$@"
+  ./scripts/build_android.sh ${build_args[@]} "$@"
   exit 0
 fi
 
