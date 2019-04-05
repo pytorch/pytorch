@@ -38,7 +38,7 @@ if [ ! -d "$ANDROID_NDK" ]; then
 fi
 
 ANDROID_NDK_PROPERTIES="$ANDROID_NDK/source.properties"
-[ -f "$ANDROID_NDK_PROPERTIES" ] && ANDROID_NDK_VERSION=$(sed -n 's/^Pkg.Revision[^=]*=[^0-9a-z]*\([0-9a-z]*\)\..*$/\1/p' "$ANDROID_NDK_PROPERTIES")
+[ -f "$ANDROID_NDK_PROPERTIES" ] && ANDROID_NDK_VERSION=$(sed -n 's/^Pkg.Revision[^=]*= *\([0-9]*\)\..*$/\1/p' "$ANDROID_NDK_PROPERTIES")
 
 echo "Bash: $(/bin/bash --version | head -1)"
 echo "Caffe2 path: $CAFFE2_ROOT"
