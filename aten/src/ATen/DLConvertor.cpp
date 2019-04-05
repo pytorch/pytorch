@@ -70,7 +70,7 @@ static DLContext getDLContext(const Tensor& tensor, const int64_t& device_id) {
 static Device getATenDevice(const DLContext& ctx) {
   switch (ctx.device_type) {
     case DLDeviceType::kDLCPU:
-      return at::Device(DeviceType::CPU, ctx.device_id);
+      return at::Device(DeviceType::CPU);
     case DLDeviceType::kDLGPU:
       return at::Device(DeviceType::CUDA, ctx.device_id);
     case DLDeviceType::kDLOpenCL:
