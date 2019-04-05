@@ -835,7 +835,7 @@ def btrisolve(b, LU_data, LU_pivots, out=None):
     """
     warnings.warn("torch.btrisolve is deprecated in favour of torch.lu_solve and will be "
                   "removed in the next release. Please use torch.lu_solve instead.", stacklevel=2)
-    return torch.lu_solve(b=b, LU_data=LU_data, LU_pivots=LU_pivots, out=out)
+    return torch.lu_solve(b, LU_data=LU_data, LU_pivots=LU_pivots, out=out)
 
 
 def lu(A, pivot=True, get_infos=False, out=None):
