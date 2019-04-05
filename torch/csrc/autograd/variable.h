@@ -439,9 +439,6 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   /// The underlying data tensor for this Variable.
   /// This field will be removed once VariableImpl and TensorImpl are merged.
   at::Tensor data_;
-
- private:
-  int64_t get_device_slow() const override;
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
