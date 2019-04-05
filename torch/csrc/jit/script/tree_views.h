@@ -740,8 +740,9 @@ struct Const : public Expr {
     return std::stoll(subtree(0)->stringValue());
   }
   double asFloatingPoint() const {
+    char* dummy;
     return torch::jit::script::strtod_c(
-        subtree(0)->stringValue().c_str(), nullptr);
+        subtree(0)->stringValue().c_str(), &dummy);
   }
   const std::string& text() const {
     return subtree(0)->stringValue();
