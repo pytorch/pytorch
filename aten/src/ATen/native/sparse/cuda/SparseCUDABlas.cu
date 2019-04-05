@@ -69,8 +69,12 @@ void Xcoo2csr(const int *coorowind, int64_t nnz, int64_t m, int *csrrowptr) {
   AT_CHECK((m <= INT_MAX) && (nnz <= INT_MAX),
     "cusparseXcoo2csr only supports m, nnz with the bound [val] <= ",
     INT_MAX);
+
+  int i_nnz = (int)nnz;
+  int i_m = (int)m;
+
   auto handle = setCUDASparseStream();
-  CUSPARSE_CHECK(cusparseXcoo2csr(handle, coorowind, nnz, m, csrrowptr, CUSPARSE_INDEX_BASE_ZERO));
+  CUSPARSE_CHECK(cusparseXcoo2csr(handle, coorowind, i_nnz, i_m, csrrowptr, CUSPARSE_INDEX_BASE_ZERO));
 }
 
 cusparseOperation_t convertTransToCusparseOperation(char trans) {
