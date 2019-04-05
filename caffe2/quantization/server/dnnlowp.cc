@@ -65,6 +65,11 @@ C10_DEFINE_bool(
     caffe2_dnnlowp_force_slow_path,
     false,
     "When true, use slow path in quantization");
+C10_DEFINE_bool(
+    caffe2_dnnlowp_warnings,
+    true,
+    "When true, print warnings that are useful for fbgemm optimizations. "
+    "Disable it for performance concerns in production");
 
 namespace dnnlowp {
 
