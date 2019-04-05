@@ -33,6 +33,8 @@ import model_defs.word_language_model as word_language_model
 from model_defs.mnist import MNIST
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
+from caffe2.python.operator_test.torch_integration_test import (generate_rois,
+    generate_rois_rotated, create_bbox_transform_inputs)
 
 import onnx
 import caffe2.python.onnx.backend as c2
@@ -1289,48 +1291,18 @@ class TestCaffe2Backend(unittest.TestCase):
 
             def forward(self, rois, deltas, im_info):
                 a, b = torch.ops._caffe2.BBoxTransform(
-                    rois, deltas, im_info,
-                    weights=[1., 1., 1., 1.], apply_scale=False, rotated=True, angle_bound_on=True, angle_bound_lo=-90, angle_bound_hi=90, clip_angle_thresh=0.5,
+                    rois,
+                    deltas,
+                    im_info,
+                    weights=[1., 1., 1., 1.],
+                    apply_scale=False,
+                    rotated=True,
+                    angle_bound_on=True,
+                    angle_bound_lo=-90,
+                    angle_bound_hi=90,
+                    clip_angle_thresh=0.5,
                 )
                 return a, b
-
-        def generate_rois(roi_counts, im_dims):
-            assert len(roi_counts) == len(im_dims)
-            all_rois = []
-            for i, num_rois in enumerate(roi_counts):
-                if num_rois == 0:
-                    continue
-                # [batch_idx, x1, y1, x2, y2]
-                rois = np.random.uniform(0, im_dims[i], size=(roi_counts[i], 5)).astype(
-                    np.float32
-                )
-                rois[:, 0] = i  # batch_idx
-                # Swap (x1, x2) if x1 > x2
-                rois[:, 1], rois[:, 3] = (
-                    np.minimum(rois[:, 1], rois[:, 3]),
-                    np.maximum(rois[:, 1], rois[:, 3]),
-                )
-                # Swap (y1, y2) if y1 > y2
-                rois[:, 2], rois[:, 4] = (
-                    np.minimum(rois[:, 2], rois[:, 4]),
-                    np.maximum(rois[:, 2], rois[:, 4]),
-                )
-                all_rois.append(rois)
-            if len(all_rois) > 0:
-                return np.vstack(all_rois)
-            return np.empty((0, 5)).astype(np.float32)
-
-        def generate_rois_rotated(roi_counts, im_dims):
-            rois = generate_rois(roi_counts, im_dims)
-            # [batch_id, ctr_x, ctr_y, w, h, angle]
-            rotated_rois = np.empty((rois.shape[0], 6)).astype(np.float32)
-            rotated_rois[:, 0] = rois[:, 0]  # batch_id
-            rotated_rois[:, 1] = (rois[:, 1] + rois[:, 3]) / 2.  # ctr_x = (x1 + x2) / 2
-            rotated_rois[:, 2] = (rois[:, 2] + rois[:, 4]) / 2.  # ctr_y = (y1 + y2) / 2
-            rotated_rois[:, 3] = rois[:, 3] - rois[:, 1] + 1.0  # w = x2 - x1 + 1
-            rotated_rois[:, 4] = rois[:, 4] - rois[:, 2] + 1.0  # h = y2 - y1 + 1
-            rotated_rois[:, 5] = np.random.uniform(-90.0, 90.0)  # angle in degrees
-            return rotated_rois
 
         roi_counts = [0, 2, 3, 4, 5]
         batch_size = len(roi_counts)
@@ -1346,6 +1318,61 @@ class TestCaffe2Backend(unittest.TestCase):
         im_info[:, 2] = 1.0
         im_info = torch.zeros((batch_size, 3))
         inputs = (torch.tensor(rois), torch.tensor(deltas), torch.tensor(im_info))
+        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
+
+    # BoxWithNMSLimits has requirements for the inputs, so randomly generated inputs
+    # in Caffe2BackendTestEmbed doesn't work with this op.
+    @skipIfEmbed
+    def test_c2_box_with_nms_limits(self):
+        roi_counts = [0, 2, 3, 4, 5]
+        num_classes = 7
+        rotated = False
+        angle_bound_on = True
+        clip_angle_thresh=0.5
+        rois, deltas, im_info = create_bbox_transform_inputs(
+            roi_counts, num_classes, rotated
+        )
+        pred_bbox, batch_splits = [
+            t.detach().numpy()
+            for t in torch.ops._caffe2.BBoxTransform(
+                torch.tensor(rois),
+                torch.tensor(deltas),
+                torch.tensor(im_info),
+                [1.0, 1.0, 1.0, 1.0],
+                False,
+                rotated,
+                angle_bound_on,
+                -90,
+                90,
+                clip_angle_thresh,
+            )
+        ]
+        class_prob = np.random.randn(sum(roi_counts), num_classes).astype(np.float32)
+        score_thresh = 0.5
+        nms_thresh = 0.5
+        topk_per_image = int(sum(roi_counts) / 2)
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, class_prob, pred_bbox, batch_splits):
+                a, b, c, d = torch.ops._caffe2.BoxWithNMSLimit(
+                    class_prob,
+                    pred_bbox,
+                    batch_splits,
+                    score_thresh=score_thresh,
+                    nms=nms_thresh,
+                    detections_per_im=topk_per_image,
+                    soft_nms_enabled=False,
+                    soft_nms_method="linear",
+                    soft_nms_sigma=0.5,
+                    soft_nms_min_score_thres=0.001,
+                    rotated=rotated,
+                )
+                return a, b, c, d
+
+        inputs = (torch.tensor(class_prob), torch.tensor(pred_bbox), torch.tensor(batch_splits))
         self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
 
     def test_c2_inference_lstm(self):

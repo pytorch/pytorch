@@ -57,7 +57,6 @@ void preprocessCaffe2Ops(Block* block) {
       const auto& args = schema.arguments();
       size_t origin_inputs_index = 0;
       for (const auto& arg : args) {
-      // for (size_t arg_index = 0; arg_index < args.size(); ++arg_index) {
         auto type = arg.type();
         AT_ASSERT(origin_inputs_index < origin_inputs.size());
         const auto& origin_input = origin_inputs[origin_inputs_index++];
@@ -83,7 +82,8 @@ void preprocessCaffe2Ops(Block* block) {
             it->f_(Symbol::attr(arg.name()), tensor.item().to<float>());
           } else {
             // TODO handle the StringType, no c10 op accept String as argument yet
-            throw std::runtime_error("Unhandled scalar arg: " + arg.name() + ", type: " + c10::typeKindToString(type->kind()));
+            throw std::runtime_error("Unhandled scalar arg: " + arg.name() +
+                ", type: " + c10::typeKindToString(type->kind()));
           }
         } else if (type->kind() == TypeKind::StringType) {
           const auto* constant_node = origin_input->node();
@@ -99,7 +99,7 @@ void preprocessCaffe2Ops(Block* block) {
               it->addInput(t);
             }
           } else if (elem_type->kind() == TypeKind::IntType || elem_type->kind() == TypeKind::BoolType) {
-            // TODO support list of ints and bools
+            // TODO support list of ints and bools, needs c10 op for testing
             throw std::runtime_error("List[int] and List[bool] are not supported yet.");
           } else if (elem_type->kind() == TypeKind::FloatType) {
             std::vector<double> values;
@@ -112,12 +112,12 @@ void preprocessCaffe2Ops(Block* block) {
             }
             it->fs_(Symbol::attr(arg.name()), values);
           } else {
-            // TODO handle the StringType, no c10 op accept String as argument yet
-            throw std::runtime_error("Unhandled scalar arg: " + arg.name() + ", type: " + c10::typeKindToString(elem_type->kind()));
-          }
+            throw std::runtime_error("Unhandled scalar arg: " + arg.name() +
+                ", type: " + c10::typeKindToString(elem_type->kind())); }
         } else {
-          throw std::runtime_error("Unsupported input type of arg " + arg.name() + " in Caffe2 operator: " + c10::typeKindToString(type->kind()));
-        }
+          throw std::runtime_error("Unsupported input type of arg " +
+              arg.name() + " in Caffe2 operator: " +
+              c10::typeKindToString(type->kind())); }
       }
     }
   }
