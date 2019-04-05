@@ -11,7 +11,7 @@ fi
 
 COMPACT_JOB_NAME=pytorch-win-ws2016-cuda9-cudnn7-py3-build
 
-SCRIPT_PARENT_DIR=$(dirname "${BASH_SOURCE[0]}")
+SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source "$SCRIPT_PARENT_DIR/common.sh"
 
 export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
@@ -22,15 +22,8 @@ fi
 export TMP_DIR="${PWD}/build/win_tmp"
 export TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 
-CI_SCRIPTS_DIR=$TMP_DIR/ci_scripts
-mkdir -p $CI_SCRIPTS_DIR
+export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
-
-SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
-
-
-# upload_image.py is called by build_pytorch.bat:
-cp $SCRIPT_HELPERS_DIR/upload_image.py $CI_SCRIPTS_DIR
 
 $SCRIPT_HELPERS_DIR/build_pytorch.bat
 
