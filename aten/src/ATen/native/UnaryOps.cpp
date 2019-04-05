@@ -89,10 +89,15 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
 
 Tensor& _fill__cpu(Tensor& self, Scalar value) {
   auto iter = TensorIterator::unary_op(self, self);
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter->dtype(), "fill_cpu", [&]() {
-    scalar_t fill_value = value.to<scalar_t>();
-    unary_kernel(*iter, [=](scalar_t a) -> scalar_t { return fill_value; });
-  });
+  AT_DISPATCH_ALL_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::Bool,
+      iter->dtype(),
+      "fill_cpu",
+      [&]() {
+        scalar_t fill_value = value.to<scalar_t>();
+        unary_kernel(*iter, [=](scalar_t a) -> scalar_t { return fill_value; });
+      });
   return self;
 }
 
