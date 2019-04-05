@@ -79,7 +79,7 @@ condDiv(T *q, int64_t *J, int64_t inputsize, T q_max) {
       q[idx] = one;
     } else {
       if (THCNumerics<T>::gt(q_max, one)) {
-	q[idx] = THCNumerics<T>::div(q[idx], q_max);
+        q[idx] = THCNumerics<T>::div(q[idx], q_max);
       }
     }
   }
@@ -230,7 +230,7 @@ sampleMultinomialOnce(int64_t* dest,
           THCNumerics<AccT>::div(
               ScalarConvert<T, AccT>::to(dist[curDist * stride_dist + cat * stride_categories]),
               sum) :
-	  accZero);
+          accZero);
 
       smem[threadIdx.x] = dist_val;
       __syncthreads();
