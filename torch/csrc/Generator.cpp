@@ -5,7 +5,6 @@
 #include <ATen/CPUGenerator.h>
 
 #include <TH/TH.h>
-#include <random>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -98,18 +97,7 @@ static PyObject * THPGenerator_manualSeed(THPGenerator *self, PyObject *seed)
 static PyObject * THPGenerator_seed(THPGenerator *self)
 {
   HANDLE_TH_ERRORS
-  std::random_device rd;
-  uint64_t seed_val;
-  // std::random_device might not work always
-  // in those case use chrono
-  if (rd.entropy() != 0) {
-    // limit to 53 bits to ensure unique representation in double
-    seed_val = ((((uint64_t)rd()) << 32) + rd()) & 0x1FFFFFFFFFFFFF;
-  }
-  else {
-    seed_val = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-    seed_val = ((((uint64_t)seed_val) << 32) + seed_val) & 0x1FFFFFFFFFFFFF;
-  }
+  uint64_t seed_val = at::detail::getNonDeterministicRandom();
   // See Note [Thread-safety and Generators]
   std::lock_guard<std::mutex> lock(self->cdata->mutex_);
   self->cdata->set_current_seed(seed_val);

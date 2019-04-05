@@ -193,7 +193,7 @@ struct geometric_distribution {
 
   C10_HOST inline int operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
-    auto sample = uniform(generator);
+    T sample = uniform(generator);
     return static_cast<int>(::log(static_cast<T>(1.0)-sample) / ::log(p)) + 1;
   }
 
@@ -213,7 +213,7 @@ struct exponential_distribution {
 
   C10_HOST inline T operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
-    auto sample = uniform(generator);
+    T sample = uniform(generator);
     return static_cast<T>(-1.0) / lambda * ::log(static_cast<T>(1.0)-sample);
   }
 

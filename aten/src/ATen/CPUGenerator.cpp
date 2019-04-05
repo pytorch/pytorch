@@ -1,6 +1,10 @@
 #include <ATen/CPUGenerator.h>
 #include <c10/util/C++17.h>
 #include <algorithm>
+#ifndef _WIN32
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 namespace at {
 
@@ -22,7 +26,7 @@ static std::unique_ptr<CPUGenerator> default_gen_cpu;
  */
 std::unique_ptr<CPUGenerator>& getDefaultCPUGenerator() {
   std::call_once(cpu_device_flag, [&] {
-    default_gen_cpu = c10::guts::make_unique<CPUGenerator>(default_rng_seed_val);
+    default_gen_cpu = c10::guts::make_unique<CPUGenerator>(getNonDeterministicRandom());
   });
   return default_gen_cpu;
 }
@@ -32,6 +36,45 @@ std::unique_ptr<CPUGenerator>& getDefaultCPUGenerator() {
  */
 std::unique_ptr<CPUGenerator> createCPUGenerator(uint64_t seed_val) {
   return c10::guts::make_unique<CPUGenerator>(seed_val);
+}
+
+/**
+ * Helper function to concatenate two 32 bit unsigned int
+ * and return them as a 64 bit unsigned int
+ */
+uint64_t make64BitsFrom32Bits(uint32_t a, uint32_t b) {
+  uint64_t hi = static_cast<uint64_t>(a) << 32;
+  uint64_t lo = static_cast<uint64_t>(b);
+  return hi | lo;
+}
+
+#ifndef _WIN32
+static uint64_t readURandomLong() {
+  int randDev = open("/dev/urandom", O_RDONLY);
+  uint64_t randValue;
+  if (randDev < 0) {
+    AT_ASSERT("Unable to open /dev/urandom");
+  }
+  ssize_t readBytes = read(randDev, &randValue, sizeof(randValue));
+  if (readBytes < (ssize_t) sizeof(randValue)) {
+    AT_ASSERT("Unable to read from /dev/urandom");
+  }
+  close(randDev);
+  return randValue;
+}
+#endif // _WIN32
+
+/**
+ * Gets a non deterministic random number number from either the
+ * std::random_device or the current time
+ */
+uint32_t getNonDeterministicRandom() {
+  #ifdef _WIN32
+  uint64_t s = (uint64_t)time(0);
+  #else
+  uint64_t s = readURandomLong();
+  #endif
+  return s;
 }
 
 } // namespace detail
@@ -89,9 +132,7 @@ uint32_t CPUGenerator::random() {
  * See Note [Thread-safety and Generators]
  */
 uint64_t CPUGenerator::random64() {
-  uint64_t hi = static_cast<uint64_t>(engine_()) << 32;
-  uint64_t lo = static_cast<uint64_t>(engine_());
-  return hi | lo;
+  return detail::make64BitsFrom32Bits(engine_(), engine_());
 }
 
 /**

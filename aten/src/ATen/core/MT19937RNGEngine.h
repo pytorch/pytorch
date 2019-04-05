@@ -15,9 +15,9 @@ namespace at {
 constexpr int MERSENNE_STATE_N = 624;
 constexpr int MERSENNE_STATE_M = 397;
 constexpr int INIT_KEY_MULTIPLIER = 3;
-constexpr uint32_t MATRIX_A = 0x9908b0df;
-constexpr uint32_t UMASK = 0x80000000;
-constexpr uint32_t LMASK = 0x7fffffff;
+constexpr uint32_t MATRIX_A = 0x9908b0dfUL;
+constexpr uint32_t UMASK = 0x80000000UL;
+constexpr uint32_t LMASK = 0x7fffffffUL;
 
 /**
  * Note [Mt19937 Engine implementation]
@@ -95,8 +95,8 @@ public:
     return seed_;
   }
 
-  inline uint32_t operator()() {
-    uint32_t y;
+  inline uint64_t operator()() {
+    uint64_t y;
     
     if (--(left_) == 0) {
         next_state();
@@ -113,14 +113,14 @@ public:
 private:
   uint64_t seed_;
   int left_;
-  uint32_t next_;
-  uint32_t state_[MERSENNE_STATE_N];
+  uint64_t next_;
+  uint64_t state_[MERSENNE_STATE_N];
 
   inline void init_with_uint32(uint64_t seed) {
-    state_[0] = seed & 0xffffffff;
+    state_[0] = seed & 0xffffffffUL;
     for(int j = 1; j < MERSENNE_STATE_N; j++) {
-      state_[j] = (1812433253 * (state_[j-1] ^ (state_[j-1] >> 30)) + j);
-      state_[j] &= 0xffffffff;
+      state_[j] = (1812433253UL * (state_[j-1] ^ (state_[j-1] >> 30)) + j);
+      state_[j] &= 0xffffffffUL;
     }
     left_ = 1;
   }
@@ -146,16 +146,16 @@ private:
     left_ = 1;
   }
 
-  inline uint32_t mix_bits(uint32_t u, uint32_t v) {
+  inline uint64_t mix_bits(uint64_t u, uint64_t v) {
     return (u & UMASK) | (v & LMASK);
   }
 
-  inline uint32_t twist(uint32_t u, uint32_t v) {
-    return (mix_bits(u,v) >> 1) ^ (v & 1 ? MATRIX_A : 0);
+  inline uint64_t twist(uint64_t u, uint64_t v) {
+    return (mix_bits(u,v) >> 1) ^ (v & 1UL ? MATRIX_A : 0UL);
   }
 
   inline void next_state() {
-    uint32_t* p = state_;
+    uint64_t* p = state_;
     left_ = MERSENNE_STATE_N;
     next_ = 0;
 

@@ -27,6 +27,7 @@ namespace detail {
 
 CAFFE2_API std::unique_ptr<CPUGenerator>& getDefaultCPUGenerator();
 CAFFE2_API std::unique_ptr<CPUGenerator> createCPUGenerator(uint64_t seed_val = default_rng_seed_val);
+CAFFE2_API uint32_t getNonDeterministicRandom();
 
 } // namespace detail
 
