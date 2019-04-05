@@ -373,11 +373,15 @@ def lstm_factory_premul(premul_cell, script):
         hx, cx = hidden
         outputs = []
         inpSize = input.size()
+        # add bias for all timesteps instead of going step-by-step, results in a single reduction kernel in the backward
+        # FIXME matmul(x,y) + bias currently goes through jit AD, and backward formula in AD is not optimized for this
+        # case. Workaround with mm and views.
+        inpSize = input.size()
         inputs = torch.mm(input.view(-1, inpSize[2]), wih.t()) + bih
         inputs = inputs.view(inpSize[0], inpSize[1], -1).unbind(0)
         hy, cy = hx[0], cx[0]
         for seq_idx in range(len(inputs)):
-            hy, cy = premul_cell(inputs[seq_idx], (hy, cy), whh, bih, bhh)
+            hy, cy = premul_cell(inputs[seq_idx], (hy, cy), whh, bhh)
             outputs += [hy]
         return torch.stack(outputs), (hy.unsqueeze(0), cy.unsqueeze(0))
 

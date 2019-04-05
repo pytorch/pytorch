@@ -57,8 +57,8 @@ def flat_lstm_cell(input, hx, cx, w_ih, w_hh, b_ih, b_hh):
     return hy, cy
 
 
-def premul_lstm_cell(igates, hidden, w_hh, b_ih, b_hh):
-    # type: (Tensor, Tuple[Tensor, Tensor], Tensor, Tensor, Tensor) -> Tuple[Tensor, Tensor]
+def premul_lstm_cell(igates, hidden, w_hh, b_hh):
+    # type: (Tensor, Tuple[Tensor, Tensor], Tensor, Tensor) -> Tuple[Tensor, Tensor]
     hx, cx = hidden
     gates = igates + torch.mm(hx, w_hh.t()) + b_hh
 

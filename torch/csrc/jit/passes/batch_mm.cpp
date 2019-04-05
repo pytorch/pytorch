@@ -124,6 +124,8 @@ RegisterOperators mm_tree_reduction_reg(
         // failing
         if (have_same_shape(lhs_inputs) && have_same_shape(rhs_inputs) &&
             shape_is_fast_for_reduce(lhs_inputs[0], rhs_inputs[0])) {
+          //sometimes lhs_inputs or rhs_inputs are not contiguous, and that causes at::cat to go through slow path
+          //view them as contiguous if possible by transposing
           bool lhs_input_transposed = (!lhs_inputs[0].is_contiguous() && lhs_inputs[0].t().is_contiguous());
           bool rhs_input_transposed = (!rhs_inputs[0].is_contiguous() && rhs_inputs[0].t().is_contiguous());
           at::Tensor lhs, rhs;
