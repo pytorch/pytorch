@@ -8069,6 +8069,7 @@ a")
         out = fn()
         self.assertEqual(out.dtype, torch.double)
         g = fn.graph_for()
+        # Testing shape analysis correctly setting type
         FileCheck().check("Double(*, *)").check_not("Float(*, *)").run(g)
 
         @torch.jit.script
@@ -8076,6 +8077,8 @@ a")
             return torch.randint(0, 5, [1, 2])
         out = randint()
         self.assertEqual(out.dtype, torch.double)
+        # although the type should be int here, testing that the runtime dtype
+        # and shape analysis dtype is the same.
         FileCheck().check("Double(*, *)").check_not("Float(*, *)").run(randint.graph_for())
 
     def test_erase_number_types(self):
