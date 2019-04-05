@@ -20,6 +20,10 @@
 #include <magma.h>
 #endif
 
+#if AT_ROCM_ENABLED()
+#include <miopen/version.h>
+#endif
+
 #include <cuda.h>
 
 #include <sstream>
