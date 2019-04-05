@@ -2708,6 +2708,19 @@ class TestScript(JitTestCase):
             ge = torch.jit.script(script, optimize)
             ge(*inputs)
 
+    def test_submodule_twice(self):
+
+        @torch.jit.script
+        def foo(x):
+            return x * x
+
+        class What(torch.jit.ScriptModule):
+            def __init__(self, x):
+                super(What, self).__init__()
+                self.foo = x
+        a = What(foo)
+        c = What(foo)
+
     def test_training_param(self):
         class What(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -9974,7 +9987,7 @@ a")
             def __init__(self):
                 super(OtherStrong, self).__init__()
                 self.weak = weak
-                self.weak2 = weak
+                self.weak2 = Weak()
 
             @torch.jit.script_method
             def forward(self, x):
@@ -9991,7 +10004,7 @@ a")
 
         other_strong_mod = OtherStrong()
 
-        self.assertIs(other_strong_mod.weak, other_strong_mod.weak2)
+        self.assertIsNot(other_strong_mod.weak, other_strong_mod.weak2)
 
         with self.assertRaisesRegex(RuntimeError, "Attempted to inline a Module with param"):
             strong_mod = Strong()

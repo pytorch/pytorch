@@ -19,8 +19,8 @@ struct ModuleAccessorValue : public SugaredValue {
       const SourceRange& loc,
       Method& m,
       const std::string& field) override {
-    if (NamedModule* v = module->find_module(field)) {
-      return std::make_shared<ModuleAccessorValue>(v->module);
+    if (std::shared_ptr<Module> v = module->find_module(field)) {
+      return std::make_shared<ModuleAccessorValue>(std::move(v));
     } else if (NamedIValue* v = module->find_parameter(field)) {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     } else if (NamedIValue* v = module->find_buffer(field)) {

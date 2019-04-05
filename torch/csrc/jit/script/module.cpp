@@ -123,7 +123,7 @@ void Module::to_impl(
     bool non_blocking) {
   // First call `to()` on every child module.
   for (auto& child : get_modules()) {
-    child.module->to_impl(device, dtype, non_blocking);
+    child->to_impl(device, dtype, non_blocking);
   }
   // Then convert every of our parameters.
   for (auto& parameter : get_parameters()) {

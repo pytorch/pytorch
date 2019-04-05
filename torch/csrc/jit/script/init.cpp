@@ -324,8 +324,8 @@ struct ModuleValue : public SugaredValue {
       return std::make_shared<SimpleValue>(the_bool);
     }
 
-    if (NamedModule* v = module->find_module(field)) {
-      return std::make_shared<ModuleValue>(v->module);
+    if (std::shared_ptr<Module> v = module->find_module(field)) {
+      return std::make_shared<ModuleValue>(v);
     } else if (Method* v = module->find_method(field)) {
       return std::make_shared<MethodValue>(shared_from_this(), *v);
     } else if (NamedIValue* v = module->find_parameter(field)) {
@@ -614,7 +614,7 @@ static void gatherParametersAndBuffers(
     }
   }
   for (const auto& sub : m.get_modules()) {
-    gatherParametersAndBuffers(values, *sub.module);
+    gatherParametersAndBuffers(values, *sub);
   }
 }
 
@@ -771,7 +771,7 @@ void initJitScriptBindings(PyObject* module) {
             py::tuple result(modules.size());
             for (size_t i = 0; i < modules.size(); ++i) {
               auto& item = modules[i];
-              result[i] = std::make_pair(item.name, item.module);
+              result[i] = std::make_pair(item->name(), item);
             }
             return result;
           })
