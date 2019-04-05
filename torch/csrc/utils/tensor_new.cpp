@@ -194,15 +194,12 @@ Tensor internal_new_from_data(
     PyObject* data,
     bool copy_variables,
     bool copy_numpy,
-    bool type_inference,
-    bool pin_memory = false) {
-
+    bool type_inference) {
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
   }
 
   if (THPVariable_Check(data)) {
-    AT_CHECK(!pin_memory, "Can't pin tensor constructed from a variable");
     auto var = reinterpret_cast<THPVariable*>(data)->cdata;
     if (copy_variables) {
       var = var.detach();
@@ -218,7 +215,6 @@ Tensor internal_new_from_data(
 
 #ifdef USE_NUMPY
   if (PyArray_Check(data)) {
-    AT_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
     auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : at::Device(type.device_type());
@@ -230,7 +226,7 @@ Tensor internal_new_from_data(
 
   auto sizes = compute_sizes(data);
   ScalarType inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type;
-  auto tensor = autograd::make_variable(at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory)), /*requires_grad=*/false);
+  auto tensor = autograd::make_variable(at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type)), /*requires_grad=*/false);
   recursive_store(
       (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
       inferred_scalar_type, tensor.dtype().itemsize(), data);
@@ -512,10 +508,10 @@ Tensor sparse_coo_tensor_ctor(const Type& default_type, ScalarType scalar_type, 
 
 Tensor tensor_ctor(const Type& type, ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-    "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
+    "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   });
 
-  ParsedArgs<5> parsed_args;
+  ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     PyObject* data = r.pyobject(0);
@@ -526,8 +522,7 @@ Tensor tensor_ctor(const Type& type, ScalarType scalar_type, PyObject* args, PyO
     }
 
     bool type_inference = r.isNone(1);
-    bool pin_memory = r.toBool(3);
-    bool args_requires_grad = r.toBool(4);
+    bool args_requires_grad = r.toBool(3);
     auto new_tensor = internal_new_from_data(
                typeWithDefault(r, 1, 2, type, scalar_type),
                r.scalartypeWithDefault(1, scalar_type),
@@ -535,8 +530,7 @@ Tensor tensor_ctor(const Type& type, ScalarType scalar_type, PyObject* args, PyO
                data,
                true,
                true,
-               type_inference,
-               pin_memory);
+               type_inference);
     new_tensor.detach_(); // ensure new_tensor a leaf node
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;
@@ -596,10 +590,10 @@ Tensor new_tensor(const Type& type, ScalarType scalar_type, PyObject* args, PyOb
 
 Tensor new_empty(const Type& type, ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-    "new_empty(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
+    "new_empty(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
   }, /*traceable=*/true);
 
-  ParsedArgs<5> parsed_args;
+  ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     const auto& actual_type = typeWithDefault(r, 1, 2, type, scalar_type);

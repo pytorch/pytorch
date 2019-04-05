@@ -31,11 +31,22 @@ namespace {
 // This means that we allocate a [1,0] size indices tensor and a [0] size
 // values tensor for such an empty tensor.
 SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeMeta& data_type)
-    : TensorImpl(type_id, data_type, nullptr, false)
+  :   SparseTensorImpl(type_id, data_type
+      , at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(ScalarType::Long))
+      , at::empty({0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(data_type))) {}
+
+SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeMeta& data_type, at::Tensor indices, at::Tensor values)
+    : TensorImpl(type_id, data_type, values.device(), false)
     , sparse_dim_(1)
     , dense_dim_(0)
-    , indices_(at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(ScalarType::Long)))
-    , values_(at::empty({0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(data_type))) {}
+    , indices_(std::move(indices))
+    , values_(std::move(values)) {
+  // we proxy to this constructor so we can initialize the device correctly, but really only indices/values of this shape are allowed.
+  AT_ASSERT(indices_.sizes() == IntArrayRef({1, 0}));
+  AT_ASSERT(values_.sizes() == IntArrayRef({0}));
+  AT_ASSERT(values_.device() == indices_.device());
+  AT_ASSERT(values_.device() == device());
+}
 
 IntArrayRef SparseTensorImpl::sizes() const {
   return sizes_;
@@ -111,6 +122,8 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
 
   indices_ = indices;
   values_ = values;
+  AT_ASSERT(device() == values_.device());
+  AT_ASSERT(values_.device() == indices_.device());
 
   coalesced_ = false;
 }

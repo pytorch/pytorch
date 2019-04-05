@@ -129,6 +129,9 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
 }
 
 template <typename scalar_t>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 __global__
 void roll_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N,
                       int64_t roll_dim, int64_t start,
