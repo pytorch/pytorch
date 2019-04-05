@@ -858,7 +858,7 @@ Tensor reservoir_sampling_cpu(
 
 }
 
-Tensor sampling_with_replacement(
+Tensor sampling_with_replacement_cpu(
   const Tensor& x,
   const Tensor& weights,
   int64_t k
@@ -869,10 +869,23 @@ Tensor sampling_with_replacement(
   if (weights.numel() == 0){
     samples = at::randint(0, n, {k}, x.options().dtype(at::kLong));
   } else {
-    Tensor uniform_samples = at::rand({k}, weights.options());
+
+    THGenerator* generator = get_generator(nullptr);
+    samples = at::empty({k}, x.options().dtype(at::kLong));
+    int64_t *samples_ptr = samples.data<int64_t>();
+
     Tensor cdf = weights.cumsum(0);
     cdf /= cdf[-1];
-    samples = (uniform_samples.unsqueeze(1) > cdf.unsqueeze(0)).sum(1);
+
+    AT_DISPATCH_FLOATING_TYPES(weights.scalar_type(), "Sampling with replacement", [&] {
+      scalar_t *cdf_ptr = cdf.data<scalar_t>();
+      for(int i = 0; i < k; i++){
+        scalar_t u = THRandom_standard_uniform(generator);
+        auto ptr = std::lower_bound(cdf_ptr, cdf_ptr + n, u);
+        samples_ptr[i] = std::distance(cdf_ptr, ptr);
+      }
+    });
+
   }
 
   return x.index_select(0, samples);
@@ -885,7 +898,7 @@ Tensor choice_cpu(
   int64_t k
 ){
   if (replace){
-    return native::sampling_with_replacement(input, weights, k);
+    return sampling_with_replacement_cpu(input, weights, k);
   } else {
     return reservoir_sampling_cpu(input, weights, k);
   }
@@ -898,7 +911,7 @@ Tensor choice_cpu(
 ){
   at::Tensor weights = at::empty({0}, input.options().dtype(at::kFloat));
   if (replace){
-    return native::sampling_with_replacement(input, weights, k);
+    return sampling_with_replacement_cpu(input, weights, k);
   } else {
     return reservoir_sampling_cpu(input, weights, k);
   }

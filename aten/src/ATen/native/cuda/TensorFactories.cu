@@ -15,6 +15,7 @@
 #include <thrust/sort.h>
 #include <thrust/execution_policy.h>
 #include <thrust/sequence.h>
+#include <thrust/binary_search.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -445,6 +446,22 @@ __global__ void generate_keys(
   }
 }
 
+template <typename scalar_t>
+__global__ void sampling_with_replacement_kernel(
+  int64_t *samples,
+  scalar_t *cdf,
+  int64_t n,
+  int64_t k,
+  curandStateMtgp32 *state
+){
+  int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  if(thread_id < k){
+    scalar_t u = curand_uniform(state);
+    auto ptr = thrust::lower_bound(thrust::device, cdf, cdf + n, u);
+    samples[thread_id] = thrust::distance(cdf, ptr);
+  }
+}
+
 __global__ void generate_reservoir(
   int64_t *indices,
   int64_t *samples,
@@ -522,6 +539,8 @@ Tensor reservoir_sampling_cuda(
       split
     );
 
+    AT_CUDA_CHECK(cudaGetLastError());
+
     return x.index_select(
       0,
       indices_n.index_select(
@@ -569,9 +588,48 @@ Tensor reservoir_sampling_cuda(
       );
     });
 
+    AT_CUDA_CHECK(cudaGetLastError());
+
     return x.index_select(0, std::get<1>(keys.topk(k)));
   }
 
+}
+
+Tensor sampling_with_replacement_cuda(
+  const Tensor& x,
+  const Tensor& weights,
+  int64_t k
+){
+  int n = x.size(0);
+  Tensor samples;
+
+  if (weights.numel() == 0){
+    samples = at::randint(0, n, {k}, x.options().dtype(at::kLong));
+  } else {
+
+    THCState *state = at::globalContext().getTHCState();
+    curandStateMtgp32 *gen_states = THCRandom_generatorStates(state);
+
+    samples = at::empty({k}, x.options().dtype(at::kLong));
+    Tensor cdf = weights.cumsum(0);
+    cdf /= cdf[-1];
+
+    dim3 threads(threadsPerBlock);
+    dim3 blocks((k + threadsPerBlock - 1)/threadsPerBlock);
+
+    AT_DISPATCH_FLOATING_TYPES(weights.scalar_type(), "Sampling with replacement", [&] {
+      sampling_with_replacement_kernel<scalar_t><<<blocks, threads>>>(
+        samples.data<int64_t>(),
+        cdf.data<scalar_t>(),
+        n,
+        k,
+        gen_states
+      );
+    });
+    AT_CUDA_CHECK(cudaGetLastError());
+  }
+
+  return x.index_select(0, samples);
 }
 
 Tensor choice_cuda(
@@ -581,7 +639,7 @@ Tensor choice_cuda(
   int64_t k
 ){
   if (replace){
-    return native::sampling_with_replacement(input, weights, k);
+    return sampling_with_replacement_cuda(input, weights, k);
   } else {
     return reservoir_sampling_cuda(input, weights, k);
   }
@@ -594,7 +652,7 @@ Tensor choice_cuda(
 ){
   at::Tensor weights = at::empty({0}, input.options().dtype(at::kFloat));
   if (replace){
-    return native::sampling_with_replacement(input, weights, k);
+    return sampling_with_replacement_cuda(input, weights, k);
   } else {
     return reservoir_sampling_cuda(input, weights, k);
   }
