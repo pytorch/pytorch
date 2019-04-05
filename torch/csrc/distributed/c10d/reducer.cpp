@@ -39,7 +39,7 @@ inline int64_t current_time_in_nanos() {
 
 Reducer::Reducer(
     std::vector<std::vector<torch::autograd::Variable>> replicas,
-    std::vector<std::vector<size_t>> buckets,
+    std::vector<std::vector<size_t>> bucket_indices,
     std::shared_ptr<c10d::ProcessGroup> process_group)
     : replicas_(std::move(replicas)),
       process_group_(std::move(process_group)),
@@ -79,7 +79,7 @@ Reducer::Reducer(
 
   // Initialize variable bucketing.
   // This can be reinitialized later after capturing runtime information.
-  initialize_buckets(std::move(buckets));
+  initialize_buckets(std::move(bucket_indices));
 
   // All variables are expected to have their `grad_fn` set to the gradient
   // accumulation function (since they are leafs in the autograd graph).
@@ -154,11 +154,12 @@ void Reducer::mark_variable_ready(
 
   AT_ASSERTM(replica_index < replicas_.size(), "Out of range replica index.");
   AT_ASSERTM(
-      variable_index < bucket_indices_.size(), "Out of range variable index.");
+      variable_index < variable_locators_.size(),
+      "Out of range variable index.");
   backward_stats_[replica_index][variable_index] =
       current_time_in_nanos() - backward_stats_base_;
 
-  const auto& bucket_index = bucket_indices_[variable_index];
+  const auto& bucket_index = variable_locators_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
   auto& replica = bucket.replicas[replica_index];
   auto& variable = replica.variables[bucket_index.intra_bucket_index];
@@ -244,7 +245,8 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
   }
 }
 
-void Reducer::initialize_buckets(std::vector<std::vector<size_t>> indices) {
+void Reducer::initialize_buckets(
+    std::vector<std::vector<size_t>> bucket_indices) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   // This shouldn't be called if we're expecting autograd hooks to fire.
@@ -254,13 +256,13 @@ void Reducer::initialize_buckets(std::vector<std::vector<size_t>> indices) {
 
   // Clear current bucket assignment.
   buckets_.clear();
-  bucket_indices_.clear();
+  variable_locators_.clear();
 
   // Ensure we have a bucket index for every variable.
-  bucket_indices_.resize(replicas_[0].size());
+  variable_locators_.resize(replicas_[0].size());
 
   // Iterate over buckets.
-  const auto bucket_count = indices.size();
+  const auto bucket_count = bucket_indices.size();
   const auto replica_count = replicas_.size();
   buckets_.reserve(bucket_count);
   for (size_t bucket_index = 0; bucket_index < bucket_count; bucket_index++) {
@@ -268,7 +270,8 @@ void Reducer::initialize_buckets(std::vector<std::vector<size_t>> indices) {
 
     // TODO(@pietern): Validate indices.
     // Must be non-empty, unique, and unique across buckets.
-    AT_ASSERTM(indices[bucket_index].size() > 0, "Empty bucket specified.");
+    AT_ASSERTM(
+        bucket_indices[bucket_index].size() > 0, "Empty bucket specified.");
 
     // Iterate over model replicas.
     for (size_t replica_index = 0; replica_index < replica_count;
@@ -278,7 +281,7 @@ void Reducer::initialize_buckets(std::vector<std::vector<size_t>> indices) {
       size_t offset = 0;
 
       // Iterate over bucket variables.
-      for (const auto variable_index : indices[bucket_index]) {
+      for (const auto variable_index : bucket_indices[bucket_index]) {
         AT_ASSERTM(
             variable_index < replicas_[replica_index].size(),
             "Out of range variable index specified.");
@@ -318,11 +321,11 @@ void Reducer::initialize_buckets(std::vector<std::vector<size_t>> indices) {
     // Map participating variables to this bucket.
     // This is identical across replicas so we only need to do this once.
     size_t intra_bucket_index = 0;
-    for (const auto variable_index : indices[bucket_index]) {
+    for (const auto variable_index : bucket_indices[bucket_index]) {
       AT_ASSERTM(
-          variable_index < bucket_indices_.size(),
+          variable_index < variable_locators_.size(),
           "Out of range variable index specified.");
-      bucket_indices_[variable_index] = BucketIndex{
+      variable_locators_[variable_index] = VariableLocator{
           .bucket_index = bucket_index,
           .intra_bucket_index = intra_bucket_index++,
       };
