@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/LegacyTHFunctions.h>
 
 namespace at { namespace native {
 
