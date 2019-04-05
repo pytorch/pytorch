@@ -1,5 +1,11 @@
 #pragma once
 
+#include <c10/core/TensorTypeId.h>
+#include <c10/core/DeviceType.h>
+// For kCPU
+// TODO: Why are these defined in Backend.h?
+#include <c10/core/Backend.h>
+
 namespace c10 {
 
 /**
@@ -8,17 +14,29 @@ namespace c10 {
  * Please refer to ATen/core/Quantizer.h to see the Quantizers classes.
  */
 enum class QScheme : uint8_t {
-  NO_QUANT,
-  PER_TENSOR_AFFINE,
-  PER_CHANNEL_AFFINE,
-  PER_TENSOR_SYMMETRIC,
-  PER_CHANNEL_SYMMETRIC
+  PER_TENSOR_AFFINE = 0,
+  PER_CHANNEL_AFFINE = 1,
+  PER_TENSOR_SYMMETRIC = 2,
+  PER_CHANNEL_SYMMETRIC = 3,
+  COMPILE_TIME_NUM_QSCHEMES = 4,
 };
 
-constexpr auto kNoQuant = QScheme::NO_QUANT;
 constexpr auto kPerTensorAffine = QScheme::PER_TENSOR_AFFINE;
 constexpr auto kPerChannelAffine = QScheme::PER_CHANNEL_AFFINE;
 constexpr auto kPerTensorSymmetric = QScheme::PER_TENSOR_SYMMETRIC;
 constexpr auto kPerChannelSymmetric = QScheme::PER_CHANNEL_SYMMETRIC;
+constexpr int COMPILE_TIME_NUM_QSCHEMES = static_cast<int>(QScheme::COMPILE_TIME_NUM_QSCHEMES);
+
+inline TensorTypeId qschemeToTensorTypeId(QScheme qscheme, DeviceType device_type) {
+  AT_CHECK(device_type == kCPU, "Right now only CPU is supported in quantized TensorTypeId");
+  switch(qscheme) {
+    case kPerTensorAffine:
+      return AffineCPUTensorId();
+    case kPerChannelAffine:
+      return PerChannelAffineCPUTensorId();
+    default:
+      AT_ERROR("QScheme not supported in qschemeToTensorTypeId");
+  }
+}
 
 } // namespace c10

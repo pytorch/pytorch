@@ -242,7 +242,7 @@ CAFFE2_API QuantizerPtr
 make_per_tensor_affine_quantizer(double scale, int64_t zero_point);
 
 // Create a QTensor given arguments for normal Tensor and a quantizer
-QTensor new_qtensor(
+QTensor new_qtensor_cpu(
     IntArrayRef sizes,
     const TensorOptions& options,
     bool is_variable,

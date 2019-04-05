@@ -25,7 +25,7 @@ QTensorImpl* get_qtensorimpl(const QTensor& self) {
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
-inline QTensor new_qtensor(
+inline QTensor new_qtensor_cpu(
     IntArrayRef sizes,
     const TensorOptions& options,
     bool is_variable,
@@ -36,16 +36,15 @@ inline QTensor new_qtensor(
   auto* allocator = at::getCPUAllocator();
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
-  AT_ASSERT(isQIntType(typeMetaToScalarType(dtype)));
+  AT_CHECK(isQIntType(typeMetaToScalarType(dtype)), "ScalarType not supported for QTensor in new_qtensor_cpu.");
   auto storage_impl = c10::make_intrusive<StorageImpl>(
       dtype,
       nelements,
       allocator->allocate(nelements * dtype.itemsize()),
       allocator,
       /*resizable=*/true);
-  // TODO: get TensorTypeId from quantizer
   auto tensor = detail::make_tensor<QTensorImpl>(
-      storage_impl, at::AffineCPUTensorId(), is_variable, quantizer);
+      storage_impl, qschemeToTensorTypeId(quantizer->qscheme(), kCPU), is_variable, quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   return tensor;
 }
@@ -74,7 +73,7 @@ QTensor PerTensorAffineQuantizer::quantize(RealTensor tensor) {
   AT_CHECK(
       tensor.options().device() == kCPU,
       "quantize only works for CPU backend right now.");
-  QTensor qv = new_qtensor(
+  QTensor qv = new_qtensor_cpu(
       sizes,
       tensor.options().dtype(at::kQInt8),
       tensor.is_variable(),
