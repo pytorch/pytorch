@@ -226,7 +226,6 @@ void testCustomOperatorAliasing() {
         return a;
       })});
   auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::aliasing"));
-  auto& op = ops.front();
 
   {
     auto graph = std::make_shared<Graph>();
@@ -256,22 +255,6 @@ graph(%x: Tensor, %y: Tensor):
   # CHECK: foo::aliasing
   %ret : Tensor = foo::aliasing(%x, %y)
   return (%x)
-  )IR";
-    script::parseIR(text, graph.get());
-    EliminateDeadCode(graph);
-
-    testing::FileCheck().run(text, *graph);
-  }
-  {
-    RegisterOperators reg(
-        {createOperator("foo::no_input", []() -> double { return 4.0; })});
-    // DCE should not remove a custom op
-    auto graph = std::make_shared<Graph>();
-    const auto text = R"IR(
-graph(%x: Tensor, %y: Tensor):
-  # CHECK: foo::no_input
-  %ret : int = foo::no_input()
-  return (%ret)
   )IR";
     script::parseIR(text, graph.get());
     EliminateDeadCode(graph);
