@@ -863,8 +863,12 @@ class TestSparse(TestCase):
         test_shape(7, 8, 9, 20, True)
 
     def test_sparse_mm(self):
-        def test_shape(d1, d2, d3, nnz):
-            D = torch.randn(d2, d3, device=self.device).requires_grad_(True)
+        def test_shape(d1, d2, d3, nnz, transposed):
+            if transposed:
+                D = torch.randn(d3, d2,
+                                device=self.device).t_().requires_grad_(True)
+            else:
+                D = torch.randn(d2, d3, device=self.device).requires_grad_(True)
             S = self._gen_sparse(2, nnz, [d1, d2])[0]
             S_dense = S.to_dense().requires_grad_(True)
             S.requires_grad_(True)
@@ -874,7 +878,8 @@ class TestSparse(TestCase):
                 return torch.sparse.mm(S, D)
             gradcheck(fn, (S, D), check_sparse_nnz=True)
 
-        test_shape(7, 8, 9, 20)
+        test_shape(7, 8, 9, 20, False)
+        test_shape(7, 8, 9, 20, True)
 
     @skipIfRocm
     def test_dsmm(self):

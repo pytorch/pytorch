@@ -24,11 +24,11 @@ struct XLAAllocator final : public at::Allocator {
 
 TEST(XlaTensorTest, TestNoStorage) {
   XLAAllocator allocator;
-  auto storage = Storage(caffe2::TypeMeta::Make<float>(), 0, &allocator, true);
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-      std::move(storage),
       XLATensorId(),
+      caffe2::TypeMeta::Make<float>(),
+      at::Device(DeviceType::XLA, 0),
       /*is_variable=*/false);
   at::Tensor t(std::move(tensor_impl));
-  ASSERT_TRUE(t.device() == DeviceType::XLA);
+  ASSERT_TRUE(t.device() == at::Device(DeviceType::XLA, 0));
 }
