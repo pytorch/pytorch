@@ -47,6 +47,7 @@ TESTS = [
     'utils',
     'namedtuple_return_api',
     'jit_fuser',
+    'jit_classes',
 ]
 
 WINDOWS_BLACKLIST = [
