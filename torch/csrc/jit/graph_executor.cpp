@@ -322,28 +322,6 @@ struct GraphExecutorImpl {
     return copy;
   }
 
-  static size_t countFlatInputs(const TypePtr& ptr) {
-    if (auto optional_type = ptr->cast<OptionalType>()) {
-      return countFlatInputs(optional_type->getElementType());
-    }
-    if (auto tuple_type = ptr->cast<TupleType>()) {
-      size_t total = 0;
-      for (auto& elem : tuple_type->elements()) {
-        total += countFlatInputs(elem);
-      }
-      return total;
-    }
-    return 1;
-  }
-
-  static size_t countFlatInputs(const std::shared_ptr<Graph>& graph) {
-    size_t total = 0;
-    for (Value* input : graph->inputs()) {
-      total += countFlatInputs(input->type());
-    }
-    return total;
-  }
-
   GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize)
       : graph(prepareGraph(graph)),
         // until we have correct alias analysis any use of mutable operators
