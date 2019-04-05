@@ -375,6 +375,37 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorList
   EXPECT_EQ(2, outputs[0].toInt());
 }
 
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenFallbackKernelWithoutAnyArguments_whenRegistered_thenCanBeCalled) {
+  // note: non-fallback kernels without tensor arguments don't work because there
+  // is no way to get the dispatch key. For operators that only have a fallback
+  // kernel, this must work for backwards compatibility.
+  bool called = false;
+  auto registrar = RegisterOperators()
+      .op("_test::no_tensor_args() -> ()", [&] () {called = true;});
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::no_tensor_args", "");
+  ASSERT_TRUE(op.has_value());
+
+  called = false;
+  auto outputs = callOp(*op);
+  EXPECT_TRUE(called);
+}
+
+TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenFallbackKernelWithoutTensorArguments_whenRegistered_thenCanBeCalled) {
+  // note: non-fallback kernels without tensor arguments don't work because there
+  // is no way to get the dispatch key. For operators that only have a fallback
+  // kernel, this must work for backwards compatibility.
+  auto registrar = RegisterOperators()
+      .op("_test::no_tensor_args(int arg) -> int", [] (int64_t arg) {return arg + 1;});
+
+  auto op = c10::Dispatcher::singleton().findSchema("_test::no_tensor_args", "");
+  ASSERT_TRUE(op.has_value());
+
+  auto outputs = callOp(*op, 3);
+  EXPECT_EQ(1, outputs.size());
+  EXPECT_EQ(4, outputs[0].toInt());
+}
+
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_withDifferentNumArguments_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
