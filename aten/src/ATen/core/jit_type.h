@@ -1166,7 +1166,7 @@ struct CAFFE2_API ClassType : public Type {
   Method* getMethod(const std::string& name) const;
   std::vector<Method*> methods() const;
 
-  std::string name() const {
+  const std::string& name() const {
     return typename_;
   }
 
