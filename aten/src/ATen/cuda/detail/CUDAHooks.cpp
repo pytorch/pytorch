@@ -115,12 +115,17 @@ long CUDAHooks::versionCuDNN() const {
 
 std::string CUDAHooks::showConfig() const {
   std::ostringstream oss;
+#ifndef __HIP_PLATFORM_HCC__
   oss << "  - CUDA Runtime " << (CUDART_VERSION / 1000) << "." << (CUDART_VERSION / 10 % 100) << "." << (CUDART_VERSION % 10) << "\n";
 #if AT_CUDNN_ENABLED()
   oss << "  - CuDNN " << CUDNN_MAJOR << "." << CUDNN_MINOR << "." << CUDNN_PATCHLEVEL << "\n";
 #endif
 #ifdef USE_MAGMA
   oss << "  - Magma " << MAGMA_VERSION_MAJOR << "." << MAGMA_VERSION_MINOR << "." << MAGMA_VERSION_MICRO << "\n";
+#endif
+#else
+  // TODO: Actual information here
+  oss << "  - HIP\n";
 #endif
   return oss.str();
 }
