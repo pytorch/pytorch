@@ -16,7 +16,6 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
-#include <vector>
 
 namespace at { namespace native {
 
@@ -293,7 +292,7 @@ struct ReduceOp {
   int noutputs;
 
   ReduceOp(ops_t ops, ReduceConfig config, InputCalculator input_calc, OutputCalculator output_calc,
-           const void* src, std::vector<char*> dst_, void* acc_buf, void* cta_buf, int* semaphores, arg_t ident, int noutputs)
+           const void* src, char* dst1, char* dst2, void* acc_buf, void* cta_buf, int* semaphores, arg_t ident, int noutputs)
     : ops(ops)
     , config(config)
     , input_calc(input_calc)
@@ -304,9 +303,8 @@ struct ReduceOp {
     , semaphores(semaphores)
     , ident(ident)
     , noutputs(noutputs) {
-    for (int i = 0; i < 2; i++) {
-      dst[i] = dst_[i];
-    }
+      dst[0] = dst1;
+      dst[1] = dst2;
   }
 
   C10_DEVICE void run() const {
@@ -653,10 +651,6 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
   char* out_data = (char*)iter.data_ptr(0);
   const auto noutputs = iter.noutputs();
-  std::vector<char*> out_data_p;
-  for (int i = 0; i < noutputs; i++) {
-    out_data_p.push_back((char*)iter.data_ptr(i));
-  }
   char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 
   // Start by assuming that each thread handles a single output and all
@@ -734,7 +728,8 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
       input_calc,
       output_calc,
       in_data,
-      out_data_p,
+      (char*)iter.data_ptr(0),
+      (char*)iter.data_ptr(1),
       acc_data,
       buffer.get(),
       (int*)semaphores.get(),
