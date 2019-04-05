@@ -74,6 +74,7 @@ namespace c10 {
   _(prim, MMBatchSide)             \
   _(prim, min)                     \
   _(prim, max)                     \
+  _(prim, abs)                     \
   _(prim, rangelist)               \
   _(aten, _grad_sum_to_size)       \
   _(aten, _size_if_not_equal)      \
@@ -97,7 +98,23 @@ namespace c10 {
   _(aten, __is__)                  \
   _(aten, __isnot__)               \
   _(aten, copy_)                   \
+  _(aten, t_)                      \
+  _(aten, addbmm_)                 \
+  _(aten, addcdiv_)                \
+  _(aten, addcmul_)                \
+  _(aten, addmv_)                  \
+  _(aten, addr_)                   \
+  _(aten, baddbmm_)                \
+  _(aten, ge_)                     \
+  _(aten, gt_)                     \
+  _(aten, le_)                     \
+  _(aten, lerp_)                   \
+  _(aten, lt_)                     \
+  _(aten, ne_)                     \
+  _(aten, transpose_)              \
+  _(aten, unsqueeze_)              \
   _(aten, _set_item)               \
+  _(aten, set_)                    \
   _(aten, index_put_)              \
   _(aten, device)                  \
   _(aten, hash)                    \

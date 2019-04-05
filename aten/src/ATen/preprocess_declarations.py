@@ -15,7 +15,8 @@ type_map = {
         'Short',
         'Int',
         'Long',
-        'Bool'
+        'Bool',
+        'QInt8',
     ],
 }
 
