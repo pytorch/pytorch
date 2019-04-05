@@ -64,8 +64,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   build_args+=("-DBUILD_TEST=ON")
   build_args+=("-DUSE_OBSERVERS=ON")
   build_args+=("-DUSE_ZSTD=ON")
-  ./scripts/build_android.sh "${build_args[@]}" "$@"
-  exit 0
+  exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
