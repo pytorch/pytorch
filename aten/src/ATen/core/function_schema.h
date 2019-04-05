@@ -150,7 +150,7 @@ public:
   }
   bool is_mutable() const {
     // see [custom operator aliasing]
-    const auto kind = Symbol::fromQualString(name_);
+    const auto kind = Symbol::fromQualString(name_.name);
     const auto is_custom_op = !kind.is_aten() && !kind.is_prim();
     return is_custom_op ||
         std::any_of(
