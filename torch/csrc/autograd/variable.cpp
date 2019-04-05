@@ -22,7 +22,7 @@
 namespace torch {
 namespace autograd {
 Variable::Impl::Impl(at::Tensor data, std::unique_ptr<Variable::AutogradMeta> autograd_meta, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(data.type_id(), data.dtype(), /*allocator=*/nullptr, /* is variable */ true),
+    : TensorImpl(data.type_id(), data.dtype(), data.device(), /* is variable */ true),
       data_(std::move(data)) {
   autograd_meta->grad_fn_ = std::move(gradient_edge.function);
   autograd_meta->requires_grad_ = false;
@@ -103,10 +103,6 @@ int64_t Variable::Impl::storage_offset() const {
   return data_.storage_offset();
 }
 
-int64_t Variable::Impl::get_device_slow() const {
-  return data_.get_device();
-}
-
 std::shared_ptr<Function> Variable::grad_accumulator() const {
   auto autograd_meta = get_autograd_meta();
   if (autograd_meta->grad_fn_) {
@@ -172,6 +168,7 @@ void Variable::Impl::set_data(const at::Tensor &new_data) {
 
   // Updates metadata
   data_type_ = new_data.type().typeMeta();
+  device_opt_ = new_data.device();
   type_id_ = new_data.dispatch_type().type_id();
   is_variable_ = true;
 
