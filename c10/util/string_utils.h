@@ -17,11 +17,18 @@ std::string to_string(T value) {
   return os.str();
 }
 
-inline int stoi(const std::string& str) {
+inline int stoi(const std::string& str, std::size_t* pos = 0) {
   std::stringstream ss;
   int n = 0;
   ss << str;
   ss >> n;
+  if (pos) {
+    if (ss.tellg() == std::streampos(-1)) {
+      *pos = str.size();
+    } else {
+      *pos = ss.tellg();
+    }
+  }
   return n;
 }
 
