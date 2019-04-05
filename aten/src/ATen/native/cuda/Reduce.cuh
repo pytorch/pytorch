@@ -292,7 +292,7 @@ struct ReduceOp {
   int noutputs;
 
   ReduceOp(ops_t ops, ReduceConfig config, InputCalculator input_calc, OutputCalculator output_calc,
-           const void* src, char* dst1, char* dst2, void* acc_buf, void* cta_buf, int* semaphores, arg_t ident, int noutputs)
+           const void* src, char* dst_[], void* acc_buf, void* cta_buf, int* semaphores, arg_t ident, int noutputs)
     : ops(ops)
     , config(config)
     , input_calc(input_calc)
@@ -303,8 +303,9 @@ struct ReduceOp {
     , semaphores(semaphores)
     , ident(ident)
     , noutputs(noutputs) {
-      dst[0] = dst1;
-      dst[1] = dst2;
+    for (int i = 0; i < 2; i++) {
+      dst[i] = dst_[i];
+    }
   }
 
   C10_DEVICE void run() const {
@@ -651,6 +652,10 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
   char* out_data = (char*)iter.data_ptr(0);
   const auto noutputs = iter.noutputs();
+  char* out_data_p[noutputs];
+  for (int i = 0; i < noutputs; i++) {
+    out_data_p[i] = (char*)iter.data_ptr(i);
+  }
   char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 
   // Start by assuming that each thread handles a single output and all
@@ -728,8 +733,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
       input_calc,
       output_calc,
       in_data,
-      (char*)iter.data_ptr(0),
-      (char*)iter.data_ptr(1),
+      out_data_p,
       acc_data,
       buffer.get(),
       (int*)semaphores.get(),
