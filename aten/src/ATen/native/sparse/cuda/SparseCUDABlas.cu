@@ -125,6 +125,7 @@ void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
   CUSPARSE_CHECK(cusparseScsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
+  CUSPARSE_CHECK(cusparseDestroyMatDescr(desc));
 }
 
 void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, double alpha, double *csrvala, int *csrrowptra, int *csrcolinda, double *b, int64_t ldb, double beta, double *c, int64_t ldc)
@@ -146,8 +147,8 @@ void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
   CUSPARSE_CHECK(cusparseDcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
-  // TODO: I think this leaks the matrix descriptor.  Proper fix is to create
-  // real descriptor classes
+  CUSPARSE_CHECK(cusparseDestroyMatDescr(desc));
+  // TODO: Proper fix is to create real descriptor classes
 }
 
 /* format conversion */
@@ -187,7 +188,7 @@ void Xcsrsort(int64_t m, int64_t n, int64_t nnz, const int *csrRowPtr, int *csrC
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
   CUSPARSE_CHECK(cusparseXcsrsort(handle, i_m, i_n, i_nnz, desc, csrRowPtr, csrColInd, P, pBuffer));
-  // TODO: I think this leaks the matrix descriptor.
+  CUSPARSE_CHECK(cusparseDestroyMatDescr(desc));
 }
 
 void Xcoosort_bufferSizeExt(int64_t m, int64_t n, int64_t nnz, const int *cooRows, const int *cooCols, size_t *pBufferSizeInBytes)
