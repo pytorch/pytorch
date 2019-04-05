@@ -276,7 +276,7 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
     const auto& param_list = module_->get_parameters();
     for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
       auto& param = *it;
-      params.push_back(caller.get_or_add_initial_ivalue(&param));
+      params.push_back(caller.get_or_add_parameter(param.slot()));
     }
     auto list = caller.graph()->createList(TensorType::get(), params);
     caller.graph()->insertNode(list);
@@ -319,7 +319,7 @@ struct ModuleValue : public SugaredValue {
         module->register_buffer("training", std::move(t));
         v = module->find_buffer(field);
       }
-      Value* the_tensor = m.get_or_add_initial_ivalue(v);
+      Value* the_tensor = m.get_or_add_parameter(v->slot());
       Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
       return std::make_shared<SimpleValue>(the_bool);
     }
@@ -329,10 +329,10 @@ struct ModuleValue : public SugaredValue {
     } else if (Method* v = module->find_method(field)) {
       return std::make_shared<MethodValue>(shared_from_this(), *v);
     } else if (NamedIValue* v = module->find_parameter(field)) {
-      return std::make_shared<SimpleValue>(m.get_or_add_initial_ivalue(v));
+      return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     } else if (NamedIValue* v = module->find_attribute(field)) {
       return std::make_shared<SimpleValue>(
-          m.get_or_add_initial_ivalue(v));
+          m.get_or_add_attribute(v->type(), v->slot()));
     }
 
     // This can also be a call to a non-script module, or a plain
@@ -603,14 +603,14 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
 }
 
 static void gatherParametersAndBuffers(
-    std::vector<const NamedIValue*>& values,
+    std::vector<Slot>& values,
     const Module& m) {
   for (auto& param : m.get_parameters()) {
-    values.push_back(&param);
+    values.push_back(param.slot());
   }
   for (auto& param : m.get_attributes()) {
     if (param.type()->isSubtypeOf(TensorType::get())) {
-      values.push_back(&param);
+      values.push_back(param.slot());
     }
   }
   for (const auto& sub : m.get_modules()) {
@@ -852,11 +852,11 @@ void initJitScriptBindings(PyObject* module) {
              bool force_outplace) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
-            std::vector<const NamedIValue*> parameters;
+            std::vector<Slot> parameters;
             gatherParametersAndBuffers(parameters, *self);
             Stack inputs = toStack(input_tuple);
-            for (const NamedIValue* param : parameters) {
-              inputs.emplace_back(*param->slot());
+            for (const Slot& param : parameters) {
+              inputs.emplace_back(*param);
             }
             auto graph = tracer::createGraphByTracing(
                 func,
@@ -946,14 +946,14 @@ void initJitScriptBindings(PyObject* module) {
              std::vector<std::tuple<std::shared_ptr<Module>, std::string>>
                  params,
              std::shared_ptr<Module> orig) {
-            std::vector<const NamedIValue*> member_inputs;
+            std::vector<Slot> member_inputs;
             for (auto& p : params) {
-              auto named_param = std::get<0>(p)->find_parameter(std::get<1>(p));
-              if (named_param == nullptr) {
-                named_param = std::get<0>(p)->find_buffer(std::get<1>(p));
+              NamedIValue* np = std::get<0>(p)->find_parameter(std::get<1>(p));
+              if (np == nullptr) {
+                np = std::get<0>(p)->find_buffer(std::get<1>(p));
               }
-              AT_ASSERT(named_param != nullptr);
-              member_inputs.push_back(named_param);
+              AT_ASSERT(np != nullptr);
+              member_inputs.push_back(np->slot());
             }
 
             Method* orig_method = orig->find_method(name);
@@ -975,21 +975,15 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "propagate_and_assign_input_and_output_shapes",
           &Method::propagate_and_assign_input_and_output_shapes)
-      .def("initial_ivalues", [](Method& m) {
-          std::vector<at::Tensor> result;
-          result.reserve(m.initial_ivalues().size());
-
-          for (auto named_ivalue : m.initial_ivalues()) {
-            AT_CHECK(
-                named_ivalue->slot()->isTensor(),
-                "Cannot get initial"
-                " IValues if any are not Tensors (found ",
-                named_ivalue->type()->python_str(),
-                ")");
-            result.push_back(named_ivalue->slot()->toTensor());
-          }
-          return result;
-      })
+      .def(
+          "initial_ivalues",
+          [](Method& m) {
+            std::vector<at::Tensor> tensors;
+            for (auto& t : m.initial_ivalues()) {
+              tensors.push_back(t->toTensor());
+            }
+            return tensors;
+          })
       .def(
           "graph_for",
           [](py::args args, py::kwargs kwargs) {
