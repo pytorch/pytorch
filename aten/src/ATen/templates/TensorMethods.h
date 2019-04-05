@@ -10,33 +10,33 @@
 namespace at {
 
 inline Tensor Tensor::toType(const Type & t, bool non_blocking) const {
-  if(type() == t)
+  if(dispatch_type() == t)
     return *this;
   return t.copy(*this, non_blocking);
 }
 
 inline Tensor Tensor::cpu() const {
-  return toType(type().cpu());
+  return toType(dispatch_type().cpu());
 }
 
 inline Tensor Tensor::cuda() const {
-  return toType(type().cuda());
+  return toType(dispatch_type().cuda());
 }
 
 inline Tensor Tensor::hip() const {
-  return toType(type().hip());
+  return toType(dispatch_type().hip());
 }
 
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
-  return type().copy_(*this, src, non_blocking);
+  return dispatch_type().copy_(*this, src, non_blocking);
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {
-  return toType(type().toScalarType(t));
+  return toType(dispatch_type().toScalarType(t));
 }
 
 inline Tensor Tensor::toBackend(Backend b) const {
-  return toType(type().toBackend(b));
+  return toType(dispatch_type().toBackend(b));
 }
 
 inline TensorOptions Tensor::options() const {
@@ -50,11 +50,11 @@ inline void Tensor::backward(
     c10::optional<Tensor> gradient,
     bool keep_graph,
     bool create_graph) {
-  type().backward(*this, std::move(gradient), keep_graph, create_graph);
+  dispatch_type().backward(*this, std::move(gradient), keep_graph, create_graph);
 }
 
 inline void Tensor::set_data(Tensor new_data) {
-  type().set_data(*this, new_data);
+  dispatch_type().set_data(*this, new_data);
 }
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
