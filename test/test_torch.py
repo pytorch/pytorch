@@ -10021,40 +10021,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(pinned, x)
         self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
 
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    def test_pin_memory_from_constructor(self):
-
-        def _get_like(t, **kwargs):
-            return [
-                torch.rand_like(t, **kwargs),
-                torch.randn_like(t, **kwargs),
-                torch.empty_like(t, **kwargs),
-                torch.full_like(t, 4, **kwargs),
-                torch.zeros_like(t, **kwargs),
-                torch.ones_like(t, **kwargs),
-            ]
-
-        def _get_tensors(**kwargs):
-            return [
-                torch.tensor([10, 11], **kwargs),
-                torch.randn(3, 5, **kwargs),
-                torch.rand(3, **kwargs),
-                # torch.randint(3,5, **kwargs), // unsupported
-                torch.zeros(3, **kwargs),
-                torch.randperm(3, **kwargs),
-                torch.empty(6, **kwargs),
-                torch.ones(6, **kwargs),
-                torch.eye(6, **kwargs),
-                torch.arange(3, 5, **kwargs), ]
-
-        pinned_tensors = _get_tensors(pin_memory=True) + _get_like(torch.empty(5, dtype=torch.float64), pin_memory=True)
-        for x in pinned_tensors:
-            self.assertTrue(x.is_pinned())
-
-        tensors = _get_tensors() + _get_like(torch.empty(5, dtype=torch.float64, pin_memory=True))
-        for x in tensors:
-            self.assertFalse(x.is_pinned())
-
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_unresizable(self):
         x = np.zeros((2, 2))
