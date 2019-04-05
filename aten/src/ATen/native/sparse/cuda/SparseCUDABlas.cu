@@ -70,7 +70,7 @@ void Xcoo2csr(const int *coorowind, int64_t nnz, int64_t m, int *csrrowptr) {
     "cusparseXcoo2csr only supports m, nnz with the bound [val] <= ",
     INT_MAX);
 
-#ifdef __HIP_COMPILER_HCC__
+#ifdef __HIP_PLATFORM_HCC__
   // current shortcoming in hip/rocSPARSE
   if(nnz == 0 || m == 0) return;
 #endif
