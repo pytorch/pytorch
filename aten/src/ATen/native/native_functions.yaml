@@ -56,7 +56,7 @@
   dispatch:
     CUDA: _cudnn_rnn_backward
 
-- func: _cudnn_init_dropout_state(float dropout, bool train, int dropout_seed, *, ScalarType dtype, Layout layout, Device device, bool pin_memory) -> Tensor
+- func: _cudnn_init_dropout_state(float dropout, bool train, int dropout_seed, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
   matches_jit_signature: True
   dispatch:
     CUDA: _cudnn_init_dropout_state
@@ -873,7 +873,7 @@
   matches_jit_signature: True
   device_guard: False
 
-- func: empty_like(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory) -> Tensor
+- func: empty_like(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
   matches_jit_signature: True
   device_guard: False
 
@@ -1020,7 +1020,7 @@
 - func: full_like(Tensor self, Scalar fill_value) -> Tensor
   matches_jit_signature: True
 
-- func: full_like(Tensor self, Scalar fill_value, *, ScalarType dtype, Layout layout, Device device, bool pin_memory) -> Tensor
+- func: full_like(Tensor self, Scalar fill_value, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
   matches_jit_signature: True
 
 # NOTE [ grid_sampler Native Functions ]
@@ -1682,7 +1682,7 @@
 - func: ones_like(Tensor self) -> Tensor
   matches_jit_signature: True
 
-- func: ones_like(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory) -> Tensor
+- func: ones_like(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
   matches_jit_signature: True
 
 - func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor
@@ -1738,7 +1738,7 @@
 - func: rand_like(Tensor self) -> Tensor
   matches_jit_signature: True
 
-- func: rand_like(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory) -> Tensor
+- func: rand_like(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
   matches_jit_signature: True
 
 - func: randint(int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -1769,10 +1769,10 @@
 - func: randint_like(Tensor self, int low, int high) -> Tensor
   matches_jit_signature: True
 
-- func: randint_like(Tensor self, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory) -> Tensor
+- func: randint_like(Tensor self, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
   matches_jit_signature: True
 
-- func: randint_like(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory) -> Tensor
+- func: randint_like(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
   matches_jit_signature: True
 
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -1789,7 +1789,7 @@
 - func: randn_like(Tensor self) -> Tensor
   matches_jit_signature: True
 
-- func: randn_like(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory) -> Tensor
+- func: randn_like(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
   matches_jit_signature: True
 
 - func: randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -2453,7 +2453,7 @@
 - func: zeros_like(Tensor self) -> Tensor
   matches_jit_signature: True
 
-- func: zeros_like(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory) -> Tensor
+- func: zeros_like(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
   matches_jit_signature: True
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
@@ -2786,7 +2786,7 @@
 
 # FIXME: would be nicer if TensorOptions was optional based; not adding default arguments for options given
 # the default would never make sense.
-- func: sparse_coo_tensor(int[] size, *, ScalarType dtype, Layout layout, Device device, bool pin_memory) -> Tensor
+- func: sparse_coo_tensor(int[] size, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
   matches_jit_signature: True
 
 - func: sparse_coo_tensor(Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -2798,14 +2798,14 @@
 - func: _sparse_coo_tensor_unsafe(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   matches_jit_signature: True
 
-- func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType dtype, Layout layout, Device device, bool pin_memory) -> Tensor
+- func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
   matches_jit_signature: True
   dispatch:
     SparseCPU: new_with_dims_sparse
     SparseCUDA: new_with_dims_sparse
   requires_tensor: True
 
-- func: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType dtype, Layout layout, Device device, bool pin_memory) -> Tensor
+- func: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
   matches_jit_signature: True
   dispatch:
     SparseCPU: new_with_dims_and_tensor_sparse
@@ -3030,7 +3030,7 @@
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
 # See NOTE [ TensorOptions Constructors ].
-- func: to(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory, bool non_blocking=False, bool copy=False) -> Tensor
+- func: to(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, bool non_blocking=False, bool copy=False) -> Tensor
   matches_jit_signature: True
   variants: method
   device_guard: False

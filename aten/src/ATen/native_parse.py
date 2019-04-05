@@ -202,7 +202,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
             {'name': 'dtype', 'type': 'ScalarType', 'is_nullable': False, 'annotation': None},
             {'name': 'layout', 'type': 'Layout', 'is_nullable': False, 'annotation': None},
             {'name': 'device', 'type': 'Device', 'is_nullable': False, 'annotation': None},
-            {'name': 'pin_memory', 'type': 'bool', 'is_nullable': False, 'annotation': None},
+            {'name': 'pin_memory', 'type': 'bool', 'is_nullable': False, 'annotation': None, 'default': False},
         ]
     ]
     supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[0]))
