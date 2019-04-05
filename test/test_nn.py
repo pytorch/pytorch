@@ -3098,7 +3098,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
-    @skipIfRocm
     def test_Conv2d_naive_groups_cuda(self, dtype=torch.float):
         self._test_Conv2d_naive_groups("cuda", dtype)
 
@@ -3994,7 +3993,9 @@ class TestNN(NNTestCase):
             'block.conv1.bias': torch.arange(1, 4),
             'bn.running_mean': torch.randn(2),
         })
-        net.load_state_dict(state_dict)
+        incompatible_keys = net.load_state_dict(state_dict)
+        self.assertEqual(len(incompatible_keys.missing_keys), 0)
+        self.assertEqual(len(incompatible_keys.unexpected_keys), 0)
         self.assertEqual(net.linear1.weight.data, state_dict['linear1.weight'])
         self.assertEqual(net.block.conv1.bias.data, state_dict['block.conv1.bias'])
         self.assertEqual(net.bn.running_mean, state_dict['bn.running_mean'])
@@ -4002,18 +4003,38 @@ class TestNN(NNTestCase):
         state_dict = net.state_dict()
         state_dict.update({'extra': torch.ones(5)})
         self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
+        incompatible_keys = net.load_state_dict(state_dict, strict=False)
+        self.assertEqual(len(incompatible_keys.missing_keys), 0)
+        self.assertEqual(len(incompatible_keys.unexpected_keys), 1)
+        self.assertIn('extra', incompatible_keys.unexpected_keys)
 
         state_dict = net.state_dict()
         state_dict.update({'extra.param': torch.ones(5)})
         self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
+        incompatible_keys = net.load_state_dict(state_dict, strict=False)
+        self.assertEqual(len(incompatible_keys.missing_keys), 0)
+        self.assertEqual(len(incompatible_keys.unexpected_keys), 1)
+        self.assertIn('extra.param', incompatible_keys.unexpected_keys)
 
         state_dict = net.state_dict()
         del state_dict['linear1.weight']
         self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
+        incompatible_keys = net.load_state_dict(state_dict, strict=False)
+        self.assertEqual(len(incompatible_keys.missing_keys), 1)
+        self.assertEqual(len(incompatible_keys.unexpected_keys), 0)
+        self.assertIn('linear1.weight', incompatible_keys.missing_keys)
+        state_dict.update({'extra.param': torch.ones(5)})
+        self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
+        incompatible_keys = net.load_state_dict(state_dict, strict=False)
+        self.assertEqual(len(incompatible_keys.missing_keys), 1)
+        self.assertEqual(len(incompatible_keys.unexpected_keys), 1)
+        self.assertIn('linear1.weight', incompatible_keys.missing_keys)
+        self.assertIn('extra.param', incompatible_keys.unexpected_keys)
 
         state_dict = net.state_dict()
         state_dict.update({'bn.running_mean': torch.rand(14, 4)})  # wrong size
         self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
+        self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict, strict=False))
 
         state_dict = net.state_dict()
         old_state_dict = deepcopy(state_dict)
@@ -4414,7 +4435,6 @@ class TestNN(NNTestCase):
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    @skipIfRocm
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_Conv2d_depthwise_naive_groups_cuda(self, dtype=torch.float):
         for depth_multiplier in [1, 2]:
@@ -4624,7 +4644,7 @@ class TestNN(NNTestCase):
     def test_CTCLoss_zero_infinity(self):
         target_lengths = [60, 25, 20]
         input_lengths = [50, 50, 50]
-        targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
+        targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int, device='cuda')
         log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2).requires_grad_()
         res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths,
                                            reduction='sum', zero_infinity=True)
@@ -6519,7 +6539,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @skipIfRocm
     def test_affine_2d_rotate0(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -6557,7 +6576,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @skipIfRocm
     def test_affine_2d_rotate90(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -6603,7 +6621,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @skipIfRocm
     def test_affine_2d_rotate45(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -6642,7 +6659,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @skipIfRocm
     def test_affine_2d_rotateRandom(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -6691,7 +6707,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @skipIfRocm
     def test_affine_3d_rotateRandom(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
