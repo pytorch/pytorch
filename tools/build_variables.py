@@ -51,6 +51,7 @@ libtorch_sources = [
     "torch/csrc/Exceptions.cpp",
     "torch/csrc/jit/autodiff.cpp",
     "torch/csrc/jit/attributes.cpp",
+    "torch/csrc/jit/argument_spec.cpp",
     "torch/csrc/jit/constants.cpp",
     "torch/csrc/jit/node_hashing.cpp",
     "torch/csrc/jit/export.cpp",
@@ -148,6 +149,9 @@ def add_torch_libs():
             "torch/csrc/distributed/**/*.cpp",
             # top-level hook of extension registration lives in a separate file
             "torch/csrc/stub.cpp",
+            # to avoid redefinitions of symbols defined in
+            # dynamic_library_unix.cpp
+            "torch/csrc/jit/fuser/cpu/dynamic_library_win.cpp",
         ],
     ) + [
         "torch/csrc/distributed/Module.cpp",
@@ -250,6 +254,7 @@ def add_torch_libs():
     cpp_library(
         name="_C_impl",
         srcs=libtorch_python_sources,
+        link_whole=True,
         deps=[
             ":libtorch_cuda",
             ":thnn",

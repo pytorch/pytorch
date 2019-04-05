@@ -1,15 +1,14 @@
 #pragma once
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/jit/argument_spec.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/named_value.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/source_range.h>
 #include <torch/csrc/jit/script/slot.h>
-
+#include <torch/csrc/jit/source_range.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
@@ -51,8 +50,8 @@ using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
 struct Module;
 
-using ModuleLookup = std::function<std::shared_ptr<Module>(
-    const std::vector<std::string>&)>;
+using ModuleLookup =
+    std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
 
 struct Method {
   Method(
@@ -137,6 +136,14 @@ struct Method {
     return graph()->addInput()->setType(type);
   }
 
+  static void setInputTensorTypes(Graph& g, const Stack& stack) {
+    AT_ASSERT(stack.size() == g.inputs().size());
+    for (size_t i = 0; i < stack.size(); ++i) {
+      g.inputs().at(i)->setType(
+          DimensionedTensorType::create(stack.at(i).toTensor()));
+    }
+  }
+
   std::shared_ptr<Graph> propagate_shapes(
       std::vector<at::Tensor> inputs,
       bool with_grad = false) {
@@ -149,8 +156,7 @@ struct Method {
     for (const Slot& inp : initial_ivalues_) {
       stack.push_back(*inp);
     }
-    const auto size = stack.size();
-    setInputTypes(*retval, ArgumentSpec(with_grad, stack, size));
+    setInputTensorTypes(*retval, stack);
     PropagateInputShapes(retval);
     return retval;
   }
@@ -167,9 +173,7 @@ struct Method {
       }
     }
     if (propagate) {
-      setInputTypes(
-          *retval,
-          ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
+      setInputTensorTypes(*retval, fmap<IValue>(inputs));
       PropagateInputShapes(retval);
     }
     AT_ASSERT(retval->inputs().size() == inputs.size());
@@ -288,16 +292,16 @@ struct Method {
       if (pos < inputs.size()) {
         if (!isSubvalueOf(inputs[pos], argument.type())) {
           AT_ERROR(
-            "Expected value of type ",
-            *argument.type(),
-            " for argument '",
-            argument.name(),
-            "' in position ",
-            pos,
-            ", but instead got value of type ",
-            attemptToRecoverType(inputs[pos])->str(),
-            ". Declaration: ",
-            schema);
+              "Expected value of type ",
+              *argument.type(),
+              " for argument '",
+              argument.name(),
+              "' in position ",
+              pos,
+              ", but instead got value of type ",
+              attemptToRecoverType(inputs[pos])->str(),
+              ". Declaration: ",
+              schema);
         }
       } else if (argument.default_value()) {
         inputs.push_back(*argument.default_value());
@@ -375,7 +379,8 @@ struct NamedIValue {
   const TypePtr& type() const {
     return type_;
   }
-private:
+
+ private:
   const std::string name_;
   const TypePtr type_;
   std::unique_ptr<IValue> ivalue_;
@@ -383,12 +388,7 @@ private:
 
 struct Module {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);
-  Module()
-      : modules("Module"),
-        parameters("Parameter"),
-        attributes("Attributes"),
-        methods("Method"),
-        optimize(true) {}
+  Module() : optimize(true) {}
 
   // note this doesn't change the flags of existing methods just ones
   // added afterward.
@@ -405,12 +405,16 @@ struct Module {
   }
 
   void register_buffer(const std::string& name, autograd::Variable v) {
-    if (auto b = attributes.find(name)) {
+    if (auto b = find_attribute(name)) {
       AT_ASSERT(b->type()->isSubtypeOf(TensorType::get()));
       *b->slot() = v;
       return;
     }
-    attributes.insert(name, NamedIValue(name, TensorType::get(), std::move(v)));
+    insert(
+        name,
+        attributes_,
+        EntityType::ATTRIBUTE,
+        NamedIValue(name, TensorType::get(), std::move(v)));
   }
   void register_parameter(
       const std::string& name,
@@ -420,22 +424,30 @@ struct Module {
       register_buffer(name, std::move(v));
       return;
     }
-    if (auto p = parameters.find(name)) {
+    if (auto p = find_parameter(name)) {
       *p->slot() = v;
       return;
     }
-    parameters.insert(name, NamedIValue(name, TensorType::get(), std::move(v)));
+    insert(
+        name,
+        parameters_,
+        EntityType::PARAMETER,
+        NamedIValue(name, TensorType::get(), std::move(v)));
   }
   void register_attribute(
       const std::string& name,
       const TypePtr type,
       IValue ivalue) {
-    attributes.insert(name, NamedIValue(name, type, ivalue));
+    insert(
+        name,
+        attributes_,
+        EntityType::ATTRIBUTE,
+        NamedIValue(name, type, ivalue));
   }
   void register_module(
       const std::string& name,
       std::shared_ptr<Module> module) {
-    modules.insert(name, {name, std::move(module)});
+    insert(name, modules_, EntityType::MODULE, {name, std::move(module)});
   }
 
   Method& create_method(
@@ -450,7 +462,7 @@ struct Module {
         std::move(graph),
         std::move(member_inputs),
         nullptr));
-    return *methods.insert(name, std::move(method));
+    return *insert(name, methods_, EntityType::METHOD, std::move(method));
   }
 
   Method& create_method(
@@ -463,11 +475,11 @@ struct Module {
         std::make_shared<Graph>(),
         {},
         std::move(creator)));
-    return *methods.insert(name, std::move(method));
+    return *insert(name, methods_, EntityType::METHOD, std::move(method));
   }
 
   Slot parameter_slot(const std::string& name) const {
-    return parameters[name].slot();
+    return parameters_[get_offset(name, EntityType::PARAMETER)].slot();
   }
 
   void set_parameter(const std::string& name, at::Tensor v) {
@@ -477,71 +489,71 @@ struct Module {
   autograd::Variable get_parameter(const std::string& name) const {
     return autograd::as_variable_ref(parameter_slot(name)->toTensor());
   }
-  autograd::Variable get_buffer(const std::string& name) const {
-    return autograd::as_variable_ref(attributes.find(name)->slot()->toTensor());
-  }
+
   IValue get_attribute(const std::string& name) const {
-    return *attributes.find(name)->slot();
+    return *attributes_[get_offset(name, EntityType::ATTRIBUTE)].slot();
+  }
+
+  autograd::Variable get_buffer(const std::string& name) const {
+    return autograd::as_variable_ref(get_attribute(name).toTensor());
   }
 
   // each module owns its method. The reference returned here
   // is guarenteed to stay valid until this module has been destroyed
   Method& get_method(const std::string& name) const {
-    return *methods[name];
+    return *methods_[get_offset(name, EntityType::METHOD)];
   }
 
   std::shared_ptr<Module> get_module(const std::string& name) const {
-    return modules[name].module;
+    return modules_[get_offset(name, EntityType::MODULE)].module;
   }
 
-  const torch::OrderedDict<std::string, NamedModule>& get_modules() const {
-    return modules;
+  c10::ArrayRef<NamedModule> get_modules() const {
+    return modules_;
   }
-  const torch::OrderedDict<std::string, NamedIValue>& get_parameters()
-      const {
-    return parameters;
+  c10::ArrayRef<NamedIValue> get_parameters() const {
+    return parameters_;
   }
-  const torch::OrderedDict<std::string, NamedIValue>& get_attributes()
-      const {
-    return attributes;
+  c10::ArrayRef<NamedIValue> get_attributes() const {
+    return attributes_;
   }
-  const torch::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods()
-      const {
-    return methods;
+  c10::ArrayRef<std::unique_ptr<Method>> get_methods() const {
+    return methods_;
   }
 
   NamedIValue* find_parameter(const std::string& name) {
-    return parameters.find(name);
+    auto offset = find_offset(name, EntityType::PARAMETER);
+    return offset ? &parameters_[*offset] : nullptr;
   }
   NamedIValue* find_attribute(const std::string& name) {
-    return attributes.find(name);
+    auto offset = find_offset(name, EntityType::ATTRIBUTE);
+    return offset ? &attributes_[*offset] : nullptr;
   }
   NamedIValue* find_buffer(const std::string& name) {
-    auto b = attributes.find(name);
-    if (b && b->type()->isSubtypeOf(TensorType::get())) {
-      return b;
+    auto iv = find_attribute(name);
+    if (iv && iv->type()->isSubtypeOf(TensorType::get())) {
+      return iv;
     }
     return nullptr;
   }
   NamedModule* find_module(const std::string& name) {
-    return modules.find(name);
+    auto offset = find_offset(name, EntityType::MODULE);
+    return offset ? &modules_[*offset] : nullptr;
   }
   Method* find_method(const std::string& name) {
-    if (auto* pm = methods.find(name)) {
-      return pm->get();
-    }
-    return nullptr;
+    auto offset = find_offset(name, EntityType::METHOD);
+    return offset ? methods_[*offset].get() : nullptr;
   }
   void apply(std::function<void(Module&)> fn) {
     for (auto& submod : get_modules()) {
-      submod.value().module->apply(fn);
+      submod.module->apply(fn);
     }
     fn(*this);
   }
   /// Enables "training" mode.
   void train(bool on = true) {
     for (auto& submod : get_modules()) {
-      submod->module->train(on);
+      submod.module->train(on);
     }
     register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
   }
@@ -619,37 +631,44 @@ struct Module {
       std::unordered_map<Slot, Slot>& parameter_remap,
       std::vector<std::string> names = {}) const {
     auto curr = module_lookup(names);
-    for (auto& kv : parameters) {
+    for (auto& param : get_parameters()) {
       curr->register_parameter(
-          kv.key(),
-          kv.value().slot()->toTensor(),
+          param.name(),
+          param.slot()->toTensor(),
           /*is_buffer=*/false);
-      parameter_remap[kv.value().slot()] = curr->parameter_slot(kv.key());
+      parameter_remap[param.slot()] = curr->parameter_slot(param.name());
     }
-    for (auto& kv : attributes) {
-      if (!kv.value().type()->isSubtypeOf(TensorType::get())) {
+    for (auto& attr : get_attributes()) {
+      if (!attr.type()->isSubtypeOf(TensorType::get())) {
         continue;
       }
-      curr->register_buffer(
-          kv.key(),
-          kv.value().slot()->toTensor());
-      parameter_remap[kv.value().slot()] = curr->find_buffer(kv.key())->slot();
+      curr->register_buffer(attr.name(), attr.slot()->toTensor());
+      parameter_remap[attr.slot()] = curr->find_buffer(attr.name())->slot();
     }
-    for (auto& kv : modules) {
-      names.push_back(kv.key());
+    for (auto& mod : get_modules()) {
+      names.push_back(mod.name);
       // Submodules must be translated first, otherwise parameter_remap entries
       // will not be filled in for methods of this module.
-      kv.value().module->copy_into(module_lookup, parameter_remap, names);
+      mod.module->copy_into(module_lookup, parameter_remap, names);
       names.pop_back();
     }
-    for (auto& kv : methods) {
+    for (auto& method : get_methods()) {
       std::vector<Slot> initial_ivalues;
-      for (auto& p : kv.value()->initial_ivalues()) {
+      for (auto& p : method->initial_ivalues()) {
         initial_ivalues.push_back(parameter_remap.at(p));
       }
       curr->create_method(
-          kv.key(), kv.value()->graph()->copy(), initial_ivalues);
+          method->name(), method->graph()->copy(), initial_ivalues);
     }
+  }
+
+  enum class EntityType { MODULE, PARAMETER, ATTRIBUTE, METHOD };
+
+  at::optional<EntityType> kind_of(const std::string& name) const {
+    auto it = dict_.find(name);
+    if (it == dict_.end())
+      return at::nullopt;
+    return it->second.type;
   }
 
  private:
@@ -658,14 +677,93 @@ struct Module {
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
 
+  // modules have a single namespace, but spread over 4 different concepts:
+  // parameters, attributes, methods, and sub-modules
+  // we store individual lists of each concept, and a single map to
+  // unify the namespace and ensure fast lookup
+
   // invariant: to ensure initial_ivalues of Methods stay valid,
   // it is only legal to _add_ new modules and parameters.
   // removing them will allow initial_ivalues to point to invalid parameters
   // no such restriction exists for methods
-  torch::OrderedDict<std::string, NamedModule> modules;
-  torch::OrderedDict<std::string, NamedIValue> parameters;
-  torch::OrderedDict<std::string, NamedIValue> attributes;
-  torch::OrderedDict<std::string, std::unique_ptr<Method>> methods;
+  std::vector<NamedModule> modules_;
+  std::vector<NamedIValue> parameters_;
+  std::vector<NamedIValue> attributes_;
+  std::vector<std::unique_ptr<Method>> methods_;
+
+  static const char* toString(EntityType t) {
+    switch (t) {
+      case EntityType::MODULE:
+        return "module";
+      case EntityType::PARAMETER:
+        return "parameter";
+      case EntityType::ATTRIBUTE:
+        return "attribute";
+      case EntityType::METHOD:
+        return "method";
+    }
+    return nullptr;
+  }
+
+  struct Entry {
+    EntityType type;
+    size_t offset;
+  };
+
+  size_t get_offset(const std::string& name, EntityType expected_type) const {
+    auto it = dict_.find(name);
+    if (it == dict_.end()) {
+      AT_ERROR(toString(expected_type), " '", name, "' is not defined.");
+    }
+    if (it->second.type != expected_type) {
+      AT_ERROR(
+          "The field '",
+          name,
+          "' is a ",
+          toString(it->second.type),
+          " but this call is"
+          " trying to use it as a ",
+          toString(expected_type));
+    }
+    return it->second.offset;
+  }
+  at::optional<size_t> find_offset(
+      const std::string& name,
+      EntityType expected_type) const {
+    auto it = dict_.find(name);
+    if (it == dict_.end() || it->second.type != expected_type) {
+      return at::nullopt;
+    }
+    return it->second.offset;
+  }
+
+  template <typename T>
+  T& insert(
+      const std::string& name,
+      std::vector<T>& list,
+      EntityType type,
+      T value) {
+    auto it = dict_.find(name);
+    if (it != dict_.end()) {
+      if (type != it->second.type) {
+        AT_ERROR(
+            "attempting to add ",
+            toString(type),
+            " '",
+            name,
+            "' but it already exists as a ",
+            toString(it->second.type));
+      } else {
+        AT_ERROR(toString(type), " '", name, "' already defined.");
+      }
+    }
+    dict_[name] = Entry{type, list.size()};
+    list.emplace_back(std::move(value));
+    return list.back();
+  }
+
+  std::unordered_map<std::string, Entry> dict_;
+
   bool optimize;
 };
 

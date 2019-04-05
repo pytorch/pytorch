@@ -4,6 +4,7 @@
   variants: function
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   device_guard: False
   return: argument 0
   options:
@@ -41,6 +42,7 @@
   variants: function
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   options:
     - arguments:
       - THTensor* self
@@ -57,6 +59,7 @@
     - function
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   device_guard: False
   return: bool
   arguments:
@@ -108,6 +111,8 @@
 [[
   name: _th_nonzero
   cname: nonzero
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -124,12 +129,16 @@
     - function
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   arguments:
     - THTensor* self
 ]]
 [[
   name: _th_view
   cname: newView
+  cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   device_guard: False
@@ -142,6 +151,9 @@
 [[
   name: _th_resize_as_
   cname: resizeAs
+  cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: self
@@ -243,6 +255,7 @@
     - function
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   device_guard: False
   return: argument 0
   arguments:
@@ -1669,6 +1682,7 @@
   return: self
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   arguments:
@@ -1846,18 +1860,19 @@
     - arg: THTensor* tensor
 ]]
 [[
-  name: _th_cross
-  cname: cross
+  name: _th_cross_kernel
+  cname: crossKernel
   variants:
     - function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
       output: True
     - THTensor* self
     - THTensor* other
-    - arg: long dim
-      default: -1
+    - arg: int64_t dim
 ]]
 [[
   name: _th_diag
@@ -2460,8 +2475,9 @@
     - CPU
     - CUDA
   return: self
-  cpu_bool: True
   variants: function
+  cpu_bool: True
+  cuda_bool: True
   options:
     - cname: random
       arguments:
@@ -2725,6 +2741,7 @@
   return: THTensor*
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   options:
@@ -2749,6 +2766,8 @@
   cname: catArray
   variants: [function]
   cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
   return: self
   arguments:
     - arg: THTensor* self
