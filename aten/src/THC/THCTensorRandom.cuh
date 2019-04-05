@@ -91,6 +91,9 @@ condDiv(T *q, int64_t *J, int64_t inputsize, T q_max) {
 
 // Normalizes the L1 norm of every row to 1; used by multinomial
 template <typename T>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(1024)
+#endif
 __global__ void renormRowsL1(T* dist, long rows, long cols) {
   extern __shared__  unsigned char my_smem[];
   T *smem = reinterpret_cast<T *>(my_smem);
@@ -156,6 +159,9 @@ __device__ int binarySearchForMultinomial(T* cumdist,
 }
 
 template <typename T, typename AccT>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(1024)
+#endif
 __global__ void
 sampleMultinomialOnce(int64_t* dest,
                       int64_t distributions,
