@@ -12,6 +12,9 @@
 #include <THC/THCAtomics.cuh>
 
 template<typename Dtype, typename Acctype>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(1024)
+#endif
 __global__ void nearest_neighbor_3d_kernel(
 		const int n,
 		const THCDeviceTensor<Dtype, 3> data1,
@@ -49,6 +52,9 @@ __global__ void nearest_neighbor_3d_kernel(
 
 // Backward operation
 template <typename Dtype, typename Acctype>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(1024)
+#endif
 __global__ void nearest_neighbor_3d_kernel_backward(
 		const int n,
 		THCDeviceTensor<Dtype, 3> data1,
