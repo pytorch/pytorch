@@ -573,27 +573,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   * Wait on the future until it completes.
   */
   void wait() {
-    if (completed()) {
-      return;
-    }
-    std::condition_variable finished;
-    bool fired = false;
-
-    // Add a callback to notify the current thread
-    // when the current future completes.
-    addCallback([&] {
-      std::unique_lock<std::mutex> lock(mutex_);
-      finished.notify_all();
-      fired = true;
-    });
-
-    // The current thread will be blocked unless the above callback is fired.
     std::unique_lock<std::mutex> lock(mutex_);
-    while (!fired) {
-      finished.wait(lock);
-    }
+    cv_.wait(lock, [&] { return completed_; });
 
-    AT_ASSERT(completed());
+    AT_ASSERT(completed_);
   }
 
   /**
@@ -601,35 +584,33 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   void markCompleted(IValue value) {
     {
-      // This is not to protect completed_ but to create a barrier
-      // from possible addCallback() calls
       std::unique_lock<std::mutex> lock(mutex_);
-      AT_ASSERT(!completed());
+      AT_ASSERT(!completed_);
       completed_ = true;
       value_ = std::move(value);
     }
 
+    cv_.notify_all();
     fireCallbacks();
   }
 
   void markCompleted(FutureError&& error_) {
     {
-      // This is not to protect completed_ but to create a barrier
-      // from possible addCallback() calls
       std::unique_lock<std::mutex> lock(mutex_);
-      AT_ASSERT(!completed());
+      AT_ASSERT(!completed_);
       completed_ = true;
       has_error = true;
       error = std::move(error_);
     }
 
+    cv_.notify_all();
     fireCallbacks();
   }
 
   // Get the result of the current future.
   IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
-    AT_ASSERT(completed());
+    AT_ASSERT(completed_);
     if (has_error) {
       throw error;
     }
@@ -644,7 +625,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   void addCallback(std::function<void(void)> callback) {
     std::unique_lock<std::mutex> lock(mutex_);
-    if (completed()) {
+    if (completed_) {
       lock.unlock();
       callback();
       return;
@@ -654,6 +635,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // Check if the current future has completed
   bool completed() {
+    std::unique_lock<std::mutex> lock(mutex_);
     return completed_;
   }
 
@@ -673,8 +655,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   std::mutex mutex_;
+  std::condition_variable cv_;
   IValue value_; // when finished the value
-  std::atomic_bool completed_ = {false}; // is this future complete
+  bool completed_ = false; // is this future complete
   std::vector<std::function<void(void)>> callbacks;
   bool has_error = false;
   FutureError error;
