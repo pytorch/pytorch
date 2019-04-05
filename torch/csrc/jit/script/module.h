@@ -76,7 +76,7 @@ struct Method {
 
   void run(Stack& stack) {
     for (auto input : initial_ivalues_) {
-      push(stack, *input);
+      push(stack, input.value());
     }
     get_executor().run(stack);
   }
@@ -93,7 +93,7 @@ struct Method {
 
   std::shared_ptr<Graph> graph_for(Stack inputs) {
     for (auto tp : initial_ivalues_) {
-      inputs.emplace_back(*tp);
+      inputs.emplace_back(tp.value());
     }
     return get_executor().graphFor(inputs);
   }
@@ -122,7 +122,7 @@ struct Method {
     return graph()->inputs().size() - initial_ivalues_.size();
   }
   TORCH_API Value* get_or_add_parameter(Slot slot) {
-    AT_ASSERT(slot->isTensor());
+    AT_ASSERT(slot.value().isTensor());
     return get_or_add_attribute(TensorType::get(), slot);
   }
 
@@ -154,7 +154,7 @@ struct Method {
       stack.emplace_back(std::move(i));
     }
     for (const Slot& inp : initial_ivalues_) {
-      stack.push_back(*inp);
+      stack.push_back(inp.value());
     }
     setInputTensorTypes(*retval, stack);
     PropagateInputShapes(retval);
@@ -168,8 +168,8 @@ struct Method {
       bool propagate = true) {
     auto retval = graph_->copy();
     for (auto inp : initial_ivalues_) {
-      if (inp->isTensor()) {
-        inputs.push_back(inp->toTensor());
+      if (inp.value().isTensor()) {
+        inputs.push_back(inp.value().toTensor());
       }
     }
     if (propagate) {
@@ -406,7 +406,7 @@ struct Module {
   void register_buffer(const std::string& name, autograd::Variable v) {
     if (auto b = find_attribute(name)) {
       AT_ASSERT(b->type()->isSubtypeOf(TensorType::get()));
-      *b->slot() = v;
+      b->slot().setValue(v);
       return;
     }
     insert(
@@ -424,7 +424,7 @@ struct Module {
       return;
     }
     if (auto p = find_parameter(name)) {
-      *p->slot() = v;
+      p->slot().setValue(v);
       return;
     }
     insert(
@@ -497,15 +497,15 @@ struct Module {
   }
 
   void set_parameter(const std::string& name, at::Tensor v) {
-    *parameter_slot(name) = std::move(v);
+    parameter_slot(name).setValue(std::move(v));
   }
 
   autograd::Variable get_parameter(const std::string& name) const {
-    return autograd::as_variable_ref(parameter_slot(name)->toTensor());
+    return autograd::as_variable_ref(parameter_slot(name).value().toTensor());
   }
 
   IValue get_attribute(const std::string& name) const {
-    return *attributes_[get_offset(name, EntityType::ATTRIBUTE)].slot();
+    return attributes_[get_offset(name, EntityType::ATTRIBUTE)].slot().value();
   }
 
   autograd::Variable get_buffer(const std::string& name) const {
@@ -579,7 +579,7 @@ struct Module {
   /// True if the module is in training mode.
   bool is_training() {
     if (auto p = find_buffer("training")) {
-      return p->slot()->toTensor().item<int64_t>() == 1;
+      return p->slot().value().toTensor().item<int64_t>() == 1;
     }
     // We are in training mode by default
     return true;
@@ -648,7 +648,7 @@ struct Module {
     for (auto& param : get_parameters()) {
       curr->register_parameter(
           param.name(),
-          param.slot()->toTensor(),
+          param.slot().value().toTensor(),
           /*is_buffer=*/false);
       parameter_remap[param.slot()] = curr->parameter_slot(param.name());
     }
@@ -656,7 +656,7 @@ struct Module {
       if (!attr.type()->isSubtypeOf(TensorType::get())) {
         continue;
       }
-      curr->register_buffer(attr.name(), attr.slot()->toTensor());
+      curr->register_buffer(attr.name(), attr.slot().value().toTensor());
       parameter_remap[attr.slot()] = curr->find_buffer(attr.name())->slot();
     }
     for (auto& mod : get_modules()) {

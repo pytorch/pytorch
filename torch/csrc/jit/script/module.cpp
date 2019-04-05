@@ -56,7 +56,7 @@ Value* try_emit_call_to(
              " from a raw graph. File a bug report";
     }
     // TODO: preserve the type information so we don't have to infer it here
-    auto type = incompleteInferTypeFrom(*member);
+    auto type = incompleteInferTypeFrom(member.value());
     matched_schema->inputs.push_back(
         caller->get_or_add_attribute(type, member));
   }
@@ -128,7 +128,7 @@ void Module::to_impl(
   // Then convert every of our parameters.
   for (auto& parameter : get_parameters()) {
     // Need to access the `at::Tensor` as a `Variable` here.
-    autograd::Variable variable = parameter.slot()->toTensor();
+    autograd::Variable variable = parameter.slot().value().toTensor();
     at::Tensor data = variable.data();
     // Use the data's original device or dtype if not supplied here.
     auto new_data = data.to(

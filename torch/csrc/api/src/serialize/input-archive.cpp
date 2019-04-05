@@ -32,7 +32,7 @@ void InputArchive::read(
       "'");
   // clang-format off
   auto read_param = is_buffer ? buffer : param;
-  auto read_tensor = read_param->slot()->toTensor();
+  auto read_tensor = read_param->slot().value().toTensor();
   AT_CHECK(
       bool(buffer) == is_buffer,
       "Expected deserialized tensor for key '", key,

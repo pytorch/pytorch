@@ -15,10 +15,10 @@ void check_all_parameters(
     const torch::jit::script::Module& module,
     Predicate predicate) {
   for (const auto& parameter : module.get_parameters()) {
-    AT_ASSERT(predicate(parameter.slot()->toTensor()));
+    AT_ASSERT(predicate(parameter.slot().value().toTensor()));
   }
   for (const auto& child : module.get_modules()) {
-    check_all_parameters(module, predicate);
+    check_all_parameters(*child, predicate);
   }
 }
 } // namespace helpers
