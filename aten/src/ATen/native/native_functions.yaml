@@ -53,6 +53,7 @@
     CUDA: _cudnn_rnn
 
 - func: _cudnn_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, BoolTensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
+  matches_jit_signature: False
   dispatch:
     CUDA: _cudnn_rnn_backward
 
@@ -62,6 +63,7 @@
     CUDA: _cudnn_init_dropout_state
 
 - func: _debug_has_internal_overlap(Tensor self) -> int
+  matches_jit_signature: False
   variants: function
 
 - func: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
@@ -801,6 +803,7 @@
   matches_jit_signature: True
 
 - func: embedding_dense_backward(Tensor grad_output, IndexTensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
+  matches_jit_signature: False
   dispatch:
     CPU: embedding_dense_backward_cpu
     CUDA: embedding_dense_backward_cuda
@@ -839,6 +842,7 @@
   matches_jit_signature: True
 
 - func: _embedding_bag_dense_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, IndexTensor maximum_indices, int num_weights, bool scale_grad_by_freq, int mode) -> Tensor
+  matches_jit_signature: False
   dispatch:
     CPU: _embedding_bag_dense_backward_cpu
     CUDA: _embedding_bag_dense_backward_cuda
@@ -1692,6 +1696,7 @@
   matches_jit_signature: True
 
 - func: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
+  matches_jit_signature: False
 
 - func: pdist(Tensor self, float p=2) -> Tensor
   matches_jit_signature: True
@@ -1728,6 +1733,7 @@
   matches_jit_signature: True
 
 - func: rand(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
+  matches_jit_signature: False
 
 - func: rand(int[] size, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -1745,11 +1751,13 @@
   matches_jit_signature: True
 
 - func: randint(int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
+  matches_jit_signature: False
 
 - func: randint(int low, int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
   matches_jit_signature: True
 
 - func: randint(int low, int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
+  matches_jit_signature: False
 
 - func: randint(int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -1779,6 +1787,7 @@
   matches_jit_signature: True
 
 - func: randn(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
+  matches_jit_signature: False
 
 - func: randn(int[] size, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -1796,6 +1805,7 @@
   matches_jit_signature: True
 
 - func: randperm(int n, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
+  matches_jit_signature: False
 
 - func: randperm(int n, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -2294,6 +2304,7 @@
   device_guard: False
 
 - func: one_hot(Tensor self, int num_classes=-1) -> Tensor
+  matches_jit_signature: False
   python_module: nn
   variants: function
 
@@ -3593,11 +3604,13 @@
   variants: method, function
 
 - func: tril_indices(int row, int col, int offset=0, *, TensorOptions options=at::kLong) -> Tensor
+  matches_jit_signature: False
   dispatch:
     CPU: tril_indices_cpu
     CUDA: tril_indices_cuda
 
 - func: triu_indices(int row, int col, int offset=0, *, TensorOptions options=at::kLong) -> Tensor
+  matches_jit_signature: False
   dispatch:
     CPU: triu_indices_cpu
     CUDA: triu_indices_cuda
