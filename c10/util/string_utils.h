@@ -47,11 +47,21 @@ inline double stod(const std::string& str, std::size_t* pos = 0) {
   }
   return val;
 }
+
+inline long long stoll(const std::string& str) {
+  // std::stoll doesn't exist in our Android environment, we need to implement
+  // it ourselves.
+  std::istringstream s(str);
+  long long result = 0;
+  s >> result;
+  return result;
+}
 #else
 #define CAFFE2_TESTONLY_WE_ARE_USING_CUSTOM_STRING_FUNCTIONS 0
 using std::stod;
 using std::stoi;
 using std::stoull;
+using std::stoll;
 using std::to_string;
 #endif // defined(__ANDROID__) || defined(CAFFE2_FORCE_STD_STRING_FALLBACK_TEST)
 

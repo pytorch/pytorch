@@ -89,7 +89,7 @@ std::string kindToString(int kind) {
     TC_FORALL_TOKEN_KINDS(DEFINE_CASE)
 #undef DEFINE_CASE
     default:
-      throw std::runtime_error("Unknown kind: " + std::to_string(kind));
+      throw std::runtime_error("Unknown kind: " + c10::guts::to_string(kind));
   }
 }
 
@@ -97,6 +97,7 @@ SharedParserData& sharedParserData() {
   static SharedParserData data; // safely handles multi-threaded init
   return data;
 }
+
 } // namespace script
 } // namespace jit
 } // namespace torch
