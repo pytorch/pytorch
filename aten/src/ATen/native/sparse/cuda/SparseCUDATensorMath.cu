@@ -481,6 +481,9 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
 // see NOTE [ sparse.sum() backward ]
 // --------------------------------------------------------------------
 template <typename scalar_t>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 __global__ void _sparse_sum_backward_cuda_kernel(
   int64_t total_threads,
   const TensorInfo<int64_t, int64_t> grad_indices_ti,
