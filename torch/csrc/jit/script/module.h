@@ -748,8 +748,9 @@ struct Module {
   Slot appendSlot(const std::string& name, TypePtr typ, IValue value) {
     const ClassTypePtr& type = module_value_->type();
     type->addAttribute(name, std::move(typ));
-    module_value_->appendSlot(std::move(value));
-    return Slot(module_value_, type->attributeNames().size() - 1);
+    auto slot_index = type->getAttributeSlot(name);
+    module_value_->setSlot(slot_index, std::move(value));
+    return Slot(module_value_, slot_index);
   }
 
   // modules have a single namespace, but spread over 4 different concepts:

@@ -695,6 +695,12 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   }
 
   void setSlot(size_t slot, IValue v) {
+    if (slot >= slots_.size()) {
+      // for module types, it is possible that the members of the class have
+      // expanded after the object was created. In this case, we expand
+      // the slots to the right size
+      resizeObject(slot);
+    }
     slots_[slot] = v;
   }
 
@@ -715,6 +721,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   }
 
  private:
+  void resizeObject(size_t slot);
   std::shared_ptr<ClassType> type_;
   std::vector<IValue> slots_;
 };
