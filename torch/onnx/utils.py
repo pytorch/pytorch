@@ -354,7 +354,6 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
                 weight_proto_file, "wb", lambda f: f.write(v))
     else:
         raise RuntimeError('Unknown export type')
-
     return torch_out
 
 
@@ -498,7 +497,7 @@ def _graph_op(g, opname, *raw_args, **kwargs):
 # In abstract, it would be better for us to export inplace annotations,
 # than to not export them, since it is useful information that can
 # help the target of an ONNX export export more efficiently.  However,
-# ONNX doesn't currently formalize inplace.  Fortunately, it's sound to drop
+# ONNX doesn't currently formalize inplace. Fortunately, it's sound to drop
 # inplace annotations, but we are losing information this way.
 
 

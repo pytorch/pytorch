@@ -22,6 +22,7 @@
 
 #include <fstream>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <stack>
 #include <string>
@@ -88,7 +89,8 @@ void validateBlock(
       bool is_aten_enabled = operator_export_type ==
               onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
           operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
-      if (!node->kind().is_onnx() && !node->kind().is_caffe2() && !is_aten_enabled && !node->mustBeNone()) {
+      if (!node->kind().is_onnx() && !node->kind().is_caffe2() &&
+          !is_aten_enabled && !node->mustBeNone()) {
         FAIL_EXPORT(
             "Couldn't export operator " + node->kind().toDisplayString() +
             "\n\nDefined at:\n" + getNodeStackTraceString(node));
@@ -157,7 +159,7 @@ class EncoderBase {
   size_t num_blocks_;
   onnx_torch::OperatorExportTypes operator_export_type_;
   bool strip_doc_;
-  std::unordered_set<std::string> domains_;
+  std::set<std::string> domains_;
 };
 
 onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {

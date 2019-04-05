@@ -435,38 +435,31 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
 }
 
 void addInputs(Node* n, const char* name, const ArrayRef<double>& value) {
-  AT_ERROR("Tracing float lists currently not supported!");
-}
-
-void addInputs(
-    Node* n,
-    const char* name,
-    const std::vector<double>& value) {
   std::vector<Value*> info;
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasValue(name)) {
-    // FIXME
-    throw std::runtime_error("need appropriate handling");
+    // TODO the double list has no special handling in ArgumentStash yet.
+    throw std::runtime_error("ArgumentStash doesn't support double list yet.");
   } else {
     info.resize(value.size());
   }
 
   auto& g = getTracingState()->graph;
   for (size_t i = 0; i < info.size(); ++i) {
-    if (info[i] != nullptr)
-      continue;
+    AT_ASSERT(info[i] == nullptr);
     info[i] = g->insertConstant(value[i]);
     recordSourceLocation(info[i]->node());
   }
-  for (jit::Value* v : info) {
-    if (*v->type() != *jit::FloatType::get()) {
-      throw std::runtime_error(
-          "Type mismatch in setposattr for IntArrayRef. Check that your program "
-          "is valid without tracing, and please file a bug report if it is.");
-    }
-  }
   n->addInput(
       g->insertNode(g->createList(jit::FloatType::get(), info))->output());
+}
+
+void addInputs(
+    Node* n,
+    const char* name,
+    const std::vector<double>& value) {
+  ArrayRef<double> value_arrayref(value);
+  addInputs(n, name, value_arrayref);
 }
 
 void addOutput(Node* node, const at::Tensor& output) {
