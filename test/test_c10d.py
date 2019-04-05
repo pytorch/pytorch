@@ -505,7 +505,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
         opts.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
-        opts.timeout = 1.0
+        opts.timeout = 5.0
         opts.threads = threads
         return opts
 
