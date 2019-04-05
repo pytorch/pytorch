@@ -3,7 +3,7 @@
 
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
-#include <torch/csrc/jit/function_schema_parser.h>
+#include <torch/csrc/jit/script/function_schema_parser.h>
 
 using c10::RegisterOperators;
 using c10::OperatorKernel;
