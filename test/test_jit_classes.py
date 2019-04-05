@@ -9,6 +9,10 @@ from common_utils import run_tests
 from test_jit import JitTestCase
 from torch.testing import FileCheck
 
+"""
+Tests for TorchScript classes.
+"""
+
 
 class TestClassType(JitTestCase):
     def test_get_with_method(self):
