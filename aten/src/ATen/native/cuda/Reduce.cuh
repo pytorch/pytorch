@@ -652,7 +652,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
   char* out_data = (char*)iter.data_ptr(0);
   const auto noutputs = iter.noutputs();
-  char* out_data_p[noutputs];
+  const char* out_data_p[noutputs];
   for (int i = 0; i < noutputs; i++) {
     out_data_p[i] = (char*)iter.data_ptr(i);
   }
