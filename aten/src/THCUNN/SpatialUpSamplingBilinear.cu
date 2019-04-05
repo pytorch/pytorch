@@ -12,6 +12,9 @@
 #include <THC/THCAtomics.cuh>
 
 template<typename Dtype, typename Acctype>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(1024)
+#endif
 __global__ void caffe_gpu_interp2_kernel(const int n,
     const Acctype rheight, const Acctype rwidth, const bool align_corners,
     const THCDeviceTensor<Dtype, 4> data1, THCDeviceTensor<Dtype, 4> data2) {
@@ -65,6 +68,9 @@ __global__ void caffe_gpu_interp2_kernel(const int n,
 
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename Dtype, typename Acctype>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(1024)
+#endif
 __global__ void caffe_gpu_interp2_kernel_backward(const int n,
     const Acctype rheight, const Acctype rwidth, const bool align_corners,
     THCDeviceTensor<Dtype, 4> data1, const THCDeviceTensor<Dtype, 4> data2){
