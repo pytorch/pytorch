@@ -391,9 +391,7 @@ def add_build_env_defs(jobs_dict):
     config_list = instantiate_configs()
     for c in config_list:
 
-        phases = dimensions.PHASES
-        if c.restrict_phases:
-            phases = c.restrict_phases
+        phases = c.restrict_phases or dimensions.PHASES
 
         for phase in phases:
 
@@ -425,9 +423,7 @@ def get_workflow_list():
     x = []
     for conf_options in config_list:
 
-        phases = dimensions.PHASES
-        if conf_options.restrict_phases:
-            phases = conf_options.restrict_phases
+        phases = conf_options.restrict_phases or dimensions.PHASES
 
         for phase in phases:
 
