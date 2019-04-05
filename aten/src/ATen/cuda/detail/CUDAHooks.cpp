@@ -115,18 +115,62 @@ long CUDAHooks::versionCuDNN() const {
 
 std::string CUDAHooks::showConfig() const {
   std::ostringstream oss;
+
+  int runtimeVersion;
+  cudaRuntimeGetVersion(&runtimeVersion);
+
+  auto printCudaStyleVersion = [&](int v) {
+    oss << (v / 1000) << "." << (v / 10 % 100);
+    if (v % 10 != 0) {
+      oss << "." << (v % 10);
+    }
+  };
+
 #ifndef __HIP_PLATFORM_HCC__
-  oss << "  - CUDA Runtime " << (CUDART_VERSION / 1000) << "." << (CUDART_VERSION / 10 % 100) << "." << (CUDART_VERSION % 10) << "\n";
-#if AT_CUDNN_ENABLED()
-  oss << "  - CuDNN " << CUDNN_MAJOR << "." << CUDNN_MINOR << "." << CUDNN_PATCHLEVEL << "\n";
+  oss << "  - CUDA Runtime ";
+#else
+  oss << "  - HIP Runtime ";
 #endif
+  printCudaStyleVersion(runtimeVersion);
+  oss << "\n";
+
+  // TODO: Make HIPIFY understand CUDART_VERSION macro
+#ifndef __HIP_PLATFORM_HCC__
+  if (runtimeVersion != CUDART_VERSION) {
+    oss << "  - Built with CUDA Runtime ";
+    printCudaStyleVersion(CUDART_VERSION);
+    oss << "\n";
+  }
+  oss << "  - NVCC architecture flags: " << NVCC_FLAGS_EXTRA << "\n";
+#endif
+
+#ifndef __HIP_PLATFORM_HCC__
+#if AT_CUDNN_ENABLED()
+  size_t cudnnVersion = cudnnGetVersion();
+  oss << "  - CudNN ";
+  printCudaStyleVersion(cudnnVersion);
+  size_t cudnnCudartVersion = cudnnGetCudartVersion();
+  if (cudnnCudartVersion != CUDART_VERSION) {
+    oss << "  (built against CUDA ";
+    printCudaStyleVersion(cudnnCudartVersion);
+    oss << ")";
+  }
+  oss << "\n";
+  if (cudnnVersion != CUDNN_VERSION) {
+    oss << "  - Built with CuDNN ";
+    printCudaStyleVersion(CUDNN_VERSION);
+    oss << "\n";
+  }
+#endif
+#else
+  // TODO: Check if miopen has the functions above and unify
+  oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << "." << MIOPEN_VERSION_MINOR << "." MIOPEN_VERSION_PATCH << "\n";
+#endif
+
 #ifdef USE_MAGMA
   oss << "  - Magma " << MAGMA_VERSION_MAJOR << "." << MAGMA_VERSION_MINOR << "." << MAGMA_VERSION_MICRO << "\n";
 #endif
-#else
-  // TODO: Actual information here
-  oss << "  - HIP\n";
-#endif
+
   return oss.str();
 }
 
