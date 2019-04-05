@@ -7,19 +7,15 @@ import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep, utils, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
-from dnnlowp_test_utils import check_quantized_results_close
+from dnnlowp_test_utils import (
+    check_quantized_results_close,
+    generate_conv_inputs,
+)
 from hypothesis import assume, given
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
-workspace.GlobalInit(
-    [
-        "caffe2",
-        "--caffe2_omp_num_threads=11",
-        # Increase this threshold to test acc16 with randomly generated data
-        "--caffe2_dnnlowp_acc16_density_threshold=0.9",
-    ]
-)
+workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
@@ -258,7 +254,9 @@ class DNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
             W_min = -100
             W_max = W_min + 255
         W = (
-            np.random.rand(output_channels, kernel, kernel, input_channels_per_group)
+            np.random.rand(
+                output_channels, kernel, kernel, input_channels_per_group
+            )
             * 4
             - 2
             + W_min
