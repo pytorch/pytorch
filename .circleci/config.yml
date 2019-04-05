@@ -1364,6 +1364,13 @@ jobs:
       PYTHON_VERSION: "3.6"
     <<: *pytorch_linux_build_defaults
 
+  pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:291"
+      PYTHON_VERSION: "3.6"
+    <<: *pytorch_linux_build_defaults
+
   pytorch_short_perf_test_gpu:
     environment:
       BUILD_ENVIRONMENT: pytorch-short-perf-test-gpu
@@ -3154,6 +3161,7 @@ workflows:
           requires:
             - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
       - pytorch_linux_xenial_cuda10_cudnn7_py3_gcc7_build
+      - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_build
 
       # Pytorch MacOS builds
       - pytorch_macos_10_13_py3_build
