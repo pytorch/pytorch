@@ -126,7 +126,7 @@ at::Tensor pinnedLike(at::Tensor& tensor) {
   auto* allocator = at::cuda::getPinnedMemoryAllocator();
   auto storage = c10::Storage(
       tensor.dtype(),
-      at::computeStorageSize(tensor.sizes(), tensor.strides()),
+      at::detail::computeStorageSize(tensor.sizes(), tensor.strides()),
       allocator,
       /*resizable=*/false
   );
