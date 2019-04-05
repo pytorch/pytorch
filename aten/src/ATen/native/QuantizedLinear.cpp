@@ -1,7 +1,6 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtilsMulti.h"
-#include "ATen/cpp_custom_type_hack.h"
 
 #ifdef USE_FBGEMM
 #include "fbgemm/Fbgemm.h"
@@ -17,14 +16,6 @@
 #include <vector>
 
 #include <chrono>
-
-namespace caffe2 {
-#ifdef USE_FBGEMM
-// Required for cpp_custom_type_hack to work
-CAFFE_KNOWN_TYPE(fbgemm::PackBMatrix<int8_t>);
-#endif // USE_FBGEMM
-}
-
 namespace at {
 namespace native {
 
@@ -136,12 +127,13 @@ Tensor fbgemm_linear_int8_weight(
   auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
   // Pull out the PackBMatrix instance from the owning tensor
-  auto& packB = cpp_custom_type_hack::cast<fbgemm::PackBMatrix<int8_t>>(packed);
+  auto* packB = reinterpret_cast<fbgemm::PackBMatrix<int8_t>*>(
+      packed.storage().data_ptr().get());
 
   // Do the GEMM
   fbgemm::fbgemmPacked(
       /*packA=*/packA,
-      /*packB=*/packB,
+      /*packB=*/*packB,
       /*C=*/output.data<float>(),
       /*C_buffer=*/buffer.data<int32_t>(),
       /*ldc=*/N,
@@ -241,7 +233,7 @@ Tensor fbgemm_pack_quantized_matrix(
   AT_ASSERTM(fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
   auto weight_contig = weight.contiguous();
   auto contiguous_ptr = weight_contig.data<int8_t>();
-  auto ptr = std::make_unique<fbgemm::PackBMatrix<int8_t>>(
+  auto* ptr = new fbgemm::PackBMatrix<int8_t>(
       /*trans=*/fbgemm::matrix_op_t::Transpose,
       /*nRow=*/K,
       /*nCol=*/N,
@@ -249,7 +241,26 @@ Tensor fbgemm_pack_quantized_matrix(
       /*ld=*/K,
       /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
       /*groups=*/1);
-  return cpp_custom_type_hack::create(std::move(ptr));
+
+  // We store this instance away in a Tensor and register a deleter function
+  // so that we do not leak memory. On the other side, we pull out the storage's
+  // data_ptr and get the PackBMatrix's pointer.
+  at::DataPtr at_ptr(
+      ptr,
+      ptr,
+      [](void* ptr) {
+        fbgemm::PackBMatrix<int8_t>* typed_ptr =
+            reinterpret_cast<fbgemm::PackBMatrix<int8_t>*>(ptr);
+        delete typed_ptr;
+      },
+      at::kCPU);
+
+  auto retval = at::empty(
+      {sizeof(fbgemm::PackBMatrix<int8_t>)}, weight.options().dtype(at::kByte));
+
+  retval.storage().set_data_ptr(std::move(at_ptr));
+
+  return retval;
 }
 
 #else // USE_FBGEMM
