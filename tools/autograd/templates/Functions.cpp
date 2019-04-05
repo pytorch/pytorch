@@ -524,6 +524,17 @@ Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, const Tensor &
 Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntArrayRef sizes, IntArrayRef strides, const Scalar & alpha) {
   // if input was column-major, return grad as column-order for efficiency
   if (strides[0] == 1 && strides[1] == sizes[0]) {
+    if (mat1.is_sparse()) {
+      // Since mm(dense, sparse) doesn't exist,
+      // pass a transposed output matrix to the underlying "addmm"
+      // function directly.
+      int64_t out_rows = mat1.size(1);
+      int64_t out_cols = grad.size(1);
+      Tensor t = at::zeros({}, grad.options()).expand({out_rows, out_cols}, true);
+      Tensor r = at::empty({out_cols, out_rows}, grad.options()).t();
+      at::s_native_addmm_out(r, t, mat1.t(), grad, alpha, 1);
+      return r;
+    }
     return maybe_multiply(grad.t().mm(mat1).t(), alpha);
   } else {
     return maybe_multiply(mat1.t().mm(grad), alpha);
