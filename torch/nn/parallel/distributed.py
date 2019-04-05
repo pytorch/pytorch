@@ -256,18 +256,25 @@ class DistributedDataParallel(Module):
             self.modules_params_data[dev_idx] = [p.data for p in module.parameters()]
             self.modules_buffers_data[dev_idx] = [b.data for b in module.buffers()]
 
-        # Note: reverse list of parameters because we want to approximate the
-        # order in which their gradients are produced, and assume they
-        # are defined in the order in which they are used in the forward pass.
         param_list = [
-            list(filter(lambda p: p.requires_grad, reversed(list(module.parameters()))))
+            list(filter(lambda p: p.requires_grad, module.parameters()))
             for module in self._module_copies]
+
+        # The bucket size limit is specified in the constructor.
+        # Additionally, we allow for a single small bucket for parameters
+        # that are defined first, such that their gradients don't spill into
+        # a much larger bucket, adding unnecessary latency after gradient
+        # computation finishes. Experiments showed 1MB is a reasonable value.
         bucket_indices = dist._compute_bucket_assignment_by_size(
             param_list[0],
-            self.bucket_bytes_cap)
+            [1024 * 1024, self.bucket_bytes_cap])
+
+        # Note: reverse list of buckets because we want to approximate the
+        # order in which their gradients are produced, and assume they
+        # are used in the forward pass in the order they are defined.
         self.reducer = dist.Reducer(
             param_list,
-            bucket_indices,
+            list(reversed(bucket_indices)),
             self.process_group)
 
         # passing a handle to torch.nn.SyncBatchNorm layer

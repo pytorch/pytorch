@@ -43,6 +43,6 @@ void syncReduction(
 
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
-    size_t bucket_size);
+    std::vector<size_t> bucket_size);
 
 } // namespace c10d

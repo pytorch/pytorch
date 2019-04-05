@@ -43,10 +43,10 @@ void copyBroadcastTensorsToReplicas(
 // the same type, on the same device, so a bucket can identified by a
 // composite key of a tensor's type identifier and its device.
 struct BucketKey {
-  BucketKey(c10::TensorTypeId type, c10::Device device)
+  BucketKey(c10::ScalarType type, c10::Device device)
       : type(std::move(type)), device(std::move(device)) {}
 
-  const c10::TensorTypeId type;
+  const c10::ScalarType type;
   const c10::Device device;
 
   // See torch/csrc/utils/hash.h for dispatch code.
@@ -261,9 +261,17 @@ void syncReduction(
 // of device placement and will not allow buckets to span devices.
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
-    size_t bucket_size_limit) {
+    std::vector<size_t> bucket_size_limits) {
   std::vector<std::vector<size_t>> result;
   result.reserve(tensors.size());
+
+  // Keep iterator into the size_limit vector by tensor type and device.
+  // This is done so that we can use the consecutive bucket limits per type.
+  std::unordered_map<
+      BucketKey,
+      std::vector<size_t>::iterator,
+      torch::hash<BucketKey>>
+      bucket_size_limit_iterators;
 
   // Local accumulator type for a single bucket.
   struct BucketAccumulator {
@@ -278,21 +286,50 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
   for (size_t i = 0; i < tensors.size(); i++) {
     const auto& tensor = tensors[i];
     AT_ASSERTM(!tensor.is_sparse(), "No support for sparse tensors.");
-    auto key = BucketKey(tensor.type_id(), tensor.device());
+    auto key = BucketKey(tensor.scalar_type(), tensor.device());
     auto& bucket = buckets[key];
     bucket.indices.push_back(i);
     bucket.size += tensor.numel() * tensor.element_size();
+
+    // Initialize bucket size limit iterator if necessary.
+    if (bucket_size_limit_iterators.count(key) == 0) {
+      bucket_size_limit_iterators[key] = bucket_size_limits.begin();
+    }
+
+    auto& bucket_size_limit_iterator = bucket_size_limit_iterators[key];
+    const auto bucket_size_limit = *bucket_size_limit_iterator;
     if (bucket.size >= bucket_size_limit) {
       result.emplace_back(std::move(bucket.indices));
       bucket = BucketAccumulator();
+
+      // Advance to the next bucket size limit for this type/device.
+      auto next = bucket_size_limit_iterator + 1;
+      if (next != bucket_size_limits.end()) {
+        bucket_size_limit_iterator = next;
+      }
     }
   }
 
   // Add remaining buckets.
   for (auto& it : buckets) {
     auto& bucket = it.second;
-    result.emplace_back(std::move(bucket.indices));
+    if (!bucket.indices.empty()) {
+      result.emplace_back(std::move(bucket.indices));
+    }
   }
+
+  // Sort resulting buckets by the minimum tensor index they include.
+  // We assume that the order of the tensors is the order in which they are
+  // used (or the reverse order in which their gradients are produced).
+  // This sorting step ensures that the buckets are ready in consecutive order.
+  std::sort(
+      result.begin(),
+      result.end(),
+      [](const std::vector<size_t>& a, const std::vector<size_t>& b) {
+        const auto amin = std::min_element(a.begin(), a.end());
+        const auto bmin = std::min_element(b.begin(), b.end());
+        return *amin < *bmin;
+      });
 
   return result;
 }
