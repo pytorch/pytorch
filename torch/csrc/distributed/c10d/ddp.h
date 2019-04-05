@@ -41,4 +41,8 @@ void syncReduction(
     std::vector<at::Tensor>& gradsBatch,
     at::Tensor& gradsBatchCoalesced);
 
+std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
+    const std::vector<at::Tensor>& tensors,
+    size_t bucket_size);
+
 } // namespace c10d

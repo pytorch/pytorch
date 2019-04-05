@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/c10d/ddp.h>
 
 #include <torch/csrc/cuda/comm.h>
+#include <torch/csrc/utils/hash.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
 #ifdef USE_C10D_NCCL
@@ -37,6 +38,27 @@ void copyBroadcastTensorsToReplicas(
     }
   }
 }
+
+// Tensors may be coalesced into buckets. Buckets must contain tensors of
+// the same type, on the same device, so a bucket can identified by a
+// composite key of a tensor's type identifier and its device.
+struct BucketKey {
+  BucketKey(c10::TensorTypeId type, c10::Device device)
+      : type(std::move(type)), device(std::move(device)) {}
+
+  const c10::TensorTypeId type;
+  const c10::Device device;
+
+  // See torch/csrc/utils/hash.h for dispatch code.
+  static size_t hash(const BucketKey& key) {
+    return torch::get_hash(key.type, key.device);
+  }
+};
+
+inline bool operator==(const BucketKey& lhs, const BucketKey& rhs) {
+  return lhs.type == rhs.type && lhs.device == rhs.device;
+}
+
 } // namespace
 
 std::vector<std::vector<at::Tensor>> bucketTensors(
@@ -232,6 +254,47 @@ void syncReduction(
   // (NB: original_stream is the current stream PRIOR to the guard.  Might
   // live on a completely different device than our current device here!)
   event.block(cudaGuard.original_stream());
+}
+
+// This is equivalent to take_tensors but returns indices into the
+// tensor list argument for bucket assignment. Also, it is aware
+// of device placement and will not allow buckets to span devices.
+std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
+    const std::vector<at::Tensor>& tensors,
+    size_t bucket_size_limit) {
+  std::vector<std::vector<size_t>> result;
+  result.reserve(tensors.size());
+
+  // Local accumulator type for a single bucket.
+  struct BucketAccumulator {
+    std::vector<size_t> indices;
+    size_t size = 0;
+  };
+
+  // Keep vector of indices and size accumulator by tensor type and device.
+  std::unordered_map<BucketKey, BucketAccumulator, torch::hash<BucketKey>>
+      buckets;
+
+  for (size_t i = 0; i < tensors.size(); i++) {
+    const auto& tensor = tensors[i];
+    AT_ASSERTM(!tensor.is_sparse(), "No support for sparse tensors.");
+    auto key = BucketKey(tensor.type_id(), tensor.device());
+    auto& bucket = buckets[key];
+    bucket.indices.push_back(i);
+    bucket.size += tensor.numel() * tensor.element_size();
+    if (bucket.size >= bucket_size_limit) {
+      result.emplace_back(std::move(bucket.indices));
+      bucket = BucketAccumulator();
+    }
+  }
+
+  // Add remaining buckets.
+  for (auto& it : buckets) {
+    auto& bucket = it.second;
+    result.emplace_back(std::move(bucket.indices));
+  }
+
+  return result;
 }
 
 } // namespace c10d
