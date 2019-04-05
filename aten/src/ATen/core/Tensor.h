@@ -220,7 +220,6 @@ class CAFFE2_API Tensor {
     return impl_->storage().is_alias_of(other.storage());
   }
   Tensor toType(const Type & t, bool non_blocking=false) const;
-  Tensor & copy_(const Tensor & src, bool non_blocking=false);
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
 
@@ -375,6 +374,7 @@ class CAFFE2_API Tensor {
   Tensor clamp_min(Scalar min) const;
   Tensor & clamp_min_(Scalar min);
   Tensor contiguous() const;
+  Tensor & copy_(const Tensor & src, bool non_blocking=false);
   Tensor cos() const;
   Tensor & cos_();
   Tensor cosh() const;

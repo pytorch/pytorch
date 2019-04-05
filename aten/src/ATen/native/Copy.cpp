@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cpu/CopyKernel.h>
 
@@ -36,6 +37,19 @@ bool copy_transpose_valid(const at::Tensor& self, const at::Tensor& src) {
 
 namespace at {
 namespace native {
+
+Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
+  Tensor b_src;
+  std::tie(b_src) = expand_inplace(self, src, "copy");
+  return s_copy_(self, b_src, non_blocking);
+}
+
+Tensor copy(const Tensor & self, const ScalarType dtype, const Device device, bool non_blocking) {
+  AT_CHECK(self.defined(), "attempt to copy an undefined tensor");
+  auto r = at::empty(self.sizes(), self.options().device(device).dtype(dtype));
+  r.copy_(self, non_blocking);
+  return r;
+}
 
 Tensor& _s_copy__cpu(Tensor& self, const Tensor& src, bool non_blocking) {
   if (src.type_id() != CPUTensorId()) {

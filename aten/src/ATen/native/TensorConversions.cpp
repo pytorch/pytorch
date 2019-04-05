@@ -20,8 +20,7 @@ static inline Device ensure_has_index(Device device) {
 }
 
 static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking) {
-  return self.dispatch_type().toBackend(options.backend()).toScalarType(typeMetaToScalarType(options.dtype()))
-                             .copy(self, non_blocking, options.device());
+  return at::copy(self, typeMetaToScalarType(options.dtype()), options.device(), non_blocking);
 }
 
 Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy) {
@@ -44,14 +43,7 @@ Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, b
       (!dtype_opt  || self.dtype()  ==  dtype_opt.value()) && !copy) {
     return self;
   }
-  auto specified_options = self.options();
-  if (device_opt) {
-    specified_options = specified_options.device(device_opt.value());
-  }
-  if (dtype_opt) {
-    specified_options = specified_options.dtype(dtype_opt.value());
-  }
-  return to_impl(self, specified_options, non_blocking);
+  return to_impl(self, options, non_blocking);
 }
 
 Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking, bool copy) {

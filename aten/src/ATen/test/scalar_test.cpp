@@ -90,8 +90,8 @@ TEST(TestScalar, TestScalar) {
   test_overflow();
 
   if (at::hasCUDA()) {
-    auto r = CUDA(Float).copy(next_h);
-    ASSERT_TRUE(CPU(Float).copy(r).equal(next_h));
+    auto r = at::copy(next_h, kFloat, at::Device(kCPU), /*non_blocking*/false);
+    ASSERT_TRUE(at::copy(r, kFloat, at::Device(kCPU), /*non_blocking*/false).equal(next_h));
   }
   ASSERT_NO_THROW(randn({10, 10, 2}, options));
 

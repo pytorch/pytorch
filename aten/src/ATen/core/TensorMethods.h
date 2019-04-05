@@ -12,7 +12,10 @@ namespace at {
 inline Tensor Tensor::toType(const Type & t, bool non_blocking) const {
   if(dispatch_type() == t)
     return *this;
-  return t.copy(*this, non_blocking);
+  return to(
+      at::device(t.device_type()).layout(t.layout()).dtype(t.scalarType()),
+      non_blocking,
+      /*copy*/ true);
 }
 
 inline Tensor Tensor::cpu() const {
@@ -25,10 +28,6 @@ inline Tensor Tensor::cuda() const {
 
 inline Tensor Tensor::hip() const {
   return toType(dispatch_type().hip());
-}
-
-inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
-  return dispatch_type().copy_(*this, src, non_blocking);
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {
@@ -180,6 +179,9 @@ inline Tensor & Tensor::clamp_min_(Scalar min) {
 }
 inline Tensor Tensor::contiguous() const {
     return dispatch_type().contiguous(*this);
+}
+inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
+    return dispatch_type().copy_(*this, src, non_blocking);
 }
 inline Tensor Tensor::cos() const {
     return dispatch_type().cos(*this);

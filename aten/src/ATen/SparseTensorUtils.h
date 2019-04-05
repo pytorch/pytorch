@@ -33,8 +33,8 @@ inline void alias_into_sparse(const SparseTensor& self, const LongTensor& indice
 inline void copy_into_sparse(const SparseTensor& self, const LongTensor& indices, const Tensor& values, bool non_blocking) {
   alias_into_sparse(
       self,
-      self._indices().dispatch_type().copy(indices, non_blocking),
-      self._values().dispatch_type().copy(values, non_blocking));
+      copy(indices, self._indices().scalar_type(), self._indices().device(), non_blocking),
+      copy(values, self._values().scalar_type(), self._values().device(), non_blocking));
 }
 
 // TODO: put this into the public API
