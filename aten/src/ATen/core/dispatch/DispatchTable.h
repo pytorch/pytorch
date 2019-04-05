@@ -152,6 +152,7 @@ class DispatchTable final {
   void registerKernel(
       TensorTypeId dispatch_key,
       const DispatchTableEntry& kernel) {
+    AT_ASSERTM(dispatch_strategy_.is_valid_, "Tried to register a kernel with a dispatch key for operator schema ", operator_name_, " that doesn't have tensor arguments.");
     kernels_.emplace(dispatch_key, kernel, operator_name_);
   }
 
@@ -193,17 +194,33 @@ class DispatchTable final {
    * @return Kernel function pointing to the right kernel for the given arguments.
    */
    const DispatchTableEntry& lookup(const Stack* stack) const {
-     TensorTypeId dispatch_key = dispatch_strategy_.get_dispatch_key(stack);
-     auto found = kernels_.lookup(dispatch_key, operator_name_);
-     if (nullptr != found) {
-       return *found;
+     if (C10_LIKELY(dispatch_strategy_.is_valid_)) {
+       TensorTypeId dispatch_key = dispatch_strategy_.get_dispatch_key(stack);
+       auto found = kernels_.lookup(dispatch_key, operator_name_);
+       if (nullptr != found) {
+         return *found;
+       }
+
+       // regular dispatch didn't find a kernel, let's check the fallback kernel.
+       if (fallback_kernel_.has_value()) {
+         return *fallback_kernel_;
+       }
+
+       // no kernel found and fallback kernel doesn't exist either
+       AT_ERROR("Didn't find kernel to dispatch to for operator '", operator_name_,
+                "'. Tried to look up kernel for dispatch key '", detail::dispatch_key_to_string(dispatch_key),
+                "'. Registered dispatch keys are: ", list_all_dispatch_keys_());
+     } else {
+       AT_ASSERTM(kernels_.isEmpty(), "Cannot have an invalid dispatch key but registered kernels");
+
+       // with an invalid dispatch key, only the fallback kernel is allowed.
+       if (fallback_kernel_.has_value()) {
+         return *fallback_kernel_;
+       }
+
+       // no kernel registered and fallback kernel doesn't exist either
+       AT_ERROR("Didn't find kernel to dispatch to for operator '", operator_name_, "'");
      }
-     if (fallback_kernel_.has_value()) {
-       return *fallback_kernel_;
-     }
-     AT_ERROR("Didn't find kernel to dispatch to for operator '", operator_name_,
-              "'. Tried to look up kernel for dispatch key '", detail::dispatch_key_to_string(dispatch_key),
-              "'. Registered dispatch keys are: ", kernels_.list_all_dispatch_keys());
    }
 
    bool isEmpty() const {
@@ -220,6 +237,13 @@ private:
     // i.e. '1' is the last argument.
     size_t reverse_index_of_first_tensor_arg_;
     bool first_tensor_arg_is_tensor_list_;
+
+    // An invalid dispatch strategy means we can't dispatch any kernels.
+    // You're able to create a dispatch table with an invalid dispatch strategy,
+    // but adding kernels to it will fail.
+    // This is used to allow creating operators with empty argument lists
+    // as long as they only have fallback kernels and no dispatched kernels.
+    bool is_valid_;
 
     TensorTypeId get_dispatch_key(const Stack* stack) const {
       auto first_tensor_arg = torch::jit::peek(
@@ -244,14 +268,24 @@ private:
     for (size_t i = 0; i < schema.arguments().size(); ++i) {
       const auto& type = schema.arguments()[i].type();
       if (type->isSubtypeOf(TensorType::get())) {
-        return {schema.arguments().size() - i, false};
+        return {schema.arguments().size() - i, false, true};
       }
       if (type->isSubtypeOf(ListType::ofTensors())) {
-        return {schema.arguments().size() - i, true};
+        return {schema.arguments().size() - i, true, true};
       }
     }
 
-    AT_ERROR("Tried to create dispatch table for operator schema ", schema.name(), " that doesn't have tensor arguments.");
+    // The function schema doesn't have tensor arguments.
+    // Return an invalid dispatch strategy.
+    return {0, false, false};
+  }
+
+  std::string list_all_dispatch_keys_() const {
+    std::string result = kernels_.list_all_dispatch_keys();
+    if (fallback_kernel_.has_value()) {
+      result += ", FALLBACK";
+    }
+    return result;
   }
 
   detail::ThreadsafeOperatorTable_ kernels_;

@@ -198,4 +198,13 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringKernelAfterw
   }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
 }
 
+TEST(OperatorRegistrationTest, givenOpWithoutKernelsWithoutTensorInputs_whenRegistering_thenRegisters) {
+  // as long as we don't register non-fallback kernels, ops without tensor arguments are fine
+
+  auto registrar = c10::RegisterOperators().op("_test::dummy() -> ()");
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value()); // assert schema is registered
+}
+
 }
