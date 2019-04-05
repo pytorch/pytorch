@@ -826,6 +826,8 @@ bool OnnxifiTransformer::supportOpC2(
     for (const auto& i : op.input()) {
       const auto it = shape_hints.find(i);
       if (it == shape_hints.end()) {
+        VLOG(1) << "Skipping " << op.type() << " (" << pos
+                << ") due to missing shape info for input " << i;
         return false;
       }
       if ((it->second).is_quantized == false) {
@@ -844,6 +846,8 @@ bool OnnxifiTransformer::supportOpC2(
     for (const auto& i : op.output()) {
       const auto it = shape_hints.find(i);
       if (it == shape_hints.end()) {
+        VLOG(1) << "Skipping " << op.type() << " (" << pos
+                << ") due to missing shape info for output " << i;
         return false;
       }
       if ((it->second).is_quantized == false) {
