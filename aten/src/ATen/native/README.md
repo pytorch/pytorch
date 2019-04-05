@@ -282,17 +282,16 @@ matter, please write in at https://github.com/pytorch/pytorch/issues/14234
 ### `matches_jit_signature`
 
 ```
-matches_jit_signature: True
+matches_jit_signature: False
 ```
 
 This will verify that the func syntax follows the JIT signature schema.
-If you are a developer outside the core team, set this to `False` first to
-help us track unification. After your tests pass try setting this to `True`
-once and leave it set to `True` if it doesn't trigger any asserts. This means
-that your signature happens to be compliant. In general, it serves as a means
+If you are a triggering an assert related to JIT signature compliance
+try adding this field and setting it to False. In general, this serves as a means
 of tracking an ongoing schema unification with the goal of aligning func syntax
 with other components of PyTorch in order to reduce overall complexity and assert
-coverage of all functions by each component.
+coverage of all functions by each component. If you find yourself having to
+add this fields add @gchanan to your PR's set of reviewers.
 
 ## Writing an implementation in C++
 

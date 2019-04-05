@@ -383,11 +383,14 @@ def run(paths):
                 declaration['return'] = return_arguments if len(output_arguments) == 0 else output_arguments
                 declaration['variants'] = func.get('variants', ['function'])
                 declaration['requires_tensor'] = func.get('requires_tensor', False)
-                try:
-                    declaration['matches_jit_signature'] = func['matches_jit_signature']
-                except KeyError:
-                    raise Exception('{} doesn\'t have matches_jit_signature field. '
-                                    'See README.md for an explanation'.format(declaration['name']))
+                declaration['matches_jit_signature'] = func.get('matches_jit_signature', None)
+                if declaration['matches_jit_signature'] is not None:
+                    assert declaration['matches_jit_signature'] is False, \
+                            "Only add the matches_jit_signature field " + \
+                            "for {} ".format(declaration['name']) + \
+                            "if set to False. See the README for details."
+                else:
+                    declaration['matches_jit_signature'] = True
                 declaration['cpu_half'] = func.get('cpu_half', False)
                 declaration['cpu_bool'] = func.get('cpu_bool', False)
                 declaration['cuda_bool'] = func.get('cuda_bool', False)
