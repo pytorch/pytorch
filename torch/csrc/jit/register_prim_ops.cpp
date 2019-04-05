@@ -600,7 +600,7 @@ RegisterOperators reg(
 	   IValue self_size, other_size;
 	   pop(stack, self_size, other_size);
 	   const auto s = self_size.toIntList()->elements();
-	   if (s == self_size.toIntList()->elements()) {
+	   if (s == other_size.toIntList()->elements()) {
 	     push(stack, IValue());
 	   } else {
 	     push(stack, s);
