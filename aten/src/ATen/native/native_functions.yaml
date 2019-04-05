@@ -63,7 +63,7 @@
     CUDA: _cudnn_init_dropout_state
 
 - func: _debug_has_internal_overlap(Tensor self) -> int
-  matches_jit_signature: False
+  matches_jit_signature: True
   variants: function
 
 - func: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
@@ -1696,7 +1696,7 @@
   matches_jit_signature: True
 
 - func: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
-  matches_jit_signature: False
+  matches_jit_signature: True
 
 - func: pdist(Tensor self, float p=2) -> Tensor
   matches_jit_signature: True
@@ -2304,7 +2304,7 @@
   device_guard: False
 
 - func: one_hot(Tensor self, int num_classes=-1) -> Tensor
-  matches_jit_signature: False
+  matches_jit_signature: True
   python_module: nn
   variants: function
 
