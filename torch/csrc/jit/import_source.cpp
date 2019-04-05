@@ -1,4 +1,5 @@
-#include <torch/csrc/jit/import_source.h>
+#include "import_source.h"
+
 #include <torch/csrc/jit/script/parser.h>
 
 namespace torch {
@@ -21,12 +22,12 @@ struct ModuleAccessorValue : public SugaredValue {
     if (NamedModule* v = module->find_module(field)) {
       return std::make_shared<ModuleAccessorValue>(v->module);
     } else if (NamedIValue* v = module->find_parameter(field)) {
-      return std::make_shared<SimpleValue>(m.get_or_add_initial_ivalue(v));
+      return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     } else if (NamedIValue* v = module->find_buffer(field)) {
-      return std::make_shared<SimpleValue>(m.get_or_add_initial_ivalue(v));
+      return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     } else if (script::NamedIValue* v = module->find_attribute(field)) {
       return std::make_shared<script::SimpleValue>(
-          m.get_or_add_initial_ivalue(v));
+          m.get_or_add_attribute(v->type(), v->slot()));
     } else if (Method* m = module->find_method(field)) {
       return std::make_shared<MethodValue>(shared_from_this(), *m);
     } else {
