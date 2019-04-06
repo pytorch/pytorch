@@ -256,7 +256,7 @@ struct SchemaParser {
 } // namespace
 } // namespace script
 
-FunctionSchema parseSchema(const std::string& schema) {
+C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
   return script::SchemaParser(schema).parseDeclarations().at(0);
 }
 
