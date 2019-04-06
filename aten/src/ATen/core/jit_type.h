@@ -1109,6 +1109,11 @@ struct CAFFE2_API ClassType : public Type {
   static ClassTypePtr create(
       const std::string& name,
       std::shared_ptr<Module> module);
+
+  // Create a type representing a Module,
+  // These do not have methods, and are not globally registered
+  static ClassTypePtr createModuleType();
+
   // returns nullptr if there is no type with that name
   static ClassTypePtr get(const std::string& name);
   // For testing: delete all registered types
@@ -1151,7 +1156,7 @@ struct CAFFE2_API ClassType : public Type {
     return attributeTypes_[pos];
   }
 
-  TypePtr getAttribute(size_t slot) const {
+  const TypePtr& getAttribute(size_t slot) const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     AT_ASSERT(slot < attributeTypes_.size());
     return attributeTypes_[slot];

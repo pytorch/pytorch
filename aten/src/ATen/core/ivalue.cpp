@@ -113,4 +113,9 @@ const std::string& ivalue::Object::name() const {
   return this->type_->name();
 }
 
+void ivalue::Object::resizeObject(size_t slot) {
+  AT_ASSERT(slot < type()->numAttributes());
+  slots_.resize(type()->numAttributes());
+}
+
 } // namespace c10

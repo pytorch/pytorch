@@ -132,10 +132,10 @@ void createTensorToParameterNameMap(
     const QualifiedNamePtr& prefix,
     std::unordered_map<script::Slot, QualifiedNamePtr>& result) {
   for (const auto& param : module.get_parameters()) {
-    result[param.slot()] = QualifiedName::create(prefix, param.name());
+    result[param] = QualifiedName::create(prefix, param.name());
   }
   for (const auto& param : module.get_attributes()) {
-    result[param.slot()] = QualifiedName::create(prefix, param.name());
+    result[param] = QualifiedName::create(prefix, param.name());
   }
   for (const auto& elem : module.get_modules()) {
     createTensorToParameterNameMap(
