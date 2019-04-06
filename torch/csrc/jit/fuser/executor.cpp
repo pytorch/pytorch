@@ -317,7 +317,7 @@ void launchFusion(
   fusion.launch_raw(numel, arguments);
 }
 
-bool runFusion(const int64_t key, Stack& stack) {
+bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   // Short-circuits if fusion isn't enabled
   if (!canFuseOnCPU() && !canFuseOnGPU())
     return false;
@@ -372,6 +372,10 @@ bool runFusion(const int64_t key, Stack& stack) {
   }
   maybe_kernel = spec.findKernel(arg_spec);
   AT_ASSERT(maybe_kernel);
+
+  if (code_out) {
+    *code_out = maybe_kernel.value()->code();
+  }
 
   // Launches fusion
   std::vector<at::Tensor> raw_outputs;
