@@ -27,3 +27,4 @@ Scalar _local_scalar_dense_cpu(const Tensor& self) {
 }
 
 }} // at::native
+//do nothing
