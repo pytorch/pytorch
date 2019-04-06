@@ -132,6 +132,21 @@ There is no wrapper code that needs to be written. You can see [a tutorial here]
 Commands to install from binaries via Conda or pip wheels are on our website:
 [https://pytorch.org](https://pytorch.org)
 
+
+#### NVIDIA Jetson platforms
+
+Python wheels for NVIDIA's Jetson Nano, Jetson TX2, and Jetson AGX Xavier are available via the following URLs:
+
+- Stable binaries:
+  - Python 2.7: https://nvidia.box.com/v/torch-stable-cp27-jetson-jp42
+  - Python 3.6: https://nvidia.box.com/v/torch-stable-cp36-jetson-jp42
+- Rolling weekly binaries:
+  - Python 2.7: https://nvidia.box.com/v/torch-weekly-cp27-jetson-jp42
+  - Python 3.6: https://nvidia.box.com/v/torch-weekly-cp36-jetson-jp42
+
+They requires JetPack 4.2 and above and are maintained by @dusty-nv
+
+
 ### From Source
 
 If you are installing from source, we highly recommend installing an [Anaconda](https://www.continuum.io/downloads) environment.
@@ -145,6 +160,9 @@ If you want to compile with CUDA support, install
 
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 Other potentially useful environment variables may be found in `setup.py`.
+
+If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to [are available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
+
 
 #### Install Dependencies
 
