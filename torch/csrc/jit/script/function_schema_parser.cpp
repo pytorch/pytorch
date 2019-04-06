@@ -272,11 +272,11 @@ struct SchemaParser {
 } // namespace
 } // namespace script
 
-either<OperatorName, FunctionSchema> parseSchemaOrName(const std::string& schemaOrName) {
+C10_EXPORT either<OperatorName, FunctionSchema> parseSchemaOrName(const std::string& schemaOrName) {
   return script::SchemaParser(schemaOrName).parseDeclarations().at(0);
 }
 
-FunctionSchema parseSchema(const std::string& schema) {
+C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
   auto parsed = parseSchemaOrName(schema);
   AT_CHECK(parsed.is_right(), "Tried to parse a function schema but only the operator name was given");
   return parsed.right();

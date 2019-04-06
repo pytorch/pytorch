@@ -718,7 +718,7 @@ void ScriptModuleSerializer::writeAttributeTable() {
   }
   pickler.finish();
   writer_.writeRecord(
-        "attributes.pkl", pickler.stack().data(), pickler.stack().size());
+      "attributes.pkl", pickler.stack().data(), pickler.stack().size());
 }
 
 void ScriptModuleSerializer::convertModule(
@@ -739,7 +739,7 @@ void ScriptModuleSerializer::convertModule(
     attribute_def->set_name(attribute.name());
     attribute_def->set_type(attribute.type()->python_str());
 
-    attribute_table_.push_back(*attribute.slot());
+    attribute_table_.push_back(attribute.slot().value());
     attribute_def->set_id(attribute_table_.size() - 1);
   }
 
@@ -769,7 +769,7 @@ void ScriptModuleSerializer::convertModule(
 
   for (const auto& elem : module.get_modules()) {
     torch::ModuleDef* sub_def = module_def->add_submodules();
-    convertModule(*elem.module, module_name.str(), elem.name, sub_def);
+    convertModule(*elem, module_name.str(), elem->name(), sub_def);
   }
 }
 
@@ -779,7 +779,7 @@ void ScriptModuleSerializer::convertParameter(
     bool is_parameter) {
   param_def->set_name(param.name());
   param_def->set_is_buffer(is_parameter);
-  param_def->set_tensor_id(addTensor(param.slot()->toTensor()));
+  param_def->set_tensor_id(addTensor(param.slot().value().toTensor()));
 }
 
 // Pretty printing for ONNX
