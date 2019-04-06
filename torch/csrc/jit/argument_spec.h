@@ -87,6 +87,7 @@ struct ArgumentSpec {
     std::memset(&arg, 0, sizeof(ArgumentInfo));
     arg.is_nontensor_optional_ = true;
     arg.is_none_ = input.isNone();
+    combineHash(arg);
   }
 
   void addTensor(const IValue& input, bool with_grad) {
