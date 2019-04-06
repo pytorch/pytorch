@@ -1415,7 +1415,7 @@ def bilinear(input1, input2, weight, bias=None):
 def _no_grad_embedding_renorm_(weight, input, max_norm, norm_type):
     # type: (Tensor, Tensor, float, float) -> Tensor
     with torch.no_grad():
-        return torch.embedding_renorm_(weight, input, max_norm, norm_type)
+        torch.embedding_renorm_(weight, input, max_norm, norm_type)
 
 
 @weak_script
