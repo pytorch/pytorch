@@ -41,7 +41,7 @@ At a granular level, PyTorch is a library that consists of the following compone
 | **torch.autograd** | a tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
 | **torch.nn** | a neural networks library deeply integrated with autograd designed for maximum flexibility |
 | **torch.multiprocessing** | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
-| **torch.utils** | DataLoader, Trainer and other utility functions for convenience |
+| **torch.utils** | DataLoader and other utility functions for convenience |
 
 Usually one uses PyTorch either as:
 
