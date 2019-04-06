@@ -174,26 +174,32 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   constexpr auto f2 = ScalarType::Half;
   constexpr auto f4 = ScalarType::Float;
   constexpr auto f8 = ScalarType::Double;
+  constexpr auto c2 = ScalarType::ComplexHalf;
+  constexpr auto c4 = ScalarType::ComplexFloat;
+  constexpr auto c8 = ScalarType::ComplexDouble;
   constexpr auto ud = ScalarType::Undefined;
   if (a == ud || b == ud) {
     return ScalarType::Undefined;
   }
-  if (isComplexType(a) || isComplexType(b)) {
-    AT_ERROR("promoteTypes with complex numbers is not handled yet; figure out what the correct rules should be");
-  }
   static constexpr ScalarType _promoteTypesLookup
       [static_cast<int>(ScalarType::NumOptions)]
       [static_cast<int>(ScalarType::NumOptions)] = {
-            /* u1  i1  i2  i4  i8  f2  f4  f8 */
-    /* u1 */ { u1, i2, i2, i4, i8, f2, f4, f8 },
-    /* i1 */ { i2, i1, i2, i4, i8, f2, f4, f8 },
-    /* i2 */ { i2, i2, i2, i4, i8, f2, f4, f8 },
-    /* i4 */ { i4, i4, i4, i4, i8, f2, f4, f8 },
-    /* i8 */ { i8, i8, i8, i8, i8, f2, f4, f8 },
-    /* f2 */ { f2, f2, f2, f2, f2, f2, f4, f8 },
-    /* f4 */ { f4, f4, f4, f4, f4, f4, f4, f8 },
-    /* f8 */ { f8, f8, f8, f8, f8, f8, f8, f8 },
+                /* u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8*/
+        /* u1 */ { u1, i2, i2, i4, i8, f2, f4, f8, c2, c4, c8},
+        /* i1 */ { i2, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8},
+        /* i2 */ { i2, i2, i2, i4, i8, f4, f4, f8, c4, c4, c8},
+        /* i4 */ { i4, i4, i4, i4, i8, f8, f4, f8, c8, c4, c8},
+        /* i8 */ { i8, i8, i8, i8, i8, f8, f4, f8, c8, c4, c8},
+        /* f2 */ { f2, f2, f4, f8, f8, f2, f4, f8, c2, c4, c8},
+        /* f4 */ { f4, f4, f4, f4, f4, f4, f4, f8, c4, c4, c8},
+        /* f8 */ { f8, f8, f8, f8, f8, f8, f8, f8, c8, c8, c8},
+        /* c2 */ { c2, c2, c4, c8, c8, c2, c4, c8, c2, c4, c8},
+        /* c4 */ { c4, c4, c4, c8, c8, c4, c4, c8, c4, c4, c8},
+        /* c8 */ { c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8},
   };
+  std::cout << "promoteTypes_a: " << at::toString(a) <<std::endl;
+  std::cout << "promoteTypes_b: " << at::toString(b) <<std::endl;
+  std::cout << "promoteTypes: " << toString(_promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)])<<std::endl;
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
 }
 
