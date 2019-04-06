@@ -56,9 +56,10 @@ static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
 template<class T>
 static inline Storage pin_memory(int64_t size, Tensor dummy) {
   auto* allocator = cuda::getPinnedMemoryAllocator();
+  int64_t adjusted_size = size * sizeof(T);
   return Storage(
-      caffe2::TypeMeta::Make<T>(),
-      size,
+      caffe2::TypeMeta::Make<uint8_t>(),
+      adjusted_size,
       allocator,
       /*resizable=*/false
   );
