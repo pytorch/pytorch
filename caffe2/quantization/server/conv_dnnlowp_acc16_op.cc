@@ -17,6 +17,7 @@
 C10_DECLARE_int32(caffe2_dnnlowp_nbits_in_non_outlier);
 C10_DECLARE_int32(caffe2_dnnlowp_copy_to_32bit_frequency);
 C10_DECLARE_bool(caffe2_dnnlowp_shared_int32_buffer);
+
 // Thresholds to fallback to 32-bit accumulation when 16-bit accumulation
 // doesn't provide performance benefits.
 C10_DEFINE_double(
@@ -61,8 +62,35 @@ ConvDNNLowPAcc16Op<ReluFused>::ConvDNNLowPAcc16Op(
 template <bool ReluFused>
 bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
   if (fallback_to_32_bit_accumulation_) {
-    // Short cut if we already know we are falling back to acc32
-    return BaseType::GetQuantizationParameters_();
+    return true;
+  }
+
+  if (!BaseType::GetQuantizationParameters_()) {
+    return false;
+  }
+
+  if (!Wq_acc16_packed_ &&
+      this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER)) {
+    CAFFE_ENFORCE_EQ(
+        this->order_,
+        StorageOrder::NHWC,
+        "Pre-packed weight only works with NHWC layout");
+    // If the input is already packed
+    const auto& packed_filter =
+        this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER);
+    Wq_outlier_ = packed_filter.W_outlier;
+    Wq_acc16_packed_ = packed_filter.W_acc16;
+
+    if (nbits_in_non_outlier_ != packed_filter.nbits_in_non_outlier) {
+      LOG(WARNING)
+          << "nbits_in_non_outlier in packed weight "
+          << packed_filter.nbits_in_non_outlier
+          << " doesn't match with nbits_in_non_outlier specified in operator "
+          << nbits_in_non_outlier_;
+    }
+
+    first_invocation_ = false;
+    return true;
   }
 
   int kernel_dim = this->KernelDim_();
@@ -70,17 +98,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
   int num_out_channels = filter.dim32(0);
 
   // Check if we should fallback to 32-bit accumulation
-  // We should do this before GetQuantizationParameters_ to make sure
-  // GetQuantizationParameters_ initialize things like Wq_packed_ for acc32
-  // properly.
-
-  // We can't fallback if layout is not NHWC or
-  // if weight is prepacked and the prepacked weight doesn't have acc32.
-  bool can_fallback_to_32_bit_accumulation =
-      this->order_ == StorageOrder::NHWC &&
-      (!this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER) ||
-       this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER).W);
-  if (can_fallback_to_32_bit_accumulation) {
+  if (this->order_ == StorageOrder::NHWC) {
     const Tensor& X = InputTensorCPU_(INPUT);
     int N = X.dim32(0);
 
@@ -103,69 +121,29 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
     }
 
     if (N * output_image_size < FLAGS_caffe2_dnnlowp_acc16_m_threshold) {
-      LOG_FIRST_N(INFO, 10)
-          << "M " << N * output_image_size << " of Conv layer with weight blob "
-          << this->debug_def().input(FILTER) << " is smaller than threshold "
-          << FLAGS_caffe2_dnnlowp_acc16_m_threshold
-          << " . Falling back to acc32";
+      LOG(INFO) << "M " << N * output_image_size
+                << " of Conv layer with weight blob "
+                << this->debug_def().input(1) << " is smaller than threshold "
+                << FLAGS_caffe2_dnnlowp_acc16_m_threshold
+                << " . Falling back to acc32";
       fallback_to_32_bit_accumulation_ = true;
+      return true;
     }
-    if (!fallback_to_32_bit_accumulation_ &&
-        num_out_channels / group_ < acc16_n_threshold) {
-      LOG_FIRST_N(INFO, 10)
-          << "N " << num_out_channels / group_
-          << " of Conv layer with weight blob "
-          << this->debug_def().input(FILTER) << " is smaller than threshold "
-          << acc16_n_threshold << " . Falling back to acc32";
+    if (num_out_channels / group_ < acc16_n_threshold) {
+      LOG(INFO) << "N " << num_out_channels / group_
+                << " of Conv layer with weight blob "
+                << this->debug_def().input(1) << " is smaller than threshold "
+                << acc16_n_threshold << " . Falling back to acc32";
       fallback_to_32_bit_accumulation_ = true;
+      return true;
     }
-    if (!fallback_to_32_bit_accumulation_ && kernel_dim < acc16_k_threshold) {
-      LOG_FIRST_N(INFO, 10)
-          << "K " << kernel_dim << " of Conv layer with weight blob "
-          << this->debug_def().input(FILTER) << " is smaller than threshold "
-          << acc16_k_threshold << " . Falling back to acc32";
+    if (kernel_dim < acc16_k_threshold) {
+      LOG(INFO) << "K " << kernel_dim << " of Conv layer with weight blob "
+                << this->debug_def().input(1) << " is smaller than threshold "
+                << acc16_k_threshold << " . Falling back to acc32";
       fallback_to_32_bit_accumulation_ = true;
+      return true;
     }
-    if (!fallback_to_32_bit_accumulation_ &&
-        this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER) &&
-        !this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER)
-             .W_acc16) {
-      LOG_FIRST_N(INFO, 10)
-          << "Falling back to acc32 because packed weight for acc16 is not "
-             "available";
-      fallback_to_32_bit_accumulation_ = true;
-    }
-  }
-
-  if (!BaseType::GetQuantizationParameters_()) {
-    return false;
-  }
-
-  if (fallback_to_32_bit_accumulation_) {
-    return true;
-  }
-
-  if (!Wq_acc16_packed_ &&
-      this->template InputIsType<Int8ConvDNNLowPPackedWeightBlob>(FILTER)) {
-    CAFFE_ENFORCE_EQ(
-        this->order_,
-        StorageOrder::NHWC,
-        "Pre-packed weight only works with NHWC layout");
-    // If the input is already packed
-    const auto& packed_filter =
-        this->template Input<Int8ConvDNNLowPPackedWeightBlob>(FILTER);
-    Wq_outlier_ = packed_filter.W_outlier;
-    Wq_acc16_packed_ = packed_filter.W_acc16;
-
-    if (nbits_in_non_outlier_ != packed_filter.nbits_in_non_outlier) {
-      LOG_FIRST_N(WARNING, 10)
-          << "nbits_in_non_outlier in packed weight "
-          << packed_filter.nbits_in_non_outlier
-          << " doesn't match with nbits_in_non_outlier specified in operator "
-          << nbits_in_non_outlier_;
-    }
-    first_invocation_ = false;
-    return true;
   }
 
   // Separate out outliers
@@ -181,24 +159,20 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
         W_quantized_));
     int outlier_cnt = Wq_outlier_->ColPtr()[num_out_channels];
 
-    LOG_FIRST_N(INFO, 10)
-        << "Proportion of outlier for Conv layer with weight blob "
-        << this->debug_def().input(FILTER) << " is "
-        << static_cast<float>(outlier_cnt) / W_quantized_.size();
-    LOG_FIRST_N(INFO, 10) << "nbits_in_non_outlier " << nbits_in_non_outlier_
-                          << " copy_to_32bit_frequency "
-                          << copy_to_32bit_frequency_;
+    LOG(INFO) << "Proportion of outlier for Conv layer with weight blob "
+              << this->debug_def().input(1) << " is "
+              << static_cast<float>(outlier_cnt) / W_quantized_.size();
+    LOG(INFO) << "nbits_in_non_outlier " << nbits_in_non_outlier_
+              << " copy_to_32bit_frequency " << copy_to_32bit_frequency_;
 
-    if (can_fallback_to_32_bit_accumulation &&
-        static_cast<float>(outlier_cnt) / W_quantized_.size() >
-            FLAGS_caffe2_dnnlowp_acc16_density_threshold) {
-      LOG_FIRST_N(INFO, 10) << "Density of outliers is higher than threshold "
-                            << FLAGS_caffe2_dnnlowp_acc16_density_threshold
-                            << " . Falling back to acc32";
+    if (static_cast<float>(outlier_cnt) / W_quantized_.size() >
+        FLAGS_caffe2_dnnlowp_acc16_density_threshold) {
+      LOG(INFO) << "Density of outliers is higher than threshold "
+                << FLAGS_caffe2_dnnlowp_acc16_density_threshold
+                << " . Falling back to acc32";
       fallback_to_32_bit_accumulation_ = true;
       Wq_outlier_.reset();
-      // We need to call GetQuantizationParameters_ again to pack for acc32
-      return BaseType::GetQuantizationParameters_();
+      return true;
     }
   }
 
@@ -219,9 +193,8 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
         static int log_occurences = 0;
         if (log_occurences < 32) {
           ++log_occurences;
-          LOG_FIRST_N(WARNING, 10)
-              << "Conv with weight " << this->debug_def().input(FILTER)
-              << " falls back to slow path because " << reason;
+          LOG(WARNING) << "Conv with weight " << this->debug_def().input(FILTER)
+                       << " falls back to slow path because " << reason;
         }
       }
     }
@@ -229,8 +202,8 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
       static int log_occurences = 0;
       if (log_occurences < 32) {
         ++log_occurences;
-        LOG_FIRST_N(WARNING, 10) << "Outlier-aware quantization only supports "
-                                    "NHWC layout";
+        LOG(WARNING) << "Outlier-aware quantization only supports "
+                        "NHWC layout";
       }
     }
     first_invocation_ = false;
@@ -386,7 +359,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHW() {
         static int log_occurences = 0;
         if (log_occurences < 32) {
           ++log_occurences;
-          LOG_FIRST_N(WARNING, 10)
+          LOG(WARNING)
               << "Consider using DNNLOWP instead of DNNLOWP_ACC16 engine since "
                  "we're falling back to a slow path because of NCHW layout";
         }

@@ -508,7 +508,7 @@ class ScriptModuleSerializer final {
       torch::ModuleDef* module_def);
 
   void convertParameter(
-      const script::NamedIValue& param,
+      const script::Slot & param,
       torch::ParameterDef* param_def,
       bool is_parameter);
 
@@ -718,7 +718,7 @@ void ScriptModuleSerializer::writeAttributeTable() {
   }
   pickler.finish();
   writer_.writeRecord(
-        "attributes.pkl", pickler.stack().data(), pickler.stack().size());
+      "attributes.pkl", pickler.stack().data(), pickler.stack().size());
 }
 
 void ScriptModuleSerializer::convertModule(
@@ -739,7 +739,7 @@ void ScriptModuleSerializer::convertModule(
     attribute_def->set_name(attribute.name());
     attribute_def->set_type(attribute.type()->python_str());
 
-    attribute_table_.push_back(*attribute.slot());
+    attribute_table_.push_back(attribute.value());
     attribute_def->set_id(attribute_table_.size() - 1);
   }
 
@@ -769,17 +769,17 @@ void ScriptModuleSerializer::convertModule(
 
   for (const auto& elem : module.get_modules()) {
     torch::ModuleDef* sub_def = module_def->add_submodules();
-    convertModule(*elem.module, module_name.str(), elem.name, sub_def);
+    convertModule(*elem, module_name.str(), elem->name(), sub_def);
   }
 }
 
 void ScriptModuleSerializer::convertParameter(
-    const script::NamedIValue& param,
+    const script::Slot& param,
     torch::ParameterDef* param_def,
     bool is_parameter) {
   param_def->set_name(param.name());
   param_def->set_is_buffer(is_parameter);
-  param_def->set_tensor_id(addTensor(param.slot()->toTensor()));
+  param_def->set_tensor_id(addTensor(param.value().toTensor()));
 }
 
 // Pretty printing for ONNX
