@@ -54,18 +54,12 @@ private:
     #undef DEFINE_CASE
   }
 
-  at::TensorOptions typeFor(const Tensor& ten) {
-    at::Backend b = backend();
-#ifdef __HIP_PLATFORM_HCC__
-    if (b == at::Backend::HIP) {
-      b = at::Backend::CUDA;
-    }
-#endif
-    return at::device(backendToDeviceType(b)).dtype(ten.dtype());
-  }
   at::Tensor tensorWrapping(const Tensor& ten_) {
     auto& ten = const_cast<Tensor&>(ten_);
-    return at::from_blob(ten.raw_mutable_data(), ten.sizes(), typeFor(ten));
+    return at::from_blob(
+        ten.raw_mutable_data(),
+        ten.sizes(),
+        at::TensorOptions(ten.GetDevice()).dtype(ten.dtype()));
   }
 
   at::Tensor peek(size_t i, size_t N) {
