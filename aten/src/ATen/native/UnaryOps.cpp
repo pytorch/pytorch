@@ -16,6 +16,8 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/cpu/vec256/vec256_base.h>
+#include <ATen/native/cpu/Loops.h>
 
 #include <algorithm>
 #include <cmath>
@@ -131,6 +133,78 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
   return result;
 }
 
+// ***** abs *****
+Tensor abs(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  return at::abs_out(result, self);
+}
+
+Tensor& _abs__cpu(Tensor& self) {
+  return at::abs_out(self, self);
+}
+
+Tensor& _abs_out_cpu(Tensor& result, const Tensor& self) {
+  checkBackend("abs", {result}, Backend::CPU);
+  assert_no_internal_overlap(result, "abs");
+  auto iter = TensorIterator::unary_op(result, self);
+  abs_stub(iter->device_type(), *iter);
+  return result;
+}
+
+// ***** frac *****
+Tensor frac(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  return at::frac_out(result, self);
+}
+
+Tensor& _frac__cpu(Tensor& self) {
+  return at::frac_out(self, self);
+}
+
+Tensor& _frac_out_cpu(Tensor& result, const Tensor& self) {
+  checkBackend("frac", {result}, Backend::CPU);
+  assert_no_internal_overlap(result, "frac");
+  auto iter = TensorIterator::unary_op(result, self);
+  frac_stub(iter->device_type(), *iter);
+  return result;
+}
+
+// ***** reciprocal *****
+Tensor reciprocal(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  return at::reciprocal_out(result, self);
+}
+
+Tensor& _reciprocal__cpu(Tensor& self) {
+  return at::reciprocal_out(self, self);
+}
+
+Tensor& _reciprocal_out_cpu(Tensor& result, const Tensor& self) {
+  checkBackend("reciprocal", {result}, Backend::CPU);
+  assert_no_internal_overlap(result, "reciprocal");
+  auto iter = TensorIterator::unary_op(result, self);
+  reciprocal_stub(iter->device_type(), *iter);
+  return result;
+}
+
+// ***** neg *****
+Tensor neg(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  return at::neg_out(result, self);
+}
+
+Tensor& _neg__cpu(Tensor& self) {
+  return at::neg_out(self, self);
+}
+
+Tensor& _neg_out_cpu(Tensor& result, const Tensor& self) {
+  checkBackend("neg", {result}, Backend::CPU);
+  assert_no_internal_overlap(result, "neg");
+  auto iter = TensorIterator::unary_op(result, self);
+  neg_stub(iter->device_type(), *iter);
+  return result;
+}
+
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 
@@ -167,7 +241,6 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
 
 // NB: Temp. defaulting to TH implementation of abs due to issues with Apple
 
-IMPLEMENT_UNARY_OP_TH(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)
@@ -203,10 +276,13 @@ DEFINE_DISPATCH(erfc_stub);
 DEFINE_DISPATCH(exp_stub);
 DEFINE_DISPATCH(expm1_stub);
 DEFINE_DISPATCH(floor_stub);
+DEFINE_DISPATCH(frac_stub);
 DEFINE_DISPATCH(log_stub);
 DEFINE_DISPATCH(log10_stub);
 DEFINE_DISPATCH(log1p_stub);
 DEFINE_DISPATCH(log2_stub);
+DEFINE_DISPATCH(neg_stub);
+DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);
 DEFINE_DISPATCH(rsqrt_stub);
 DEFINE_DISPATCH(sigmoid_stub);
