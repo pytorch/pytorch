@@ -447,7 +447,7 @@ Normalization layers
     :members:
 
 :hidden:`SyncBatchNorm`
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: SyncBatchNorm
     :members:
