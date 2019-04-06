@@ -113,9 +113,6 @@ void initJITBindings(PyObject* module) {
             return EliminateCommonSubexpression(g); // overload resolution
           })
       .def(
-          "_jit_pass_expand_fakequant",
-          [](std::shared_ptr<Graph>& g) { return ExpandFakeQuantNodes(g); })
-      .def(
           "_jit_pass_propagate_qinfo",
           [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
       .def(
@@ -130,8 +127,8 @@ void initJITBindings(PyObject* module) {
             new_node->destroy();
           })
       .def(
-          "_jit_pass_insert_fakequant",
-          [](std::shared_ptr<Graph>& g) { return InsertFakeQuantNodes(g); })
+          "_jit_pass_insert_quantdequant",
+          [](std::shared_ptr<Graph>& g) { return InsertQuantDequantNodes(g); })
       .def(
           "_jit_pass_quantlint",
           [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
