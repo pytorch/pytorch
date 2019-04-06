@@ -346,6 +346,9 @@ struct CAFFE2_API Type {
   virtual Tensor pin_memory(const Tensor & self) const = 0;
   virtual Tensor pinverse(const Tensor & self, double rcond) const = 0;
   virtual Tensor repeat(const Tensor & self, IntArrayRef repeats) const = 0;
+  virtual Tensor repeat_interleave(const Tensor & repeats) const = 0;
+  virtual Tensor repeat_interleave(const Tensor & self, const Tensor & repeats, c10::optional<int64_t> dim) const = 0;
+  virtual Tensor repeat_interleave(const Tensor & self, int64_t repeats, c10::optional<int64_t> dim) const = 0;
   virtual Tensor reshape(const Tensor & self, IntArrayRef shape) const = 0;
   virtual Tensor reshape_as(const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor round(const Tensor & self) const = 0;

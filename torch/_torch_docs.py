@@ -6396,3 +6396,49 @@ Example::
             [2, 3],
             [3, 3]])
 """)
+
+
+add_docstr(torch.repeat_interleave,
+           r"""
+.. function:: repeat_interleave(input, repeats, dim=None) -> Tensor
+
+Repeat elements of a tensor.
+
+.. warning::
+
+    This is different from :func:`torch.repeat` but similar to `numpy.repeat`.
+
+Args:
+    input (Tensor): The input tensor
+    repeats (Tensor or int): The number of repetitions for each element.
+        repeats is broadcasted to fit the shape of the given axis.
+    dim (int, optional): The dimension along which to repeat values.
+        By default, use the flattened input array, and return a flat output
+        array.
+
+Returns:
+    Tensor: Repeated tensor which has the same shape as input, except along the
+     given axis.
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3])
+    >>> x.repeat_interleave(2)
+    tensor([1, 1, 2, 2, 3, 3])
+    >>> y = torch.tensor([[1, 2], [3, 4]])
+    >>> torch.repeat_interleave(y, 2)
+    tensor([1, 1, 2, 2, 3, 3, 4, 4])
+    >>> torch.repeat_interleave(y, 3, dim=1)
+    tensor([[1, 1, 1, 2, 2, 2],
+            [3, 3, 3, 4, 4, 4]])
+    >>> torch.repeat_interleave(y, torch.tensor([1, 2]), dim=0)
+    tensor([[1, 2],
+            [3, 4],
+            [3, 4]])
+
+.. function:: repeat_interleave(repeats) -> Tensor
+
+If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
+`tensor([0, 0, ..., 1, 1, ..., 2, 2, ..., ...])` where `0` appears `n1` times,
+`1` appears `n2` times, `2` appears `n3` times, etc.
+""")

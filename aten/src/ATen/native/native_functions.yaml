@@ -1822,6 +1822,21 @@
   matches_jit_signature: True
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
+- func: repeat_interleave(Tensor repeats) -> Tensor
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: repeat_interleave_cpu
+    CUDA: repeat_interleave_cuda
+
+- func: repeat_interleave(Tensor self, Tensor repeats, int? dim=None) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
+
+- func: repeat_interleave(Tensor self, int repeats, int? dim=None) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
+
 - func: reshape(Tensor self, int[] shape) -> Tensor
   matches_jit_signature: True
   variants: function, method

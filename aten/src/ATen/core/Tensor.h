@@ -466,6 +466,8 @@ class CAFFE2_API Tensor {
   Tensor pin_memory() const;
   Tensor pinverse(double rcond=1e-15) const;
   Tensor repeat(IntArrayRef repeats) const;
+  Tensor repeat_interleave(const Tensor & repeats, c10::optional<int64_t> dim=c10::nullopt) const;
+  Tensor repeat_interleave(int64_t repeats, c10::optional<int64_t> dim=c10::nullopt) const;
   Tensor reshape(IntArrayRef shape) const;
   Tensor reshape_as(const Tensor & other) const;
   Tensor round() const;
