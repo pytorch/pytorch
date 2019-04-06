@@ -480,6 +480,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries.append('cudart')
     if IS_WINDOWS:
         libraries.append('c10')
+        libraries.append('c10_cuda')
         libraries.append('caffe2')
         libraries.append('torch')
         libraries.append('torch_python')
