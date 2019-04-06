@@ -77,10 +77,14 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
               tracer::addInputs(node, args[i].name().c_str(), tensor_list);
             } else if (elem_type->kind() == TypeKind::FloatType) {
               AT_ASSERT(iter->isDoubleList());
-              tracer::addInputs(
-                  node,
-                  args[i].name().c_str(),
-                  iter->toDoubleListRef());
+              const std::vector<double>& value = iter->toDoubleListRef();
+              std::vector<Value*> info(value.size());
+              for (int value_index = 0; value_index < value.size(); ++value_index) {
+                info[value_index] = graph->insertConstant(value[value_index]);
+                tracer::recordSourceLocation(info[value_index]->node());
+              }
+              node->addInput(
+                  graph->insertNode(graph->createList(jit::FloatType::get(), info))->output());
             } else if (elem_type->kind() == TypeKind::IntType) {
               AT_ASSERT(iter->isIntList());
               tracer::addInputs(
