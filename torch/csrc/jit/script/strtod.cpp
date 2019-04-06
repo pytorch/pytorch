@@ -23,6 +23,7 @@
 #include <errno.h>
 #include <math.h>
 #include <string.h>
+#include <locale>
 
 #define D_PNAN ((double)+NAN)
 #define D_PINF ((double)+INFINITY)
@@ -79,9 +80,6 @@ C10_EXPORT double strtod_c(const char *nptr, char **endptr)
 {
     char *fail_pos;
     double val;
-    struct lconv *locale_data;
-    const char *decimal_point;
-    size_t decimal_point_len;
     const char *p, *decimal_point_pos;
     const char *end = NULL; /* Silence gcc */
     const char *digits_pos = NULL;
@@ -89,9 +87,7 @@ C10_EXPORT double strtod_c(const char *nptr, char **endptr)
 
     fail_pos = NULL;
 
-    locale_data = localeconv();
-    decimal_point = locale_data->decimal_point;
-    decimal_point_len = strlen(decimal_point);
+    char decimal_point = std::use_facet<std::numpunct<char>>(std::locale()).decimal_point();
 
     decimal_point_pos = NULL;
 
@@ -132,7 +128,7 @@ C10_EXPORT double strtod_c(const char *nptr, char **endptr)
             goto invalid_string;
 
 
-        if (decimal_point[0] != '.' || decimal_point[1] != 0) {
+        if (decimal_point != '.') {
             /* Look for a '.' in the input; if present, it'll need to be
                swapped for the current locale's decimal point before we
                call strtod.  On the other hand, if we find the current
@@ -155,7 +151,7 @@ C10_EXPORT double strtod_c(const char *nptr, char **endptr)
                     p++;
                 end = p;
             }
-            else if (strncmp(p, decimal_point, decimal_point_len) == 0)
+            else if (*p == decimal_point)
                 goto invalid_string;
             /* For the other cases, we need not convert the decimal point */
         }
@@ -166,7 +162,7 @@ C10_EXPORT double strtod_c(const char *nptr, char **endptr)
             goto invalid_string;
 
         digits_pos = p;
-        if (decimal_point[0] != '.' || decimal_point[1] != 0) {
+        if (decimal_point != '.') {
             /* Look for a '.' in the input; if present, it'll need to be
                swapped for the current locale's decimal point before we
                call strtod.  On the other hand, if we find the current
@@ -189,7 +185,7 @@ C10_EXPORT double strtod_c(const char *nptr, char **endptr)
                     p++;
                 end = p;
             }
-            else if (strncmp(p, decimal_point, decimal_point_len) == 0)
+            else if (*p == decimal_point)
                 goto invalid_string;
             /* For the other cases, we need not convert the decimal point */
         }
@@ -199,8 +195,7 @@ C10_EXPORT double strtod_c(const char *nptr, char **endptr)
         char *copy, *c;
         /* Create a copy of the input, with the '.' converted to the
            locale-specific decimal point */
-        copy = (char *)malloc(end - digits_pos +
-                                    1 + decimal_point_len);
+        copy = (char *)malloc(end - digits_pos + 2);
         if (copy == NULL) {
             *endptr = (char *)nptr;
             errno = ENOMEM;
@@ -210,8 +205,8 @@ C10_EXPORT double strtod_c(const char *nptr, char **endptr)
         c = copy;
         memcpy(c, digits_pos, decimal_point_pos - digits_pos);
         c += decimal_point_pos - digits_pos;
-        memcpy(c, decimal_point, decimal_point_len);
-        c += decimal_point_len;
+        memcpy(c, &decimal_point, 1);
+        c += 1;
         memcpy(c, decimal_point_pos + 1,
                end - (decimal_point_pos + 1));
         c += end - (decimal_point_pos + 1);
@@ -221,13 +216,8 @@ C10_EXPORT double strtod_c(const char *nptr, char **endptr)
 
         if (fail_pos)
         {
-            if (fail_pos > decimal_point_pos)
-                fail_pos = (char *)digits_pos +
-                    (fail_pos - copy) -
-                    (decimal_point_len - 1);
-            else
-                fail_pos = (char *)digits_pos +
-                    (fail_pos - copy);
+            fail_pos = (char *)digits_pos +
+                (fail_pos - copy);
         }
 
         free(copy);
