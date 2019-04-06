@@ -64,6 +64,8 @@ class CAFFE2_API BoundShapeInferencer {
       TensorProto::DataType type,
       bool is_quantized);
 
+  void InferConcatInputs(const OperatorDef& op);
+
   void InferGivenTensorFill(const OperatorDef& op);
   void InferSparseLengthsSum(const OperatorDef& op);
   void InferFC(const OperatorDef& op);

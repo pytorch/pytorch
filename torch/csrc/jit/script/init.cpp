@@ -273,10 +273,10 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
       size_t n_binders) override {
     // Add all module parameters as inputs to the graph
     std::vector<Value*> params;
-    const auto& param_list = module_->get_parameters().items();
+    const auto& param_list = module_->get_parameters();
     for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
       auto& param = *it;
-      params.push_back(caller.get_or_add_parameter(param->slot()));
+      params.push_back(caller.get_or_add_parameter(param));
     }
     auto list = caller.graph()->createList(TensorType::get(), params);
     caller.graph()->insertNode(list);
@@ -310,7 +310,7 @@ struct ModuleValue : public SugaredValue {
     // it adds a buffer 'training' to the model if one doesn't exist
     // and then loads that parameter, casting it to bool
     if (field == "training") {
-      NamedIValue* v = module->find_buffer(field);
+      Slot* v = module->find_buffer(field);
       if (!v) {
         py::object py_module = py::cast(module);
         bool training = py::cast<bool>(py::getattr(py_module, "training"));
@@ -319,20 +319,20 @@ struct ModuleValue : public SugaredValue {
         module->register_buffer("training", std::move(t));
         v = module->find_buffer(field);
       }
-      Value* the_tensor = m.get_or_add_parameter(v->slot());
+      Value* the_tensor = m.get_or_add_parameter(*v);
       Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
       return std::make_shared<SimpleValue>(the_bool);
     }
 
-    if (NamedModule* v = module->find_module(field)) {
-      return std::make_shared<ModuleValue>(v->module);
+    if (std::shared_ptr<Module> v = module->find_module(field)) {
+      return std::make_shared<ModuleValue>(v);
     } else if (Method* v = module->find_method(field)) {
       return std::make_shared<MethodValue>(shared_from_this(), *v);
-    } else if (NamedIValue* v = module->find_parameter(field)) {
-      return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
-    } else if (NamedIValue* v = module->find_attribute(field)) {
+    } else if (Slot* v = module->find_parameter(field)) {
+      return std::make_shared<SimpleValue>(m.get_or_add_parameter(*v));
+    } else if (Slot* v = module->find_attribute(field)) {
       return std::make_shared<SimpleValue>(
-          m.get_or_add_attribute(v->type(), v->slot()));
+          m.get_or_add_attribute(*v));
     }
 
     // This can also be a call to a non-script module, or a plain
@@ -606,15 +606,15 @@ static void gatherParametersAndBuffers(
     std::vector<Slot>& values,
     const Module& m) {
   for (auto& param : m.get_parameters()) {
-    values.push_back(param->slot());
+    values.push_back(param);
   }
   for (auto& param : m.get_attributes()) {
-    if (param->type()->isSubtypeOf(TensorType::get())) {
-      values.push_back(param->slot());
+    if (param.type()->isSubtypeOf(TensorType::get())) {
+      values.push_back(param);
     }
   }
   for (const auto& sub : m.get_modules()) {
-    gatherParametersAndBuffers(values, *sub->module);
+    gatherParametersAndBuffers(values, *sub);
   }
 }
 
@@ -767,38 +767,39 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_get_modules",
           [](Module& self) -> py::tuple {
-            auto& modules = self.get_modules();
+            auto modules = self.get_modules();
             py::tuple result(modules.size());
             for (size_t i = 0; i < modules.size(); ++i) {
               auto& item = modules[i];
-              result[i] = std::make_pair(item.key(), item.value().module);
+              result[i] = std::make_pair(item->name(), item);
             }
             return result;
           })
       .def(
           "_get_parameters",
           [](Module& self) -> py::tuple {
-            auto& parameters = self.get_parameters();
+            auto parameters = self.get_parameters();
             py::tuple result(parameters.size());
             for (size_t i = 0; i < parameters.size(); ++i) {
               auto& p = parameters[i];
               py::tuple r(2);
               result[i] = std::make_tuple(
-                  p.key(), autograd::as_variable_ref(p->slot()->toTensor()));
+                  p.name(),
+                  autograd::as_variable_ref(p.value().toTensor()));
             }
             return result;
           })
       .def(
           "_get_attributes",
           [](Module& self) -> py::tuple {
-            auto& attributes = self.get_attributes();
+            auto attributes = self.get_attributes();
             py::tuple result(attributes.size());
             for (size_t i = 0; i < attributes.size(); ++i) {
               auto& buffer = attributes[i];
               py::tuple r(3);
-              IValue v = *buffer->slot();
+              IValue v = buffer.value();
               result[i] = std::make_tuple(
-                  buffer.key(), buffer->type(), toPyObject(std::move(v)));
+                  buffer.name(), buffer.type(), toPyObject(std::move(v)));
             }
             return result;
           })
@@ -830,11 +831,10 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_method_names",
           [](Module& self) {
-            using Item =
-                torch::OrderedDict<std::string, std::unique_ptr<Method>>::Item;
-            return fmap(self.get_methods(), [](const Item& item) {
-              return (*item)->name();
-            });
+            return fmap(
+                self.get_methods(), [](const std::unique_ptr<Method>& method) {
+                  return method->name();
+                });
           })
       .def(
           "_create_method_from_graph",
@@ -857,7 +857,7 @@ void initJitScriptBindings(PyObject* module) {
             gatherParametersAndBuffers(parameters, *self);
             Stack inputs = toStack(input_tuple);
             for (const Slot& param : parameters) {
-              inputs.emplace_back(*param);
+              inputs.emplace_back(param.value());
             }
             auto graph = tracer::createGraphByTracing(
                 func,
@@ -949,12 +949,12 @@ void initJitScriptBindings(PyObject* module) {
              std::shared_ptr<Module> orig) {
             std::vector<Slot> member_inputs;
             for (auto& p : params) {
-              NamedIValue* np = std::get<0>(p)->find_parameter(std::get<1>(p));
+              Slot* np = std::get<0>(p)->find_parameter(std::get<1>(p));
               if (np == nullptr) {
                 np = std::get<0>(p)->find_buffer(std::get<1>(p));
               }
               AT_ASSERT(np != nullptr);
-              member_inputs.push_back(np->slot());
+              member_inputs.push_back(*np);
             }
 
             Method* orig_method = orig->find_method(name);
@@ -976,13 +976,15 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "propagate_and_assign_input_and_output_shapes",
           &Method::propagate_and_assign_input_and_output_shapes)
-      .def("initial_ivalues",[](Method& m) {
-        std::vector<at::Tensor> tensors;
-        for (auto& t : m.initial_ivalues()) {
-          tensors.push_back(t->toTensor());
-        }
-        return tensors;
-      })
+      .def(
+          "initial_ivalues",
+          [](Method& m) {
+            std::vector<at::Tensor> tensors;
+            for (auto& t : m.initial_ivalues()) {
+              tensors.push_back(t.value().toTensor());
+            }
+            return tensors;
+          })
       .def(
           "graph_for",
           [](py::args args, py::kwargs kwargs) {
@@ -996,22 +998,22 @@ void initJitScriptBindings(PyObject* module) {
           &Method::debugDisableAutodiffSubgraphInlining)
       .def("schema", &Method::getSchema)
       .def("pretty_print_schema", &Method::pretty_print_schema)
-      .def("python_print", [](Method& m) {
-        std::ostringstream oss;
-        std::vector<at::Tensor> constants;
-        std::vector<ClassTypePtr> classes;
-        PythonPrint(oss, m, constants, classes, true);
-        return std::make_pair(oss.str(), std::move(constants));
-      })
-      .def_property_readonly(
-          "code",
-          [](Method& self) {
-            std::ostringstream ss;
-            std::vector<at::Tensor> tensors;
+      .def(
+          "python_print",
+          [](Method& m) {
+            std::ostringstream oss;
+            std::vector<at::Tensor> constants;
             std::vector<ClassTypePtr> classes;
-            PythonPrint(ss, self, tensors, classes, false);
-            return ss.str();
-          });
+            PythonPrint(oss, m, constants, classes, true);
+            return std::make_pair(oss.str(), std::move(constants));
+          })
+      .def_property_readonly("code", [](Method& self) {
+        std::ostringstream ss;
+        std::vector<at::Tensor> tensors;
+        std::vector<ClassTypePtr> classes;
+        PythonPrint(ss, self, tensors, classes, false);
+        return ss.str();
+      });
 
   m.def(
       "_jit_script_compile",
@@ -1127,9 +1129,10 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("checks_file"),
           py::arg("graph"));
 
-  m.def("_logging_set_logger", [](logging::LoggerBase* logger) {
-    return logging::setLogger(logger);
-  }, py::return_value_policy::reference);
+  m.def(
+      "_logging_set_logger",
+      [](logging::LoggerBase* logger) { return logging::setLogger(logger); },
+      py::return_value_policy::reference);
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
       m, "LoggerBase");
   py::enum_<logging::LockingLogger::AggregationType>(m, "AggregationType")
@@ -1148,7 +1151,6 @@ void initJitScriptBindings(PyObject* module) {
       logging::LoggerBase,
       std::shared_ptr<logging::NoopLogger>>(m, "NoopLogger")
       .def(py::init<>());
-
 }
 } // namespace script
 } // namespace jit
