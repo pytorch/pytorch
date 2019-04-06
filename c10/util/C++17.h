@@ -213,10 +213,16 @@ constexpr auto apply(F&& f, Tuple&& t) -> decltype(detail::apply_impl(
 
 
 
+#if defined(_MSC_VER) && defined(__CUDACC__) && \
+    (__CUDACC_VER_MAJOR__ >= 10 || (__CUDACC_VER_MAJOR__ == 9 && __CUDACC_VER_MINOR__ >= 2))
+// workaround: CUDA >= v9.2 compiler cannot compile correctly on Windows.
+#  define AT_CPP14_CONSTEXPR
+#else
 #if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
 #  define AT_CPP14_CONSTEXPR constexpr
 #else
 #  define AT_CPP14_CONSTEXPR
+#endif
 #endif
 
 
