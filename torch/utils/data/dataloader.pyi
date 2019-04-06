@@ -1,13 +1,20 @@
-from typing import Any, Callable, TypeVar, Generic, overload, Sequence, List, Union
+from typing import Any, Callable, TypeVar, Generic, overload, Sequence, List, Union, Tuple
 from . import Dataset, Sampler
 from ... import Tensor
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
 _worker_init_fn_t = Callable[[int], None]
-_collate_fn_t = Callable[[List[T]], Union[Tensor, Sequence[Tensor]]]
 
-class DataLoader(Generic[T]):
+# Ideally we would parameterize `DataLoader` by the return type of `collate_fn`, but there is currently no way to have that
+# type parameter set to a default value if the user doesn't pass in a custom 'collate_fn'.
+# See https://github.com/python/mypy/issues/3737.
+# For now, we mark the return type of the collate function as a union of 'Any' and a common return value of the default collate function (a tensor or tuple thereof).
+# While semantically that is the same type as 'Any', IDEs like PyCharm and VSCode will use that explicit union to auto-suggest
+# tensor methods, which the majority of the time is what is wanted.
+_collate_fn_t = Callable[[List[T]], Union[Tensor, Tuple[Tensor, ...], Any]]
+
+class DataLoader(Generic[T_co]):
     dataset: Dataset[T_co]
     batch_size: int
     num_workers: int
@@ -33,8 +40,4 @@ class _DataLoaderIter:
     def __init__(self, loader: DataLoader) -> None:...
     def __len__(self) -> int: ...
     def __iter__(self) -> _DataLoaderIter: ...
-    # Whether a single tensor or a list of tensors returned depends on if the
-    # underlying dataloader returns a sequence or scalar in '__getitem__.
-    # There is no way to exactly express that in the Python type system so
-    # we give this loose return type.
-    def __next__(self) -> Union[Tensor, List[Tensor]]: ...
+    def __next__(self) -> Any: ...
