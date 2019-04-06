@@ -499,6 +499,6 @@ class SyncBatchNorm(_BatchNorm):
             module_output.running_var = module.running_var
             module_output.num_batches_tracked = module.num_batches_tracked
         for name, child in module.named_children():
-            module_output.add_module(name, self.convert_sync_batchnorm(child))
+            module_output.add_module(name, cls.convert_sync_batchnorm(child))
         del module
         return module_output
