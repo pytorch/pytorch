@@ -1,6 +1,5 @@
-from typing import Any, Callable, TypeVar, Generic, overload, Sequence, List, Union, Tuple
+from typing import Any, Callable, TypeVar, Generic, overload, Sequence, List
 from . import Dataset, Sampler
-from ... import Tensor
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')

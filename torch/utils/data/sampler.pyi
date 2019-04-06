@@ -1,4 +1,4 @@
-from typing import Any, Iterator, Optional, Sequence, List, TypeVar, Generic, Sized
+from typing import Iterator, Optional, Sequence, List, TypeVar, Generic, Sized
 
 T_co = TypeVar('T_co', covariant=True)
 class Sampler(Generic[T_co]):

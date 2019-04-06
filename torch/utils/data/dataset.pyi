@@ -1,4 +1,4 @@
-from typing import Any, TypeVar, Generic, Union, Tuple, Iterable, Sequence, List
+from typing import TypeVar, Generic, Iterable, Sequence, List, Tuple
 from ... import Tensor
 
 T_co = TypeVar('T_co', covariant=True)
@@ -8,7 +8,7 @@ class Dataset(Generic[T_co]):
     def __len__(self) -> int: ...
     def __add__(self, other: T_co) -> 'ConcatDataset[T_co]': ...
 
-class TensorDataset(Dataset[Tensor]):
+class TensorDataset(Dataset[Tuple[Tensor, ...]]):
     tensors: List[Tensor]
 
     def __init__(self, *tensors: Tensor) -> None: ...
