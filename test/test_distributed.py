@@ -141,6 +141,58 @@ def skip_if_small_worldsize(func):
     return wrapper
 
 
+def require_backend(backends):
+    if BACKEND not in backends:
+        return unittest.skip("Test requires backend to be one of %s" % backends)
+    return lambda func: func
+
+
+def require_backends_available(backends):
+    def check(backend):
+        if backend == dist.Backend.GLOO:
+            return dist.is_gloo_available()
+        if backend == dist.Backend.NCCL:
+            return dist.is_nccl_available()
+        if backend == dist.Backend.MPI:
+            return dist.is_mpi_available()
+        return False
+    backends = map(lambda b: dist.Backend(b), backends)
+    if not all(map(check, backends)):
+        return unittest.skip(
+            "Test requires backends to be available %s" % backends)
+    return lambda func: func
+
+
+def require_world_size(world_size):
+    if int(os.environ["WORLD_SIZE"]) < world_size:
+        return unittest.skip("Test requires world size of %d" % world_size)
+    return lambda func: func
+
+
+def require_num_gpus(n):
+    """
+    Require environment to have access to at least `n` GPUs.
+    Test is skipped otherwise.
+
+    Note: this check cannot run in the parent process, because calling
+    `torch.cuda.is_initialized()` will cause lazy initialization of a
+    CUDA runtime API context, and CUDA doesn't support forking.
+    """
+    def decorator(func):
+        func.skip_if_no_gpu = True
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not torch.cuda.is_available():
+                sys.exit(SKIP_IF_NO_CUDA_EXIT_CODE)
+            if torch.cuda.device_count() < n:
+                sys.exit(SKIP_IF_NO_GPU_EXIT_CODE)
+            return func(*args, **kwargs)
+        return wrapper
+
+    return decorator
+
+
 def apply_hack_for_nccl():
     # This is a hack for a known NCCL issue using multiprocess
     # in conjunction with multiple threads to manage different GPUs which
@@ -397,6 +449,49 @@ class _DistTestBase(object):
         _, group_id, _ = self._init_full_group_test(timeout=timeout)
         if group_id is not None:
             self._test_barrier_timeout(group_id, timeout)
+
+    # This test helper can only be used when using the Gloo or NCCL backend
+    # **and** both the Gloo and NCCL backends are available.
+    # See the @skip annotations below.
+    def _test_group_override_backend(self, initializer):
+        if BACKEND == "gloo":
+            new_backend = "nccl"
+        if BACKEND == "nccl":
+            new_backend = "gloo"
+
+        group, group_id, rank = initializer(backend=new_backend)
+        if group_id is None:
+            return
+
+        if new_backend == "gloo":
+            self.assertTrue(isinstance(group_id, dist.ProcessGroupGloo))
+        if new_backend == "nccl":
+            self.assertTrue(isinstance(group_id, dist.ProcessGroupNCCL))
+
+        self.assertEqual(rank, group[dist.get_rank(group_id)])
+        self.assertEqual(len(group), dist.get_world_size(group_id))
+
+        # Pin device (so we avoid NCCL race conditions/deadlocks).
+        group_rank = dist.get_rank(group_id)
+        torch.cuda.set_device(group_rank)
+
+        # Run broadcast of CUDA tensor (so it works for both Gloo and NCCL).
+        tensor = _build_tensor(2, value=group_rank).cuda()
+        dist.broadcast(tensor, src=group[0], group=group_id)
+        self.assertEqual(_build_tensor(2, value=0), tensor.to("cpu"))
+
+    @require_backend({"gloo", "nccl"})
+    @require_backends_available({"gloo", "nccl"})
+    @require_world_size(3)
+    @require_num_gpus(2)
+    def test_backend_group(self):
+        self._test_group_override_backend(self._init_group_test)
+
+    @require_backend({"gloo", "nccl"})
+    @require_backends_available({"gloo", "nccl"})
+    @require_num_gpus(3)
+    def test_backend_full_group(self):
+        self._test_group_override_backend(self._init_full_group_test)
 
     # SEND RECV
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
@@ -1456,7 +1551,8 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             for attr in dir(cls):
                 if attr.startswith("test"):
                     fn = getattr(cls, attr)
-                    setattr(cls, attr, cls.manager_join(fn))
+                    if not getattr(fn, "__unittest_skip__", False):
+                        setattr(cls, attr, cls.manager_join(fn))
 
         def setUp(self):
             super(TestDistBackend, self).setUp()

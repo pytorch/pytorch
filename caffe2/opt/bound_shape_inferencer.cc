@@ -79,6 +79,14 @@ void BoundShapeInferencer::InferBoundShapeAndType(
     }
   }
 
+  // Doing a reverse pass to infer the input shapes if applicable
+  for (int i = net.op_size() - 1; i >= 0; --i) {
+    const auto& op = net.op(i);
+    if (op.type() == "Concat") {
+      InferConcatInputs(op);
+    }
+  }
+
   // Make sure shape has name
   EnsureShapeNames(&shape_info_);
 }
@@ -251,6 +259,55 @@ void BoundShapeInferencer::InferReshape(const OperatorDef& op) {
     shape_info_[op.output(1)].dim_type = ShapeInfo::DimType::CONSTANT;
   }
 }
+
+void BoundShapeInferencer::InferConcatInputs(const OperatorDef& op) {
+  ArgumentHelper helper(op);
+  const auto add_axis = helper.GetSingleArgument<int32_t>("add_axis", 0);
+  if (add_axis) {
+    return;
+  } else if (op.output_size() == 0 || !shape_info_.count(op.output(0))) {
+    return;
+  }
+
+  const auto axis = helper.HasArgument("axis")
+      ? helper.GetSingleArgument<int32_t>("axis", -1)
+      : GetDimFromOrderString(
+            helper.GetSingleArgument<string>("order", "NCHW"));
+
+  const auto& shape_info = shape_info_.at(op.output(0));
+  int output_channel = shape_info.shape.dims(axis);
+  int missing_shape_infos = 0;
+  int channel_acc = 0;
+  std::string input_to_infer;
+  for (const auto& i : op.input()) {
+    const auto it = shape_info_.find(i);
+    if (it != shape_info_.end()) {
+      const auto& current_input_shape = it->second;
+      channel_acc += current_input_shape.shape.dims(axis);
+    } else if (missing_shape_infos) {
+      LOG(INFO) << "More than one missing shapes, previous one: "
+                << input_to_infer;
+      // We can only infer one missing input shape info
+      return;
+    } else {
+      ++missing_shape_infos;
+      input_to_infer = i;
+    }
+  }
+
+  if (missing_shape_infos && !input_to_infer.empty()) {
+    auto input_shape_info = shape_info;
+    input_shape_info.shape.set_dims(axis, output_channel - channel_acc);
+    shape_info_.emplace(input_to_infer, std::move(input_shape_info));
+
+    // Infer the shape of the second output of Concat
+    InferCommonOp(op);
+    if (op.output_size() > 1 && shape_info_.count(op.output(1))) {
+      shape_info_[op.output(1)].dim_type = ShapeInfo::DimType::CONSTANT;
+    }
+  }
+}
+
 // For concat net, if some inputs are missing and we have add_axis argument, it
 // means that all the inputs should be of the same dimension. In this case, we
 // can infer the shape of the missing inputs
@@ -399,7 +456,7 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
       !(op.type().compare(0, 4, "Int8")) && (op.type() != "Int8Dequantize");
   TensorProto::DataType infered_data_type = TensorProto::UNDEFINED;
   if (is_quantized) {
-    const static std::map<string, int> type_info_from_input = {
+    const static std::map<std::string, int> type_info_from_input = {
         {"Int8Quantize", -1}, // Force this op's output to be uint8
         {"Int8ConvRelu", 1},
         {"Int8MaxPool", 0},
@@ -420,6 +477,7 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
   } else if (op.type() == "Int8Dequantize") {
     infered_data_type = TensorProto::FLOAT;
   }
+
   for (const auto& shape : output_shapes) {
     if (infered_data_type == TensorProto::UNDEFINED) {
       infered_data_type = shape.data_type();
