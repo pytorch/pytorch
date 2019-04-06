@@ -1099,9 +1099,6 @@ class TestJit(JitTestCase):
         self.run_pass('cse', graph)
         FileCheck().check("block").check_not("aten::add").check_not("aten::gt").run(str(graph))
 
-    def test_expand_fakequant(self):
-        pass
-
     def test_expand_propagate_qinfo(self):
         pass
 
@@ -1147,8 +1144,124 @@ class TestJit(JitTestCase):
         self.assertEqual(value_stats['p'][1], x2 + y2)
         self.assertEqual(value_stats['z'][1], x2 - y2)
 
-    def test_expand_insert_fakequant(self):
-        pass
+    def test_insert_quantdequant_consecutive_qnodes_script(self):
+        class testModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(testModule, self).__init__()
+                self.conv1 = nn.Conv2d(1, 20, 5, 1)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = F.relu(self.conv1(x))
+                return x
+
+        trace = testModule()
+
+        # Constant Propagation step is performed because this pass is intended
+        # to insert quant-dequant nodes for quantizable tensors. The type analysis
+        # happens as part of this jit pass
+        torch._C._jit_pass_constant_propagation(trace.graph)
+        self.run_pass('insert_quantdequant', trace.graph)
+
+        # We expect to see quant-dequant node before and after
+        # both conv and relu nodes and at external output since relu
+        # is last node. Constant nodes correspond to params for the
+        # quantization nodes
+        FileCheck().check("quantize_linear").check_next("dequantize") \
+                   .check("conv2d").check_next("Constant") \
+                   .check_next("Constant").check_next("quantize_linear") \
+                   .check_next("dequantize").run(str(trace.graph))
+        FileCheck().check("relu").check_next("Constant") \
+                   .check_next("Constant").check_next("quantize_linear") \
+                   .check_next("dequantize").check_next("return") \
+                   .run(str(trace.graph))
+
+    def test_insert_quantdequant_consecutive_qnodes_trace(self):
+        class testModule(torch.nn.Module):
+            def __init__(self):
+                super(testModule, self).__init__()
+                self.conv1 = nn.Conv2d(1, 20, 5, 1)
+
+            def forward(self, x):
+                x = F.relu(self.conv1(x))
+                return x
+
+        trace = torch.jit.trace(testModule(), (torch.rand(1, 1, 28, 28)))
+
+        self.run_pass('insert_quantdequant', trace.graph)
+        # We expect to see quant-dequant node before and after
+        # both conv and relu nodes and at external output since relu
+        # is last node. Constant nodes correspond to params for the
+        # quantization nodes
+        FileCheck().check("quantize_linear").check_next("dequantize") \
+                   .check("_convolution").check_next("Constant") \
+                   .check_next("Constant").check_next("quantize_linear") \
+                   .check_next("dequantize").run(str(trace.graph))
+        FileCheck().check("relu").check_next("Constant") \
+                   .check_next("Constant").check_next("quantize_linear") \
+                   .check_next("dequantize").check_next("return") \
+                   .run(str(trace.graph))
+
+    def test_insert_quantdequant_single_qnode(self):
+        class testModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(testModule, self).__init__()
+                self.conv1 = nn.Conv2d(1, 20, 5, 1)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = self.conv1(x)
+                x1 = torch.add(x, 1)
+                return x1
+
+        trace = testModule()
+
+        # Constant Propagation step is performed because this pass is intended
+        # to insert quant-dequant nodes for quantizable tensors. The type analysis
+        # happens as part of this jit pass
+        torch._C._jit_pass_constant_propagation(trace.graph)
+        self.run_pass('insert_quantdequant', trace.graph)
+
+        # We expect to see quant-dequant node before and after
+        # both conv and no quant-dequant after add. Constant nodes correspond
+        # to params for the quantization nodes
+        FileCheck().check("quantize_linear").check_next("dequantize") \
+                   .check("conv2d").check_next("Constant") \
+                   .check_next("Constant").check_next("quantize_linear") \
+                   .check_next("dequantize").check_next("add") \
+                   .check_next("return").run(str(trace.graph))
+
+    def test_insert_quantdequant_alternate_qnode(self):
+        class testModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(testModule, self).__init__()
+                self.conv1 = nn.Conv2d(1, 20, 5, 1)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = self.conv1(x)
+                x1 = torch.add(x, 1)
+                x2 = F.relu(x1)
+                return x2
+
+        trace = testModule()
+
+        # Constant Propagation step is performed because this pass is intended
+        # to insert quant-dequant nodes for quantizable tensors. The type analysis
+        # happens as part of this jit pass
+        torch._C._jit_pass_constant_propagation(trace.graph)
+        self.run_pass('insert_quantdequant', trace.graph)
+
+        # We expect to see quant-dequant node before and after
+        # conv, relu and add. Constant nodes correspond to params for the
+        # quantization nodes
+        FileCheck().check("quantize_linear").check_next("dequantize") \
+                   .check("conv2d").check_next("Constant") \
+                   .check_next("Constant").check_next("quantize_linear") \
+                   .check_next("dequantize").run(str(trace.graph))
+        FileCheck().check("add").check_next("Constant")\
+                   .check_next("Constant").check_next("quantize_linear") \
+                   .check("dequantize").run(str(trace.graph))
 
     def test_expand_quantlint(self):
         pass
