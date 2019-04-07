@@ -156,47 +156,64 @@ static std::string encodeSpecialRHS(const Node* n, TemplateEnv& env) {
   }
 }
 
+// This struct specifies a template for dispatching specific aten:: operators.
+// The current variants of RHS code selection we support are for double and
+// float output values. For example, an aten::log operator which is assigned
+// to a float value would emit logf(), whereas an aten::log operator which is
+// assigned to a double would emit log().
+struct RHSTemplate {
+  // Common case: float and double dispatch are identical
+  RHSTemplate(const char* for_float)
+      : for_float(for_float), for_double(for_float) {}
+
+  RHSTemplate(const char* for_float, const char* for_double)
+      : for_float(for_float), for_double(for_double) {}
+
+  const char* for_float;
+  const char* for_double;
+};
+
 // Writes "simple mappable" ops
 static std::string encodeRHS(const Node* n) {
-  static std::unordered_map<NodeKind, std::string> simple_map_ops = {
+  static std::unordered_map<NodeKind, RHSTemplate> simple_map_ops = {
       // unary
       {aten::_cast_Float, "static_cast<float>(${0})"},
       {aten::abs, "fabs(${0})"},
-      {aten::sigmoid, "1.f / (1.f + expf(-${0}))"},
+      {aten::sigmoid, {"1.f / (1.f + expf(-${0}))", "1. / (1. + exp(-${0}))"}},
       {aten::relu, "${0} < 0 ? 0.f : ${0} "},
       {aten::threshold,
        "${0} <= ${1} ? static_cast<decltype(${0})>(${2}) : ${0} "},
-      {aten::log, "logf(${0})"},
-      {aten::log10, "log10f(${0})"},
-      {aten::log1p, "log1pf(${0})"},
-      {aten::log2, "log2f(${0})"},
-      {aten::lgamma, "lgammaf(${0})"},
-      {aten::exp, "expf(${0})"},
-      {aten::expm1, "expm1f(${0})"},
-      {aten::erf, "erff(${0})"},
-      {aten::erfc, "erfcf(${0})"},
-      {aten::cos, "cosf(${0})"},
-      {aten::acos, "acosf(${0})"},
-      {aten::cosh, "coshf(${0})"},
-      {aten::sin, "sinf(${0})"},
-      {aten::asin, "asinf(${0})"},
-      {aten::sinh, "sinhf(${0})"},
-      {aten::tan, "tanf(${0})"},
-      {aten::atan, "atanf(${0})"},
-      {aten::tanh, "tanhf(${0})"},
-      {aten::sqrt, "sqrtf(${0})"},
-      {aten::rsqrt, "rsqrtf(${0})"},
-      {aten::ceil, "ceilf(${0})"},
-      {aten::floor, "floorf(${0})"},
-      {aten::round, "roundf(${0})"},
-      {aten::trunc, "truncf(${0})"},
-      {aten::frac, "fracf(${0})"},
-      {aten::reciprocal, "1.f/(${0})"},
+      {aten::log, {"logf(${0})", "log(${0})"}},
+      {aten::log10, {"log10f(${0})", "log10(${0})"}},
+      {aten::log1p, {"log1pf(${0})", "log1p(${0})"}},
+      {aten::log2, {"log2f(${0})", "log2(${0})"}},
+      {aten::lgamma, {"lgammaf(${0})", "lgamma(${0})"}},
+      {aten::exp, {"expf(${0})", "exp(${0})"}},
+      {aten::expm1, {"expm1f(${0})", "expm1(${0})"}},
+      {aten::erf, {"erff(${0})", "erf(${0})"}},
+      {aten::erfc, {"erfcf(${0})", "erfc(${0})"}},
+      {aten::cos, {"cosf(${0})", "cos(${0})"}},
+      {aten::acos, {"acosf(${0})", "acos(${0})"}},
+      {aten::cosh, {"coshf(${0})", "cosh(${0})"}},
+      {aten::sin, {"sinf(${0})", "sin(${0})"}},
+      {aten::asin, {"asinf(${0})", "asin(${0})"}},
+      {aten::sinh, {"sinhf(${0})", "sinh(${0})"}},
+      {aten::tan, {"tanf(${0})", "tan(${0})"}},
+      {aten::atan, {"atanf(${0})", "atan(${0})"}},
+      {aten::tanh, {"tanhf(${0})", "tanh(${0})"}},
+      {aten::sqrt, {"sqrtf(${0})", "sqrt(${0})"}},
+      {aten::rsqrt, {"rsqrtf(${0})", "rsqrt(${0})"}},
+      {aten::ceil, {"ceilf(${0})", "ceil(${0})"}},
+      {aten::floor, {"floorf(${0})", "floor(${0})"}},
+      {aten::round, {"roundf(${0})", "round(${0})"}},
+      {aten::trunc, {"truncf(${0})", "trunc(${0})"}},
+      {aten::frac, {"fracf(${0})", "frac(${0})"}},
+      {aten::reciprocal, {"1.f/(${0})", "1./(${0})"}},
       {aten::neg, "-${0}"},
       // simple binary
       {aten::atan2, "atan2(${0}, ${1})"},
-      {aten::min, "fminf(${0}, ${1})"},
-      {aten::max, "fmaxf(${0}, ${1})"},
+      {aten::min, {"fminf(${0}, ${1})", "fmin(${0}, ${1})"}},
+      {aten::max, {"fmaxf(${0}, ${1})", "fmax(${0}, ${1})"}},
 
       // binary with other
       // TODO: some of these ops will not get generated because
@@ -208,24 +225,24 @@ static std::string encodeRHS(const Node* n) {
       {aten::__or__, "${0} || ${1}"},
       {aten::__rshift__, "${0} >> ${1}"},
       {aten::__xor__, "${0} ^ ${1}"},
-      {aten::addcmul, "${cast_0} + ${cast_3} * ${cast_1} * ${cast_2}"},
-      {aten::div, "${cast_0} / ${cast_1}"},
-      {aten::eq, "${0} == ${1}"},
-      {aten::fmod, "fmodf(${cast_0}, ${cast_1})"},
-      {aten::ge, "(${0} >= ${1})"},
-      {aten::gt, "${0} > ${1}"},
-      {aten::le, "(${0} <= ${1})"},
-      {aten::lt, "${0} < ${1}"},
-      {aten::lerp, "${cast_0} + ${cast_2} * (${cast_1} - ${cast_0})"},
-      {aten::type_as, "(${cast_0})"},
-      {aten::mul, "${cast_0} * ${cast_1}"},
-      {aten::ne, "${0} != ${1}"},
+      {aten::addcmul, "${0} + ${3} * ${1} * ${2}"},
+      {aten::div, "${0} / ${1}"},
+      {aten::eq, "${0_nocast} == ${1_nocast}"},
+      {aten::fmod, "fmodf(${0}, ${1})"},
+      {aten::ge, "(${0_nocast} >= ${1_nocast})"},
+      {aten::gt, "${0_nocast} > ${1_nocast}"},
+      {aten::le, "(${0_nocast} <= ${1_nocast})"},
+      {aten::lt, "${0_nocast} < ${1_nocast}"},
+      {aten::lerp, "${0} + ${2} * (${1} - ${0})"},
+      {aten::type_as, "(${0})"},
+      {aten::mul, "${0} * ${1}"},
+      {aten::ne, "${0_nocast} != ${1_nocast}"},
       {aten::remainder, "remainderf(${0}, ${1})"},
-      {aten::pow, "powf(${cast_0}, ${cast_1})"},
+      {aten::pow, {"powf(${0}, ${1})", "pow(${0}, ${1})"}},
 
       // alpha
-      {aten::add, "${cast_0} + ${cast_2}*${cast_1}"},
-      {aten::sub, "(${cast_0} - ${cast_2}*${cast_1})"},
+      {aten::add, "${0} + ${2}*${1}"},
+      {aten::sub, "(${0} - ${2}*${1})"},
       {aten::rand_like, "uniform(rnd())"},
 
       // where
@@ -262,14 +279,22 @@ static std::string encodeRHS(const Node* n) {
     for (auto in : n->inputs()) {
       // PyTorch converts (scalar) argument types to result before applying the
       // operator e.g. 1.4-torch.tensor(3) = -2
-      env.s(std::to_string(i), valueName(in));
       env.s(
-          std::string("cast_") + std::to_string(i),
+          std::to_string(i),
           typeCastedValueName(in->type(), outtype, valueName(in)));
+      // Uncasted operands only used for comparison operators
+      env.s(std::to_string(i) + "_nocast", valueName(in));
       i++;
     }
 
-    const auto& str = simple_map_ops.at(n->kind());
+    const auto& templ = simple_map_ops.at(n->kind());
+    const char* str = nullptr;
+    if (outtype == at::kFloat) {
+      str = templ.for_float;
+    } else {
+      str = templ.for_double;
+    }
+    AT_ASSERT(str);
     return format(str, env);
   }
 }
