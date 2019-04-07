@@ -33,8 +33,8 @@ import model_defs.word_language_model as word_language_model
 from model_defs.mnist import MNIST
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from caffe2.python.operator_test.torch_integration_test import (generate_rois,
-    generate_rois_rotated, create_bbox_transform_inputs)
+from caffe2.python.operator_test.torch_integration_test import (generate_rois_rotated,
+                                                                create_bbox_transform_inputs)
 
 import onnx
 import caffe2.python.onnx.backend as c2
@@ -1328,7 +1328,7 @@ class TestCaffe2Backend(unittest.TestCase):
         num_classes = 7
         rotated = False
         angle_bound_on = True
-        clip_angle_thresh=0.5
+        clip_angle_thresh = 0.5
         rois, deltas, im_info = create_bbox_transform_inputs(
             roi_counts, num_classes, rotated
         )
@@ -1381,7 +1381,7 @@ class TestCaffe2Backend(unittest.TestCase):
         emb_lens = 10
         has_bias = True
         batch_first = True
-        is_bidirectional=True
+        is_bidirectional = True
 
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -1389,7 +1389,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
             def forward(self, lstm_in):
                 a, b, c = torch.ops._caffe2.InferenceLSTM(
-                  lstm_in, num_layers, has_bias, batch_first, is_bidirectional
+                    lstm_in, num_layers, has_bias, batch_first, is_bidirectional
                 )
                 return a, b, c
 
