@@ -161,7 +161,7 @@ struct ArgumentSpec {
 // ArgumentSpecCreator takes an initial graph and comes up with a set
 // of simple instructions to compute the ArgumentSpec given a set of
 // input tensors.
-struct ArgumentSpecCreator {
+struct TORCH_API ArgumentSpecCreator {
   // instructs acts on a stack of a list of input IValues
   // at the beginning the stack contains a single list of the inputs to the
   // function the ENTER_ instructs descend into subobjects and push new lists
