@@ -40,6 +40,30 @@ void removePrintOps(std::shared_ptr<Graph>& graph) {
 
 namespace {
 
+void checkONNXCompatibility(const c10::FunctionSchema& schema) {
+  // in ONNX, all inputs are tensors, no support for tensor list
+  // so at most one input tensor list is supported
+  bool has_tensor_list = false;
+  const auto& args = schema.arguments();
+  for (const auto& arg : args) {
+    if (arg.name() == "_caffe2_preallocated_outputs") {
+      continue;
+    }
+    auto type = arg.type();
+    if (type->kind() == TypeKind::OptionalType) {
+      type = reinterpret_cast<OptionalType*>(type.get())->getElementType();
+      AT_ASSERT(type->kind() != TypeKind::OptionalType);
+    }
+    if (type->kind() == TypeKind::ListType) {
+      const auto& elem_type = reinterpret_cast<ListType*>(type.get())->getElementType();
+      if (elem_type->isSubclass(TypeKind::TensorType)) {
+        AT_ASSERTM(!has_tensor_list, "ONNX export supports at most one TensorList as input.");
+        has_tensor_list = true;
+      }
+    }
+  }
+}
+
 void preprocessCaffe2Ops(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
        ++it) {
@@ -47,8 +71,8 @@ void preprocessCaffe2Ops(Block* block) {
       preprocessCaffe2Ops(b);
     }
     if (it->kind().is_caffe2()) {
-      // TODO check whether this caffe2 op can be exported to onnx
       const auto& schema = it->schema();
+      checkONNXCompatibility(schema);
       std::vector<Value*> origin_inputs;
       for (Value* v : it->inputs()) {
         origin_inputs.push_back(v);
