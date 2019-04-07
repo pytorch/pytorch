@@ -38,12 +38,9 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
       bool create_graph) const override;
   void set_data(Tensor & self, Tensor new_data) const override;
 
-  Tensor tensorFromBlob(void * data, IntArrayRef sizes, const std::function<void(void*)> & deleter=noop_deleter) const override;
-  Tensor tensorFromBlob(void * data, IntArrayRef sizes, IntArrayRef strides, const std::function<void(void*)> & deleter=noop_deleter) const override;
   Tensor tensorWithAllocator(IntArrayRef sizes, Allocator* allocator) const override;
   Tensor tensorWithAllocator(IntArrayRef sizes, IntArrayRef strides, Allocator* allocator) const override;
 
-  Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
   Storage storageWithAllocator(int64_t size, Allocator* allocator) const override;
   Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;
   Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
