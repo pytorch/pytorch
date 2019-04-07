@@ -274,17 +274,16 @@ void EncoderBase::EncodeBlock(
       p_n->add_output(output->uniqueName());
       EncodeIntermediateValueInfo(graph_proto, output);
     }
-    if (is_raw_export) {
-      AT_ASSERT(!node->kind().is_onnx());
+    if (!node->kind().is_onnx()) {
       p_n->set_domain(node->kind().domainString());
       domains_.insert(node->kind().domainString());
+    }
+    if (is_raw_export) {
+      AT_ASSERT(!node->kind().is_onnx());
     } else if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
-      if (node->kind().is_caffe2()) {
-        p_n->set_domain(node->kind().domainString());
-        domains_.insert(node->kind().domainString());
-      } else {
-        AT_ASSERT(node->kind().is_onnx());
-      }
+      AT_ASSERT(!node->kind().is_aten() &&
+          !node->kind().is_prim() &&
+          !node->kind().is_attr());
     }
     p_n->set_op_type(node->kind().toUnqualString());
     for (auto attr_name : node->attributeNames()) {

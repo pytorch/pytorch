@@ -77,6 +77,9 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
               tracer::addInputs(node, args[i].name().c_str(), tensor_list);
             } else if (elem_type->kind() == TypeKind::FloatType) {
               AT_ASSERT(iter->isDoubleList());
+              // NB: now, tracer doesn't support tracing double list. We add special
+              // handling here, since in our case, we assume that all the doubles
+              // in the list are constants
               const std::vector<double>& value = iter->toDoubleListRef();
               std::vector<Value*> info(value.size());
               for (int value_index = 0; value_index < value.size(); ++value_index) {
