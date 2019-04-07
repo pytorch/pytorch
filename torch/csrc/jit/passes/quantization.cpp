@@ -125,10 +125,6 @@ static void addObserverFor(Value* v, Node* original_observer_node) {
   observedValue->setType(v->type());
   observedValue->setUniqueName(v->uniqueName() + ".observed");
 
-  // Replace the uses of v with observedValue. We need to do it *before* we add
-  // the inputs - otherwise we would replace the newly added inputs as well.
-  v->replaceAllUsesWith(observedValue);
-
   // Now we can add the inputs.
   observerNode->addInput(v);
   observerNode->addInput(vname);
@@ -170,7 +166,9 @@ void InsertObserverNodes(std::shared_ptr<Graph>& graph, Node* observer_node) {
 
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
-    addObserverFor(v, observer_node);
+    if (v->type()->isSubtypeOf(TensorType::get())) {
+      addObserverFor(v, observer_node);
+    }
   }
 }
 
