@@ -17,10 +17,13 @@ bool isEqual(at::IntArrayRef lhs, at::IntArrayRef rhs) {
 }
 
 bool isEqual(const ArgumentInfo& ti, const autograd::Variable& v) {
+  if (ti.isNontensorOptional() || ti.isNone()) {
+    return false;
+  }
   if (!ti.defined())
     return ti.defined() == v.defined();
   return ti.device() == device(v) && ti.requires_grad() == v.requires_grad() &&
-    ti.type() == v.scalar_type();
+      ti.type() == v.scalar_type() && ti.dim() == v.dim();
 }
 
 autograd::Variable var(at::Type& t, at::IntArrayRef sizes, bool requires_grad) {
@@ -84,20 +87,18 @@ void testArgumentSpec() {
   ASSERT_TRUE(no_grad != a);
 
   std::unordered_set<ArgumentSpec> spec;
-  spec.insert(std::move(a));
+  spec.insert(a); // we still need a for the test below
   ASSERT_TRUE(spec.count(b) > 0);
   ASSERT_EQ(spec.count(no_grad), 0);
   spec.insert(std::move(no_grad));
   ASSERT_EQ(spec.count(arg_spec_creator.create(true, list)), 1);
 
   list2[1].toTensor().transpose_(0, 1);
-  ArgumentSpec c = arg_spec_creator.create(true, list2); // same as list, except for one stride
-  ASSERT_FALSE(c == a);
+  ArgumentSpec c = arg_spec_creator.create(
+      true, list2); // same as list, except for one stride, used to be
+                    // different, now the same
+  ASSERT_TRUE(c == a);
   ASSERT_EQ(spec.count(c), 1);
-
-  /*Stack stack = {var(CF, {1, 2}, true), 3, var(CF, {1, 2}, true)};
-  CompleteArgumentSpec with_const(true, stack);
-  ASSERT_EQ(with_const.at(2).sizes().size(), 2);*/
 }
 
 } // namespace test

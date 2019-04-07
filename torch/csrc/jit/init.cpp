@@ -167,6 +167,15 @@ void initJITBindings(PyObject* module) {
 	    ArgumentSpec spec =
 	      arg_spec_creator.create(with_grad, stack);
 	    arg_spec_creator.setInputTypes(*graph, spec);
+            // We only get DimensionedTensorType from the arg_spec_creator, but
+            // we want CompleteTensorType. The alternative would be to have a
+            // "complete type inference" function in ArguemntSpecCreator.
+            auto g_inputs = graph->inputs();
+            for (size_t i = 0; i < inputs.size(); ++i) {
+              if (stack[i].isTensor()) {
+                g_inputs[i]->setType(incompleteInferTypeFrom(stack[i]));
+              }
+            }
             PropagateInputShapes(graph);
           })
       .def("_jit_pass_remove_expands", RemoveExpands)

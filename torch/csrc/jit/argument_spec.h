@@ -28,6 +28,9 @@ struct ArgumentInfo {
   bool isNone() const {
     return is_none_;
   }
+  bool isNontensorOptional() const {
+    return is_nontensor_optional_;
+  }
   int device() const {
     return device_;
   }
