@@ -82,11 +82,11 @@ std::tuple<Tensor, Tensor> _unique_dim_cpu_template(
   // check if dim is in range and see if the size along that dim is 0    
   if (dim <= self.dim() && self.size(dim)==0 ){
     // check the other remaining dimentions, returns true if other dimentions are 0
-    bool well_formed_tensor = true;
+    bool well_formed_tensor = false;
     for (int64t i=0; i< self.dim(); ++i){
       if (dim == i) continue;
       if (self.size(i) != 0){
-        well_formed_tensor = false;
+        well_formed_tensor = true;
         break;
       }
     }
