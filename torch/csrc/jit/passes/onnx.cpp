@@ -38,8 +38,6 @@ void removePrintOps(std::shared_ptr<Graph>& graph) {
   removePrintOps(graph->block());
 }
 
-namespace {
-
 void checkONNXCompatibility(const c10::FunctionSchema& schema) {
   // in ONNX, all inputs are tensors, no support for tensor list
   // so at most one input tensor list is supported
@@ -151,8 +149,6 @@ void preprocessCaffe2Ops(Block* block) {
 void preprocessCaffe2Ops(std::shared_ptr<Graph>& graph) {
   preprocessCaffe2Ops(graph->block());
 }
-
-} // namespace
 
 // Transform PythonOps into Nodes that match ONNX semantics.
 std::shared_ptr<Graph> ToONNX(
