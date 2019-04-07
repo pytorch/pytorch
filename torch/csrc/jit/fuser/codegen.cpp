@@ -55,7 +55,7 @@ static std::string scalarValue(const double v) {
       out << "POS_INFINITY";
     }
   } else {
-    out << std::scientific << v << "f";
+    out << std::setprecision(16) << v;
   }
   return out.str();
 }
@@ -86,9 +86,9 @@ static const char* calcScalarTypeName(const at::ScalarType type) {
 
 static std::string variableType(const std::shared_ptr<c10::Type>& t) {
   if (t->kind() == TypeKind::IntType) {
-    return "int";
+    return "int64_t";
   } else if (t->kind() == TypeKind::FloatType) {
-    return "float";
+    return "double";
   } else if (t->kind() == TypeKind::BoolType) {
     return "bool";
   } else if (t->kind() == TypeKind::DimensionedTensorType) {
@@ -110,10 +110,12 @@ static std::string typeCastedValueName(
     }
     return vn;
   } else if (t->kind() == TypeKind::FloatType) {
-    if (!isFloatingType(outtype)) {
-      return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
-    }
-    return vn;
+    // We don't guard this on anything because in our type system for scalars,
+    // there is not a distinction between `float` and `double`, however there
+    // *is* a distinction in tensor scalar types. We conservatively insert a
+    // cast here, which may end up being a no-op if the tensor's scalar type
+    // is `double`.
+    return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
   } else if (t->kind() == TypeKind::DimensionedTensorType) {
     auto const tt = t->cast<DimensionedTensorType>();
     if (tt->scalarType() != outtype) {
@@ -252,18 +254,6 @@ static std::string encodeRHS(const Node* n) {
       {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
       {aten::_tanh_backward, "${0} * (1.f - ${1} * ${1})"},
   };
-
-  if (n->kind() == prim::Constant) {
-    const auto val = toIValue(n->output()).value();
-    if (val.isDouble()) {
-      return scalarValue(val.toDouble());
-    } else if (val.isBool()) {
-      return scalarValue(val.toBool());
-    } else {
-      AT_ASSERT(val.isInt());
-      return scalarValue(val.toInt());
-    }
-  }
 
   TemplateEnv env;
 
@@ -450,10 +440,30 @@ std::string generateKernel(
       AT_ASSERT(use_cuda);
       has_random = true;
     }
+    // Always emit double for prim::Constant. This will be narrowed later based
+    // on either:
+    //  - Tensor-Scalar operator type rules
+    //  - Math function rules
+    if (n->kind() == prim::Constant) {
+      const auto val = toIValue(n->output()).value();
+      std::string rhs;
+      if (val.isDouble()) {
+        rhs = scalarValue(val.toDouble());
+      } else if (val.isBool()) {
+        rhs = scalarValue(val.toBool());
+      } else {
+        AT_ASSERT(val.isInt());
+        rhs = scalarValue(val.toInt());
+      }
+      env.s("node", valueName(n->output()));
+      env.s("rhs", rhs);
+      env.s("lhs_type", variableType(n->output()->type()));
+    } else {
+      env.s("node", valueName(n->output()));
+      env.s("rhs", encodeRHS(n));
+      env.s("lhs_type", variableType(n->output()->type()));
+    }
 
-    env.s("node", valueName(n->output()));
-    env.s("rhs", encodeRHS(n));
-    env.s("lhs_type", variableType(n->output()->type()));
     body << format("${lhs_type} ${node} = ${rhs};\n", env);
   }
 
