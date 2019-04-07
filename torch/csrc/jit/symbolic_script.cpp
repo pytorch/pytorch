@@ -1055,19 +1055,6 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
-        def max_pool2d_with_indices(self,
-                                    kernel_size: List[int],
-                                    stride: List[int],
-                                    padding: List[int],
-                                    dilation: List[int],
-                                    ceil_mode: bool):
-            result0, result1 = torch.max_pool2d_with_indices(self, kernel_size, stride, padding, dilation, ceil_mode)
-            def backward(grad_output):
-                grad_self = torch.max_pool2d_with_indices_backward(grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, result1)
-                return grad_self, None, None, None, None, None
-
-            return result0, result1, backward
-
         def nll_loss(self, target, weight: Optional[Tensor], reduction: int, ignore_index: int):
             result, total_weight = torch.nll_loss_forward(self, target, weight, reduction, ignore_index)
             def backward(grad):
@@ -1089,18 +1076,6 @@ const std::vector<std::string> functions = {
                 return grad_self, None, None
 
             return torch.softmax(self, dim, dtype), backward
-
-        def thnn_conv2d_forward(self, weight,
-                                kernel_size: List[int],
-                                bias: Optional[Tensor],
-                                stride: List[int],
-                                padding: List[int]):
-            result0, result1, result2 = torch.thnn_conv2d_forward(self, weight, kernel_size, bias, stride, padding)
-            def backward(grad_output):
-                grad_self, grad_weight, grad_bias = torch.thnn_conv2d_backward(grad_output, self, weight, kernel_size, stride, padding, result1, result2, [True, True, True])
-                return grad_self, grad_weight, None, grad_bias, None, None
-
-            return result0, result1, result2, backward
 
         def AD_interpolate_backward(grad,
                                     input,
