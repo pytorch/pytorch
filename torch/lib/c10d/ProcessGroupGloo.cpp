@@ -130,7 +130,8 @@ at::Tensor pinnedLike(at::Tensor& tensor) {
       allocator,
       /*resizable=*/false
   );
-  return at::empty({0}, tensor.options()).set_(storage, 0, tensor.sizes(), tensor.strides());
+  return at::empty({0}, tensor.options().device(at::kCPU)).set_(
+      storage, 0, tensor.sizes(), tensor.strides());
 }
 
 // This function initializes a vector of CUDA streams, one for every
