@@ -14,13 +14,52 @@
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/Reduction.h>
 #include <c10/util/Optional.h>
+#include <ATen/TensorUtils.h>
 
 namespace at {
 
-using native::from_blob;
 using native::tensor;
 
 ${function_declarations}
+
+inline Tensor from_blob(
+    void* data,
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    const std::function<void(void*)>& deleter,
+    const TensorOptions& options = {}) {
+  auto storage = Storage(
+      options.dtype(),
+      detail::computeStorageSize(sizes, strides),
+      InefficientStdFunctionContext::makeDataPtr(
+          data, deleter, options.device()),
+      /*allocator=*/nullptr,
+      /*resizable=*/false);
+  return empty({0}, options).set_(storage, 0, sizes, strides);
+}
+
+inline Tensor from_blob(
+    void* data,
+    IntArrayRef sizes,
+    const std::function<void(void*)>& deleter,
+    const TensorOptions& options = {}) {
+  return from_blob(data, sizes, detail::defaultStrides(sizes), deleter, options);
+}
+
+inline Tensor from_blob(
+    void* data,
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    const TensorOptions& options = {}) {
+  return from_blob(data, sizes, strides, [](void*) {}, options);
+}
+
+inline Tensor from_blob(
+    void* data,
+    IntArrayRef sizes,
+    const TensorOptions& options = {}) {
+  return from_blob(data, sizes, detail::defaultStrides(sizes), [](void*) {}, options);
+}
 
 namespace detail {
 
