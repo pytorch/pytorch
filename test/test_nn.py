@@ -2533,35 +2533,14 @@ class TestNN(NNTestCase):
         self._test_EmbeddingBag(False, 'mean', True)
 
     @staticmethod
-    def _get_reduction(mode='mean', dim=0):
-        def safe_mean(tensor, dim):
-            if tensor.size(dim) > 0:
-                return tensor.mean(dim)
-            return torch.zeros_like(tensor.mean(dim))
-
-        def safe_max(tensor, dim):
-            if tensor.size(dim) > 0:
-                return tensor.max(dim)[0]
-            return torch.zeros_like(tensor.mean(dim))
-
-        if mode == 'mean':
-            return lambda t: safe_mean(t, dim)
-        elif mode == 'sum':
-            return lambda t: t.sum(dim)
-        elif mode == 'max':
-            return lambda t: safe_max(t, dim)
-        else:
-            assert false
-
-    @staticmethod
-    def _embedding_bag_reference(input, weight, offsets=None, mode='mean',
-                                 per_sample_weights=None):
+    def _embedding_bag_reference_impl(input, weight, offsets=None, mode='sum',
+                                      per_sample_weights=None):
+        assert mode == 'sum'
         assert offsets is not None
         if per_sample_weights is None:
             per_sample_weights = torch.ones(input.size())
         assert input.numel() == per_sample_weights.numel()
 
-        reduction = TestNN._get_reduction(mode)
         bags = []
         embeddings = weight.index_select(0, input) * per_sample_weights.unsqueeze(1)
         for index, offset in enumerate(offsets):
@@ -2570,7 +2549,7 @@ class TestNN(NNTestCase):
             else:
                 next_offset = len(input)
             length = next_offset - offset
-            bags.append(reduction(embeddings.narrow(0, offset, length)))
+            bags.append(embeddings.narrow(0, offset, length).sum(0))
         return torch.stack(bags)
 
     @staticmethod
@@ -2630,7 +2609,7 @@ class TestNN(NNTestCase):
             per_sample_weights = torch.randn_like(input, dtype=dtype)
             reference_weights = es.weight.detach().requires_grad_()
 
-            expected = self._embedding_bag_reference(
+            expected = self._embedding_bag_reference_impl(
                 input, reference_weights, offsets, mode, per_sample_weights)
             result = es(input, offsets, per_sample_weights)
             self.assertEqual(result, expected)
