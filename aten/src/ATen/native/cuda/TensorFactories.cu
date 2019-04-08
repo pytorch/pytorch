@@ -9,7 +9,6 @@
 
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
-#include <THC/THCGenerator.hpp>
 #include <THC/THCTensorRandom.h>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
@@ -503,6 +502,8 @@ Tensor reservoir_sampling_cuda(
   dim3 threads(threadsPerBlock);
 
   THCState *state = at::globalContext().getTHCState();
+  int64_t seed = at::randint(0, 2147483647, {1}).item().toLong();
+  THCRandom_manualSeedAll(state, seed);
   curandStateMtgp32 *gen_states = THCRandom_generatorStates(state);
 
   if (weights.numel() == 0){
@@ -608,6 +609,8 @@ Tensor sampling_with_replacement_cuda(
   } else {
 
     THCState *state = at::globalContext().getTHCState();
+    int64_t seed = at::randint(0, 2147483647, {1}).item().toLong();
+    THCRandom_manualSeedAll(state, seed);
     curandStateMtgp32 *gen_states = THCRandom_generatorStates(state);
 
     samples = at::empty({k}, x.options().dtype(at::kLong));
