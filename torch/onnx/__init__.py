@@ -1,6 +1,3 @@
-import functools
-import types
-
 import torch._C as _C
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType

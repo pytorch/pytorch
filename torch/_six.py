@@ -53,9 +53,9 @@ else:
 
 
 if PY2:
-    import Queue as queue
+    import Queue as queue  # noqa: F401
 else:
-    import queue
+    import queue  # noqa: F401
 
 
 def with_metaclass(meta, *bases):

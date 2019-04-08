@@ -92,6 +92,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   } else {
     sorted_indices = at::arange(0, num_inp, options);
     int64_t *sorted_indices_ptr = sorted_indices.data<int64_t>();
+    sorted_indices_ptr = sorted_indices.data<int64_t>();
     thrust::sort_by_key(policy, output_data, output_data + num_inp, sorted_indices_ptr);
   }
 

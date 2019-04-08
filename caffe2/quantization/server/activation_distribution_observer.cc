@@ -342,6 +342,10 @@ void HistogramNetObserver::DumpAndReset_(
                      << " has an empty range: min " << hist->Min()
                      << " and max " << hist->Max();
       }
+      if (hist->GetHistogram()->empty()) {
+        LOG(WARNING) << "Histogram of "
+                     << info->min_max_info.tensor_infos[i].name << " is empty";
+      }
 
       ostringstream ost;
       ost << op_index << " " << info->min_max_info.type << " " << i << " "
@@ -352,15 +356,11 @@ void HistogramNetObserver::DumpAndReset_(
         ost << " " << c;
       }
 
-      f << ost.str() << endl;
       if (print_total_min_max) {
         LOG(INFO) << this << " " << ost.str();
       }
 
-      if (hist->GetHistogram()->empty()) {
-        LOG(WARNING) << "Histogram of "
-                     << info->min_max_info.tensor_infos[i].name << " is empty";
-      }
+      f << ost.str() << endl;
 
       if (!print_total_min_max) {
         info->histograms[i] = DynamicHistogram(hist->GetHistogram()->size());
@@ -575,7 +575,8 @@ RegisterQuantizationParamsWithHistogramNetObserver::
         qparams = qfactory->ChooseQuantizationParams(hist, is_weight);
       } else {
         qparams.scale = 0.1f;
-        qparams.zero_point = -min / qparams.scale;
+        qparams.zero_point =
+            (isinf(min) || isnan(min)) ? 0 : (-min / qparams.scale);
         qparams.precision = 8;
       }
 
