@@ -1479,7 +1479,7 @@ class _DistTestBase(object):
         model_gpu.cuda(gpu_subset[0])
 
         # DDP training setup
-        model_DDP = nn.utils.convert_sync_batchnorm(copy.deepcopy(model))
+        model_DDP = nn.SyncBatchNorm.convert_sync_batchnorm(copy.deepcopy(model))
         model_DDP.cuda(gpu_subset[0])
         model_DDP = nn.parallel.DistributedDataParallel(
             model_DDP, device_ids=gpu_subset
