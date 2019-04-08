@@ -16,6 +16,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace at { namespace native {
 
@@ -292,7 +293,7 @@ struct ReduceOp {
   int noutputs;
 
   ReduceOp(ops_t ops, ReduceConfig config, InputCalculator input_calc, OutputCalculator output_calc,
-           const void* src, const char* dst_[], void* acc_buf, void* cta_buf, int* semaphores, arg_t ident, int noutputs)
+           const void* src, std::vector<char*> dst_, void* acc_buf, void* cta_buf, int* semaphores, arg_t ident, int noutputs)
     : ops(ops)
     , config(config)
     , input_calc(input_calc)
@@ -652,9 +653,9 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
   char* out_data = (char*)iter.data_ptr(0);
   const auto noutputs = iter.noutputs();
-  const char* out_data_p[noutputs];
+  std::vector<char*> out_data_p;
   for (int i = 0; i < noutputs; i++) {
-    out_data_p[i] = (char*)iter.data_ptr(i);
+    out_data_p.push_back((char*)iter.data_ptr(i));
   }
   char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
 
