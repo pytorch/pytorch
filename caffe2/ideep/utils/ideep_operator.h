@@ -16,6 +16,8 @@ C10_DECLARE_REGISTRY(
   C10_REGISTER_CREATOR(IDEEPOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_IDEEP_OPERATOR(name, ...) \
   C10_REGISTER_CLASS(IDEEPOperatorRegistry, name, __VA_ARGS__)
+#define REGISTER_IDEEP_OPERATOR_WITH_ENGINE(name, engine, ...) \
+  C10_REGISTER_CLASS(IDEEPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 #define REGISTER_IDEEP_OPERATOR_STR(str_name, ...) \
   C10_REGISTER_TYPED_CLASS(IDEEPOperatorRegistry, str_name, __VA_ARGS__)
 #define REGISTER_IDEEP_COMPARE_OPERATOR(Op)                    \
@@ -27,8 +29,6 @@ C10_DECLARE_REGISTRY(
           Op##Functor<CPUContext>,                             \
           FixedType<bool>>>)
 
-#define REGISTER_IDEEP_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  C10_REGISTER_CLASS(IDEEPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
 // IDEEPOperator is the base scaffolding of the operators that uses IDEEP. It
 // provides a few operators that are useful to IDEEP specific implementations.
@@ -39,8 +39,6 @@ class IDEEPOperator : public OperatorBase {
         context_(operator_def.device_option()),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
-    OPERATOR_NEEDS_FEATURE(
-        order_ == StorageOrder::NCHW, "Unsupported storage order.");
   }
   virtual ~IDEEPOperator() {}
 
@@ -118,5 +116,20 @@ class IDEEPOperator : public OperatorBase {
   name(const OperatorDef& operator_def, Workspace* ws)                         \
       : IDEEPOperator(operator_def, ws) {}                                     \
   virtual ~name() {}
+
+// Convert zero_point scales to min_max scales
+// NOTE:
+//  The scales in operator is saved in FBGEMM format,
+//  while FBGEMM scales are the reciprocals of MKL-DNN scales.
+//  This function is provided to convert scales from FBGEMM to MKL-DNN
+inline ideep::scale_t ConvertScales(
+    const std::vector<float> scales_z) {
+  ideep::scale_t scales (scales_z);
+  for (auto it = scales.begin(); it != scales.end(); it++) {
+    *it = 1.0f / *it;
+  }
+  return scales;
+}
+
 
 } // namespace caffe2
