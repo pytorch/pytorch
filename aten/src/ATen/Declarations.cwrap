@@ -75,13 +75,13 @@
     - arguments:
       - arg: THTensor* self
         broadcast: mask inplace fallback types:Byte
-      - THBoolTensor* mask
+      - THByteTensor* mask
       - real value
     - zero_dim_tensor_only: True
       arguments:
       - arg: THTensor* self
         broadcast: mask inplace fallback types:Byte
-      - THBoolTensor* mask
+      - THByteTensor* mask
       - THTensor* value
 ]]
 [[
@@ -92,7 +92,7 @@
   arguments:
     - arg: THTensor* self
       broadcast: mask inplace fallback types:Byte
-    - THBoolTensor* mask
+    - THByteTensor* mask
     - THTensor* source
 ]]
 [[
@@ -106,11 +106,13 @@
       output: True
     - arg: THTensor* self
       broadcast: mask fallback types:Byte
-    - THBoolTensor* mask
+    - THByteTensor* mask
 ]]
 [[
   name: _th_nonzero
   cname: nonzero
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -134,6 +136,9 @@
 [[
   name: _th_view
   cname: newView
+  cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   device_guard: False
@@ -146,6 +151,9 @@
 [[
   name: _th_resize_as_
   cname: resizeAs
+  cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: self
@@ -524,13 +532,13 @@
   options:
     - cname: ltValue
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
     - cname: ltTensor
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - arg: THTensor* self
           broadcast: other fallback
@@ -561,13 +569,13 @@
   options:
     - cname: gtValue
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
     - cname: gtTensor
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - arg: THTensor* self
           broadcast: other fallback
@@ -598,13 +606,13 @@
   options:
     - cname: leValue
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
     - cname: leTensor
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - arg: THTensor* self
           broadcast: other fallback
@@ -635,13 +643,13 @@
   options:
     - cname: geValue
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
     - cname: geTensor
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - arg: THTensor* self
           broadcast: other fallback
@@ -672,13 +680,13 @@
   options:
     - cname: eqValue
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
     - cname: eqTensor
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - arg: THTensor* self
           broadcast: other fallback
@@ -709,13 +717,13 @@
   options:
     - cname: neValue
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
     - cname: neTensor
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - arg: THTensor* self
           broadcast: other fallback

@@ -17,8 +17,6 @@ new_common_args = parse_kwargs("""
         Default: if None, same :class:`torch.device` as this tensor.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
-    pin_memory (bool, optional): If set, returned tensor would be allocated in
-        the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
 add_docstr_all('new_tensor',
@@ -669,6 +667,13 @@ add_docstr_all('data_ptr',
 data_ptr() -> int
 
 Returns the address of the first element of :attr:`self` tensor.
+""")
+
+add_docstr_all('dequantize',
+               r"""
+dequantize() -> Tensor
+
+Given a quantized Tensor, dequantize it and return the dequantized float Tensor.
 """)
 
 add_docstr_all('dense_dim',
@@ -1775,6 +1780,31 @@ qr() -> (Tensor, Tensor)
 See :func:`torch.qr`
 """)
 
+add_docstr_all('quantize_linear',
+               r"""
+quantize_linear(scale, zero_point) -> Tensor
+
+Quantize a float Tensor using affine quantization scheme with given scale and
+zero_point.
+returns the quantized Tensor.
+""")
+
+add_docstr_all('q_scale',
+               r"""
+q_scale() -> float
+
+Given a Tensor quantized by linear(affine) quantization,
+returns the scale of the underlying quantizer().
+""")
+
+add_docstr_all('q_zero_point',
+               r"""
+q_zero_point() -> int
+
+Given a Tensor quantized by linear(affine) quantization,
+returns the zero_point of the underlying quantizer().
+""")
+
 add_docstr_all('random_',
                r"""
 random_(from=0, to=None, *, generator=None) -> Tensor
@@ -1843,6 +1873,7 @@ Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
     `numpy.repeat <https://docs.scipy.org/doc/numpy/reference/generated/numpy.repeat.html>`_,
     but is more similar to
     `numpy.tile <https://docs.scipy.org/doc/numpy/reference/generated/numpy.tile.html>`_.
+    For the operator similar to `numpy.repeat`, see :func:`torch.repeat_interleave`.
 
 Args:
     sizes (torch.Size or int...): The number of times to repeat this tensor along each
@@ -1858,6 +1889,13 @@ Example::
             [ 1,  2,  3,  1,  2,  3]])
     >>> x.repeat(4, 2, 1).size()
     torch.Size([4, 2, 3])
+""")
+
+add_docstr_all('repeat_interleave',
+               r"""
+repeat_interleave(repeats, dim=None) -> Tensor
+
+See :func:`torch.repeat_interleave`.
 """)
 
 add_docstr_all('requires_grad_',

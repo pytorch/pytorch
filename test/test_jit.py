@@ -1086,21 +1086,26 @@ class TestJit(JitTestCase):
         self.assertExportImport(trace, (x, y))
 
     def test_recursive_cse(self):
-        x = torch.tensor([0.1])
-        y = torch.tensor([0.2])
-
-        def fn(x, y):
-            z = x
-            if bool(x + y > x):
-                z = x + y
-            return z
-
-        graph = torch.jit.script(fn).graph
+        input_str = """
+graph(%x : Tensor,
+      %y : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %3 : Tensor = aten::add(%x, %y, %2)
+  %4 : Tensor = aten::gt(%3, %x)
+  %5 : bool = prim::Bool(%4)
+  %z : Tensor = prim::If(%5)
+    # CHECK: block
+    block0():
+      # CHECK-NOT: aten::add
+      %z.1 : Tensor = aten::add(%x, %y, %2)
+      -> (%z.1)
+    block1():
+      -> (%x)
+  return (%z)
+"""
+        graph = parse_ir(input_str)
         self.run_pass('cse', graph)
-        FileCheck().check("block").check_not("aten::add").check_not("aten::gt").run(str(graph))
-
-    def test_expand_fakequant(self):
-        pass
+        FileCheck().run(input_str, graph)
 
     def test_expand_propagate_qinfo(self):
         pass
@@ -1147,8 +1152,124 @@ class TestJit(JitTestCase):
         self.assertEqual(value_stats['p'][1], x2 + y2)
         self.assertEqual(value_stats['z'][1], x2 - y2)
 
-    def test_expand_insert_fakequant(self):
-        pass
+    def test_insert_quantdequant_consecutive_qnodes_script(self):
+        class testModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(testModule, self).__init__()
+                self.conv1 = nn.Conv2d(1, 20, 5, 1)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = F.relu(self.conv1(x))
+                return x
+
+        trace = testModule()
+
+        # Constant Propagation step is performed because this pass is intended
+        # to insert quant-dequant nodes for quantizable tensors. The type analysis
+        # happens as part of this jit pass
+        torch._C._jit_pass_constant_propagation(trace.graph)
+        self.run_pass('insert_quantdequant', trace.graph)
+
+        # We expect to see quant-dequant node before and after
+        # both conv and relu nodes and at external output since relu
+        # is last node. Constant nodes correspond to params for the
+        # quantization nodes
+        FileCheck().check("quantize_linear").check_next("dequantize") \
+                   .check("conv2d").check_next("Constant") \
+                   .check_next("Constant").check_next("quantize_linear") \
+                   .check_next("dequantize").run(str(trace.graph))
+        FileCheck().check("relu").check_next("Constant") \
+                   .check_next("Constant").check_next("quantize_linear") \
+                   .check_next("dequantize").check_next("return") \
+                   .run(str(trace.graph))
+
+    def test_insert_quantdequant_consecutive_qnodes_trace(self):
+        class testModule(torch.nn.Module):
+            def __init__(self):
+                super(testModule, self).__init__()
+                self.conv1 = nn.Conv2d(1, 20, 5, 1)
+
+            def forward(self, x):
+                x = F.relu(self.conv1(x))
+                return x
+
+        trace = torch.jit.trace(testModule(), (torch.rand(1, 1, 28, 28)))
+
+        self.run_pass('insert_quantdequant', trace.graph)
+        # We expect to see quant-dequant node before and after
+        # both conv and relu nodes and at external output since relu
+        # is last node. Constant nodes correspond to params for the
+        # quantization nodes
+        FileCheck().check("quantize_linear").check_next("dequantize") \
+                   .check("_convolution").check_next("Constant") \
+                   .check_next("Constant").check_next("quantize_linear") \
+                   .check_next("dequantize").run(str(trace.graph))
+        FileCheck().check("relu").check_next("Constant") \
+                   .check_next("Constant").check_next("quantize_linear") \
+                   .check_next("dequantize").check_next("return") \
+                   .run(str(trace.graph))
+
+    def test_insert_quantdequant_single_qnode(self):
+        class testModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(testModule, self).__init__()
+                self.conv1 = nn.Conv2d(1, 20, 5, 1)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = self.conv1(x)
+                x1 = torch.add(x, 1)
+                return x1
+
+        trace = testModule()
+
+        # Constant Propagation step is performed because this pass is intended
+        # to insert quant-dequant nodes for quantizable tensors. The type analysis
+        # happens as part of this jit pass
+        torch._C._jit_pass_constant_propagation(trace.graph)
+        self.run_pass('insert_quantdequant', trace.graph)
+
+        # We expect to see quant-dequant node before and after
+        # both conv and no quant-dequant after add. Constant nodes correspond
+        # to params for the quantization nodes
+        FileCheck().check("quantize_linear").check_next("dequantize") \
+                   .check("conv2d").check_next("Constant") \
+                   .check_next("Constant").check_next("quantize_linear") \
+                   .check_next("dequantize").check_next("add") \
+                   .check_next("return").run(str(trace.graph))
+
+    def test_insert_quantdequant_alternate_qnode(self):
+        class testModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(testModule, self).__init__()
+                self.conv1 = nn.Conv2d(1, 20, 5, 1)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                x = self.conv1(x)
+                x1 = torch.add(x, 1)
+                x2 = F.relu(x1)
+                return x2
+
+        trace = testModule()
+
+        # Constant Propagation step is performed because this pass is intended
+        # to insert quant-dequant nodes for quantizable tensors. The type analysis
+        # happens as part of this jit pass
+        torch._C._jit_pass_constant_propagation(trace.graph)
+        self.run_pass('insert_quantdequant', trace.graph)
+
+        # We expect to see quant-dequant node before and after
+        # conv, relu and add. Constant nodes correspond to params for the
+        # quantization nodes
+        FileCheck().check("quantize_linear").check_next("dequantize") \
+                   .check("conv2d").check_next("Constant") \
+                   .check_next("Constant").check_next("quantize_linear") \
+                   .check_next("dequantize").run(str(trace.graph))
+        FileCheck().check("add").check_next("Constant")\
+                   .check_next("Constant").check_next("quantize_linear") \
+                   .check("dequantize").run(str(trace.graph))
 
     def test_expand_quantlint(self):
         pass
@@ -1484,13 +1605,23 @@ class TestJit(JitTestCase):
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: JIT tests not yet supported on windows")
+    @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
+    @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
+    @skipIfRocm
+    def test_cpp(self):
+        from cpp.jit import tests_setup
+        tests_setup.setup()
+        torch._C._jit_run_cpp_tests(run_cuda=False)
+        tests_setup.shutdown()
+
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @skipIfRocm
     def test_cpp_cuda(self):
         from cpp.jit import tests_setup
         tests_setup.setup()
-        torch._C._jit_run_cpp_tests()
+        torch._C._jit_run_cpp_tests(run_cuda=True)
         tests_setup.shutdown()
 
     def test_batchnorm(self):
@@ -2308,6 +2439,23 @@ class TestJit(JitTestCase):
             torch.randn(7, 3, 10), torch.LongTensor([7, 5, 2]), torch.randn(2, 3, 20), torch.randn(2, 3, 20)
         self.assertEqual(traced(x, lengths, (h0, c0)), imported(x, lengths, (h0, c0)))
 
+    def test_unique_state_dict(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                shared_param = torch.nn.Parameter(torch.ones(1))
+                self.register_parameter('w1', shared_param)
+                self.register_parameter('w2', shared_param)
+
+            def forward(self, input):
+                return input + self.w1 + self.w2
+
+        model = MyModule()
+        unittest.TestCase.assertEqual(
+            self, len(torch.jit._unique_state_dict(model, keep_vars=False)), 1)
+        unittest.TestCase.assertEqual(
+            self, len(torch.jit._unique_state_dict(model, keep_vars=True)), 1)
+
     def test_trace_dict_input(self):
         class Bar(torch.nn.Module):
             def __init__(self):
@@ -2680,6 +2828,19 @@ class TestScript(JitTestCase):
         with self.assertRaisesRegex(exception, regex):
             ge = torch.jit.script(script, optimize)
             ge(*inputs)
+
+    def test_submodule_twice(self):
+
+        @torch.jit.script
+        def foo(x):
+            return x * x
+
+        class What(torch.jit.ScriptModule):
+            def __init__(self, x):
+                super(What, self).__init__()
+                self.foo = x
+        a = What(foo)
+        c = What(foo)
 
     def test_training_param(self):
         class What(torch.jit.ScriptModule):
@@ -3215,6 +3376,17 @@ a")
         # trivial expression usage
         check_indexing('[1+1]', consec((3, 3)))
         check_indexing('[1:(0 + 2)]', consec((3, 3, 3)))
+
+        # None for new dimensions
+        check_indexing('[None, 0]', consec((3, 3)))
+        check_indexing('[1, None]', consec((3, 3), 10))
+        check_indexing('[None, None, 2]', consec((3, 3), 19))
+        check_indexing('[None, 2, None]', consec((3,)))
+        check_indexing('[0:2, None]', consec((3, 3, 3)))
+        check_indexing('[None, 1:-1]', consec((3, 3, 3)))
+        check_indexing('[None, -3:-1, None]', consec((6, 3)))
+        check_indexing('[-1, None, 2:, None, 1:2]', consec((3, 3, 3, 3)))
+        check_indexing('[None, -1, None, 2:, None, 1:2, None]', consec((3, 3, 3, 3)))
 
         # dynamic expression usage
         check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
@@ -4287,6 +4459,24 @@ a")
         a = next(graph.outputs()).type().kind()
         self.assertTrue(next(graph.outputs()).type().kind() != 'TensorType')
 
+    def test_shape_prop_promotion(self):
+        @torch.jit.script
+        def fn(x, y):
+            return x + y
+
+        x, y = torch.rand(3, 4, dtype=torch.float), torch.rand(3, 4, dtype=torch.double)
+        graph = fn._get_method('forward').propagate_shapes((x, y), False)
+        FileCheck().check('Double(*, *) = aten::add').run(graph)
+
+    def test_shape_prop_promote_scalar_arg(self):
+        @torch.jit.script
+        def fn(x):
+            return math.pi + x
+
+        x = torch.zeros(3, 4, dtype=torch.long)
+        graph = fn._get_method('forward').propagate_shapes((x,), False)
+        FileCheck().check('Long(*, *) = aten::add').run(graph)
+
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
         def test_integral_shape_inference(a):
@@ -4296,6 +4486,106 @@ a")
         outputs = torch.ones(10, 10)
 
         self.assertEqual(cu.test_integral_shape_inference(*inputs), outputs)
+
+    @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @enable_cpu_fuser
+    def test_batchnorm_fuser_cpu(self):
+        code = '''
+            graph(%3 : Tensor,
+                  %7 : Tensor,
+                  %12 : Float(*, *),
+                  %13 : Tensor,
+                  %25 : Tensor):
+                %23 : int = prim::Constant[value=1]()
+                %22 : float = prim::Constant[value=1e-05]()
+                %26 : Tensor = aten::sqrt(%25)
+                %24 : Tensor = aten::add(%26, %22, %23)
+                %20 : Tensor = aten::reciprocal(%24)
+                %norm_invstd : Tensor = aten::mul(%20, %23)
+                %15 : Tensor = aten::sub(%12, %13, %23)
+                %11 : Tensor = aten::mul(%15, %norm_invstd)
+                %8 : Tensor = aten::mul(%11, %7)
+                %5 : Tensor = aten::add(%8, %3, %23)
+                %1 : Float(*, *) = aten::relu(%5)
+                return (%1)
+        '''
+
+        graph = parse_ir(code)
+        inputs = 5 * [torch.rand(26, 2048, dtype=torch.float)]
+        code = torch._C._jit_fuser_get_fused_kernel_code(graph, inputs)
+        FileCheck().check('sqrtf').run(code)
+
+    @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @enable_cpu_fuser
+    def test_fuser_double_float_codegen(self):
+        fns = ['log', 'log10', 'log1p', 'log2', 'lgamma', 'exp', 'expm1', 'erf',
+               'erfc', 'cos', 'acos', 'cosh', 'sin', 'asin', 'sinh', 'tan',
+               'atan', 'tanh', 'sqrt', 'ceil', 'floor', 'round', 'trunc',
+               'frac']
+
+        def lookup_c_equivalent_fn(aten_fn):
+            if aten_fn == 'min':
+                return 'fmin'
+            elif aten_fn == 'max':
+                return 'fmax'
+            else:
+                return aten_fn
+
+        def test_dispatch(op, expects, dtype, binary=False):
+            if dtype == torch.double:
+                dtype_str = 'Double'
+            elif dtype == torch.float:
+                dtype_str = 'Float'
+            else:
+                raise RuntimeError('Unknown dtype')
+
+            if binary:
+                code = '''
+                    graph(%3 : Tensor, %4 : Tensor):
+                        %2 : {dtype}(*, *) = aten::{op}(%3, %4)
+                        %1 : {dtype}(*, *) = aten::relu(%2)
+                        return (%1)
+                '''.format(op=op, dtype=dtype_str)
+            else:
+                code = '''
+                    graph(%3 : Tensor):
+                        %2 : {dtype}(*, *) = aten::{op}(%3)
+                        %1 : {dtype}(*, *) = aten::relu(%2)
+                        return (%1)
+                '''.format(op=op, dtype=dtype_str)
+
+            graph = parse_ir(code)
+            inputs = (2 if binary else 1) * [torch.rand(26, 2048, dtype=dtype)]
+            code = torch._C._jit_fuser_get_fused_kernel_code(graph, inputs)
+            FileCheck().check(expects).run(code)
+
+        for fn in fns:
+            test_dispatch(fn, lookup_c_equivalent_fn(fn) + '(', torch.double)
+            test_dispatch(fn, lookup_c_equivalent_fn(fn) + 'f(', torch.float)
+
+        binary_fns = ['min', 'max', 'pow']
+        for fn in binary_fns:
+            test_dispatch(fn, lookup_c_equivalent_fn(fn) + '(', torch.double, binary=True)
+            test_dispatch(fn, lookup_c_equivalent_fn(fn) + 'f(', torch.float, binary=True)
+
+    @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @enable_cpu_fuser
+    def test_fuser_double_literal_precision(self):
+        code = '''
+        graph(%2 : Float(*, *)):
+            %4 : int = prim::Constant[value=1]()
+            %3 : float = prim::Constant[value=1.282549830161864]()
+            %5 : Float(*, *) = aten::add(%2, %3, %4)
+            %1 : Float(*, *) = aten::relu(%5)
+            return (%1)
+        '''
+
+        graph = parse_ir(code)
+        code = torch._C._jit_fuser_get_fused_kernel_code(graph, [torch.rand(3, 4)])
+        FileCheck().check('1.282549830161864').run(code)
 
     def test_fuser_multiple_blocks(self):
         cu = torch.jit.CompilationUnit('''
@@ -4526,13 +4816,48 @@ a")
 
         self.assertTrue(str(test_lhs_none_rhs_never.graph).count(': int = prim::Constant') == 1)
 
-    def test_explicit_bool_cast(self):
-        with self.assertRaisesRegex(RuntimeError, "expected a boolean"):
+    def test_conditional_casting(self):
+        def test_bool_cast_tensor(x):
+            if x:
+                return 1
+            else:
+                return 0
+
+        for make_one_dim in [True, False]:
+            for inp_val in [0.1, 0.0, -0.0, -0.1, -1, 0, 1]:
+                inp_val = [inp_val] if make_one_dim else inp_val
+                self.checkScript(test_bool_cast_tensor, (torch.tensor(inp_val),))
+
+        self.checkScriptRaisesRegex(test_bool_cast_tensor, (torch.tensor([1, 1]),), Exception,
+                                    "bool value of Tensor with more than one value")
+
+        def test_cast_int(x):
+            # type: (int) -> int
+            if x:
+                return 1
+            else:
+                return 0
+        self.checkScript(test_cast_int, (1,))
+        self.checkScript(test_cast_int, (0,))
+        self.checkScript(test_cast_int, (-1,))
+
+        def test_cast_float(x):
+            # type: (float) -> int
+            if x:
+                return 1
+            else:
+                return 0
+        self.checkScript(test_cast_float, (1.,))
+        self.checkScript(test_cast_float, (0.,))
+        self.checkScript(test_cast_float, (-1.,))
+
+        with self.assertRaisesRegex(RuntimeError, "expected a bool, int, float, or Tensor"):
             @torch.jit.script
-            def test_bool_cast(a):
-                if a:
-                    return a + 2
-                return a + 1
+            def test_bad_conditional(x):
+                if (1, 2):
+                    return
+                else:
+                    return 0
 
     def test_while_nonexistent_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
@@ -5030,6 +5355,26 @@ a")
             for func in funcs:
                 code = funcs_template.format(func=func, scalar1=scalar1, scalar2=scalar2)
                 run_test(code)
+
+    def test_number_abs(self):
+        def func1(x):
+            # type: (float) -> float
+            return abs(x)
+
+        def func2(x):
+            # type: (int) -> int
+            return abs(x)
+
+        def func3(x):
+            return abs(x)
+
+        self.checkScript(func1, (-3.14,))
+        self.checkScript(func1, (3.14,))
+        self.checkScript(func2, (-10,))
+        self.checkScript(func2, (10,))
+        self.checkScript(func3, (torch.tensor([-5, -10, -20]),))
+        self.checkScript(func3, (torch.tensor([5, 10, 20]),))
+        self.checkScript(func3, (torch.tensor([-5, 10, -20]),))
 
     def test_number_div(self):
         self.checkScript(div_int_future, (), optimize=True)
@@ -7376,6 +7721,24 @@ a")
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
+    def test_interpolate_trace(self):
+        class test(nn.Module):
+            def __init__(self):
+                super(test, self).__init__()
+                self.conv = nn.Conv2d(1, 32, kernel_size=3, padding=1)
+
+            def forward(self, x):
+                y = self.conv(x)
+                w = nn.functional.interpolate(y, mode='bilinear', align_corners=False, scale_factor=3)
+                return w
+
+        f = test()
+        # no failure
+        g = torch.jit.trace(f, (torch.zeros(1, 1, 28, 28),))
+        x = torch.zeros(1, 1, 14, 14)
+        # constants not baked in
+        self.assertEqual(g(x), f(x))
+
     def test_trace_nested_datatypes(self):
         @torch.jit.script
         def foo(x):
@@ -7965,6 +8328,21 @@ a")
             return a + 1.0 - a
 
         self.checkScript(test_rand, ())
+        fn = torch.jit.script(test_rand)
+        out = fn()
+        self.assertEqual(out.dtype, torch.double)
+        g = fn.graph_for()
+        # Testing shape analysis correctly setting type
+        FileCheck().check("Double(*, *)").check_not("Float(*, *)").run(g)
+
+        @torch.jit.script
+        def randint():
+            return torch.randint(0, 5, [1, 2])
+        out = randint()
+        self.assertEqual(out.dtype, torch.double)
+        # although the type should be int here, testing that the runtime dtype
+        # and shape analysis dtype is the same.
+        FileCheck().check("Double(*, *)").check_not("Float(*, *)").run(randint.graph_for())
 
     def test_erase_number_types(self):
         def func(a):
@@ -8310,7 +8688,7 @@ a")
             ''')
 
     def test_duplicate(self):
-        with self.assertRaisesRegex(RuntimeError, 'Method \'test\' already defined'):
+        with self.assertRaisesRegex(RuntimeError, 'method \'test\' already defined'):
             cu = torch.jit.CompilationUnit('''
             def test():
                 return 1
@@ -9874,7 +10252,7 @@ a")
             def __init__(self):
                 super(OtherStrong, self).__init__()
                 self.weak = weak
-                self.weak2 = weak
+                self.weak2 = Weak()
 
             @torch.jit.script_method
             def forward(self, x):
@@ -9891,7 +10269,7 @@ a")
 
         other_strong_mod = OtherStrong()
 
-        self.assertIs(other_strong_mod.weak, other_strong_mod.weak2)
+        self.assertIsNot(other_strong_mod.weak, other_strong_mod.weak2)
 
         with self.assertRaisesRegex(RuntimeError, "Attempted to inline a Module with param"):
             strong_mod = Strong()
@@ -12150,10 +12528,15 @@ nn_functional_tests = [
     ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),
         '', (True, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
-    ('layer_norm', (S, S, S, S), ([5],),),
-    ('layer_norm', (S, S, S, S), ([5], (S,)), 'with_only_weight'),
-    ('layer_norm', (S, S, S, S), ([5], None, (S,)), 'with_only_bias'),
-    ('layer_norm', (S, S, S, S), ([5], (S,), (S,)), 'with_weight_and_bias'),
+    ('layer_norm', (S, S, S, S), ([5],), '',
+     (True, ['prim::Loop', 'aten::_batch_norm_impl_index'])),
+    ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),), 'with_only_weight',
+     (True, ['prim::Loop', 'aten::_batch_norm_impl_index'])),
+    ('layer_norm', (S, S, S, S), ([5], None, non_differentiable(torch.rand(S)),), 'with_only_bias',
+     (True, ['prim::Loop', 'aten::_batch_norm_impl_index'])),
+    ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),
+                                  non_differentiable(torch.rand(S))), 'with_weight_and_bias',
+     (True, ['prim::Loop', 'aten::_batch_norm_impl_index'])),
     ('group_norm', (S, S, S), (1, torch.rand(5),),),
     ('local_response_norm', (S, S, S), (2, ),),
     ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]),), '', (True, 'aten::nll_loss_forward')),
