@@ -73,6 +73,9 @@ template <typename T,
           typename ModifyOp,
           typename ReduceOp,
           int ADims>
+#if defined(__HIP_PLATFORM_HCC__)
+C10_LAUNCH_BOUNDS_1(THC_REDUCE_ALL_BLOCK_SIZE)
+#endif
 __global__ void
 kernelReduceAllPass1(TensorInfo<T, IndexType> in,
                      IndexType totalElements,
@@ -103,6 +106,9 @@ kernelReduceAllPass1(TensorInfo<T, IndexType> in,
 }
 
 template <typename T, typename ReduceOp>
+#if defined(__HIP_PLATFORM_HCC__)
+C10_LAUNCH_BOUNDS_1(THC_REDUCE_ALL_BLOCK_SIZE)
+#endif
 __global__ void
 kernelReduceAllPass2(int numPass1Blocks,
                      T init,
