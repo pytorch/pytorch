@@ -20,10 +20,6 @@
 #include <magma.h>
 #endif
 
-#if AT_ROCM_ENABLED()
-#include <miopen/version.h>
-#endif
-
 #include <cuda.h>
 
 #include <sstream>
@@ -168,7 +164,7 @@ std::string CUDAHooks::showConfig() const {
 #endif
 #else
   // TODO: Check if miopen has the functions above and unify
-  oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << "." << MIOPEN_VERSION_MINOR << "." MIOPEN_VERSION_PATCH << "\n";
+  oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << "." << MIOPEN_VERSION_MINOR << "." << MIOPEN_VERSION_PATCH << "\n";
 #endif
 
 #ifdef USE_MAGMA
