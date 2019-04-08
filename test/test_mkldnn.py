@@ -6,7 +6,7 @@ import warnings
 
 
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
-# @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+@unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMkldnn(TestCase):
     def test_conversion(self):
         for cpu_tensor in [torch.randn((1, 2, 3, 4),
@@ -69,10 +69,6 @@ class TestMkldnn(TestCase):
         # these numbers are just empirical results that seem to work.
         self.assertWarnsRegex(lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2),
                               'double precision floating point')
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            self.assertRaisesRegex(ValueError, 'MKLDNN output is not supported at gradcheck yet',
-                                   lambda: gradgradcheck(func, [root], atol=4e-2, rtol=1e-2))
 
     def test_detach(self):
         root = torch.randn(4, 5, dtype=torch.float32).to_mkldnn().requires_grad_()
