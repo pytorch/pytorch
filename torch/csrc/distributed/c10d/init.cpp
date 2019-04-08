@@ -497,6 +497,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       py::arg("grads_batch"),
       py::arg("grads_batch_coalesced"),
       py::call_guard<py::gil_scoped_release>());
+#endif
 
   module.def(
       "_compute_bucket_assignment_by_size",
@@ -504,8 +505,6 @@ They are used in specifying strategies for reduction collectives, e.g.,
       py::arg("tensors"),
       py::arg("bucket_size"),
       py::call_guard<py::gil_scoped_release>());
-
-#endif
 
   Py_RETURN_TRUE;
 }
