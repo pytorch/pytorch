@@ -27,6 +27,11 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
     refresh_numel();
   }
 
+  void release_resources() override {
+    TensorImpl::release_resources();
+    opaque_handle_ = {};
+  }
+
   IntArrayRef strides() const override {
     AT_ERROR("opaque tensors do not have strides");
   }
