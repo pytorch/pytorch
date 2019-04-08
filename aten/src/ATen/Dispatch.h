@@ -21,7 +21,7 @@ struct ScalarTypeToCType<at::ScalarType::Half> {
 
   // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
   // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
-  // For repro example, please see: https://github.com/izdeby/playground/blob/0b0c0e9373b32830442ec26b2bc3535b21fb8d95/C%2B%2B/CudaBugRepro.cu
+  // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
   // TODO: remove once the bug is fixed.
   static at::Half t;
 };
@@ -32,7 +32,7 @@ struct ScalarTypeToCType<at::ScalarType::Bool> {
 
   // This is a workaround for the CUDA bug which prevents ::detail::ScalarTypeToCType<T>::type being used directly
   // due to ambiguous reference which can't to be resolved. For some reason it cant pick between at::detail and at::cuda::detail.
-  // For repro example, please see: https://github.com/izdeby/playground/blob/0b0c0e9373b32830442ec26b2bc3535b21fb8d95/C%2B%2B/CudaBugRepro.cu
+  // For repro example, please see: https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba
   // TODO: remove once the bug is fixed.
   static bool t;
 };
