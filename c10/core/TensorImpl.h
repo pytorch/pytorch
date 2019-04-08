@@ -1418,7 +1418,6 @@ protected:
   // You get to have eight byte-size fields here, before you
   // should pack this into a bitfield.
   TensorTypeId type_id_;
-
   bool is_contiguous_ = true;
   bool is_variable_ = false;
   bool is_wrapped_number_ = false;
