@@ -276,7 +276,7 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
     const auto& param_list = module_->get_parameters();
     for (auto it = param_list.rbegin(); it != param_list.rend(); ++it) {
       auto& param = *it;
-      params.push_back(caller.get_or_add_parameter(param.slot()));
+      params.push_back(caller.get_or_add_parameter(param));
     }
     auto list = caller.graph()->createList(TensorType::get(), params);
     caller.graph()->insertNode(list);
@@ -310,7 +310,7 @@ struct ModuleValue : public SugaredValue {
     // it adds a buffer 'training' to the model if one doesn't exist
     // and then loads that parameter, casting it to bool
     if (field == "training") {
-      NamedIValue* v = module->find_buffer(field);
+      Slot* v = module->find_buffer(field);
       if (!v) {
         py::object py_module = py::cast(module);
         bool training = py::cast<bool>(py::getattr(py_module, "training"));
@@ -319,7 +319,7 @@ struct ModuleValue : public SugaredValue {
         module->register_buffer("training", std::move(t));
         v = module->find_buffer(field);
       }
-      Value* the_tensor = m.get_or_add_parameter(v->slot());
+      Value* the_tensor = m.get_or_add_parameter(*v);
       Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
       return std::make_shared<SimpleValue>(the_bool);
     }
@@ -328,11 +328,11 @@ struct ModuleValue : public SugaredValue {
       return std::make_shared<ModuleValue>(v);
     } else if (Method* v = module->find_method(field)) {
       return std::make_shared<MethodValue>(shared_from_this(), *v);
-    } else if (NamedIValue* v = module->find_parameter(field)) {
-      return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
-    } else if (NamedIValue* v = module->find_attribute(field)) {
+    } else if (Slot* v = module->find_parameter(field)) {
+      return std::make_shared<SimpleValue>(m.get_or_add_parameter(*v));
+    } else if (Slot* v = module->find_attribute(field)) {
       return std::make_shared<SimpleValue>(
-          m.get_or_add_attribute(v->type(), v->slot()));
+          m.get_or_add_attribute(*v));
     }
 
     // This can also be a call to a non-script module, or a plain
@@ -606,11 +606,11 @@ static void gatherParametersAndBuffers(
     std::vector<Slot>& values,
     const Module& m) {
   for (auto& param : m.get_parameters()) {
-    values.push_back(param.slot());
+    values.push_back(param);
   }
   for (auto& param : m.get_attributes()) {
     if (param.type()->isSubtypeOf(TensorType::get())) {
-      values.push_back(param.slot());
+      values.push_back(param);
     }
   }
   for (const auto& sub : m.get_modules()) {
@@ -785,7 +785,7 @@ void initJitScriptBindings(PyObject* module) {
               py::tuple r(2);
               result[i] = std::make_tuple(
                   p.name(),
-                  autograd::as_variable_ref(p.slot().value().toTensor()));
+                  autograd::as_variable_ref(p.value().toTensor()));
             }
             return result;
           })
@@ -797,7 +797,7 @@ void initJitScriptBindings(PyObject* module) {
             for (size_t i = 0; i < attributes.size(); ++i) {
               auto& buffer = attributes[i];
               py::tuple r(3);
-              IValue v = buffer.slot().value();
+              IValue v = buffer.value();
               result[i] = std::make_tuple(
                   buffer.name(), buffer.type(), toPyObject(std::move(v)));
             }
@@ -949,12 +949,12 @@ void initJitScriptBindings(PyObject* module) {
              std::shared_ptr<Module> orig) {
             std::vector<Slot> member_inputs;
             for (auto& p : params) {
-              NamedIValue* np = std::get<0>(p)->find_parameter(std::get<1>(p));
+              Slot* np = std::get<0>(p)->find_parameter(std::get<1>(p));
               if (np == nullptr) {
                 np = std::get<0>(p)->find_buffer(std::get<1>(p));
               }
               AT_ASSERT(np != nullptr);
-              member_inputs.push_back(np->slot());
+              member_inputs.push_back(*np);
             }
 
             Method* orig_method = orig->find_method(name);
