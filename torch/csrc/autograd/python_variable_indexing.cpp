@@ -173,7 +173,11 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
           result = applySelect(result, dim, THPUtils_unpackLong(obj), i);
         } else {
           result = result.unsqueeze(dim);
-          handle_var(boolToIndexingTensor(result, var.item<uint8_t>() != 0));
+          if(scalar_type == at::kBool) {
+            handle_var(boolToIndexingTensor(result, var.item<bool>() != 0));
+          } else {
+            handle_var(boolToIndexingTensor(result, var.item<uint8_t>() != 0));
+          }
         }
       } else {
         handle_var(var);
