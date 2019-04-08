@@ -5,7 +5,7 @@
 //  index(Tensor self, indices) -> Tensor
 //  index_put_(Tensor self, indices, value, accumulate=false)
 //
-// The index is a TensorList containg kLong or kByte tensors or nulls. Byte
+// The index is a TensorList containg kLong, kBool or kByte tensors or nulls. Byte
 // tensors (boolean masks) are expanded to long tensors via nonzero(). Null
 // tensors signify that the dimension is not indexed.
 //
@@ -79,19 +79,19 @@ static void checkIndexTensorTypes(TensorList indices) {
   for (auto& tensor : indices) {
     if (tensor.defined()) {
       auto scalarType = tensor.scalar_type();
-      if (scalarType != kLong && scalarType != kByte) {
-          AT_INDEX_ERROR("tensors used as indices must be long or byte tensors");
+      if (scalarType != kLong && scalarType != kByte && scalarType != kBool) {
+          AT_INDEX_ERROR("tensors used as indices must be long, byte or bool tensors");
       }
     }
   }
 }
 
-static std::vector<Tensor> expandByteTensors(const Tensor & self, TensorList indices) {
-  // Expands byte tensors (masks) into the equivalent indexing by LongTensors
+static std::vector<Tensor> expandTensors(const Tensor & self, TensorList indices) {
+  // Expands ByteTensor (masks) or BoolTensor (masks) into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
   for (auto & index : indices) {
-    if (index.scalar_type() == kByte) {
-      // The sizes of the ByteTensor mask must match the sizes of the
+    if (index.scalar_type() == kByte || index.scalar_type() == kBool) {
+      // The sizes of the ByteTensor mask or bool tensor must match the sizes of the
       // corresponding dimensions in self
       for (int64_t j = 0; j < index.dim(); j++) {
         int64_t srcIdx = result.size() + j;
@@ -190,7 +190,6 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size)
 
 static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
   auto strides = computeLinearStride(src);
-  Type& longType = src.type().toScalarType(kLong);
 
   // Compute the linear index by multiplying the indexing tensors by the
   // stride and summing them. All the indexing tensors have the same shape at
@@ -202,7 +201,7 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
     if (indices[i].defined()) {
       // Cast index to the longType matching src's backend
       // This allows us to support ie indexing a cuda tensor with a cpu tensor
-      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i)) * strides[i]).toType(longType);
+      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i)) * strides[i]).to(kLong);
       if (linearIndex.defined()) {
         linearIndex += index;
       } else {
@@ -220,13 +219,13 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
   // Compute the linear indices for the parts of the tensor not being indexed
   Tensor beforeIndex;
   if (emptyBefore > 0) {
-    auto index = at::arange(0, nElemBefore, longType) * strides[emptyBefore - 1];
+    auto index = at::arange(0, nElemBefore, src.options().dtype(kLong)) * strides[emptyBefore - 1];
     index = index.view(src.sizes().slice(0, emptyBefore));
     beforeIndex = unsqueezeN(index, 0, linearIndex.dim() + emptyAfter);
   }
   Tensor afterIndex;
   if (emptyAfter > 0) {
-    auto index = at::arange(0, nElemAfter, longType);
+    auto index = at::arange(0, nElemAfter, src.options().dtype(kLong));
     index = index.view(src.sizes().slice(src.dim() - emptyAfter, emptyAfter));
     afterIndex = unsqueezeN(index, linearIndex.dim() + emptyBefore, 0);
   }
@@ -244,8 +243,8 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
 
 static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) {
   checkIndexTensorTypes(orig);
-  // first expand ByteTensor (boolean masks) into 1 or more LongTensors
-  auto indices = expandByteTensors(self, orig);
+  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
+  auto indices = expandTensors(self, orig);
   // next broadcast all index tensors together
   indices = expand_outplace(indices);
   // add missing null Tensors so that it matches self.dim()
@@ -378,8 +377,8 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
 
 static AdvancedIndex make_info(Tensor self, TensorList orig) {
   checkIndexTensorTypes(orig);
-  // first expand ByteTensor (boolean masks) into 1 or more LongTensors
-  auto indices = expandByteTensors(self, orig);
+  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
+  auto indices = expandTensors(self, orig);
   // next broadcast all index tensors together
   try {
     indices = expand_outplace(indices);
@@ -408,7 +407,7 @@ static AdvancedIndex make_info(Tensor self, TensorList orig) {
 static std::unique_ptr<TensorIterator> make_index_iterator(const AdvancedIndex& info) {
   auto builder = TensorIterator::Builder();
   builder.dont_compute_common_dtype();
-  builder.add_output(Tensor(), &info.src.type());
+  builder.add_output(Tensor(), info.src.type().backend(), info.src.scalar_type());
   builder.add_input(info.src);
   for (auto& index : info.indices) {
     builder.add_input(index);
@@ -425,7 +424,7 @@ static std::unique_ptr<TensorIterator> make_index_put_iterator(const AdvancedInd
   builder.dont_compute_common_dtype();
   builder.dont_resize_outputs();
   builder.add_output(info.src);
-  builder.add_input(value, &info.src.type());
+  builder.add_input(value, info.src.type().backend(), info.src.scalar_type());
   for (auto& index : info.indices) {
     builder.add_input(index);
   }
