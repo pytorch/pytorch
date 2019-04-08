@@ -7729,7 +7729,7 @@ a")
 
             def forward(self, x):
                 y = self.conv(x)
-                w = nn.functional.interpolate(y, mode='bilinear', align_corners=False, scale_factor=0.5)
+                w = nn.functional.interpolate(y, mode='bilinear', align_corners=False, scale_factor=3)
                 return w
 
         f = test()
