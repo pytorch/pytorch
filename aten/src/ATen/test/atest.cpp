@@ -53,7 +53,7 @@ TEST(atest, atest) {
 
   float data[] = {1, 2, 3, 4, 5, 6};
 
-  auto f = CPU(kFloat).tensorFromBlob(data, {1, 2, 3});
+  auto f = from_blob(data, {1, 2, 3});
   auto f_a = f.accessor<float, 3>();
 
   ASSERT_EQ(f_a[0][0][0], 1.0);
@@ -72,7 +72,7 @@ TEST(atest, atest) {
     int isgone = 0;
     {
       auto f2 =
-          CPU(kFloat).tensorFromBlob(data, {1, 2, 3}, [&](void*) { isgone++; });
+          from_blob(data, {1, 2, 3}, [&](void*) { isgone++; });
     }
     ASSERT_EQ(isgone, 1);
   }
@@ -81,7 +81,7 @@ TEST(atest, atest) {
     Tensor a_view;
     {
       auto f2 =
-          CPU(kFloat).tensorFromBlob(data, {1, 2, 3}, [&](void*) { isgone++; });
+          from_blob(data, {1, 2, 3}, [&](void*) { isgone++; });
       a_view = f2.view({3, 2, 1});
     }
     ASSERT_EQ(isgone, 0);
@@ -93,8 +93,7 @@ TEST(atest, atest) {
     int isgone = 0;
     {
       auto base = at::empty({1,2,3}, TensorOptions(kCUDA));
-      auto f2 = CUDA(kFloat).tensorFromBlob(
-          base.data_ptr(), {1, 2, 3}, [&](void*) { isgone++; });
+      auto f2 = from_blob(base.data_ptr(), {1, 2, 3}, [&](void*) { isgone++; });
     }
     ASSERT_EQ(isgone, 1);
   }
