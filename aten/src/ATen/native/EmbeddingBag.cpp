@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
-#include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
+#include <ATen/TensorUtils.h>
 
 #include <TH/THBlasUtils.h>
 
@@ -505,16 +506,17 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
   auto offset2bag_data = offset2bag.data<int64_t>();
 
   // XXX: 64 was arbitrarily chosen. There is probably a sweet spot for this number.
-  #pragma omp parallel for if (num_samples >= 64)
-  for (int64_t sample_idx = 0; sample_idx < num_samples; sample_idx++) {
-    auto bag_idx = offset2bag_data[sample_idx];
-    auto embedding_idx = indices_data[sample_idx];
+  parallel_for(0, num_samples, 64, [&](int64_t begin, int64_t end) {
+    for (int64_t sample_idx = begin; sample_idx < end; sample_idx++) {
+      auto bag_idx = offset2bag_data[sample_idx];
+      auto embedding_idx = indices_data[sample_idx];
 
-    output_data[sample_idx] = THBlas_dot<scalar_t>(
-        embedding_features,
-        grad_data + grad_stride0 * bag_idx, grad_stride1,
-        weight_data + weight_stride0 * embedding_idx, weight_stride1);
-  }
+      output_data[sample_idx] = THBlas_dot<scalar_t>(
+          embedding_features,
+          grad_data + grad_stride0 * bag_idx, grad_stride1,
+          weight_data + weight_stride0 * embedding_idx, weight_stride1);
+    }
+  });
   return output;
 }
 
@@ -547,7 +549,7 @@ Tensor _embedding_bag_sparse_backward(
                                        offset2bag, bag_size_);
   if (per_sample_weights.defined()) {
     AT_ASSERT(mode == MODE_SUM);
-    index_grad *= per_sample_weights.unsqueeze(1);
+    index_grad.mul_(per_sample_weights.unsqueeze(1));
   }
   return native::embedding_backward(index_grad, indices, num_weights, -1,
                                     scale_grad_by_freq, true);
