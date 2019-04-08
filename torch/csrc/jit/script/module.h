@@ -13,6 +13,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/utils/memory.h>
+#include <torch/csrc/jit/script/compilation_unit.h>
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/ArrayRef.h>
@@ -39,6 +40,8 @@ using ::c10::FunctionSchema;
 // Map which stores filename to content.
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
+
+using ModulePtr = c10::intrusive_ptr<c10::ivalue::Object>;
 // A method in a module, e.g. f in:
 //
 // class M(ScriptModule):
@@ -56,183 +59,12 @@ using ModuleLookup =
 struct Method {
   Method(
       Module* owner,
-      std::string name,
-      bool optimize,
-      std::shared_ptr<Graph> graph,
-      std::vector<Slot> initial_members,
-      std::function<void(Method&)> method_creator)
+      Function* function,
+      std::vector<Slot> initial_members)
       : owner_(owner),
-        name_(std::move(name)),
-        graph_(std::move(graph)),
-        optimize(optimize),
-        initial_ivalues_(std::move(initial_members)),
-        method_creator(std::move(method_creator)) {
-    AT_ASSERT(graph_->inputs().size() >= initial_ivalues_.size());
-    int i = graph_->inputs().size() - initial_ivalues_.size();
-    for (auto member : initial_ivalues_) {
-      initial_ivalue_index[member] = i++;
-    }
-  }
-
-  void run(Stack& stack) {
-    for (auto input : initial_ivalues_) {
-      push(stack, input.value());
-    }
-    get_executor().run(stack);
-  }
-
-  void run(Stack&& stack) {
-    run(stack);
-  }
-
-  IValue operator()(std::vector<IValue> stack) {
-    checkInputsAgainstSchema(stack);
-    run(stack);
-    return stack.front();
-  }
-
-  std::shared_ptr<Graph> graph_for(Stack inputs) {
-    for (auto tp : initial_ivalues_) {
-      inputs.emplace_back(tp.value());
-    }
-    return get_executor().graphFor(inputs);
-  }
-  TORCH_API std::shared_ptr<Graph> graph() const {
-    return graph_;
-  }
-
-  TORCH_API const std::string& name() const {
-    return name_;
-  }
-  // emit a function call by inlining the callees Graph into this one
-  // adding any extra parameters necessary to do this call
-
-  // defined here to keep details of member_input handling confined to this
-  // class
-  Value* emit_call_to(
-      const SourceRange& loc,
-      Method& callee,
-      ArrayRef<NamedValue> args,
-      ArrayRef<NamedValue> kwargs);
-
-  // if this isn't yet defined, run its method_creator function
-  TORCH_API void ensure_defined();
-
-  size_t num_inputs() const {
-    return graph()->inputs().size() - initial_ivalues_.size();
-  }
-  TORCH_API Value* get_or_add_parameter(Slot slot) {
-    AT_ASSERT(slot.value().isTensor());
-    return get_or_add_attribute(slot);
-  }
-  TORCH_API Value* get_or_add_attribute(Slot slot) {
-    auto it = initial_ivalue_index.find(slot);
-    if (it != initial_ivalue_index.end()) {
-      return graph()->inputs().at(it->second);
-    }
-    initial_ivalues_.push_back(slot);
-    initial_ivalue_index[slot] = graph()->inputs().size();
-    return graph()->addInput()->setType(slot.type());
-  }
-
-  static void setInputTensorTypes(Graph& g, const Stack& stack) {
-    AT_ASSERT(stack.size() == g.inputs().size());
-    for (size_t i = 0; i < stack.size(); ++i) {
-      g.inputs().at(i)->setType(
-          DimensionedTensorType::create(stack.at(i).toTensor()));
-    }
-  }
-
-  std::shared_ptr<Graph> propagate_shapes(
-      std::vector<at::Tensor> inputs,
-      bool with_grad = false) {
-    auto retval = graph_->copy();
-    Stack stack;
-    stack.reserve(inputs.size() + initial_ivalues_.size());
-    for (at::Tensor& i : inputs) {
-      stack.emplace_back(std::move(i));
-    }
-    for (const Slot& inp : initial_ivalues_) {
-      stack.push_back(inp.value());
-    }
-    setInputTensorTypes(*retval, stack);
-    PropagateInputShapes(retval);
-    return retval;
-  }
-
-  std::shared_ptr<Graph> propagate_and_assign_input_and_output_shapes(
-      std::vector<at::Tensor> inputs,
-      std::vector<at::Tensor> outputs,
-      bool with_grad = false,
-      bool propagate = true) {
-    auto retval = graph_->copy();
-    for (auto inp : initial_ivalues_) {
-      if (inp.value().isTensor()) {
-        inputs.push_back(inp.value().toTensor());
-      }
-    }
-    if (propagate) {
-      setInputTensorTypes(*retval, fmap<IValue>(inputs));
-      PropagateInputShapes(retval);
-    }
-    AT_ASSERT(retval->inputs().size() == inputs.size());
-    for (size_t i = 0; i < retval->inputs().size(); ++i) {
-      auto scalar_type = inputs[i].scalar_type();
-      auto sizes = inputs[i].sizes();
-      auto type =
-          torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
-      retval->inputs()[i]->setType(type);
-    }
-    at::ArrayRef<Value*> output_values = retval->outputs();
-    // patch this to still work if we are returning a tuple of multiple values
-    if (output_values.at(0)->type()->kind() == TupleType::Kind) {
-      AT_ASSERT(output_values.at(0)->node()->kind() == prim::TupleConstruct);
-      output_values = output_values.at(0)->node()->inputs();
-    }
-    AT_ASSERT(output_values.size() == outputs.size());
-    for (size_t i = 0; i < retval->outputs().size(); ++i) {
-      auto scalar_type = outputs[i].scalar_type();
-      auto sizes = outputs[i].sizes();
-      auto type =
-          torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
-      output_values[i]->setType(type);
-    }
-    return retval;
-  }
-
-  const std::vector<Slot>& initial_ivalues() const {
-    return initial_ivalues_;
-  }
-
-  Method& setSchema(FunctionSchema schema_) {
-    schema = make_unique<FunctionSchema>(std::move(schema_));
-    return *this;
-  }
-
-  TORCH_API const FunctionSchema& getSchema() const {
-    if (schema == nullptr) {
-      schema = make_unique<FunctionSchema>(defaultSchemaFor(*this));
-    }
-    return *schema;
-  }
-
-  std::string pretty_print_schema() const {
-    AT_ASSERT(schema);
-    std::stringstream ss;
-    ss << *schema;
-    return ss.str();
-  }
-
-  GraphExecutorState getDebugState() {
-    return get_executor().getDebugState();
-  }
-
-  void debugDisableAutodiffSubgraphInlining() {
-    return get_executor().debugDisableAutodiffSubgraphInlining();
-  }
-
-  bool is_optimized() const {
-    return optimize;
+        function_(function),
+        initial_ivalues_(std::move(initial_members)) {
+    AT_ASSERT(function->num_inputs() >= initial_ivalues_.size());
   }
 
   // the module that contains this method.
@@ -240,120 +72,75 @@ struct Method {
     return *owner_;
   }
 
-  void check_single_output() {
-    AT_CHECK(
-        graph()->outputs().size() == 1,
-        "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
+  void run(Stack& stack) {
+    for (auto input : initial_ivalues_) {
+      push(stack, input.value());
+    }
+    function_->run(stack);
+  }
+  void run(Stack&& stack) {
+    run(stack);
   }
 
- private:
-  static FunctionSchema defaultSchemaFor(const Method& method) {
-    std::vector<Argument> args;
-    std::vector<Argument> returns;
-    Graph& g = *method.graph();
-    size_t num_inputs = method.num_inputs();
-    for (size_t i = 0; i < num_inputs; ++i) {
-      const Value* v = g.inputs().at(i);
-      std::string name = v->hasUniqueName() ? v->uniqueNameBase()
-                                            : ("argument_" + std::to_string(i));
-      args.emplace_back(std::move(name), unshapedType(g.inputs()[i]->type()));
+  IValue operator()(std::vector<IValue> stack) {
+    for (auto input : initial_ivalues_) {
+      push(stack, input.value());
     }
-    for (size_t i = 0; i < g.outputs().size(); ++i) {
-      returns.emplace_back("", unshapedType(g.outputs()[i]->type()));
+    return (*function_)(std::move(stack));
+  }
+
+  const std::vector<Slot>& initial_ivalues() const {
+    return initial_ivalues_;
+  }
+
+
+  // proxies for underlying unbound Function
+  std::shared_ptr<Graph> graph_for(Stack inputs) {
+    for (auto tp : initial_ivalues_) {
+      inputs.emplace_back(tp.value());
     }
-    return {method.name(), "", std::move(args), std::move(returns)};
+    return function_->get_executor().graphFor(inputs);
+  }
+
+  TORCH_API std::shared_ptr<Graph> graph() const {
+    return function_->graph();
+  }
+
+  TORCH_API const std::string& name() const {
+    return function_->name();
+  }
+
+  size_t num_inputs() const {
+    return function_->num_inputs() - initial_ivalues_.size();
+  }
+
+  FunctionSchema getSchema() const {
+    // we are required to slice out the slot inputs from the schema
+    // we can't cache this because setSchema on the underlying function
+    // will change the underlying schema
+    auto sliced = ArrayRef<Argument>(function_->getSchema().arguments()).slice(0, num_inputs());
+    return function_->getSchema().withArguments(sliced.vec());
   }
 
   GraphExecutor& get_executor() {
-    std::call_once(executor_init, [&] {
-      check_single_output();
-      executor = GraphExecutor(graph(), optimize);
-    });
-    return executor;
+    return function_->get_executor();
   }
 
-  void checkInputsAgainstSchema(std::vector<IValue>& inputs) {
-    const auto& schema = getSchema();
-    // Do we have more inputs than the schema accepts?
-    AT_CHECK(
-        inputs.size() <= schema.arguments().size(),
-        "Expected at most ",
-        schema.arguments().size(),
-        " argument(s) for operator '",
-        schema.name(),
-        "', but received ",
-        inputs.size(),
-        " argument(s). Declaration: ",
-        schema);
-
-    for (size_t pos = 0; pos < schema.arguments().size(); ++pos) {
-      const auto& argument = schema.arguments()[pos];
-      if (pos < inputs.size()) {
-        if (!isSubvalueOf(inputs[pos], argument.type())) {
-          AT_ERROR(
-              "Expected value of type ",
-              *argument.type(),
-              " for argument '",
-              argument.name(),
-              "' in position ",
-              pos,
-              ", but instead got value of type ",
-              attemptToRecoverType(inputs[pos])->str(),
-              ". Declaration: ",
-              schema);
-        }
-      } else if (argument.default_value()) {
-        inputs.push_back(*argument.default_value());
-      } else {
-        AT_ERROR(
-            schema.name(),
-            "() is missing value for argument '",
-            argument.name(),
-            "'. Declaration: ",
-            schema);
-      }
-    }
+  Function& function() const {
+    return *function_;
   }
-
+ private:
   // Methods are uniqued onwed by a single module. This raw pointer allows
   // looking up the module.
   Module* owner_;
 
-  std::string name_;
-  std::shared_ptr<Graph> graph_; // for debugging and for inlining
-  bool optimize;
+  //Underlying unbound function
+  Function* function_;
 
-  GraphExecutor executor; // for execution
-  // initial_ivalues are a list of additional arguments appended to graph
-  // that are inputs that come from the members of the Module or its submodules.
-  // each is a pointer to a slot in the module that owns this parameter
-  // parameters and submodules can only be _added_ to script Modules to ensure
-  // these pointers always stay valid
+  // parameters and attributes loaded from the Module and appending
+  // before calling function_
   std::vector<Slot> initial_ivalues_;
 
-  // map from a IValue* in initial_ivalues to the offset it appears at
-  // in graph. used to accelerate get_or_add_parameter
-  std::unordered_map<Slot, size_t> initial_ivalue_index;
-
-  // TODO: support that case where we allow _writes_ to parameters from
-  // compiled functions.
-  // This requires more sophisticated tracking of ssa values in Graphs so that
-  // stores to all modules can be lifted to the end of a graph execution.
-  // It also adds more complexity to adding actual module invocations
-  // to the executor, so currently it is not done.
-  // std::vector<at::Tensor*> member_outputs;
-
-  std::once_flag executor_init;
-
-  // an optional function that actually creates the method when
-  // emit_call_to(this,...) is first called. this is used by the compiler so
-  // that it can construct methods out of order
-  std::function<void(Method&)> method_creator;
-
-  // if absent, then we generate a default schema based on the graph
-  // mutable because getSchema caches the default schema if one is requested
-  // before a call to setSchema
-  mutable std::unique_ptr<FunctionSchema> schema;
 };
 
 struct Module;
@@ -363,9 +150,8 @@ struct Module {
   Module()
       : name_("__main__"),
         module_value_(c10::ivalue::Object::create(
-            ClassType::createModuleType(),
-            0)),
-        optimize_(true) {}
+            ClassType::createModuleType(std::make_shared<CompilationUnit>()),
+            0)) {}
 
   const std::string& name() const {
     return name_;
@@ -374,11 +160,11 @@ struct Module {
   // note this doesn't change the flags of existing methods just ones
   // added afterward.
   void set_optimized(bool o) {
-    optimize_ = o;
+    class_cu().set_optimized(o);
   }
 
   bool is_optimized() const {
-    return optimize_;
+    return class_cu().is_optimized();
   }
 
   IValue forward(std::vector<IValue> inputs) {
@@ -444,33 +230,6 @@ struct Module {
     insert(name, modules_, EntityType::MODULE, std::move(module));
   }
 
-  Method& create_method(
-      const std::string& name,
-      std::shared_ptr<Graph> graph,
-      std::vector<Slot> member_inputs) {
-    AT_ASSERT(graph);
-    std::unique_ptr<Method> method(new Method(
-        this,
-        name,
-        optimize_,
-        std::move(graph),
-        std::move(member_inputs),
-        nullptr));
-    return *insert(name, methods_, EntityType::METHOD, std::move(method));
-  }
-
-  Method& create_method(
-      const std::string& name,
-      std::function<void(Method&)> creator) {
-    std::unique_ptr<Method> method(new Method(
-        this,
-        name,
-        optimize_,
-        std::make_shared<Graph>(),
-        {},
-        std::move(creator)));
-    return *insert(name, methods_, EntityType::METHOD, std::move(method));
-  }
 
   Slot parameter_slot(const std::string& name) const {
     return parameters_[get_offset(name, EntityType::PARAMETER)];
@@ -495,7 +254,14 @@ struct Module {
   // each module owns its method. The reference returned here
   // is guarenteed to stay valid until this module has been destroyed
   Method& get_method(const std::string& name) const {
-    return *methods_[get_offset(name, EntityType::METHOD)];
+    if (Method* method = find_method(name)) {
+      return *method;
+    }
+    // temporary: force the error message
+    // once the on-demand creation of Method is removed, this code
+    // can be removed as well
+    get_offset(name, EntityType::METHOD);
+    AT_ERROR("unreachable");
   }
 
   std::shared_ptr<Module> get_module(const std::string& name) const {
@@ -511,7 +277,12 @@ struct Module {
   c10::ArrayRef<Slot> get_attributes() const {
     return attributes_;
   }
-  c10::ArrayRef<std::unique_ptr<Method>> get_methods() const {
+  const std::vector<std::unique_ptr<Method>>& get_methods() const {
+    // force methods_ to be up to date by querying all
+    // methods. This will go away when lowered_methods_ is deleted
+    for(const auto& m : class_cu().get_functions()) {
+      get_method(m->name());
+    }
     return methods_;
   }
 
@@ -534,9 +305,17 @@ struct Module {
     auto offset = find_offset(name, EntityType::MODULE);
     return offset ? modules_[*offset] : nullptr;
   }
-  Method* find_method(const std::string& name) {
+  Method* find_method(const std::string& name) const {
     auto offset = find_offset(name, EntityType::METHOD);
-    return offset ? methods_[*offset].get() : nullptr;
+    if (offset) {
+      return methods_[*offset].get();
+    }
+
+    if (Function* fn = class_cu().find_function(name)) {
+      return &const_cast<Module*>(this)->lower_first_class_method(fn);
+    }
+
+    return nullptr;
   }
   void apply(std::function<void(Module&)> fn) {
     for (auto& submod : get_modules()) {
@@ -646,26 +425,55 @@ struct Module {
       mod->copy_into(module_lookup, parameter_remap, names);
       names.pop_back();
     }
-    for (auto& method : get_methods()) {
-      std::vector<Slot> initial_ivalues;
-      for (auto& p : method->initial_ivalues()) {
-        initial_ivalues.push_back(parameter_remap.at(p));
-      }
-      curr->create_method(
-          method->name(), method->graph()->copy(), initial_ivalues);
+
+    for (auto& fn : class_cu().get_functions()) {
+      curr->class_cu().clone_function(*fn);
     }
   }
 
   enum class EntityType { MODULE, PARAMETER, ATTRIBUTE, METHOD };
 
   at::optional<EntityType> kind_of(const std::string& name) const {
+    // force lazy creation of Method if needed
+    // remove once lowered_methods_ is removed.
+    find_method(name);
+
     auto it = dict_.find(name);
     if (it == dict_.end())
       return at::nullopt;
     return it->second.type;
   }
 
+  ModulePtr module_object() const {
+    return module_value_;
+  }
+  CompilationUnit& class_compilation_unit() {
+    return module_object()->type()->compilation_unit();
+  }
+  CompilationUnit& lowered_methods() const {
+    return lowered_methods_;
+  }
+
+
+  void _define_lowered(const std::vector<Def>& definitions,
+                       const std::vector<Resolver>& resolvers);
+  void _define_lowered(const std::string& src,
+                       const Resolver& resolver);
+
+  Method& _define_lowered(
+      std::string name,
+      std::shared_ptr<Graph> graph,
+      std::vector<Slot> slots);
+
  private:
+  Method& _create_lowered_method(
+     Function* func,
+     std::vector<Slot> member_inputs);
+
+  Method& lower_first_class_method(Function* fn);
+  void lift_lowered_method(Method& fn);
+  void lift_lowered_methods(size_t start);
+
   void to_impl(
       const c10::optional<at::Device>& device,
       const c10::optional<at::ScalarType>& dtype,
@@ -753,6 +561,13 @@ struct Module {
     return Slot(module_value_, slot_index);
   }
 
+  CompilationUnit& class_cu() {
+    return module_value_->type()->compilation_unit();
+  }
+  const CompilationUnit& class_cu() const {
+    return module_value_->type()->compilation_unit();
+  }
+
   // modules have a single namespace, but spread over 4 different concepts:
   // parameters, attributes, methods, and sub-modules
   // we store individual lists of each concept, and a single map to
@@ -771,28 +586,97 @@ struct Module {
   std::string name_;
 
 
-  c10::intrusive_ptr<at::ivalue::Object> module_value_;
+  ModulePtr module_value_;
 
 
   // back reference to parent of this Module if present
   Module* parent_ = nullptr;
-  bool optimize_;
+
+
+  // Currently we are in a transitionary state
+  // where we construct such first class functions but we lower them
+  // to a form where the modules does not exist before execution.
+
+  // So each Method is actually stored twice once in first-class Module
+  // form and once in lowered form.
+
+  // first-class: module_value_->type().compilation_unit() holds Functions that treat
+  // modules as first class.
+
+  // lowered: In this lowered form, all the attributes/parameters are appended
+  // as additional inputs. lowered_methods_ holds this lowered form
+  // mutable because it is a cache for class_cu() methods
+  mutable CompilationUnit lowered_methods_;
 };
 
-// returns nullptr and fills in failure_messages if the callee does not
-// match the functions schema
-Value* try_emit_call_to(
+static void setInputTensorTypes(Graph& g, const Stack& stack) {
+  AT_ASSERT(stack.size() == g.inputs().size());
+  for (size_t i = 0; i < stack.size(); ++i) {
+    g.inputs().at(i)->setType(
+        DimensionedTensorType::create(stack.at(i).toTensor()));
+  }
+}
+
+inline std::shared_ptr<Graph> propagate_shapes(Graph& graph,
+    const std::vector<at::Tensor>& inputs,
+    const std::vector<Slot>& initial_ivalues,
+    bool with_grad = false) {
+  auto retval = graph.copy();
+  Stack stack;
+  stack.reserve(inputs.size() + initial_ivalues.size());
+  for (const at::Tensor& i : inputs) {
+    stack.emplace_back(std::move(i));
+  }
+  for (const Slot& inp : initial_ivalues) {
+    stack.push_back(inp.value());
+  }
+  setInputTensorTypes(*retval, stack);
+  PropagateInputShapes(retval);
+  return retval;
+}
+
+inline std::shared_ptr<Graph> propagate_and_assign_input_and_output_shapes(
     Graph& graph,
-    const SourceRange& loc,
-    Method& callee,
-    c10::optional<NamedValue> self,
-    ArrayRef<NamedValue> args,
-    ArrayRef<NamedValue> kwargs,
-    std::stringstream& failure_messages,
-    // when callee uses no parameters (e.g. it is a function in a compilation
-    // unit, and not a method), then nullptr can be passed as caller.
-    Method* caller,
-    bool conv_tensors_to_nums);
+    std::vector<at::Tensor> inputs,
+    const std::vector<Slot>& initial_ivalues,
+    std::vector<at::Tensor> outputs,
+    bool with_grad = false,
+    bool propagate = true) {
+  auto retval = graph.copy();
+  for (auto inp : initial_ivalues) {
+    if (inp.value().isTensor()) {
+      inputs.push_back(inp.value().toTensor());
+    }
+  }
+  if (propagate) {
+    setInputTensorTypes(*retval, fmap<IValue>(inputs));
+    PropagateInputShapes(retval);
+  }
+  AT_ASSERT(retval->inputs().size() == inputs.size());
+  for (size_t i = 0; i < retval->inputs().size(); ++i) {
+    auto scalar_type = inputs[i].scalar_type();
+    auto sizes = inputs[i].sizes();
+    auto type =
+        torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
+    retval->inputs()[i]->setType(type);
+  }
+  at::ArrayRef<Value*> output_values = retval->outputs();
+  // patch this to still work if we are returning a tuple of multiple values
+  if (output_values.at(0)->type()->kind() == TupleType::Kind) {
+    AT_ASSERT(output_values.at(0)->node()->kind() == prim::TupleConstruct);
+    output_values = output_values.at(0)->node()->inputs();
+  }
+  AT_ASSERT(output_values.size() == outputs.size());
+  for (size_t i = 0; i < retval->outputs().size(); ++i) {
+    auto scalar_type = outputs[i].scalar_type();
+    auto sizes = outputs[i].sizes();
+    auto type =
+        torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
+    output_values[i]->setType(type);
+  }
+  return retval;
+}
+
 } // namespace script
 } // namespace jit
 } // namespace torch

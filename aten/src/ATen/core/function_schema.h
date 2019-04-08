@@ -164,6 +164,15 @@ public:
     }
     return c10::nullopt;
   }
+  FunctionSchema withArguments(std::vector<Argument> new_arguments) const {
+    return FunctionSchema(
+        name(),
+        overload_name(),
+        std::move(new_arguments),
+        returns(),
+        is_vararg(),
+        is_varret());
+  }
 };
 
 inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {

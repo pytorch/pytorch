@@ -40,6 +40,7 @@
 #include "ATen/core/ivalue.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
+#include "torch/jit.h"
 
 #include "onnx/onnx_pb.h"
 
@@ -369,11 +370,10 @@ static const auto cf_examples = R"JIT(
     return a
 )JIT";
 void testControlFlow() {
-  auto cu = std::make_shared<script::Module>();
-  script::defineMethodsInModule(
-      cu, cf_examples, script::nativeResolver, c10::nullopt);
+  auto cu = compile(cf_examples);
+
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
-    auto graph = cu->get_method(name).graph();
+    auto graph = cu->get_function(name).graph();
     Code code(graph);
     InterpreterState interp(code);
     interp.run(stack);

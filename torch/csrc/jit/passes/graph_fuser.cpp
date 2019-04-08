@@ -262,10 +262,9 @@ struct GraphFuser {
             norm_invstd = 1 / (eps + torch.sqrt(norm_var))
             return ((input - norm_mean) * norm_invstd)
       )SCRIPT";
-          auto module = std::make_shared<script::Module>();
-          defineMethodsInModule(
-              module, source, script::nativeResolver, /*self=*/c10::nullopt);
-          *graph_ptr = module->get_method("batch_norm").graph();
+          script::CompilationUnit cu;
+          cu.define(source, script::nativeResolver, nullptr);
+          *graph_ptr = cu.get_function("batch_norm").graph();
         },
         &bn_graph);
 
