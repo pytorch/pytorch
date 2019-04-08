@@ -13,10 +13,7 @@ from torch._six import container_abcs
 import contextlib
 import numbers
 import warnings
-import functools
-import types
 from torch._six import string_classes
-from torch.autograd import Function, function
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
 from torch._C import ListType
@@ -255,6 +252,10 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
             output.inferTypeFrom(tensor)
 
     _set_input_and_output_names(graph, input_names, output_names)
+
+    # make sure that the param dict and the graph match each other
+    flatten_args, _ = torch._C._jit_flatten(args)
+    assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
 
     input_and_param_names = [val.uniqueName() for val in graph.inputs()]
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
