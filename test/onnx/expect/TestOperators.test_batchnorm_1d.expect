@@ -27,7 +27,7 @@ graph {
     }
     attribute {
       name: "momentum"
-      f: 1
+      f: 0.9
       type: FLOAT
     }
   }
