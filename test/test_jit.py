@@ -12,9 +12,6 @@ from contextlib import contextmanager
 from itertools import product, chain
 import torch.jit.frontend
 from torch.autograd import Variable, Function
-from torch.nn import Module
-from torch.autograd.function import traceable
-from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2, builtins, StringIO
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
@@ -25,7 +22,6 @@ from textwrap import dedent
 from functools import wraps
 import os
 import io
-import itertools
 import sys
 import unittest
 import inspect
@@ -46,14 +42,13 @@ from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from torch.testing import FileCheck
-from torch._C import TensorType, TupleType, FloatType, IntType, \
-    ListType, StringType, DictType
+from torch._C import TensorType, parse_ir
 from copy import deepcopy
 import random
 from typing import List, Dict, Optional, Tuple
 from torch.jit.frontend import NotSupportedError
 from torch import Tensor
-from torch.jit.annotations import BroadcastingList2, BroadcastingList3
+from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
 
 # For testing truediv in python 2
 from test_module.future_div import div_int_future, div_float_future
@@ -72,6 +67,10 @@ except ImportError:
 
 
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
+# Note: creating FusionGroups is currently device-independent.
+# FusionGroup creation with CPU is disabled.
+FUSION_ENABLED = torch._C._jit_can_fuse_on_cpu() or torch._C._jit_can_fuse_on_gpu()
 
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_HALF = RUN_CUDA
@@ -282,6 +281,8 @@ class JitTestCase(TestCase):
         torch._C._jit_set_emit_module_hook(self.emitModuleHook)
 
     def emitModuleHook(self, module):
+        import zipfile
+
         def copy_structure_and_params(m):
             c = torch.jit.ScriptModule()
             for name, v in m._get_parameters():
@@ -295,7 +296,24 @@ class JitTestCase(TestCase):
         # disable the hook while we parse code, otherwise we will re-enter the hook
         with self.disableModuleHook():
             try:
-                pp, constant_table = module._python_print()
+                if len(module.code) == 0:
+                    # short-circuit if this is an empty module
+                    return
+                # save the module to a buffer
+                buffer = io.BytesIO()
+                torch.jit.save(module, buffer)
+
+                # copy the data in the buffer so we can restore it later. This
+                # is because py2 and py3 have different semantics with zipfile
+                # and it's easier to just work with a fresh copy each time.
+                buffer_copy = buffer.getvalue()
+
+                # crack open the zip format to get at the main module code
+                archive = zipfile.ZipFile(buffer)
+                main_module = archive.open('archive/code/archive.py')
+                main_module_code = ""
+                for line in main_module:
+                    main_module_code += line.decode()
             except RuntimeError as e:
                 se = str(e)
                 if "could not export python function" not in se and \
@@ -303,12 +321,24 @@ class JitTestCase(TestCase):
                     raise
                 else:
                     return
-            ppv = "op_version_set = 0\n{}".format(pp)
-            sm = copy_structure_and_params(module)
-            torch._C._jit_import_methods(sm, ppv, constant_table)
-            pp2, _ = sm._python_print()
-            if pp != pp2:
-                self.assertMultiLineEqual(pp, pp2)
+
+            # import the model again (from a the copy we made of the original)
+            buffer2 = io.BytesIO(buffer_copy)
+            imported = torch.jit.load(buffer2)
+
+            # save it again
+            saved_module_buffer_2 = io.BytesIO()
+            torch.jit.save(imported, saved_module_buffer_2)
+
+            saved_module_buffer_2.seek(0)
+            archive2 = zipfile.ZipFile(saved_module_buffer_2)
+            main_module_2 = archive2.open('archive/code/archive.py')
+
+            main_module_2_code = ""
+            for line in main_module_2:
+                main_module_2_code += line.decode()
+
+            self.assertMultiLineEqual(main_module_code, main_module_2_code)
 
     def getExportImportCopy(self, m, also_test_file=True, map_location=None):
         buffer = io.BytesIO()
@@ -389,6 +419,25 @@ class JitTestCase(TestCase):
         graph = torch._C._jit_pass_canonicalize(graph)
         torch._C._jit_pass_lint(graph)
         self.assertExpected(str(graph), *args, **kwargs)
+
+    def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):
+        if not FUSION_ENABLED:
+            nonfusible_nodes = nonfusible_nodes + fusible_nodes
+            fusible_nodes = []
+        diff_nodes = graph.findAllNodes('prim::DifferentiableGraph')
+        diff_subgraphs = [node.g('Subgraph') for node in diff_nodes]
+
+        # For any non-fusible node, it must show up in one of the DifferentiableGraph.
+        found_all_nonfusible_nodes = (len(diff_subgraphs) == 0 and len(nonfusible_nodes) == 0)\
+            or all([any(g.findNode(n) is not None for g in diff_subgraphs) for n in nonfusible_nodes])
+
+        # For any fusible node, it must show up in one of the FusionGroup in the DifferentiableGraph.
+        fusion_nodes = list(chain.from_iterable([g.findAllNodes('prim::FusionGroup') for g in diff_subgraphs]))
+        fusion_subgraphs = [node.g('Subgraph') for node in fusion_nodes]
+        found_all_fusible_nodes = (len(fusion_nodes) == 0 and len(fusible_nodes) == 0)\
+            or all([any(g.findNode(n) is not None for g in fusion_subgraphs) for n in fusible_nodes])
+
+        self.assertEqual(should_autodiff_node, found_all_nonfusible_nodes and found_all_fusible_nodes)
 
     def run_pass(self, name, trace):
         if isinstance(trace, torch._C.Graph):
@@ -737,6 +786,62 @@ class TestJit(JitTestCase):
         trace = torch.jit.trace(f, (b, c))
         self.run_pass('peephole', trace.graph)
         self.assertTrue(len(list(trace.graph.nodes())) == 0)
+
+    def test_peephole_optimize_shape_ops(self):
+        def test_input(func, input, result):
+            self.assertEqual(func(input), result)
+            gre = func.graph_for(input)
+            FileCheck().check_not("prim::If").run(gre)
+
+        def test_dim():
+            @torch.jit.script
+            def func(x):
+                if x.dim() == 1:
+                    return 1
+                else:
+                    return 2
+
+            test_input(func, torch.tensor([0.5]), 1)
+            test_input(func, torch.tensor([[0.5]]), 2)
+        test_dim()
+
+        def test_dtype():
+            @torch.jit.script
+            def func(x):
+                if x.dtype == torch.float32:
+                    return 1
+                else:
+                    return 2
+
+            test_input(func, torch.tensor(0.5, dtype=torch.float32), 1)
+            test_input(func, torch.tensor(0.5, dtype=torch.int64), 2)
+        test_dtype()
+
+        def test_device():
+            @torch.jit.script
+            def func_1(x):
+                if x.device == torch.device('cuda:0'):
+                    a = 0
+                else:
+                    a = 1
+                return a
+
+            @torch.jit.script
+            def func_2(x):
+                if x.is_cuda:
+                    a = 0
+                else:
+                    a = 1
+                return a
+
+            test_input(func_1, torch.tensor(0.5), 1)
+            test_input(func_2, torch.tensor(0.5), 1)
+
+            if RUN_CUDA:
+                test_input(func_1, torch.tensor(0.5, device="cuda:0"), 0)
+                test_input(func_2, torch.tensor(0.5, device="cuda:0"), 0)
+
+        test_device()
 
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
@@ -1379,13 +1484,23 @@ class TestJit(JitTestCase):
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: JIT tests not yet supported on windows")
+    @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
+    @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
+    @skipIfRocm
+    def test_cpp(self):
+        from cpp.jit import tests_setup
+        tests_setup.setup()
+        torch._C._jit_run_cpp_tests(run_cuda=False)
+        tests_setup.shutdown()
+
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @skipIfRocm
     def test_cpp_cuda(self):
         from cpp.jit import tests_setup
         tests_setup.setup()
-        torch._C._jit_run_cpp_tests()
+        torch._C._jit_run_cpp_tests(run_cuda=True)
         tests_setup.shutdown()
 
     def test_batchnorm(self):
@@ -1819,17 +1934,18 @@ class TestJit(JitTestCase):
 
     def test_tuple_specialization(self):
         @torch.jit.script
-        def f(t):
-            # type: (Tuple[Tensor, Tensor]) -> Tensor
-            x, y = t
+        def f(t, s):
+            # type: (Tuple[Tensor, Tuple[int, Tensor]], str) -> Tensor
+            x, t2 = t
+            _, y = t2
             return x + y
 
-        t = torch.randn(2, 2), torch.randn(2, 2)
-        f(t)
-        graph = f.graph_for(t)
+        t = torch.randn(2, 2), (1, torch.randn(2, 2)),
+        f(t, "hi")
+        graph = f.graph_for(t, "hi")
         input_types = list(next(graph.inputs()).type().elements())
-        for t in input_types:
-            self.assertEqual(t.kind(), 'DimensionedTensorType')
+        self.assertEqual(input_types[0].kind(), 'DimensionedTensorType')
+        self.assertEqual(input_types[1].elements()[1].kind(), 'DimensionedTensorType')
 
     def test_constant_prop_simple(self):
         @torch.jit.script
@@ -2201,6 +2317,23 @@ class TestJit(JitTestCase):
         x, lengths, h0, c0 = \
             torch.randn(7, 3, 10), torch.LongTensor([7, 5, 2]), torch.randn(2, 3, 20), torch.randn(2, 3, 20)
         self.assertEqual(traced(x, lengths, (h0, c0)), imported(x, lengths, (h0, c0)))
+
+    def test_unique_state_dict(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                shared_param = torch.nn.Parameter(torch.ones(1))
+                self.register_parameter('w1', shared_param)
+                self.register_parameter('w2', shared_param)
+
+            def forward(self, input):
+                return input + self.w1 + self.w2
+
+        model = MyModule()
+        unittest.TestCase.assertEqual(
+            self, len(torch.jit._unique_state_dict(model, keep_vars=False)), 1)
+        unittest.TestCase.assertEqual(
+            self, len(torch.jit._unique_state_dict(model, keep_vars=True)), 1)
 
     def test_trace_dict_input(self):
         class Bar(torch.nn.Module):
@@ -2574,6 +2707,19 @@ class TestScript(JitTestCase):
         with self.assertRaisesRegex(exception, regex):
             ge = torch.jit.script(script, optimize)
             ge(*inputs)
+
+    def test_submodule_twice(self):
+
+        @torch.jit.script
+        def foo(x):
+            return x * x
+
+        class What(torch.jit.ScriptModule):
+            def __init__(self, x):
+                super(What, self).__init__()
+                self.foo = x
+        a = What(foo)
+        c = What(foo)
 
     def test_training_param(self):
         class What(torch.jit.ScriptModule):
@@ -3376,13 +3522,11 @@ a")
         # test that shape analysis is written correctly for sum with IntArrayRef[1] dim argument
         self.run_pass('constant_propagation', func.graph)
         self.run_pass('constant_propagation', func2.graph)
-        torch._C._jit_pass_shape_analysis(
-            func.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
-        torch._C._jit_pass_shape_analysis(
-            func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
-        self.assertTrue(func.graph.findNode("aten::sum").output().type().kind()
+        g = func._get_method('forward').propagate_shapes((torch.zeros(1, 1, 1, 1, 4),), False)
+        g2 = func2._get_method('forward').propagate_shapes((torch.zeros(1, 1, 1, 1, 4),), False)
+        self.assertTrue(g.findNode("aten::sum").output().type().kind()
                         == "DimensionedTensorType")
-        self.assertTrue(func2.graph.findNode("aten::sum").output().type().kind()
+        self.assertTrue(g2.findNode("aten::sum").output().type().kind()
                         == "DimensionedTensorType")
 
     def test_cat(self):
@@ -4080,9 +4224,9 @@ a")
                 torch.mul(x, y, out=z)
                 return z
 
-            torch._C._jit_pass_shape_analysis(
-                test.graph, (torch.zeros(2, 1), torch.zeros(1, 2), torch.zeros(1, 1, 1)), False)
-            self.assertTrue(next(test.graph.outputs()).type() == TensorType.get())
+            graph = test._get_method('forward').propagate_shapes(
+                (torch.zeros(2, 1), torch.zeros(1, 2), torch.zeros(1, 1, 1)), False)
+            self.assertTrue(next(graph.outputs()).type() == TensorType.get())
         out_op_graph_input()
 
         def test_resize():
@@ -4099,10 +4243,8 @@ a")
                     after_resize_alias = b.add_(1)
                 return after_resize_alias
 
-            g = test.graph
-            self.run_pass('constant_propagation', g)
-            torch._C._jit_pass_shape_analysis(
-                g, (torch.zeros(1, 1),), False)
+            self.run_pass('constant_propagation', test.graph)
+            g = test._get_method('forward').propagate_shapes((torch.zeros(1, 1),), False)
             resize_node = g.findNode("aten::resize_")
             # first input and output of b.resize_ is b
             self.assertTrue(next(resize_node.inputs()).type() == TensorType.get())
@@ -4126,8 +4268,7 @@ a")
 
             g = test.graph
             self.run_pass('constant_propagation', g)
-            torch._C._jit_pass_shape_analysis(
-                g, (torch.zeros(1, 1),), False)
+            g = test._get_method('forward').propagate_shapes((torch.zeros(1, 1),), False)
 
             # x doesn't alias a resized op so it shouldn't be set to base Tensor type
             self.assertTrue(next(g.inputs()).type() != TensorType.get())
@@ -4181,10 +4322,28 @@ a")
             return x.view(T, B, C)
 
         x = torch.randn(3, 1, 5, requires_grad=True)
-        graph = torch.jit.script(fn).graph
-        torch._C._jit_pass_shape_analysis(graph, (x,), False)
+        fn = torch.jit.script(fn)
+        graph = fn._get_method('forward').propagate_shapes((x,), False)
         a = next(graph.outputs()).type().kind()
         self.assertTrue(next(graph.outputs()).type().kind() != 'TensorType')
+
+    def test_shape_prop_promotion(self):
+        @torch.jit.script
+        def fn(x, y):
+            return x + y
+
+        x, y = torch.rand(3, 4, dtype=torch.float), torch.rand(3, 4, dtype=torch.double)
+        graph = fn._get_method('forward').propagate_shapes((x, y), False)
+        FileCheck().check('Double(*, *) = aten::add').run(graph)
+
+    def test_shape_prop_promote_scalar_arg(self):
+        @torch.jit.script
+        def fn(x):
+            return math.pi + x
+
+        x = torch.zeros(3, 4, dtype=torch.long)
+        graph = fn._get_method('forward').propagate_shapes((x,), False)
+        FileCheck().check('Long(*, *) = aten::add').run(graph)
 
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
@@ -4195,6 +4354,35 @@ a")
         outputs = torch.ones(10, 10)
 
         self.assertEqual(cu.test_integral_shape_inference(*inputs), outputs)
+
+    @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
+    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
+    @enable_cpu_fuser
+    def test_batchnorm_fuser_cpu(self):
+        code = '''
+            graph(%3 : Tensor,
+                  %7 : Tensor,
+                  %12 : Float(*, *),
+                  %13 : Tensor,
+                  %25 : Tensor):
+                %23 : int = prim::Constant[value=1]()
+                %22 : float = prim::Constant[value=1e-05]()
+                %26 : Tensor = aten::sqrt(%25)
+                %24 : Tensor = aten::add(%26, %22, %23)
+                %20 : Tensor = aten::reciprocal(%24)
+                %norm_invstd : Tensor = aten::mul(%20, %23)
+                %15 : Tensor = aten::sub(%12, %13, %23)
+                %11 : Tensor = aten::mul(%15, %norm_invstd)
+                %8 : Tensor = aten::mul(%11, %7)
+                %5 : Tensor = aten::add(%8, %3, %23)
+                %1 : Float(*, *) = aten::relu(%5)
+                return (%1)
+        '''
+
+        graph = parse_ir(code)
+        inputs = 5 * [torch.rand(26, 2048, dtype=torch.float)]
+        code = torch._C._jit_fuser_get_fused_kernel_code(graph, inputs)
+        FileCheck().check('sqrtf').run(code)
 
     def test_fuser_multiple_blocks(self):
         cu = torch.jit.CompilationUnit('''
@@ -4425,13 +4613,48 @@ a")
 
         self.assertTrue(str(test_lhs_none_rhs_never.graph).count(': int = prim::Constant') == 1)
 
-    def test_explicit_bool_cast(self):
-        with self.assertRaisesRegex(RuntimeError, "expected a boolean"):
+    def test_conditional_casting(self):
+        def test_bool_cast_tensor(x):
+            if x:
+                return 1
+            else:
+                return 0
+
+        for make_one_dim in [True, False]:
+            for inp_val in [0.1, 0.0, -0.0, -0.1, -1, 0, 1]:
+                inp_val = [inp_val] if make_one_dim else inp_val
+                self.checkScript(test_bool_cast_tensor, (torch.tensor(inp_val),))
+
+        self.checkScriptRaisesRegex(test_bool_cast_tensor, (torch.tensor([1, 1]),), Exception,
+                                    "bool value of Tensor with more than one value")
+
+        def test_cast_int(x):
+            # type: (int) -> int
+            if x:
+                return 1
+            else:
+                return 0
+        self.checkScript(test_cast_int, (1,))
+        self.checkScript(test_cast_int, (0,))
+        self.checkScript(test_cast_int, (-1,))
+
+        def test_cast_float(x):
+            # type: (float) -> int
+            if x:
+                return 1
+            else:
+                return 0
+        self.checkScript(test_cast_float, (1.,))
+        self.checkScript(test_cast_float, (0.,))
+        self.checkScript(test_cast_float, (-1.,))
+
+        with self.assertRaisesRegex(RuntimeError, "expected a bool, int, float, or Tensor"):
             @torch.jit.script
-            def test_bool_cast(a):
-                if a:
-                    return a + 2
-                return a + 1
+            def test_bad_conditional(x):
+                if (1, 2):
+                    return
+                else:
+                    return 0
 
     def test_while_nonexistent_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
@@ -4929,6 +5152,26 @@ a")
             for func in funcs:
                 code = funcs_template.format(func=func, scalar1=scalar1, scalar2=scalar2)
                 run_test(code)
+
+    def test_number_abs(self):
+        def func1(x):
+            # type: (float) -> float
+            return abs(x)
+
+        def func2(x):
+            # type: (int) -> int
+            return abs(x)
+
+        def func3(x):
+            return abs(x)
+
+        self.checkScript(func1, (-3.14,))
+        self.checkScript(func1, (3.14,))
+        self.checkScript(func2, (-10,))
+        self.checkScript(func2, (10,))
+        self.checkScript(func3, (torch.tensor([-5, -10, -20]),))
+        self.checkScript(func3, (torch.tensor([5, 10, 20]),))
+        self.checkScript(func3, (torch.tensor([-5, 10, -20]),))
 
     def test_number_div(self):
         self.checkScript(div_int_future, (), optimize=True)
@@ -5544,6 +5787,14 @@ a")
         m2.sub2.a.data.zero_()
         self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
 
+    def test_irparser(self):
+        graph_str = """graph(%0 : Double(5, 5)):
+          # CHECK: aten::relu
+          %1 : Double(5, 5) = aten::relu(%0)
+          return (%1)
+        """
+        FileCheck().run(graph_str, parse_ir(graph_str))
+
     def test_filecheck(self):
         def test_check():
             file = "232"
@@ -5635,6 +5886,59 @@ a")
             fb = FileCheck().check_count("2", 2).check_not("1").check_count("2", 2)
             with self.assertRaisesRegex(RuntimeError, 'Expected to not find "1"'):
                 fb.run("22 1 22")
+
+    def test_filecheck_parse(self):
+        def test_check():
+            file = """
+                # CHECK: 2
+                # CHECK: 3
+                # CHECK: 2
+                232
+                """
+            FileCheck().run(checks_file=file, test_file=file)
+            file = """
+                # CHECK: 232
+                232
+                """
+            FileCheck().run(file, "232")
+            with self.assertRaisesRegex(RuntimeError, 'Expected to find "232"'):
+                FileCheck().run(file, "22")
+            with self.assertRaisesRegex(RuntimeError, 'Expected to find "22"'):
+                FileCheck().run("# CHECK: 22", "23")
+        test_check()
+
+        def test_check_count():
+            file = "22222"
+            FileCheck().run("# CHECK-COUNT-5: 2", file)
+            FileCheck().run("# CHECK-COUNT-EXACTLY-5: 2", file)
+            FileCheck().run("# CHECK-COUNT-2: 22", file)
+            FileCheck().run("# CHECK-COUNT-1: 222", file)
+
+            with self.assertRaisesRegex(RuntimeError, 'Expected to not find'):
+                FileCheck().run("# CHECK-COUNT-EXACTLY-2: 2", file)
+        test_check_count()
+
+        def test_check_same():
+            file = "22\n33"
+            FileCheck().run("# CHECK-SAME: 22", file)
+
+            with self.assertRaisesRegex(RuntimeError, "Expected to not find"):
+                FileCheck().run("# CHECK-SAME: 33", file)
+
+            file = "22  1  3"
+
+            FileCheck().run("# CHECK: 2\n # CHECK-SAME: 3", file)
+            FileCheck().run("# CHECK-COUNT-2: 2\n # CHECK-SAME: 3", file)
+        test_check_same()
+
+        def test_bad_input():
+            with self.assertRaisesRegex(RuntimeError, "Check for bad input"):
+                FileCheck().run("", "1")
+
+            with self.assertRaisesRegex(RuntimeError, "Could not parse check"):
+                FileCheck().run("# CHECK1", "")
+
+        test_bad_input()
 
     def test_script_module_call_noscript(self):
         class M(torch.jit.ScriptModule):
@@ -6542,7 +6846,7 @@ a")
             return torch.cat(c)
 
         b = torch.zeros(2, 4)
-        test_list.graph.propagate_shapes((b,), False)
+        test_list._get_method('forward').propagate_shapes((b,), False)
 
     def test_if_supertype(self):
         @torch.jit.script
@@ -6559,8 +6863,8 @@ a")
         b = torch.zeros(2, 4, dtype=torch.long)
         c = torch.zeros(2, 4, dtype=torch.float)
 
-        tensor_unifying.graph.propagate_shapes((a, b, c), False)
-        if_outputs = list(tensor_unifying.graph.findNode("prim::If").outputs())
+        graph = tensor_unifying._get_method('forward').propagate_shapes((a, b, c), False)
+        if_outputs = list(graph.findNode("prim::If").outputs())
         self.assertTrue(if_outputs[0].type().str() == "Float(*, *)")
         self.assertTrue(if_outputs[1].type().str() == "Tensor")
         self.assertTrue(if_outputs[2].type().str() == "Tensor")
@@ -6727,8 +7031,6 @@ a")
 
     @unittest.skipIf(not PY35, "Python 3.5 needed")
     def test_type_annotation_py3(self):
-        import importlib.util
-
         code = dedent("""
         import torch
         from torch import Tensor
@@ -7215,6 +7517,24 @@ a")
         self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
+
+    def test_interpolate_trace(self):
+        class test(nn.Module):
+            def __init__(self):
+                super(test, self).__init__()
+                self.conv = nn.Conv2d(1, 32, kernel_size=3, padding=1)
+
+            def forward(self, x):
+                y = self.conv(x)
+                w = nn.functional.interpolate(y, mode='bilinear', align_corners=False, scale_factor=0.5)
+                return w
+
+        f = test()
+        # no failure
+        g = torch.jit.trace(f, (torch.zeros(1, 1, 28, 28),))
+        x = torch.zeros(1, 1, 14, 14)
+        # constants not baked in
+        self.assertEqual(g(x), f(x))
 
     def test_trace_nested_datatypes(self):
         @torch.jit.script
@@ -8150,7 +8470,7 @@ a")
             ''')
 
     def test_duplicate(self):
-        with self.assertRaisesRegex(RuntimeError, 'Method \'test\' already defined'):
+        with self.assertRaisesRegex(RuntimeError, 'method \'test\' already defined'):
             cu = torch.jit.CompilationUnit('''
             def test():
                 return 1
@@ -8876,7 +9196,7 @@ a")
                 return torch.jit._unwrap_optional(None)
 
     def test_indexing_error(self):
-        with self.assertRaisesRegex(RuntimeError, "only supported on lists, dictionaries, tensors, and tuples"):
+        with self.assertRaisesRegex(RuntimeError, "only supported on List, Dict, Tensor, Tuple, and str"):
             @torch.jit.script
             def test_wrong_type():
                 a = 8
@@ -9349,8 +9669,6 @@ a")
             foo(torch.ones([123]))  # wrong size
 
     def test_builtin_error_messsage(self):
-        from torch.nn.modules.utils import _single, _pair, _triple, _quadruple
-
         with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def close_match(x):
@@ -9716,7 +10034,7 @@ a")
             def __init__(self):
                 super(OtherStrong, self).__init__()
                 self.weak = weak
-                self.weak2 = weak
+                self.weak2 = Weak()
 
             @torch.jit.script_method
             def forward(self, x):
@@ -9733,7 +10051,7 @@ a")
 
         other_strong_mod = OtherStrong()
 
-        self.assertIs(other_strong_mod.weak, other_strong_mod.weak2)
+        self.assertIsNot(other_strong_mod.weak, other_strong_mod.weak2)
 
         with self.assertRaisesRegex(RuntimeError, "Attempted to inline a Module with param"):
             strong_mod = Strong()
@@ -10108,6 +10426,43 @@ a")
 
         with self.capture_stdout() as captured:
             print(fn(x, scale, shift))
+
+    def test_string_index(self):
+        def fn(x):
+            # type: (str) -> str
+            return x[2]
+
+        self.checkScript(fn, ("abcde",))
+
+    def test_ord(self):
+        def fn(x):
+            # type: (str) -> int
+            return ord(x)
+
+        self.checkScript(fn, ("h"))
+        self.checkScript(fn, ("y"))
+
+    def test_string_slicing(self):
+        def fn1(x):
+            # type: (str) -> str
+            return x[1:3]
+
+        def fn2(x):
+            # type: (str) -> str
+            return x[-1:3]
+
+        def fn3(x):
+            # type: (str) -> str
+            return x[3:1]
+
+        def fn4(x):
+            # type: (str) -> str
+            return x[3:100]
+
+        self.checkScript(fn1, ("abcdefghi",))
+        self.checkScript(fn2, ("abcdefghi",))
+        self.checkScript(fn3, ("abcdefghi",))
+        self.checkScript(fn4, ("abcdefghi",))
 
     def test_non_final_return(self):
 
@@ -10586,6 +10941,7 @@ a")
         self.assertEqual(m.int64_max, imported.int64_max)
         self.assertEqual(m.int64_min, imported.int64_min)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: TemporaryFileName on Windows")
     def test_serialization_sharing(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -11020,8 +11376,6 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
 
     @staticmethod
     def _test_super_resolution(self, device, check_export_import=True):
-        import torch.nn.init as init
-
         class Net(nn.Module):
 
             def __init__(self, upscale_factor):
@@ -11294,6 +11648,15 @@ EXCLUDE_SCRIPT = {
     'test_nn_fold',
 }
 
+# chunk returns a list in scripting and we don't unpack the list,
+# Thus it won't be replaced by ConstantChunk and run AD.
+# It's explicitly checked in test_chunk_constant_script_ad
+EXCLUDE_SCRIPT_AD_CHECK = {
+    'test_chunk',
+    'test_chunk_dim',
+    'test_chunk_dim_neg0',
+}
+
 EXCLUDE_PYTHON_PRINT = {
     # no support for BroadcastingList in python printer
     'test_nn_max_unpool1d',
@@ -11310,23 +11673,6 @@ EXCLUDE_SCRIPT_MODULES = {
     'test_nn_AdaptiveAvgPool3d_tuple_none',
     'test_nn_AdaptiveMaxPool2d_tuple_none',
     'test_nn_AdaptiveMaxPool3d_tuple_none',
-}
-
-DISABLE_AUTODIFF_SUBGRAPH_INLINING = {
-    'test_nn_avg_pool2d',
-    'test_nn_adaptive_avg_pool1d',
-    'test_nn_adaptive_avg_pool2d',
-    'test_nn_adaptive_avg_pool3d',
-    'test_nn_batch_norm',
-    'test_nn_embedding',
-    'test_nn_log_softmax',
-    'test_nn_softmax',
-    'test_nn_softmax_with_all_args',
-    'test_nn_threshold',
-    'test_nn_nll_loss',
-    # Should have added all test_nn_interpolate_* here,
-    # but it's using autodiff since its subgraph is over
-    # 2 nodes.
 }
 
 
@@ -11538,6 +11884,17 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
     def assertGraphSize(self, graph, size):
         self.assertEqual(len(list(graph.nodes())), size)
+
+    def test_chunk_constant_script_ad(self):
+        @torch.jit.script
+        def func(x):
+            x1, x2 = torch.chunk(x, 2)
+            return (x1, x2)
+
+        input = torch.rand(6, 10).requires_grad_()
+        func.debug_disable_autodiff_subgraph_inlining()
+        output = func(input)
+        self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
 
     def test_simple_merge(self):
         # o --> o
@@ -11878,6 +12235,7 @@ EXCLUDE_MODULE_EXPORT_IMPORT = {
 #   args (tuple represents shape of a tensor arg),
 #   test variant name(will be used at test name suffix,
 #       'inplace' skips grad tests),                         // optional
+#   (True, nonfusible_nodes, fusible_nodes) for autodiff     // optional
 #   fn to determine if test should be skipped,               // optional
 #   fn mapping output to part that should be gradcheck'ed,   // optional
 #   kwargs for function,                                     // optional
@@ -11891,7 +12249,7 @@ nn_functional_tests = [
     ('conv_transpose3d', (S, S, S, S, S), ((S, S, S, S, S),)),
     ('conv_tbc', (S, S, S), ((S, S, S), (S,), 2)),
     ('avg_pool1d', (S, S, S), (3,)),
-    ('avg_pool2d', (S, S, S, S), (3,)),
+    ('avg_pool2d', (S, S, S, S), (3,), '', (True,)),
     ('avg_pool3d', (S, S, S, S, S), (3,)),
     ('fractional_max_pool2d', (S, S, S, S), (3, [2, 3],)),
     ('max_pool1d', (S, S, S), (2, 1)),
@@ -11906,15 +12264,17 @@ nn_functional_tests = [
     ('adaptive_max_pool1d', (S, S, S), (5,)),
     ('adaptive_max_pool2d', (S, S, S, S), ([5, 7],)),
     ('adaptive_max_pool3d', (S, S, S, S, S), ([3, 2, 2],)),
-    ('adaptive_avg_pool1d', (S, S, S), (5,)),
-    ('adaptive_avg_pool2d', (S, S, S, S), ([5, 7],)),
-    ('adaptive_avg_pool3d', (S, S, S, S, S), ([3, 2, 2],)),
-    ('dropout', (S, S, S), (0.5,)),
+    ('adaptive_avg_pool1d', (S, S, S), (5,), '', (True,)),
+    ('adaptive_avg_pool2d', (S, S, S, S), ([5, 7],), '', (True,)),
+    ('adaptive_avg_pool3d', (S, S, S, S, S), ([3, 2, 2],), '', (True,)),
+    ('dropout', (S, S, S), (0.5,), '', (True,
+                                        ['prim::is_cuda', 'aten::bernoulli_'],
+                                        ['aten::rand_like', 'aten::lt', 'aten::type_as', 'aten::mul', 'aten::div'])),
     ('alpha_dropout', (S, S, S), (0.5,)),
     ('dropout2d', (S, S, S), (0.5,)),
     ('dropout3d', (S, S, S), (0.5,)),
     ('feature_alpha_dropout', (S, S, S), (0.5,)),
-    ('threshold', (S, S, S), (0.1, 2.),),
+    ('threshold', (S, S, S), (0.1, 2.), '', (True,)),
     ('threshold', (S, S, S), (0.1, 2., True), 'inplace'),
     ('relu', (S, S, S), (),),
     ('relu', (S, S, S), (), 'inplace'),
@@ -11938,24 +12298,30 @@ nn_functional_tests = [
     ('softsign', (S, S, S), (),),
     ('softplus', (S, S, S), (),),
     ('softmin', (S, S, S), (0,),),
-    ('softmax', (S, S, S), (0,),),
-    ('softmax', (S, S, S), (0, 3, torch.double), 'with_all_args'),
+    ('softmax', (S, S, S), (0,), '', (True,)),
+    ('softmax', (S, S, S), (0, 3, torch.double), 'with_all_args', (True,)),
     ('tanh', (S, S, S), (),),
     ('sigmoid', (S, S, S), (),),
-    ('log_softmax', (S, S, S), (0,),),
+    ('log_softmax', (S, S, S), (0,), '', (True,)),
     ('linear', (S, S), ((M, S),),),
     ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M),),),
-    ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ),),
+    ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
-    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),
+        '', (True, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
-    ('layer_norm', (S, S, S, S), ([5],),),
-    ('layer_norm', (S, S, S, S), ([5], (S,)), 'with_only_weight'),
-    ('layer_norm', (S, S, S, S), ([5], None, (S,)), 'with_only_bias'),
-    ('layer_norm', (S, S, S, S), ([5], (S,), (S,)), 'with_weight_and_bias'),
+    ('layer_norm', (S, S, S, S), ([5],), '',
+     (True, ['prim::Loop', 'aten::_batch_norm_impl_index'])),
+    ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),), 'with_only_weight',
+     (True, ['prim::Loop', 'aten::_batch_norm_impl_index'])),
+    ('layer_norm', (S, S, S, S), ([5], None, non_differentiable(torch.rand(S)),), 'with_only_bias',
+     (True, ['prim::Loop', 'aten::_batch_norm_impl_index'])),
+    ('layer_norm', (S, S, S, S), ([5], non_differentiable(torch.rand(S)),
+                                  non_differentiable(torch.rand(S))), 'with_weight_and_bias',
+     (True, ['prim::Loop', 'aten::_batch_norm_impl_index'])),
     ('group_norm', (S, S, S), (1, torch.rand(5),),),
     ('local_response_norm', (S, S, S), (2, ),),
-    ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]),),),
+    ('nll_loss', F.log_softmax(torch.randn(3, 5), dim=0), (torch.tensor([1, 0, 4]),), '', (True, 'aten::nll_loss_forward')),
     ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2),),),
     ('poisson_nll_loss', torch.rand(S, 2), (torch.rand(S, 2), True, True), 'full'),
     ('kl_div', F.log_softmax(torch.randn(S, 10), 1), (F.softmax(torch.randn(S, 10), 1),),),
@@ -11983,8 +12349,8 @@ nn_functional_tests = [
     ('unfold', (S, S, S, S), ([2, 3]),),
     ('fold', (1, 3 * 2 * 2, 12), ([4, 5], [2, 2]),),
     ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
-    ('gumbel_softmax', (S, S), (2.,),),
-    ('gumbel_softmax', (S, S), (2., True,), 'hard'),
+    ('gumbel_softmax', (S, S), (2.,), '', (True, ['aten::softmax'], ['aten::neg', 'aten::add', 'aten::div'])),
+    ('gumbel_softmax', (S, S), (2., True,), 'hard', (True, ['aten::softmax'], ['aten::neg', 'aten::add', 'aten::div'])),
     ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
     ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)),
                                    1, 1., non_differentiable(torch.randn(S))),),
@@ -11998,35 +12364,35 @@ nn_functional_tests = [
       torch.randint(1, S, (S,), dtype=torch.long))),
     ('upsample', torch.randn(S, S, M, M), (None, 2), 'with_scale'),
     ('upsample', torch.randn(S, S, M, M), (4,), 'with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'nearest_4d'),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'nearest_4d_with_scale'),
-    ('interpolate', torch.randn(S, S, M, M), (4,), 'nearest_4d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'area_4d'),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'area_4d_with_scale'),
-    ('interpolate', torch.randn(S, S, M, M), (4,), 'area_4d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'bilinear_4d'),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'bilinear_4d_with_scale'),
-    ('interpolate', torch.randn(S, S, M, M), (4,), 'bilinear_4d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'bicubic_4d'),
-    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'bicubic_4d_with_scale'),
-    ('interpolate', torch.randn(S, S, M, M), (4,), 'bicubic_4d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'nearest_3d'),
-    ('interpolate', torch.randn(S, M, M), (None, 2.), 'nearest_3d_with_scale'),
-    ('interpolate', torch.randn(S, M, M), (4,), 'nearest_3d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'area_3d'),
-    ('interpolate', torch.randn(S, M, M), (None, 2.), 'area_3d_with_scale'),
-    ('interpolate', torch.randn(S, M, M), (4,), 'area_3d_with_size'),
-    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'linear_3d'),
-    ('interpolate', torch.randn(S, M, M), (None, 2.), 'linear_3d_with_scale'),
-    ('interpolate', torch.randn(S, M, M), (4,), 'linear_3d_with_size'),
-    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'nearest_5d_with_scale'),
-    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'nearest_5d_with_size'),
-    ('interpolate', torch.zeros(3, 3, 3).view(1, 1, 3, 3, 3), (2,), 'area_5d'),
-    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'area_5d_with_scale'),
-    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'area_5d_with_size'),
-    ('interpolate', torch.zeros(3, 3, 3).view(1, 1, 3, 3, 3), (2,), 'trilinear_5d'),
-    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'trilinear_5d_with_scale'),
-    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'trilinear_5d_with_size'),
+    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'nearest_4d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'nearest_4d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (4,), 'nearest_4d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'area_4d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'area_4d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (4,), 'area_4d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'bilinear_4d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'bilinear_4d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (4,), 'bilinear_4d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3).view(1, 1, 3, 3), (2,), 'bicubic_4d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (None, 2.), 'bicubic_4d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, S, M, M), (4,), 'bicubic_4d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'nearest_3d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M), (None, 2.), 'nearest_3d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M), (4,), 'nearest_3d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'area_3d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M), (None, 2.), 'area_3d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M), (4,), 'area_3d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3).view(1, 3, 3), (2,), 'linear_3d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M), (None, 2.), 'linear_3d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M), (4,), 'linear_3d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'nearest_5d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'nearest_5d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3, 3).view(1, 1, 3, 3, 3), (2,), 'area_5d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'area_5d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'area_5d_with_size', (True, 'aten::__interpolate')),
+    ('interpolate', torch.zeros(3, 3, 3).view(1, 1, 3, 3, 3), (2,), 'trilinear_5d', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (None, 2.), 'trilinear_5d_with_scale', (True, 'aten::__interpolate')),
+    ('interpolate', torch.randn(S, M, M, M, M), (4,), 'trilinear_5d_with_size', (True, 'aten::__interpolate')),
 ]
 
 
@@ -12074,6 +12440,7 @@ def add_autograd_test(
         self_size,
         args,
         variant_name='',
+        check_ad=(),
         dim_args_idx=(),
         skipTestIf=(),
         output_process_fn=lambda x: x,
@@ -12091,7 +12458,7 @@ def add_autograd_test(
         # for-loop bodies don't define scopes, so we have to save the variables
         # we want to close over in some way
         def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
-                    output_process_fn=output_process_fn):
+                    check_ad=check_ad, output_process_fn=output_process_fn):
             def check(name):
                 set_rng_seed(2)
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
@@ -12115,19 +12482,26 @@ def add_autograd_test(
                     # Test with disable_autodiff_subgraph_inlining, which forces the graph
                     # to contain DifferentiableGraph nodes whenever possible. This allows us
                     # to test autodiff; we assume that autograd is correct and use autodiff for backprop
+                    should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
                     if test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self,
-                                                create_traced_fn(self, fn,
-                                                                 disable_autodiff_subgraph_inlining=True),
+                        traced_fn = create_traced_fn(self, fn, disable_autodiff_subgraph_inlining=True)
+
+                        check_against_reference(self, traced_fn,
+                                                fn, (self_variable,) + args_variable, kwargs_variable,
+                                                check_types=check_types)
+                        self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
+
+                    if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
+                        script_fn = create_script_fn(self, name, 'method', output_process_fn,
+                                                     disable_autodiff_subgraph_inlining=True)
+                        check_against_reference(self, script_fn,
                                                 fn, (self_variable,) + args_variable, kwargs_variable,
                                                 check_types=check_types)
 
-                    if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
-                        check_against_reference(self,
-                                                create_script_fn(self, name, 'method', output_process_fn,
-                                                                 disable_autodiff_subgraph_inlining=True),
-                                                fn, (self_variable,) + args_variable, kwargs_variable,
-                                                check_types=check_types)
+                        self.assertAutodiffNode(script_fn.last_graph,
+                                                should_autodiff_node and test_name not in EXCLUDE_SCRIPT_AD_CHECK,
+                                                autodiff_nodes,
+                                                fusible_nodes)
 
                 # functional interface tests
                 if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
@@ -12173,7 +12547,7 @@ def suppress_warnings(fn):
     return wrapper
 
 
-def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=(),
+def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), skipTestIf=(),
                            output_process_fn=lambda x: x, kwargs=None):
     test_name = 'test_nn_' + name
 
@@ -12183,7 +12557,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
     no_grad = variant_name == 'inplace'
 
     @suppress_warnings
-    def do_test(self, name=name, args=args, test_name=test_name):
+    def do_test(self, name=name, args=args, test_name=test_name, check_ad=check_ad):
         torch.manual_seed(2)
 
         self_variable = create_input((self_size,))[0][0]
@@ -12204,13 +12578,14 @@ def add_nn_functional_test(name, self_size, args, variant_name='', skipTestIf=()
         f_args_variable = (self_variable,) + args_variable
         f_args_tensor = (self_tensor,) + args_tensor
 
+        should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
         if test_name not in EXCLUDE_SCRIPT:
-            disable_ad_subgraph_inlining = test_name in DISABLE_AUTODIFF_SUBGRAPH_INLINING
-
             def run_test():
                 script_fn = create_script_fn(self, name, 'nn_functional', output_process_fn,
-                                             disable_autodiff_subgraph_inlining=disable_ad_subgraph_inlining)
+                                             disable_autodiff_subgraph_inlining=should_autodiff_node)
                 check_against_reference(self, script_fn, fn, f_args_variable, kwargs_variable, no_grad=no_grad)
+                # For tests we disabled AD subgraph inlining, make sure it's not falling back to autograd
+                self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
             if test_name in EXCLUDE_PYTHON_PRINT:
                 with self.disableModuleHook():
@@ -12339,6 +12714,24 @@ def post_add_test(test_name, skipTestIf, do_test, test_class):
 
     if not (TEST_WITH_UBSAN and test_name in UBSAN_BLACKLISTED_TESTS):
         setattr(test_class, test_name, do_test)
+
+
+def normalize_check_ad(check_ad, name):
+    # normalized check_ad is 3-element tuple: (bool, List[str], List[str])
+    if len(check_ad) == 0:
+        check_ad = [False, ['aten::' + name], []]
+    elif len(check_ad) == 1:
+        check_ad = [check_ad[0], ['aten::' + name], []]
+    elif len(check_ad) == 2:
+        check_ad = [check_ad[0], check_ad[1], []]
+    elif len(check_ad) == 3:
+        check_ad = list(check_ad)
+    else:
+        raise Exception('Invalid check_ad, requires (bool, str|List[str], str|List[str])')
+
+    check_ad = [[t] if isinstance(t, str) else t for t in check_ad]
+
+    return check_ad
 
 
 class TestAsync(JitTestCase):
@@ -13101,6 +13494,30 @@ class TestClassType(JitTestCase):
 
         self.assertEqual(x, f2.x)
         self.assertEqual(y, f2.y)
+
+    def test_class_specialization(self):
+        @torch.jit.script  # noqa: B903
+        class Foo(object):
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        def use_foo(foo, foo2, tup):
+            # type: (Foo, Foo, Tuple[Foo, Foo]) -> Tensor
+            a, b = tup
+            return foo.x + foo2.y + a.x + b.y
+
+        # create from python
+        x = torch.ones(2, 3)
+        y = torch.zeros(2, 3)
+        f = Foo(x, y)
+        f2 = Foo(x * 2, y * 3)
+        f3 = Foo(x * 4, y * 4)
+
+        input = (f, f2, (f, f3))
+        sfoo = self.checkScript(use_foo, input)
+        graphstr = str(sfoo.graph_for(*input))
+        FileCheck().check_count("Double(*, *) = prim::GetAttr", 4).run(graphstr)
 
 
 class TestLogging(JitTestCase):
