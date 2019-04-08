@@ -167,10 +167,11 @@ struct Value {
   bool requires_grad() const {
     return type()->requires_grad();
   }
-  bool isTensor() const {
+  bool isCompleteTensor() const {
     return type()->kind() == TypeKind::CompleteTensorType;
   }
   TORCH_API bool mustBeNone() const;
+  TORCH_API bool mustNotBeNone() const;
   size_t unique() const {
     return unique_;
   }
@@ -1041,7 +1042,7 @@ struct Graph {
 
   TORCH_API Node* createNone(
       TypePtr typ); // value of None with type Optional[typ]
-  TORCH_API Node* createUndefined();
+  TORCH_API Node* createAutogradZero();
   TORCH_API Node* createFusionGroup();
   TORCH_API Node* createDifferentiableSubgraph();
   TORCH_API Node* createTuple(
@@ -1062,7 +1063,7 @@ struct Graph {
   TORCH_API Node* createDictIndex(Value* dict, Value* index);
   TORCH_API Node* createNumToTensor(Value* value);
   TORCH_API Node* createImplicitTensorToNum(const TypePtr& type, Value* value);
-  TORCH_API Node* createUserObject(const UserTypePtr& type);
+  TORCH_API Node* createObject(const ClassTypePtr& type);
   TORCH_API Node* createSetAttr(
       Value* obj,
       const std::string& field,

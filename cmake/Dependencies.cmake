@@ -46,13 +46,15 @@ endif()
 # 1. Replace /Zi and /ZI with /Z7
 # 2. Switch off incremental linking in debug builds
 if (MSVC)
-  foreach(flag_var
-      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-    if(${flag_var} MATCHES "/Z[iI]")
-      string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
-    endif(${flag_var} MATCHES "/Z[iI]")
-  endforeach(flag_var)
+  if(MSVC_Z7_OVERRIDE)
+    foreach(flag_var
+        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+        CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+      if(${flag_var} MATCHES "/Z[iI]")
+        string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
+      endif(${flag_var} MATCHES "/Z[iI]")
+    endforeach(flag_var)
+  endif(MSVC_Z7_OVERRIDE)
   foreach(flag_var
       CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
       CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
@@ -133,7 +135,7 @@ if (NOT BUILD_ATEN_MOBILE)
   set(AT_MKL_ENABLED 0)
   set(AT_MKL_MT 0)
   set(USE_BLAS 1)
-  if(NOT (ATLAS_FOUND OR OPENBLAS_FOUND OR MKL_FOUND OR VECLIB_FOUND))
+  if(NOT (ATLAS_FOUND OR OpenBLAS_FOUND OR MKL_FOUND OR VECLIB_FOUND))
     message(WARNING "Preferred BLAS (" ${BLAS} ") cannot be found, now searching for a general BLAS library")
     find_package(BLAS)
     if (NOT BLAS_FOUND)
@@ -330,16 +332,27 @@ if(BUILD_TEST)
 
   # For gtest, we will simply embed it into our test binaries, so we won't
   # need to install it.
-  set(BUILD_GTEST ON CACHE BOOL "Build gtest" FORCE)
   set(INSTALL_GTEST OFF CACHE BOOL "Install gtest." FORCE)
-  # We currently don't need gmock right now.
-  set(BUILD_GMOCK OFF CACHE BOOL "Build gmock." FORCE)
+  set(BUILD_GMOCK ON CACHE BOOL "Build gmock." FORCE)
   # For Windows, we will check the runtime used is correctly passed in.
   if (NOT CAFFE2_USE_MSVC_STATIC_RUNTIME)
       set(gtest_force_shared_crt ON CACHE BOOL "force shared crt on gtest" FORCE)
   endif()
+
+  # Add googletest subdirectory but make sure our INCLUDE_DIRECTORIES
+  # don't bleed into it. This is because libraries installed into the root conda
+  # env (e.g. MKL) add a global /opt/conda/include directory, and if there's
+  # gtest installed in conda, the third_party/googletest/**.cc source files
+  # would try to include headers from /opt/conda/include/gtest/**.h instead of
+  # its own. Once we have proper target-based include directories,
+  # this shouldn't be necessary anymore.
+  get_property(INC_DIR_temp DIRECTORY PROPERTY INCLUDE_DIRECTORIES)
+  set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES "")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest)
-  include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
+  set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES ${INC_DIR_temp})
+
+  include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
+  include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googlemock/include)
 
   # We will not need to test benchmark lib itself.
   set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "Disable benchmark testing as we don't need it.")
@@ -917,63 +930,6 @@ if(USE_PROF)
   else()
     message(WARNING "htrace not found. Caffe2 will build without htrace prof")
   endif()
-endif()
-
-# ---[ ARM Compute Library: check compatibility.
-if (USE_ACL)
-  if (NOT ANDROID)
-    message(WARNING "ARM Compute Library is only supported for Android builds.")
-    caffe2_update_option(USE_ACL OFF)
-  else()
-    list(APPEND Caffe2_DEPENDENCY_LIBS EGL GLESv2)
-    if (CMAKE_SYSTEM_PROCESSOR MATCHES "^armv")
-      # 32-bit ARM (armv7, armv7-a, armv7l, etc)
-      set(ACL_ARCH "armv7a")
-    elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
-      # 64-bit ARM
-      set(ACL_ARCH "arm64-v8a")
-    else()
-      message(WARNING "ARM Compute Library is only supported for ARM/ARM64 builds.")
-      caffe2_update_option(USE_ACL OFF)
-    endif()
-  endif()
-endif()
-
-# ---[ ARM Compute Library: build the target.
-if (USE_ACL)
-  list(APPEND ARM_COMPUTE_INCLUDE_DIRS "third_party/ComputeLibrary/")
-  list(APPEND ARM_COMPUTE_INCLUDE_DIRS "third_party/ComputeLibrary/include")
-  include_directories(SYSTEM ${ARM_COMPUTE_INCLUDE_DIRS})
-  string (REPLACE ";" " -I" ANDROID_STL_INCLUDE_FLAGS "-I${ANDROID_STL_INCLUDE_DIRS}")
-  set (ARM_COMPUTE_SRC_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/ComputeLibrary/")
-  set (ARM_COMPUTE_LIB "${CMAKE_CURRENT_BINARY_DIR}/libarm_compute.a")
-  set (ARM_COMPUTE_CORE_LIB "${CMAKE_CURRENT_BINARY_DIR}/libarm_compute_core.a")
-  set (ARM_COMPUTE_LIBS ${ARM_COMPUTE_LIB} ${ARM_COMPUTE_CORE_LIB})
-
-  add_custom_command(
-      OUTPUT ${ARM_COMPUTE_LIBS}
-      COMMAND
-        /bin/sh -c "export PATH=\"$PATH:$(dirname ${CMAKE_CXX_COMPILER})\" && \
-        scons -C \"${ARM_COMPUTE_SRC_DIR}\" -Q \
-          examples=no validation_tests=no benchmark_tests=no standalone=yes \
-          embed_kernels=yes opencl=no gles_compute=yes \
-          os=android arch=${ACL_ARCH} \
-          extra_cxx_flags=\"${ANDROID_CXX_FLAGS} ${ANDROID_STL_INCLUDE_FLAGS}\"" &&
-        /bin/sh -c "cp ${ARM_COMPUTE_SRC_DIR}/build/libarm_compute-static.a ${CMAKE_CURRENT_BINARY_DIR}/libarm_compute.a" &&
-        /bin/sh -c "cp ${ARM_COMPUTE_SRC_DIR}/build/libarm_compute_core-static.a ${CMAKE_CURRENT_BINARY_DIR}/libarm_compute_core.a" &&
-        /bin/sh -c "rm -r ${ARM_COMPUTE_SRC_DIR}/build"
-      COMMENT "Building ARM compute library" VERBATIM)
-  add_custom_target(arm_compute_build ALL DEPENDS ${ARM_COMPUTE_LIBS})
-
-  add_library(arm_compute_core STATIC IMPORTED)
-  add_dependencies(arm_compute_core arm_compute_build)
-  set_property(TARGET arm_compute_core PROPERTY IMPORTED_LOCATION ${ARM_COMPUTE_CORE_LIB})
-
-  add_library(arm_compute STATIC IMPORTED)
-  add_dependencies(arm_compute arm_compute_build)
-  set_property(TARGET arm_compute PROPERTY IMPORTED_LOCATION ${ARM_COMPUTE_LIB})
-
-  list(APPEND Caffe2_DEPENDENCY_LIBS arm_compute arm_compute_core)
 endif()
 
 if (USE_SNPE AND ANDROID)

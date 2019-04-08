@@ -47,7 +47,7 @@ __device__ static inline int64_t get_target_prime(const target_t* __restrict__ t
 template<typename scalar_t, typename target_t>
 __global__ void
 #if defined (__HIP_PLATFORM_HCC__)
-C10_LAUNCH_BOUNDS((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
 ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
                                     const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths, int64_t max_input_length,
@@ -102,8 +102,7 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
     bool have_three;            // flag which of the two cases in eq (6) we have
     if (s < 2*target_length+1) {
       current_char = get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s, BLANK);
-      have_three = ((s > 1) && (get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s-2, BLANK) !=
-				current_char));
+      have_three = ((s > 1) && (get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s-2, BLANK) != current_char));
     } else {
       current_char = BLANK;
       have_three = false;
@@ -165,12 +164,11 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
 // We return log_alpha (currently, might change to (log_alpha+log_beta) to be passed to the
 // backward. The dispatch function will only return the loss.
 template<typename scalar_t, ScalarType target_scalar_type>
-std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const Tensor& targets_, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK) {
+std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK) {
   // log_probs: input_len x batch_size x num_labels
   // targets [int64]: batch_size x target_length OR sum(target_lengths)
   CheckedFrom c = "ctc_loss_gpu";
   using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
-  auto targets = targets_.toType(log_probs.type().toScalarType(target_scalar_type)); // to log_probs cuda if it isn't there already
   auto log_probs_arg = TensorArg(log_probs, "log_probs", 1);
   auto targets_arg = TensorArg(targets, "targets", 2);
   checkAllSameGPU(c, {log_probs_arg, targets_arg});
@@ -226,7 +224,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
 
   auto target_lengths_t = at::tensor(target_lengths, targets.options().dtype(kLong));
   auto input_lengths_t = at::tensor(input_lengths, targets.options().dtype(kLong));
-  tg_batch_offsets = tg_batch_offsets.toType(targets.type().toScalarType(kLong));
+  tg_batch_offsets = tg_batch_offsets.cuda();
 
   Tensor log_alpha = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
   Tensor neg_log_likelihood = at::empty({batch_size}, log_probs.options());
@@ -260,7 +258,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
 // alpha kernel above. (As mentioned above, it might make sense do the calculation in the alpha kernel.)
 template<typename scalar_t, typename target_t>
 __global__ void
-C10_LAUNCH_BOUNDS((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
                                       const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths, int64_t max_input_length,
                                       const target_t* __restrict__ targets_data, const int64_t* __restrict__ target_lengths, int64_t max_target_length,
@@ -366,7 +364,7 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
 template<typename scalar_t, typename target_t>
 __global__ void
 #if defined (__HIP_PLATFORM_HCC__)
-C10_LAUNCH_BOUNDS((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
 ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_data,
                                                      const scalar_t* __restrict__ grad_out_data, int64_t grad_out_batch_stride,
@@ -418,7 +416,7 @@ ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_da
 template<typename scalar_t, typename target_t>
 __global__ void
 #if defined (__HIP_PLATFORM_HCC__)
-C10_LAUNCH_BOUNDS((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
+C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 #endif
 ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
                                                      const scalar_t* __restrict__ grad_out_data, int64_t grad_out_batch_stride,
@@ -482,11 +480,10 @@ ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ gradient_data,
 // The backward. It essentially computes eq 16 by using the above kernels.
 // We don't do a lot of checking as we envision this to be called only when backpropagating through a (well-checked) forward.
 template<typename scalar_t, ScalarType target_scalar_type>
-Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_probs, const Tensor& targets_, IntArrayRef input_lengths, IntArrayRef target_lengths,
+Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
 				      const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK, bool zero_infinity) {
   constexpr scalar_t neginf = -INFINITY;
   using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
-  auto targets = targets_.toType(log_probs.type().toScalarType(target_scalar_type)); // to cuda if it isn't there already
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
   int64_t lp_input_stride = log_probs.stride(0);
@@ -516,9 +513,9 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
     tg_target_stride = targets.stride(1);
     max_target_length = targets.size(1);
   }
-  auto target_lengths_t = at::tensor(target_lengths, targets.options().device(at::Device(at::Device::Type::CPU)).dtype(kLong)).toType(targets.type().toScalarType(kLong));
-  auto input_lengths_t = at::tensor(input_lengths, targets.options().device(at::Device(at::Device::Type::CPU)).dtype(kLong)).toType(targets.type().toScalarType(kLong));
-  tg_batch_offsets = tg_batch_offsets.toType(targets.type().toScalarType(kLong));
+  auto target_lengths_t = at::tensor(target_lengths, targets.options().dtype(kLong));
+  auto input_lengths_t = at::tensor(input_lengths, targets.options().dtype(kLong));
+  tg_batch_offsets = tg_batch_offsets.cuda();
 
   Tensor log_beta = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
   Tensor grad = at::full_like(log_probs, neginf); // initialization for log(sum (alpha beta))
@@ -631,8 +628,8 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
 
 std::tuple<Tensor, Tensor> ctc_loss_gpu(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, bool zero_infinity) {
   (void)zero_infinity; // only used for backward
-  return AT_DISPATCH_FLOATING_TYPES(log_probs.type(), "ctc_loss", [&] {
-      if (targets.type().scalarType() == kLong) {
+  return AT_DISPATCH_FLOATING_TYPES(log_probs.scalar_type(), "ctc_loss_cuda", [&] {
+      if (targets.scalar_type() == kLong) {
 	return ctc_loss_gpu_template<scalar_t, kLong>(log_probs, targets, input_lengths, target_lengths, BLANK);
       } else {
 	return ctc_loss_gpu_template<scalar_t, kInt>(log_probs, targets, input_lengths, target_lengths, BLANK);
@@ -642,8 +639,8 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu(const Tensor& log_probs, const Tensor& t
 
 Tensor ctc_loss_backward_gpu(const Tensor& grad, const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
                              const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK, bool zero_infinity) {
-  return AT_DISPATCH_FLOATING_TYPES(log_probs.type(), "ctc_loss_backward", [&] {
-      if (targets.type().scalarType() == kLong) {
+  return AT_DISPATCH_FLOATING_TYPES(log_probs.scalar_type(), "ctc_loss_backward_cuda", [&] {
+      if (targets.scalar_type() == kLong) {
 	return ctc_loss_backward_gpu_template<scalar_t, kLong>(grad, log_probs, targets, input_lengths, target_lengths, neg_log_likelihood, log_alpha, BLANK, zero_infinity);
       } else {
 	return ctc_loss_backward_gpu_template<scalar_t, kInt>(grad, log_probs, targets, input_lengths, target_lengths, neg_log_likelihood, log_alpha, BLANK, zero_infinity);

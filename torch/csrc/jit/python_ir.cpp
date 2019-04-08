@@ -209,19 +209,9 @@ void initPythonIRBindings(PyObject* module_) {
             db.dump();
           })
       .def(
-          "propagate_shapes",
-          [](std::shared_ptr<Graph> g,
-             std::vector<at::Tensor> inputs,
-             bool with_grad) {
-            setInputTypes(
-                *g,
-                ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
-            PropagateInputShapes(g);
-          })
-      .def(
           "_export_onnx",
           [](const std::shared_ptr<Graph> g,
-             const std::vector<at::Tensor>& initializers,
+             const std::map<std::string, at::Tensor>& initializers,
              int64_t onnx_opset_version,
              bool defer_weight_export,
              ::torch::onnx::OperatorExportTypes operator_export_type) {
@@ -237,7 +227,7 @@ void initPythonIRBindings(PyObject* module_) {
                 python_serialized_export_map;
             for (auto& kv : export_map) {
               auto t = kv.second;
-              size_t copy_bytes = t.type().elementSizeInBytes() * t.numel();
+              size_t copy_bytes = t.element_size() * t.numel();
               // TODO: this is an unecessary copy. In theory we can directly
               // return the map from identifier to Tensor, but we need some API
               // in Python to get raw `bytes` containing the raw tensor data.
@@ -255,7 +245,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "_pretty_print_onnx",
           [](const std::shared_ptr<Graph> g,
-             const std::vector<at::Tensor>& initializers,
+             const std::map<std::string, at::Tensor>& initializers,
              int64_t onnx_opset_version,
              bool defer_weight_export,
              ::torch::onnx::OperatorExportTypes operator_export_type,
@@ -384,8 +374,10 @@ void initPythonIRBindings(PyObject* module_) {
             return node;
           })
       .VS(copyMetadata)
-      .VS(isTensor)
-      .def("toIValue", [](Value& n) { return toIValue(&n); });
+      .VS(isCompleteTensor)
+      .VS(requires_grad)
+      .def("toIValue", [](Value& n) { return toIValue(&n); })
+      .def("type", [](Value& v) { return v.type(); });
 #undef VS
 
   py::class_<Block, std::unique_ptr<Block, py::nodelete>>(m, "Block")
@@ -409,7 +401,19 @@ void initPythonIRBindings(PyObject* module_) {
           },
           "Find all nodes",
           py::arg("kind"),
-          py::arg("recurse") = true);
+          py::arg("recurse") = true)
+      .def(
+          "inputs",
+          [](Block& b) {
+            return py::make_iterator(b.inputs().begin(), b.inputs().end());
+          })
+      .def(
+          "outputs",
+          [](Block& b) {
+            return py::make_iterator(b.outputs().begin(), b.outputs().end());
+          })
+      .def("returnNode", [](Block& b) { return b.return_node(); })
+      .def("paramNode", [](Block& b) { return b.param_node(); });
 
 #define NS(name) def(#name, &Node ::name)
   py::class_<Node, std::unique_ptr<Node, py::nodelete>>(m, "Node")

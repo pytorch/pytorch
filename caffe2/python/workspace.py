@@ -83,6 +83,11 @@ GetNumNUMANodes = C.get_num_numa_nodes
 GetBlobNUMANode = C.get_blob_numa_node
 GetBlobSizeBytes = C.get_blob_size_bytes
 
+
+def FillRandomNetworkInputs(net, input_dims, input_types):
+    C.fill_random_network_inputs(net.Proto().SerializeToString(), input_dims, input_types)
+
+
 def _GetFreeFlaskPort():
     """Get a free flask port."""
     # We will prefer to use 5000. If not, we will then pick a random port.
@@ -185,12 +190,20 @@ def RunOperatorOnce(operator):
     return C.run_operator_once(StringifyProto(operator))
 
 
+def RunOperatorMultiple(operator, num_runs):
+    return C.run_operator_multiple(StringifyProto(operator), num_runs)
+
+
 def RunOperatorsOnce(operators):
     for op in operators:
         success = RunOperatorOnce(op)
         if not success:
             return False
     return True
+
+
+def ClearGlobalNetObserver():
+    return C.clear_global_net_observer()
 
 
 def CallWithExceptionIntercept(func, op_id_fetcher, net_name, *args, **kwargs):
@@ -362,6 +375,11 @@ def FetchBlob(name):
             )
         )
     return result
+
+
+def FetchTorch(name):
+    ws = C.Workspace.current
+    return ws.blobs[name].to_torch()
 
 
 Int8Tensor = collections.namedtuple(
@@ -701,13 +719,45 @@ Workspace.run = _Workspace_run
 Workspace.feed_blob = _Workspace_feed_blob
 Workspace.remove_blob = _Workspace_remove_blob
 
-
 # C.Blob methods.
 
+
 def _Blob_feed(blob, arg, device_option=None):
+    # conservative type check to avoid unnecessary import
+    if type(arg).__name__ == 'Tensor' and type(arg).__module__ == 'torch':
+        import torch
+        if isinstance(arg, torch.Tensor):
+            assert device_option is None, \
+                "device_option doesn't make sense with PyTorch tensors"
+            handle = torch._C._tensor_impl_raw_handle(arg)
+            blob._wrap_tensor_impl(handle)
+            return True  # _feed() returns True for some reason
     if device_option is not None:
         device_option = StringifyProto(device_option)
     return blob._feed(arg, device_option)
 
 
 C.Blob.feed = _Blob_feed
+
+
+def _Tensor_to_torch(tensor):
+    """
+    PyTorch tensor interop (TensorCPU methods)
+
+    Can be accessed as:
+      workspace.Workspace.current.blobs['foo'].tensor().to_torch()
+    """
+    # avoiding circular dependency
+    import torch
+    handle = tensor._tensor_impl_raw_handle()
+    return torch._C._wrap_tensor_impl(handle)
+
+C.TensorCPU.to_torch = _Tensor_to_torch
+
+
+def _Blob_to_torch(blob):
+    if not blob.is_tensor():
+        raise RuntimeError("Blob has to be a tensor")
+    return blob.as_tensor().to_torch()
+
+C.Blob.to_torch = _Blob_to_torch

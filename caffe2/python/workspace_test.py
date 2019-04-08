@@ -5,8 +5,11 @@ from __future__ import unicode_literals
 
 import numpy as np
 import os
+import shutil
+import tempfile
 import unittest
 
+import torch
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, test_util, workspace, model_helper, brew
 
@@ -289,6 +292,27 @@ class TestWorkspace(unittest.TestCase):
         for key in workspace.blobs:
             self.assertEqual(key, "testblob")
 
+    def testTorchInterop(self):
+        workspace.RunOperatorOnce(core.CreateOperator(
+            "ConstantFill", [], "foo", shape=(4,), value=2, dtype=10))
+        t = workspace.FetchTorch("foo")
+        t.resize_(5)
+        t[4] = t[2] = 777
+        np.testing.assert_array_equal(t.numpy(), np.array([2,2,777,2,777]))
+        # this doesn't work because of variable / tensor confusion
+        # the underlying data tensor is not properly reshaped :(
+        np.testing.assert_array_equal(
+            workspace.FetchBlob("foo"), np.array([2,2,777,2]))
+
+        z = torch.ones((4,), dtype=torch.int64)
+        workspace.FeedBlob('bar', z)
+        workspace.RunOperatorOnce(
+            core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2)))
+        z[0,1] = 123
+        np.testing.assert_array_equal(
+            workspace.FetchBlob("bar"), np.array([[1,123],[1,1]]))
+        np.testing.assert_array_equal(z, np.array([[1,123],[1,1]]))
+
 
 class TestMultiWorkspaces(unittest.TestCase):
     def setUp(self):
@@ -348,6 +372,43 @@ class TestWorkspaceGPU(test_util.TestCase):
         self.assertEqual(pattern.ndim, 2)
         self.assertEqual(pattern.shape[0], pattern.shape[1])
         self.assertEqual(pattern.shape[0], workspace.NumGpuDevices())
+
+    @unittest.skipIf(not workspace.has_cuda_support,
+                     "Tensor interop doesn't yet work on ROCm")
+    def testTorchInterop(self):
+        # CUDA has convenient mem stats, let's use them to make sure we didn't
+        # leak memory
+        initial_mem = torch.cuda.memory_allocated()
+        workspace.RunOperatorOnce(core.CreateOperator(
+            "ConstantFill", [], "foo", shape=(4,), value=2, dtype=10,
+            device_option=core.DeviceOption(workspace.GpuDeviceType)))
+        t = workspace.FetchTorch("foo")
+        t.resize_(5)
+        self.assertTrue(t.is_cuda)
+        t[4] = t[2] = 777
+        np.testing.assert_array_equal(
+            t.cpu().numpy(), np.array([2,2,777,2,777]))
+        # this doesn't work because of variable / tensor confusion
+        # the underlying data tensor is not properly reshaped :(
+        np.testing.assert_array_equal(
+            workspace.FetchBlob("foo"), np.array([2,2,777,2]))
+
+        z = torch.ones((4,), dtype=torch.int64, device="cuda")
+        workspace.FeedBlob('bar', z)
+        workspace.RunOperatorOnce(
+            core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2),
+            device_option=core.DeviceOption(workspace.GpuDeviceType)))
+        z[0,1] = 123
+        np.testing.assert_array_equal(
+            workspace.FetchBlob("bar"), np.array([[1,123],[1,1]]))
+        np.testing.assert_array_equal(z.cpu(), np.array([[1,123],[1,1]]))
+
+        self.assertGreater(torch.cuda.memory_allocated(), initial_mem)
+        # clean up everything
+        del t
+        del z
+        workspace.ResetWorkspace()
+        self.assertEqual(torch.cuda.memory_allocated(), initial_mem)
 
 
 @unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
@@ -640,6 +701,110 @@ class TestTransform(htu.HypothesisTestCase):
             improvement_threshold=2.0)
         self.assertEqual(
             workspace.RunNetOnce(proto.SerializeToString()), True)
+
+
+class MyModule(torch.jit.ScriptModule):
+    def __init__(self):
+        super(MyModule, self).__init__()
+        self.mult = torch.nn.Parameter(torch.tensor([[1, 2, 3, 4, 5.0]]))
+
+    @torch.jit.script_method
+    def forward(self, x):
+        return self.mult.mm(x)
+
+    @torch.jit.script_method
+    def multi_input(self, x, y, z=2):
+        # type: (Tensor, Tensor, int) -> Tensor
+        return x + y + z
+
+    @torch.jit.script_method
+    def multi_output(self, x):
+        return (x, x + 1)
+
+
+@unittest.skipIf(
+    "ScriptModule" not in core._REGISTERED_OPERATORS,
+    "Script module integration in Caffe2 is not enabled")
+class TestScriptModule(test_util.TestCase):
+    def _createFeedModule(self):
+        workspace.FeedBlob('m', MyModule())
+
+    def testCreation(self):
+        m = MyModule()
+        workspace.FeedBlob('module', m)
+        m2 = workspace.FetchBlob('module')
+        self.assertTrue(m is m2)
+
+    def testForward(self):
+        self._createFeedModule()
+        val = np.random.rand(5, 5).astype(np.float32)
+        param = np.array([[1, 2, 3, 4, 5]]).astype(np.float32)
+        workspace.FeedBlob('w', val)
+        workspace.RunOperatorOnce(core.CreateOperator("ScriptModule", ["m", "w"], ["y"]))
+        np.testing.assert_almost_equal(workspace.FetchBlob("y"), np.matmul(param, val), decimal=5)
+
+    def testMultiInputOutput(self):
+        self._createFeedModule()
+        val = np.random.rand(5, 5).astype(np.float32)
+        workspace.FeedBlob('w', val)
+        val2 = np.random.rand(5, 5).astype(np.float32)
+        workspace.FeedBlob('w2', val2)
+        workspace.RunOperatorOnce(core.CreateOperator("ScriptModule", ["m", "w", "w2"], ["y"], method="multi_input"))
+        workspace.RunOperatorOnce(core.CreateOperator("ScriptModule", ["m", "w"], ["y1", "y2"], method="multi_output"))
+        np.testing.assert_almost_equal(workspace.FetchBlob("y"), val + val2 + 2, decimal=5)
+        np.testing.assert_almost_equal(workspace.FetchBlob("y1"), val, decimal=5)
+        np.testing.assert_almost_equal(workspace.FetchBlob("y2"), val + 1, decimal=5)
+
+    def testSerialization(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            self._createFeedModule()
+            workspace.RunOperatorOnce(core.CreateOperator(
+                "Save",
+                ["m"], [],
+                absolute_path=1,
+                db=os.path.join(tmpdir, "db"), db_type="minidb"))
+            workspace.ResetWorkspace()
+
+            self.assertFalse(workspace.HasBlob('m'))
+            workspace.RunOperatorOnce(core.CreateOperator(
+                "Load",
+                [], [],
+                absolute_path=1,
+                db=os.path.join(tmpdir, "db"), db_type="minidb",
+                load_all=1))
+            self.assertTrue(workspace.HasBlob('m'))
+            # TODO: make caffe2 side load return python-sided module
+            # right now it returns the base class (torch._C.ScriptModule)
+            # self.assertTrue(isinstance(workspace.FetchBlob('m'), torch.jit.ScriptModule))
+
+            # do something with the module
+            val = np.random.rand(5, 5).astype(np.float32)
+            param = np.array([[1, 2, 3, 4, 5]]).astype(np.float32)
+            workspace.FeedBlob('w', val)
+            workspace.RunOperatorOnce(core.CreateOperator("ScriptModule", ["m", "w"], ["y"]))
+            np.testing.assert_almost_equal(workspace.FetchBlob("y"), np.matmul(param, val), decimal=5)
+        finally:
+            # clean up temp folder.
+            try:
+                shutil.rmtree(tmpdir)
+            except OSError as e:
+                if e.errno != errno.ENOENT:
+                    raise
+
+
+class TestScriptModuleFromString(TestScriptModule):
+    def _createFeedModule(self):
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                "ScriptModuleLoad", [], ["m"],
+                serialized_binary=self._get_modules_bytes(MyModule())))
+
+    def _get_modules_bytes(self, the_module):
+        import io
+        buffer = io.BytesIO()
+        torch.jit.save(the_module, buffer)
+        return buffer.getvalue()
 
 
 if __name__ == '__main__':

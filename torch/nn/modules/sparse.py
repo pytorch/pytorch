@@ -4,7 +4,7 @@ from torch.nn.parameter import Parameter
 from .module import Module
 from .. import functional as F
 from .. import init
-from torch._jit_internal import weak_module, weak_script, weak_script_method
+from torch._jit_internal import weak_module, weak_script_method
 
 
 @weak_module
@@ -320,5 +320,3 @@ class EmbeddingBag(Module):
             sparse=sparse)
         embeddingbag.weight.requires_grad = not freeze
         return embeddingbag
-
-# TODO: SparseLinear

@@ -17,7 +17,7 @@ constexpr uint32_t AT_APPLY_BLOCKS_PER_SM = 4;
 
 template <typename scalar_t, typename IndexType>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernel_pointwise_flip_apply2(const cuda::detail::TensorInfo<scalar_t, IndexType> in_tensor_info,
@@ -87,7 +87,7 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
 
   // use kernel_pointwise_flip_apply2 only when to-flip dim is the 1st or last dim, where collapseDims can reduce the amount of work
   if (flip_dims_size == 1 && in_tensor.is_contiguous() && (flip_dims[0] == 0 || flip_dims[0] == total_dims - 1)) {
-    AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "flip_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, in_tensor.scalar_type(), "flip_cuda", [&] {
       auto in_tensor_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(in_tensor);
       auto out_tensor_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(out_tensor);
       int flip_dim = in_tensor_info.collapseDims(flip_dims[0]);
@@ -99,13 +99,16 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
     return out_tensor;
   }
 
-  auto flip_dims_t = at::CPU(kLong).tensorFromBlob(flip_dims.data(), {static_cast<int64_t>(flip_dims.size())});
+  auto flip_dims_t = at::from_blob(
+      flip_dims.data(), {static_cast<int64_t>(flip_dims.size())}, at::device(kCPU).dtype(kLong));
 
   auto shape = in_tensor.sizes().vec();
-  auto shape_t = at::CPU(kLong).tensorFromBlob(shape.data(), {static_cast<int64_t>(shape.size())});
+  auto shape_t = at::from_blob(
+      shape.data(), {static_cast<int64_t>(shape.size())}, at::device(kCPU).dtype(kLong));
 
   auto strides = in_tensor.strides().vec();
-  auto strides_t = at::CPU(kLong).tensorFromBlob(strides.data(), {static_cast<int64_t>(strides.size())});
+  auto strides_t = at::from_blob(
+      strides.data(), {static_cast<int64_t>(strides.size())}, at::device(kCPU).dtype(kLong));
 
   // stride_contiguous is the stride of non-contiguous tensor after calling contiguous(),
   // it is used to compute indices for each element in non-contiguous tensor
@@ -119,7 +122,7 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
     }
   }
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "flip_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, in_tensor.scalar_type(), "flip_cuda", [&] {
     flip_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
       in_tensor.data<scalar_t>(), out_tensor.data<scalar_t>(), N, flip_dims_t.toType(CUDA(kLong)).data<int64_t>(), flip_dims_size,
       strides_t.toType(CUDA(kLong)).data<int64_t>(), stride_contiguous.toType(CUDA(kLong)).data<int64_t>(), shape_t.toType(CUDA(kLong)).data<int64_t>(), total_dims);
@@ -129,6 +132,9 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
 }
 
 template <typename scalar_t>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 __global__
 void roll_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N,
                       int64_t roll_dim, int64_t start,
@@ -177,7 +183,7 @@ Tensor roll_cuda(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
 
   auto total_dims = in_tensor.dim();
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "roll_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, in_tensor.scalar_type(), "roll_cuda", [&] {
     roll_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
       in_tensor.data<scalar_t>(), out_tensor.data<scalar_t>(), N,
       dim, start,

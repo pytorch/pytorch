@@ -3,8 +3,6 @@
 #else
 
 
-TH_EXTERNC void dtrtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
-TH_EXTERNC void strtrs_(char *uplo, char *trans, char *diag, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info);
 TH_EXTERNC void dgels_(char *trans, int *m, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, double *work, int *lwork, int *info);
 TH_EXTERNC void sgels_(char *trans, int *m, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, float *work, int *lwork, int *info);
 TH_EXTERNC void dsyev_(char *jobz, char *uplo, int *n, double *a, int *lda, double *w, double *work, int *lwork, int *info);
@@ -30,21 +28,6 @@ TH_EXTERNC void dormqr_(char *side, char *trans, int *m, int *n, int *k, double 
 TH_EXTERNC void spstrf_(char *uplo, int *n, float *a, int *lda, int *piv, int *rank, float *tol, float *work, int *info);
 TH_EXTERNC void dpstrf_(char *uplo, int *n, double *a, int *lda, int *piv, int *rank, double *tol, double *work, int *info);
 
-
-/* Solve a triangular system of the form A * X = B  or A^T * X = B */
-void THLapack_(trtrs)(char uplo, char trans, char diag, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int* info)
-{
-#ifdef USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dtrtrs_(&uplo, &trans, &diag, &n, &nrhs, a, &lda, b, &ldb, info);
-#else
-  strtrs_(&uplo, &trans, &diag, &n, &nrhs, a, &lda, b, &ldb, info);
-#endif
-#else
-  THError("trtrs : Lapack library not found in compile time\n");
-#endif
-  return;
-}
 
 /* Solve overdetermined or underdetermined real linear systems involving an
 M-by-N matrix A, or its transpose, using a QR or LQ factorization of A */

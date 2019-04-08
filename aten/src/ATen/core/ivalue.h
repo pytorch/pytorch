@@ -14,6 +14,7 @@
 
 namespace c10 {
 struct IValue;
+struct ClassType;
 
 namespace ivalue {
 
@@ -51,18 +52,22 @@ struct CAFFE2_API List : c10::intrusive_ptr_target {
   static c10::intrusive_ptr<List<Elem>> create(std::vector<Elem> elements_) {
     return c10::make_intrusive<List<Elem>>(std::move(elements_));
   }
-  const std::vector<Elem>& elements() const {
+  const std::vector<Elem>& elements() const & {
     return elements_;
   }
   operator const std::vector<Elem>&() const {
     return elements();
   }
 
-  std::vector<Elem>& elements() {
+  std::vector<Elem>& elements() & {
     return elements_;
   }
   operator std::vector<Elem>&() {
     return elements();
+  }
+
+  std::vector<Elem>&& elements() && {
+    return std::move(elements_);
   }
 };
 
@@ -91,7 +96,7 @@ using DoubleList = List<double>;
 using BoolList = List<bool>;
 using GenericList = List<IValue>;
 
-struct UserObject;
+struct Object;
 }
 
 // IValue is the generic tagged union used by the interpreter to hold
@@ -118,7 +123,7 @@ struct UserObject;
   _(GenericDict) \
   _(Future) \
   _(Device) \
-  _(UserObject)
+  _(Object)
 
 struct CAFFE2_API IValue final {
   IValue()
@@ -394,16 +399,16 @@ struct CAFFE2_API IValue final {
     return toIntrusivePtr<ivalue::GenericDict>();
   }
 
-  // UserType
-  IValue(c10::intrusive_ptr<ivalue::UserObject> v);
-  bool isUserObject() const { return tag == Tag::UserObject; }
-  c10::intrusive_ptr<ivalue::UserObject> toUserObject() && {
-    AT_ASSERT(isUserObject());
-    return toIntrusivePtr<ivalue::UserObject>();
+  // ClassType
+  IValue(c10::intrusive_ptr<ivalue::Object> v);
+  bool isObject() const { return tag == Tag::Object; }
+  c10::intrusive_ptr<ivalue::Object> toObject() && {
+    AT_ASSERT(isObject());
+    return toIntrusivePtr<ivalue::Object>();
   }
-  c10::intrusive_ptr<ivalue::UserObject> toUserObject() const & {
-    AT_ASSERT(isUserObject());
-    return toIntrusivePtr<ivalue::UserObject>();
+  c10::intrusive_ptr<ivalue::Object> toObject() const & {
+    AT_ASSERT(isObject());
+    return toIntrusivePtr<ivalue::Object>();
   }
 
   // None
@@ -424,15 +429,13 @@ struct CAFFE2_API IValue final {
     }
   }
   bool isScalar() const {
-    return isDouble() || isInt() || isBool();
+    return isDouble() || isInt();
   }
   at::Scalar toScalar() const {
     if(isDouble())
       return toDouble();
     else if(isInt())
       return toInt();
-    else if (isBool())
-      return int(toBool());
     throw std::runtime_error("IValue is not a Scalar");
   }
 
@@ -679,32 +682,44 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 };
 
 // User-defined object.
-struct C10_EXPORT ivalue::UserObject final : c10::intrusive_ptr_target {
+struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
  public:
-  UserObject(Symbol name, size_t numSlots) : typename_(std::move(name)) {
+  Object(std::shared_ptr<ClassType> type, size_t numSlots) : type_(std::move(type)) {
     slots_.resize(numSlots);
   }
 
-  static c10::intrusive_ptr<UserObject> create(
-      Symbol name,
+  static c10::intrusive_ptr<Object> create(
+      std::shared_ptr<ClassType> type,
       size_t numSlots) {
-    return c10::make_intrusive<UserObject>(std::move(name), numSlots);
+    return c10::make_intrusive<Object>(std::move(type), numSlots);
   }
 
   void setSlot(size_t slot, IValue v) {
+    if (slot >= slots_.size()) {
+      // for module types, it is possible that the members of the class have
+      // expanded after the object was created. In this case, we expand
+      // the slots to the right size
+      resizeObject(slot);
+    }
     slots_[slot] = v;
   }
 
-  IValue getSlot(size_t slot) const {
+  const IValue& getSlot(size_t slot) const {
     return slots_.at(slot);
   }
 
-  Symbol name() const {
-    return typename_;
+  const std::string& name() const;
+
+  const std::vector<IValue>& slots() const {
+    return slots_;
+  }
+  std::shared_ptr<ClassType> type() const {
+    return type_;
   }
 
  private:
-  const Symbol typename_;
+  void resizeObject(size_t slot);
+  std::shared_ptr<ClassType> type_;
   std::vector<IValue> slots_;
 };
 
@@ -780,7 +795,7 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::TensorList>, toTensorList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::GenericList>, toGenericList)
 DEFINE_TO(c10::intrusive_ptr<ivalue::GenericDict>, toGenericDict)
 DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
-DEFINE_TO(c10::intrusive_ptr<ivalue::UserObject>, toUserObject)
+DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(std::vector<int64_t>, toIntListRef)
 DEFINE_TO(std::vector<double>, toDoubleListRef)
@@ -793,6 +808,39 @@ DEFINE_TO(IValue, toIValue)
 DEFINE_TO(c10::Device, toDevice)
 DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
+
+template <typename T>
+struct _fake_type {};
+
+template <typename Elem>
+std::vector<Elem> generic_to(
+    const IValue* ivalue,
+    _fake_type<std::vector<Elem>>) {
+  return fmap(ivalue->toGenericListRef(), [](IValue item_ivalue) { return item_ivalue.to<Elem>(); });
+}
+
+template <typename K, typename V>
+std::unordered_map<K, V> generic_to(
+    const IValue* ivalue,
+    _fake_type<std::unordered_map<K, V>>) {
+  std::unordered_map<K, V> specialized_dict;
+
+  for (auto item : ivalue->toGenericDictRef()) {
+    specialized_dict[item.first.to<K>()] = item.second.to<V>();
+  }
+
+  return specialized_dict;
+}
+
+template <typename T>
+inline T IValue::to() && {
+  return generic_to(this, _fake_type<T>{});
+}
+
+template <typename T>
+inline T IValue::to() const& {
+  return generic_to(this, _fake_type<T>{});
+}
 
 // note: when adding a DEFINE_TO case here you should also add a
 // toX method to IValue. These named methods are much more discoverable
@@ -852,8 +900,8 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericDict> v)
 inline IValue::IValue(ivalue::UnorderedMap v)
 : IValue(ivalue::GenericDict::create(std::move(v))) {}
 
-inline IValue::IValue(c10::intrusive_ptr<ivalue::UserObject> v)
-: tag(Tag::UserObject), is_intrusive_ptr(true) {
+inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
+: tag(Tag::Object), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
@@ -927,6 +975,23 @@ inline bool IValue::isSameIdentity(IValue& rhs) {
         && this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
   }
 }
+
+inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
+  if (lhs.isNone()) {
+    return rhs.isNone();
+  } else if (lhs.isInt()) {
+    return rhs.isInt() && lhs.toInt() == rhs.toInt();
+  } else if (lhs.isString()) {
+    return rhs.isString() && lhs.toStringRef() == rhs.toStringRef();
+  } else if (lhs.isDouble()) {
+    return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
+  } else if (lhs.isBool()) {
+    return rhs.isBool() && lhs.toBool() == rhs.toBool();
+  } else {
+    AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
+  }
+}
+
 } // namespace c10
 
 inline size_t at::ivalue::DictHash::operator()(
@@ -945,7 +1010,9 @@ inline size_t at::ivalue::DictHash::operator()(
 inline bool at::ivalue::DictEqualTo::operator()(
     const c10::IValue& lhs,
     const c10::IValue& rhs) const {
-  if (lhs.isInt()) {
+  if (lhs.isNone()) {
+    return rhs.isNone();
+  } else if (lhs.isInt()) {
     return lhs.toInt() == rhs.toInt();
   } else if (lhs.isString()) {
     return lhs.toStringRef() == rhs.toStringRef();

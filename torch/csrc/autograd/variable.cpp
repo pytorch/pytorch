@@ -22,13 +22,12 @@
 namespace torch {
 namespace autograd {
 Variable::Impl::Impl(at::Tensor data, std::unique_ptr<Variable::AutogradMeta> autograd_meta, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(data.type_id(), data.dtype(), /*allocator=*/nullptr, /* is variable */ true),
+    : TensorImpl(data.type_id(), data.dtype(), data.device(), /* is variable */ true),
       data_(std::move(data)) {
   autograd_meta->grad_fn_ = std::move(gradient_edge.function);
   autograd_meta->requires_grad_ = false;
   autograd_meta->is_view_ = false;
   autograd_meta->output_nr_ = gradient_edge.input_nr;
-  autograd_meta->pyobj_ = nullptr;
 
   // set_requires_grad also checks error conditions.
   autograd_meta->set_requires_grad(requires_grad, this);
@@ -104,10 +103,6 @@ int64_t Variable::Impl::storage_offset() const {
   return data_.storage_offset();
 }
 
-int64_t Variable::Impl::get_device_slow() const {
-  return data_.get_device();
-}
-
 std::shared_ptr<Function> Variable::grad_accumulator() const {
   auto autograd_meta = get_autograd_meta();
   if (autograd_meta->grad_fn_) {
@@ -157,14 +152,14 @@ void Variable::backward(
   Engine::get_default_engine().execute(edges, inputs, keep_graph, create_graph);
 }
 
-void Variable::Impl::set_data(Tensor new_data) {
+void Variable::Impl::set_data(const at::Tensor &new_data) {
   // Resets gradient accumulator if metadata is out of date
   auto autograd_meta = get_autograd_meta();
   std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
   auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
   if (prior_accumulator) {
     const auto prior_device = prior_accumulator->input_metadata(0).device();
-    const auto new_device = new_data.is_cuda() ? new_data.get_device() : -1;
+    const auto new_device = new_data.device();
 
     if (new_data.type() != data_.type() || prior_device != new_device) {
       autograd_meta->grad_accumulator_.reset();
@@ -173,7 +168,8 @@ void Variable::Impl::set_data(Tensor new_data) {
 
   // Updates metadata
   data_type_ = new_data.type().typeMeta();
-  type_id_ = new_data.type().type_id();
+  device_opt_ = new_data.device();
+  type_id_ = new_data.dispatch_type().type_id();
   is_variable_ = true;
 
   auto new_data_copy = at::Tensor(new_data.getIntrusivePtr()->shallow_copy_and_detach());
@@ -215,9 +211,9 @@ const std::shared_ptr<Function>& Variable::grad_fn() const {
       fn->storage_offset = data().storage_offset();
       fn->set_next_edges(collect_next_edges(diff_view_meta->base_));
       fn->add_input_metadata(
-        diff_view_meta->base_.type()
+        diff_view_meta->base_.dispatch_type()
       , sizes() // Note: sizes(), not base_.sizes(), is intentional
-      , diff_view_meta->base_.is_cuda() ? diff_view_meta->base_.get_device() : -1);
+      , diff_view_meta->base_.device());
       diff_view_meta->grad_fn_ = std::move(fn);
       diff_view_meta->attr_version = current_version;
     }

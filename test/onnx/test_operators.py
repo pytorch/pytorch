@@ -1,4 +1,4 @@
-from test_pytorch_common import TestCase, run_tests, skipIfNoLapack, flatten
+from test_pytorch_common import TestCase, run_tests, flatten
 
 import torch
 import torch.onnx
@@ -10,11 +10,9 @@ import itertools
 import io
 import unittest
 import inspect
-import argparse
 import glob
 import os
 import shutil
-import sys
 import common_utils as common
 
 
@@ -260,6 +258,10 @@ class TestOperators(TestCase):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2), x)
 
+    def test_avg_pool2d(self):
+        x = torch.randn(20, 16, 50, 32)
+        self.assertONNX(nn.AvgPool2d(3, stride=2), x)
+
     def test_maxpool_indices(self):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2, return_indices=True), x)
@@ -410,6 +412,10 @@ class TestOperators(TestCase):
         x = torch.rand(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x[:, 1:2], x)
 
+    def test_narrow(self):
+        x = torch.randn(3, 3, requires_grad=True)
+        self.assertONNX(lambda x: torch.narrow(x, 0, 0, 2), x)
+
     def test_atan(self):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.atan(), x)
@@ -425,6 +431,14 @@ class TestOperators(TestCase):
     def test_flatten2D(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.flatten(x, 1), x)
+
+    def test_isnan(self):
+        x = torch.tensor([1, float('nan'), 2])
+        self.assertONNX(lambda x: torch.isnan(x), x)
+
+    def test_argmax(self):
+        x = torch.randn(4, 4, requires_grad=True)
+        self.assertONNX(lambda x: torch.argmax(x, dim=1), x)
 
     def test_logsoftmax(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
@@ -455,6 +469,7 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
+    @unittest.skip("Temporary - waiting for https://github.com/onnx/onnx/pull/1773.")
     def test_upsample(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
@@ -534,10 +549,25 @@ class TestOperators(TestCase):
         x = torch.tensor([[[2., 2.], [1., 0.]], [[0., 0.], [1., 1.]]], requires_grad=True)
         self.assertONNX(lambda x: torch.nonzero(x), x)
 
-    def test_stable_opset(self):
+    def test_master_opset(self):
         x = torch.randn(2, 3).float()
         y = torch.randn(2, 3).float()
-        self.assertONNX(lambda x, y: x + y, (x, y), opset_version=9)
+        self.assertONNX(lambda x, y: x + y, (x, y), opset_version=10)
+
+    def test_retain_param_name_disabled(self):
+        class MyModule(Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.fc1 = nn.Linear(4, 5, bias=False)
+                self.fc1.weight.data.fill_(2.)
+                self.fc2 = nn.Linear(5, 6, bias=False)
+                self.fc2.weight.data.fill_(3.)
+
+            def forward(self, x):
+                return self.fc2(self.fc1(x))
+
+        x = torch.randn(3, 4).float()
+        self.assertONNX(MyModule(), (x,), _retain_param_name=False)
 
 
 if __name__ == '__main__':

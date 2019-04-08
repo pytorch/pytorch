@@ -79,7 +79,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
 
   result.resize_({n});
 
-  if (result.type().scalarType() == at::ScalarType::Half) {
+  if (result.scalar_type() == at::ScalarType::Half) {
     auto result_float = at::empty({n}, initialTensorOptions().device(Device(DeviceType::CUDA)));
     result.copy_(randperm_out_cuda(result_float, n, generator));
   } else {
@@ -90,7 +90,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
     } else {
       // Generate random values for the keys array
       AT_DISPATCH_ALL_TYPES(
-        result.type(), "randperm_out_cuda", [&] {
+        result.scalar_type(), "randperm_out_cuda", [&] {
           auto keys = at::empty(result.sizes(), result.options()).random_(generator);
 
           auto result_data = thrust::device_ptr<scalar_t>(result.data<scalar_t>());
@@ -265,6 +265,9 @@ inline void get_coordinate_in_triu_trapezoid(
 
 template <typename scalar_t>
 __global__
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 void tril_indices_kernel(scalar_t * tensor,
                          int64_t row_offset,
                          int64_t m_first_row,
@@ -322,7 +325,7 @@ Tensor tril_indices_cuda(
       cuda::getApplyGrid(tril_size, dim_grid, tensor.get_device()),
       "unable to get dim grid");
 
-    AT_DISPATCH_ALL_TYPES_AND_HALF(tensor.type(), "tril_indices_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
       tril_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
         tensor.data<scalar_t>(),
@@ -398,7 +401,7 @@ Tensor triu_indices_cuda(
       cuda::getApplyGrid(triu_size, dim_grid, tensor.get_device()),
       "unable to get dim grid");
 
-    AT_DISPATCH_ALL_TYPES_AND_HALF(tensor.type(), "triu_indices_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "triu_indices_cuda", [&] {
       triu_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
         tensor.data<scalar_t>(),

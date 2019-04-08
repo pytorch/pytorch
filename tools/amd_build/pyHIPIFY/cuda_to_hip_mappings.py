@@ -2235,6 +2235,8 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     # straight to the normal versions hip::HIPCachingAllocator
     ("cuda::CUDACachingAllocator::get", ("hip::HIPCachingAllocatorMasqueradingAsCUDA::get", API_PYTORCH)),
     ("CUDACachingAllocator::get", ("HIPCachingAllocatorMasqueradingAsCUDA::get", API_PYTORCH)),
+    ("cuda::CUDACachingAllocator::recordStream", ("hip::HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA", API_PYTORCH)),
+    ("CUDACachingAllocator::recordStream", ("HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA", API_PYTORCH)),
 
     ("cuda::CUDAStream", ("hip::HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
     ("CUDAStream", ("HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
@@ -2260,6 +2262,10 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
 
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cuda_stream" , ("hip_stream", API_CAFFE2)),
+    # if the header is a native hip folder (under hip directory),
+    # there is no need to add a hip path to it; the trie in hipify script
+    # takes this mapping order to forbid further replacement
+    ("/hip/" , ("/hip/", API_CAFFE2)),
     ("/context_gpu" , ("/hip/context_gpu", API_CAFFE2)),
     ("/common_gpu"  , ("/hip/common_gpu", API_CAFFE2)),
     ("/mixed_utils" , ("/hip/mixed_utils", API_CAFFE2)),

@@ -24,7 +24,7 @@ You can reuse your favorite Python packages such as NumPy, SciPy and Cython to e
 | :---: | :---: | :---: | :--: |
 | Linux CPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | <center>—</center> |
 | Linux GPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | <center>—</center> |
-| Windows GPU | <center>—</center> | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/) |  <center>—</center> |
+| Windows CPU / GPU | <center>—</center> | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/) |  <center>—</center> |
 | Linux (ppc64le) CPU | [![Build Status](https://powerci.osuosl.org/job/pytorch-master-nightly-py2-linux-ppc64le/badge/icon)](https://powerci.osuosl.org/job/pytorch-master-nightly-py2-linux-ppc64le/) | — | [![Build Status](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le/badge/icon)](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le/) |
 | Linux (ppc64le) GPU | [![Build Status](https://powerci.osuosl.org/job/pytorch-linux-cuda9-cudnn7-py2-mpi-build-test-gpu/badge/icon)](https://powerci.osuosl.org/job/pytorch-linux-cuda9-cudnn7-py2-mpi-build-test-gpu/) | — | [![Build Status](https://powerci.osuosl.org/job/pytorch-linux-cuda92-cudnn7-py3-mpi-build-test-gpu/badge/icon)](https://powerci.osuosl.org/job/pytorch-linux-cuda92-cudnn7-py3-mpi-build-test-gpu/) |
 
@@ -41,7 +41,7 @@ At a granular level, PyTorch is a library that consists of the following compone
 | **torch.autograd** | a tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
 | **torch.nn** | a neural networks library deeply integrated with autograd designed for maximum flexibility |
 | **torch.multiprocessing** | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
-| **torch.utils** | DataLoader, Trainer and other utility functions for convenience |
+| **torch.utils** | DataLoader and other utility functions for convenience |
 
 Usually one uses PyTorch either as:
 
@@ -132,6 +132,21 @@ There is no wrapper code that needs to be written. You can see [a tutorial here]
 Commands to install from binaries via Conda or pip wheels are on our website:
 [https://pytorch.org](https://pytorch.org)
 
+
+#### NVIDIA Jetson platforms
+
+Python wheels for NVIDIA's Jetson Nano, Jetson TX2, and Jetson AGX Xavier are available via the following URLs:
+
+- Stable binaries:
+  - Python 2.7: https://nvidia.box.com/v/torch-stable-cp27-jetson-jp42
+  - Python 3.6: https://nvidia.box.com/v/torch-stable-cp36-jetson-jp42
+- Rolling weekly binaries:
+  - Python 2.7: https://nvidia.box.com/v/torch-weekly-cp27-jetson-jp42
+  - Python 3.6: https://nvidia.box.com/v/torch-weekly-cp36-jetson-jp42
+
+They requires JetPack 4.2 and above and are maintained by @dusty-nv
+
+
 ### From Source
 
 If you are installing from source, we highly recommend installing an [Anaconda](https://www.continuum.io/downloads) environment.
@@ -146,6 +161,9 @@ If you want to compile with CUDA support, install
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 Other potentially useful environment variables may be found in `setup.py`.
 
+If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to [are available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
+
+
 #### Install Dependencies
 
 Common
@@ -156,7 +174,7 @@ conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
 On Linux
 ```bash
 # Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda92 # or [magma-cuda80 | magma-cuda91] depending on your cuda version
+conda install -c pytorch magma-cuda90 # or [magma-cuda80 | magma-cuda92 | magma-cuda100 ] depending on your cuda version
 ```
 
 #### Get the PyTorch Source
@@ -272,7 +290,7 @@ Sending a PR without discussion might end up resulting in a rejected PR, because
 
 PyTorch is a community driven project with several skillful engineers and researchers contributing to it.
 
-PyTorch is currently maintained by [Adam Paszke](https://apaszke.github.io/), [Sam Gross](https://github.com/colesbury), [Soumith Chintala](http://soumith.ch) and [Gregory Chanan](https://github.com/gchanan) with major contributions coming from 10s of talented individuals in various forms and means.
+PyTorch is currently maintained by [Adam Paszke](https://apaszke.github.io/), [Sam Gross](https://github.com/colesbury), [Soumith Chintala](http://soumith.ch) and [Gregory Chanan](https://github.com/gchanan) with major contributions coming from hundreds of talented individuals in various forms and means.
 A non-exhaustive but growing list needs to mention: Trevor Killeen, Sasank Chilamkurthy, Sergey Zagoruyko, Adam Lerer, Francisco Massa, Alykhan Tejani, Luca Antiga, Alban Desmaison, Andreas Kopf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein, Christian Sarofeen, Martin Raison, Edward Yang, Zachary Devito.
 
 Note: this project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor in the Torch community and has helped with many things Torch and PyTorch.

@@ -137,9 +137,8 @@ void LSTMUnitGradient(
 template <typename Context>
 class LSTMUnitOp : public Operator<Context> {
  public:
-  template <class... Args>
-  explicit LSTMUnitOp(Args&&... args)
-      : Operator<Context>(std::forward<Args>(args)...),
+  explicit LSTMUnitOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
         forget_bias_(static_cast<float>(
             this->template GetSingleArgument<float>("forget_bias", 0.0))),
         sequence_lengths_(

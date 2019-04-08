@@ -3,22 +3,20 @@ from __future__ import division
 
 import warnings
 import math
-import types
 
 import torch
 from torch._C import _infer_size, _add_docstr
 from . import _reduction as _Reduction
-from . import _functions
 from .modules import utils
 from ._functions import vision
 from .modules.utils import _single, _pair, _triple, _list_with_default
-from . import grad
+from . import grad  # noqa: F401
 from . import _VF
 from .._jit_internal import weak_script, List
 
 
 conv1d = _add_docstr(torch.conv1d, r"""
-conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
 
 Applies a 1D convolution over an input signal composed of several input
 planes.
@@ -33,12 +31,13 @@ Args:
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or
       a one-element tuple `(sW,)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a
       single number or a one-element tuple `(padW,)`. Default: 0
     dilation: the spacing between kernel elements. Can be a single number or
       a one-element tuple `(dW,)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
       the number of groups. Default: 1
+    padding_mode: the type of paddings applied to both sided can be: `zeros` or `circular`. Default: `zeros`
 
 Examples::
 
@@ -48,7 +47,7 @@ Examples::
 """)
 
 conv2d = _add_docstr(torch.conv2d, r"""
-conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
 
 Applies a 2D convolution over an input image composed of several input
 planes.
@@ -63,12 +62,13 @@ Args:
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sH, sW)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a
       single number or a tuple `(padH, padW)`. Default: 0
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
       number of groups. Default: 1
+    padding_mode: the type of paddings applied to both sided can be: `zeros` or `circular`. Default: `zeros`
 
 Examples::
 
@@ -79,7 +79,7 @@ Examples::
 """)  # noqa: E501
 
 conv3d = _add_docstr(torch.conv3d, r"""
-conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
 
 Applies a 3D convolution over an input image composed of several input
 planes.
@@ -94,12 +94,13 @@ Args:
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a
       single number or a tuple `(padT, padH, padW)`. Default: 0
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dT, dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
       the number of groups. Default: 1
+    padding_mode: the type of paddings applied to both sided can be: `zeros` or `circular`. Default: `zeros`
 
 Examples::
 
@@ -1414,7 +1415,7 @@ def bilinear(input1, input2, weight, bias=None):
 def _no_grad_embedding_renorm_(weight, input, max_norm, norm_type):
     # type: (Tensor, Tensor, float, float) -> Tensor
     with torch.no_grad():
-        return torch.embedding_renorm_(weight, input, max_norm, norm_type)
+        torch.embedding_renorm_(weight, input, max_norm, norm_type)
 
 
 @weak_script
@@ -1753,7 +1754,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
             The logarithmized probabilities of the outputs
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
         targets: :math:`(N, S)` or `(sum(target_lengths))`.
-            Targets (cannot be blank). In the second form, the targets are assumed to be concatenated.
+            Targets cannot be blank. In the second form, the targets are assumed to be concatenated.
         input_lengths: :math:`(N)`.
             Lengths of the inputs (must each be :math:`\leq T`)
         target_lengths: :math:`(N)`.
@@ -1761,9 +1762,10 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
         blank (int, optional):
             Blank label. Default :math:`0`.
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the output losses will be divided by the target lengths and
-            then the mean over the batch is taken. Default: 'mean'
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the output losses will be divided by the target lengths and
+            then the mean over the batch is taken, ``'sum'``: the output will be
+            summed. Default: ``'mean'``
         zero_infinity (bool, optional):
             Whether to zero infinite losses and the associated gradients.
             Default: ``False``
@@ -1793,7 +1795,7 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
 
     Args:
         input: :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
-            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 1`
+            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K \geq 1`
             in the case of K-dimensional loss.
         target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
             or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
@@ -1813,11 +1815,11 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Example::
 
@@ -1891,11 +1893,11 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     """
     if size_average is not None or reduce is not None:
@@ -1939,19 +1941,21 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'batchmean' | 'sum' | 'mean'.
-            'none': no reduction will be applied
-            'batchmean': the sum of the output will be divided by the batchsize
-            'sum': the output will be summed
-            'mean': the output will be divided by the number of elements in the output
-            Default: 'mean'
+            ``'none'`` | ``'batchmean'`` | ``'sum'`` | ``'mean'``.
+            ``'none'``: no reduction will be applied
+            ``'batchmean'``: the sum of the output will be divided by the batchsize
+            ``'sum'``: the output will be summed
+            ``'mean'``: the output will be divided by the number of elements in the output
+            Default: ``'mean'``
 
-        .. note:: :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
-            and in the meantime, specifying either of those two args will override :attr:`reduction`.
+    .. note::
+        :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
+        and in the meantime, specifying either of those two args will override :attr:`reduction`.
 
-        .. note:: `reduction='mean'` doesn't return the true kl divergence value, please use
-            `reduction='batchmean'` which aligns with KL math definition.
-            In the next major release, 'mean' will be changed to be the same as 'batchmean'.
+    .. note::
+        :attr:``reduction`` = ``'mean'`` doesn't return the true kl divergence value, please use
+        :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
+        In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
     """
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
@@ -1986,7 +1990,7 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
 
     Args:
         input (Tensor) : :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
-            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 1`
+            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K \geq 1`
             in the case of K-dimensional loss.
         target (Tensor) : :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
             or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
@@ -2006,11 +2010,11 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Examples::
 
@@ -2048,11 +2052,11 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Examples::
 
@@ -2065,9 +2069,10 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
-    if not (target.size() == input.size()):
+    if target.size() != input.size():
         warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
-                      "Please ensure they have the same size.".format(target.size(), input.size()))
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
     if input.numel() != target.numel():
         raise ValueError("Target and input must have the same number of elements. target nelement ({}) "
                          "!= input nelement ({})".format(target.numel(), input.numel()))
@@ -2104,11 +2109,11 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the sum of the output will be divided by the number of
-            elements in the output, 'sum': the output will be summed. Note: :attr:`size_average`
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
-            specifying either of those two args will override :attr:`reduction`. Default: 'mean'
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
         pos_weight (Tensor, optional): a weight of positive examples.
                 Must be a vector with length equal to the number of classes.
 
@@ -2156,6 +2161,11 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
 
     See :class:`~torch.nn.SmoothL1Loss` for details.
     """
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
@@ -2177,6 +2187,11 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
 
     See :class:`~torch.nn.L1Loss` for details.
     """
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
@@ -2198,6 +2213,11 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
 
     See :class:`~torch.nn.MSELoss` for details.
     """
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
@@ -2340,7 +2360,7 @@ def multi_margin_loss(input, target, p=1, margin=1., weight=None, size_average=N
 
 pixel_shuffle = _add_docstr(torch.pixel_shuffle, r"""
 Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)` to a
-tensor of shape :math:`(C, H \times r, W \times r)`.
+tensor of shape :math:`(*, C, H \times r, W \times r)`.
 
 See :class:`~torch.nn.PixelShuffle` for details.
 
@@ -2384,15 +2404,17 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to be an integer.
         mode (string): algorithm used for upsampling:
-            'nearest' | 'linear' | 'bilinear' | 'bicubic' | 'trilinear'. Default: 'nearest'
+            ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
+            ``'trilinear'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
-            If set to True, the input and output tensors are aligned by the
-            center points of their corner pixels. If set to False, the input and
+            If set to ``True``, the input and output tensors are aligned by the
+            center points of their corner pixels. If set to ``False``, the input and
             output tensors are aligned by the corner points of their corner
             pixels, and the interpolation uses edge value padding for out-of-boundary values.
-            This only has effect when :attr:`mode` is `linear`,
-            `bilinear`, `bicubic` or `trilinear`. Default: False
+            This only has effect when :attr:`mode` is ``'linear'``,
+            ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
+            Default: ``False``
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -2428,16 +2450,18 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
-        mode (string): algorithm used for upsampling:
-            'nearest' | 'linear' | 'bilinear' | 'bicubic' | 'trilinear' | 'area'. Default: 'nearest'
+        mode (str): algorithm used for upsampling:
+            ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
+            ``'trilinear'`` | ``'area'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
-            If set to True, the input and output tensors are aligned by the
-            center points of their corner pixels. If set to False, the input and
+            If set to ``True``, the input and output tensors are aligned by the
+            center points of their corner pixels. If set to ``False``, the input and
             output tensors are aligned by the corner points of their corner
             pixels, and the interpolation uses edge value padding for out-of-boundary values.
-            This only has effect when :attr:`mode` is `linear`,
-            `bilinear`, `bicubic`, or `trilinear`. Default: False
+            This only has effect when :attr:`mode` is ``'linear'``,
+            ``'bilinear'``, ``'bicubic'``, or ``'trilinear'``.
+            Default: ``False``
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -2450,7 +2474,6 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
     .. include:: cuda_deterministic_backward.rst
     """
-    from numbers import Integral
     from .modules.utils import _ntuple
 
     def _check_size_scale_factor(dim):
@@ -2469,7 +2492,12 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             return size
         scale_factors = _ntuple(dim)(scale_factor)
         # math.floor might return float in py2.7
-        return [int(math.floor(input.size(i + 2) * scale_factors[i])) for i in range(dim)]
+
+        # make scale_factor a tensor in tracing so constant doesn't get baked in
+        if torch._C._get_tracing_state():
+            return [(torch.floor(input.size(i + 2) * torch.tensor(float(scale_factors[i])))) for i in range(dim)]
+        else:
+            return [int(math.floor(int(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
 
     if mode in ('nearest', 'area'):
         if align_corners is not None:
@@ -2616,7 +2644,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
           the border for out-of-bound values. For location far away from the
           border, it will keep being reflected until becoming in bound, e.g.,
           (normalized) pixel location ``x = -3.5`` reflects by ``-1`` and
-          becomes ``x' = 2.5``, then reflects by border ``1`` and becomes
+          becomes ``x' = 1.5``, then reflects by border ``1`` and becomes
           ``x'' = -0.5``.
 
     .. Note:: This function is often used in building Spatial Transformer Networks.
@@ -2628,9 +2656,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
         grid (Tensor): flow-field of shape :math:`(N, H_\text{out}, W_\text{out}, 2)` (4-D case)
                        or :math:`(N, D_\text{out}, H_\text{out}, W_\text{out}, 3)` (5-D case)
         mode (str): interpolation mode to calculate output values
-            'bilinear' | 'nearest'. Default: 'bilinear'
+            ``'bilinear'`` | ``'nearest'``. Default: ``'bilinear'``
         padding_mode (str): padding mode for outside grid values
-            'zeros' | 'border' | 'reflection'. Default: 'zeros'
+            ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
 
     Returns:
         output (Tensor): output Tensor
@@ -2662,14 +2690,14 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
 @weak_script
 def affine_grid(theta, size):
     # type: (Tensor, List[int]) -> Tensor
-    r"""Generates a 2d flow field, given a batch of affine matrices :attr:`theta`
+    r"""Generates a 2d flow field, given a batch of affine matrices :attr:`theta`.
     Generally used in conjunction with :func:`grid_sample` to
     implement Spatial Transformer Networks.
 
     Args:
         theta (Tensor): input batch of affine matrices (:math:`N \times 2 \times 3`)
-        size (torch.Size): the target output image size (:math:`N \times C \times H \times W`)
-                           Example: torch.Size((32, 3, 24, 24))
+        size (torch.Size): the target output image size (:math:`N \times C \times H \times W`).
+            Example: torch.Size((32, 3, 24, 24))
 
     Returns:
         output (Tensor): output Tensor of size (:math:`N \times H \times W \times 2`)
@@ -2710,10 +2738,12 @@ def pad(input, pad, mode='constant', value=0):
     .. include:: cuda_deterministic_backward.rst
 
     Args:
-        input (Tensor): `Nd` tensor
-        pad (tuple): m-elem tuple, where :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
-        mode: 'constant', 'reflect' or 'replicate'. Default: 'constant'
-        value: fill value for 'constant' padding. Default: 0
+        input (Tensor): N-dimensional tensor
+        pad (tuple): m-elements tuple, where
+            :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
+        mode: ``'constant'``, ``'reflect'``, ``'replicate'`` or ``'circular'``.
+            Default: ``'constant'``
+        value: fill value for ``'constant'`` padding. Default: ``0``
 
     Examples::
 
@@ -2745,6 +2775,8 @@ def pad(input, pad, mode='constant', value=0):
                 ret = torch._C._nn.reflection_pad1d(input, pad)
             elif mode == 'replicate':
                 ret = torch._C._nn.replication_pad1d(input, pad)
+            elif mode == 'circular':
+                ret = _pad_circular(input, pad)
             else:
                 ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
@@ -2755,6 +2787,8 @@ def pad(input, pad, mode='constant', value=0):
                 ret = torch._C._nn.reflection_pad2d(input, pad)
             elif mode == 'replicate':
                 ret = torch._C._nn.replication_pad2d(input, pad)
+            elif mode == 'circular':
+                ret = _pad_circular(input, pad)
             else:
                 ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
@@ -2766,12 +2800,15 @@ def pad(input, pad, mode='constant', value=0):
                 raise NotImplementedError
             elif mode == 'replicate':
                 ret = torch._C._nn.replication_pad3d(input, pad)
+            elif mode == 'circular':
+                ret = _pad_circular(input, pad)
             else:
                 ret = input  # TODO: remove this when jit raise supports control flow
                 raise NotImplementedError
         else:
             ret = input  # TODO: remove this when jit raise supports control flow
             raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
+
     return ret
 
 # distance
@@ -2943,6 +2980,14 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
         Currently, only 4-D input tensors (batched image-like tensors) are
         supported.
 
+    .. warning::
+
+        More than one element of the unfolded tensor may refer to a single
+        memory location. As a result, in-place operations (especially ones that
+        are vectorized) may result in incorrect behavior. If you need to write
+        to the tensor, please clone it first.
+
+
     See :class:`torch.nn.Unfold` for details
     """
 
@@ -2987,3 +3032,29 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))
         ret = input  # TODO: remove when jit supports exception control flow
     return ret
+
+
+@weak_script
+def _pad_circular(input, padding):
+    # type: (Tensor, List[int]) -> Tensor
+    """
+    Arguments
+        :param input: tensor of shape :math:`(N, C_{\text{in}}, H, [W, D]))`
+        :param padding: (tuple): m-elem tuple where m is the degree of convolution
+    Returns
+        :return: tensor of shape :math:`(N, C_{\text{in}}, [D + 2 * padding[0],
+                 H + 2 * padding[1]], W + 2 * padding[2]))`
+    """
+
+    input = torch.cat([input, input[:, :, 0:padding[-1]]], dim=2)
+    input = torch.cat([input[:, :, -(padding[-1] + padding[-2]):-padding[-1]], input], dim=2)
+
+    if len(padding) > 2:
+        input = torch.cat([input, input[:, :, :, 0:padding[-3]]], dim=3)
+        input = torch.cat([input[:, :, :, -(padding[-3] + padding[-4]):-padding[-3]], input], dim=3)
+
+    if len(padding) > 4:
+        input = torch.cat([input, input[:, :, :, :, 0:padding[-5]]], dim=4)
+        input = torch.cat([input[:, :, :, :, -(padding[-5] + padding[-6]):-padding[-5]], input], dim=4)
+
+    return input

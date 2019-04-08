@@ -13,10 +13,7 @@ from torch._six import container_abcs
 import contextlib
 import numbers
 import warnings
-import functools
-import types
 from torch._six import string_classes
-from torch.autograd import Function, function
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
 from torch._C import ListType
@@ -44,7 +41,7 @@ def set_training(model, mode):
 
 def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
-           operator_export_type=None, opset_version=None):
+           operator_export_type=None, opset_version=None, _retain_param_name=True):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -92,8 +89,10 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             OperatorExportTypes.RAW: export raw ir.
         opset_version (int, default is 9): by default we export the model to the
             opset version of the onnx submodule. Since ONNX's latest opset may
-            evolve before next stable release, we may want to export to some stable
+            evolve before next stable release, by default we export to one stable
             opset version. Right now, supported stable opset version is 9.
+            The opset_version must be _onnx_master_opset or in _onnx_stable_opsets
+            which are defined in torch/onnx/symbolic.py
     """
     if aten or export_raw_ir:
         assert operator_export_type is None
@@ -105,7 +104,8 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
         else:
             operator_export_type = OperatorExportTypes.ONNX
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
-            operator_export_type=operator_export_type, opset_version=opset_version)
+            operator_export_type=operator_export_type, opset_version=opset_version,
+            _retain_param_name=_retain_param_name)
 
 
 # ONNX can't handle constants that are lists of tensors, which can
@@ -210,7 +210,8 @@ def _trace_and_get_graph_from_model(model, args, training):
 def _model_to_graph(model, args, f, verbose=False, training=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
-                    example_outputs=None, propagate=False):
+                    example_outputs=None, propagate=False,
+                    _retain_param_name=False):
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
         args = (args, )
@@ -225,13 +226,21 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
             graph = method.propagate_and_assign_input_and_output_shapes(
                 args, example_outputs, False, propagate)
             # Erase number types to bring the graph to a pre-NumberType state
-            params = method.params()
+            params = method.initial_ivalues()
         except AttributeError:
             # TODO: just trace it
             raise RuntimeError('\'forward\' method must be a script method')
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args, training)
-        params = list(_unique_state_dict(model).values())
+        state_dict = _unique_state_dict(model)
+        params = list(state_dict.values())
+        if _retain_param_name:
+            graph_inputs = list(graph.inputs())
+            user_input_num = len(graph_inputs) - len(state_dict)
+            param_names = list(state_dict.keys())
+            for i, inp in enumerate(graph_inputs):
+                if i >= user_input_num:
+                    inp.setUniqueName(param_names[i - user_input_num])
 
     graph = _optimize_graph(graph, operator_export_type)
 
@@ -243,17 +252,26 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
             output.inferTypeFrom(tensor)
 
     _set_input_and_output_names(graph, input_names, output_names)
+
+    # make sure that the param dict and the graph match each other
+    flatten_args, _ = torch._C._jit_flatten(args)
+    assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
+
+    input_and_param_names = [val.uniqueName() for val in graph.inputs()]
+    param_names = input_and_param_names[len(input_and_param_names) - len(params):]
+    params_dict = dict(zip(param_names, params))
+
     if verbose:
         print(graph)
 
-    return graph, params, torch_out
+    return graph, params_dict, torch_out
 
 
 def export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
                             input_names=None, output_names=None, aten=False, export_raw_ir=False,
                             operator_export_type=None, export_type=ExportTypes.PROTOBUF_FILE,
                             example_outputs=None, propagate=False, google_printer=False,
-                            opset_version=None):
+                            opset_version=None, _retain_param_name=True):
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
@@ -263,13 +281,13 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, propagate, google_printer,
-                                    opset_version)
+                                    opset_version, _retain_param_name)
 
 
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
                              input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
-                             google_printer=False, opset_version=None):
+                             google_printer=False, opset_version=None, _retain_param_name=False):
     from torch.onnx.symbolic import _default_onnx_opset_version, _set_opset_version
     if opset_version is None:
         opset_version = _default_onnx_opset_version
@@ -277,7 +295,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
     graph, params, torch_out = _model_to_graph(model, args, f, verbose,
                                                training, input_names,
                                                output_names, operator_export_type,
-                                               example_outputs, propagate)
+                                               example_outputs, propagate, _retain_param_name)
 
     return graph._pretty_print_onnx(params, opset_version, False, operator_export_type, google_printer)
 
@@ -289,22 +307,23 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 def _export(model, args, f, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
-            opset_version=None):
+            opset_version=None, _retain_param_name=False):
     from torch.onnx.symbolic import _default_onnx_opset_version, _set_opset_version
     if opset_version is None:
         opset_version = _default_onnx_opset_version
     _set_opset_version(opset_version)
-    graph, params, torch_out = _model_to_graph(model, args, f, verbose,
-                                               training, input_names,
-                                               output_names, operator_export_type,
-                                               example_outputs, propagate)
+    graph, params_dict, torch_out = _model_to_graph(model, args, f, verbose,
+                                                    training, input_names,
+                                                    output_names, operator_export_type,
+                                                    example_outputs, propagate,
+                                                    _retain_param_name)
 
     # TODO: Don't allocate a in-memory string for the protobuf
     defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
     if export_params:
-        proto, export_map = graph._export_onnx(params, opset_version, defer_weight_export, operator_export_type)
+        proto, export_map = graph._export_onnx(params_dict, opset_version, defer_weight_export, operator_export_type)
     else:
-        proto, export_map = graph._export_onnx([], opset_version, False, operator_export_type)
+        proto, export_map = graph._export_onnx({}, opset_version, False, operator_export_type)
 
     if export_type == ExportTypes.PROTOBUF_FILE:
         assert(len(export_map) == 0)

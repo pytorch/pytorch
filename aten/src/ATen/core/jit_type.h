@@ -29,7 +29,7 @@ namespace c10 {
 _(TensorType) \
 _(DimensionedTensorType) \
 _(CompleteTensorType) \
-_(UndefinedTensorType) \
+_(AutogradZeroTensorType) \
 _(TupleType) \
 _(ListType) \
 _(DictType) \
@@ -44,7 +44,7 @@ _(BoolType) \
 _(OptionalType) \
 _(VarType) \
 _(DeviceObjType) \
-_(UserType) \
+_(ClassType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -246,6 +246,11 @@ struct CAFFE2_API OptionalType: public SingleElementType<TypeKind::OptionalType,
     return ss.str();
   }
 
+  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
+    AT_ASSERT(contained_types.size() == 1);
+    return create(contained_types[0]);
+  }
+
   // common cast Optional[Tensor] for undefined tensor type
   static OptionalTypePtr ofTensor();
 private:
@@ -255,9 +260,9 @@ private:
 struct TensorType;
 using TensorTypePtr = std::shared_ptr<TensorType>;
 // This type represents a single Tensor, with an unknown shape.
-// Subtype hierarchy for Tensor Types (DynamicType as the base type):
-// CompleteTensorType <: TensorType <: DynamicType
-// UndefinedTensorType <: DynamicType
+// Subtype hierarchy for Tensor Types (TensorType as the base type):
+// CompleteTensorType <: DimensionedTensorType <: TensorType
+// AutogradZeroTensorType <: TensorType
 struct CAFFE2_API TensorType : public Type {
   static TensorTypePtr create() {
     return TensorTypePtr(new TensorType()); // NOLINT(modernize-make-shared)
@@ -280,15 +285,15 @@ protected:
   : Type(kind) {}
 };
 
-struct UndefinedTensorType;
-using UndefinedTensorTypePtr = std::shared_ptr<UndefinedTensorType>;
+struct AutogradZeroTensorType;
+using AutogradZeroTensorTypePtr = std::shared_ptr<AutogradZeroTensorType>;
 // This type represents an undefined tensor.
-struct CAFFE2_API UndefinedTensorType : public TensorType {
-  static UndefinedTensorTypePtr create() {
-    return UndefinedTensorTypePtr(new UndefinedTensorType()); // NOLINT(modernize-make-shared)
+struct CAFFE2_API AutogradZeroTensorType : public TensorType {
+  static AutogradZeroTensorTypePtr create() {
+    return AutogradZeroTensorTypePtr(new AutogradZeroTensorType()); // NOLINT(modernize-make-shared)
   }
 
-  DEFINE_IS_SUBCLASS(UndefinedTensorType);
+  DEFINE_IS_SUBCLASS(AutogradZeroTensorType);
 
   bool requires_grad() const override { return false; }
 
@@ -297,18 +302,18 @@ struct CAFFE2_API UndefinedTensorType : public TensorType {
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
     return rhs->kind() == TypeKind::TensorType ||
-           rhs->kind() == TypeKind::UndefinedTensorType ||
+           rhs->kind() == TypeKind::AutogradZeroTensorType ||
            TensorType::isSubtypeOf(rhs);
   }
   std::string str() const override {
-    return "UndefinedTensor";
+    return "AutogradZeroTensor";
   }
 
-  static const TypeKind Kind = TypeKind::UndefinedTensorType;
+  static const TypeKind Kind = TypeKind::AutogradZeroTensorType;
   // global singleton
-  static UndefinedTensorTypePtr get();
+  static AutogradZeroTensorTypePtr get();
 protected:
-  UndefinedTensorType(): TensorType(TypeKind::UndefinedTensorType) {}
+  AutogradZeroTensorType(): TensorType(TypeKind::AutogradZeroTensorType) {}
 };
 
 struct DimensionedTensorType;
@@ -368,7 +373,7 @@ struct CAFFE2_API DimensionedTensorType : public TensorType {
 
 protected:
   DimensionedTensorType(const at::Tensor& tensor, TypeKind kind=TypeKind::DimensionedTensorType)
-    : DimensionedTensorType(tensor.type().scalarType(),
+    : DimensionedTensorType(tensor.scalar_type(),
                  tensor.device(),
                  tensor.dim(),
                  tensor.is_variable() && tensor.requires_grad(),
@@ -1052,7 +1057,16 @@ template<class T> struct getTypePtr_<ArrayRef<T>> final {
     return type;
   }
 };
-template<class T> struct getTypePtr_<at::optional<T>> final {
+template <class K, class V>
+struct getTypePtr_<std::unordered_map<K, V>> final {
+  static TypePtr call() {
+    static auto type =
+        DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
+    return type;
+  }
+};
+template <class T>
+struct getTypePtr_<at::optional<T>> final {
   static TypePtr call() {
     static auto type = OptionalType::create(getTypePtr_<T>::call());
     return type;
@@ -1060,6 +1074,8 @@ template<class T> struct getTypePtr_<at::optional<T>> final {
 };
 }
 template<class T> inline TypePtr getTypePtr() {
+  // TODO: static_assert that a templated function exists, and throw a friendy
+  // error message if not
   return detail::getTypePtr_<T>::call();
 }
 
@@ -1082,21 +1098,30 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
  * User Defined Types
  */
 
-struct UserType;
-using UserTypePtr = std::shared_ptr<UserType>;
+struct ClassType;
+using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::script::Module;
 using ::torch::jit::script::Method;
 
-// This represents a user-defined type in TorchScript.
-struct CAFFE2_API UserType : public Type {
+// This represents a class in TorchScript.
+struct CAFFE2_API ClassType : public Type {
   // Create a user type and register it globally.
-  static UserTypePtr create(const std::string& name, std::shared_ptr<Module> module);
-  // returns nullptr if there is no type with that name
-  static UserTypePtr get(const std::string& name);
+  static ClassTypePtr create(
+      const std::string& name,
+      std::shared_ptr<Module> module);
 
-  DEFINE_IS_SUBCLASS(UserType);
+  // Create a type representing a Module,
+  // These do not have methods, and are not globally registered
+  static ClassTypePtr createModuleType();
+
+  // returns nullptr if there is no type with that name
+  static ClassTypePtr get(const std::string& name);
+  // For testing: delete all registered types
+  static void clearRegistry();
+
+  DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
-    if (auto user_rhs = rhs.cast<UserType>()) {
+    if (auto user_rhs = rhs.cast<ClassType>()) {
       return typename_ == user_rhs->typename_;
     }
     return false;
@@ -1108,38 +1133,61 @@ struct CAFFE2_API UserType : public Type {
     return *this == *rhs;
   }
   std::string str() const override {
-    return std::string("UserType<") + typename_ + ">";
+    return std::string("ClassType<") + typename_ + ">";
+  }
+
+  std::string python_str() const override {
+    return typename_;
   }
 
   TypePtr getAttribute(const std::string& name) const {
-    const auto it = std::find_if(
-        attributes_.cbegin(), attributes_.cend(), [&](const Attribute& attr) {
-          return attr.name == name;
-        });
-    if (it == attributes_.cend()) {
-      return nullptr;
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+    size_t pos = 0;
+    for (const auto& attr : attributeNames_) {
+      if (name == attr) {
+        break;
+      }
+      ++pos;
     }
 
-    return it->type;
+    if (pos >= attributeNames_.size()) {
+      return nullptr;
+    }
+    return attributeTypes_[pos];
+  }
+
+  const TypePtr& getAttribute(size_t slot) const {
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+    AT_ASSERT(slot < attributeTypes_.size());
+    return attributeTypes_[slot];
+  }
+
+  const std::string& getAttributeName(size_t slot) const {
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+    AT_ASSERT(slot < attributeTypes_.size());
+    return attributeNames_[slot];
   }
 
   Method* getMethod(const std::string& name) const;
+  std::vector<Method*> methods() const;
 
-  std::string name() const {
+  const std::string& name() const {
     return typename_;
   }
 
   size_t numAttributes() const {
-    return attributes_.size();
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+    return attributeNames_.size();
   }
 
   // Attributes are stored in a specific slot at runtime for effiency.
   // When emitting instructions we specify the slot so that attribute access is
   // a constant lookup
   size_t getAttributeSlot(const std::string& name) const {
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     size_t slot = 0;
-    for (const auto& attr : attributes_) {
-      if (name == attr.name) {
+    for (const auto& attr : attributeNames_) {
+      if (name == attr) {
         return slot;
       }
       slot++;
@@ -1149,21 +1197,37 @@ struct CAFFE2_API UserType : public Type {
 
   bool hasAttribute(const std::string& name) const {
     return std::find_if(
-               attributes_.cbegin(),
-               attributes_.cend(),
-               [&](const Attribute& attr) { return attr.name == name; }) !=
-        attributes_.cend();
+               attributeNames_.cbegin(),
+               attributeNames_.cend(),
+               [&](const std::string& attr) { return attr == name; }) !=
+        attributeNames_.cend();
   }
 
   void addAttribute(const std::string& name, TypePtr type) {
-    attributes_.emplace_back(name, type);
+    attributeNames_.push_back(name);
+    attributeTypes_.push_back(type);
   }
 
-  static const TypeKind Kind = TypeKind::UserType;
+  at::ArrayRef<std::string> attributeNames() const {
+    return attributeNames_;
+  }
+
+  at::ArrayRef<TypePtr> containedTypes() const override {
+    return attributeTypes_;
+  }
+
+  // generate a refined version of this class.
+  // It has the same name but the slot Types are subtypes of
+  // the original slots. It is only valid to refine a class type in a context
+  // where it is know that there are not assignments to the objects slots
+  // that would invalidate the refinement.
+  // These variants are not registered in the global class table.
+  ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
+  static const TypeKind Kind = TypeKind::ClassType;
 
  private:
-  UserType(std::string name, std::shared_ptr<Module> module)
-      : Type(TypeKind::UserType),
+  ClassType(std::string name, std::shared_ptr<Module> module)
+      : Type(TypeKind::ClassType),
         typename_(std::move(name)),
         module_(std::move(module)) {}
 
@@ -1174,13 +1238,10 @@ struct CAFFE2_API UserType : public Type {
   // NOTE: this does not contain methods, which are stored in the module
   // TODO: once modules support arbitrary ivalue attributes, we don't need this
   // anymore.
-  struct Attribute {
-    Attribute(std::string n, TypePtr t)
-        : name(std::move(n)), type(std::move(t)) {}
-    std::string name;
-    TypePtr type;
-  };
-  std::vector<Attribute> attributes_;
+  // TODO: This is better represented as an OrderedDict, but alas it is not yet
+  // available from c10
+  std::vector<std::string> attributeNames_;
+  std::vector<TypePtr> attributeTypes_;
   // Holds method attributes
   std::shared_ptr<Module> module_;
 

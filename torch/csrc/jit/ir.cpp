@@ -81,8 +81,8 @@ struct const_value_list_with_types {
   std::string delim;
   const_value_list_with_types(
       ArrayRef<const Value*> values,
-      const std::string& delim = ", ")
-      : values(values), delim(delim) {}
+      std::string delim_ = ", ")
+      : values(values), delim(std::move(delim_)) {}
 };
 
 std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
@@ -290,13 +290,15 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
 
 std::ostream& Graph::prettyPrint(std::ostream& out) {
   std::vector<at::Tensor> tensor_table;
-  PythonPrint(out, *this, tensor_table);
+  std::vector<ClassTypePtr> class_table;
+  PythonPrint(out, *this, tensor_table, class_table);
   return out;
 }
 
 void Graph::dumpPretty() {
   std::vector<at::Tensor> tensor_table;
-  PythonPrint(std::cout, *this, tensor_table);
+  std::vector<ClassTypePtr> class_table;
+  PythonPrint(std::cout, *this, tensor_table, class_table);
 }
 
 static void checkSameDevice(const Node* node) {
@@ -639,6 +641,10 @@ std::shared_ptr<Graph> Graph::copy() {
 bool Value::mustBeNone() const {
   return node_->mustBeNone();
 }
+bool Value::mustNotBeNone() const {
+  return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
+      !type()->cast<OptionalType>();
+}
 
 std::string Value::uniqueNameBase() const {
   std::string name = uniqueName();
@@ -769,9 +775,10 @@ bool Node::matches(
 }
 
 bool Node::mustBeNone() const {
-  return kind_ == prim::Constant && !this->hasAttributes() &&
-      (output()->type()->cast<OptionalType>() ||
-       output()->type() == NoneType::get());
+  return kind_ == prim::AutogradZero ||
+      (kind_ == prim::Constant && !this->hasAttributes() &&
+       (output()->type()->cast<OptionalType>() ||
+        output()->type() == NoneType::get()));
 }
 
 void Node::dump() const {
@@ -805,19 +812,19 @@ bool Node::isNondeterministic() const {
       "aten::poisson(Tensor self, Generator? generator) -> Tensor",
       "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
-      "aten::rand(int[] size, *, int dtype, int layout, Device device) -> Tensor",
+      "aten::rand(int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
       "aten::rand_like(Tensor self) -> Tensor",
       "aten::rand_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
-      "aten::randint(int high, int[] size, *, int dtype, int layout, Device device) -> Tensor",
-      "aten::randint(int low, int high, int[] size, *, int dtype, int layout, Device device) -> Tensor",
+      "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
+      "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
       "aten::randint_like(Tensor self, int high) -> Tensor",
       "aten::randint_like(Tensor self, int low, int high) -> Tensor",
       "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device) -> Tensor",
       "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device) -> Tensor",
-      "aten::randn(int[] size, *, int dtype, int layout, Device device) -> Tensor",
+      "aten::randn(int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
       "aten::randn_like(Tensor self) -> Tensor",
       "aten::randn_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
-      "aten::randperm(int n, *, int dtype, int layout, Device device) -> Tensor"};
+      "aten::randperm(int n, *, int? dtype, int? layout, Device? device) -> Tensor"};
 
   if (nondeterministic_ops.find(this) == nullptr) {
     return false;
@@ -838,9 +845,18 @@ bool Node::hasSideEffects() const {
     case prim::RaiseException:
     case prim::SetAttr:
     case aten::warn:
+    case prim::AddStatValue:
+    case prim::TimePoint:
       return true;
   }
-  return false;
+  // All other builtin ops are known to be safe.
+  // see [custom operator aliasing]
+  if (kind_.is_aten() || kind_.is_prim() || kind_.is_onnx()) {
+    return false;
+  }
+
+  // Custom ops may have arbitrary side effects
+  return true;
 }
 
 // Assign this node a topological position, to facilitate fast isBefore() and
@@ -1194,8 +1210,8 @@ Node* Graph::create(
   return n;
 }
 
-Node* Graph::createUndefined() {
-  return create(prim::Undefined);
+Node* Graph::createAutogradZero() {
+  return create(prim::AutogradZero);
 }
 
 Node* Graph::createNone(TypePtr typ) {
@@ -1309,8 +1325,8 @@ Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
   return result;
 }
 
-Node* Graph::createUserObject(const UserTypePtr& type) {
-  auto result = create(prim::CreateUserObject);
+Node* Graph::createObject(const ClassTypePtr& type) {
+  auto result = create(prim::CreateObject);
   result->output()->setType(type);
   return result;
 }
@@ -1319,20 +1335,18 @@ Node* Graph::createSetAttr(
     Value* obj,
     const std::string& field,
     Value* newValue) {
-  const auto userType = obj->type()->expect<UserType>();
-
   auto n = create(prim::SetAttr, {obj, newValue}, /*num_outputs=*/0);
   n->s_(attr::name, field);
   return n;
 }
 
 Node* Graph::createGetAttr(Value* obj, const std::string& field) {
-  const auto userType = obj->type()->expect<UserType>();
+  const auto classType = obj->type()->expect<ClassType>();
 
   auto n = create(prim::GetAttr, {obj}, /*num_outputs=*/1);
   n->s_(attr::name, field);
 
-  const auto outputType = userType->getAttribute(field);
+  const auto outputType = classType->getAttribute(field);
   n->output()->setType(outputType);
   return n;
 }

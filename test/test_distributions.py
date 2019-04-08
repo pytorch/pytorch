@@ -796,7 +796,7 @@ class TestDistributions(TestCase):
         self.assertIsNotNone(cov.grad)
 
     def test_has_examples(self):
-        distributions_with_examples = set(e.Dist for e in EXAMPLES)
+        distributions_with_examples = {e.Dist for e in EXAMPLES}
         for Dist in globals().values():
             if isinstance(Dist, type) and issubclass(Dist, Distribution) \
                     and Dist is not Distribution and Dist is not ExponentialFamily:
@@ -2208,9 +2208,42 @@ class TestDistributions(TestCase):
             x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
             self.assertTrue(np.isfinite(x) and x > 0, 'Invalid Beta.sample(): {}'.format(x))
 
+    def test_beta_underflow(self):
+        # For low values of (alpha, beta), the gamma samples can underflow
+        # with float32 and result in a spurious mode at 0.5. To prevent this,
+        # torch._sample_dirichlet works with double precision for intermediate
+        # calculations.
+        set_rng_seed(1)
+        num_samples = 50000
+        for dtype in [torch.float, torch.double]:
+            conc = torch.tensor(1e-2, dtype=dtype)
+            beta_samples = Beta(conc, conc).sample([num_samples])
+            self.assertEqual((beta_samples == 0).sum(), 0)
+            self.assertEqual((beta_samples == 1).sum(), 0)
+            # assert support is concentrated around 0 and 1
+            frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
+            frac_ones = float((beta_samples > 0.9).sum()) / num_samples
+            self.assertEqual(frac_zeros, 0.5, 0.05)
+            self.assertEqual(frac_ones, 0.5, 0.05)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_beta_underflow_gpu(self):
+        set_rng_seed(1)
+        num_samples = 50000
+        conc = torch.tensor(1e-2, dtype=torch.float64).cuda()
+        beta_samples = Beta(conc, conc).sample([num_samples])
+        self.assertEqual((beta_samples == 0).sum(), 0)
+        self.assertEqual((beta_samples == 1).sum(), 0)
+        # assert support is concentrated around 0 and 1
+        frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
+        frac_ones = float((beta_samples > 0.9).sum()) / num_samples
+        # TODO: increase precision once imbalance on GPU is fixed.
+        self.assertEqual(frac_zeros, 0.5, 0.12)
+        self.assertEqual(frac_ones, 0.5, 0.12)
+
     def test_independent_shape(self):
         for Dist, params in EXAMPLES:
-            for i, param in enumerate(params):
+            for param in params:
                 base_dist = Dist(**param)
                 x = base_dist.sample()
                 base_log_prob_shape = base_dist.log_prob(x).shape
@@ -2661,14 +2694,14 @@ class TestRsample(TestCase):
 
 class TestDistributionShapes(TestCase):
     def setUp(self):
-        super(TestCase, self).setUp()
+        super(TestDistributionShapes, self).setUp()
         self.scalar_sample = 1
         self.tensor_sample_1 = torch.ones(3, 2)
         self.tensor_sample_2 = torch.ones(3, 2, 3)
         Distribution.set_default_validate_args(True)
 
     def tearDown(self):
-        super(TestCase, self).tearDown()
+        super(TestDistributionShapes, self).tearDown()
         Distribution.set_default_validate_args(False)
 
     def test_entropy_shape(self):
@@ -3049,6 +3082,7 @@ class TestDistributionShapes(TestCase):
 class TestKL(TestCase):
 
     def setUp(self):
+        super(TestKL, self).setUp()
 
         class Binomial30(Binomial):
             def __init__(self, probs):
@@ -3078,6 +3112,7 @@ class TestKL(TestCase):
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         lognormal = pairwise(LogNormal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
+        independent = (Independent(normal[0], 1), Independent(normal[1], 1))
         onehotcategorical = pairwise(OneHotCategorical, [[0.4, 0.3, 0.3],
                                                          [0.2, 0.7, 0.1],
                                                          [0.33, 0.33, 0.34],
@@ -3127,6 +3162,7 @@ class TestKL(TestCase):
             (gumbel, gumbel),
             (gumbel, normal),
             (halfnormal, halfnormal),
+            (independent, independent),
             (laplace, laplace),
             (lognormal, lognormal),
             (laplace, normal),
@@ -3373,7 +3409,7 @@ class TestKL(TestCase):
                     continue
                 x = dist.sample(sample_shape=(60000,))
                 expected = -dist.log_prob(x).mean(0)
-                ignore = (expected == inf)
+                ignore = (expected == inf) | (expected == -inf)
                 expected[ignore] = actual[ignore]
                 self.assertEqual(actual, expected, prec=0.2, message='\n'.join([
                     '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),
@@ -3561,6 +3597,7 @@ class TestNumericalStability(TestCase):
 
 class TestLazyLogitsInitialization(TestCase):
     def setUp(self):
+        super(TestLazyLogitsInitialization, self).setUp()
         self.examples = [e for e in EXAMPLES if e.Dist in
                          (Categorical, OneHotCategorical, Bernoulli, Binomial, Multinomial)]
 
@@ -3603,7 +3640,7 @@ class TestLazyLogitsInitialization(TestCase):
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 class TestAgainstScipy(TestCase):
     def setUp(self):
-        set_rng_seed(0)
+        super(TestAgainstScipy, self).setUp()
         positive_var = torch.randn(20).exp()
         positive_var2 = torch.randn(20).exp()
         random_var = torch.randn(20)
@@ -3754,6 +3791,7 @@ class TestAgainstScipy(TestCase):
 
 class TestTransforms(TestCase):
     def setUp(self):
+        super(TestTransforms, self).setUp()
         self.transforms = []
         transforms_by_cache_size = {}
         for cache_size in [0, 1]:
@@ -4147,7 +4185,7 @@ class TestValidation(TestCase):
 
     def test_valid(self):
         for Dist, params in EXAMPLES:
-            for i, param in enumerate(params):
+            for param in params:
                 Dist(validate_args=True, **param)
 
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
@@ -4162,7 +4200,7 @@ class TestValidation(TestCase):
                     raise AssertionError(fail_string.format(Dist.__name__, i + 1, len(params)))
 
     def tearDown(self):
-        super(TestCase, self).tearDown()
+        super(TestValidation, self).tearDown()
         Distribution.set_default_validate_args(False)
 
 

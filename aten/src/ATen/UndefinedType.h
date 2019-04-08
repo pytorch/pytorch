@@ -18,11 +18,8 @@ struct UndefinedType final : public TypeDefault {
   virtual Backend backend() const override;
   virtual Allocator* allocator() const override;
   virtual Device getDeviceFromPtr(void* data) const override;
-  virtual Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
-  virtual Storage storageWithAllocator(int64_t size, Allocator* allocator) const override;
   virtual std::unique_ptr<Generator> generator() const override;
   virtual const char * toString() const override;
-  virtual size_t elementSizeInBytes() const override;
   virtual Type & toBackend(Backend b) const override;
   virtual Type & toScalarType(ScalarType s) const override;
   virtual TypeID ID() const override;
