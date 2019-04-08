@@ -672,7 +672,7 @@ void testAutogradProfiler() {
 void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
-          "test::test_none() -> int?",
+          "prim::test_none() -> int?",
           [](const Node* node) {
             return [](Stack& stack) {
               push(stack, IValue());
@@ -680,7 +680,7 @@ void testNoneSchemaMatch() {
             };
           }),
       Operator(
-          "test::is_none(int? a) -> bool",
+          "prim::is_none(int? a) -> bool",
           [](const Node* node) {
             return [](Stack& stack) {
               IValue a = pop(stack);
@@ -700,8 +700,8 @@ void testNoneSchemaMatch() {
 
   auto r = std::make_shared<Graph>();
   auto& g = *r;
-  auto opt_int = g.insert(Symbol::fromQualString("test::test_none"), {});
-  auto out_bool = g.insert(Symbol::fromQualString("test::is_none"), {opt_int});
+  auto opt_int = g.insert(Symbol::fromQualString("prim::test_none"), {});
+  auto out_bool = g.insert(Symbol::fromQualString("prim::is_none"), {opt_int});
   g.registerOutput(out_bool);
   ConstantPropagation(r);
 

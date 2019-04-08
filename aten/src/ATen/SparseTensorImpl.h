@@ -40,7 +40,6 @@ public:
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
 
-  IntArrayRef sizes() const override;
   IntArrayRef strides() const override;
   bool is_contiguous() const override;
   int64_t stride(int64_t d) const override;
@@ -206,15 +205,13 @@ public:
     impl->dense_dim_ = dense_dim();
     impl->indices_ = indices();
     impl->values_ = values();
+    impl->device_opt_ = device();
     impl->coalesced_ = coalesced();
     impl->refresh_numel();
     return impl;
   }
- private:
-  int64_t get_device_slow() const override {
-    return values_.get_device();
-  }
-
+private:
+    explicit SparseTensorImpl(at::TensorTypeId, const caffe2::TypeMeta&, at::Tensor indices, at::Tensor values);
 };
 
 } // namespace at

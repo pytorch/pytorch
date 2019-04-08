@@ -93,7 +93,6 @@ class TestSparse(TestCase):
         # TODO: Put this in torch.cuda.randn
         return self.value_empty(*args, **kwargs).normal_()
 
-    @skipIfRocm  # ROCm stack doesn't like the x + x call
     def test_print(self):
         shape_sparse_dim_nnz = [
             ((), 0, 2),
@@ -863,8 +862,12 @@ class TestSparse(TestCase):
         test_shape(7, 8, 9, 20, True)
 
     def test_sparse_mm(self):
-        def test_shape(d1, d2, d3, nnz):
-            D = torch.randn(d2, d3, device=self.device).requires_grad_(True)
+        def test_shape(d1, d2, d3, nnz, transposed):
+            if transposed:
+                D = torch.randn(d3, d2,
+                                device=self.device).t_().requires_grad_(True)
+            else:
+                D = torch.randn(d2, d3, device=self.device).requires_grad_(True)
             S = self._gen_sparse(2, nnz, [d1, d2])[0]
             S_dense = S.to_dense().requires_grad_(True)
             S.requires_grad_(True)
@@ -874,9 +877,9 @@ class TestSparse(TestCase):
                 return torch.sparse.mm(S, D)
             gradcheck(fn, (S, D), check_sparse_nnz=True)
 
-        test_shape(7, 8, 9, 20)
+        test_shape(7, 8, 9, 20, False)
+        test_shape(7, 8, 9, 20, True)
 
-    @skipIfRocm
     def test_dsmm(self):
         def test_shape(di, dj, dk, nnz):
             x = self._gen_sparse(2, nnz, [di, dj])[0]
@@ -1137,7 +1140,6 @@ class TestSparse(TestCase):
         self._test_basic_ops_shape(0, 0, [10, 10, 10])
         self._test_basic_ops_shape(0, 0, [10, 10, 0])
 
-    @skipIfRocm
     def test_basic_ops_hybrid(self):
         self._test_basic_ops_shape(9, 12, [5, 6], [2, 3])
         self._test_basic_ops_shape(9, 12, [10, 10, 10], [3])
@@ -1315,7 +1317,6 @@ class TestSparse(TestCase):
             self.assertEqual(res.sparse_dim(), len(template_shape_i))
             self.assertEqual(res.dense_dim(), len(template_shape_v))
 
-    @skipIfRocm
     def test_zeros_like(self):
         def test_shape(i_shapes, v_shapes, nnzs):
             for i_dim in range(1, len(i_shapes) + 1):
@@ -1403,7 +1404,6 @@ class TestSparse(TestCase):
             device=self.device)
         self._test_log1p_tensor(input, torch.zeros([5, 6, 0]))
 
-    @skipIfRocm
     def test_sparse_add_coalesce(self):
         i = self.index_tensor([[1, 2, 1]])
         v = self.value_tensor([3, 4, 5])
