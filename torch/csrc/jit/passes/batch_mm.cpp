@@ -77,7 +77,6 @@ static constexpr size_t min_fusion_size = 4;
 
 bool have_same_shape(at::TensorList inputs) {
   auto expected_sizes = inputs[0].sizes();
-  auto expected_strides = inputs[0].strides();
   return (std::all_of(
       inputs.begin(), inputs.end(), [expected_sizes](const at::Tensor& t) {
         return t.sizes() == expected_sizes;
