@@ -66,6 +66,15 @@ then it finds string `return (%x, %x)` matching the annotation (3), and since
 there were no lines matching `aten::mul` after the match (1) and before the
 match (3), the annotation (2) is also satisfied.
 
+One could also register FileCheck annotations using a builder API. To generate
+annotations from the example above one would write:
+```python
+      FileCheck().check("aten::mul")     \
+                 .check_not("aten::mul") \
+                 .check("return")        \
+                 .run(optimized)
+```
+
 ## Supported pragmas
 
 * `CHECK: <pattern>`
