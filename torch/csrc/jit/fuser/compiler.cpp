@@ -330,15 +330,11 @@ c10::optional<std::shared_ptr<FusedKernel>> compileKernel(
     }
   }
 
-  const bool use_cuda = device.is_cuda();
-  // Although we have checked the estimated # of arguments during the fuser,
-  // keep this check since that was an approximation.
-  if( use_cuda &&
-      ((flat_inputs.size() + flat_outputs.size()) >
-          fusion_kernel_args_limit) ) {
-      return c10::nullopt;
-  }
+  // Have checked the limit at graph_fuser. Assert nothing else changing that.
+  AT_ASSERT((flat_inputs.size() + flat_outputs.size()) <=
+            fusion_kernel_args_limit);
 
+  const bool use_cuda = device.is_cuda();
   const std::string name = "kernel_" + std::to_string(next_kernel_id++);
   std::string code =
       generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
