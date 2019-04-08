@@ -69,7 +69,7 @@ namespace detail {
   };
   template<class T>
   IValue return_type_to_ivalue(T&& v) {
-    return return_type_to_ivalue_<std::decay_t<T>>::call(std::move(v));
+    return return_type_to_ivalue_<guts::decay_t<T>>::call(std::move(v));
   }
 
   template<class Functor, size_t... ivalue_arg_indices>
