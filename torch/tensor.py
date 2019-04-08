@@ -338,12 +338,12 @@ class Tensor(torch._C._TensorBase):
         else:
             return super(Tensor, self).split_with_sizes(split_size, dim)
 
-    def unique(self, sorted=True, return_inverse=False, dim=None):
+    def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
         r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
 
         See :func:`torch.unique`
         """
-        return torch.unique(self, sorted=sorted, return_inverse=return_inverse, dim=dim)
+        return torch.unique(self, sorted=sorted, return_inverse=return_inverse, return_counts=False, dim=dim)
 
     def __rsub__(self, other):
         return _C._VariableFunctions.rsub(self, other)
