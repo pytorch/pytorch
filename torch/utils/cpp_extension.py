@@ -390,7 +390,6 @@ class BuildExtension(build_ext, object):
     def _add_gnu_cpp_abi_flag(self, extension):
         # use the same CXX ABI as what PyTorch was compiled with
         self._add_compile_flag(extension, '-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI)))
-            
 
 
 def CppExtension(name, sources, *args, **kwargs):
@@ -1008,7 +1007,6 @@ def _write_ninja_file(path,
     common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
     common_cflags += ['-I{}'.format(include) for include in user_includes]
     common_cflags += ['-isystem {}'.format(include) for include in system_includes]
-
 
     common_cflags += ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
 
