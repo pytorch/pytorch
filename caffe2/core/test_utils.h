@@ -56,7 +56,7 @@ void assertTensorListEquals(
     const Workspace& workspace2);
 
 // Read a tensor from the workspace.
-const caffe2::Tensor& getTensor(
+CAFFE2_API const caffe2::Tensor& getTensor(
     const caffe2::Workspace& workspace,
     const std::string& name);
 
