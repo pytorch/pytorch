@@ -1,4 +1,5 @@
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
 #include <ATen/core/Formatting.h>
 #include <cmath>
 
@@ -95,7 +96,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printDict(out, v.toGenericDict());
     case IValue::Tag::Object:
       // TODO we should print the object contents
-      return out << "Object<" << v.toObject()->name().toUnqualString()
+      return out << "Object<" << v.toObject()->name()
                  << ">";
   }
   AT_ERROR("Tag not found\n");
@@ -105,6 +106,16 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
 
 void IValue::dump() const {
   std::cout << *this << "\n";
+}
+
+
+const std::string& ivalue::Object::name() const {
+  return this->type_->name();
+}
+
+void ivalue::Object::resizeObject(size_t slot) {
+  AT_ASSERT(slot < type()->numAttributes());
+  slots_.resize(type()->numAttributes());
 }
 
 } // namespace c10

@@ -189,7 +189,10 @@ EncoderBase::EncoderBase(
       operator_export_type_(operator_export_type),
       strip_doc_(strip_doc) {
   model_proto_.set_producer_name("pytorch");
-  model_proto_.set_ir_version(onnx::IR_VERSION);
+  // we pin IR version to version 4 (01/22/2019) instead of using
+  // onnx::IR_VERSION. with this change, the test_operators.py will be more
+  // stable. only bump it when it's necessary
+  model_proto_.set_ir_version(4);
   // TODO: set the producer version using appropriate function call
   model_proto_.set_producer_version("1.1");
 }
@@ -451,8 +454,7 @@ void GraphEncoder::EncodeTensor(
   } else {
     AT_ASSERT(t.is_contiguous());
     tensor_proto->set_raw_data(std::string(
-        static_cast<char*>(t.data_ptr()),
-        t.element_size() * t.numel()));
+        static_cast<char*>(t.data_ptr()), t.element_size() * t.numel()));
   }
 }
 
@@ -506,7 +508,7 @@ class ScriptModuleSerializer final {
       torch::ModuleDef* module_def);
 
   void convertParameter(
-      const script::NamedIValue& param,
+      const script::Slot & param,
       torch::ParameterDef* param_def,
       bool is_parameter);
 
@@ -662,8 +664,7 @@ void ScriptModuleSerializer::convertAndWriteTensor(
 
   tensor_proto->set_requires_grad(tensor.requires_grad());
 
-  uint64_t record_size =
-      tensor.element_size() * tensor.storage().size();
+  uint64_t record_size = tensor.element_size() * tensor.storage().size();
   auto* key = tensor.storage().unsafeGetStorageImpl();
 
   auto storage_it = storageMap.find(key);
@@ -683,8 +684,7 @@ void ScriptModuleSerializer::convertAndWriteTensor(
                                /* stride = */ {1})
                            .cpu();
       AT_ASSERT(
-          storage_tensor.element_size() *
-              storage_tensor.storage().size() ==
+          storage_tensor.element_size() * storage_tensor.storage().size() ==
           record_size);
     }
     std::string name = "tensors/" + std::to_string(tensor_id);
@@ -718,7 +718,7 @@ void ScriptModuleSerializer::writeAttributeTable() {
   }
   pickler.finish();
   writer_.writeRecord(
-        "attributes.pkl", pickler.stack().data(), pickler.stack().size());
+      "attributes.pkl", pickler.stack().data(), pickler.stack().size());
 }
 
 void ScriptModuleSerializer::convertModule(
@@ -730,17 +730,16 @@ void ScriptModuleSerializer::convertModule(
   module_def->set_optimize(module.is_optimized());
   for (const auto& elem : module.get_parameters()) {
     torch::ParameterDef* param_def = module_def->add_parameters();
-    convertParameter(elem.value(), param_def, /*is_buffer=*/false);
+    convertParameter(elem, param_def, /*is_buffer=*/false);
   }
 
-  for (const auto& item : module.get_attributes()) {
-    auto& attribute = item.value();
+  for (const auto& attribute : module.get_attributes()) {
     // Add attribute to ModuleDef
     torch::AttributeDef* attribute_def = module_def->add_attributes();
     attribute_def->set_name(attribute.name());
     attribute_def->set_type(attribute.type()->python_str());
 
-    attribute_table_.push_back(*attribute.slot());
+    attribute_table_.push_back(attribute.value());
     attribute_def->set_id(attribute_table_.size() - 1);
   }
 
@@ -770,17 +769,17 @@ void ScriptModuleSerializer::convertModule(
 
   for (const auto& elem : module.get_modules()) {
     torch::ModuleDef* sub_def = module_def->add_submodules();
-    convertModule(*elem->module, module_name.str(), elem.key(), sub_def);
+    convertModule(*elem, module_name.str(), elem->name(), sub_def);
   }
 }
 
 void ScriptModuleSerializer::convertParameter(
-    const script::NamedIValue& param,
+    const script::Slot& param,
     torch::ParameterDef* param_def,
     bool is_parameter) {
   param_def->set_name(param.name());
   param_def->set_is_buffer(is_parameter);
-  param_def->set_tensor_id(addTensor(param.slot()->toTensor()));
+  param_def->set_tensor_id(addTensor(param.value().toTensor()));
 }
 
 // Pretty printing for ONNX

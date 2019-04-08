@@ -57,51 +57,14 @@ Type & TypeDefault::toBackend(Backend b) const {
 Type & TypeDefault::toScalarType(ScalarType s) const {
   return at::globalContext().getNonVariableType(backend(),s);
 }
-static std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
-  std::vector<int64_t> strides(sizes.size());
-  int64_t stride = 1;
-  for(size_t i = sizes.size(); i > 0; --i) {
-    strides[i-1] = stride;
-    stride *= sizes[i-1];
-  }
-  return strides;
-}
-static int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides) {
-  // size of the underlying storage is 1 bigger than the offset
-  // of the last element according to stride
-  int64_t size = 1;
-  for(size_t i = 0; i < sizes.size(); i++) {
-    if(sizes[i] == 0) {
-      return 0;
-    }
-    size += strides[i]*(sizes[i]-1);
-  }
-  return size;
-}
-Tensor TypeDefault::tensorFromBlob(void * data, IntArrayRef sizes, const std::function<void(void*)> & deleter) const {
-  return tensorFromBlob(data, sizes, defaultStrides(sizes), deleter);
-}
-Tensor TypeDefault::tensorFromBlob(void * data, IntArrayRef sizes, IntArrayRef strides, const std::function<void(void*)> & deleter) const {
-  auto storage = storageFromBlob(data, computeStorageSize(sizes, strides), deleter);
-  return at::empty({0}, options()).set_(storage, 0, sizes, strides);
-}
 Tensor TypeDefault::tensorWithAllocator(IntArrayRef sizes, Allocator* allocator) const {
-  return tensorWithAllocator(sizes, defaultStrides(sizes), std::move(allocator));
+  return tensorWithAllocator(sizes, detail::defaultStrides(sizes), std::move(allocator));
 }
 Tensor TypeDefault::tensorWithAllocator(IntArrayRef sizes, IntArrayRef strides, Allocator* allocator) const {
-  auto storage = storageWithAllocator(computeStorageSize(sizes, strides), std::move(allocator));
+  auto storage = storageWithAllocator(detail::computeStorageSize(sizes, strides), std::move(allocator));
   return at::empty({0}, options()).set_(storage, 0, sizes, strides);
 }
 
-Storage TypeDefault::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
-  return Storage(
-      typeMeta(),
-      size,
-      InefficientStdFunctionContext::makeDataPtr(
-          data, deleter, getDeviceFromPtr(data)),
-      /*allocator=*/nullptr,
-      /*resizable=*/false);
-}
 Storage TypeDefault::storageWithAllocator(int64_t size, Allocator* allocator) const {
   // Potentially the storage might be marked as resizable too here
   return Storage(typeMeta(), size, allocator, /*resizable=*/false);
