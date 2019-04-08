@@ -224,7 +224,7 @@ void launchFusion(
   }
 
   // compute number of scalar inputs and convert them to float
-  std::vector<float> scalar_inputs;
+  std::vector<double> scalar_inputs;
   scalar_inputs.reserve(all_inputs.size());
   for (auto const &input: all_inputs){
     if (input.isDouble()) scalar_inputs.push_back(input.to<float>());
@@ -283,7 +283,7 @@ void launchFusion(
     }
   }
   // Adds scalar arguments
-  for (float &s: scalar_inputs){
+  for (double &s: scalar_inputs){
     arguments.push_back(&s);
   }
 
