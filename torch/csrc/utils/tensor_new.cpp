@@ -122,7 +122,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
   }
   if (PyBool_Check(obj)) {
     // TODO: infer Bool when we have Bool ScalarType
-    return ScalarType::Byte;
+    return ScalarType::Bool;
   }
   if (THPVariable_Check(obj)) {
     auto var = reinterpret_cast<THPVariable*>(obj)->cdata;
