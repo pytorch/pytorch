@@ -329,15 +329,16 @@ def init_process_group(backend,
             must have exclusive access to every GPU it uses, as sharing GPUs
             between processes can result in deadlocks.
         init_method (str, optional): URL specifying how to initialize the
-                                     process group. Default is "env://" if
-                                     no `init_method` or `store` is specified.
-                                     Mutually exclusive with `store`.
+                                     process group. Default is "env://" if no
+                                     ``init_method`` or ``store`` is specified.
+                                     Mutually exclusive with ``store``.
         world_size (int, optional): Number of processes participating in
-                                    the job.
+                                    the job. Required if ``store`` is specified.
         rank (int, optional): Rank of the current process.
+                              Required if ``store`` is specified.
         store(Store, optional): Key/value store accessible to all workers, used
                                 to exchange connection/address information.
-                                Mutually exclusive with `init_method`.
+                                Mutually exclusive with ``init_method``.
         timeout (timedelta, optional): Timeout for operations executed against
             the process group. Default value equals 30 minutes.
             This is only applicable for the ``gloo`` backend.
@@ -362,11 +363,11 @@ def init_process_group(backend,
                            "twice!")
 
     assert (store is None) or (init_method is None), \
-        "Either `init_method or `store` must be specified, not both."
+        "Cannot specify both init_method and store."
 
     if store is not None:
-        assert world_size > 0, '`world_size` needs to be positive if using `store`'
-        assert rank >= 0, '`rank` needs to be non-negative if using `store`'
+        assert world_size > 0, 'world_size must be positive if using store'
+        assert rank >= 0, 'rank must be non-negative if using store'
     elif init_method is None:
         init_method = "env://"
 
