@@ -81,19 +81,18 @@ bool have_same_shape(at::TensorList inputs) {
   return (std::all_of(
       inputs.begin(), inputs.end(), [expected_sizes](const at::Tensor& t) {
         return t.sizes() == expected_sizes;
-      }) && std::all_of(
-      inputs.begin(), inputs.end(), [expected_strides](const at::Tensor& t) {
-        return t.strides() == expected_strides;
-      })) ;
+      }));
+}
+
+bool should_be_transposed(at::TensorList inputs) {
+  return (std::all_of(
+      inputs.begin(), inputs.end(), [](const at::Tensor& t) {
+        return t.stride(0) == 1 && t.stride(1) == t.size(0);
+      }));
 }
 
 std::vector<at::Tensor> transpose_inputs(at::TensorList inputs){
-    std::vector<at::Tensor> contig_inputs;
-    contig_inputs.reserve(inputs.size());
-    for (auto& i: inputs){
-      contig_inputs.push_back(i.t());
-    }
-    return contig_inputs;
+    return fmap(inputs, [](const at::Tensor& i) { return i.t(); });
 }
 
 bool shape_is_fast_for_reduce(const at::Tensor& lhs, const at::Tensor& rhs) {
@@ -126,8 +125,8 @@ RegisterOperators mm_tree_reduction_reg(
             shape_is_fast_for_reduce(lhs_inputs[0], rhs_inputs[0])) {
           //sometimes lhs_inputs or rhs_inputs are not contiguous, and that causes at::cat to go through slow path
           //view them as contiguous if possible by transposing
-          bool lhs_input_transposed = (!lhs_inputs[0].is_contiguous() && lhs_inputs[0].t().is_contiguous());
-          bool rhs_input_transposed = (!rhs_inputs[0].is_contiguous() && rhs_inputs[0].t().is_contiguous());
+          bool lhs_input_transposed = should_be_transposed(lhs_inputs);
+          bool rhs_input_transposed = should_be_transposed(rhs_inputs);
           at::Tensor lhs, rhs;
           if (lhs_input_transposed) {
             std::vector<at::Tensor> lhs_contig_inputs = transpose_inputs(lhs_inputs);
