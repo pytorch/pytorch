@@ -782,7 +782,8 @@ class ShapePropagator {
             auto first_scalar_type = (*maybe_tensor_types)[0]->scalarType();
             auto second_scalar_type = (*maybe_tensor_types)[1]->scalarType();
             size_t arg_for_type = 0;
-            if (c10::promoteTypes(first_scalar_type, second_scalar_type) != first_scalar_type) {
+            if (c10::promoteTypes(first_scalar_type, second_scalar_type) !=
+                first_scalar_type) {
               arg_for_type = 1;
             }
             return {broadcast(*maybe_tensor_types, arg_for_type)};
@@ -1180,7 +1181,7 @@ class ShapePropagator {
       if (!maybe_dtype_option)
         return {};
       auto dtype =
-          (maybe_dtype_option->isNone() ? at::kFloat
+          (maybe_dtype_option->isNone() ? at::kDouble
                                         : maybe_dtype_option->toScalarType());
 
       return {DimensionedTensorType::create(dtype, device, dim)};
