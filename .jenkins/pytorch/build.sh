@@ -48,7 +48,10 @@ pip install -q -r requirements.txt || true
 
 # TODO: Don't install this here
 if ! which conda; then
-  if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc7.2* ]] || [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc4.8* ]]; then
+  # In ROCm CIs, we are doing cross compilation on build machines with
+  # intel cpu and later run tests on machines with amd cpu.
+  # Also leave out two builds to make sure non-mkldnn builds still work.
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* && "$BUILD_ENVIRONMENT" != *-xenial-cuda8-cudnn7-py3-* ]]; then
     pip install -q mkl mkl-devel
     export USE_MKLDNN=1
   else
