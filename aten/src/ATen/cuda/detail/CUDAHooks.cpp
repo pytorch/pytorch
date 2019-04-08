@@ -20,6 +20,10 @@
 #include <magma.h>
 #endif
 
+#ifdef __HIP_PLATFORM_HCC__
+#include <miopen/version.h>
+#endif
+
 #include <cuda.h>
 
 #include <sstream>
