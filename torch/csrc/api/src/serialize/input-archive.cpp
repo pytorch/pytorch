@@ -32,7 +32,7 @@ void InputArchive::read(
       "'");
   // clang-format off
   auto read_param = is_buffer ? buffer : param;
-  auto read_tensor = read_param->slot()->toTensor();
+  auto read_tensor = read_param->value().toTensor();
   AT_CHECK(
       bool(buffer) == is_buffer,
       "Expected deserialized tensor for key '", key,
@@ -51,9 +51,8 @@ void InputArchive::read(
 }
 
 void InputArchive::read(const std::string& key, InputArchive& archive) {
-  if (auto* named_module = module_->find_module(key)) {
-    AT_ASSERT(named_module->module != nullptr);
-    archive.module_ = std::move(named_module->module);
+  if (auto named_module = module_->find_module(key)) {
+    archive.module_ = std::move(named_module);
   } else {
     AT_ERROR("No such serialized submodule: '", key, "'");
   }

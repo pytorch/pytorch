@@ -40,6 +40,7 @@ using TensorList = ArrayRef<Tensor>;
 
 class Context;
 struct Generator;
+struct Quantizer;
 
 static inline void noop_deleter(void*) {}
 
@@ -53,6 +54,7 @@ enum class TypeID {
   CPULong,
   CPUShort,
   CPUHalf,
+  CPUQInt8,
   SparseCPUBool,
   SparseCPUByte,
   SparseCPUChar,
@@ -61,6 +63,7 @@ enum class TypeID {
   SparseCPUInt,
   SparseCPULong,
   SparseCPUShort,
+  SparseCPUQInt8,
   CUDABool,
   CUDAByte,
   CUDAChar,
@@ -70,6 +73,7 @@ enum class TypeID {
   CUDALong,
   CUDAShort,
   CUDAHalf,
+  CUDAQInt8,
   SparseCUDABool,
   SparseCUDAByte,
   SparseCUDAChar,
@@ -78,6 +82,7 @@ enum class TypeID {
   SparseCUDAInt,
   SparseCUDALong,
   SparseCUDAShort,
+  SparseCUDAQInt8,
   MSNPUBool,
   MSNPUByte,
   MSNPUChar,
@@ -87,6 +92,7 @@ enum class TypeID {
   MSNPULong,
   MSNPUShort,
   MSNPUHalf,
+  MSNPUQInt8,
   XLABool,
   XLAByte,
   XLAChar,
@@ -96,6 +102,7 @@ enum class TypeID {
   XLALong,
   XLAShort,
   XLAHalf,
+  XLAQInt8,
   CPUComplexFloat,
   CPUComplexDouble,
   CUDAComplexFloat,
@@ -121,8 +128,6 @@ struct CAFFE2_API Type {
   bool is_undefined() const noexcept { return is_undefined_; }
   virtual Allocator * allocator() const = 0;
   virtual Device getDeviceFromPtr(void * data) const = 0;
-  virtual Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
-  virtual Storage storageWithAllocator(int64_t size, Allocator* allocator) const = 0;
   virtual std::unique_ptr<Generator> generator() const = 0;
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
   virtual Storage unsafeStorageFromTH(void * th_pointer, bool retain) const = 0;
@@ -168,11 +173,6 @@ struct CAFFE2_API Type {
       bool keep_graph,
       bool create_graph) const = 0;
   virtual void set_data(Tensor & self, Tensor new_data) const = 0;
-
-  virtual Tensor tensorFromBlob(void * data, IntArrayRef sizes, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
-  virtual Tensor tensorFromBlob(void * data, IntArrayRef sizes, IntArrayRef strides, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
-  virtual Tensor tensorWithAllocator(IntArrayRef sizes, Allocator* allocator) const = 0;
-  virtual Tensor tensorWithAllocator(IntArrayRef sizes, IntArrayRef strides, Allocator* allocator) const = 0;
 
   bool operator==(const Type& other) const {
     return this == &other;
@@ -339,6 +339,9 @@ struct CAFFE2_API Type {
   virtual Tensor pin_memory(const Tensor & self) const = 0;
   virtual Tensor pinverse(const Tensor & self, double rcond) const = 0;
   virtual Tensor repeat(const Tensor & self, IntArrayRef repeats) const = 0;
+  virtual Tensor repeat_interleave(const Tensor & repeats) const = 0;
+  virtual Tensor repeat_interleave(const Tensor & self, const Tensor & repeats, c10::optional<int64_t> dim) const = 0;
+  virtual Tensor repeat_interleave(const Tensor & self, int64_t repeats, c10::optional<int64_t> dim) const = 0;
   virtual Tensor reshape(const Tensor & self, IntArrayRef shape) const = 0;
   virtual Tensor reshape_as(const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor round(const Tensor & self) const = 0;
@@ -444,6 +447,10 @@ struct CAFFE2_API Type {
   virtual std::vector<Tensor> unbind(const Tensor & self, int64_t dim) const = 0;
   virtual Tensor to_sparse(const Tensor & self, int64_t sparse_dim) const = 0;
   virtual Tensor to_sparse(const Tensor & self) const = 0;
+  virtual Tensor quantize_linear(const Tensor & self, double scale, int64_t zero_point) const = 0;
+  virtual Tensor dequantize(const Tensor & self) const = 0;
+  virtual Scalar q_scale(const Tensor & self) const = 0;
+  virtual Scalar q_zero_point(const Tensor & self) const = 0;
   virtual Tensor to(const Tensor & self, const TensorOptions & options, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
