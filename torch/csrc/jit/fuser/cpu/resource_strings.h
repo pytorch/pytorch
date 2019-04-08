@@ -32,8 +32,12 @@ struct TensorInfo<T, 0> {
 
 static auto cpu_compilation_unit_template = CodeTemplate(R"(
 #include <math.h>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
+${vec256_header}
 
 double rsqrt(double x) {
   return 1.0/sqrt(x);
@@ -55,8 +59,18 @@ ${type_declarations}
 
 #define OMP_THRESHOLD 100000
 static void ${kernelName}_kernel(IndexType totalElements, ${formals}) {
-  #pragma omp parallel for if(totalElements > OMP_THRESHOLD)
-  for (IndexType linearIndex = 0;
+  IndexType linearIndex = 0;
+#if ${vectorizable} // vectorizable
+  for (;
+        linearIndex + ${vectorWidth} < totalElements;
+        linearIndex += ${vectorWidth}) {
+      // Convert `linearIndex` into an offset of tensor:
+      ${tensorOffsets}
+      // calculate the results
+      ${kernelVectorBody}
+  }
+#endif // vectorizable
+  for (;
         linearIndex < totalElements;
         linearIndex += 1) {
       // Convert `linearIndex` into an offset of tensor:

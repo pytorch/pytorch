@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/ir.h>
 
 #include <torch/csrc/jit/fuser/cpu/resource_strings.h>
+#include <torch/csrc/jit/fuser/cpu/vec256_resource_strings.h>
 #include <torch/csrc/jit/fuser/cuda/resource_strings.h>
 
 #include <cmath>
@@ -100,6 +101,45 @@ static std::string variableType(const std::shared_ptr<c10::Type>& t) {
       "unknown scalar type during JIT fusion code generation");
 }
 
+static std::string typeCastedVectorValueName(
+    const std::shared_ptr<c10::Type>& t,
+    const at::ScalarType outtype,
+    const std::string& vn) {
+  if (t->kind() == TypeKind::IntType) {
+    // In vector code, a value that was of Int type will now be a
+    // Vec256<int32_t> value. We do the usual vec256 conversion, similar to
+    // below.
+    if (outtype != at::kInt) {
+      return std::string("Vec256<") + calcScalarTypeName(outtype) + ">(" + vn +
+          ")";
+    }
+    return vn;
+  } else if (t->kind() == TypeKind::FloatType) {
+    // Only valid operation is promotion to Vec256<float>
+    if (outtype == at::kFloat) {
+      return std::string("Vec256<") + calcScalarTypeName(outtype) + ">(" + vn +
+          ")";
+    }
+  } else if (t->kind() == TypeKind::DimensionedTensorType) {
+    auto const tt = t->cast<DimensionedTensorType>();
+    if (tt->scalarType() != outtype) {
+      return std::string("Vec256<") + calcScalarTypeName(outtype) + ">(" + vn +
+          ")";
+    }
+    return vn;
+  }
+  throw std::runtime_error(
+      "unknown scalar type during JIT fusion code generation");
+}
+
+static std::string vectorVariableType(const std::shared_ptr<c10::Type>& t) {
+  auto scalar_type_str = variableType(t);
+  if (scalar_type_str == "int") {
+    scalar_type_str = "int32_t";
+  }
+  return "Vec256<" + scalar_type_str + ">";
+}
+
 static std::string typeCastedValueName(
     const std::shared_ptr<c10::Type>& t,
     const at::ScalarType outtype,
@@ -166,93 +206,135 @@ static std::string encodeSpecialRHS(const Node* n, TemplateEnv& env) {
 struct RHSTemplate {
   // Common case: float and double dispatch are identical
   RHSTemplate(const char* for_float)
-      : for_float(for_float), for_double(for_float) {}
+      : for_float(for_float), for_double(for_float), for_vector(nullptr) {}
 
   RHSTemplate(const char* for_float, const char* for_double)
-      : for_float(for_float), for_double(for_double) {}
+      : for_float(for_float), for_double(for_double), for_vector(nullptr) {}
+
+  RHSTemplate(
+      const char* for_float,
+      const char* for_double,
+      const char* for_vector)
+      : for_float(for_float), for_double(for_double), for_vector(for_vector) {}
 
   const char* for_float;
   const char* for_double;
+  const char* for_vector;
 };
 
+// NB: update this set if you add support for these vector instructions
+static std::unordered_set<NodeKind> unsupported_vector_ops = {aten::_cast_Float,
+                                                              aten::lgamma,
+                                                              aten::frac,
+                                                              aten::atan,
+                                                              aten::__and__,
+                                                              aten::__lshift__,
+                                                              aten::__or__,
+                                                              aten::rand_like,
+                                                              aten::where};
+
 // Writes "simple mappable" ops
-static std::string encodeRHS(const Node* n) {
+static std::string encodeRHS(const Node* n, bool vector = false) {
   static std::unordered_map<NodeKind, RHSTemplate> simple_map_ops = {
       // unary
-      {aten::_cast_Float, "static_cast<float>(${0})"},
-      {aten::abs, "fabs(${0})"},
-      {aten::sigmoid, {"1.f / (1.f + expf(-${0}))", "1. / (1. + exp(-${0}))"}},
-      {aten::relu, "${0} < 0 ? 0.f : ${0} "},
+      {aten::_cast_Float, "static_cast<float>(${0})"}, // TODO: vector instr
+      {aten::abs, {"fabs(${0})", "fabsf(${0})", "${0}.abs()"}},
+      {aten::sigmoid,
+       {"1.f / (1.f + expf(-${0}))",
+        "1. / (1. + exp(-${0}))",
+        "Vec256<float>(1) / (Vec256<float>(1) + ${0}.neg().exp())"}},
+      {aten::relu,
+       {"${0} < 0 ? 0.f : ${0} ",
+        "${0} < 0 ? 0.f : ${0} ",
+        "maximum(${0}, Vec256<float>(0))"}},
       {aten::threshold,
-       "${0} <= ${1} ? static_cast<decltype(${0})>(${2}) : ${0} "},
-      {aten::log, {"logf(${0})", "log(${0})"}},
-      {aten::log10, {"log10f(${0})", "log10(${0})"}},
-      {aten::log1p, {"log1pf(${0})", "log1p(${0})"}},
-      {aten::log2, {"log2f(${0})", "log2(${0})"}},
-      {aten::lgamma, {"lgammaf(${0})", "lgamma(${0})"}},
-      {aten::exp, {"expf(${0})", "exp(${0})"}},
-      {aten::expm1, {"expm1f(${0})", "expm1(${0})"}},
-      {aten::erf, {"erff(${0})", "erf(${0})"}},
-      {aten::erfc, {"erfcf(${0})", "erfc(${0})"}},
-      {aten::cos, {"cosf(${0})", "cos(${0})"}},
-      {aten::acos, {"acosf(${0})", "acos(${0})"}},
-      {aten::cosh, {"coshf(${0})", "cosh(${0})"}},
-      {aten::sin, {"sinf(${0})", "sin(${0})"}},
-      {aten::asin, {"asinf(${0})", "asin(${0})"}},
-      {aten::sinh, {"sinhf(${0})", "sinh(${0})"}},
-      {aten::tan, {"tanf(${0})", "tan(${0})"}},
-      {aten::atan, {"atanf(${0})", "atan(${0})"}},
-      {aten::tanh, {"tanhf(${0})", "tanh(${0})"}},
-      {aten::sqrt, {"sqrtf(${0})", "sqrt(${0})"}},
-      {aten::rsqrt, {"rsqrtf(${0})", "rsqrt(${0})"}},
-      {aten::ceil, {"ceilf(${0})", "ceil(${0})"}},
-      {aten::floor, {"floorf(${0})", "floor(${0})"}},
-      {aten::round, {"roundf(${0})", "round(${0})"}},
-      {aten::trunc, {"truncf(${0})", "trunc(${0})"}},
-      {aten::frac, {"fracf(${0})", "frac(${0})"}},
-      {aten::reciprocal, {"1.f/(${0})", "1./(${0})"}},
-      {aten::neg, "-${0}"},
+       {"${0} <= ${1} ? static_cast<decltype(${0})>(${2}) : ${0} ",
+        "${0} <= ${1} ? static_cast<decltype(${0})>(${2}) : ${0} ",
+        "(${0} <= ${1}).where(${2}, ${0})"}},
+      {aten::log, {"logf(${0})", "log(${0})", "${0}.log()"}},
+      {aten::log10, {"log10f(${0})", "log10(${0})", "${0}.log10()"}},
+      {aten::log1p, {"log1pf(${0})", "log1p(${0})", "${0}.log1p()"}},
+      {aten::log2, {"log2f(${0})", "log2(${0})", "${0}.log2()"}},
+      {aten::lgamma, {"lgammaf(${0})", "lgamma(${0})"}}, // TODO: vector instr
+      {aten::exp, {"expf(${0})", "exp(${0})", "${0}.exp()"}},
+      {aten::expm1, {"expm1f(${0})", "expm1(${0})", "${0}.expm1()"}},
+      {aten::erf, {"erff(${0})", "erf(${0})", "${0}.erf()"}},
+      {aten::erfc, {"erfcf(${0})", "erfc(${0})", "${0}.erfc()"}},
+      {aten::cos, {"cosf(${0})", "cos(${0})", "${0}.cos()"}},
+      {aten::acos, {"acosf(${0})", "acos(${0})", "${0}.acos()"}},
+      {aten::cosh, {"coshf(${0})", "cosh(${0})", "${0}.cosh()"}},
+      {aten::sin, {"sinf(${0})", "sin(${0})", "${0}.sin()"}},
+      {aten::asin, {"asinf(${0})", "asin(${0})", "${0}.asin()"}},
+      {aten::sinh, {"sinhf(${0})", "sinh(${0})", "${0}.sinh()"}},
+      {aten::tan, {"tanf(${0})", "tan(${0})", "${0}.tan()"}},
+      {aten::atan, {"atanf(${0})", "atan(${0})", "${0}.atan()"}},
+      {aten::tanh, {"tanhf(${0})", "tanh(${0})", "${0}.tanh()"}},
+      {aten::sqrt, {"sqrtf(${0})", "sqrt(${0})", "${0}.sqrt()"}},
+      {aten::rsqrt, {"rsqrtf(${0})", "rsqrt(${0})", "${0}.rsqrt()"}},
+      {aten::ceil, {"ceilf(${0})", "ceil(${0})", "${0}.ceil()"}},
+      {aten::floor, {"floorf(${0})", "floor(${0})", "${0}.floor()"}},
+      {aten::round, {"roundf(${0})", "round(${0})", "${0}.round()"}},
+      {aten::trunc, {"truncf(${0})", "trunc(${0})", "${0}.trunc()"}},
+      {aten::frac, {"fracf(${0})", "frac(${0})"}}, // TODO: vector instr
+      {aten::reciprocal, {"1.f/(${0})", "1./(${0})", "${0}.reciprocal()"}},
+      {aten::neg, {"-${0}", "-${0}", "${0}.neg()"}},
       // simple binary
-      {aten::atan2, "atan2(${0}, ${1})"},
-      {aten::min, {"fminf(${0}, ${1})", "fmin(${0}, ${1})"}},
-      {aten::max, {"fmaxf(${0}, ${1})", "fmax(${0}, ${1})"}},
+      {aten::atan2, "atan2(${0}, ${1})"}, // TODO: vector instr
+      {aten::min,
+       {"fminf(${0}, ${1})", "fmin(${0}, ${1})", "minimum(${0}, ${1})"}},
+      {aten::max,
+       {"fmaxf(${0}, ${1})", "fmax(${0}, ${1})", "maximum(${0}, ${1})"}},
 
       // binary with other
       // TODO: some of these ops will not get generated because
       // we only work on float inputs/outputs, but they are here to record
       // that they are valid mappable ops once we handle more type
 
-      {aten::__and__, "${0} && ${1}"},
-      {aten::__lshift__, "${0} << ${1}"},
-      {aten::__or__, "${0} || ${1}"},
-      {aten::__rshift__, "${0} >> ${1}"},
-      {aten::__xor__, "${0} ^ ${1}"},
-      {aten::addcmul, "${0} + ${3} * ${1} * ${2}"},
-      {aten::div, "${0} / ${1}"},
-      {aten::eq, "${0_nocast} == ${1_nocast}"},
-      {aten::fmod, "fmodf(${0}, ${1})"},
-      {aten::ge, "(${0_nocast} >= ${1_nocast})"},
-      {aten::gt, "${0_nocast} > ${1_nocast}"},
-      {aten::le, "(${0_nocast} <= ${1_nocast})"},
-      {aten::lt, "${0_nocast} < ${1_nocast}"},
-      {aten::lerp, "${0} + ${2} * (${1} - ${0})"},
+      {aten::__and__, "${0} && ${1}"}, // TODO: vector instr
+      {aten::__lshift__, "${0} << ${1}"}, // TODO: vector instr
+      {aten::__or__, {"${0} || ${1}", "${0} || ${1}", "${0} || ${1}"}},
+      {aten::__rshift__, "${0} >> ${1}"}, // TODO: vector instr
+      {aten::__xor__, {"${0} ^ ${1}", "${0} ^ ${1}", "${0} ^ ${1}"}},
+      {aten::addcmul,
+       {"${0} + ${3} * ${1} * ${2}",
+        "${0} + ${3} * ${1} * ${2}",
+        "${0} + ${3} * ${1} * ${2}"}},
+      {aten::div, {"${0} / ${1}", "${0} / ${1}", "${0} / ${1}"}},
+      {aten::eq, {"${0_nocast} == ${1_nocast}", "${0_nocast} == ${1_nocast}", "${0_nocast} == ${1_nocast}"}},
+      {aten::fmod, "fmodf(${0}, ${1})"}, // TODO: vector instr
+      {aten::ge, {"(${0_nocast} >= ${1_nocast})", "(${0_nocast} >= ${1_nocast})", "(${0_nocast} >= ${1_nocast})"}},
+      {aten::gt, {"${0_nocast} > ${1_nocast}", "${0_nocast} > ${1_nocast}", "${0_nocast} > ${1_nocast}"}},
+      {aten::le, {"(${0_nocast} <= ${1_nocast})", "(${0_nocast} <= ${1_nocast})", "(${0_nocast} <= ${1_nocast})"}},
+      {aten::lt, {"${0_nocast} < ${1_nocast}", "${0_nocast} < ${1_nocast}", "${0_nocast} < ${1_nocast}"}},
+      {aten::lerp,
+       {"${0} + ${2} * (${1} - ${0})",
+        "${0} + ${2} * (${1} - ${0})",
+        "${0} + ${2} * (${1} - ${0})"}},
       {aten::type_as, "(${0})"},
-      {aten::mul, "${0} * ${1}"},
-      {aten::ne, "${0_nocast} != ${1_nocast}"},
-      {aten::remainder, "remainderf(${0}, ${1})"},
-      {aten::pow, {"powf(${0}, ${1})", "pow(${0}, ${1})"}},
+      {aten::mul, {"${0} * ${1}", "${0} * ${1}", "${0} * ${1}"}},
+      {aten::ne, {"${0_nocast} != ${1_nocast}", "${0_nocast} != ${1_nocast}", "${0_nocast} != ${1_nocast}"}},
+      {aten::remainder, "remainderf(${0}, ${1})"}, // TODO: vector instr
+      {aten::pow,
+       {"powf(${0}, ${1})", "pow(${0}, ${1})", "${0}.pow(${1})"}},
 
       // alpha
-      {aten::add, "${0} + ${2}*${1}"},
-      {aten::sub, "(${0} - ${2}*${1})"},
-      {aten::rand_like, "uniform(rnd())"},
+      {aten::add, {"${0} + ${2}*${1}", "${0} + ${2}*${1}", "${0} + ${2}*${1}"}},
+      {aten::sub,
+       {"(${0} - ${2}*${1})", "(${0} - ${2}*${1})", "(${0} - ${2}*${1})"}},
+      {aten::rand_like, "uniform(rnd())"}, // TODO: vector instr
 
       // where
-      {aten::where, "(${0} ? ${1} : ${2})"},
+      {aten::where, "(${0} ? ${1} : ${2})"}, // TODO: vector instr
 
       // simple derivatives
-      {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
-      {aten::_tanh_backward, "${0} * (1.f - ${1} * ${1})"},
+      {aten::_sigmoid_backward,
+       {"${0} * ${1} * (1.f - ${1})",
+        "${0} * ${1} * (1.f - ${1})",
+        "${0} * ${1} * (Vec256<float>(1.f) - ${1})"}},
+      {aten::_tanh_backward,
+       {"${0} * (1.f - ${1} * ${1})",
+        "${0} * (1.f - ${1} * ${1})",
+        "${0} * (Vec256<float>(1.f) - ${1} * ${1})"}}
   };
 
   TemplateEnv env;
@@ -269,9 +351,15 @@ static std::string encodeRHS(const Node* n) {
     for (auto in : n->inputs()) {
       // PyTorch converts (scalar) argument types to result before applying the
       // operator e.g. 1.4-torch.tensor(3) = -2
-      env.s(
-          std::to_string(i),
-          typeCastedValueName(in->type(), outtype, valueName(in)));
+      if (vector) {
+        env.s(
+            std::to_string(i),
+            typeCastedVectorValueName(in->type(), outtype, valueName(in)));
+      } else {
+        env.s(
+            std::to_string(i),
+            typeCastedValueName(in->type(), outtype, valueName(in)));
+      }
       // Uncasted operands only used for comparison operators
       env.s(std::to_string(i) + "_nocast", valueName(in));
       i++;
@@ -279,8 +367,10 @@ static std::string encodeRHS(const Node* n) {
 
     const auto& templ = simple_map_ops.at(n->kind());
     const char* str = nullptr;
-    if (outtype == at::kFloat) {
-      str = templ.for_float;
+    if (vector) {
+      str = templ.for_vector;
+    } else if (outtype == at::kFloat) {
+       str = templ.for_float;
     } else {
       str = templ.for_double;
     }
@@ -313,6 +403,49 @@ static void emitIndexingFor(
   }
 }
 
+// For now, only support float and int types, since we want to be able to use
+// Vec256 with vector width = 8.
+bool isVectorizable(
+    bool use_cuda,
+    const std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>>&
+        inputs,
+    const Graph& graph) {
+  bool vectorizable = !use_cuda;
+  for (const auto& input : inputs) {
+    if (input.second.has_value()) {
+      // Inputs must have Float or Int scalar type and must be contiguous along
+      // the last dimension.
+      auto scalar_type = input.second.value().scalar_type;
+      if (scalar_type != at::kFloat && scalar_type != at::kInt) {
+        vectorizable = false;
+      }
+      if (!input.second.value().lastIsContiguous()) {
+        vectorizable = false;
+      }
+    } else {
+      if (!input.first->type()->isSubtypeOf(c10::NumberType::get())) {
+        vectorizable = false;
+      }
+    }
+  }
+
+  // Scan graph for Constant nodes. Do not support vectorization if we have
+  // Constants that are not Float or Int type.
+  for (const auto& n : graph.nodes()) {
+    if (n->kind() == prim::Constant) {
+      auto val = toIValue(n->output()).value();
+      if (!val.isDouble() && !val.isInt()) {
+        vectorizable = false;
+      }
+    }
+    if (unsupported_vector_ops.count(n->kind())) {
+      vectorizable = false;
+    }
+  }
+
+  return vectorizable;
+}
+
 // TODO: handle cases where we need to generate > 2^32 element tensors
 std::string generateKernel(
     const std::string& name,
@@ -327,9 +460,15 @@ std::string generateKernel(
       "unsigned int"); // Note: not uint32_t to avoid including cstdint
 
   std::stringstream body;
+  std::stringstream kernelVectorBody;
   std::stringstream tensorOffsets;
   std::vector<std::string> formals;
   std::vector<std::string> argument_loads;
+
+  bool vectorizable = isVectorizable(use_cuda, inputs, graph);
+  env.s("vectorizable", std::to_string(vectorizable));
+  // NB: change this if we support different data-types in the future.
+  env.s("vectorWidth", std::to_string(8));
 
   // Lambda for writing arguments
   auto emitFormal = [&](const Value* n, const TensorDesc& desc) {
@@ -395,6 +534,7 @@ std::string generateKernel(
     auto p = input.first;
     env.s("node", valueName(p));
     env.d("formal", formal_count++);
+    env.s("vector_type", vectorVariableType(input.first->type()));
 
     // Acquires and converts (if needed) inputs
     // Note: conversion from half is only supported for CUDA kernels.
@@ -412,13 +552,23 @@ std::string generateKernel(
         env.s("access", format("__ldg(&t${formal}.data[t${formal}_offset])", env));
       } else {
         env.s("access", format("t${formal}.data[t${formal}_offset]", env));
+        env.s(
+            "vector_access",
+            format(
+                "${vector_type}::loadu(t${formal}.data + t${formal}_offset)",
+                env));
       }
       env.s("lhs_type", calcScalarTypeName(input.second.value().scalar_type));
     } else {
       env.s("access", format("s${formal}", env));
+      env.s("vector_access", format("${vector_type}(s${formal})", env));
       env.s("lhs_type", variableType(input.first->type()));
     }
     body << format("${lhs_type} ${node} = ${access};\n", env);
+    if (vectorizable) {
+      kernelVectorBody << format(
+          "${vector_type} ${node} = ${vector_access};\n", env);
+    }
   }
 
   bool has_random = false;
@@ -457,14 +607,28 @@ std::string generateKernel(
       }
       env.s("node", valueName(n->output()));
       env.s("rhs", rhs);
-      env.s("lhs_type", variableType(n->output()->type()));
-    } else {
+      env.s("vector_rhs", rhs);
+      auto var_type = variableType(n->output()->type());
+      env.s("lhs_type", var_type);
+      if (var_type == "double" || var_type == "int64_t") {
+        env.s("vector_lhs_type", var_type);
+      } else {
+        env.s("vector_lhs_type", std::string("Vec256<") + var_type + ">");
+      }    } else {
       env.s("node", valueName(n->output()));
       env.s("rhs", encodeRHS(n));
+      if (vectorizable) {
+        env.s("vector_rhs", encodeRHS(n, true));
+      } else {
+        env.s("vector_rhs", "");
+      }
       env.s("lhs_type", variableType(n->output()->type()));
+      env.s("vector_lhs_type", vectorVariableType(n->output()->type()));
     }
 
     body << format("${lhs_type} ${node} = ${rhs};\n", env);
+    kernelVectorBody << format(
+        "${vector_lhs_type} ${node} = ${vector_rhs};\n", env);
   }
 
   // Generates writes to output tensors
@@ -506,6 +670,7 @@ std::string generateKernel(
   // Insantiates the CUDA or CPU-specific templates
   env.s("tensorOffsets", tensorOffsets.str());
   env.s("kernelBody", body.str());
+  env.s("kernelVectorBody", kernelVectorBody.str());
   env.v("formals", formals);
   env.v("argument_loads", argument_loads);
   std::string code_string;
@@ -514,6 +679,7 @@ std::string generateKernel(
     code_string = cuda::cuda_compilation_unit_template.format(env);
   } else {
     env.s("type_declarations", cpu::type_declarations_template.format(env));
+    env.s("vec256_header", cpu::vec256_template.format(env));
     code_string = cpu::cpu_compilation_unit_template.format(env);
   }
 
