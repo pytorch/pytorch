@@ -316,7 +316,19 @@ class DistributedDataParallel(Module):
         else:
             outputs = self.parallel_apply(self._module_copies[:len(inputs)], inputs, kwargs)
             output = self.gather(outputs, self.output_device)
-        self.reducer.prepare_for_backward(output)
+
+        # We'll return the output object verbatim since it is a freeform object.
+        # We need to find any tensors in this object, though, because we need to
+        # figure out which parameters were used during this forward pass,
+        # to ensure we short circuit reduction for any unused parameters.
+        output_tensors = []
+        if isinstance(output, torch.Tensor):
+            output_tensors = [output]
+        if isinstance(output, (list, tuple)):
+            def istensor(obj):
+                return isinstance(obj, torch.Tensor)
+            output_tensors = list(filter(istensor, output))
+        self.reducer.prepare_for_backward(output_tensors)
         return output
 
     def scatter(self, inputs, kwargs, device_ids):

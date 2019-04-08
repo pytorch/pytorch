@@ -361,6 +361,13 @@ void Reducer::prepare_for_backward(
     bucket.pending = bucket.replicas.size();
   }
 
+  // If no outputs are specified, we assume that autograd hooks for ALL
+  // variables will be called, and we don't have to search the autograd graph
+  // for presence of these hooks.
+  if (outputs.empty()) {
+    return;
+  }
+
   // Seed queue with the grad functions of all outputs.
   for (const auto& output : outputs) {
     const auto& grad_fn = output.grad_fn();
