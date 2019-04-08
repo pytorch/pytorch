@@ -49,16 +49,16 @@ Value* try_emit_call_to(
 
   // parameters to callee method (which become parameters to _this_ method
   // if they were not already)
-  for (auto member : callee.initial_ivalues()) {
+  for (const auto& member : callee.initial_ivalues()) {
     if (!caller) {
       throw ErrorReport(loc)
           << " attempting to call a method with parameters/attributes"
              " from a raw graph. File a bug report";
     }
     // TODO: preserve the type information so we don't have to infer it here
-    auto type = incompleteInferTypeFrom(*member);
+    auto type = incompleteInferTypeFrom(member.value());
     matched_schema->inputs.push_back(
-        caller->get_or_add_attribute(type, member));
+        caller->get_or_add_attribute(member));
   }
   callee.check_single_output();
   return inlineCallTo(graph, *callee.graph(), matched_schema->inputs).at(0);
@@ -123,12 +123,12 @@ void Module::to_impl(
     bool non_blocking) {
   // First call `to()` on every child module.
   for (auto& child : get_modules()) {
-    child.module->to_impl(device, dtype, non_blocking);
+    child->to_impl(device, dtype, non_blocking);
   }
   // Then convert every of our parameters.
   for (auto& parameter : get_parameters()) {
     // Need to access the `at::Tensor` as a `Variable` here.
-    autograd::Variable variable = parameter.slot()->toTensor();
+    autograd::Variable variable = parameter.value().toTensor();
     at::Tensor data = variable.data();
     // Use the data's original device or dtype if not supplied here.
     auto new_data = data.to(

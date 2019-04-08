@@ -213,16 +213,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
 
   /**
-   * Construct a 1-dim 0-size tensor with the given settings.
-   * The provided allocator will be used to allocate data on
-   * subsequent resize.
-   */
-  TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, Allocator *allocator, bool is_variable);
-
-  /**
    * Construct a 1-dim 0-size tensor backed by the given storage.
    */
   TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
+
+  /**
+   * Construct a 1-dim 0 size tensor that doesn't have a storage.
+   */
+  TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt, bool is_variable);
 
   /**
    * Construct a tensor with an opaque layout given `opaque_handle` backed by `storage` and
@@ -237,7 +235,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // storage.  Still, we pass it in separately because it's easier to write
   // the initializer list if we're not worried about storage being moved out
   // from under us.
-  TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable);
+  TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, c10::optional<c10::Device>, bool is_variable);
 
  public:
   TensorImpl(const TensorImpl&) = delete;
@@ -373,31 +371,25 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   int64_t get_device() const {
-    // NB: This method is not virtual and tries to avoid dispatches in the common case for perf.
-    const auto tid = type_id();
-    if (tid == CUDATensorId() || tid == HIPTensorId() || tid == MSNPUTensorId() || tid == XLATensorId()) {
-      // TODO: #12934 investigate caching device on TensorImpl to avoid this vdispatch.
-      return storage().device().index();
+    if (device_opt_.has_value()) {
+      // See NOTE [c10::optional operator usage in CUDA]
+      return (*device_opt_).index();
     }
-    return get_device_slow();
+
+    AT_ERROR(
+        "tensor with backend ", toString(tensorTypeIdToBackend(type_id())),
+        " does not have a device");
   }
 
   Device device() const {
-    // Special case the common case for performance reasons
-    // TODO: This is a little convoluted so it would be good to investigate
-    // caching device on TensorImpl (#12934) to speed up device() calls in all cases.
-    const auto tid = type_id();
-    if (tid == CPUTensorId() || tid == CUDATensorId() || tid == HIPTensorId() || tid == MSNPUTensorId() ||
-        tid == XLATensorId()) {
-      // NB: storage(), not storage_, b/c of Variable.
-      const auto& mystorage = storage();
-      if (mystorage) {
-        return mystorage.device();
-      }
+    if (device_opt_.has_value()) {
+      // See NOTE [c10::optional operator usage in CUDA]
+      return *device_opt_;
     }
-    const auto device_type = computeDeviceType(tid);
-    bool not_cpu = device_type != DeviceType::CPU;
-    return Device(device_type, not_cpu ? get_device() : -1);
+
+    AT_ERROR(
+        "tensor with backend ", toString(tensorTypeIdToBackend(type_id())),
+        " does not have a device");
   }
 
   Layout layout() const {
@@ -898,15 +890,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
  private:
-  // As an optimization, get_device handles the typical CUDA Tensor case and
-  // calls get_device_slow if the tensor stores its device somewhere else
-  // (VariableImpl, SparseTensorImpl). This methods does a virtual dispatch
-  // that makes it 10-20ns slower than the special-cased CUDA Tensor case.
-  virtual int64_t get_device_slow() const {
-    AT_ERROR(
-        "get_device is not implemented for tensors with ",
-        toString(tensorTypeIdToBackend(type_id())),
-        " backend");
+  // See NOTE [c10::optional operator usage in CUDA]
+  // We probably don't want to expose this publically until
+  // the note is addressed.
+  c10::optional<c10::Device> device_opt() const {
+    return device_opt_;
   }
 
  public:
@@ -916,7 +904,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   DeviceType device_type() const {
     AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
-    return storage_.device_type();
+    AT_ASSERT(device_opt_.has_value());
+    // See NOTE [c10::optional operator usage in CUDA]
+    return (*device_opt_).type();
   }
 
   /**
@@ -924,7 +914,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * device).
    */
   Device GetDevice() const {
-    return storage_.device();
+    // See NOTE [c10::optional operator usage in CUDA]
+    return *device_opt_;
   }
 
   /**
@@ -1156,6 +1147,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
      */
     storage_ = src.storage();
     data_type_ = src.dtype();
+    device_opt_ = src.device_opt();
     storage_offset_ = src.storage_offset();
   }
 
@@ -1175,6 +1167,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       storage_.UniqueStorageShareExternalPointer(
           std::move(data_ptr), data_type, capacity);
       data_type_ = data_type;
+      device_opt_ = storage_.device();
       storage_offset_ = 0;
     } else {
       int64_t numel = capacity / data_type.itemsize();
@@ -1186,6 +1179,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           /*allocator=*/nullptr,
           /*resizable=*/false);
       data_type_ = data_type;
+      device_opt_ = storage_.device();
       storage_offset_ = 0;
     }
   }
@@ -1217,6 +1211,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         }
       }
       data_type_ = meta;
+      // NB: device is not changed
 
       // We can reuse the existing buffer if the current data does not have
       // a special destructor and the new data doesn't have a special
@@ -1252,6 +1247,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       }
       storage_.set_numel(numel_);
       AT_ASSERT(storage_offset_ == 0); // because we just reallocated
+      device_opt_ = storage_.device();
       return storage_.data();
     }
   }
@@ -1298,6 +1294,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     AT_CHECK(allow_tensor_metadata_change(), "set_storage is not allowed on Tensor created from .data or .detach()");
     storage_ = std::move(storage);
     data_type_ = storage_.dtype();
+    device_opt_ = storage_.device();
   }
 
 private:
@@ -1448,6 +1445,17 @@ protected:
   // agree with the type meta in storage
   caffe2::TypeMeta data_type_;
 
+  // NOTE [c10::optional operator usage in CUDA]
+  // Our optional definition doesn't compile in .cu file if `value()` or
+  // `operator->` are used.  Instead, we always use `operator*`.
+  // See https://github.com/pytorch/pytorch/issues/18496 for more info.
+  // If this is too burdensome to maintain, we can just
+  // manually implement this with an additional bool.
+
+  // INVARIANT: When storage is non-null, this Device must
+  // agree with the type meta in storage.
+  c10::optional<c10::Device> device_opt_;
+
   // You get to have eight byte-size fields here, before you
   // should pack this into a bitfield.
   TensorTypeId type_id_;
@@ -1526,10 +1534,11 @@ protected:
 //    storage offset
 //    numel
 //    data type pointer
+//    (optional) device
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 27,
+              sizeof(TensorImpl) == sizeof(int64_t) * 28,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 
