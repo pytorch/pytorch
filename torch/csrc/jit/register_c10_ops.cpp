@@ -22,22 +22,13 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
 
       Node* node = nullptr;
 
-      // unwrap tensor inputs from variable
-      for (auto iter = stack.end() - input_size; iter != stack.end(); ++iter) {
-        // TODO Remove the .defined() check once we don't have undefined tensors on the stack anymore (@wanchaol is working on this)
-        if (iter->isTensor() && iter->toTensor().defined()) {
-          *iter = unwrap(std::move(*iter).toTensor());
-        } else if (iter->isTensorList()) {
-          for (auto& item : iter->toTensorList()->elements()) {
-            item = unwrap(std::move(item));
-          }
-        }
-      }
-
+      // trace the input before unwrapping, otherwise we may lose
+      // the input information
       if (jit::tracer::isTracing()) {
         auto symbol = Symbol::fromQualString(op.schema().name());
         const auto& graph = tracer::getTracingState()->graph;
         node = graph->create(symbol, 0);
+        tracer::recordSourceLocation(node);
         const auto& args = op.schema().arguments();
         int i = 0;
         for (auto iter = stack.end() - input_size; iter != stack.end();
@@ -82,24 +73,29 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
                 reinterpret_cast<ListType*>(type.get())->getElementType();
             if (elem_type->isSubclass(TypeKind::TensorType)) {
               AT_ASSERT(iter->isTensorList());
-              tracer::addInputs(
-                  node,
-                  args[i].name().c_str(),
-                  iter->toTensorList()->elements());
+              at::ArrayRef<at::Tensor> tensor_list(iter->toTensorListRef());
+              tracer::addInputs(node, args[i].name().c_str(), tensor_list);
             } else if (elem_type->kind() == TypeKind::FloatType) {
               AT_ASSERT(iter->isDoubleList());
-              tracer::addInputs(
-                  node,
-                  args[i].name().c_str(),
-                  iter->toDoubleList()->elements());
+              // NB: now, tracer doesn't support tracing double list. We add special
+              // handling here, since in our case, we assume that all the doubles
+              // in the list are constants
+              const std::vector<double>& value = iter->toDoubleListRef();
+              std::vector<Value*> info(value.size());
+              for (int value_index = 0; value_index < value.size(); ++value_index) {
+                info[value_index] = graph->insertConstant(value[value_index]);
+                tracer::recordSourceLocation(info[value_index]->node());
+              }
+              node->addInput(
+                  graph->insertNode(graph->createList(jit::FloatType::get(), info))->output());
             } else if (elem_type->kind() == TypeKind::IntType) {
               AT_ASSERT(iter->isIntList());
               tracer::addInputs(
-                  node, args[i].name().c_str(), iter->toIntList()->elements());
+                  node, args[i].name().c_str(), iter->toIntListRef());
             } else if (elem_type->kind() == TypeKind::BoolType) {
               AT_ASSERT(iter->isBoolList());
               tracer::addInputs(
-                  node, args[i].name().c_str(), iter->toBoolList()->elements());
+                  node, args[i].name().c_str(), iter->toBoolListRef());
             } else {
               throw std::runtime_error(
                   "unsupported input list type: " + elem_type->str());
@@ -109,6 +105,18 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
           }
         }
         graph->insertNode(node);
+      }
+
+      // unwrap tensor inputs from variable
+      for (auto iter = stack.end() - input_size; iter != stack.end(); ++iter) {
+        // TODO Remove the .defined() check once we don't have undefined tensors on the stack anymore (@wanchaol is working on this)
+        if (iter->isTensor() && iter->toTensor().defined()) {
+          *iter = unwrap(std::move(*iter).toTensor());
+        } else if (iter->isTensorList()) {
+          for (auto& item : iter->toTensorList()->elements()) {
+            item = unwrap(std::move(item));
+          }
+        }
       }
 
       c10::Dispatcher::singleton().lookup(op, &stack).call(&stack);
