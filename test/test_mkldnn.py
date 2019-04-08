@@ -78,13 +78,13 @@ class TestMkldnn(TestCase):
 
         detach = root.detach()
         self.assertEquals((4, 5), detach.size())
-        self.assertFalse(detach.requires_grad())
-        self.assertTrue(root.requires_grad())
+        self.assertFalse(detach.requires_grad)
+        self.assertTrue(root.requires_grad)
 
         detach_ = root.detach_()
         self.assertEquals((4, 5), detach_.size())
-        self.assertFalse(detach_.requires_grad())
-        self.assertFalse(root_.requires_grad())
+        self.assertFalse(detach_.requires_grad)
+        self.assertFalse(root.requires_grad)
 
     def test_repr(self):
         self.assertTrue("layout=torch._mkldnn" in str(torch.randn((1, 2, 3, 4),
