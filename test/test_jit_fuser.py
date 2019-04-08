@@ -7,8 +7,7 @@ import unittest
 import torch
 from torch import Tensor
 
-from common_utils import IS_WINDOWS, \
-    skipIfRocm, IS_SANDCASTLE
+from common_utils import run_tests, IS_WINDOWS, skipIfRocm, IS_SANDCASTLE
 
 from test_jit import JitTestCase, enable_cpu_fuser, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
     backward_graph
@@ -876,3 +875,6 @@ class TestFuser(JitTestCase):
         ge = self.checkScript(scaleshift, inputs)
         self.assertGraphContainsExactly(
             ge.graph_for(*inputs), 'prim::FusionGroup', 0, consider_subgraphs=True)
+
+if __name__ == '__main__':
+    run_tests()
