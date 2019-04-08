@@ -497,12 +497,12 @@ Tensor all(const Tensor& self) {
   AT_CHECK(self.type().backend() == Backend::CPU ||
     self.type().backend() == Backend::CUDA, "all only supports CPU AND CUDA "
     "backend, got: ", toString(self.type().backend()));
-  AT_CHECK(self.scalar_type() == at::ScalarType::Byte,
+  AT_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
     "all only supports torch.uint8 dtype");
 
   Tensor result = at::empty({0}, self.options());
   auto iter = make_reduction(
-    "all", result, self, {}, false, at::ScalarType::Byte);
+    "all", result, self, {}, false, self.scalar_type());
   return _all(result, iter);
 }
 
@@ -515,14 +515,14 @@ Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU ||
     self.type().backend() == Backend::CUDA, "all only supports CPU AND CUDA "
     "backend, got: ", toString(self.type().backend()));
-  AT_CHECK(self.scalar_type() == at::ScalarType::Byte,
+  AT_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
     "all only supports torch.uint8 dtype");
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 1, dim, keepdim)) {
     return result;
   } else {
     auto iter = make_reduction(
-      "all", result, self, dim, keepdim, at::ScalarType::Byte);
+      "all", result, self, dim, keepdim, self.scalar_type());
     return _all(result, iter);
   }
 }
@@ -541,12 +541,12 @@ Tensor any(const Tensor& self) {
   AT_CHECK(self.type().backend() == Backend::CPU ||
     self.type().backend() == Backend::CUDA, "any only supports CPU AND CUDA "
     "backend, got: ", toString(self.type().backend()));
-  AT_CHECK(self.scalar_type() == at::ScalarType::Byte,
+  AT_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
     "any only supports torch.uint8 dtype");
 
   Tensor result = at::empty({0}, self.options());
   auto iter = make_reduction(
-    "any", result, self, {}, false, at::ScalarType::Byte);
+    "any", result, self, {}, false, self.scalar_type());
   return _any(result, iter);
 }
 
@@ -559,14 +559,14 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU ||
     self.type().backend() == Backend::CUDA, "any only supports CPU AND CUDA "
     "backend, got: ", toString(self.type().backend()));
-  AT_CHECK(self.scalar_type() == at::ScalarType::Byte,
+  AT_CHECK(self.scalar_type() == at::ScalarType::Byte || self.scalar_type() == at::ScalarType::Bool,
     "any only supports torch.uint8 dtype");
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {
     return result;
   } else {
     auto iter = make_reduction(
-      "any", result, self, dim, keepdim, at::ScalarType::Byte);
+      "any", result, self, dim, keepdim, self.scalar_type());
     return _any(result, iter);
   }
 }

@@ -1101,8 +1101,8 @@ class TestCuda(TestCase):
             actual = f(a.cuda()).cpu()
             expected = f(a).cpu()
             self.assertEqual(torch.isnan(actual), torch.isnan(expected), 'nans for {}'.format(name))
-            self.assertEqual(actual[~torch.isnan(actual)],
-                             expected[~torch.isnan(expected)], 'nans for {}'.format(name))
+            self.assertEqual(actual[~torch.isnan(actual).byte()],
+                             expected[~torch.isnan(expected).byte()], 'nans for {}'.format(name))
 
     @staticmethod
     def _test_broadcast_coalesced(self, tensors, buffer_size):

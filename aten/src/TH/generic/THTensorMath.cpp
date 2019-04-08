@@ -21,11 +21,96 @@
 // sense (rather than just having cut the file down the middle, which is
 // what I did when I split these up originally).
 
-#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
+void THTensor_(cbitand)(THTensor *r_, THTensor *t, THTensor *src)
+{
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
+  (void)r_;
+  (void)t;
+  (void)src;
+  return THError("cbitand is only supported for integer type tensors");
+#else
+  THTensor_(resizeAs)(r_, t);
+  int64_t r_Size = THTensor_(nElement)(r_);
+  int64_t srcSize = THTensor_(nElement)(src);
+  int r_Contig = THTensor_(isContiguous)(r_);
+  int tContig = THTensor_(isContiguous)(t);
+  int srcContig = THTensor_(isContiguous)(src);
+  int serial_path = 0;
+  if (srcSize == r_Size){
+    if (r_Contig && tContig && srcContig) {
+      scalar_t *tp = t->data<scalar_t>();
+      scalar_t *sp = src->data<scalar_t>();
+      scalar_t *rp = r_->data<scalar_t>();
+      int64_t i;
+      #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+      for (i=0; i<r_Size; i++) {
+        rp[i] = tp[i] & sp[i];
+      }
+    } else {
+#if _OPENMP
+      int inOMP = omp_in_parallel();
+      if (inOMP) {
+        serial_path = 1;
+      } else {
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data & *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+      }
+#else
+      serial_path = 1;
+#endif
+    }
+  } else {
+    serial_path = 1;
+  }
+  if (serial_path) {
+      TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data & *src_data;);
+  }
+#endif
+}
 
-// Should wrap if the value (a) has a different sign than the divisor (b), but is not 0.
-static inline bool modulo_wrap(scalar_t a, scalar_t b) {
-  return (a != 0) && (a < 0) != (b < 0);
+void THTensor_(cbitor)(THTensor *r_, THTensor *t, THTensor *src)
+{
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
+  (void)r_;
+  (void)t;
+  (void)src;
+  return THError("cbitor is only supported for integer type tensors");
+#else
+  THTensor_(resizeAs)(r_, t);
+  int64_t r_Size = THTensor_(nElement)(r_);
+  int64_t srcSize = THTensor_(nElement)(src);
+  int r_Contig = THTensor_(isContiguous)(r_);
+  int tContig = THTensor_(isContiguous)(t);
+  int srcContig = THTensor_(isContiguous)(src);
+  int serial_path = 0;
+  if (srcSize == r_Size){
+    if (r_Contig && tContig && srcContig) {
+      scalar_t *tp = t->data<scalar_t>();
+      scalar_t *sp = src->data<scalar_t>();
+      scalar_t *rp = r_->data<scalar_t>();
+      int64_t i;
+      #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+      for (i=0; i<r_Size; i++) {
+        rp[i] = tp[i] | sp[i];
+      }
+    } else {
+#if _OPENMP
+      int inOMP = omp_in_parallel();
+      if (inOMP) {
+        serial_path = 1;
+      } else {
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data | *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+      }
+#else
+      serial_path = 1;
+#endif
+    }
+  } else {
+    serial_path = 1;
+  }
+  if (serial_path) {
+      TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data | *src_data;);
+  }
+#endif
 }
 
 void THTensor_(bitor)(THTensor *r_, THTensor *t, scalar_t value)
@@ -104,6 +189,59 @@ void THTensor_(bitxor)(THTensor *r_, THTensor *t, scalar_t value)
     TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = *t_data ^ value;);
   }
 #endif
+}
+
+void THTensor_(cbitxor)(THTensor *r_, THTensor *t, THTensor *src)
+{
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
+  (void)r_;
+  (void)t;
+  (void)src;
+  return THError("cbitxor is only supported for integer type tensors");
+#else
+  THTensor_(resizeAs)(r_, t);
+  int64_t r_Size = THTensor_(nElement)(r_);
+  int64_t srcSize = THTensor_(nElement)(src);
+  int r_Contig = THTensor_(isContiguous)(r_);
+  int tContig = THTensor_(isContiguous)(t);
+  int srcContig = THTensor_(isContiguous)(src);
+  int serial_path = 0;
+  if (srcSize == r_Size){
+    if (r_Contig && tContig && srcContig) {
+      scalar_t *tp = t->data<scalar_t>();
+      scalar_t *sp = src->data<scalar_t>();
+      scalar_t *rp = r_->data<scalar_t>();
+      int64_t i;
+      #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+      for (i=0; i<r_Size; i++) {
+        rp[i] = tp[i] ^ sp[i];
+      }
+    } else {
+#if _OPENMP
+      int inOMP = omp_in_parallel();
+      if (inOMP) {
+        serial_path = 1;
+      } else {
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data ^ *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+      }
+#else
+      serial_path = 1;
+#endif
+    }
+  } else {
+    serial_path = 1;
+  }
+  if (serial_path) {
+      TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data ^ *src_data;);
+  }
+#endif
+}
+
+#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
+
+// Should wrap if the value (a) has a different sign than the divisor (b), but is not 0.
+static inline bool modulo_wrap(scalar_t a, scalar_t b) {
+  return (a != 0) && (a < 0) != (b < 0);
 }
 
 void THTensor_(clamp)(THTensor *r_, THTensor *t, scalar_t min_value, scalar_t max_value)
@@ -583,144 +721,6 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
 #endif
 
   }
-}
-
-void THTensor_(cbitand)(THTensor *r_, THTensor *t, THTensor *src)
-{
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
-  (void)r_;
-  (void)t;
-  (void)src;
-  return THError("cbitand is only supported for integer type tensors");
-#else
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int64_t srcSize = THTensor_(nElement)(src);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  int srcContig = THTensor_(isContiguous)(src);
-  int serial_path = 0;
-  if (srcSize == r_Size){
-    if (r_Contig && tContig && srcContig) {
-      scalar_t *tp = t->data<scalar_t>();
-      scalar_t *sp = src->data<scalar_t>();
-      scalar_t *rp = r_->data<scalar_t>();
-      int64_t i;
-      #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-      for (i=0; i<r_Size; i++) {
-        rp[i] = tp[i] & sp[i];
-      }
-    } else {
-#if _OPENMP
-      int inOMP = omp_in_parallel();
-      if (inOMP) {
-        serial_path = 1;
-      } else {
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data & *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-      }
-#else
-      serial_path = 1;
-#endif
-    }
-  } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
-      TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data & *src_data;);
-  }
-#endif
-}
-
-void THTensor_(cbitor)(THTensor *r_, THTensor *t, THTensor *src)
-{
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
-  (void)r_;
-  (void)t;
-  (void)src;
-  return THError("cbitor is only supported for integer type tensors");
-#else
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int64_t srcSize = THTensor_(nElement)(src);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  int srcContig = THTensor_(isContiguous)(src);
-  int serial_path = 0;
-  if (srcSize == r_Size){
-    if (r_Contig && tContig && srcContig) {
-      scalar_t *tp = t->data<scalar_t>();
-      scalar_t *sp = src->data<scalar_t>();
-      scalar_t *rp = r_->data<scalar_t>();
-      int64_t i;
-      #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-      for (i=0; i<r_Size; i++) {
-        rp[i] = tp[i] | sp[i];
-      }
-    } else {
-#if _OPENMP
-      int inOMP = omp_in_parallel();
-      if (inOMP) {
-        serial_path = 1;
-      } else {
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data | *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-      }
-#else
-      serial_path = 1;
-#endif
-    }
-  } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
-      TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data | *src_data;);
-  }
-#endif
-}
-
-void THTensor_(cbitxor)(THTensor *r_, THTensor *t, THTensor *src)
-{
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
-  (void)r_;
-  (void)t;
-  (void)src;
-  return THError("cbitxor is only supported for integer type tensors");
-#else
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int64_t srcSize = THTensor_(nElement)(src);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  int srcContig = THTensor_(isContiguous)(src);
-  int serial_path = 0;
-  if (srcSize == r_Size){
-    if (r_Contig && tContig && srcContig) {
-      scalar_t *tp = t->data<scalar_t>();
-      scalar_t *sp = src->data<scalar_t>();
-      scalar_t *rp = r_->data<scalar_t>();
-      int64_t i;
-      #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-      for (i=0; i<r_Size; i++) {
-        rp[i] = tp[i] ^ sp[i];
-      }
-    } else {
-#if _OPENMP
-      int inOMP = omp_in_parallel();
-      if (inOMP) {
-        serial_path = 1;
-      } else {
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data ^ *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-      }
-#else
-      serial_path = 1;
-#endif
-    }
-  } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
-      TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data ^ *src_data;);
-  }
-#endif
 }
 
 void THTensor_(tpow)(THTensor *r_, scalar_t value, THTensor *t)

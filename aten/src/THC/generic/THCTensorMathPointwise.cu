@@ -4,6 +4,90 @@
 
 #include <ATen/MemoryOverlap.h>
 
+
+void THCTensor_(cbitand)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
+{
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+  return THError("cbitand is only supported for integer type tensors");
+#else
+  THAssert(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
+  THArgCheck(THCTensor_(nElement)(state, src1) ==
+             THCTensor_(nElement)(state, src2), 3, "sizes do not match");
+
+  if (self_ == src1) {
+    // self /= src2
+    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src2, TensorBitAndOp<scalar_t>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src1);
+
+    // self = src1 / src2
+    if (!THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, self_, src1, src2, TensorBitAndOp<scalar_t>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+#endif
+}
+
+void THCTensor_(cbitor)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
+{
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+  return THError("cbitor is only supported for integer type tensors");
+#else
+  THAssert(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
+  THArgCheck(THCTensor_(nElement)(state, src1) ==
+             THCTensor_(nElement)(state, src2), 3, "sizes do not match");
+
+  if (self_ == src1) {
+    // self /= src2
+    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src2, TensorBitOrOp<scalar_t>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src1);
+
+    // self = src1 / src2
+    if (!THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, self_, src1, src2, TensorBitOrOp<scalar_t>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+#endif
+}
+
+void THCTensor_(cbitxor)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
+{
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+  return THError("cbitor is only supported for integer type tensors");
+#else
+  THAssert(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
+  THArgCheck(THCTensor_(nElement)(state, src1) ==
+             THCTensor_(nElement)(state, src2), 3, "sizes do not match");
+
+  if (self_ == src1) {
+    // self /= src2
+    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src2, TensorBitXorOp<scalar_t>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src1);
+
+    // self = src1 / src2
+    if (!THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, self_, src1, src2, TensorBitXorOp<scalar_t>())) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+#endif
+}
+
+#if !defined(THC_REAL_IS_BOOL)
+
 #define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_(NAME, CFUNC, REAL)             \
   struct Tensor_##NAME##_##REAL##_Op {                                  \
     __device__ __forceinline__ void operator()(scalar_t* out, scalar_t* in) const { \
@@ -552,84 +636,5 @@ void THCTensor_(addcdiv)(THCState *state, THCTensor *self_, THCTensor *t, scalar
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(cbitand)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
-{
-#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-  return THError("cbitand is only supported for integer type tensors");
-#else
-  THAssert(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
-  THArgCheck(THCTensor_(nElement)(state, src1) ==
-             THCTensor_(nElement)(state, src2), 3, "sizes do not match");
-
-  if (self_ == src1) {
-    // self /= src2
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src2, TensorBitAndOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src1);
-
-    // self = src1 / src2
-    if (!THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, self_, src1, src2, TensorBitAndOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
 #endif
-}
-
-void THCTensor_(cbitor)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
-{
-#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-  return THError("cbitor is only supported for integer type tensors");
-#else
-  THAssert(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
-  THArgCheck(THCTensor_(nElement)(state, src1) ==
-             THCTensor_(nElement)(state, src2), 3, "sizes do not match");
-
-  if (self_ == src1) {
-    // self /= src2
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src2, TensorBitOrOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src1);
-
-    // self = src1 / src2
-    if (!THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, self_, src1, src2, TensorBitOrOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-#endif
-}
-
-void THCTensor_(cbitxor)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
-{
-#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-  return THError("cbitor is only supported for integer type tensors");
-#else
-  THAssert(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
-  THArgCheck(THCTensor_(nElement)(state, src1) ==
-             THCTensor_(nElement)(state, src2), 3, "sizes do not match");
-
-  if (self_ == src1) {
-    // self /= src2
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src2, TensorBitXorOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src1);
-
-    // self = src1 / src2
-    if (!THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, self_, src1, src2, TensorBitXorOp<scalar_t>())) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-#endif
-}
 #endif

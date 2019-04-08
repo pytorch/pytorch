@@ -461,7 +461,7 @@ class TestCase(expecttest.TestCase):
                             # check that NaNs are in the same locations
                             nan_mask = torch.isnan(a)
                             self.assertTrue(torch.equal(nan_mask, torch.isnan(b)), message)
-                            diff[nan_mask] = 0
+                            diff[nan_mask.byte()] = 0
                             # inf check if allow_inf=True
                             if allow_inf:
                                 inf_mask = torch.isinf(a)

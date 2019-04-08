@@ -3839,11 +3839,11 @@ class _TestTorchMixin(object):
                     if fn == "lerp":
                         return myfn(t1, 0.5)
                     elif fn == "masked_select":
-                        return myfn(t1 < 0)
+                        return myfn((t1 < 0).byte())
                     elif fn == "masked_scatter":
-                        return myfn(t1 < 0.5, full1d)
+                        return myfn((t1 < 0.5).byte(), full1d)
                     elif fn == "masked_fill":
-                        return myfn(t1 < 0.5, 1.0)
+                        return myfn((t1 < 0.5).byte(), 1.0)
                     elif fn in fns_3_args:
                         return myfn(1, t1, t2)
                     else:
@@ -3869,11 +3869,11 @@ class _TestTorchMixin(object):
                     if fn == "lerp":
                         return fntorch(t1, t2, 0.5)
                     elif fn == "masked_select":
-                        return fntorch(t1, t2 < 0)
+                        return fntorch(t1, (t2 < 0).byte())
                     elif fn == "masked_scatter":
-                        return fntorch(t1, t2 < 0.5, full1d)
+                        return fntorch(t1, (t2 < 0.5).byte(), full1d)
                     elif fn == "masked_fill":
-                        return fntorch(t1, t2 < 0.5, 1.0)
+                        return fntorch(t1, (t2 < 0.5).byte(), 1.0)
                     elif fn in fns_3_args:
                         return fntorch(t1, 1.0, t2, t3)
                     else:
@@ -3902,9 +3902,9 @@ class _TestTorchMixin(object):
                 if fn == "lerp":
                     return t0_fn(t1, 0.5)
                 elif fn == "masked_scatter":
-                    return t0_fn(t1 < 0.5, full1d)
+                    return t0_fn((t1 < 0.5).byte(), full1d)
                 elif fn == "masked_fill":
-                    return t0_fn(t1 < 0.5, 1.0)
+                    return t0_fn((t1 < 0.5).byte(), 1.0)
                 elif fn == "map":
                     return t0_fn(t1, lambda x, y: x + y)
                 elif fn == "map2":
@@ -7634,8 +7634,8 @@ class _TestTorchMixin(object):
         # test non-contiguous case
         dst = torch.randn(num_dest, num_dest, num_dest).permute((2, 0, 1))
         dst2 = dst.clone()
-        dst.masked_fill_(dst > 0, val)
-        dst2.masked_fill_(dst2 > 0, val)
+        dst.masked_fill_((dst > 0).byte(), val)
+        dst2.masked_fill_((dst2 > 0).byte(), val)
         self.assertEqual(dst, dst2, 0)
 
         # test bool tensor case
@@ -8938,7 +8938,7 @@ class _TestTorchMixin(object):
             self.assertEqual(x.bernoulli().tolist(), trivial_p)
 
         def isBinary(t):
-            return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum().item() == 0
+            return (torch.ne(t, 0) == torch.ne(t, 1)).all().item() == False
 
         p = torch.rand(5, 5, dtype=p_dtype, device=device)
         self.assertTrue(isBinary(p.bernoulli()))
@@ -10516,8 +10516,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(x[idx] >= y[idx], ge[idx] == 1)
 
     def test_bitwise_ops(self):
-        x = torch.randn(5, 5).gt(0)
-        y = torch.randn(5, 5).gt(0)
+        x = torch.randn(5, 5).gt(0).byte()
+        y = torch.randn(5, 5).gt(0).byte()
 
         and_result = x & y
         for idx in iter_indices(x):

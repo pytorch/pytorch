@@ -254,7 +254,7 @@ static Tensor dispatch_invert(const Tensor & self) {
 static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  if (self_.scalar_type() != at::kByte) {
+  if (self_.scalar_type() != at::kByte && self_.scalar_type() != at::kBool) {
     throw TypeError("~ (operator.invert) is only implemented on byte tensors");
   }
   return THPVariable_Wrap(dispatch_invert(self_));

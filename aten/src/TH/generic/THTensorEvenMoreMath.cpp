@@ -85,6 +85,69 @@ accreal THTensor_(sumall)(THTensor *tensor)
     TH_TENSOR_APPLY(scalar_t, tensor, sum += *tensor_data;);
   }
   return sum;
+
+void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
+{
+  ptrdiff_t numel = THByteTensor_sumall(mask);
+  scalar_t *tensor_data;
+
+#ifdef DEBUG
+  THAssert(numel <= LONG_MAX);
+#endif
+  THTensor_(resize1d)(tensor,numel);
+  tensor_data = tensor->data<scalar_t>();
+  TH_TENSOR_APPLY2(scalar_t, src, unsigned char, mask,
+                   if (*mask_data > 1)
+                   {
+                     THFree(mask_counter);
+                     THFree(src_counter);
+                     THError("Mask tensor can take 0 and 1 values only");
+                   }
+                   else if (*mask_data == 1)
+                   {
+                     *tensor_data = *src_data;
+                     tensor_data++;
+                   });
+}
+
+void THTensor_(bitand)(THTensor *r_, THTensor *t, scalar_t value)
+{
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
+  (void)r_;
+  (void)t;
+  (void)value;
+  return THError("bitand is only supported for integer type tensors");
+#else
+  THTensor_(resizeAs)(r_, t);
+  int64_t r_Size = THTensor_(nElement)(r_);
+  int r_Contig = THTensor_(isContiguous)(r_);
+  int serial_path = 0;
+  int tContig = THTensor_(isContiguous)(t);
+  if (r_Contig && tContig) {
+    scalar_t *tp = t->data<scalar_t>();
+    scalar_t *rp = r_->data<scalar_t>();
+    int64_t i;
+    #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD * 100) private(i)
+    for (i=0; i<r_Size; i++) {
+      rp[i] = tp[i] & value;
+    }
+  } else {
+#ifdef _OPENMP
+    int inOMP = omp_in_parallel();
+    if (inOMP) {
+      serial_path = 1;
+    } else {
+      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data & value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+    }
+#else
+    serial_path = 1;
+#endif
+  }
+  if (serial_path) {
+    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = *t_data & value;);
+  }
+#endif
+
 }
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
@@ -202,29 +265,6 @@ void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* s
   c10::raw::intrusive_ptr::decref(srct);
 }
 
-void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
-{
-  ptrdiff_t numel = THByteTensor_sumall(mask);
-  scalar_t *tensor_data;
-
-#ifdef DEBUG
-  THAssert(numel <= LONG_MAX);
-#endif
-  THTensor_(resize1d)(tensor,numel);
-  tensor_data = tensor->data<scalar_t>();
-  TH_TENSOR_APPLY2(scalar_t, src, unsigned char, mask,
-                   if (*mask_data > 1)
-                   {
-                     THFree(mask_counter);
-                     THFree(src_counter);
-                     THError("Mask tensor can take 0 and 1 values only");
-                   }
-                   else if (*mask_data == 1)
-                   {
-                     *tensor_data = *src_data;
-                     tensor_data++;
-                   });
-}
 
 void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor *src, THBoolTensor *mask)
 {
@@ -988,45 +1028,6 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, scalar_t value)
                                           if (modulo_wrap(*r__data, value)) *r__data += value;);
 #endif
   }
-}
-
-void THTensor_(bitand)(THTensor *r_, THTensor *t, scalar_t value)
-{
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
-  (void)r_;
-  (void)t;
-  (void)value;
-  return THError("bitand is only supported for integer type tensors");
-#else
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int serial_path = 0;
-  int tContig = THTensor_(isContiguous)(t);
-  if (r_Contig && tContig) {
-    scalar_t *tp = t->data<scalar_t>();
-    scalar_t *rp = r_->data<scalar_t>();
-    int64_t i;
-    #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD * 100) private(i)
-    for (i=0; i<r_Size; i++) {
-      rp[i] = tp[i] & value;
-    }
-  } else {
-#ifdef _OPENMP
-    int inOMP = omp_in_parallel();
-    if (inOMP) {
-      serial_path = 1;
-    } else {
-      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data & value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-    }
-#else
-    serial_path = 1;
-#endif
-  }
-  if (serial_path) {
-    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = *t_data & value;);
-  }
-#endif
 }
 
 #endif

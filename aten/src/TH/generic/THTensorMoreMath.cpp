@@ -6,10 +6,10 @@
 #include <TH/THGenerator.hpp>
 
 #define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)                                \
-  void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, scalar_t value) \
+  void THTensor_(NAME##Value)(THBoolTensor *r_, THTensor* t, scalar_t value) \
   { \
-    THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);                \
-    TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t,                        \
+    THBoolTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);                \
+    TH_TENSOR_APPLY2(bool, r_, scalar_t, t,                        \
                      *r__data = (*t_data OP value) ? 1 : 0;); \
   }                                                                        \
   void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, scalar_t value)        \
@@ -18,10 +18,10 @@
     TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,                                        \
                      *r__data = (*t_data OP value) ? 1 : 0;); \
   }                                                                        \
-  void THTensor_(NAME##Tensor)(THByteTensor *r_, THTensor *ta, THTensor *tb) \
+  void THTensor_(NAME##Tensor)(THBoolTensor *r_, THTensor *ta, THTensor *tb) \
   {                                        \
-    THByteTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);                \
-    TH_TENSOR_APPLY3(unsigned char, r_, scalar_t, ta, scalar_t, tb,                \
+    THBoolTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);                \
+    TH_TENSOR_APPLY3(bool, r_, scalar_t, ta, scalar_t, tb,                \
                      *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
   }                                                                        \
   void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb) \
@@ -37,6 +37,31 @@ TENSOR_IMPLEMENT_LOGICAL(le,<=)
 TENSOR_IMPLEMENT_LOGICAL(ge,>=)
 TENSOR_IMPLEMENT_LOGICAL(eq,==)
 TENSOR_IMPLEMENT_LOGICAL(ne,!=)
+
+int THTensor_(equal)(THTensor *ta, THTensor* tb)
+{
+  int equal = 1;
+  if(!THTensor_(isSameSizeAs)(ta, tb))
+    return 0;
+
+  if (THTensor_(isContiguous)(ta) && THTensor_(isContiguous)(tb)) {
+    scalar_t *tap = ta->data<scalar_t>();
+    scalar_t *tbp = tb->data<scalar_t>();
+    ptrdiff_t sz = THTensor_(nElement)(ta);
+    ptrdiff_t i;
+    for (i=0; i<sz; ++i){
+      if(tap[i] != tbp[i]) return 0;
+    }
+  } else {
+    // Short-circuit the apply function on inequality
+    TH_TENSOR_APPLY2(scalar_t, ta, scalar_t, tb,
+                     if (equal && *ta_data != *tb_data) {
+                        equal = 0;
+                        TH_TENSOR_APPLY_hasFinished = 1; break;
+                     })
+  }
+  return equal;
+}
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
@@ -1007,31 +1032,6 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
     for(c = 0; c < sz; c++)
       r__data[r*r__stride_0+c*r__stride_1] = 0;
   }
-}
-
-int THTensor_(equal)(THTensor *ta, THTensor* tb)
-{
-  int equal = 1;
-  if(!THTensor_(isSameSizeAs)(ta, tb))
-    return 0;
-
-  if (THTensor_(isContiguous)(ta) && THTensor_(isContiguous)(tb)) {
-    scalar_t *tap = ta->data<scalar_t>();
-    scalar_t *tbp = tb->data<scalar_t>();
-    ptrdiff_t sz = THTensor_(nElement)(ta);
-    ptrdiff_t i;
-    for (i=0; i<sz; ++i){
-      if(tap[i] != tbp[i]) return 0;
-    }
-  } else {
-    // Short-circuit the apply function on inequality
-    TH_TENSOR_APPLY2(scalar_t, ta, scalar_t, tb,
-                     if (equal && *ta_data != *tb_data) {
-                        equal = 0;
-                        TH_TENSOR_APPLY_hasFinished = 1; break;
-                     })
-  }
-  return equal;
 }
 
 #ifdef _OPENMP
