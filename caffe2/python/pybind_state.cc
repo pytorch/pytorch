@@ -32,6 +32,14 @@
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/variable.h"
 
+// Because of CMake setup, we can't depend on script module here just yet -
+// it pulls in generated files from a different directory and it
+// probabilistically breaks the build.
+// TODO: enable if once shared libraries are unified in CMake
+#ifdef FBCODE_CAFFE2
+#include "torch/script.h"
+#endif
+
 namespace caffe2 {
 namespace python {
 
@@ -77,6 +85,19 @@ class StringFetcher : public BlobFetcherBase {
   }
 };
 REGISTER_BLOB_FETCHER((TypeMeta::Id<string>()), StringFetcher);
+
+#ifdef FBCODE_CAFFE2
+class ScriptModuleFetcher : public BlobFetcherBase {
+ public:
+  pybind11::object Fetch(const Blob& blob) override {
+    return py::cast(blob.Get<std::shared_ptr<torch::jit::script::Module>>());
+  }
+};
+
+REGISTER_BLOB_FETCHER(
+    (TypeMeta::Id<std::shared_ptr<torch::jit::script::Module>>()),
+    caffe2::python::ScriptModuleFetcher);
+#endif
 
 static_assert(
     sizeof(int) == sizeof(int32_t),
@@ -193,6 +214,45 @@ py::object fetchBlob(Workspace* ws, const std::string& name) {
        << blob.TypeName() << ".";
     return py::bytes(ss.str());
   }
+}
+
+// This function can only return true, but keeping it for backward compatibility
+bool feedBlob(
+    Blob* blob,
+    const py::object& arg,
+    const py::object device_option) {
+  DeviceOption option;
+  if (!device_option.is(py::none())) {
+    // If we have a device option passed in, read it.
+    CAFFE_ENFORCE(ParseProtoFromLargeString(
+        py::bytes(device_option).cast<std::string>(), &option));
+  }
+#ifdef USE_NUMPY
+  if (PyArray_Check(arg.ptr())) { // numpy array
+    PyArrayObject* array = reinterpret_cast<PyArrayObject*>(arg.ptr());
+    auto feeder = CreateFeeder(option.device_type());
+    CAFFE_ENFORCE(feeder, "Unknown device type encountered in FeedBlob.");
+    feeder->Feed(option, array, blob, true); /* default to inplace feed */
+    return true;
+  }
+#else
+  CAFFE_THROW("Caffe2 compiled without NumPy support.");
+#endif // USE_NUMPY
+  if (PyBytes_Check(arg.ptr()) || PyUnicode_Check(arg.ptr())) {
+    *blob->GetMutable<std::string>() = arg.cast<std::string>();
+    return true;
+  }
+#ifdef FBCODE_CAFFE2
+  if (py::isinstance<torch::jit::script::Module>(arg)) {
+    *blob->GetMutable<std::shared_ptr<torch::jit::script::Module>>() =
+        arg.cast<std::shared_ptr<torch::jit::script::Module>>();
+    return true;
+  }
+#endif
+  CAFFE_THROW(
+      "Unexpected type of argument - only numpy array or string are "
+      "supported for feeding");
+  return false;
 }
 } // namespace python_detail
 
@@ -352,36 +412,7 @@ void addObjectMethods(py::module& m) {
           py::return_value_policy::reference_internal)
       .def(
           "_feed",
-          [](Blob* blob,
-             const py::object& arg,
-             const py::object device_option) {
-            DeviceOption option;
-            if (!device_option.is(py::none())) {
-              // If we have a device option passed in, read it.
-              CAFFE_ENFORCE(ParseProtoFromLargeString(
-                  py::bytes(device_option).cast<std::string>(), &option));
-            }
-#ifdef USE_NUMPY
-            if (PyArray_Check(arg.ptr())) { // numpy array
-              PyArrayObject* array
-                = reinterpret_cast<PyArrayObject*>(arg.ptr());
-              auto feeder = CreateFeeder(option.device_type());
-              CAFFE_ENFORCE(
-                  feeder, "Unknown device type encountered in FeedBlob.");
-              feeder->Feed(option, array, blob, true); /* default to inplace feed */
-              return true;
-            }
-#else
-            CAFFE_THROW("Caffe2 compiled without NumPy support.");
-#endif // USE_NUMPY
-            if (PyBytes_Check(arg.ptr()) || PyUnicode_Check(arg.ptr())) {
-              *blob->GetMutable<std::string>() = arg.cast<std::string>();
-              return true;
-            }
-            CAFFE_THROW(
-                "Unexpected type of argument - only numpy array or string are "
-                "supported for feeding");
-          },
+          &python_detail::feedBlob,
           "Feed an input array or string, with the (optional) DeviceOption",
           py::arg("arg"),
           py::arg("device_option") = py::none())
@@ -1461,35 +1492,8 @@ void addGlobalMethods(py::module& m) {
   m.def(
       "feed_blob",
       [](const std::string& name, py::object arg, py::object device_option) {
-        DeviceOption option;
-        if (!device_option.is(py::none())) {
-          // If we have a device option passed in, read it.
-          CAFFE_ENFORCE(ParseProtoFromLargeString(
-              py::bytes(device_option).cast<std::string>(), &option));
-        }
         auto* blob = gWorkspace->CreateBlob(name);
-#ifdef USE_NUMPY
-        if (PyArray_Check(arg.ptr())) { // numpy array
-          PyArrayObject* array = reinterpret_cast<PyArrayObject*>(arg.ptr());
-          auto feeder = CreateFeeder(option.device_type());
-          CAFFE_ENFORCE(
-              feeder,
-              "Unknown device type encountered in FeedBlob: ",
-              option.device_type());
-          feeder->Feed(option, array, blob);
-          return true;
-        }
-#else
-        CAFFE_THROW("Caffe2 was compiled without NumPy support.");
-#endif // USE_NUMPY
-        if (PyBytes_Check(arg.ptr()) || PyUnicode_Check(arg.ptr())) { // string
-          *blob->GetMutable<std::string>() = arg.cast<std::string>();
-          return true;
-        }
-        CAFFE_THROW(
-            "Unexpected type of argument - only numpy array or string are "
-            "supported for feeding");
-        return false;
+        return python_detail::feedBlob(blob, arg, device_option);
       },
       "",
       py::arg("name"),
