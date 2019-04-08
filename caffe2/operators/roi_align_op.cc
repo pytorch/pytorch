@@ -134,7 +134,11 @@ void ROIAlignForward(
   int n_rois = nthreads / channels / pooled_width / pooled_height;
 
 #ifdef _OPENMP
+#if (_OPENMP >= 201307)
+#pragma omp parallel for simd
+#else
 #pragma omp parallel for
+#endif
 #endif
   for (int n = 0; n < n_rois; n++) {
     int index_n = n * channels * pooled_width * pooled_height;
