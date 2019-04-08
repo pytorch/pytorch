@@ -301,12 +301,23 @@ def get_backend(group=group.WORLD):
 
 
 def init_process_group(backend,
-                       init_method="env://",
+                       init_method=None,
                        timeout=_default_pg_timeout,
-                       **kwargs):
+                       world_size=-1,
+                       rank=-1,
+                       store=None,
+                       group_name=''):
     """
     Initializes the default distributed process group, and this will also
-    initialize the distributed package
+    initialize the distributed package.
+
+    There are 2 main ways to initialize a process group:
+        1. Specify `store`, `rank`, and `world_size` explicitly.
+        2. Specify `init_method` (a URL string) which indicates where/how
+           to discover peers. Optionally specify `rank` and `world_size`,
+           or encode all required parameters in the URL and omit them.
+   If neither is specified, `init_method` is assumed to be "env://".
+
 
     Arguments:
         backend (str or Backend): The backend to use. Depending on
@@ -318,12 +329,15 @@ def init_process_group(backend,
             must have exclusive access to every GPU it uses, as sharing GPUs
             between processes can result in deadlocks.
         init_method (str, optional): URL specifying how to initialize the
-                                     process group.
+                                     process group. Default is "env://" if
+                                     no `init_method` or `store` is specified.
+                                     Mutually exclusive with `store`.
         world_size (int, optional): Number of processes participating in
                                     the job.
         rank (int, optional): Rank of the current process.
-        store(Store, optional): Rendevous key/value store as an alternative
-                                to other init methods.
+        store(Store, optional): Key/value store accessible to all workers, used
+                                to exchange connection/address information.
+                                Mutually exclusive with `init_method`.
         timeout (timedelta, optional): Timeout for operations executed against
             the process group. Default value equals 30 minutes.
             This is only applicable for the ``gloo`` backend.
@@ -347,15 +361,14 @@ def init_process_group(backend,
         raise RuntimeError("trying to initialize the default process group "
                            "twice!")
 
-    world_size = kwargs.pop('world_size', -1)
-    group_name = kwargs.pop('group_name', '')
-    rank = kwargs.pop('rank', -1)
-    store = kwargs.pop('store', None)
+    assert (store is None) or (init_method is None), \
+        "Either `init_method or `store` must be specified, not both."
+
     if store is not None:
-        assert world_size > 0, 'world_size needs to be positive'
-        assert rank >= 0, 'rank needs to be non-negative'
-    assert len(kwargs) == 0, \
-        "got unexpected keyword arguments: %s" % ",".join(kwargs.keys())
+        assert world_size > 0, '`world_size` needs to be positive if using `store`'
+        assert rank >= 0, '`rank` needs to be non-negative if using `store`'
+    elif init_method is None:
+        init_method = "env://"
 
     backend = Backend(backend)
 
@@ -368,16 +381,17 @@ def init_process_group(backend,
         _pg_names[_default_pg] = group_name
     else:
         # backward compatible API
-        url = init_method
-        if world_size != -1 and rank != -1:
-            url += "?rank={}&world_size={}".format(rank, world_size)
-        elif rank != -1:
-            url += "?rank={}".format(rank)
-        elif world_size != -1:
-            url += "?world_size={}".format(world_size)
-
         if store is None:
+            url = init_method
+            if world_size != -1 and rank != -1:
+                url += "?rank={}&world_size={}".format(rank, world_size)
+            elif rank != -1:
+                url += "?rank={}".format(rank)
+            elif world_size != -1:
+                url += "?world_size={}".format(world_size)
+
             store, rank, world_size = next(rendezvous(url))
+
         if backend == Backend.GLOO:
             _default_pg = ProcessGroupGloo(
                 store,
