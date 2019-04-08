@@ -9,7 +9,6 @@ smoke_linux_test: &smoke_linux_test
   steps:
   - run:
       <<: *setup_linux_system_environment
-  - run:
   - checkout
   - run:
       <<: *setup_ci_environment
