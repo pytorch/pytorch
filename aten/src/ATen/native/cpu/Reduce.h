@@ -97,10 +97,10 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
     };
     acc_t total_acc = init;
     auto numel = sub_iter.numel();
-    if (numel < at::internal::GRAIN_SIZE || at::get_max_threads() == 1 || at::in_parallel_region()) {
+    if (numel < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 || at::in_parallel_region()) {
       total_acc = reduction_body(total_acc, 0, numel);
     } else {
-      int max_threads = at::get_max_threads();
+      int max_threads = at::get_num_threads();
       AT_ASSERT(max_threads > 0);
       static_assert(
         !std::is_same<acc_t, bool>::value,

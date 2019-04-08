@@ -100,10 +100,6 @@ TH_API void THFree(void *ptr);
 TH_API void THSetGCHandler( void (*torchGCHandlerFunction)(void *data), void *data );
 // this hook should only be called by custom allocator functions
 TH_API void THHeapUpdate(ptrdiff_t size);
-TH_API void THSetNumThreads(int num_threads);
-TH_API int THGetNumThreads(void);
-TH_API int THGetNumCores(void);
-TH_API void THInferNumThreads(void);
 
 #define THError(...) _THError(__FILE__, __LINE__, __VA_ARGS__)
 

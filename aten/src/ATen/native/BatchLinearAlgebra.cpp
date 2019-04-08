@@ -12,8 +12,9 @@
 
 // First the required LAPACK implementations are registered here.
 // A comment above the registered LAPACK routine suggest which batched
-// linear algebra function uses that routine
-#ifdef USE_LAPACK
+// linear algebra function uses that routine;
+// in case of TH_BLAS_MKL, mkl.h declares routines below
+#if defined(USE_LAPACK) && !defined(TH_BLAS_MKL)
 
 // gesv
 extern "C" void dgesv_(int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
@@ -73,7 +74,7 @@ void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info) {
 template<class scalar_t>
 void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info) {
   AT_ERROR("triangular_solve only takes float or double Tensors");
-} 
+}
 
 #ifdef USE_LAPACK
 template<> void lapackSolve<double>(int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
