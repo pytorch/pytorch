@@ -280,6 +280,7 @@ Other Operations
 .. autofunction:: histc
 .. autofunction:: meshgrid
 .. autofunction:: renorm
+.. autofunction:: repeat_interleave
 .. autofunction:: roll
 .. autofunction:: tensordot
 .. autofunction:: trace
@@ -315,6 +316,8 @@ BLAS and LAPACK Operations
 .. autofunction:: det
 .. autofunction:: logdet
 .. autofunction:: slogdet
+.. autofunction:: lu
+.. autofunction:: lu_unpack
 .. autofunction:: matmul
 .. autofunction:: matrix_power
 .. autofunction:: matrix_rank

@@ -480,6 +480,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries.append('cudart')
     if IS_WINDOWS:
         libraries.append('c10')
+        libraries.append('c10_cuda')
         libraries.append('caffe2')
         libraries.append('torch')
         libraries.append('torch_python')
@@ -1026,6 +1027,7 @@ def _write_ninja_file(path,
         cuda_flags = common_cflags + COMMON_NVCC_FLAGS
         if IS_WINDOWS:
             cuda_flags = _nt_quote_args(cuda_flags)
+            cuda_flags += _nt_quote_args(extra_cuda_cflags)
         else:
             cuda_flags += ['--compiler-options', "'-fPIC'"]
             cuda_flags += extra_cuda_cflags

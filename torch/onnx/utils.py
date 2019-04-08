@@ -13,10 +13,7 @@ from torch._six import container_abcs
 import contextlib
 import numbers
 import warnings
-import functools
-import types
 from torch._six import string_classes
-from torch.autograd import Function, function
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
 from torch._C import ListType
@@ -255,10 +252,19 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
             output.inferTypeFrom(tensor)
 
     _set_input_and_output_names(graph, input_names, output_names)
+
+    # make sure that the param dict and the graph match each other
+    flatten_args, _ = torch._C._jit_flatten(args)
+    assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
+
+    input_and_param_names = [val.uniqueName() for val in graph.inputs()]
+    param_names = input_and_param_names[len(input_and_param_names) - len(params):]
+    params_dict = dict(zip(param_names, params))
+
     if verbose:
         print(graph)
 
-    return graph, params, torch_out
+    return graph, params_dict, torch_out
 
 
 def export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
@@ -306,18 +312,18 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     if opset_version is None:
         opset_version = _default_onnx_opset_version
     _set_opset_version(opset_version)
-    graph, params, torch_out = _model_to_graph(model, args, f, verbose,
-                                               training, input_names,
-                                               output_names, operator_export_type,
-                                               example_outputs, propagate,
-                                               _retain_param_name)
+    graph, params_dict, torch_out = _model_to_graph(model, args, f, verbose,
+                                                    training, input_names,
+                                                    output_names, operator_export_type,
+                                                    example_outputs, propagate,
+                                                    _retain_param_name)
 
     # TODO: Don't allocate a in-memory string for the protobuf
     defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
     if export_params:
-        proto, export_map = graph._export_onnx(params, opset_version, defer_weight_export, operator_export_type)
+        proto, export_map = graph._export_onnx(params_dict, opset_version, defer_weight_export, operator_export_type)
     else:
-        proto, export_map = graph._export_onnx([], opset_version, False, operator_export_type)
+        proto, export_map = graph._export_onnx({}, opset_version, False, operator_export_type)
 
     if export_type == ExportTypes.PROTOBUF_FILE:
         assert(len(export_map) == 0)
@@ -491,7 +497,7 @@ def _graph_op(g, opname, *raw_args, **kwargs):
 # In abstract, it would be better for us to export inplace annotations,
 # than to not export them, since it is useful information that can
 # help the target of an ONNX export export more efficiently.  However,
-# ONNX doesn't currently formalize inplace.  Fortunately, it's sound to drop
+# ONNX doesn't currently formalize inplace. Fortunately, it's sound to drop
 # inplace annotations, but we are losing information this way.
 
 

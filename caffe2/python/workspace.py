@@ -83,6 +83,11 @@ GetNumNUMANodes = C.get_num_numa_nodes
 GetBlobNUMANode = C.get_blob_numa_node
 GetBlobSizeBytes = C.get_blob_size_bytes
 
+
+def FillRandomNetworkInputs(net, input_dims, input_types):
+    C.fill_random_network_inputs(net.Proto().SerializeToString(), input_dims, input_types)
+
+
 def _GetFreeFlaskPort():
     """Get a free flask port."""
     # We will prefer to use 5000. If not, we will then pick a random port.
@@ -185,12 +190,20 @@ def RunOperatorOnce(operator):
     return C.run_operator_once(StringifyProto(operator))
 
 
+def RunOperatorMultiple(operator, num_runs):
+    return C.run_operator_multiple(StringifyProto(operator), num_runs)
+
+
 def RunOperatorsOnce(operators):
     for op in operators:
         success = RunOperatorOnce(op)
         if not success:
             return False
     return True
+
+
+def ClearGlobalNetObserver():
+    return C.clear_global_net_observer()
 
 
 def CallWithExceptionIntercept(func, op_id_fetcher, net_name, *args, **kwargs):

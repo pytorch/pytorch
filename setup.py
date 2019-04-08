@@ -142,7 +142,7 @@
 #     we will search for libraries in these paths
 
 from __future__ import print_function
-from setuptools import setup, Extension, distutils, Command, find_packages
+from setuptools import setup, Extension, distutils, find_packages
 from distutils import core, dir_util
 from distutils.core import Distribution
 from distutils.errors import DistutilsArgError
@@ -151,7 +151,6 @@ import setuptools.command.install
 import distutils.command.clean
 import distutils.sysconfig
 import filecmp
-import platform
 import subprocess
 import shutil
 import sys
@@ -374,6 +373,12 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
             target_lib = os.path.join(
                 build_lib, 'torch', 'lib', '_C.lib').replace('\\', '/')
+
+            # Create "torch/lib" directory if not exists.
+            # (It is not created yet in "develop" mode.)
+            target_dir = os.path.dirname(target_lib)
+            if not os.path.exists(target_dir):
+                os.makedirs(target_dir)
 
             self.copy_file(export_lib, target_lib)
 
@@ -723,9 +728,14 @@ if __name__ == '__main__':
         entry_points=entry_points,
         package_data={
             'torch': [
+                'py.typed',
                 'bin/*',
                 'test/*',
                 '__init__.pyi',
+                'cuda/*.pyi',
+                'optim/*.pyi',
+                'autograd/*.pyi',
+                'utils/data/*.pyi',
                 'lib/*.so*',
                 'lib/*.dylib*',
                 'lib/*.dll',
