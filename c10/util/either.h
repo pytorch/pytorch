@@ -16,18 +16,18 @@ namespace c10 {
   class C10_API either final {
   public:
       template<class Head, class... Tail, c10::guts::enable_if_t<std::is_constructible<Left, Head, Tail...>::value && !std::is_constructible<Right, Head, Tail...>::value>* = nullptr>
-      either(Head&& construct_left_head_arg, Tail&&... construct_left_tail_args) noexcept(noexcept(std::declval<either<Left, Right>>()._construct_left(std::forward<Head>(construct_left_head_arg), std::forward<Tail>(construct_left_tail_args)...)))
+      either(Head&& construct_left_head_arg, Tail&&... construct_left_tail_args)
               : _side(Side::left) {
           _construct_left(std::forward<Head>(construct_left_head_arg), std::forward<Tail>(construct_left_tail_args)...);
       }
 
       template<class Head, class... Tail, c10::guts::enable_if_t<!std::is_constructible<Left, Head, Tail...>::value && std::is_constructible<Right, Head, Tail...>::value>* = nullptr>
-      either(Head&& construct_right_head_arg, Tail&&... construct_right_tail_args) noexcept(noexcept(std::declval<either<Left, Right>>()._construct_right(std::forward<Head>(construct_right_head_arg), std::forward<Tail>(construct_right_tail_args)...)))
+      either(Head&& construct_right_head_arg, Tail&&... construct_right_tail_args)
           : _side(Side::right) {
         _construct_right(std::forward<Head>(construct_right_head_arg), std::forward<Tail>(construct_right_tail_args)...);
       }
 
-      either(const either<Left, Right> &rhs) noexcept(noexcept(std::declval<either<Left, Right>>()._construct_left(rhs._left)) && noexcept(std::declval<either<Left, Right>>()._construct_right(rhs._right)))
+      either(const either<Left, Right> &rhs)
               : _side(rhs._side) {
           if(_side == Side::left) {
               _construct_left(rhs._left);  // NOLINT(cppcoreguidelines-pro-type-union-access)
@@ -36,7 +36,7 @@ namespace c10 {
           }
       }
 
-      either(either<Left, Right> &&rhs) noexcept(noexcept(std::declval<either<Left, Right>>()._construct_left(std::move(rhs._left))) && noexcept(std::declval<either<Left, Right>>()._construct_right(std::move(rhs._right))))
+      either(either<Left, Right> &&rhs) noexcept
               : _side(rhs._side) {
           if(_side == Side::left) {
               _construct_left(std::move(rhs._left));  // NOLINT(cppcoreguidelines-pro-type-union-access)
@@ -49,7 +49,7 @@ namespace c10 {
           _destruct();
       }
 
-      either<Left, Right> &operator=(const either<Left, Right> &rhs) noexcept(noexcept(std::declval<either<Left, Right>>()._construct_left(rhs._left)) && noexcept(std::declval<either<Left, Right>>()._construct_right(rhs._right))) {
+      either<Left, Right> &operator=(const either<Left, Right> &rhs) {
           _destruct();
           _side = rhs._side;
           if (_side == Side::left) {
@@ -60,7 +60,7 @@ namespace c10 {
           return *this;
       }
 
-      either<Left, Right> &operator=(either<Left, Right> &&rhs) noexcept(noexcept(std::declval<either<Left, Right>>()._construct_left(std::move(rhs._left))) && noexcept(std::declval<either<Left, Right>>()._construct_right(std::move(rhs._right)))) {
+      either<Left, Right> &operator=(either<Left, Right> &&rhs) {
           _destruct();
           _side = rhs._side;
           if (_side == Side::left) {
@@ -115,11 +115,11 @@ namespace c10 {
       explicit either(Side side) noexcept : _side(side) {}
 
       template<typename... Args>
-      void _construct_left(Args&&... args) noexcept(noexcept(new Left(std::forward<Args>(args)...))) {
+      void _construct_left(Args&&... args) {
           new(&_left)Left(std::forward<Args>(args)...);  // NOLINT(cppcoreguidelines-pro-type-union-access)
       }
       template<typename... Args>
-      void _construct_right(Args&&... args) noexcept(noexcept(new Right(std::forward<Args>(args)...))) {
+      void _construct_right(Args&&... args) {
           new(&_right)Right(std::forward<Args>(args)...);  // NOLINT(cppcoreguidelines-pro-type-union-access)
       }
       void _destruct() noexcept {
@@ -138,7 +138,7 @@ namespace c10 {
   };
 
   template<class Left, class Right>
-  inline bool operator==(const either<Left, Right> &lhs, const either<Left, Right> &rhs) noexcept(noexcept(std::declval<Left>() == std::declval<Left>()) && noexcept(std::declval<Right>() == std::declval<Right>())) {
+  inline bool operator==(const either<Left, Right> &lhs, const either<Left, Right> &rhs) {
       if (lhs.is_left() != rhs.is_left()) {
           return false;
       }
@@ -150,7 +150,7 @@ namespace c10 {
   }
 
   template<class Left, class Right>
-  inline bool operator!=(const either<Left, Right> &lhs, const either<Left, Right> &rhs) noexcept(noexcept(operator==(lhs, rhs))) {
+  inline bool operator!=(const either<Left, Right> &lhs, const either<Left, Right> &rhs) {
       return !operator==(lhs, rhs);
   }
 
