@@ -39,17 +39,6 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable
 TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt, bool is_variable)
     : TensorImpl({}, type_id, data_type, std::move(device_opt), is_variable) {}
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable,
-                       c10::intrusive_ptr<c10::intrusive_ptr_target> opaque_handle, IntArrayRef sizes)
-  : TensorImpl(std::move(storage), type_id, is_variable) {
-  AT_ASSERT(opaque_handle);
-  opaque_handle_ = opaque_handle;
-  sizes_ = sizes;
-  is_contiguous_ = false;
-  allow_tensor_metadata_change_ = false;
-  refresh_numel();
-}
-
 TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type,
                        c10::optional<c10::Device> device_opt, bool is_variable)
     : storage_(std::move(storage)),
@@ -72,14 +61,10 @@ IntArrayRef TensorImpl::sizes() const {
 }
 
 IntArrayRef TensorImpl::strides() const {
-  AT_ASSERTM(!opaque_handle_, "Opaque tensor does not support strides");
   return strides_;
 }
 
 bool TensorImpl::compute_contiguous() const {
-  if (opaque_handle_) {
-    return false;
-  }
   bool is_contiguous = true;
   if (is_empty())
     return is_contiguous;
@@ -100,9 +85,6 @@ bool TensorImpl::compute_contiguous() const {
 void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
-  }
-  if (opaque_handle_) {
-    opaque_handle_ = {};
   }
 }
 
