@@ -23,14 +23,8 @@ Device UndefinedType::getDeviceFromPtr(void*) const {
   AT_ERROR("getDeviceFromPtr not defined for UndefinedType");
 }
 
-Storage UndefinedType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
-  AT_ERROR("storageFromBlob not defined for UndefinedType");
-}
 Storage UndefinedType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   AT_ERROR("unsafeStorageFromTH not defined for UndefinedType");
-}
-Storage UndefinedType::storageWithAllocator(int64_t size, Allocator* allocator) const {
-  AT_ERROR("storageWithAllocator not defined for UndefinedType");
 }
 Tensor UndefinedType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   AT_ERROR("unsafeTensorFromTH not defined for UndefinedType");
