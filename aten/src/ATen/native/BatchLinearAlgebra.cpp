@@ -12,9 +12,8 @@
 
 // First the required LAPACK implementations are registered here.
 // A comment above the registered LAPACK routine suggest which batched
-// linear algebra function uses that routine;
-// in case of TH_BLAS_MKL, mkl.h declares routines below
-#if defined(USE_LAPACK) && !defined(TH_BLAS_MKL)
+// linear algebra function uses that routine
+#ifdef USE_LAPACK
 
 // gesv
 extern "C" void dgesv_(int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);

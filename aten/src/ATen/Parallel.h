@@ -8,9 +8,6 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
-#ifdef TH_BLAS_MKL
-#include <mkl.h>
-#endif
 
 namespace at {
 namespace internal {
