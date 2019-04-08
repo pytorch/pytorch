@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from common_utils import TestCase, run_tests
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
-import warnings
 
 
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
