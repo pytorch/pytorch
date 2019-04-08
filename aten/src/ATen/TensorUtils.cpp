@@ -235,4 +235,29 @@ bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
   return contig_if_nonempty;
 }
 
+namespace detail {
+
+std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
+  std::vector<int64_t> strides(sizes.size());
+  int64_t stride = 1;
+  for(size_t i = sizes.size(); i > 0; --i) {
+    strides[i-1] = stride;
+    stride *= sizes[i-1];
+  }
+  return strides;
 }
+
+int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides) {
+  // size of the underlying storage is 1 bigger than the offset
+  // of the last element according to stride
+  int64_t size = 1;
+  for(size_t i = 0; i < sizes.size(); i++) {
+    if(sizes[i] == 0) {
+      return 0;
+    }
+    size += strides[i]*(sizes[i]-1);
+  }
+  return size;
+}
+}  // namespace detail
+}  // namespace at
