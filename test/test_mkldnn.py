@@ -1,3 +1,4 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 from common_utils import TestCase, run_tests
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
