@@ -52,6 +52,7 @@ nn_runners = {
     'aten': RNNRunner('aten', pytorch_lstm_creator, DisableCuDNN),
     'jit': RNNRunner('jit', lstm_creator, DummyContext),
     'jit_premul': RNNRunner('jit_premul', lstm_premul_creator, DummyContext),
+    'jit_premul_bias': RNNRunner('jit_premul_bias', lstm_premul_bias_creator, DummyContext),
     'jit_simple': RNNRunner('jit_simple', lstm_simple_creator, DummyContext),
     'jit_multilayer': RNNRunner('jit_multilayer', lstm_multilayer_creator, DummyContext),
     'jit_layernorm': RNNRunner('jit_layernorm', lnlstm_creator, DummyContext),
