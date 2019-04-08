@@ -19,7 +19,7 @@ matrix:
       - name: "Ensure no tabs"
         python: "2.7"
         script:
-          - (! git grep -I -l $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' || (echo "These files have tabs; please convert to spaces"; false))
+          - (! git grep -I -l $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above files have tabs; please convert them to spaces"; false))
       - name: "Python 2.7 Lint"
         python: "2.7"
         install: pip install flake8
