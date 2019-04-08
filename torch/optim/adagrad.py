@@ -32,8 +32,11 @@ class Adagrad(Optimizer):
         defaults = dict(lr=lr, lr_decay=lr_decay, weight_decay=weight_decay,
                         initial_accumulator_value=initial_accumulator_value)
         super(Adagrad, self).__init__(params, defaults)
+        self._is_share_memory = False
 
     def share_memory(self):
+        self._is_share_memory = True
+        # ensure the existing state is shared memory
         for group in self.param_groups:
             for p in group['params']:
                 state = self.state[p]
@@ -62,6 +65,8 @@ class Adagrad(Optimizer):
                 if len(state) == 0:
                     state['step'] = 0
                     state['sum'] = torch.full_like(p.data, group['initial_accumulator_value'])
+                    if self._is_share_memory:
+                        state['sum'].share_memory_()
 
                 state['step'] += 1
 
