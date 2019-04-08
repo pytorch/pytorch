@@ -40,7 +40,6 @@ public:
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
 
-  IntArrayRef sizes() const override;
   IntArrayRef strides() const override;
   bool is_contiguous() const override;
   int64_t stride(int64_t d) const override;
