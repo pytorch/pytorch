@@ -59,6 +59,10 @@ class _BatchNorm(Module):
     @weak_script_method
     def forward(self, input):
         self._check_input_dim(input)
+
+        # exponential_average_factor is self.momentum set to 
+        # (when it is available) only so that if gets updated
+        # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
             exponential_average_factor = 0.0
         else:
