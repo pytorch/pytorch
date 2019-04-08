@@ -185,12 +185,20 @@ def RunOperatorOnce(operator):
     return C.run_operator_once(StringifyProto(operator))
 
 
+def RunOperatorMultiple(operator, num_runs):
+    return C.run_operator_multiple(StringifyProto(operator), num_runs)
+
+
 def RunOperatorsOnce(operators):
     for op in operators:
         success = RunOperatorOnce(op)
         if not success:
             return False
     return True
+
+
+def ClearGlobalNetObserver():
+    return C.clear_global_net_observer()
 
 
 def CallWithExceptionIntercept(func, op_id_fetcher, net_name, *args, **kwargs):

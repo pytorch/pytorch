@@ -25,7 +25,7 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
   const policy_t &policy,
   scalar_t *data,
   int64_t num_inp,
-  int64_t *sorted_indices_ptr,
+  const Tensor &sorted_indices,
   const bool return_inverse,
   const bool return_counts,
   TensorOptions options,
@@ -38,6 +38,9 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
   if (!return_inverse) {
     inverse_indices = at::empty({0}, options);
   } else {
+    AT_CHECK(sorted_indices.defined(),
+      "return_inverse is set to true, but sorted_indices is undefined. Send a bug report!");
+    const int64_t *sorted_indices_ptr = sorted_indices.data<int64_t>();
     Tensor inv_loc = at::empty({num_inp}, options);
     inverse_indices = at::empty({num_inp}, options);
     int64_t* inv_loc_ptr = inv_loc.data<int64_t>();
@@ -84,11 +87,11 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   scalar_t* output_data = output.data<scalar_t>();
 
   Tensor sorted_indices;
-  int64_t* sorted_indices_ptr = nullptr;
   if (!return_inverse) {
     thrust::sort(policy, output_data, output_data + num_inp);
   } else {
     sorted_indices = at::arange(0, num_inp, options);
+    int64_t *sorted_indices_ptr = sorted_indices.data<int64_t>();
     sorted_indices_ptr = sorted_indices.data<int64_t>();
     thrust::sort_by_key(policy, output_data, output_data + num_inp, sorted_indices_ptr);
   }
@@ -96,7 +99,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   Tensor inverse_indices, counts;
   int64_t num_out;
   std::tie(inverse_indices, counts, num_out) = compute_unique(
-    policy, output_data, num_inp, sorted_indices_ptr,
+    policy, output_data, num_inp, sorted_indices,
     return_inverse, return_counts, options,
     thrust::equal_to<scalar_t>(),
     thrust::not_equal_to<scalar_t>()
@@ -157,7 +160,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
   Tensor inverse_indices, counts;
   int64_t num_out;
   std::tie(inverse_indices, counts, num_out) = compute_unique(
-    policy, indices_data, num_inp, indices_data,
+    policy, indices_data, num_inp, indices,
     return_inverse, return_counts, options,
     [=] __device__ (int64_t a, int64_t b) -> bool {
       for (int64_t i = 0; i < n; ++i) {

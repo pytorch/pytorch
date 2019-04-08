@@ -4,6 +4,9 @@
 #include "test/cpp/jit/test_utils.h"
 
 #include "torch/csrc/jit/custom_operator.h"
+#include "torch/csrc/jit/irparser.h"
+#include "torch/csrc/jit/passes/alias_analysis.h"
+#include "torch/csrc/jit/passes/dead_code_elimination.h"
 
 namespace torch {
 namespace jit {
@@ -205,6 +208,58 @@ void testCustomOperators() {
         "Tracing float lists currently not supported!");
 
     tracer::abandon();
+  }
+  {
+    // Try to create an op using a reserved namespace
+    ASSERT_THROWS_WITH(
+        createOperator(
+            "aten::op(float[] f) -> int",
+            [](const std::vector<double>& f) -> int64_t { return f.size(); }),
+        "Tried to register a custom operator to a reserved namespace");
+  }
+}
+
+void testCustomOperatorAliasing() {
+  RegisterOperators reg({createOperator(
+      "foo::aliasing", [](at::Tensor a, at::Tensor b) -> at::Tensor {
+        a.add_(b);
+        return a;
+      })});
+  auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::aliasing"));
+
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+graph(%x: Tensor, %y: Tensor):
+  %ret : Tensor = foo::aliasing(%x, %y)
+  return (%ret)
+  )IR",
+        graph.get());
+
+    auto opNode = *graph->block()->nodes().begin();
+
+    AliasDb aliasDb(graph);
+    for (const auto input : opNode->inputs()) {
+      // The custom op writes to all its inputs
+      ASSERT_TRUE(aliasDb.writesToAlias(opNode, {input}));
+      // The output should be a wildcard and thus alias all inputs
+      ASSERT_TRUE(aliasDb.mayAlias(opNode->output(), input));
+    }
+  }
+  {
+    // DCE should not remove a custom op
+    auto graph = std::make_shared<Graph>();
+    const auto text = R"IR(
+graph(%x: Tensor, %y: Tensor):
+  # CHECK: foo::aliasing
+  %ret : Tensor = foo::aliasing(%x, %y)
+  return (%x)
+  )IR";
+    script::parseIR(text, graph.get());
+    EliminateDeadCode(graph);
+
+    testing::FileCheck().run(text, *graph);
   }
 }
 } // namespace test
