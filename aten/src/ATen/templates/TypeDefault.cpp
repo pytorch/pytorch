@@ -57,18 +57,7 @@ Type & TypeDefault::toBackend(Backend b) const {
 Type & TypeDefault::toScalarType(ScalarType s) const {
   return at::globalContext().getNonVariableType(backend(),s);
 }
-Tensor TypeDefault::tensorWithAllocator(IntArrayRef sizes, Allocator* allocator) const {
-  return tensorWithAllocator(sizes, detail::defaultStrides(sizes), std::move(allocator));
-}
-Tensor TypeDefault::tensorWithAllocator(IntArrayRef sizes, IntArrayRef strides, Allocator* allocator) const {
-  auto storage = storageWithAllocator(detail::computeStorageSize(sizes, strides), std::move(allocator));
-  return at::empty({0}, options()).set_(storage, 0, sizes, strides);
-}
 
-Storage TypeDefault::storageWithAllocator(int64_t size, Allocator* allocator) const {
-  // Potentially the storage might be marked as resizable too here
-  return Storage(typeMeta(), size, allocator, /*resizable=*/false);
-}
 Tensor TypeDefault::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   auto tensor_impl = c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(static_cast<TensorImpl*>(th_pointer));
   if (retain && tensor_impl.get() != UndefinedTensorImpl::singleton()) {
