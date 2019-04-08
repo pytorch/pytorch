@@ -124,28 +124,41 @@ struct normal_distribution {
     #endif
     mean = mean_in;
     stdv = stdv_in;
-    cache_index = 0;
   }
 
-  C10_HOST inline T operator()(at::CPUGenerator* generator){
+  C10_HOST inline dist_acctype<T> operator()(at::CPUGenerator* generator){
+    uint32_t cache_index = generator->normal_cache_index();
     if(cache_index == 0) {
       uniform_real_distribution<T> uniform(0.0, 1.0);
-      const T theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * uniform(generator);
-      T u1 = uniform(generator);
-      T r = ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0)-u1));
-      result[0] = r * ::cos(theta) * stdv + mean;
-      result[1] = r * ::sin(theta) * stdv + mean;
+      const dist_acctype<T> u1 = uniform(generator);
+      const dist_acctype<T> u2 = uniform(generator);
+      const dist_acctype<T> r = ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0)-u2));
+      const dist_acctype<T> theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * u1;
+      if (std::is_same<T, double>::value) {
+        vect_type<double> result;
+        result[0] = r * ::cos(theta) * stdv + mean;
+        result[1] = r * ::sin(theta) * stdv + mean;
+        generator->set_normal_cache_doubles(result);
+      } else {
+        vect_type<float> result;
+        result[0] = r * ::cos(theta) * stdv + mean;
+        result[1] = r * ::sin(theta) * stdv + mean;
+        generator->set_normal_cache_floats(result);
+      }
     }
-    T ret = result[cache_index];
-    cache_index = (cache_index + 1) & 1;
+    dist_acctype<T> ret;
+    if (std::is_same<T, double>::value) {
+      ret = generator->normal_cache_doubles()[cache_index];
+    } else {
+      ret = generator->normal_cache_floats()[cache_index];
+    }
+    generator->set_normal_cache_index((cache_index + 1) & 1);
     return ret;
   }
 
   private:
     T mean;
     T stdv;
-    vect_type<T> result;
-    uint32_t cache_index;
 };
 
 /**
@@ -193,7 +206,7 @@ struct geometric_distribution {
 
   C10_HOST inline int operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
-    T sample = uniform(generator);
+    dist_acctype<T> sample = uniform(generator);
     return static_cast<int>(::log(static_cast<T>(1.0)-sample) / ::log(p)) + 1;
   }
 
@@ -213,7 +226,7 @@ struct exponential_distribution {
 
   C10_HOST inline T operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
-    T sample = uniform(generator);
+    dist_acctype<T> sample = uniform(generator);
     return static_cast<T>(-1.0) / lambda * ::log(static_cast<T>(1.0)-sample);
   }
 

@@ -1,10 +1,8 @@
 #include <ATen/CPUGenerator.h>
 #include <c10/util/C++17.h>
 #include <algorithm>
-#ifndef _WIN32
-#include <fcntl.h>
-#include <unistd.h>
-#endif
+#include <random>
+#include <chrono>
 
 namespace at {
 
@@ -42,39 +40,28 @@ std::unique_ptr<CPUGenerator> createCPUGenerator(uint64_t seed_val) {
  * Helper function to concatenate two 32 bit unsigned int
  * and return them as a 64 bit unsigned int
  */
-uint64_t make64BitsFrom32Bits(uint32_t a, uint32_t b) {
-  uint64_t hi = static_cast<uint64_t>(a) << 32;
-  uint64_t lo = static_cast<uint64_t>(b);
-  return hi | lo;
+inline uint64_t make64BitsFrom32Bits(uint32_t hi, uint32_t lo) {
+  return (static_cast<uint64_t>(hi) << 32) | lo;
 }
-
-#ifndef _WIN32
-static uint64_t readURandomLong() {
-  int randDev = open("/dev/urandom", O_RDONLY);
-  uint64_t randValue;
-  if (randDev < 0) {
-    AT_ASSERT("Unable to open /dev/urandom");
-  }
-  ssize_t readBytes = read(randDev, &randValue, sizeof(randValue));
-  if (readBytes < (ssize_t) sizeof(randValue)) {
-    AT_ASSERT("Unable to read from /dev/urandom");
-  }
-  close(randDev);
-  return randValue;
-}
-#endif // _WIN32
 
 /**
  * Gets a non deterministic random number number from either the
  * std::random_device or the current time
  */
-uint32_t getNonDeterministicRandom() {
-  #ifdef _WIN32
-  uint64_t s = (uint64_t)time(0);
-  #else
-  uint64_t s = readURandomLong();
-  #endif
-  return s;
+uint64_t getNonDeterministicRandom() {
+  std::random_device rd;
+  uint32_t random1;
+  uint32_t random2;
+  if (rd.entropy() != 0) {
+    random1 = rd();
+    random2 = rd();
+    return make64BitsFrom32Bits(random1, random2);
+  }
+  else {
+    random1 = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    random2 = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    return make64BitsFrom32Bits(random1, random2);
+  }
 }
 
 } // namespace detail
@@ -84,17 +71,20 @@ uint32_t getNonDeterministicRandom() {
  */
 CPUGenerator::CPUGenerator(uint64_t seed_in)
   : CloneableGenerator(Device(DeviceType::CPU)),
-    engine_(seed_in) { }
+    engine_(seed_in),
+    normal_cache_index_(0) { }
 
 CPUGenerator::CPUGenerator(mt19937 engine_in)
   : CloneableGenerator(Device(DeviceType::CPU)),
-    engine_(engine_in) { }
+    engine_(engine_in),
+    normal_cache_index_(0) { }
 
 /**
  * Manually seeds the engine with the seed input
  * See Note [Thread-safety and Generators]
  */
 void CPUGenerator::set_current_seed(uint64_t seed) {
+  normal_cache_index_ = 0;
   engine_ = mt19937(seed);
 }
 
@@ -132,7 +122,65 @@ uint32_t CPUGenerator::random() {
  * See Note [Thread-safety and Generators]
  */
 uint64_t CPUGenerator::random64() {
-  return detail::make64BitsFrom32Bits(engine_(), engine_());
+  uint32_t random1 = engine_();
+  uint32_t random2 = engine_();
+  return detail::make64BitsFrom32Bits(random1, random2);
+}
+
+/**
+ * Gets the current cache index of normal randoms in normal
+ * distribution.
+ * 
+ * See Note [Thread-safety and Generators]
+ */
+uint32_t CPUGenerator::normal_cache_index() {
+  return normal_cache_index_;
+}
+
+/**
+ * Set the current cache index of normal randoms in normal
+ * distribution.
+ * 
+ * See Note [Thread-safety and Generators]
+ */
+void CPUGenerator::set_normal_cache_index(uint32_t index) {
+  normal_cache_index_ = index;
+}
+
+/**
+ * Get the cached normal randoms in floats
+ * 
+ * See Note [Thread-safety and Generators]
+ */
+at::detail::Array<float, 2> CPUGenerator::normal_cache_floats() {
+  return normal_cache_floats_;
+}
+
+/**
+ * Get the cached normal randoms in doubles
+ * 
+ * See Note [Thread-safety and Generators]
+ */
+at::detail::Array<double, 2> CPUGenerator::normal_cache_doubles() {
+  return normal_cache_doubles_;
+}
+
+/**
+ * Cache normal randoms in floats
+ * 
+ * See Note [Thread-safety and Generators]
+ */
+void CPUGenerator::set_normal_cache_floats(at::detail::Array<float, 2> randoms) {
+  normal_cache_floats_ = randoms;
+}
+
+/**
+ * Cache normal randoms in doubles
+ * 
+ * See Note [Thread-safety and Generators]
+ */
+void CPUGenerator::set_normal_cache_doubles(at::detail::Array<double, 2> randoms) {
+  normal_cache_doubles_ = randoms;
 }
 
 /**
