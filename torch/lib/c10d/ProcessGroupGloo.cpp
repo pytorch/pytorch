@@ -123,9 +123,15 @@ void setOutput(O& opts, at::Tensor& tensor) {
 #ifdef USE_CUDA
 
 at::Tensor pinnedLike(at::Tensor& tensor) {
-  auto& type = tensor.dispatch_type().toBackend(at::Backend::CPU);
   auto* allocator = at::cuda::getPinnedMemoryAllocator();
-  return type.tensorWithAllocator(tensor.sizes(), tensor.strides(), allocator);
+  auto storage = c10::Storage(
+      tensor.dtype(),
+      at::detail::computeStorageSize(tensor.sizes(), tensor.strides()),
+      allocator,
+      /*resizable=*/false
+  );
+  return at::empty({0}, tensor.options().device(at::kCPU)).set_(
+      storage, 0, tensor.sizes(), tensor.strides());
 }
 
 // This function initializes a vector of CUDA streams, one for every
