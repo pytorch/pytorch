@@ -486,13 +486,6 @@ bmm(batch2) -> Tensor
 See :func:`torch.bmm`
 """)
 
-add_docstr_all('btrisolve',
-               r"""
-btrisolve(LU_data, LU_pivots) -> Tensor
-
-See :func:`torch.btrisolve`
-""")
-
 add_docstr_all('cauchy_',
                r"""
 cauchy_(median=0, sigma=1, *, generator=None) -> Tensor
@@ -1417,6 +1410,13 @@ add_docstr_all('lt_',
 lt_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.lt`
+""")
+
+add_docstr_all('lu_solve',
+               r"""
+lu_solve(LU_data, LU_pivots) -> Tensor
+
+See :func:`torch.lu_solve`
 """)
 
 add_docstr_all('map_',

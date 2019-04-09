@@ -317,6 +317,7 @@ BLAS and LAPACK Operations
 .. autofunction:: logdet
 .. autofunction:: slogdet
 .. autofunction:: lu
+.. autofunction:: lu_solve
 .. autofunction:: lu_unpack
 .. autofunction:: matmul
 .. autofunction:: matrix_power
