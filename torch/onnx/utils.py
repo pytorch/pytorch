@@ -24,6 +24,11 @@ __IN_ONNX_EXPORT = False
 
 
 def is_in_onnx_export():
+    r"""
+    Check whether it's in the middle of the ONNX export.
+    This function returns True in the middle of torch.onnx.export().
+    torch.onnx.export should be executed with single thread.
+    """
     global __IN_ONNX_EXPORT
     return __IN_ONNX_EXPORT
 
