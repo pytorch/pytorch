@@ -167,10 +167,11 @@ struct Value {
   bool requires_grad() const {
     return type()->requires_grad();
   }
-  bool isTensor() const {
+  bool isCompleteTensor() const {
     return type()->kind() == TypeKind::CompleteTensorType;
   }
   TORCH_API bool mustBeNone() const;
+  TORCH_API bool mustNotBeNone() const;
   size_t unique() const {
     return unique_;
   }
@@ -602,7 +603,7 @@ struct Node {
       const char* signature_literal,
       at::ArrayRef<Symbol> const_inputs = {}) const;
 
-  const FunctionSchema& schema() const {
+  TORCH_API const FunctionSchema& schema() const {
     if (!schema_) {
       findSchema();
     }
@@ -776,7 +777,7 @@ struct Node {
   bool isBeforeOrAfter(const Node* n, MoveSide moveSide) const;
 
   std::pair<Value*, const Argument&> findInput(Symbol name);
-  void findSchema() const;
+  TORCH_API void findSchema() const;
   // Lookup iterator in use list of _input i_ that corresponds to its use of
   // _this_
   TORCH_API use_list::iterator findUseForInput(size_t i);

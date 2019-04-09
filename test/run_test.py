@@ -33,6 +33,7 @@ TESTS = [
     'indexing',
     'indexing_cuda',
     'jit',
+    'mkldnn',
     'multiprocessing',
     'multiprocessing_spawn',
     'nccl',
@@ -46,6 +47,7 @@ TESTS = [
     'type_hints',
     'utils',
     'namedtuple_return_api',
+    'jit_fuser',
 ]
 
 WINDOWS_BLACKLIST = [

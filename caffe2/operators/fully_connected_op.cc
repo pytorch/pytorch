@@ -199,7 +199,7 @@ Y:
     .Output(
         0,
         "Y",
-        "Ouput blob containing a 2D output matrix of shape $(M,N)$, where $M$ is the batch size and $N$ is the number of nodes in the layer. The ouput is calculated as $Y=XW^T+b$.")
+        "Output blob containing a 2D output matrix of shape $(M,N)$, where $M$ is the batch size and $N$ is the number of nodes in the layer. The output is calculated as $Y=XW^T+b$.")
     .InheritOnnxSchema("Gemm");
 
 GRADIENT_OPERATOR_SCHEMA(FCGradient)

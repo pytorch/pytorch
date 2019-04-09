@@ -454,11 +454,11 @@ void testAliasAnalysis() {
 }
 
 void testWriteTracking() {
-  RegisterOperators reg({createOperator(
-      "foo::creates_alias(Tensor(a) x) -> Tensor(a)",
-      [](at::Tensor a) { return a; })});
-  const auto creates_alias = Symbol::fromQualString("foo::creates_alias");
-  const auto returns_wildcard = Symbol::fromQualString("foo::returns_wildcard");
+  RegisterOperators reg(
+      {Operator("prim::creates_alias(Tensor(a) x) -> Tensor(a)", [](Stack& s) {
+        return 0;
+      })});
+  const auto creates_alias = Symbol::fromQualString("prim::creates_alias");
   {
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();
@@ -491,14 +491,16 @@ void testWriteTracking() {
 }
 
 void testWildcards() {
-  RegisterOperators reg({createOperator(
-                             "foo::returns_wildcard(Tensor a) -> Tensor(*)",
-                             [](at::Tensor a) { return a; }),
-                         createOperator(
-                             "foo::writes(Tensor(z!) a) -> Tensor(a)",
-                             [](at::Tensor a) { return a; })});
-  const auto returns_wildcard = Symbol::fromQualString("foo::returns_wildcard");
-  const auto writes = Symbol::fromQualString("foo::writes");
+  RegisterOperators reg(
+      {Operator(
+           "prim::returns_wildcard(Tensor a) -> Tensor(*)",
+           [](Stack& stack) { return 0; }),
+       Operator("prim::writes(Tensor(z!) a) -> Tensor(a)", [](Stack& stack) {
+         return 0;
+       })});
+  const auto returns_wildcard =
+      Symbol::fromQualString("prim::returns_wildcard");
+  const auto writes = Symbol::fromQualString("prim::writes");
 
   auto graph = std::make_shared<Graph>();
   const auto a = graph->addInput();
@@ -507,25 +509,41 @@ void testWildcards() {
   const auto fresh = graph->insert(aten::rand, {constant});
   const auto fresh2 = graph->insert(aten::rand, {constant});
   const auto wildcard = graph->insert(returns_wildcard, {fresh});
+
+  {
+    graph->lint();
+    AliasDb aliasDb(graph);
+
+    ASSERT_FALSE(aliasDb.mayAlias(a, fresh));
+    ASSERT_TRUE(aliasDb.mayAlias(wildcard, fresh));
+    ASSERT_TRUE(aliasDb.mayAlias(wildcard, a));
+    ASSERT_FALSE(aliasDb.mayAlias(
+        std::unordered_set<const Value*>({wildcard}),
+        std::unordered_set<const Value*>()));
+    ASSERT_FALSE(aliasDb.hasWriters(wildcard->node()));
+  }
+
+  graph->insert(writes, {fresh2})->node();
+  {
+    graph->lint();
+    AliasDb aliasDb(graph);
+    // Any write should be considered a write to the wildcard
+    ASSERT_TRUE(aliasDb.hasWriters(wildcard->node()));
+  }
+
   const auto wildcardWrite = graph->insert(writes, {wildcard})->node();
-
-  graph->lint();
-  AliasDb aliasDb(graph);
-
-  ASSERT_FALSE(aliasDb.mayAlias(a, fresh));
-  ASSERT_TRUE(aliasDb.mayAlias(wildcard, fresh));
-  ASSERT_TRUE(aliasDb.mayAlias(wildcard, a));
-  ASSERT_FALSE(aliasDb.mayAlias(
-      std::unordered_set<const Value*>({wildcard}),
-      std::unordered_set<const Value*>()));
-
-  // Test writes to wildcards
-  ASSERT_TRUE(aliasDb.writesToAlias(
-      wildcardWrite, std::unordered_set<const Value*>{fresh}));
-  ASSERT_TRUE(aliasDb.writesToAlias(
-      wildcardWrite, std::unordered_set<const Value*>{fresh2}));
-  ASSERT_TRUE(aliasDb.writesToAlias(
-      wildcardWrite, std::unordered_set<const Value*>{a}));
+  {
+    graph->lint();
+    AliasDb aliasDb(graph);
+    // Test writes to wildcards
+    ASSERT_TRUE(aliasDb.writesToAlias(
+        wildcardWrite, std::unordered_set<const Value*>{fresh}));
+    ASSERT_TRUE(aliasDb.writesToAlias(
+        wildcardWrite, std::unordered_set<const Value*>{fresh2}));
+    ASSERT_TRUE(aliasDb.writesToAlias(
+        wildcardWrite, std::unordered_set<const Value*>{a}));
+    ASSERT_TRUE(aliasDb.hasWriters(wildcard->node()));
+  }
 }
 
 void testMemoryDAG() {

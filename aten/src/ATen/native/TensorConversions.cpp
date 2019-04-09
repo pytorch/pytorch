@@ -20,8 +20,8 @@ static inline Device ensure_has_index(Device device) {
 }
 
 static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking) {
-  return self.type().toBackend(options.backend()).toScalarType(typeMetaToScalarType(options.dtype()))
-                    .copy(self, non_blocking, options.device());
+  return self.dispatch_type().toBackend(options.backend()).toScalarType(typeMetaToScalarType(options.dtype()))
+                             .copy(self, non_blocking, options.device());
 }
 
 Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy) {
@@ -78,6 +78,23 @@ Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy)
     return self;
   }
   return to_impl(self, options, non_blocking);
+}
+
+Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
+  AT_ASSERT(input_.layout() != c10::kStrided);
+  if (input_.layout() == c10::kSparse) {
+    auto input = input_.coalesce();
+    return grad.sparse_mask(at::SparseTensorRef(input));
+  } else if (input_.layout() == c10::kMkldnn) {
+    return grad.to_mkldnn();
+  } else {
+    AT_ERROR("Unsupported input layout: ", input_.layout());
+  }
+}
+
+Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
+  AT_ASSERT(input_.layout() == c10::kStrided);
+  return grad.to_dense();
 }
 
 }} // namespace at::native

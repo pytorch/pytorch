@@ -45,7 +45,9 @@ __device__ __forceinline__ void reduce_block_into_lanes
     __syncthreads();
   }
 
+#ifndef __HIP_PLATFORM_HCC__
   #pragma unroll
+#endif
   for(int i = (blockSize >> 1); i >= 64; i >>= 1)
   {
     if(tid < i)
@@ -62,7 +64,9 @@ __device__ __forceinline__ void reduce_block_into_lanes
       final = val;
     // __SYNCWARP();
 
+#ifndef __HIP_PLATFORM_HCC__
     #pragma unroll
+#endif
     for(int i = 16; i >= lanes; i >>= 1)
       final = reduceOp(final, WARP_SHFL_DOWN(final, i));
 
@@ -437,18 +441,18 @@ std::tuple<Tensor, Tensor> weight_norm_cuda_backward
        {
          using accscalar_t = acc_type<scalar_t, true>;
 
-	 weight_norm_bwd_first_dim_kernel<scalar_t, accscalar_t>
-	   <<<grad_w.size(0),
-	      BLOCK,
-	      BLOCK*sizeof(accscalar_t),
+         weight_norm_bwd_first_dim_kernel<scalar_t, accscalar_t>
+           <<<grad_w.size(0),
+              BLOCK,
+              BLOCK*sizeof(accscalar_t),
               stream>>>
-	   (grad_v.data<scalar_t>(),
-	    grad_g.data<scalar_t>(),
-	    grad_w.data<scalar_t>(),
-	    saved_v.data<scalar_t>(),
-	    saved_g.data<scalar_t>(),
-	    saved_norms.data<accscalar_t>(),
-	    rowSize);
+           (grad_v.data<scalar_t>(),
+            grad_g.data<scalar_t>(),
+            grad_w.data<scalar_t>(),
+            saved_v.data<scalar_t>(),
+            saved_g.data<scalar_t>(),
+            saved_norms.data<accscalar_t>(),
+            rowSize);
        });
   }
   else if(dim == ndims - 1)

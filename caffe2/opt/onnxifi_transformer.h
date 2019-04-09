@@ -21,8 +21,19 @@ struct OnnxifiTransformerOptions {
 
   // Dump onnx model for debugging
   bool debug{false};
+
   // Pass serialized onnx model if true, otherwise pass serialized c2 model
   bool use_onnx{true};
+
+  // Whether to attach AdjustBatch ops or not. In order to maintain static
+  // shapes to the backend, most of the time, we need to add AdjustBatch ops to
+  // the inputs/outputs of the Onnxifi op. But if backend itself supports max
+  // batch size, we don't need to do it.
+  bool add_adjust_batch_ops{true};
+
+  // Minimum number of ops to create an onnxifi op. If the subgraph is too
+  // small, it doesn't make sense to lower it to backend.
+  size_t min_ops{1};
 
   // Bound shape spec
   BoundShapeSpec bound_shape_spec;

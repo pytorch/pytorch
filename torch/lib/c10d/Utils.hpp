@@ -34,7 +34,7 @@ inline std::string toString(at::IntArrayRef l) {
 }
 
 inline void assertSameType(
-    const at::Type& type,
+    const at::DeprecatedTypeProperties& type,
     const std::vector<at::Tensor>& tensors) {
   for (size_t i = 0; i < tensors.size(); i++) {
     if (tensors[i].type() != type) {
@@ -66,7 +66,7 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   }
 
   // Ensure all tensors have identical type and shape
-  auto& type = tensors[0].type();
+  auto type = tensors[0].type();
   auto sizes = tensors[0].sizes();
   for (size_t i = 1; i < tensors.size(); i++) {
     if (tensors[i].type() != type) {
@@ -88,7 +88,7 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
 
 inline void assertTypeMatch(
     std::function<void(const std::string&)> fn,
-    const at::Type& type,
+    const at::DeprecatedTypeProperties& type,
     const at::ArrayRef<at::Tensor>& tensors,
     size_t index) {
   if (tensors[index].type() != type) {
@@ -179,7 +179,7 @@ inline void assertCPU(
 inline void assertTypeAndSizesMatch(
     std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor>& tensors,
-    const at::Type& type,
+    const at::DeprecatedTypeProperties& type,
     const at::IntArrayRef& sizes) {
   for (size_t i = 0; i < tensors.size(); i++) {
     assertTypeMatch(fn, type, tensors, i);

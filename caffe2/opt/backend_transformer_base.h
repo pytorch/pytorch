@@ -53,6 +53,11 @@ class BackendTransformerBase {
       const std::string& name,
       const ShapeInfo& shape_info) const;
 
+  // Wrap Quantized TensorShape into QTensorProto
+  QTensorProto wrapShapeInfoIntoQTensorProto(
+      const std::string& name,
+      const ShapeInfo& shape_info) const;
+
   // Do bound shape inference and collect shape infos
   ShapeInfoMap inferShapes(
       Workspace* ws,

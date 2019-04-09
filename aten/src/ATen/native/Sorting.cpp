@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/SortingUtils.h>
@@ -65,10 +66,11 @@ void dim_apply(TensorList tensors, int64_t dim, Fn f) {
   });
 }
 
-template <typename scalar_t, typename Fn>
+template <typename scalar_t, typename Comp, typename Fn>
 void quick_select_template(
     TensorAccessor<scalar_t, 1> arr,
     int64_t k,
+    Comp gt_or_nan,
     Fn swap_fn) {
   int64_t P, L, R, i, j, swap;
   scalar_t rswap, piv;
@@ -80,7 +82,7 @@ void quick_select_template(
       return;
 
     if (R == L + 1) { // Two elements only
-      if (arr[L] > arr[R]) {
+      if (gt_or_nan(arr[L], arr[R])) {
         swap_fn(L, R);
       }
       return;
@@ -89,13 +91,13 @@ void quick_select_template(
     // Use median of three for pivot choice
     P = (L + R) >> 1;
     swap_fn(P, L + 1);
-    if (arr[L + 1] > arr[R]) {
+    if (gt_or_nan(arr[L + 1], arr[R])) {
       swap_fn(L + 1, R);
     }
-    if (arr[L] > arr[R]) {
+    if (gt_or_nan(arr[L], arr[R])) {
       swap_fn(L, R);
     }
-    if (arr[L + 1] > arr[L]) {
+    if (gt_or_nan(arr[L + 1], arr[L])) {
       swap_fn(L + 1, L);
     }
 
@@ -105,10 +107,10 @@ void quick_select_template(
     do {
       do
         i++;
-      while (arr[i] < piv);
+      while (gt_or_nan(piv, arr[i]));
       do
         j--;
-      while (arr[j] > piv);
+      while (gt_or_nan(arr[j], piv));
       if (j < i)
         break;
       swap_fn(i, j);
@@ -165,10 +167,18 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
           for (int64_t j = 0; j < tmp_indices.size(0); j++) {
             tmp_indices[j] = j;
           }
-          quick_select_template(tmp_values, k - 1, [&](int64_t i, int64_t j) {
-            std::swap(tmp_values[i], tmp_values[j]);
-            std::swap(tmp_indices[i], tmp_indices[j]);
-          });
+          // we want NaN to be sorted as top for numpy compatibility
+          quick_select_template(
+              tmp_values,
+              k - 1,
+              [](scalar_t x, scalar_t y) -> bool {
+                return (
+                    (_isnan<scalar_t>(x) && !_isnan<scalar_t>(y)) || (x > y));
+              },
+              [&](int64_t i, int64_t j) {
+                std::swap(tmp_values[i], tmp_values[j]);
+                std::swap(tmp_indices[i], tmp_indices[j]);
+              });
           *mode_value = tmp_values[k - 1];
           *mode_index = tmp_indices[k - 1];
         });
@@ -189,6 +199,54 @@ std::tuple<Tensor, Tensor> kthvalue(
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
   at::kthvalue_out(values, indices, self, k, dim, keepdim);
   return std::make_tuple(values, indices);
+}
+
+std::tuple<Tensor&, Tensor&> median_out(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim) {
+  // note: kthvalue counts from 1..n
+  int64_t k = self.dim() > 0 ? (self.size(dim) + 1) / 2 : 1;
+  at::kthvalue_out(values, indices, self, k, dim, keepdim);
+  return std::forward_as_tuple(values, indices);
+}
+
+std::tuple<Tensor, Tensor> median(
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim) {
+  Tensor values = at::empty({0}, self.options());
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  at::median_out(values, indices, self, dim, keepdim);
+  return std::make_tuple(values, indices);
+}
+
+// this does not reduce to median with dim beause we don't want to copy twice
+Tensor median_cpu(const Tensor& self) {
+  AT_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
+  if (self.dim() == 0 && self.numel() == 1) {
+    return self.clone();
+  }
+  auto tmp_values = self.clone().view(-1);
+  auto result = at::empty({1}, self.options());
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "median", [&] {
+    // note, quick_select is 0 based while kthvalue is not
+    int64_t k = (tmp_values.size(0) - 1) / 2;
+    auto val_accessor = tmp_values.accessor<scalar_t, 1>();
+    quick_select_template(
+        val_accessor,
+        k,
+        [](scalar_t x, scalar_t y) -> bool {
+          return ((_isnan<scalar_t>(x) && !_isnan<scalar_t>(y)) || (x > y));
+        },
+        [&](int64_t i, int64_t j) {
+          std::swap(val_accessor[i], val_accessor[j]);
+        });
+    result.fill_(tmp_values[k]);
+  });
+  return result.view({});
 }
 
 } // namespace native

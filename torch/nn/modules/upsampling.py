@@ -1,6 +1,3 @@
-from numbers import Integral
-import warnings
-
 from .module import Module
 from .. import functional as F
 from ..._jit_internal import weak_module, weak_script_method
@@ -22,11 +19,10 @@ class Upsample(Module):
     calculate the output size. (You cannot give both, as it is ambiguous)
 
     Args:
-        size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int],
-            optional): output spatial sizes
-        scale_factor (float or Tuple[float] or Tuple[float, float] or
-            Tuple[float, float, float], optional): multiplier for spatial size.
-            Has to match input size if it is a tuple.
+        size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int], optional):
+            output spatial sizes
+        scale_factor (float or Tuple[float] or Tuple[float, float] or Tuple[float, float, float], optional):
+            multiplier for spatial size. Has to match input size if it is a tuple.
         mode (str, optional): the upsampling algorithm: one of ``'nearest'``,
             ``'linear'``, ``'bilinear'``, ``'bicubic'`` and ``'trilinear'``.
             Default: ``'nearest'``
@@ -132,7 +128,6 @@ class Upsample(Module):
 
     @weak_script_method
     def forward(self, input):
-        warnings.warn("nn.{} is deprecated. Use nn.functional.interpolate instead.".format(self.name))
         return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
 
     def extra_repr(self):

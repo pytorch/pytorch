@@ -111,7 +111,8 @@ class TestLayerNormOp(serial.SerializedTestCase):
             outputs_to_check=[0, 1, 2],
         )
 
-    @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)
+    @unittest.skipIf(workspace.has_hip_support, "Operator cross-calling doesn't work with hip yet")
+    @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_op_c10(self, X, gc, dc):
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
@@ -136,7 +137,8 @@ class TestLayerNormOp(serial.SerializedTestCase):
             outputs_to_check=[0, 1, 2],
         )
 
-    @given(X=hu.tensor(min_dim=2), **hu.gcs_cpu_only)
+    @unittest.skipIf(workspace.has_hip_support, "Operator cross-calling doesn't work with hip yet")
+    @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_op_c10_preallocated_outputs(self, X, gc, dc):
         # This test case ensures that it works correctly when output tensors are preallocated.
         axis = np.random.randint(0, len(X.shape))

@@ -41,6 +41,9 @@ __device__ void applyOp3(
 // Assume both dense and values are contiguous.
 // Currently only used in add_out_dense_sparse_cuda: add(dense, sparse, scalar).
 template <typename Op, typename IndexType, typename Real>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 __global__ void sparseElementwiseKernel(
     Op op,
     TensorInfo<Real, IndexType> dense,
@@ -68,6 +71,9 @@ __global__ void sparseElementwiseKernel(
 // Assume dense is contiguous.
 // Currently only used in add_out_dense_sparse_cuda: add(dense, sparse, scalar).
 template <typename Op, typename IndexType, typename Real>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 __global__ void sparseElementwiseKernelScalar(
     Op op,
     TensorInfo<Real, IndexType> dense,
@@ -89,6 +95,9 @@ __global__ void sparseElementwiseKernelScalar(
 }
 
 template <typename OpBoth, typename OpLeft, typename OpRight, typename IndexType, typename Real>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 __global__ void valueSparseUnionKernel(
     OpBoth opBoth,
     OpLeft opLeft,
@@ -133,6 +142,9 @@ __global__ void valueSparseUnionKernel(
 
 // TODO find a way to parallelize this...
 template <typename IndexType, typename Real>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 __global__ void indexSparseUnionKernel(
     TensorInfo<indexT, IndexType> r_indices,
     TensorInfo<indexT, IndexType> t_indices,
@@ -180,6 +192,9 @@ __global__ void indexSparseUnionKernel(
 }
 
 template <typename Op, typename IndexType, typename Real>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 __global__ void valueSparseIntersectionKernel(
     Op op,
     TensorInfo<indexT, IndexType> r_indices,
@@ -216,6 +231,9 @@ __global__ void valueSparseIntersectionKernel(
 
 // TODO find a way to parallelize this...
 template <typename IndexType, typename Real>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 __global__ void indexSparseIntersectionKernel(
     TensorInfo<indexT, IndexType> r_indices,
     TensorInfo<indexT, IndexType> t_indices,

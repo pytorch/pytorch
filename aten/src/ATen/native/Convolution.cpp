@@ -2,7 +2,6 @@
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/Config.h>
-
 #if AT_NNPACK_ENABLED()
 #include "nnpack.h"
 #endif
@@ -28,6 +27,7 @@ struct ConvParams {
   bool is_output_padding_neg() const;
   bool is_output_padding_big() const;
   bool is_padding_neg() const;
+  bool is_stride_neg() const;
   void view1d_as_2d();
   bool use_cudnn(const at::Tensor& input) const;
   bool use_miopen(const at::Tensor& input) const;
@@ -95,6 +95,14 @@ auto ConvParams::is_padding_neg() const -> bool {
   bool is_non_neg = false;
   for (int p : padding) {
     is_non_neg |= (p < 0);
+  }
+  return is_non_neg;
+}
+
+auto ConvParams::is_stride_neg() const -> bool {
+  bool is_non_neg = false;
+  for (int s : stride) {
+    is_non_neg |= (s < 0);
   }
   return is_non_neg;
 }
@@ -177,11 +185,21 @@ auto ConvParams::is_depthwise(
          weight.size(0) % input.size(1) == 0; // output channels must be a multiple of input channels
 }
 
-static void check_input_shape_forward(const at::Tensor& input,
+static void check_shape_forward(const at::Tensor& input,
                                       const at::Tensor& weight, const at::Tensor& bias,
-                                      int64_t groups, bool transposed) {
+                                      const ConvParams& params) {
   int64_t k = input.ndimension();
   int64_t weight_dim = weight.ndimension();
+  int64_t groups = params.groups;
+  auto padding = params.padding;
+  auto output_padding = params.output_padding;
+  auto stride = params.stride;
+  auto dilation = params.dilation;
+  bool transposed = params.transposed;
+
+  AT_CHECK(!params.is_padding_neg(), "negative padding is not supported");
+  AT_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
+  AT_CHECK(!params.is_stride_neg(), "negative stride is not supported");
 
   AT_CHECK(weight_dim == k,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
@@ -196,6 +214,10 @@ static void check_input_shape_forward(const at::Tensor& input,
            " instead");
 
   if (!transposed) {
+    std::vector<int64_t> input_shape;
+    std::vector<int64_t> kernel_shape;
+    bool kernel_size_correct = true;
+
     AT_CHECK(input.size(1) == (weight.size(1) * groups),
              "Given groups=", groups, ", weight of size ", weight.sizes(),
              ", expected input", input.sizes(), " to have ",
@@ -205,6 +227,34 @@ static void check_input_shape_forward(const at::Tensor& input,
              "Given weight of size ", weight.sizes(),
              ", expected bias to be 1-dimensional with ", weight.size(0), " elements",
              ", but got bias of size ", bias.sizes(), " instead");
+
+    for (int i = 2; i < k; ++i) {
+      input_shape.push_back(input.size(i) + 2 * padding[i-2]);
+      // log new kernel size considering dilation
+      kernel_shape.push_back(dilation[i-2] * (weight.size(i)-1) + 1);
+      if (input_shape.back() < kernel_shape.back()) {
+        kernel_size_correct = false;
+      }
+    }
+
+    AT_CHECK(input_shape.size() == kernel_shape.size(), "Inconsistent shape between Input and Kernel");
+
+    if (!kernel_size_correct) {
+      // If kernel size is incorrect
+      std::ostringstream input_ss;
+      std::ostringstream kernel_ss;
+      std::ostringstream output_ss;
+      std::string separator = "";
+
+      for (int i = 0, len = input_shape.size(); i < len; ++i) {
+        input_ss << separator << input_shape[i];
+        kernel_ss << separator << kernel_shape[i];
+        separator = " x ";
+      }
+
+      AT_ERROR("Calculated padded input size per channel: (", input_ss.str(), "). "
+               "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
+    }
   } else { // transposed
     AT_CHECK(input.size(1) == weight.size(0),
              "Given transposed=", transposed, ", weight of size ", weight.sizes(),
@@ -333,10 +383,7 @@ at::Tensor _convolution(
   params.deterministic = deterministic;
   params.cudnn_enabled = cudnn_enabled;
 
-  AT_CHECK(!params.is_padding_neg(), "negative padding is not supported");
-  AT_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
-
-  check_input_shape_forward(input, weight, bias, params.groups, params.transposed);
+  check_shape_forward(input, weight, bias, params);
 
   if (k == 3) {
     params.view1d_as_2d();
@@ -353,15 +400,7 @@ at::Tensor _convolution(
       auto stride = params.stride;
       auto padding = params.padding;
       auto dilation = params.dilation;
-
-      if(params.use_miopen(input)) {
-        output = at::miopen_depthwise_convolution(
-          input, weight, bias,
-          params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
-      } else {
-        output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
-      }
-
+      output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
   } else if (params.use_cudnn(input)) {
     AT_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),

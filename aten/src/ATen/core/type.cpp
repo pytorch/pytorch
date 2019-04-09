@@ -454,6 +454,11 @@ class ClassTypeRegistry {
     return nullptr;
   }
 
+  void clear() {
+    std::lock_guard<std::mutex> g(mutex_);
+    reg_.clear();
+  }
+
  private:
   std::mutex mutex_;
   std::unordered_map<std::string, ClassTypePtr> reg_;
@@ -473,7 +478,27 @@ ClassTypePtr ClassType::create(
   return ptr;
 }
 
+ClassTypePtr ClassType::createModuleType() {
+  return ClassTypePtr(new ClassType("Module", nullptr));
+}
+
+ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
+  auto ptr = ClassTypePtr(new ClassType(typename_, module_));
+  AT_ASSERT(numAttributes() == refined_slots.size());
+  for(size_t i = 0; i < attributeNames_.size(); ++i) {
+    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
+    ptr->addAttribute(attributeNames_[i], refined_slots[i]);
+  }
+  return ptr;
+}
+
 ClassTypePtr ClassType::get(const std::string& name) {
   return getRegistry().getType(name);
 }
+
+
+void ClassType::clearRegistry() {
+  getRegistry().clear();
+}
+
 } // namespace c10

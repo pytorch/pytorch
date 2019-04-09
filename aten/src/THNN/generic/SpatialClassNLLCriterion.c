@@ -4,12 +4,12 @@
 
 #define INITIAL_CHECK                                                            \
   THArgCheck(THIndexTensor_(nDimensionLegacyAll)(target) == 3, 3,                         \
-    "only batches of spatial targets supported (3D tensors)"		         \
-	     " but got targets of dimension: %d",			         \
-	     THIndexTensor_(nDimensionLegacyAll)(target));			         \
-  THArgCheck(THTensor_(nDimensionLegacyAll)(input) == 4, 2,			         \
-	     "only batches of spatial inputs supported (4D tensors), "	         \
-	     "but got input of dimension: %d", THTensor_(nDimensionLegacyAll)(input));    \
+    "only batches of spatial targets supported (3D tensors)"                         \
+             " but got targets of dimension: %d",                                 \
+             THIndexTensor_(nDimensionLegacyAll)(target));                                 \
+  THArgCheck(THTensor_(nDimensionLegacyAll)(input) == 4, 2,                                 \
+             "only batches of spatial inputs supported (4D tensors), "                 \
+             "but got input of dimension: %d", THTensor_(nDimensionLegacyAll)(input));    \
   if (weights && THTensor_(nElement)(weights) != THTensor_(size)(input, 1)) {    \
     THError("weight tensor should be defined either for all or no classes");     \
   }                                                                              \
@@ -30,8 +30,8 @@
 #define GRADOUTPUT_SHAPE_CHECK                                                \
   THArgCheck(THTensor_(nDimensionLegacyAll)(gradOutput) == 3, 3,                       \
     "gradOutput must have same dimension as target (3)"                       \
-	     " but got dimension: %d",			                                        \
-	     THTensor_(nDimensionLegacyAll)(gradOutput));			                              \
+             " but got dimension: %d",                                                                \
+             THTensor_(nDimensionLegacyAll)(gradOutput));                                                      \
   {                                                                           \
     int64_t gradOutput0 = THTensor_(size)(gradOutput, 0);                     \
     int64_t gradOutput1 = THTensor_(size)(gradOutput, 1);                     \

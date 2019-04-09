@@ -30,6 +30,26 @@ bool is_set_to(const Tensor& self, const Tensor & tensor) {
   return at::legacy::th::_th_is_set_to(self, tensor);
 }
 
+Tensor clone(const Tensor& self) {
+  return legacy::th::_th_clone(self);
+}
+
+Tensor& resize_as_(Tensor& self, const Tensor& the_template) {
+  return legacy::th::_th_resize_as_(self, the_template);
+}
+
+Tensor& pow_out(Tensor& result, const Tensor& self, Scalar exponent) {
+  return legacy::th::_th_pow_out(result, self, exponent);
+}
+
+Tensor pow(const Tensor& self, Scalar exponent) {
+  return legacy::th::_th_pow(self, exponent);
+}
+
+Tensor& zero_(Tensor& self) {
+  return legacy::th::_th_zero_(self);
+}
+
 Tensor & masked_fill_(Tensor& self, const Tensor & mask, Scalar value) {
   return at::legacy::th::_th_masked_fill_(self, mask, value);
 }
@@ -252,14 +272,6 @@ Tensor diag(const Tensor & self, int64_t diagonal) {
   return at::legacy::th::_th_diag(self, diagonal);
 }
 
-Tensor & cross_out(Tensor & result, const Tensor & self, const Tensor & other, int64_t dim) {
-  return at::legacy::th::_th_cross_out(result, self, other, dim);
-}
-
-Tensor cross(const Tensor & self, const Tensor & other, int64_t dim) {
-  return at::legacy::th::_th_cross(self, other, dim);
-}
-
 Tensor trace(const Tensor & self) {
   return at::legacy::th::_th_trace(self);
 }
@@ -424,14 +436,6 @@ std::tuple<Tensor,Tensor> gels(const Tensor & self, const Tensor & A) {
   return at::legacy::th::_th_gels(self, A);
 }
 
-std::tuple<Tensor &,Tensor &> trtrs_out(Tensor & X, Tensor & M, const Tensor & self, const Tensor & A, bool upper, bool transpose, bool unitriangular) {
-  return at::legacy::th::_th_trtrs_out(X, M, self, A, upper, transpose, unitriangular);
-}
-
-std::tuple<Tensor,Tensor> trtrs(const Tensor & self, const Tensor & A, bool upper, bool transpose, bool unitriangular) {
-  return at::legacy::th::_th_trtrs(self, A, upper, transpose, unitriangular);
-}
-
 std::tuple<Tensor &,Tensor &> symeig_out(Tensor & e, Tensor & V, const Tensor & self, bool eigenvectors, bool upper) {
   return at::legacy::th::_th_symeig_out(e, V, self, eigenvectors, upper);
 }
@@ -504,20 +508,12 @@ Tensor ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, 
   return at::legacy::th::_th_ormqr(self, input2, input3, left, transpose);
 }
 
-std::tuple<Tensor &,Tensor &> btrifact_out(Tensor & A_LU, Tensor & pivots, const Tensor & self, bool pivot) {
-  return at::legacy::th::_th_btrifact_out(A_LU, pivots, self, pivot);
+std::tuple<Tensor,Tensor> _multinomial_alias_setup(const Tensor & probs) {
+  return at::legacy::th::_th_multinomial_alias_setup(probs);
 }
 
-std::tuple<Tensor,Tensor> btrifact(const Tensor & self, bool pivot) {
-  return at::legacy::th::_th_btrifact(self, pivot);
-}
-
-std::tuple<Tensor &,Tensor &,Tensor &> btrifact_with_info_out(Tensor & A_LU, Tensor & pivots, Tensor & info, const Tensor & self, bool pivot) {
-  return at::legacy::th::_th_btrifact_with_info_out(A_LU, pivots, info, self, pivot);
-}
-
-std::tuple<Tensor,Tensor,Tensor> btrifact_with_info(const Tensor & self, bool pivot) {
-  return at::legacy::th::_th_btrifact_with_info(self, pivot);
+Tensor _multinomial_alias_draw(const Tensor & q, const Tensor & J, int64_t num_samples, Generator * generator) {
+  return at::legacy::th::_th_multinomial_alias_draw(q, J, num_samples, generator);
 }
 
 Tensor & btrisolve_out(Tensor & result, const Tensor & self, const Tensor & LU_data, const Tensor & LU_pivots) {
@@ -672,10 +668,6 @@ Tensor max(const Tensor & self, const Tensor & other) {
 
 Tensor max(const Tensor & self) {
   return at::legacy::th::_th_max(self);
-}
-
-Tensor median(const Tensor & self) {
-  return at::legacy::th::_th_median(self);
 }
 
 std::tuple<Tensor &,Tensor &> sort_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending) {

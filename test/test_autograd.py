@@ -8,8 +8,8 @@ import warnings
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
-from operator import mul, itemgetter
-from functools import reduce, wraps
+from operator import mul
+from functools import reduce
 from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
@@ -17,14 +17,11 @@ from torch.autograd.profiler import profile
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm,
-                          prod_single_zero, random_square_matrix_of_rank,
-                          random_symmetric_matrix, random_symmetric_psd_matrix,
-                          random_symmetric_pd_matrix, make_nonzero_det,
-                          random_fullrank_matrix_distinct_singular_value, load_tests)
+                          load_tests)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
-from torch.testing import make_non_contiguous, randn_like
+from torch.testing import randn_like
 from common_methods_invocations import (method_tests,
                                         create_input, unpack_variables,
                                         EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
@@ -32,7 +29,7 @@ from common_methods_invocations import (method_tests,
                                         EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
                                         exclude_tensor_method,
                                         mask_not_all_zeros,
-                                        L, S)
+                                        S)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -284,7 +281,7 @@ class TestAutograd(TestCase):
         def fn(x):
             return x ** 2 + y * x + y ** 2
 
-        for i in range(5):
+        for _ in range(5):
             grad_x, = torch.autograd.grad(
                 fn(x), x, grad_outputs=grad_output, create_graph=True)
 
@@ -629,6 +626,7 @@ class TestAutograd(TestCase):
                                     "calculating the gradient of a sparse Tensor argument to mm is not supported."):
             z.sum().backward()
 
+    # NOTE: flaky on ROCm CI
     @skipIfRocm
     def test_sparse_ctor_getter_backward(self):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
@@ -753,7 +751,7 @@ class TestAutograd(TestCase):
             y = x.clone()
 
             # build a "chain" computation graph
-            for i in range(depth):
+            for _ in range(depth):
                 y = y + y * 0.000001
 
             # graph deletion occurs when the above locals go out of scope.
@@ -774,7 +772,7 @@ class TestAutograd(TestCase):
             prev_values = [None, None]
 
             # Build a "chain with skip connections" graph
-            for i in range(depth):
+            for _ in range(depth):
                 prev_tensors = [tensor for tensor in prev_values[:-1]
                                 if tensor is not None]
                 prev_values.append(y)
@@ -809,7 +807,7 @@ class TestAutograd(TestCase):
             y = x.clone()
 
             # build deeply nested computation graph
-            for i in range(depth):
+            for _ in range(depth):
                 y = MyOp.apply(y, y)
 
             # graph deletion occurs when the above locals go out of scope.
@@ -1609,7 +1607,7 @@ class TestAutograd(TestCase):
             def __del__(self):
                 gc.collect()
 
-        for i in range(10):
+        for _ in range(10):
             Variable(torch.randn(10, 10), _grad_fn=CollectOnDelete())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
@@ -1965,7 +1963,7 @@ class TestAutograd(TestCase):
         add1 = a + b
         add2 = add1 + c
         # Simulate a long branch, so grad_output will get buffered.
-        for i in range(4):
+        for _ in range(4):
             a = a * 2
             b = b * 2
             c = c * 2
@@ -2150,6 +2148,18 @@ class TestAutograd(TestCase):
                               lambda a, b: torch.cat((a, b)),
                               True, f_args_variable, f_args_tensor)
 
+    def test_cdist(self):
+        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+            f_args_variable = (torch.randn(S, S, requires_grad=True),
+                               torch.randn(S, S, requires_grad=True))
+
+            def f(a, b):
+                return torch.cdist(a, b, p)
+
+            f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+            run_functional_checks(self, "test_cdist", "cdist", f,
+                                  True, f_args_variable, f_args_tensor)
+
     @skipIfNoLapack
     def test_cholesky(self):
         def func(root):
@@ -2171,20 +2181,22 @@ class TestAutograd(TestCase):
             run_test(upper, dims)
 
     @skipIfNoLapack
-    def test_trtrs(self):
-        def _test_with_size(N, C):
-            A = torch.rand(N, N, requires_grad=True)
-            b = torch.rand(N, C, requires_grad=True)
+    def test_triangular_solve(self):
+        def _test_with_size(A_dims, B_dims):
+            A = torch.rand(*A_dims).requires_grad_()
+            b = torch.rand(*B_dims).requires_grad_()
 
             for upper, transpose, unitriangular in product((True, False), repeat=3):
                 def func(A, b):
-                    return torch.trtrs(b, A, upper, transpose, unitriangular)
+                    return torch.triangular_solve(b, A, upper, transpose, unitriangular)
 
                 gradcheck(func, [A, b])
                 gradgradcheck(func, [A, b])
 
-        _test_with_size(S, S + 1)
-        _test_with_size(S, S - 1)
+        _test_with_size((3, 3), (3, 4))
+        _test_with_size((3, 3), (3, 2))
+        _test_with_size((2, 3, 3), (2, 3, 4))
+        _test_with_size((2, 3, 3), (2, 3, 2))
 
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_fft_ifft_rfft_irfft(self):
@@ -2273,6 +2285,16 @@ class TestAutograd(TestCase):
         _test_complex((2, 2, 10, 2), 1)
         _test_complex((1, 2, 3, 4, 2), 2)
         _test_complex((2, 1, 3, 4, 3, 2), 3)
+
+    def test_gradcheck_fail_when_no_differentiable_outputs_and_num_grad_not_zero(self):
+        def autograd_fn(input):
+            output = torch.detach(input)
+            self.assertFalse(output.requires_grad)
+            return output
+
+        f_args_variable = torch.ones(S, S, requires_grad=True)
+        self.assertRaisesRegex(RuntimeError, 'Numerical gradient for function expected to be zero',
+                               lambda: gradcheck(autograd_fn, f_args_variable, eps=1e-6, atol=PRECISION))
 
     def test_variable_traverse(self):
         def get_out_and_unrefed_cycle():
@@ -2975,6 +2997,7 @@ def add_test(
         self_size,
         args,
         variant_name='',
+        check_ad=(),  # only used in test_jit
         dim_args_idx=(),
         skipTestIf=(),
         output_process_fn=lambda x: x,

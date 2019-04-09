@@ -5,7 +5,7 @@
 namespace caffe2 {
 
 namespace {
-void AnnotateOpIndex(NetDef* net) {
+void annotateOpIndex(NetDef* net) {
   int i = 0;
   for (auto& op : *(net->mutable_op())) {
     AddArgument(kNetPos, i++, &op);
@@ -15,8 +15,18 @@ void AnnotateOpIndex(NetDef* net) {
 
 std::string BackendTransformerBase::getModelId(const NetDef& net) {
   static std::atomic<size_t> seq_id{0};
-  auto model_id =
-      ArgumentHelper(net).GetSingleArgument<std::string>(kModelId, "");
+  std::string model_id;
+  for (const auto& arg : net.arg()) {
+    if (arg.name() == kModelId) {
+      if (arg.has_s()) {
+        model_id = arg.s();
+      } else if (arg.has_i()) {
+        model_id = c10::to_string(arg.i());
+      }
+      break;
+    }
+  }
+
   if (model_id.empty()) {
     model_id = "unnamed_" + c10::to_string(seq_id++);
   }
@@ -35,6 +45,27 @@ TensorProto BackendTransformerBase::wrapShapeInfoIntoTensorProto(
   return t;
 }
 
+QTensorProto BackendTransformerBase::wrapShapeInfoIntoQTensorProto(
+    const std::string& name,
+    const ShapeInfo& shape_info) const {
+  QTensorProto t;
+  CAFFE_ENFORCE(
+      shape_info.is_quantized == true,
+      "Only quantized shapeinfo can be extracted into QTensor!");
+  t.set_name(name);
+  t.set_data_type(shape_info.shape.data_type());
+  t.set_scale(shape_info.q_info.scale);
+  t.set_bias(shape_info.q_info.offset);
+  // precision and is_signed is not used in onnxifi workflow, but it is required
+  // field
+  t.set_precision(0);
+  t.set_is_signed(0);
+  for (const auto i : shape_info.shape.dims()) {
+    t.add_dims(i);
+  }
+  return t;
+}
+
 std::unordered_map<std::string, TensorShape>
 BackendTransformerBase::ssaRewriteAndMapNames(
     Workspace* ws,
@@ -42,7 +73,7 @@ BackendTransformerBase::ssaRewriteAndMapNames(
     const std::unordered_map<std::string, TensorShape>& input_shape_hints) {
   input_mapping_ = onnx::SsaRewrite(nullptr, pred_net);
   // Annote the ops with net position
-  AnnotateOpIndex(pred_net);
+  annotateOpIndex(pred_net);
 
   // Since we are going to create a mapped workspace, we need to make sure that
   // the parent workspace has the mapped blob names. If the blobs don't exist
@@ -96,7 +127,11 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
     shape_map.emplace(
         std::piecewise_construct,
         std::forward_as_tuple(kv.first),
-        std::forward_as_tuple(kv.second.dim_type, kv.second.shape));
+        std::forward_as_tuple(
+            kv.second.dim_type,
+            kv.second.shape,
+            kv.second.is_quantized,
+            kv.second.q_info));
   }
   return shape_map;
 }

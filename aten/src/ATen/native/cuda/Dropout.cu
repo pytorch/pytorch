@@ -34,8 +34,10 @@ template <
           typename accscalar_t,
           typename IndexType,
           int ADims>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350
 C10_LAUNCH_BOUNDS_2(256, 8)
+#elif defined (__HIP_PLATFORM_HCC__)
+C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void
 fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,

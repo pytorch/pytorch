@@ -1,9 +1,6 @@
 import warnings
 
-import torch
 from .module import Module
-from .container import Sequential
-from .activation import LogSoftmax
 from .. import functional as F
 from .. import _reduction as _Reduction
 from ..._jit_internal import weak_module, weak_script_method
@@ -55,7 +52,7 @@ class L1Loss(_Loss):
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
@@ -113,8 +110,9 @@ class NLLLoss(_WeightedLoss):
     You may use `CrossEntropyLoss` instead, if you prefer not to add an extra
     layer.
 
-    The `target` that this loss expects is a class index in the range :math:`[0, C-1]`
-    where `C = number of classes`.
+    The `target` that this loss expects should be a class index in the range :math:`[0, C-1]`
+    where `C = number of classes`; if `ignore_index` is specified, this loss also accepts
+    this class index (this index may not necessarily be in the class range).
 
     The unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
 
@@ -145,7 +143,7 @@ class NLLLoss(_WeightedLoss):
             treated as if having all ones.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         ignore_index (int, optional): Specifies a target value that is ignored
@@ -248,7 +246,7 @@ class PoissonNLLLoss(_Loss):
                 \text{target}*\log(\text{target}) - \text{target} + 0.5 * \log(2\pi\text{target}).
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         eps (float, optional): Small value to avoid evaluation of :math:`\log(0)` when
@@ -335,7 +333,7 @@ class KLDivLoss(_Loss):
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
@@ -355,8 +353,8 @@ class KLDivLoss(_Loss):
         and in the meantime, specifying either of those two args will override :attr:`reduction`.
 
     .. note::
-        :attr:``reduction`` = ``'mean'`` doesn't return the true kl divergence value, please use
-        :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
+        :attr:`reduction` = ``'mean'`` doesn't return the true kl divergence value, please use
+        :attr:`reduction` = ``'batchmean'`` which aligns with KL math definition.
         In the next major release, ``'mean'`` will be changed to be the same as ``'batchmean'``.
 
     Shape:
@@ -408,7 +406,7 @@ class MSELoss(_Loss):
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
@@ -474,7 +472,7 @@ class BCELoss(_WeightedLoss):
             of each batch element. If given, has to be a Tensor of size `nbatch`.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
@@ -561,7 +559,7 @@ class BCEWithLogitsLoss(_Loss):
             of each batch element. If given, has to be a Tensor of size `nbatch`.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
@@ -636,7 +634,7 @@ class HingeEmbeddingLoss(_Loss):
         margin (float, optional): Has a default value of `1`.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
@@ -654,7 +652,7 @@ class HingeEmbeddingLoss(_Loss):
         - Input: :math:`(*)` where :math:`*` means, any number of dimensions. The sum operation
           operates over all the elements.
         - Target: :math:`(*)`, same shape as the input
-        - Output: scalar. If :attr:``reduction`` is ``'none'``, then same shape as the input
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then same shape as the input
     """
     __constants__ = ['margin', 'reduction']
 
@@ -692,7 +690,7 @@ class MultiLabelMarginLoss(_Loss):
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
@@ -710,7 +708,7 @@ class MultiLabelMarginLoss(_Loss):
         - Input: :math:`(C)` or :math:`(N, C)` where `N` is the batch size and `C`
           is the number of classes.
         - Target: :math:`(C)` or :math:`(N, C)`, label targets padded by -1 ensuring same shape as the input.
-        - Output: scalar. If :attr:``reduction`` is ``'none'``, then :math:`(N)`.
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
 
     Examples::
 
@@ -738,7 +736,7 @@ class SmoothL1Loss(_Loss):
     r"""Creates a criterion that uses a squared term if the absolute
     element-wise error falls below 1 and an L1 term otherwise.
     It is less sensitive to outliers than the `MSELoss` and in some cases
-    prevents exploding gradients (e.g. see "Fast R-CNN" paper by Ross Girshick).
+    prevents exploding gradients (e.g. see `Fast R-CNN` paper by Ross Girshick).
     Also known as the Huber loss:
 
     .. math::
@@ -761,7 +759,7 @@ class SmoothL1Loss(_Loss):
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
@@ -805,7 +803,7 @@ class SoftMarginLoss(_Loss):
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
@@ -852,7 +850,9 @@ class CrossEntropyLoss(_WeightedLoss):
     with :math:`K \geq 1` for the `K`-dimensional case (described later).
 
     This criterion expects a class index in the range :math:`[0, C-1]` as the
-    `target` for each value of a 1D tensor of size `minibatch`.
+    `target` for each value of a 1D tensor of size `minibatch`; if `ignore_index`
+    is specified, this criterion also accepts this class index (this index may not
+    necessarily be in the class range).
 
     The loss can be described as:
 
@@ -878,7 +878,7 @@ class CrossEntropyLoss(_WeightedLoss):
             If given, has to be a Tensor of size `C`
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         ignore_index (int, optional): Specifies a target value that is ignored
@@ -949,7 +949,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
             treated as if having all ones.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
@@ -997,11 +997,11 @@ class CosineEmbeddingLoss(_Loss):
 
     Args:
         margin (float, optional): Should be a number from :math:`-1` to :math:`1`,
-        :math:`0` to :math:`0.5` is suggested. If :attr:`margin` is missing, the
-        default value is :math:`0`.
+            :math:`0` to :math:`0.5` is suggested. If :attr:`margin` is missing, the
+            default value is :math:`0`.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
@@ -1029,7 +1029,7 @@ class CosineEmbeddingLoss(_Loss):
 @weak_module
 class MarginRankingLoss(_Loss):
     r"""Creates a criterion that measures the loss given
-    inputs :math:`x1`, :math:`x2`, two 1D mini-batch `Tensor`s,
+    inputs :math:`x1`, :math:`x2`, two 1D mini-batch `Tensors`,
     and a label 1D mini-batch tensor :math:`y` (containing 1 or -1).
 
     If :math:`y = 1` then it assumed the first input should be ranked higher
@@ -1044,7 +1044,7 @@ class MarginRankingLoss(_Loss):
         margin (float, optional): Has a default value of :math:`0`.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
@@ -1107,7 +1107,7 @@ class MultiMarginLoss(_WeightedLoss):
             treated as if having all ones.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
@@ -1143,8 +1143,8 @@ class TripletMarginLoss(_Loss):
     r"""Creates a criterion that measures the triplet loss given an input
     tensors :math:`x1`, :math:`x2`, :math:`x3` and a margin with a value greater than :math:`0`.
     This is used for measuring a relative similarity between samples. A triplet
-    is composed by `a`, `p` and `n`: `anchor`, `positive examples` and `negative
-    examples` respectively. The shapes of all input tensors should be
+    is composed by `a`, `p` and `n` (i.e., `anchor`, `positive examples` and `negative
+    examples` respectively). The shapes of all input tensors should be
     :math:`(N, D)`.
 
     The distance swap is described in detail in the paper `Learning shallow
@@ -1165,12 +1165,12 @@ class TripletMarginLoss(_Loss):
     Args:
         margin (float, optional): Default: :math:`1`.
         p (int, optional): The norm degree for pairwise distance. Default: :math:`2`.
-        swap (float, optional): The distance swap is described in detail in the paper
+        swap (bool, optional): The distance swap is described in detail in the paper
             `Learning shallow convolutional feature descriptors with triplet losses` by
             V. Balntas, E. Riba et al. Default: ``False``.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
-            some losses, there multiple elements per sample. If the field :attr:`size_average`
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
             when reduce is ``False``. Default: ``True``
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
@@ -1218,38 +1218,75 @@ class TripletMarginLoss(_Loss):
 class CTCLoss(_Loss):
     r"""The Connectionist Temporal Classification loss.
 
-    Args:
-        blank (int, optional): blank label. Default :math:`0`.
+    Calculates loss between a continuous (unsegmented) time series and a target sequence. CTCLoss sums over the
+    probability of possible alignments of input to target, producing a loss value which is differentiable
+    with respect to each input node. The alignment of input to target is assumed to be "many-to-one", which
+    limits the length of the target sequence such that it must be :math: `\leq` the input length.
+
+    **Args:**
+        **blank** (int, optional): blank label. Default :math:`0`.
         reduction (string, optional): Specifies the reduction to apply to the output:
-            'none' | 'mean' | 'sum'. 'none': no reduction will be applied,
-            'mean': the output losses will be divided by the target lengths and
-            then the mean over the batch is taken. Default: 'mean'
-        zero_infinity (bool, optional):
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the output losses will be divided by the target lengths and
+            then the mean over the batch is taken. Default: ``'mean'``
+
+        **zero_infinity** (bool, optional):
             Whether to zero infinite losses and the associated gradients.
             Default: ``False``
             Infinite losses mainly occur when the inputs are too short
             to be aligned to the targets.
 
-    Inputs:
-        log_probs: Tensor of size :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
-            `T = input length`, and `N = batch size`.
+    **Inputs:**
+        **log_probs**: Tensor of size :math:`(T, N, C)`
+            | :math:`T = input length`
+            | :math:`N = batch size`
+            | :math:`C = number of classes (including blank)`
+
             The logarithmized probabilities of the outputs
             (e.g. obtained with :func:`torch.nn.functional.log_softmax`).
-        targets: Tensor of size :math:`(N, S)` or `(sum(target_lengths))`.
-            Targets (cannot be blank). In the second form, the targets are assumed to be concatenated.
-        input_lengths: Tuple or tensor of size :math:`(N)`.
-            Lengths of the inputs (must each be :math:`\leq T`)
-        target_lengths: Tuple or tensor of size  :math:`(N)`.
-            Lengths of the targets
+        **targets**: Tensor of size :math:`(N, S)` or `(sum(target_lengths))`
+            | :math:`N = batch size`
+            | :math:`S = max target length, if shape is (N, S)`.
+
+            | Target sequences. Each element in the target sequence is a class index. Target index
+              cannot be blank (default=0).
+
+            | In the :math:`(N, S)` form, targets are padded to the length of the longest sequence, and stacked.
+            | In the :math:`(sum(target_lengths))` form, the targets are assumed to be un-padded and concatenated
+              within 1 dimension.
+        **input_lengths**: Tuple or tensor of size :math:`(N)`.
+            Lengths of the inputs (must each be :math:`\leq T`).
+            Lengths are specified for each sequence to achieve masking under the
+            assumption that sequences are padded to equal lengths.
+        **target_lengths**: Tuple or tensor of size  :math:`(N)`.
+            | Lengths of the targets. Lengths are specified for each sequence to achieve masking under the
+              assumption that sequences are padded to equal lengths.
+
+            | If target shape is :math:`(N,S)`, target_lengths are effectively the stop index
+              :math:`s_n` for each target sequence, such that ``target_n = targets[n,0:s_n]`` for
+              each target in a batch. Lengths must each be :math:`\leq S`
+
+            | If the targets are given as a 1d tensor that is the concatenation of individual targets,
+              the target_lengths must add up to the total length of the tensor.
 
     Example::
 
+        >>> T = 50      # Input sequence length
+        >>> C = 20      # Number of classes (excluding blank)
+        >>> N = 16      # Batch size
+        >>> S = 30      # Target sequence length of longest target in batch
+        >>> S_min = 10  # Minimum target length, for demonstration purposes
+        >>>
+        >>> # Initialize random batch of input vectors, for *size = (T,N,C)
+        >>> input = torch.randn(T, N, C).log_softmax(2).detach().requires_grad_()
+        >>>
+        >>> # Initialize random batch of targets (0 = blank, 1:C+1 = classes)
+        >>> target = torch.randint(low=1, high=C+1, size=(N, S), dtype=torch.long)
+        >>>
+        >>> input_lengths = torch.full(size=(N,), fill_value=T, dtype=torch.long)
+        >>> target_lengths = torch.randint(low=S_min, high=S, size=(N,), dtype=torch.long)
         >>> ctc_loss = nn.CTCLoss()
-        >>> log_probs = torch.randn(50, 16, 20).log_softmax(2).detach().requires_grad_()
-        >>> targets = torch.randint(1, 20, (16, 30), dtype=torch.long)
-        >>> input_lengths = torch.full((16,), 50, dtype=torch.long)
-        >>> target_lengths = torch.randint(10,30,(16,), dtype=torch.long)
-        >>> loss = ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        >>> loss = ctc_loss(input, target, input_lengths, target_lengths)
         >>> loss.backward()
 
     Reference:
@@ -1267,7 +1304,6 @@ class CTCLoss(_Loss):
 
 
     .. include:: cudnn_deterministic.rst
-
 
     """
     __constants__ = ['blank', 'reduction']
