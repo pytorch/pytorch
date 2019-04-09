@@ -233,7 +233,7 @@ class BuildExtension(build_ext, object):
         for extension in self.extensions:
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
             self._define_torch_extension_name(extension)
-            self._add_gnu_abi_flag_if_binary(extension)
+            self._add_gnu_cpp_abi_flag(extension)
 
         # Register .cu and .cuh as valid source extensions.
         self.compiler.src_extensions += ['.cu', '.cuh']
@@ -387,15 +387,9 @@ class BuildExtension(build_ext, object):
         define = '-DTORCH_EXTENSION_NAME={}'.format(name)
         self._add_compile_flag(extension, define)
 
-    def _add_gnu_abi_flag_if_binary(self, extension):
-        # If the version string looks like a binary build,
-        # we know that PyTorch was compiled with gcc 4.9.2.
-        # if the extension is compiled with gcc >= 5.1,
-        # then we have to define _GLIBCXX_USE_CXX11_ABI=0
-        # so that the std::string in the API is resolved to
-        # non-C++11 symbols
-        if _is_binary_build():
-            self._add_compile_flag(extension, '-D_GLIBCXX_USE_CXX11_ABI=0')
+    def _add_gnu_cpp_abi_flag(self, extension):
+        # use the same CXX ABI as what PyTorch was compiled with
+        self._add_compile_flag(extension, '-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI)))
 
 
 def CppExtension(name, sources, *args, **kwargs):
@@ -1014,8 +1008,7 @@ def _write_ninja_file(path,
     common_cflags += ['-I{}'.format(include) for include in user_includes]
     common_cflags += ['-isystem {}'.format(include) for include in system_includes]
 
-    if _is_binary_build():
-        common_cflags += ['-D_GLIBCXX_USE_CXX11_ABI=0']
+    common_cflags += ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
 
     cflags = common_cflags + ['-fPIC', '-std=c++11'] + extra_cflags
     if IS_WINDOWS:
