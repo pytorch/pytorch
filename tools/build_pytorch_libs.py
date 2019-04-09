@@ -268,7 +268,7 @@ def build_caffe2(version,
             check_call(build_cmd, cwd=build_dir, env=my_env)
         else:
             j = max_jobs or str(multiprocessing.cpu_count())
-            build_cmd += ['/maxcpucount:{}'.format(j)]
+            build_cmd += ['/maxcpucount:{}'.format(j), "/verbosity:detailed"]
             check_call(build_cmd, cwd=build_dir, env=my_env)
     else:
         if USE_NINJA:
