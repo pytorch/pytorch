@@ -1516,7 +1516,7 @@ class _DistTestBase(object):
     def test_DistributedDataParallel_SyncBatchNorm(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
-        # DDP does not support replicating BN layers within a process, hencing
+        # DDP does not support replicating BN layers within a process, hence
         # testing with one module replica per process
         gpus = [rank]
         self._test_DistributedDataParallel_SyncBatchNorm(gpu_subset=gpus, rank=rank)
