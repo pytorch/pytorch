@@ -450,7 +450,7 @@ def unique(input, sorted=True, return_inverse=False, dim=None):
 
 
 def unique_consecutive(input, return_inverse=False, return_counts=False, dim=None):
-    r"""Eliminates all but the first element from every consecutive group of equivalent elements
+    r"""Eliminates all but the first element from every consecutive group of equivalent elements.
 
     .. note:: This function is different from :func:`torch.unique` in the sense that this function
         only eliminates consecutive duplicate values. This semantics is similar to `std::unique`
