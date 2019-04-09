@@ -7,12 +7,12 @@
 #define ZERO_MACRO zero<T>()
 template <typename T>
 inline __device__ typename std::enable_if<std::is_same<T, double>::value, T>::type zero() {
-	return 0.;
+        return 0.;
 }
 
 template <typename T>
 inline __device__ typename std::enable_if<!std::is_same<T, double>::value, T>::type zero() {
-	return 0.f;
+        return 0.f;
 }
 #else
 #define ZERO_MACRO 0.f
