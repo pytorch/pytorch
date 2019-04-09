@@ -485,21 +485,19 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
         >>> x = torch.tensor([1, 1, 2, 2, 3, 1, 1, 2])
         >>> output = torch.unique_consecutive(x)
         >>> output
-        tensor([ 2,  3,  1])
+        tensor([1, 2, 3, 1, 2])
 
         >>> output, inverse_indices = torch.unique_consecutive(x, return_inverse=True)
         >>> output
-        tensor([ 1,  2,  3])
+        tensor([1, 2, 3, 1, 2])
         >>> inverse_indices
-        tensor([ 0,  2,  1,  2])
+        tensor([0, 0, 1, 1, 2, 3, 3, 4])
 
         >>> output, counts = torch.unique_consecutive(x, return_counts=True)
         >>> output
-        tensor([ 1,  2,  3])
+        tensor([1, 2, 3, 1, 2])
         >>> counts
-        tensor([[ 0,  2],
-                [ 1,  2]])
-
+        tensor([2, 2, 1, 2, 1])
     """
     output, inverse_indices, counts = torch._C._VariableFunctions.unique_consecutive(
         input, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
