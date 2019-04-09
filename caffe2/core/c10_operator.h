@@ -211,7 +211,7 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
 #else
 // Don't use c10 dispatcher on mobile because of binary size
 #define C10_DECLARE_CAFFE2_OPERATOR(OperatorName)
-#define C10_REGISTER_CAFFE2_OPERATOR_CPU(OperatorName, Inputs, Outputs, OperatorClass)
+#define C10_REGISTER_CAFFE2_OPERATOR_CPU(OperatorName, OperatorSchema, OperatorClass)
 #define C10_REGISTER_CAFFE2_OPERATOR_CUDA(OperatorName, OperatorClass)
 #define C10_REGISTER_CAFFE2_OPERATOR_HIP(OperatorName, OperatorClass)
 #endif
