@@ -80,8 +80,10 @@ class ArrayRef final {
       : Data(Vec.data()), Length(Vec.size()) {}
 
   /// Construct an ArrayRef from a std::vector.
-  template <typename A>
-  /* implicit */ ArrayRef(const std::vector<T, A>& Vec)
+  // The enable_if stuff here makes sure that this isn't used for std::vector<bool>,
+  // because ArrayRef can't work on a std::vector<bool> bitfield.
+  template <typename A, class _T=T, class Enable = c10::guts::enable_if_t<std::is_same<T, _T>::value && !std::is_same<T, bool>::value>>
+  /* implicit */ ArrayRef(const std::vector<_T, A>& Vec)
       : Data(Vec.data()), Length(Vec.size()) {}
 
   /// Construct an ArrayRef from a std::array
