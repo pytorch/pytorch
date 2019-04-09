@@ -73,7 +73,7 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
 template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   const Tensor& self,
-  const bool sorted_input,
+  const bool consecutive,
   const bool return_inverse,
   const bool return_counts
 ) {
@@ -89,12 +89,12 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
 
   Tensor sorted_indices;
   if (!return_inverse) {
-    if (!sorted_input) {
+    if (!consecutive) {
       thrust::sort(policy, output_data, output_data + num_inp);
     }
   } else {
     sorted_indices = at::arange(0, num_inp, options);
-    if (!sorted_input) {
+    if (!consecutive) {
       int64_t *sorted_indices_ptr = sorted_indices.data<int64_t>();
       thrust::sort_by_key(policy, output_data, output_data + num_inp, sorted_indices_ptr);
     }
@@ -121,7 +121,7 @@ template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
   const Tensor& self,
   const int64_t dim,
-  const bool sorted_input,
+  const bool consecutive,
   const bool return_inverse,
   const bool return_counts
 ) {
@@ -147,7 +147,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
 
   Tensor indices = at::arange(0, num_inp, options);
   int64_t *indices_data = indices.data<int64_t>();
-  if (!sorted_input) {
+  if (!consecutive) {
     thrust::sort(policy, indices_data, indices_data + num_inp,
       [=] __device__ (int64_t a, int64_t b) -> bool {
         for (int64_t i = 0; i < n; ++i) {
@@ -210,11 +210,11 @@ _unique_cuda(const Tensor& self, const bool sorted, const bool return_inverse) {
 }
 
 std::tuple<Tensor, Tensor, Tensor>
-_unique2_cuda(const Tensor& self, const bool sorted, const bool sorted_input, const bool return_inverse, const bool return_counts) {
+_unique2_cuda(const Tensor& self, const bool sorted, const bool return_inverse, const bool return_counts) {
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique", [&] {
     // The current CUDA implementation of unique always sort due to the
     // lack of hashtable implementation in thrust
-    return unique_cuda_template<scalar_t>(self, sorted_input, return_inverse, return_counts);
+    return unique_cuda_template<scalar_t>(self, false, return_inverse, return_counts);
   });
 }
 
@@ -228,10 +228,29 @@ _unique_dim_cuda(const Tensor& self, const int64_t dim, const bool sorted, const
 }
 
 std::tuple<Tensor, Tensor, Tensor>
-_unique_dim2_cuda(const Tensor& self, const int64_t dim, const bool sorted, const bool sorted_input, const bool return_inverse, const bool return_counts) {
+_unique_dim2_cuda(const Tensor& self, const int64_t dim, const bool sorted, const bool return_inverse, const bool return_counts) {
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique_dim", [&] {
-    return unique_dim_cuda_template<scalar_t>(self, dim, sorted_input, return_inverse, return_counts);
+    return unique_dim_cuda_template<scalar_t>(self, dim, false, return_inverse, return_counts);
   });
+}
+
+std::tuple<Tensor, Tensor, Tensor>
+unique_dim_consecutive_cuda(const Tensor& self, const int64_t dim, const bool return_inverse, const bool return_counts) {
+  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique_dim", [&] {
+    return unique_dim_cuda_template<scalar_t>(self, dim, true, return_inverse, return_counts);
+  });
+}
+
+std::tuple<Tensor, Tensor, Tensor>
+unique_consecutive_cuda(const Tensor& self, const bool return_inverse, const bool return_counts, c10::optional<int64_t> dim) {
+  if (!dim.has_value()) {
+    return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique", [&] {
+      // The current CUDA implementation of unique always sort due to the
+      // lack of hashtable implementation in thrust
+      return unique_cuda_template<scalar_t>(self, true, return_inverse, return_counts);
+    });
+  }
+  return unique_dim_consecutive_cuda(self, dim.value(), return_inverse, return_counts);
 }
 
 }  // namespace native

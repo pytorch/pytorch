@@ -10724,27 +10724,24 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(torch.tensor([3, 0, 0, 0, 1, 2], dtype=torch.long, device=device), byte_inverse)
             self.assertEqual(torch.tensor([3, 1, 1, 1], dtype=torch.long, device=device), byte_counts)
 
-            # test sorted_input
+            # test consecutive version
             z = torch.tensor([1, 2, 2, 2, 5, 5, 2, 2, 3], device=device)
             expected_z_unique = torch.tensor([1, 2, 5, 2, 3], device=device)
             expected_z_inverse = torch.tensor([0, 1, 1, 1, 2, 2, 3, 3, 4], device=device)
             expected_z_counts = torch.tensor([1, 3, 2, 2, 1], device=device)
 
-            z_unique, _, _ = torch._unique2_temporary_will_remove_soon(z, sorted_input=True)
+            z_unique = torch.unique_consecutive(z)
             self.assertEqual(z_unique, expected_z_unique)
 
-            z_unique, z_inverse, _ = torch._unique2_temporary_will_remove_soon(
-                z, sorted_input=True, return_inverse=True)
+            z_unique, z_inverse = torch.unique_consecutive(z, return_inverse=True)
             self.assertEqual(z_unique, expected_z_unique)
             self.assertEqual(z_inverse, expected_z_inverse)
 
-            z_unique, _, z_counts = torch._unique2_temporary_will_remove_soon(
-                z, sorted_input=True, return_counts=True)
+            z_unique, z_counts = torch.unique_consecutive(z, return_counts=True)
             self.assertEqual(z_unique, expected_z_unique)
             self.assertEqual(z_counts, expected_z_counts)
 
-            z_unique, z_inverse, z_counts = torch._unique2_temporary_will_remove_soon(
-                z, sorted_input=True, return_inverse=True, return_counts=True)
+            z_unique, z_inverse, z_counts = torch.unique_consecutive(z, return_inverse=True, return_counts=True)
             self.assertEqual(z_unique, expected_z_unique)
             self.assertEqual(z_inverse, expected_z_inverse)
             self.assertEqual(z_counts, expected_z_counts)
@@ -10880,7 +10877,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_inverse_dim2, x_inverse)
             self.assertEqual(expected_counts_dim2, x_counts)
 
-            # test sorted_input
+            # test consecutive version
             y = torch.tensor(
                 [[0, 1],
                  [0, 1],
@@ -10907,12 +10904,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             )
             expected_y_inverse = torch.tensor([0, 0, 0, 1, 1, 2, 3, 3, 4, 5], dtype=dtype, device=device)
             expected_y_counts = torch.tensor([3, 2, 1, 2, 1, 1], dtype=dtype, device=device)
-            y_unique, y_inverse, y_counts = torch._unique_dim2_temporary_will_remove_soon(
-                y,
-                sorted_input=True,
-                return_inverse=True,
-                return_counts=True,
-                dim=0)
+            y_unique, y_inverse, y_counts = torch.unique_consecutive(y, return_inverse=True, return_counts=True, dim=0)
+            self.assertEqual(expected_y_inverse, y_inverse)
+            self.assertEqual(expected_y_counts, y_counts)
 
         run_test(torch.float)
         run_test(torch.double)
