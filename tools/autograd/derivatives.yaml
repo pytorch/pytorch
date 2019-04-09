@@ -848,7 +848,7 @@
   self: grad.transpose(dim0, dim1)
 
 - name: triangular_solve(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular)
-  self, A: triangular_solve_backward(grads[0], grads[1], self, A, result0, upper, transpose, unitriangular, grad_input_mask)
+  self, A: triangular_solve_backward(grads[0], grads[1], self, A, solution, upper, transpose, unitriangular, grad_input_mask)
 
 - name: tril(Tensor self, int64_t diagonal)
   self: grad.tril(diagonal)

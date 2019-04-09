@@ -2,27 +2,35 @@ import os
 import re
 import yaml
 import unittest
+import textwrap
+import torch
+from collections import namedtuple
+import itertools
 
 
 path = os.path.dirname(os.path.realpath(__file__))
 aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.yaml')
-whitelist = [
+all_operators_with_namedtuple_return = {
     'max', 'min', 'median', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
-    'pstrf', 'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk',
-]
+    'pstrf', 'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'gels',
+    'triangular_solve'
+}
 
 
 class TestNamedTupleAPI(unittest.TestCase):
 
-    def test_field_name(self):
+    def test_native_functions_yaml(self):
+        operators_found = set()
         regex = re.compile(r"^(\w*)\(")
         file = open(aten_native_yaml, 'r')
         for f in yaml.load(file.read()):
             f = f['func']
             ret = f.split('->')[1].strip()
             name = regex.findall(f)[0]
-            if name in whitelist or name.endswith('_backward') or \
-               name.endswith('_forward'):
+            if name in all_operators_with_namedtuple_return:
+                operators_found.add(name)
+                continue
+            if name.endswith('_backward') or name.endswith('_forward'):
                 continue
             if not ret.startswith('('):
                 continue
@@ -32,6 +40,65 @@ class TestNamedTupleAPI(unittest.TestCase):
                 self.assertEqual(len(r.split()), 1,
                                  'only whitelisted operators are allowed to have named return type, got ' + name)
         file.close()
+        self.assertEqual(all_operators_with_namedtuple_return, operators_found, textwrap.dedent("""
+        Some elements in the `all_operators_with_namedtuple_return` of test_namedtuple_return_api.py
+        could not be found. Do you forget to update test_namedtuple_return_api.py after renaming some
+        operator?
+        """))
+
+    def test_namedtuple_return(self):
+        a = torch.randn(5, 5)
+
+        op = namedtuple('op', ['operators', 'input', 'names', 'hasout'])
+        operators = [
+            op(operators=['max', 'min', 'median', 'mode', 'sort', 'topk'], input=(0,),
+               names=('values', 'indices'), hasout=True),
+            op(operators=['kthvalue'], input=(1, 0),
+               names=('values', 'indices'), hasout=True),
+            op(operators=['svd'], input=(), names=('U', 'S', 'V'), hasout=True),
+            op(operators=['slogdet'], input=(), names=('sign', 'logabsdet'), hasout=False),
+            op(operators=['qr'], input=(), names=('Q', 'R'), hasout=True),
+            op(operators=['solve'], input=(a,), names=('solution', 'LU'), hasout=True),
+            op(operators=['geqrf'], input=(), names=('a', 'tau'), hasout=True),
+            op(operators=['symeig', 'eig'], input=(True,), names=('eigenvalues', 'eigenvectors'), hasout=True),
+            op(operators=['triangular_solve'], input=(a,), names=('solution', 'cloned_coefficient'), hasout=True),
+            op(operators=['gels'], input=(a,), names=('solution', 'QR'), hasout=True),
+        ]
+
+        for op in operators:
+            for f in op.operators:
+                ret = getattr(a, f)(*op.input)
+                for i, name in enumerate(op.names):
+                    self.assertIs(getattr(ret, name), ret[i])
+                if op.hasout:
+                    ret1 = getattr(torch, f)(a, *op.input, out=tuple(ret))
+                    for i, name in enumerate(op.names):
+                        self.assertIs(getattr(ret, name), ret[i])
+
+        all_covered_operators = set([x for y in operators for x in y.operators])
+        all_covered_operators |= {
+            # operators manually covered below
+            'pstrf',  # this operator is deprecated and will be removed in later release
+        }
+
+        self.assertEqual(all_operators_with_namedtuple_return, all_covered_operators, textwrap.dedent('''
+        The set of covered operators does not match the `all_operators_with_namedtuple_return` of
+        test_namedtuple_return_api.py. Do you forget to add test for that operator?
+        '''))
+
+        # test pstrf
+        b = torch.mm(a, a.t())
+        # add a small number to the diagonal to make the matrix numerically positive semidefinite
+        for i in range(a.size(0)):
+            b[i][i] = b[i][i] + 1e-7
+        ret = b.pstrf()
+        self.assertIs(ret.u, ret[0])
+        self.assertIs(ret.pivot, ret[1])
+        ret1 = torch.pstrf(b, out=tuple(ret))
+        self.assertIs(ret1.u, ret1[0])
+        self.assertIs(ret1.pivot, ret1[1])
+        self.assertIs(ret1.u, ret[0])
+        self.assertIs(ret1.pivot, ret[1])
 
 
 if __name__ == '__main__':

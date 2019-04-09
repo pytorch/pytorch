@@ -1934,10 +1934,10 @@ Args:
     out (tuple, optional): the optional destination tensor
 
 Returns:
-    (Tensor, Tensor): A tuple containing:
+    (Tensor, Tensor): A namedtuple (solution, QR) containing:
 
-        - **X** (*Tensor*): the least squares solution
-        - **qr** (*Tensor*): the details of the QR factorization
+        - **solution** (*Tensor*): the least squares solution
+        - **QR** (*Tensor*): the details of the QR factorization
 
 .. note::
 
@@ -5127,9 +5127,9 @@ Args:
         1 and not referenced from :math:`A`. Default: ``False``.
 
 Returns:
-    A tuple :math:`(X, M)` where :math:`M` is a clone of :math:`A` and :math:`X`
-    is the solution to :math:`AX = b` (or whatever variant of the system of
-    equations, depending on the keyword arguments.)
+    A namedtuple :math:`(solution, cloned_coefficient)` where :math:`cloned_coefficient`
+    is a clone of :math:`A` and :math:`solution` is the solution :math:`X` to :math:`AX = b`
+    (or whatever variant of the system of equations, depending on the keyword arguments.)
 
 Examples::
 
@@ -5142,8 +5142,10 @@ Examples::
     tensor([[-0.0210,  2.3513, -1.5492],
             [ 1.5429,  0.7403, -1.0243]])
     >>> torch.triangular_solve(b, A)
-    (tensor([[ 1.7840,  2.9045, -2.5405],
-            [ 1.9319,  0.9269, -1.2826]]), tensor([[ 1.1527, -1.0753],
+    torch.return_types.triangular_solve(
+    solution=tensor([[ 1.7841,  2.9046, -2.5405],
+            [ 1.9320,  0.9270, -1.2826]]),
+    cloned_coefficient=tensor([[ 1.1527, -1.0753],
             [ 0.0000,  0.7986]]))
 """)
 
