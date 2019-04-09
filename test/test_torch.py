@@ -10751,6 +10751,10 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             run_test(torch.long, torch.device('cuda'))
             run_test(torch.uint8, torch.device('cuda'))
 
+    def test_show_config(self):
+        # We can't usefully test the output; just make sure this doesn't crash
+        torch.__config__.show()
+
     @staticmethod
     def _test_bincount(self, device):
         # negative input throws
