@@ -457,6 +457,8 @@ struct Module {
     return lowered_methods_;
   }
 
+  void define(const std::string& src, const Resolver& resolver = nullptr);
+
   void _define_lowered(
       const std::vector<Def>& definitions,
       const std::vector<Resolver>& resolvers);

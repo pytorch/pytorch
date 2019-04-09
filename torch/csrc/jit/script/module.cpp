@@ -2,10 +2,10 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/schema_matching.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {
 namespace jit {
@@ -27,8 +27,7 @@ void Function::ensure_defined() {
   } catch (RecursiveMethodCallError&) {
     throw ErrorReport() // TODO: once lower_first_class methods is removed
                         // re-establish callsite info for debugging
-        << " method '" << name()
-        << "' is called recursively. "
+        << " method '" << name() << "' is called recursively. "
         << "Recursive calls are not supported";
   }
 }
@@ -123,14 +122,14 @@ void Module::to_impl(
   }
 }
 
-
 // lower_first_class_method and lift_lowered_method are transitionary functions
 // used to translate between module-as-first-class code generation,
 // and module-as-special execution. Once module-as-first-class execution is
 // debugged, then we can remove both and remove the lowered_functions_ table.
 
-// remove the first module argument, replacing any access of its parameters/attributes
-// with extra_ivalue input Slots that hold what value to pass into the graph
+// remove the first module argument, replacing any access of its
+// parameters/attributes with extra_ivalue input Slots that hold what value to
+// pass into the graph
 std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
     const ModulePtr& self,
     Graph& g_,
@@ -140,7 +139,7 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
   std::unordered_map<Slot, size_t> slot_to_offset;
   struct ToScan {
     ModulePtr mod;
-    Node * n;
+    Node* n;
     size_t offset;
   };
   std::vector<ToScan> to_scan;
@@ -159,7 +158,6 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
     return g->addInput()->setType(slot.type());
   };
 
-
   auto self_value = g->inputs().at(self_offset);
 
   for (Use use : self_value->uses()) {
@@ -176,7 +174,7 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
       std::vector<Slot> new_slots;
       std::tie(subgraph, new_slots) = lower_graph(e.mod, *subgraph, e.offset);
       e.n->g_(attr::Subgraph, subgraph);
-      for(const Slot& slot : new_slots) {
+      for (const Slot& slot : new_slots) {
         e.n->addInput(getOrAddSlot(slot));
       }
       e.n->removeInput(e.offset);
@@ -222,8 +220,8 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
   //       ++i;
   //       continue;
   //     }
-  //     // remove duplicate for input at offset i with first use at offset it->second
-  //     fork->removeInput(i);
+  //     // remove duplicate for input at offset i with first use at offset
+  //     it->second fork->removeInput(i);
   //     subgraph->inputs().at(i)->replaceAllUsesWith(
   //         subgraph->inputs().at(it->second));
   //     subgraph->eraseInput(i);
@@ -236,11 +234,14 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
 Method& Module::lower_first_class_method(Function* fn) {
   fn->ensure_defined();
   auto lowered = lower_graph(module_object(), *fn->graph());
-  Function& new_func = lowered_methods_.create_function(fn->name(), lowered.first);
+  Function& new_func =
+      lowered_methods_.create_function(fn->name(), lowered.first);
 
   // generate the new schema
   // slice away the self argument
-  std::vector<Argument> args(fn->getSchema().arguments().begin() + 1, fn->getSchema().arguments().end());
+  std::vector<Argument> args(
+      fn->getSchema().arguments().begin() + 1,
+      fn->getSchema().arguments().end());
   size_t id = 0;
   for (const Slot& slot : lowered.second) {
     std::ostringstream ss;
@@ -251,8 +252,10 @@ Method& Module::lower_first_class_method(Function* fn) {
   return _create_lowered_method(&new_func, std::move(lowered.second));
 }
 
-
-static void createFirstClassValues(Module* module, Value* self, std::unordered_map<Slot, Value*>& result) {
+static void createFirstClassValues(
+    Module* module,
+    Value* self,
+    std::unordered_map<Slot, Value*>& result) {
   auto& g = *self->owningGraph();
 
   std::vector<Node*> created;
@@ -260,13 +263,14 @@ static void createFirstClassValues(Module* module, Value* self, std::unordered_m
     Module* mod;
     Value* v; // value representing module in the graph
   };
-  std::vector<ToScan> to_scan = { {module,self} };
+  std::vector<ToScan> to_scan = {{module, self}};
 
   while (!to_scan.empty()) {
     auto s = to_scan.back();
     to_scan.pop_back();
     size_t offset = 0;
-    for (const std::string& name : s.mod->module_object()->type()->attributeNames()) {
+    for (const std::string& name :
+         s.mod->module_object()->type()->attributeNames()) {
       Value* v = g.insertGetAttr(s.v, name);
       result[Slot(s.mod->module_object(), offset++)] = v;
       if (std::shared_ptr<Module> sub = s.mod->find_module(name)) {
@@ -306,20 +310,22 @@ void Module::lift_lowered_method(Method& m) {
   // created lifted schema
   std::vector<Argument> new_args = {Argument("_self", module_object()->type())};
   const auto& lowered_args = m.function().getSchema().arguments();
-  new_args.insert(new_args.end(), lowered_args.begin(), lowered_args.begin() + m.num_inputs());
+  new_args.insert(
+      new_args.end(),
+      lowered_args.begin(),
+      lowered_args.begin() + m.num_inputs());
   new_fn.setSchema(m.function().getSchema().withArguments(std::move(new_args)));
 }
 
 Method& Module::_create_lowered_method(
     Function* func,
     std::vector<Slot> member_inputs) {
-  std::unique_ptr<Method> m(new Method(
-      this, func, std::move(member_inputs)));
+  std::unique_ptr<Method> m(new Method(this, func, std::move(member_inputs)));
   return *insert(func->name(), methods_, EntityType::METHOD, std::move(m));
 }
 
 void Module::lift_lowered_methods(size_t start) {
-  for(size_t i = start; i < lowered_methods_.get_functions().size(); ++i) {
+  for (size_t i = start; i < lowered_methods_.get_functions().size(); ++i) {
     Method& m = _create_lowered_method(
         lowered_methods_.get_functions().at(i).get(), {});
     lift_lowered_method(m);
@@ -341,10 +347,22 @@ void Module::_define_lowered(const std::string& src, const Resolver& resolver) {
   lift_lowered_methods(start);
 }
 
-Method& Module::_define_lowered(std::string name, std::shared_ptr<Graph> graph, std::vector<Slot> slots) {
-  Method& m = _create_lowered_method(&lowered_methods_.create_function(std::move(name), std::move(graph)), std::move(slots));
+Method& Module::_define_lowered(
+    std::string name,
+    std::shared_ptr<Graph> graph,
+    std::vector<Slot> slots) {
+  Method& m = _create_lowered_method(
+      &lowered_methods_.create_function(std::move(name), std::move(graph)),
+      std::move(slots));
   lift_lowered_method(m);
   return m;
+}
+
+void Module::define(const std::string& src, const Resolver& resolver) {
+  class_cu().define(
+      src,
+      resolver ? resolver : nativeResolver,
+      simpleSelf(module_object()->type()));
 }
 
 } // namespace script

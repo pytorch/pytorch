@@ -223,7 +223,7 @@ struct MethodValue : public SugaredValue {
     }
 
     return std::make_shared<SimpleValue>(
-          method.emit_call(graph, loc, inputs, attributes));
+        method.emit_call(graph, loc, inputs, attributes));
   }
 
  private:
@@ -335,6 +335,13 @@ static inline std::vector<Value*> toValues(
     Graph& g,
     at::ArrayRef<NamedValue> nvs) {
   return fmap(nvs, [&](const NamedValue& v) { return v.value(g); });
+}
+
+static inline Self simpleSelf(const TypePtr& typ) {
+  return [typ](Value* v) {
+    v->setType(typ);
+    return std::make_shared<SimpleValue>(v);
+  };
 }
 
 } // namespace script

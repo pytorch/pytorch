@@ -699,12 +699,6 @@ static Self moduleSelf(const std::shared_ptr<Module>& m) {
     return std::make_shared<ModuleValue>(v, m);
   };
 }
-static Self simpleSelf(const TypePtr& typ) {
-  return [typ](Value* v) {
-    v->setType(typ);
-    return std::make_shared<SimpleValue>(v);
-  };
-}
 
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
