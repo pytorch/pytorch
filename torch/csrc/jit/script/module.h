@@ -55,7 +55,7 @@ struct Module;
 using ModuleLookup =
     std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
 
-struct Method {
+struct TORCH_API Method {
   Method(Module* owner, Function* function, std::vector<Slot> initial_members)
       : owner_(owner),
         function_(function),
@@ -146,7 +146,7 @@ struct Method {
 
 struct Module;
 
-struct Module {
+struct TORCH_API Module {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);
   Module()
       : name_("__main__"),
