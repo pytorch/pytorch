@@ -62,7 +62,7 @@ static void frac_kernel(TensorIterator& iter) {
         iter,
         [=](scalar_t a) -> scalar_t { return a - std::trunc(a); },
         [=](Vec256<scalar_t> a) {
-          return a - a.trunc();
+          return a.frac();
         });
   });
 }
@@ -84,7 +84,7 @@ static void neg_kernel(TensorIterator& iter) {
         iter,
         [=](scalar_t a) -> scalar_t { return -a; },
         [=](Vec256<scalar_t> a) {
-          return Vec256<scalar_t>(0) - a;
+          return a.neg();
         });
   });
 }

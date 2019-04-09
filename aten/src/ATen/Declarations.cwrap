@@ -879,7 +879,6 @@
   name: _th_abs
   cname: abs
   backends:
-    - CPU
     - CUDA
   variants: function
   return: argument 0
@@ -1353,7 +1352,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   cname: frac
   variants: function
@@ -1368,7 +1366,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - function
@@ -1506,7 +1503,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - function
@@ -1523,7 +1519,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants: function
   options:
@@ -1536,7 +1531,6 @@
 [[
   name: _th_neg
   backends:
-    - CPU
     - CUDA
   variants:
     - function
@@ -1551,7 +1545,6 @@
 [[
   name: _th_neg_
   backends:
-    - CPU
     - CUDA
   variants: function
   options:

@@ -117,7 +117,6 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
 }
 
-
 Tensor sigmoid(const Tensor& self) {
   Tensor result = at::empty({0}, self.options());
   return at::sigmoid_out(result, self);
@@ -130,78 +129,6 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
   assert_no_internal_overlap(result, "sigmoid");
   auto iter = TensorIterator::unary_op(result, self);
   sigmoid_stub(iter->device_type(), *iter);
-  return result;
-}
-
-// ***** abs *****
-Tensor abs(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  return at::abs_out(result, self);
-}
-
-Tensor& _abs__cpu(Tensor& self) {
-  return at::abs_out(self, self);
-}
-
-Tensor& _abs_out_cpu(Tensor& result, const Tensor& self) {
-  checkBackend("abs", {result}, Backend::CPU);
-  assert_no_internal_overlap(result, "abs");
-  auto iter = TensorIterator::unary_op(result, self);
-  abs_stub(iter->device_type(), *iter);
-  return result;
-}
-
-// ***** frac *****
-Tensor frac(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  return at::frac_out(result, self);
-}
-
-Tensor& _frac__cpu(Tensor& self) {
-  return at::frac_out(self, self);
-}
-
-Tensor& _frac_out_cpu(Tensor& result, const Tensor& self) {
-  checkBackend("frac", {result}, Backend::CPU);
-  assert_no_internal_overlap(result, "frac");
-  auto iter = TensorIterator::unary_op(result, self);
-  frac_stub(iter->device_type(), *iter);
-  return result;
-}
-
-// ***** reciprocal *****
-Tensor reciprocal(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  return at::reciprocal_out(result, self);
-}
-
-Tensor& _reciprocal__cpu(Tensor& self) {
-  return at::reciprocal_out(self, self);
-}
-
-Tensor& _reciprocal_out_cpu(Tensor& result, const Tensor& self) {
-  checkBackend("reciprocal", {result}, Backend::CPU);
-  assert_no_internal_overlap(result, "reciprocal");
-  auto iter = TensorIterator::unary_op(result, self);
-  reciprocal_stub(iter->device_type(), *iter);
-  return result;
-}
-
-// ***** neg *****
-Tensor neg(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  return at::neg_out(result, self);
-}
-
-Tensor& _neg__cpu(Tensor& self) {
-  return at::neg_out(self, self);
-}
-
-Tensor& _neg_out_cpu(Tensor& result, const Tensor& self) {
-  checkBackend("neg", {result}, Backend::CPU);
-  assert_no_internal_overlap(result, "neg");
-  auto iter = TensorIterator::unary_op(result, self);
-  neg_stub(iter->device_type(), *iter);
   return result;
 }
 
@@ -241,6 +168,7 @@ Tensor& _neg_out_cpu(Tensor& result, const Tensor& self) {
 
 // NB: Temp. defaulting to TH implementation of abs due to issues with Apple
 
+IMPLEMENT_UNARY_OP_VEC(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)
@@ -252,10 +180,13 @@ IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC(exp)
 IMPLEMENT_UNARY_OP_VEC(expm1)
 IMPLEMENT_UNARY_OP_VEC(floor)
+IMPLEMENT_UNARY_OP_VEC(frac)
 IMPLEMENT_UNARY_OP_VEC(log)
 IMPLEMENT_UNARY_OP_VEC(log10)
 IMPLEMENT_UNARY_OP_VEC(log1p)
 IMPLEMENT_UNARY_OP_VEC(log2)
+IMPLEMENT_UNARY_OP_VEC(neg)
+IMPLEMENT_UNARY_OP_VEC(reciprocal)
 IMPLEMENT_UNARY_OP_VEC(round)
 IMPLEMENT_UNARY_OP_VEC(rsqrt)
 IMPLEMENT_UNARY_OP_VEC(sin)

@@ -131,6 +131,7 @@ public:
   Vec256<float> log1p() const {
     return Vec256<float>(Sleef_log1pf8_u10(values));
   }
+  Vec256<float> frac() const;
   Vec256<float> sin() const {
     return map(std::sin);
   }
@@ -223,6 +224,12 @@ template <>
 Vec256<float> inline operator/(const Vec256<float>& a, const Vec256<float>& b) {
   return _mm256_div_ps(a, b);
 }
+
+// Frac. Implement this here so we can use subtraction
+Vec256<float> Vec256<float>::frac() const {
+  return *this - this->trunc();
+}
+
 
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
