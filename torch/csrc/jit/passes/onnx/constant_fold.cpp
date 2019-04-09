@@ -16,10 +16,11 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
-static std::map<Value*, std::pair<std::string, at::Tensor>>
-       buildValueToParamsMap(Block* b, const std::map<std::string, 
-                             at::Tensor>& paramsDict) {
-  std::map<Value*, std::pair<std::string, at::Tensor>> valsToParamsMap;
+using ParamMap = std::map<std::string, at::Tensor>;
+using ValueToParamPairMap = std::map<Value*, std::pair<std::string, at::Tensor>>;
+
+static ValueToParamPairMap buildValueToParamsMap(Block* b, const ParamMap& paramsDict) {
+  ValueToParamPairMap valsToParamsMap;
   for(auto& input : b->inputs()) {
       auto it = paramsDict.find(input->uniqueName());
       if (it != paramsDict.end()) {
@@ -30,8 +31,7 @@ static std::map<Value*, std::pair<std::string, at::Tensor>>
 }
 
 static void buildParamsMapFromValueToParamsMap(
-    const std::map<Value*, std::pair<std::string, at::Tensor>>& valsToParamsMap,
-    std::map<std::string, at::Tensor>& paramsDict) {
+    const ValueToParamPairMap& valsToParamsMap, ParamMap& paramsDict) {
   paramsDict.clear();
   for(auto& nameTensorParamPair : valsToParamsMap) {
     paramsDict.insert(nameTensorParamPair.second);
@@ -50,8 +50,6 @@ static void eraseUnusedNodeOutputs(Node* node) {
 
 static at::Tensor runTorchBackendForOnnx(const Node* node, std::vector<at::Tensor>& inputTensorValues) {
   at::Tensor updated_val;
-  auto nodeKind = node->kind().toDisplayString();
-
   if (node->kind() == onnx::Slice) {
     assert(inputTensorValues.size() == 1);
     if ( !(node->hasAttributeS("axes") && node->hasAttributeS("starts") && node->hasAttributeS("ends")) ) {
@@ -95,23 +93,15 @@ static at::Tensor runTorchBackendForOnnx(const Node* node, std::vector<at::Tenso
   return updated_val;
 }
 
-// enum ConstantLeafNodeKind {
-// // Currently only prim::Param and onnx::Constant nodes are supported.
-// // More can be added if needed.    
-//   PRIM_PARAM,
-//   ONNX_CONSTANT
-// };
-
-static bool isConstant(Value* val, const std::map<Value*, std::pair<std::string, at::Tensor>>& valsToParamsMap) {
+static bool isConstant(Value* val, const ValueToParamPairMap& valsToParamsMap) {
   auto parentNode = val->node();
   return (parentNode->kind() == prim::Param && 
           valsToParamsMap.find(val) != valsToParamsMap.end()) || // Checks val is a parameter and not a real input
          (parentNode->kind() == onnx::Constant && !parentNode->mustBeNone() &&
-          parentNode->kindOf(attr::value) == AttributeKind::t); // Check other types?;
+          parentNode->kindOf(attr::value) == AttributeKind::t); // Check other types?
 }
 
-static std::vector<at::Tensor> getValues(Node* node, 
-       const std::map<Value*, std::pair<std::string, at::Tensor>>& valsToParamsMap) {
+static std::vector<at::Tensor> getValues(Node* node, const ValueToParamPairMap& valsToParamsMap) {
   size_t numInputs = node->inputs().size();
   std::vector<at::Tensor> inputTensorValues;
   inputTensorValues.reserve(numInputs);
@@ -134,13 +124,7 @@ static std::vector<at::Tensor> getValues(Node* node,
   return inputTensorValues;
 }
 
-static void eraseUnusedValuesFromMap(std::map<Value*, std::pair<std::string, at::Tensor>>& valsToParamsMap) {
-//   printf("---------------------------------\n");
-//   for (auto& element : valsToParamsMap) {
-//       printf("Value *: %p, Value name: %s, Param name: %s\n", 
-//         (void *)element.first, element.first->uniqueName().c_str(), element.second.first.c_str());
-//   }
-//   printf("---------------------------------\n");
+static void eraseUnusedValuesFromMap(ValueToParamPairMap& valsToParamsMap) {
   auto it = valsToParamsMap.begin();
   while (it != valsToParamsMap.end()) {
     if (!it->first->hasUses()) {
@@ -150,24 +134,14 @@ static void eraseUnusedValuesFromMap(std::map<Value*, std::pair<std::string, at:
       ++it;
     }
   }
-//   printf("---------------------------------\n");
-//   for (auto& element : valsToParamsMap) {
-//       printf("Value *: %p, Value name: %s, Param name: %s\n", 
-//         (void *)element.first, element.first->uniqueName().c_str(), element.second.first.c_str());
-//   }
 }
 
 // This method updates the block in-place to fold all the one-time 
 // constant-based computations/ops into an initializer node.
-void ConstantFoldONNX(Block* b, std::map<std::string, at::Tensor>& paramsDict) {
+void ConstantFoldONNX(Block* b, ParamMap& paramsDict) {
   auto sourceNode = b->param_node();
   AT_ASSERT(sourceNode);
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
-//   for (auto& element : valsToParamsMap) {
-//       printf("Value *: %p, Value name: %s, Param name: %s\n", 
-//         (void *)element.first, element.first->uniqueName().c_str(), element.second.first.c_str());
-//   }
- 
   // Only the root block is constant-folded. Folding nested blocks is
   // not supported for now.
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
@@ -192,9 +166,9 @@ void ConstantFoldONNX(Block* b, std::map<std::string, at::Tensor>& paramsDict) {
         // Constant folding is not supported for this op. Skip it.
         continue;
       }
-    // Disconnect the folded node. Create a new initializer for the folded  
-    // tensor and replace the output of the folded node with the 
-    // initializer as input for all downstream nodes.
+    // Create a new source node output value. Add a corresponding entry
+    // in valToParamMap. Replace the downstream inputs with this value, 
+    // and disconnect all the input values of the folded node.
     auto newSourceNodeOutput = sourceNode->addOutput();
     valsToParamsMap.insert({newSourceNodeOutput, 
                             std::make_pair(newSourceNodeOutput->uniqueName(), updated_val)});
@@ -203,89 +177,9 @@ void ConstantFoldONNX(Block* b, std::map<std::string, at::Tensor>& paramsDict) {
 
     node->removeAllInputs();
   }
-  eraseUnusedNodeOutputs(sourceNode);
   eraseUnusedValuesFromMap(valsToParamsMap);
+  eraseUnusedNodeOutputs(sourceNode);
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
-
-
-//     // ---------------------------------------------
-//     size_t numInputs = node->inputs().size();
-//     // std::vector<at::Tensor> inputTensorValues;
-//     // inputTensorValues.reserve(numInputs);
-//     std::vector<ConstantLeafNodeKind> kindOfLeafNode;
-//     kindOfLeafNode.reserve(numInputs);
-//     for (auto val : node->inputs()) {
-//       auto inputNode = val->node();
-//       bool isParam = inputNode->kind() == prim::Param && paramsDict.count(val->uniqueName());
-//       if (isParam) {
-//         AT_ASSERT(sourceNode == inputNode); // One and only one prim::Param node in block.
-//       }
-//       bool isConstant = inputNode->kind() == onnx::Constant && !inputNode->mustBeNone()
-//         && toString(inputNode->kindOfS("value")) == std::string("t"); // TODO: Check other types?
-//       if (isParam) {
-//         inputTensorValues.push_back(paramsDict[val->uniqueName()]);
-//         kindOfLeafNode.push_back(ConstantLeafNodeKind::PRIM_PARAM);
-//       }
-//       else if (isConstant) {
-//         inputTensorValues.push_back(inputNode->t(c10::Symbol::fromQualString("attr::value")));
-//         kindOfLeafNode.push_back(ConstantLeafNodeKind::ONNX_CONSTANT);
-//       }
-//     }
-
-//     // If there are inputs, and if they all can be folded, then fold them.
-//     if (!inputTensorValues.empty() && inputTensorValues.size() == numInputs) {
-//       auto updated_val = runTorchBackendForOnnx(node, inputTensorValues);
-//       if (updated_val.size(0) == 0) {
-//         // Constant folding not supported for this op. Skip it.
-//         continue;
-//       }
-//       if (node->outputs().size() > 1) {
-//         // Constant folding for multiple-output nodes not supported. Skip it.
-//         continue;
-//       }
-
-//       // Disconnect the folded node. Create a new initializer for the folded  
-//       // tensor and replace the output of the folded node with the 
-//       // initializer as input for all downstream nodes.
-//       auto newSourceNodeOutput = sourceNode->addOutput();
-//       paramsDict[newSourceNodeOutput->uniqueName()] = updated_val;
-//       newSourceNodeOutput->inferTypeFrom(updated_val);
-//       node->outputs().at(0)->replaceAllUsesWith(newSourceNodeOutput);
-
-//       // Find the indices to outputs of the source node that are
-//       // feeding into the folded node. Used below for removing 
-//       // corresponding entried in params_dict.
-//       std::unordered_map<std::string, size_t> sourceOutputNames;
-//       std::map<size_t, std::string> sourceOutputsToRemove;
-//       for (size_t i = 0; i < sourceNode->outputs().size(); ++i) {
-//         sourceOutputNames[sourceNode->outputs().at(i)->uniqueName()] = i;
-//       }
-//       for (size_t i = 0; i < numInputs; ++i) { 
-//         if (kindOfLeafNode[i] == ConstantLeafNodeKind::PRIM_PARAM) {
-//           auto matchIter = sourceOutputNames.find(node->inputs().at(i)->uniqueName());
-//           if (matchIter != sourceOutputNames.end()) {
-//             sourceOutputsToRemove[matchIter->second] = matchIter->first;
-//           }
-//         }
-//       }
-//       node->removeAllInputs();
-//       for (const auto& elem : sourceOutputsToRemove) {
-//         if (!sourceNode->outputs().at(elem.first)->hasUses()) {
-//           paramsDict.erase(elem.second);
-//         }
-//       }
-//       // // TODO: Should we delete the node, as in the line below?
-//       // it.destroyCurrent();
-//     }
-//   }
-//   if (sourceNode != nullptr) {
-//     auto removedSourceOutputNames = eraseUnusedNodeOutputs(sourceNode);
-//     for (const auto& removedName : removedSourceOutputNames) {
-//       if (paramsDict.find(removedName) != paramsDict.end()) {
-//         paramsDict.erase(removedName);
-//       }
-//     }
-//   }
   return;
 }
 
