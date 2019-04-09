@@ -83,6 +83,12 @@ class DistributedDataParallel(Module):
         Also note that ``nccl`` backend is currently the fastest and highly
         recommended backend for fp16/fp32 mixed-precision training.
 
+    .. note:: If you use ``torch.save`` on one process to checkpoint the module,
+        and ``torch.load`` on some other processes to recover it, make sure that
+        ``map_location`` is configured properly for every process. Without
+        ``map_location``, ``torch.load`` would recover the module to devices
+        where the module was saved from.
+
     .. warning::
         This module works only with the ``gloo`` and ``nccl`` backends.
 
