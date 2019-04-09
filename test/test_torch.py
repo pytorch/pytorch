@@ -1773,7 +1773,7 @@ class _TestTorchMixin(object):
         self._test_lu(self, lambda t: t)
 
     @staticmethod
-    def _test_btrisolve(self, cast):
+    def _test_lu_solve(self, cast):
         a = torch.FloatTensor((((1.3722, -0.9020),
                                 (1.8849, 1.9169)),
                                ((0.7187, -1.1695),
@@ -1786,13 +1786,13 @@ class _TestTorchMixin(object):
         a, b = cast(a), cast(b)
         LU_data, pivots, info = a.lu(get_infos=True)
         self.assertEqual(info.abs().sum(), 0)
-        x = torch.btrisolve(b, LU_data, pivots)
+        x = torch.lu_solve(b, LU_data, pivots)
         b_ = torch.bmm(a, x.unsqueeze(2)).squeeze()
         self.assertEqual(b_, b)
 
     @skipIfNoLapack
-    def test_btrisolve(self):
-        self._test_btrisolve(self, lambda t: t)
+    def test_lu_solve(self):
+        self._test_lu_solve(self, lambda t: t)
 
     @staticmethod
     def _test_lu_unpack(self, cast):
