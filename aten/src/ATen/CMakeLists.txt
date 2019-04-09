@@ -252,21 +252,21 @@ IF(USE_CUDA AND NOT USE_ROCM)
     EXECUTE_PROCESS(COMMAND touch ${CMAKE_CURRENT_BINARY_DIR}/empty_file.cc)
     if(${CUDA_VERSION_MAJOR} EQUAL "8")
       SET(CUFFT_FAKELINK_OPTIONS
-	--generate-code arch=compute_35,code=sm_35
-	--generate-code arch=compute_50,code=sm_50
-	--generate-code arch=compute_60,code=sm_60)
+        --generate-code arch=compute_35,code=sm_35
+        --generate-code arch=compute_50,code=sm_50
+        --generate-code arch=compute_60,code=sm_60)
     elseif(${CUDA_VERSION_MAJOR} EQUAL "9")
       SET(CUFFT_FAKELINK_OPTIONS
-	--generate-code arch=compute_35,code=sm_35
-	--generate-code arch=compute_50,code=sm_50
-	--generate-code arch=compute_60,code=sm_60
-	--generate-code arch=compute_70,code=sm_70)
+        --generate-code arch=compute_35,code=sm_35
+        --generate-code arch=compute_50,code=sm_50
+        --generate-code arch=compute_60,code=sm_60
+        --generate-code arch=compute_70,code=sm_70)
     elseif(${CUDA_VERSION_MAJOR} EQUAL "10")
       SET(CUFFT_FAKELINK_OPTIONS
-	--generate-code arch=compute_35,code=sm_35
-	--generate-code arch=compute_50,code=sm_50
-	--generate-code arch=compute_60,code=sm_60
-	--generate-code arch=compute_70,code=sm_70)
+        --generate-code arch=compute_35,code=sm_35
+        --generate-code arch=compute_50,code=sm_50
+        --generate-code arch=compute_60,code=sm_60
+        --generate-code arch=compute_70,code=sm_70)
     else()
       MESSAGE(FATAL_ERROR "Unhandled major cuda version ${CUDA_VERSION_MAJOR}")
     endif()
