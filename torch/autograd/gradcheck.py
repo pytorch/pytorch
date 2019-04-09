@@ -86,7 +86,6 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 for x_idx in product(*[range(m) for m in x_values.size()[1:]]):
                     indices = x_indices[i].tolist() + list(x_idx)
                     d_idx = sum(indices[k] * x_stride[k] for k in range(len(x_size)))
-
                     orig = x_value[x_idx].item()
                     x_value[x_idx] = orig - eps
                     outa = fn(input).clone()
@@ -95,6 +94,27 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                     x_value[x_idx] = orig
                     r = (outb - outa) / (2 * eps)
                     d_tensor[d_idx] = r.detach().reshape(-1)
+        elif x_tensor.layout == torch._mkldnn:
+            if len(input) != 1:
+                raise ValueError('gradcheck currently only supports functions with 1 input, but got: ',
+                                 len(input))
+            x_tensor = x_tensor.data
+            for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
+                # this is really inefficient, but without indexing implemented, there's
+                # not really a better way than converting back and forth
+                x_tensor_dense = x_tensor.to_dense()
+                orig = x_tensor_dense[x_idx].item()
+
+                x_tensor_dense[x_idx] = orig - eps
+                x_tensor_mkl = x_tensor_dense.to_mkldnn()
+                outa = fn([x_tensor_mkl])
+
+                x_tensor_dense[x_idx] = orig + eps
+                x_tensor_mkl = x_tensor_dense.to_mkldnn()
+                outb = fn([x_tensor_mkl])
+
+                r = (outb - outa) / (2 * eps)
+                d_tensor[d_idx] = r.detach().reshape(-1)
         else:
             x_tensor = x_tensor.data
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
@@ -115,6 +135,9 @@ def get_analytical_jacobian(input, output):
     # to modify analytical jacobian
     if output.is_sparse:
         raise ValueError('Sparse output is not supported at gradcheck yet. '
+                         'Please call to_dense() on the output of fn for gradcheck.')
+    if output.layout == torch._mkldnn:
+        raise ValueError('MKLDNN output is not supported at gradcheck yet. '
                          'Please call to_dense() on the output of fn for gradcheck.')
     diff_input_list = list(iter_tensors(input, True))
     jacobian = make_jacobian(input, output.numel())
@@ -137,7 +160,7 @@ def get_analytical_jacobian(input, output):
                     if d_x is None:
                         jacobian_x[:, i].zero_()
                     else:
-                        d_x_dense = d_x.to_dense() if d_x.is_sparse else d_x
+                        d_x_dense = d_x.to_dense() if not d_x.layout == torch.strided else d_x
                         assert jacobian_x[:, i].numel() == d_x_dense.numel()
                         jacobian_x[:, i] = d_x_dense.contiguous().view(-1)
 
@@ -278,13 +301,14 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         for gi, i in zip(grads_input, diff_input_list):
             if gi is None:
                 continue
-            if isinstance(gi, torch.Tensor) and gi.is_sparse:
+            if isinstance(gi, torch.Tensor) and gi.layout != torch.strided:
                 if gi.layout != i.layout:
-                    return fail_test('grad is sparse tensor, but has incorrect layout')
-                if gi.sparse_dim() != i.sparse_dim():
-                    return fail_test('grad is sparse tensor, but has incorrect sparse_dim')
-                if gi.dense_dim() != i.dense_dim():
-                    return fail_test('grad is sparse tensor, but has incorrect dense_dim')
+                    return fail_test('grad is incorrect layout')
+                if gi.layout == torch.sparse_coo:
+                    if gi.sparse_dim() != i.sparse_dim():
+                        return fail_test('grad is sparse tensor, but has incorrect sparse_dim')
+                    if gi.dense_dim() != i.dense_dim():
+                        return fail_test('grad is sparse tensor, but has incorrect dense_dim')
                 gi = gi.to_dense()
                 i = i.to_dense()
             if not gi.eq(0).all():
