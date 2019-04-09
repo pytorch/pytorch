@@ -610,7 +610,7 @@ binary_populate_env: &binary_populate_env
 
     # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
     export DATE="$(date -u +%Y%m%d)"
-    export PYTORCH_BUILD_VERSION="1.0.0.dev$DATE"
+    export PYTORCH_BUILD_VERSION="1.1.0.dev$DATE"
     export PYTORCH_BUILD_NUMBER=1
 
     cat >>"$envfile" <<EOL
@@ -625,7 +625,7 @@ binary_populate_env: &binary_populate_env
     export BUILD_PYTHONLESS="$BUILD_PYTHONLESS"
 
     export DATE="$DATE"
-    export NIGHTLIES_DATE_PREAMBLE=1.0.0.dev
+    export NIGHTLIES_DATE_PREAMBLE=1.1.0.dev
     export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
     export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
     export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
