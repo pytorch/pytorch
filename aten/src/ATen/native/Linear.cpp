@@ -46,12 +46,12 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
     auto sr = right.size(i)>1;
     if (sum_dims[i]) { // first dimensions that will be summed over after multiplication
       if (sl && sr) {  // dimensions nontrivially in both left and right must be of the same size
-	AT_CHECK(left.size(i)==right.size(i), "non-broadcast dimensions must match");
-	sum_size *= left.size(i);
+        AT_CHECK(left.size(i)==right.size(i), "non-broadcast dimensions must match");
+        sum_size *= left.size(i);
       } else if (sl) { // if it is only in one of left and right, we can sum right away
-	left = left.sum(i, true);
+        left = left.sum(i, true);
       } else if (sr) {
-	right = right.sum(i, true);
+        right = right.sum(i, true);
       }
     } else if (sl && sr) { // now deal with dimensions  dimensions that will be in the output
       // dimensions nontrivially in both left and right must be of the same size
@@ -117,7 +117,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   if (! keepdim) {
     for (int i = dim-1; i>=0; i--)
       if (sum_dims[i])
-	result.squeeze_(i);
+        result.squeeze_(i);
   }
   return result;
 }
@@ -183,7 +183,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
           }
           else {                          // we have seen an ellipsis before, so we check compatibility
             AT_CHECK(candidate_num_ell_idxes == num_ell_idxes,
-		     "ellipsis must represent ", num_ell_idxes, " dimensions in all terms");
+                     "ellipsis must represent ", num_ell_idxes, " dimensions in all terms");
           }
           for (int64_t i = 0; i < num_ell_idxes; ++i) { // map ellipsis dimensions in operand to indices
             current_op_idxes.push_back(first_ell_idx + i);
@@ -360,8 +360,8 @@ Tensor einsum(std::string eqn, TensorList tensors) {
 // the computation is unrolled in the unroll_dim dimension
 // its main purpose is to unify the computations in bilinear and bilinear_backward
 Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
-		  IntArrayRef expand1_, IntArrayRef expand2_, IntArrayRef expand3_,
-		  IntArrayRef sumdim_, int64_t unroll_dim) {
+                  IntArrayRef expand1_, IntArrayRef expand2_, IntArrayRef expand3_,
+                  IntArrayRef sumdim_, int64_t unroll_dim) {
   int64_t total_dim = i1_.dim()+expand1_.size();
   AT_CHECK((unroll_dim >= 0) && (unroll_dim < total_dim), "unroll_dim must be in [0,", total_dim-1, "]");
   auto expand1 = at::dim_list_to_bitset(expand1_, total_dim);
@@ -390,11 +390,11 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
     if (expand3[i]) {
       i3 = i3.unsqueeze(i);
       if (sumdim[i] && (i != unroll_dim))
-	sum_dims_12.push_back(i);
+        sum_dims_12.push_back(i);
     } else  {
       s = i3.size(i);
       if (sumdim[i] && (i != unroll_dim))
-	sum_dims_23.push_back(i);
+        sum_dims_23.push_back(i);
     }
     output_size.push_back(sumdim[i] ? 1 : s);
     if (i == unroll_dim)
@@ -408,8 +408,8 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   if (! sumdim[unroll_dim]) {
     for (int64_t k = 0; k < unroll_size; k++) {
       Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k * slicemul1, 1),
-					       i2.narrow(unroll_dim, k * slicemul2, 1),
-					       sum_dims_12, true);
+                                               i2.narrow(unroll_dim, k * slicemul2, 1),
+                                               sum_dims_12, true);
       buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k * slicemul3, 1), sum_dims_23, true);
       output.narrow(unroll_dim, k, 1).add_(buf);
     }
@@ -417,7 +417,7 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   else {
     for (int64_t k = 0; k < unroll_size; k++) {
       Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k*slicemul1, 1),
-					       i2.narrow(unroll_dim, k*slicemul2, 1), sum_dims_12, true);
+                                               i2.narrow(unroll_dim, k*slicemul2, 1), sum_dims_12, true);
       buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k*slicemul3, 1), sum_dims_23, true);
       output.add_(buf);
     }
@@ -473,7 +473,7 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
       t2 = t2.sum(dims2[i], true);
     } else {
       AT_CHECK(s1 == s2, "contracted dimensions need to match, but first has size ", s1, " in dim ", dims1[i],
-	       " and second has size ", s2, " in dim ", dims2[i]);
+               " and second has size ", s2, " in dim ", dims2[i]);
       csize *= s1;
     }
   }
