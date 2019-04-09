@@ -457,6 +457,7 @@ struct Module {
     return lowered_methods_;
   }
 
+  // so that C++ users can easily add methods
   void define(const std::string& src, const Resolver& resolver = nullptr);
 
   void _define_lowered(
