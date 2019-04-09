@@ -107,17 +107,17 @@ Testing CountUp operator...
 'count' value after CountUp test: 10
 
 Testing CountDown operator...
-'count' value after CountDown: 9	'done' value: False
-'count' value after CountDown: 8	'done' value: False
-'count' value after CountDown: 7	'done' value: False
-'count' value after CountDown: 6	'done' value: False
-'count' value after CountDown: 5	'done' value: False
-'count' value after CountDown: 4	'done' value: False
-'count' value after CountDown: 3	'done' value: False
-'count' value after CountDown: 2	'done' value: False
-'count' value after CountDown: 1	'done' value: False
-'count' value after CountDown: 0	'done' value: False
-'count' value after CountDown: -1	'done' value: True
+'count' value after CountDown: 9        'done' value: False
+'count' value after CountDown: 8        'done' value: False
+'count' value after CountDown: 7        'done' value: False
+'count' value after CountDown: 6        'done' value: False
+'count' value after CountDown: 5        'done' value: False
+'count' value after CountDown: 4        'done' value: False
+'count' value after CountDown: 3        'done' value: False
+'count' value after CountDown: 2        'done' value: False
+'count' value after CountDown: 1        'done' value: False
+'count' value after CountDown: 0        'done' value: False
+'count' value after CountDown: -1        'done' value: True
 ```
 
 </details>

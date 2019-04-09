@@ -1181,7 +1181,7 @@ class ShapePropagator {
       if (!maybe_dtype_option)
         return {};
       auto dtype =
-          (maybe_dtype_option->isNone() ? at::kFloat
+          (maybe_dtype_option->isNone() ? at::kDouble
                                         : maybe_dtype_option->toScalarType());
 
       return {DimensionedTensorType::create(dtype, device, dim)};

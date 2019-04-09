@@ -3377,6 +3377,17 @@ a")
         check_indexing('[1+1]', consec((3, 3)))
         check_indexing('[1:(0 + 2)]', consec((3, 3, 3)))
 
+        # None for new dimensions
+        check_indexing('[None, 0]', consec((3, 3)))
+        check_indexing('[1, None]', consec((3, 3), 10))
+        check_indexing('[None, None, 2]', consec((3, 3), 19))
+        check_indexing('[None, 2, None]', consec((3,)))
+        check_indexing('[0:2, None]', consec((3, 3, 3)))
+        check_indexing('[None, 1:-1]', consec((3, 3, 3)))
+        check_indexing('[None, -3:-1, None]', consec((6, 3)))
+        check_indexing('[-1, None, 2:, None, 1:2]', consec((3, 3, 3, 3)))
+        check_indexing('[None, -1, None, 2:, None, 1:2, None]', consec((3, 3, 3, 3)))
+
         # dynamic expression usage
         check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
         check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
@@ -7718,7 +7729,7 @@ a")
 
             def forward(self, x):
                 y = self.conv(x)
-                w = nn.functional.interpolate(y, mode='bilinear', align_corners=False, scale_factor=0.5)
+                w = nn.functional.interpolate(y, mode='bilinear', align_corners=False, scale_factor=3)
                 return w
 
         f = test()
@@ -8317,6 +8328,21 @@ a")
             return a + 1.0 - a
 
         self.checkScript(test_rand, ())
+        fn = torch.jit.script(test_rand)
+        out = fn()
+        self.assertEqual(out.dtype, torch.double)
+        g = fn.graph_for()
+        # Testing shape analysis correctly setting type
+        FileCheck().check("Double(*, *)").check_not("Float(*, *)").run(g)
+
+        @torch.jit.script
+        def randint():
+            return torch.randint(0, 5, [1, 2])
+        out = randint()
+        self.assertEqual(out.dtype, torch.double)
+        # although the type should be int here, testing that the runtime dtype
+        # and shape analysis dtype is the same.
+        FileCheck().check("Double(*, *)").check_not("Float(*, *)").run(randint.graph_for())
 
     def test_erase_number_types(self):
         def func(a):
