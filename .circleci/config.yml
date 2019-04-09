@@ -56,8 +56,8 @@ setup_linux_system_environment: &setup_linux_system_environment
 
     cat /etc/apt/sources.list
 
-    ps ax | grep apt
-    ps ax | grep dpkg
+    ps auxfww | grep [a]pt
+    ps auxfww | grep dpkg
 
 install_doc_push_script: &install_doc_push_script
   name: Install the doc push script
