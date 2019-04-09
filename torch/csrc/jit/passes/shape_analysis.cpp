@@ -778,7 +778,7 @@ class ShapePropagator {
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<DimensionedTensorType>(node)) {
-            AT_ASSERT(maybe_tensor_types->size() == 2);
+            AT_ASSERT(maybe_tensor_types->size() >= 2);
             auto first_scalar_type = (*maybe_tensor_types)[0]->scalarType();
             auto second_scalar_type = (*maybe_tensor_types)[1]->scalarType();
             size_t arg_for_type = 0;
