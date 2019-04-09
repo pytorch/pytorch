@@ -3902,10 +3902,10 @@
     CPU: _lu_with_info_cpu
     CUDA: _lu_with_info_cuda
 
-- func: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
+- func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
-- func: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
+- func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   matches_jit_signature: True
   variants: method, function
 

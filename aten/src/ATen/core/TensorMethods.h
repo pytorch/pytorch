@@ -1192,8 +1192,8 @@ inline Tensor Tensor::orgqr(const Tensor & input2) const {
 inline Tensor Tensor::ormqr(const Tensor & input2, const Tensor & input3, bool left, bool transpose) const {
     return dispatch_type().ormqr(*this, input2, input3, left, transpose);
 }
-inline Tensor Tensor::btrisolve(const Tensor & LU_data, const Tensor & LU_pivots) const {
-    return dispatch_type().btrisolve(*this, LU_data, LU_pivots);
+inline Tensor Tensor::lu_solve(const Tensor & LU_data, const Tensor & LU_pivots) const {
+    return dispatch_type().lu_solve(*this, LU_data, LU_pivots);
 }
 inline Tensor Tensor::multinomial(int64_t num_samples, bool replacement, Generator * generator) const {
     return dispatch_type().multinomial(*this, num_samples, replacement, generator);
