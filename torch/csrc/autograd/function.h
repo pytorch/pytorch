@@ -11,7 +11,6 @@
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/ATen.h>
-#include <ATen/core/stack.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -113,7 +112,8 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
   variable_list operator()(variable_list&& inputs) {
-    RECORD_FUNCTION_WITH_INPUT_RANGE(this, inputs.begin(), inputs.end());
+    RECORD_FUNCTION(
+        this, std::vector<c10::IValue>(inputs.begin(), inputs.end()));
 
     return apply(std::move(inputs));
   }

@@ -577,7 +577,7 @@ void testTopologicalIndex() {
 }
 
 at::Tensor invokeTestRecordFunction(at::Tensor& t) {
-  RECORD_FUNCTION_WITH_INPUTS("test", t);
+  RECORD_FUNCTION("test", std::vector<c10::IValue>({t}));
 
   auto t2 = t.pow(2);
   return t2;
@@ -590,15 +590,14 @@ static const auto invokeTestRecordFunction_JIT = R"JIT(
 )JIT";
 
 at::Tensor invokeTestRecordFunctionJIT(at::Tensor& t) {
-  RECORD_FUNCTION_WITH_INPUTS("test", t);
+  RECORD_FUNCTION("test", std::vector<c10::IValue>({t}));
 
-  auto cu = std::make_shared<script::Module>();
-  script::defineMethodsInModule(
-      cu, invokeTestRecordFunction_JIT, script::nativeResolver, c10::nullopt);
-  return cu->get_method("forward")({t}).toTensor();
+  auto cu = compile(invokeTestRecordFunction_JIT);
+  return cu->get_function("forward")({t}).toTensor();
 }
 
-using TracedTestInputs = std::vector<std::tuple<std::string, std::vector<std::vector<int64_t>>>>;
+using TracedTestInputs =
+    std::vector<std::tuple<std::string, std::vector<std::vector<int64_t>>>>;
 
 void checkTracedInputs(const TracedTestInputs& inputs) {
   bool found_test = false;
@@ -654,7 +653,8 @@ void testRecordFunction() {
             sizes.push_back(std::vector<int64_t>());
           }
         }
-        traced_inputs.push_back(std::make_tuple(std::string(getFullName(&fn)), sizes));
+        traced_inputs.push_back(
+            std::make_tuple(std::string(getFullName(&fn)), sizes));
       }, [](const autograd::profiler::RecordFunction&) {}, true);
 
   auto t = torch::randn({1, 2, 3}, at::kCPU);

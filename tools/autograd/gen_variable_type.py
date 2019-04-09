@@ -207,10 +207,7 @@ if (${cond}) {
 """)
 
 RECORD_FUNCTION = CodeTemplate("""\
-profiler::RecordFunction guard("${name}", Function::peek_at_next_sequence_nr());""")
-
-RECORD_FUNCTION_WITH_INPUTS = CodeTemplate("""\
-RECORD_FUNCTION_WITH_INPUTS_SEQ("${name}", Function::peek_at_next_sequence_nr(), ${input_names});
+RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Function::peek_at_next_sequence_nr());
 """)
 
 SELECT = CodeTemplate("""\
@@ -865,11 +862,8 @@ def emit_body(declaration):
     body = []
     if base_name not in DONT_PROFILE:
         input_names = record_function_input_names()
-        if len(input_names) > 0:
-            body.append(
-                RECORD_FUNCTION_WITH_INPUTS.substitute(combined, input_names=input_names))
-        else:
-            body.append(RECORD_FUNCTION.substitute(combined))
+        body.append(
+            RECORD_FUNCTION.substitute(combined, input_names=input_names))
     if strategy != 'use_type':
         body.extend(unpack_args(env, declaration))
     if requires_derivative:

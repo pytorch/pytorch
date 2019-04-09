@@ -316,7 +316,7 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) co
 }
 
 Tensor VariableType::detach(const Tensor & self) const {
-  RECORD_FUNCTION_WITH_INPUTS("detach", self);
+  RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
 
   torch::jit::Node* node = nullptr;
   if (jit::tracer::isTracing()) {
@@ -337,7 +337,7 @@ Tensor VariableType::detach(const Tensor & self) const {
 }
 
 Tensor & VariableType::detach_(Tensor & self) const {
-  RECORD_FUNCTION_WITH_INPUTS("detach_", self);
+  RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
 
   torch::jit::Node* node = nullptr;
   if (jit::tracer::isTracing()) {

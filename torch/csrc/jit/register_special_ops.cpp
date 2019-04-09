@@ -140,7 +140,7 @@ RegisterOperators reg({
     Operator(
         "aten::split(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]",
         [](Stack& stack) {
-          RECORD_FUNCTION_WITH_STACK("split_with_sizes", last(stack, 3));
+          RECORD_FUNCTION("split_with_sizes", last(stack, 3));
 
           auto result = at::split_with_sizes(
               (std::move(peek(stack, 0, 3))).toTensor(),
@@ -156,7 +156,7 @@ RegisterOperators reg({
     Operator(
         "aten::size(Tensor self) -> int[]",
         [](Stack& stack) {
-          RECORD_FUNCTION_WITH_STACK("size", last(stack, 1));
+          RECORD_FUNCTION("size", last(stack, 1));
 
           auto t = std::move(pop(stack)).toTensor();
           pack(stack, t.sizes().vec());
@@ -165,7 +165,7 @@ RegisterOperators reg({
     Operator(
         "aten::list_with_default(int[] list, int[] defaults) -> int[]",
         [](Stack& stack) {
-          RECORD_FUNCTION_WITH_STACK("sizes", last(stack, 2));
+          RECORD_FUNCTION("sizes", last(stack, 2));
 
           auto list = peek(stack, 0, 2).toIntListRef();
           auto defaults = peek(stack, 1, 2).toIntListRef();
