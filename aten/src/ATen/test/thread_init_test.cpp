@@ -14,7 +14,7 @@ void test(int given_num_threads) {
   ASSERT(given_num_threads >= 0);
   ASSERT(at::get_num_threads() == given_num_threads);
   auto t_sum = t.sum();
-  for (int i = 0; i < 1; ++i) {
+  for (int i = 0; i < 1000; ++i) {
     t_sum = t_sum + t.sum();
   }
 }
