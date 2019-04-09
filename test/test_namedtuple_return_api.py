@@ -5,7 +5,6 @@ import unittest
 import textwrap
 import torch
 from collections import namedtuple
-import itertools
 
 
 path = os.path.dirname(os.path.realpath(__file__))
