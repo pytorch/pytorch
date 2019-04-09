@@ -1,5 +1,4 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-import importlib
 import errno
 import hashlib
 import os
@@ -9,6 +8,7 @@ import sys
 import tempfile
 import torch
 import zipfile
+from tools.shared.module_loader import import_module
 
 if sys.version_info[0] == 2:
     from urlparse import urlparse
@@ -55,27 +55,9 @@ MASTER_BRANCH = 'master'
 ENV_TORCH_HUB_DIR = 'TORCH_HUB_DIR'
 DEFAULT_TORCH_HUB_DIR = '~/.torch/hub'
 VAR_DEPENDENCY = 'dependencies'
-MODULE_HUBCONF = 'hubconf'
+MODULE_HUBCONF = 'hubconf.py'
 READ_DATA_CHUNK = 8192
 hub_dir = None
-
-
-def _check_module_exists(name):
-    if sys.version_info >= (3, 4):
-        import importlib.util
-        return importlib.util.find_spec(name) is not None
-    elif sys.version_info >= (3, 3):
-        # Special case for python3.3
-        import importlib.find_loader
-        return importlib.find_loader(name) is not None
-    else:
-        # NB: imp doesn't handle hierarchical module names (names contains dots).
-        try:
-            import imp
-            imp.find_module(name)
-        except Exception:
-            return False
-        return True
 
 
 def _remove_if_exists(path):
@@ -101,16 +83,11 @@ def _download_archive_zip(url, filename):
             f.write(data)
 
 
-def _load_attr_from_module(module_name, func_name):
-    m = importlib.import_module(module_name)
-
-    if m is None:
-        raise RuntimeError('Cannot find module {}'.format(module_name))
-
+def _load_attr_from_module(module, func_name):
     # Check if callable is defined in the module
-    if func_name not in dir(m):
+    if func_name not in dir(module):
         return None
-    return getattr(m, func_name)
+    return getattr(module, func_name)
 
 
 def _setup_hubdir():
@@ -165,11 +142,40 @@ def _get_cache_or_reload(github, force_reload):
         _remove_if_exists(repo_dir)
         shutil.move(extracted_repo, repo_dir)  # rename the repo
 
-    sys.path.insert(0, repo_dir)  # Make Python interpreter aware of the repo
+    return repo_dir
 
 
-def _check_dependencies():
-    dependencies = _load_attr_from_module(MODULE_HUBCONF, VAR_DEPENDENCY)
+def _load_hubconf_module(github, force_reload):
+    # Setup hub_dir to save downloaded files
+    _setup_hubdir()
+
+    repo_dir = _get_cache_or_reload(github, force_reload)
+
+    m = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
+
+    return m
+
+
+def _check_module_exists(name):
+    if sys.version_info >= (3, 4):
+        import importlib.util
+        return importlib.util.find_spec(name) is not None
+    elif sys.version_info >= (3, 3):
+        # Special case for python3.3
+        import importlib.find_loader
+        return importlib.find_loader(name) is not None
+    else:
+        # NB: imp doesn't handle hierarchical module names (names contains dots).
+        try:
+            import imp
+            imp.find_module(name)
+        except Exception:
+            return False
+        return True
+
+
+def _check_dependencies(m):
+    dependencies = _load_attr_from_module(m, VAR_DEPENDENCY)
 
     if dependencies is not None:
         missing_deps = [pkg for pkg in dependencies if not _check_module_exists(pkg)]
@@ -177,27 +183,16 @@ def _check_dependencies():
             raise RuntimeError('Missing dependencies: {}'.format(', '.join(missing_deps)))
 
 
-def _load_repo(github, force_reload):
-    # Setup hub_dir to save downloaded files
-    _setup_hubdir()
-
-    _get_cache_or_reload(github, force_reload)
-
-
-def _load_func_from_hubconf(model):
+def _load_entry_from_hubconf(m, model):
     if not isinstance(model, str):
         raise ValueError('Invalid input: model should be a string of function name')
 
-    _check_dependencies()
+    _check_dependencies(m)
 
-    func = _load_attr_from_module(MODULE_HUBCONF, model)
+    func = _load_attr_from_module(m, model)
 
-    if func is None:
+    if func is None or not callable(func):
         raise RuntimeError('Cannot find callable {} in hubconf'.format(model))
-
-    # Check if func is callable
-    if not callable(func):
-        raise RuntimeError('{} is not callable'.format(func))
 
     return func
 
@@ -232,11 +227,11 @@ def list(github, force_reload=False):
         >>> entrypoints = torch.hub.list('pytorch/vision', force_reload=True)
     """
 
-    _load_repo(github, force_reload)
-    m = importlib.import_module(MODULE_HUBCONF)
-    module_dir = dir(m)
+    hub_module = _load_hubconf_module(github, force_reload)
+
     # We take functions starts with '_' as internal helper functions
-    entrypoints = [f for f in dir(m) if callable(getattr(m, f)) and not f.startswith('_')]
+    entrypoints = [f for f in dir(hub_module) if callable(getattr(hub_module, f)) and not f.startswith('_')]
+
     return entrypoints
 
 
@@ -253,10 +248,11 @@ def show(github, model, force_reload=False):
     Example:
         >>> torch.hub.show('pytorch/vision', 'resnet18', force_reload=True)
     """
+    hub_module = _load_hubconf_module(github, force_reload)
 
-    _load_repo(github, force_reload)
-    func = _load_func_from_hubconf(model)
-    print(func.__doc__)
+    entry = _load_entry_from_hubconf(hub_module, model)
+
+    print(entry.__doc__)
 
 
 def load(github, model, force_reload=False, *args, **kwargs):
@@ -279,11 +275,11 @@ def load(github, model, force_reload=False, *args, **kwargs):
     Example:
         >>> model = torch.hub.load('pytorch/vision', 'resnet50', pretrained=True)
     """
-    _load_repo(github, force_reload)
+    hub_module = _load_hubconf_module(github, force_reload)
 
-    func = _load_func_from_hubconf(model)
+    entry = _load_entry_from_hubconf(hub_module, model)
 
-    return func(*args, **kwargs)
+    return entry(*args, **kwargs)
 
 
 def _download_url_to_file(url, dst, hash_prefix, progress):
