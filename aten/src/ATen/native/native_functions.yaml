@@ -552,9 +552,9 @@
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int groups=1, int[3] dilation=1) -> Tensor
   matches_jit_signature: True
 
-- func: copy(Tensor self, ScalarType dtype, Device device, bool non_blocking=False) -> Tensor
+- func: copy(Tensor self, bool non_blocking=False) -> Tensor
   matches_jit_signature: True
-  variants: function
+  variants: function, method
   device_guard: False
 
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)

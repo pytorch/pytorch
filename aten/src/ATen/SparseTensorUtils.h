@@ -31,10 +31,7 @@ inline void alias_into_sparse(const SparseTensor& self, const LongTensor& indice
 // Take indices and values and makes a (data) copy of them to put into the sparse
 // indices/values.  This used to be called THSTensor_(_set)
 inline void copy_into_sparse(const SparseTensor& self, const LongTensor& indices, const Tensor& values, bool non_blocking) {
-  alias_into_sparse(
-      self,
-      copy(indices, self._indices().scalar_type(), self._indices().device(), non_blocking),
-      copy(values, self._values().scalar_type(), self._values().device(), non_blocking));
+  alias_into_sparse(self, copy(indices, non_blocking), copy(values, non_blocking));
 }
 
 // TODO: put this into the public API

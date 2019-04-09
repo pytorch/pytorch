@@ -20,7 +20,9 @@ static inline Device ensure_has_index(Device device) {
 }
 
 static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking) {
-  return at::copy(self, typeMetaToScalarType(options.dtype()), options.device(), non_blocking);
+  auto r = at::empty(self.sizes(), options);
+  r.copy_(self, non_blocking);
+  return r;
 }
 
 Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy) {
@@ -43,7 +45,7 @@ Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, b
       (!dtype_opt  || self.dtype()  ==  dtype_opt.value()) && !copy) {
     return self;
   }
-  auto specified_options = self.options();	  return to_impl(self, options, non_blocking);
+  auto specified_options = self.options();
   if (device_opt) {
     specified_options = specified_options.device(device_opt.value());
   }

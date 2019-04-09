@@ -374,6 +374,7 @@ class CAFFE2_API Tensor {
   Tensor clamp_min(Scalar min) const;
   Tensor & clamp_min_(Scalar min);
   Tensor contiguous() const;
+  Tensor copy(bool non_blocking=false) const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
   Tensor cos() const;
   Tensor & cos_();
