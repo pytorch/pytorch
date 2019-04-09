@@ -8,7 +8,6 @@ import sys
 import tempfile
 import torch
 import zipfile
-from tools.shared.module_loader import import_module
 
 if sys.version_info[0] == 2:
     from urlparse import urlparse
@@ -58,6 +57,22 @@ VAR_DEPENDENCY = 'dependencies'
 MODULE_HUBCONF = 'hubconf.py'
 READ_DATA_CHUNK = 8192
 hub_dir = None
+
+
+# Copied from tools/shared/module_loader to be included in torch package
+def import_module(name, path):
+    if sys.version_info >= (3, 5):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    elif sys.version_info >= (3, 0):
+        from importlib.machinery import SourceFileLoader
+        return SourceFileLoader(name, path).load_module()
+    else:
+        import imp
+        return imp.load_source(name, path)
 
 
 def _remove_if_exists(path):
