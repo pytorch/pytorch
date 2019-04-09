@@ -85,6 +85,9 @@ std::string show_config() {
       case 201511:
         ver_str = "4.5";
         break;
+      default:
+        ver_str = nullptr;
+        break;
     }
     if (ver_str) {
       ss << " (a.k.a. OpenMP " << ver_str << ")";
