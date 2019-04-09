@@ -13,7 +13,7 @@ namespace c10 {
    * or an object of type B.
    */
   template<class Left, class Right>
-  class C10_API either final {
+  class either final {
   public:
       template<class Head, class... Tail, c10::guts::enable_if_t<std::is_constructible<Left, Head, Tail...>::value && !std::is_constructible<Right, Head, Tail...>::value>* = nullptr>
       either(Head&& construct_left_head_arg, Tail&&... construct_left_tail_args)
