@@ -321,7 +321,7 @@ struct Module {
       return methods_[*offset].get();
     }
 
-    if (Function* fn = class_cu().find_function(name)) {
+    if (Function* fn = class_cu().find_function(name).get()) {
       return &const_cast<Module*>(this)->lower_first_class_method(fn);
     }
 

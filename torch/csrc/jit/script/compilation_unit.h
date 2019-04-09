@@ -184,11 +184,11 @@ struct TORCH_API Function {
 };
 
 struct TORCH_API CompilationUnit {
-  Function* find_function(const std::string& name) const {
+  std::shared_ptr<Function> find_function(const std::string& name) const {
     auto it = dict_.find(name);
     if (it == dict_.end())
       return nullptr;
-    return functions_[it->second].get();
+    return functions_[it->second];
   }
 
   Function& get_function(const std::string& name) const {
@@ -224,12 +224,12 @@ struct TORCH_API CompilationUnit {
   }
 
   Function& create_function(std::string name, std::shared_ptr<Graph> graph) {
-    std::unique_ptr<Function> fn{new Function(
-        std::move(name), is_optimized(), std::move(graph), nullptr)};
+    auto fn = std::make_shared<Function>(
+        std::move(name), is_optimized(), std::move(graph), nullptr);
     return register_function(std::move(fn));
   }
 
-  const std::vector<std::unique_ptr<Function>>& get_functions() const {
+  const std::vector<std::shared_ptr<Function>>& get_functions() const {
     return functions_;
   }
 
@@ -257,7 +257,7 @@ struct TORCH_API CompilationUnit {
   }
 
  private:
-  Function& register_function(std::unique_ptr<Function> fn) {
+  Function& register_function(std::shared_ptr<Function> fn) {
     AT_CHECK(
         0 == dict_.count(fn->name()),
         "method '",
@@ -267,7 +267,7 @@ struct TORCH_API CompilationUnit {
     dict_[functions_.back()->name()] = functions_.size() - 1;
     return *functions_.back();
   }
-  std::vector<std::unique_ptr<Function>> functions_;
+  std::vector<std::shared_ptr<Function>> functions_;
   // for fast lookup
   std::unordered_map<std::string, size_t> dict_;
   bool optimized_ = true;
