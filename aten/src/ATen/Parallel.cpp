@@ -9,10 +9,15 @@
 namespace at {
 
 namespace {
-std::atomic<size_t> num_threads(1);
+// Number of threads set by the user
+std::atomic<int> num_threads(-1);
 }
 
 void init_num_threads() {
+  auto nthreads = num_threads.load();
+  if (nthreads > 0) {
+    set_num_threads(nthreads);
+  } else {
 #if defined(_OPENMP) && defined(TH_BLAS_MKL)
   // If we are using MKL an OpenMP make sure the number of threads match.
   // Otherwise, MKL and our OpenMP-enabled functions will keep changing the
@@ -20,9 +25,7 @@ void init_num_threads() {
   // leaks in GCC 5.4)
   omp_set_num_threads(mkl_get_max_threads());
 #endif
-#if defined(_OPENMP)
-num_threads.store(omp_get_max_threads());
-#endif
+  }
 }
 
 void set_num_threads(size_t nthreads) {
@@ -45,8 +48,16 @@ void set_num_threads(size_t nthreads) {
 #endif
 }
 
+// Explicitly calling omp_get_max_threads() as the size of the parallel
+// region might be different in the new thread;
+// Use init_num_threads() during thread initialization to ensure
+// consistent size of parallel region in different threads
 size_t get_num_threads() {
-  return num_threads.load();
+#ifdef _OPENMP
+  return omp_get_max_threads();
+#else
+  return 1;
+#endif
 }
 
 }

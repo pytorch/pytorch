@@ -4263,7 +4263,10 @@ add_docstr(torch.set_num_threads,
            r"""
 set_num_threads(int)
 
-Sets the number of threads used for parallelizing CPU operations
+Sets the number of threads used for parallelizing CPU operations.
+WARNING:
+To ensure that the number of threads is respected, set_num_threads(int)
+must be called exactly once before running the rest of the user code
 """)
 
 add_docstr(torch.sigmoid,
