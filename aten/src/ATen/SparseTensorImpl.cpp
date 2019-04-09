@@ -48,9 +48,6 @@ SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeM
   AT_ASSERT(values_.device() == device());
 }
 
-IntArrayRef SparseTensorImpl::sizes() const {
-  return sizes_;
-}
 IntArrayRef SparseTensorImpl::strides() const {
   AT_ERROR("sparse tensors do not have strides");
 }

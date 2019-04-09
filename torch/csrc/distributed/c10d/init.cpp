@@ -45,6 +45,7 @@ PyObject* c10d_init(PyObject* _unused) {
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(py::init<
            std::vector<std::vector<torch::autograd::Variable>>,
+           std::vector<std::vector<size_t>>,
            std::shared_ptr<::c10d::ProcessGroup>>())
       .def(
           "initialize_buckets",

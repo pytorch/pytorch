@@ -454,6 +454,12 @@ inline Tensor Tensor::pinverse(double rcond) const {
 inline Tensor Tensor::repeat(IntArrayRef repeats) const {
     return dispatch_type().repeat(*this, repeats);
 }
+inline Tensor Tensor::repeat_interleave(const Tensor & repeats, c10::optional<int64_t> dim) const {
+    return dispatch_type().repeat_interleave(*this, repeats, dim);
+}
+inline Tensor Tensor::repeat_interleave(int64_t repeats, c10::optional<int64_t> dim) const {
+    return dispatch_type().repeat_interleave(*this, repeats, dim);
+}
 inline Tensor Tensor::reshape(IntArrayRef shape) const {
     return dispatch_type().reshape(*this, shape);
 }
@@ -768,6 +774,9 @@ inline Tensor Tensor::to_sparse(int64_t sparse_dim) const {
 }
 inline Tensor Tensor::to_sparse() const {
     return dispatch_type().to_sparse(*this);
+}
+inline Tensor Tensor::to_mkldnn() const {
+    return dispatch_type().to_mkldnn(*this);
 }
 inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point) const {
     return dispatch_type().quantize_linear(*this, scale, zero_point);

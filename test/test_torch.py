@@ -1769,7 +1769,6 @@ class _TestTorchMixin(object):
             torch.lu(torch.empty(1, 2, 2), pivot=False)
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_lu(self):
         self._test_lu(self, lambda t: t)
 
@@ -4680,7 +4679,6 @@ class _TestTorchMixin(object):
                 self.assertEqual(x.select(dim, i), res[i])
                 self.assertEqual(x.select(dim, i), res2[i])
 
-    @skipIfRocm
     def test_linspace(self):
         for device in torch.testing.get_all_device_types():
             _from = random.random()
@@ -7957,7 +7955,6 @@ class _TestTorchMixin(object):
             self.assertEqual([(0, 1, 3, 0)], [z.shape for z in torch.split(x, 0, dim=0)])
 
     # functions that operate over a dimension but don't reduce.
-    @skipIfRocm
     def test_dim_function_empty(self):
         for device in torch.testing.get_all_device_types():
             shape = (0, 1, 2, 0)
@@ -8276,6 +8273,47 @@ class _TestTorchMixin(object):
         result = tensor.repeat(torchSize)
         self.assertEqual(result.size(), target, 'Error in repeat using result and LongStorage')
         self.assertEqual(result.mean(0).view(8, 4), tensor, 'Error in repeat (not equal)')
+
+    def test_repeat_interleave(self):
+        x = torch.tensor([0, 1, 2, 3])
+        expected = torch.tensor([1, 2, 2, 3, 3, 3])
+        self.assertEqual(torch.repeat_interleave(x), expected)
+
+        with self.assertRaises(RuntimeError):
+            torch.repeat_interleave(torch.arange(4).reshape(2, 2))
+
+        with self.assertRaises(RuntimeError):
+            torch.repeat_interleave(torch.arange(4.0))
+
+        with self.assertRaises(RuntimeError):
+            torch.repeat_interleave(torch.tensor([1, 2, -1, 3, 4]))
+
+        y = torch.tensor([[1, 2], [3, 4]])
+
+        y1_v1 = torch.repeat_interleave(y, 2)
+        y1_v2 = torch.repeat_interleave(y, torch.tensor(2))
+        y1_v3 = torch.repeat_interleave(y, torch.tensor([2]))
+        y1_expect = torch.tensor([1, 1, 2, 2, 3, 3, 4, 4])
+        self.assertEqual(y1_v1, y1_expect)
+        self.assertEqual(y1_v2, y1_expect)
+        self.assertEqual(y1_v3, y1_expect)
+
+        y2 = torch.repeat_interleave(y, 3, dim=1)
+        y2_expect = torch.tensor([[1, 1, 1, 2, 2, 2],
+                                  [3, 3, 3, 4, 4, 4]])
+        self.assertEqual(y2, y2_expect)
+
+        y3 = torch.repeat_interleave(y, torch.tensor([1, 2]), dim=0)
+        y3_expect = torch.tensor([[1, 2],
+                                  [3, 4],
+                                  [3, 4]])
+        self.assertEqual(y3, y3_expect)
+
+        with self.assertRaises(RuntimeError):
+            torch.repeat_interleave(y, torch.tensor([1, 2, 3]), dim=0)
+
+        with self.assertRaises(RuntimeError):
+            torch.repeat_interleave(y, torch.arange(9).reshape(3, 3), dim=0)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_repeat_tile(self):

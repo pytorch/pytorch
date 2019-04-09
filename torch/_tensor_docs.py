@@ -1875,6 +1875,7 @@ Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
     `numpy.repeat <https://docs.scipy.org/doc/numpy/reference/generated/numpy.repeat.html>`_,
     but is more similar to
     `numpy.tile <https://docs.scipy.org/doc/numpy/reference/generated/numpy.tile.html>`_.
+    For the operator similar to `numpy.repeat`, see :func:`torch.repeat_interleave`.
 
 Args:
     sizes (torch.Size or int...): The number of times to repeat this tensor along each
@@ -1890,6 +1891,13 @@ Example::
             [ 1,  2,  3,  1,  2,  3]])
     >>> x.repeat(4, 2, 1).size()
     torch.Size([4, 2, 3])
+""")
+
+add_docstr_all('repeat_interleave',
+               r"""
+repeat_interleave(repeats, dim=None) -> Tensor
+
+See :func:`torch.repeat_interleave`.
 """)
 
 add_docstr_all('requires_grad_',
@@ -2626,6 +2634,13 @@ Example::
     tensor(indices=tensor([[1]]),
            values=tensor([[ 9,  0, 10]]),
            size=(3, 3), nnz=1, layout=torch.sparse_coo)
+""")
+
+add_docstr_all('to_mkldnn',
+               r"""
+to_mkldnn() -> Tensor
+Returns a copy of the tensor in ``torch.mkldnn`` layout.
+
 """)
 
 add_docstr_all('trace',

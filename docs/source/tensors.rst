@@ -367,6 +367,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: renorm
    .. automethod:: renorm_
    .. automethod:: repeat
+   .. automethod:: repeat_interleave
    .. automethod:: requires_grad
    .. automethod:: requires_grad_
    .. automethod:: reshape
@@ -423,6 +424,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: t
    .. automethod:: t_
    .. automethod:: to
+   .. automethod:: to_mkldnn
    .. automethod:: take
    .. automethod:: tan
    .. automethod:: tan_

@@ -132,14 +132,14 @@ void createTensorToParameterNameMap(
     const QualifiedNamePtr& prefix,
     std::unordered_map<script::Slot, QualifiedNamePtr>& result) {
   for (const auto& param : module.get_parameters()) {
-    result[param.slot()] = QualifiedName::create(prefix, param.name());
+    result[param] = QualifiedName::create(prefix, param.name());
   }
   for (const auto& param : module.get_attributes()) {
-    result[param.slot()] = QualifiedName::create(prefix, param.name());
+    result[param] = QualifiedName::create(prefix, param.name());
   }
   for (const auto& elem : module.get_modules()) {
     createTensorToParameterNameMap(
-        *elem.module, QualifiedName::create(prefix, elem.name), result);
+        *elem, QualifiedName::create(prefix, elem->name()), result);
   }
 }
 
@@ -1123,14 +1123,8 @@ struct PythonPrintPass {
       const std::unordered_map<script::Slot, QualifiedNamePtr>&
           extra_ivalue_names) {
     std::vector<std::string> ivalue_names =
-        fmap(method.initial_ivalues(), [&](const script::NamedIValue* value) {
-          auto entry = extra_ivalue_names.find(value->slot());
-          AT_CHECK(
-              entry != extra_ivalue_names.end(),
-              "Could not find named IValue '",
-              value->name(),
-              "' while pretty printing");
-          return entry->second->str();
+        fmap(method.initial_ivalues(), [&](const script::Slot& slot) {
+          return extra_ivalue_names.at(slot)->str();
         });
     const std::string& name = method.name();
     Graph& graph = *method.graph();

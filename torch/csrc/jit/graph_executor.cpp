@@ -322,18 +322,6 @@ struct GraphExecutorImpl {
     return copy;
   }
 
-  inline bool hasMutableOperators(Block* block) {
-    for (auto n : block->nodes()) {
-      if (n->kind().is_aten() && n->schema().is_mutable())
-        return true;
-      for (auto b : n->blocks()) {
-        if (hasMutableOperators(b))
-          return true;
-      }
-    }
-    return false;
-  }
-
   GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize)
       : graph(prepareGraph(graph)),
         // until we have correct alias analysis any use of mutable operators

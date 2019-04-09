@@ -72,17 +72,17 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
 
   size_t workspace_size;
   AT_CUDNN_CHECK(cudnnGetCTCLossWorkspaceSize(handle, probs_desc.desc(), grad_desc.desc(),
-					      targets->data<int>(), target_lengths.data(), input_lengths.data(),
-					      algo, ctc_loss_desc.desc(), &workspace_size));
+                                              targets->data<int>(), target_lengths.data(), input_lengths.data(),
+                                              algo, ctc_loss_desc.desc(), &workspace_size));
 
 
   Tensor workspace = at::empty(workspace_size, log_probs->options().dtype(kByte));
   Tensor costs = at::empty({log_probs->size(1)}, log_probs->options());
 
   AT_CUDNN_CHECK(cudnnCTCLoss(handle, probs_desc.desc(), probs.data_ptr(),
-			      targets->data<int>(), target_lengths.data(), input_lengths.data(),
-			      costs.data_ptr(), grad_desc.desc(), grad.data_ptr(), algo,
-			      ctc_loss_desc.desc(), workspace.data_ptr(), workspace_size));
+                              targets->data<int>(), target_lengths.data(), input_lengths.data(),
+                              costs.data_ptr(), grad_desc.desc(), grad.data_ptr(), algo,
+                              ctc_loss_desc.desc(), workspace.data_ptr(), workspace_size));
 
   return std::make_tuple(costs, grad);
 }
