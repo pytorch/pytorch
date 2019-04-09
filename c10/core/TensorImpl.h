@@ -157,11 +157,23 @@ struct C10_API AutogradMetaInterface {
 // operations, because it is a useful escape hatch when we want to change the
 // content of a Variable without invalidating it in the autograd graph.
 //
-// NOTE: We explicitly don't put `version_counter_` in AutogradMeta, because
-// after the Variable/Tensor merge, a tensor will not have AutogradMeta when its
-// `requires_grad_` is false, but we still need to keep track of this tensor's
-// version to make sure it's valid in the autograd graph. Hence we put
-// `version_counter_` in TensorImpl instead of AutogradMeta.
+// NOTE: After the Variable/Tensor merge, a tensor will not have AutogradMeta when
+// its `requires_grad_` is false, but when we use this tensor in the forward pass of
+// a function that requires saving this tensor for backward, we need to keep track of
+// this tensor's version to make sure it's always valid in the autograd graph.
+//
+// One logical way to achieve this goal is to initialize AutogradMeta and create the
+// version counter for the non-requires-grad tensor only when it's saved for backward.
+// However, since saving a tensor for backward happens in the forward pass, and our
+// invariant is that forward pass needs to be thread-safe, lazy-initializing AutogradMeta
+// when saving a tensor can introduce race conditions when we are running the forward
+// pass in multi-thread scenarios, thus making the forward pass not thread-safe anymore,
+// which breaks the invariant.
+//
+// Instead, we choose to put the version counter in TensorImpl instead of AutogradMeta,
+// and have it always be available. This allows us to have the optimization of not
+// carrying AutogradMeta when a tensor doesn't require gradient, and also keeps the
+// forward pass thread-safe.
 struct C10_API VariableVersion {
  public:
   // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
