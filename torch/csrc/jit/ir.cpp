@@ -382,20 +382,8 @@ void Node::lint() const {
       break;
     case prim::PythonOp: {
       // Python operator cconv is correct
-      size_t n_scalars = 0, n_tensors = 0;
       auto* value = static_cast<const PythonOp*>(this);
-      for (auto c : value->cconv) {
-        if (c == 'c') {
-          n_scalars++;
-        } else if (c == 'd') {
-          n_tensors++;
-        } else {
-          AT_ASSERT(0);
-        }
-        AT_ASSERT(static_cast<bool>(value->pyobj));
-      }
-      AT_ASSERT(n_scalars == value->scalar_args.size());
-      AT_ASSERT(n_tensors == inputs_.size());
+      value->lint_python();
       break;
     }
     case prim::Eval:
