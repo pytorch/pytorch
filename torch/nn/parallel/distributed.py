@@ -247,8 +247,6 @@ class DistributedDataParallel(Module):
 
         self.modules_params = [list(m.parameters()) for m in self._module_copies]
         self.modules_buffers = [list(m.buffers()) for m in self._module_copies]
-        self.main_module_params_data = [p.data for p in self.modules_params[0]]
-        self.main_module_buffers_data = [b.data for b in self.modules_buffers[0]]
 
         # This is a triply-nested list where the "dimensions" are: devices, buckets, bucket_elems
         param_buckets = []
@@ -384,31 +382,31 @@ class DistributedDataParallel(Module):
         dist._dist_broadcast_coalesced(self.process_group, tensors, buffer_size, False)
 
     def _sync_params(self):
-        if len(self.device_ids) > 1:
-            # intra-node parameter sync
-            result = broadcast_coalesced(self.main_module_params_data,
-                                         self.device_ids,
-                                         self.broadcast_bucket_size)
-            with torch.no_grad():
-                for tensors, module_params in zip(result[1:], self.modules_params[1:]):
+        with torch.no_grad():
+            if len(self.device_ids) > 1:
+                # intra-node parameter sync
+                result = broadcast_coalesced(self.modules_params[0],
+                                             self.device_ids,
+                                             self.broadcast_bucket_size)
+                for tensors, module_params in zip(result[1:],
+                                                  self.modules_params[1:]):
                     for tensor, param in zip(tensors, module_params):
                         param.set_(tensor)
 
-        # module buffer sync
-        if self.broadcast_buffers:
-            if len(self.modules_buffers[0]) > 0:
+            # module buffer sync
+            if self.broadcast_buffers and len(self.modules_buffers[0]) > 0:
                 # cross-node buffer sync
-                self._dist_broadcast_coalesced(self.main_module_buffers_data,
+                self._dist_broadcast_coalesced(self.modules_buffers[0],
                                                self.broadcast_bucket_size)
                 if len(self.device_ids) > 1:
                     # intra-node buffer sync
-                    result = broadcast_coalesced(self.main_module_buffers_data,
+                    result = broadcast_coalesced(self.modules_buffers[0],
                                                  self.device_ids,
                                                  self.broadcast_bucket_size)
-                    with torch.no_grad():
-                        for tensors, module_buffers in zip(result[1:], self.modules_buffers[1:]):
-                            for tensor, buffer in zip(tensors, module_buffers):
-                                buffer.set_(tensor)
+                    for tensors, module_buffers in zip(result[1:],
+                                                       self.modules_buffers[1:]):
+                        for tensor, buffer in zip(tensors, module_buffers):
+                            buffer.set_(tensor)
 
     def _passing_sync_batchnorm_handle(self, module_copies):
         for dev_idx, module in enumerate(module_copies):
