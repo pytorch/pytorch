@@ -78,8 +78,10 @@ struct Method {
     run(stack);
   }
 
-  IValue operator()(std::vector<IValue> stack) {
-    getSchema().checkInputs(stack);
+  IValue operator()(
+      std::vector<IValue> stack,
+      const Kwargs& kwargs = Kwargs()) {
+    getSchema().checkInputs(stack, kwargs);
     for (auto input : initial_ivalues_) {
       push(stack, input.value());
     }

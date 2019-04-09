@@ -31,6 +31,7 @@ namespace script {
 struct Def;
 struct SugaredValue;
 struct Function;
+using Kwargs = std::unordered_map<std::string, IValue>;
 
 using Resolver = std::function<std::shared_ptr<SugaredValue>(
     const std::string& name,
@@ -57,8 +58,10 @@ struct TORCH_API Function {
     run(stack);
   }
 
-  IValue operator()(std::vector<IValue> stack) {
-    getSchema().checkInputs(stack);
+  IValue operator()(
+      std::vector<IValue> stack,
+      const Kwargs& kwargs = Kwargs()) {
+    getSchema().checkInputs(stack, kwargs);
     run(stack);
     return stack.front();
   }
