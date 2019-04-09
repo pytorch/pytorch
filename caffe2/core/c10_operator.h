@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/core/function_schema.h>
-#include <ATen/core/interned_strings.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <vector>
 
@@ -98,7 +97,7 @@ inline c10::FunctionSchema make_function_schema_for_c10(const char* OperatorName
       IValue());
 
   return c10::FunctionSchema(
-      Symbol::caffe2(OperatorName).toQualString(),
+      std::string("_caffe2::") + OperatorName,
       "",
       std::move(actual_inputs),
       std::move(outputs));
