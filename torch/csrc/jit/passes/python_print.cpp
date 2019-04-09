@@ -1,9 +1,9 @@
+#include <torch/csrc/jit/passes/python_print.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
-#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
@@ -130,18 +130,16 @@ struct QualifiedName : c10::intrusive_ptr_target {
 void createTensorToParameterNameMap(
     const script::Module& module,
     const QualifiedNamePtr& prefix,
-    std::unordered_map<IValue*, QualifiedNamePtr>& result) {
-  for (const auto& elem : module.get_parameters()) {
-    const script::NamedIValue& param = elem.value();
-    result[param.slot()] = QualifiedName::create(prefix, param.name_);
+    std::unordered_map<script::Slot, QualifiedNamePtr>& result) {
+  for (const auto& param : module.get_parameters()) {
+    result[param] = QualifiedName::create(prefix, param.name());
   }
-  for (const auto& elem : module.get_attributes()) {
-    const script::NamedIValue& param = elem.value();
-    result[param.slot()] = QualifiedName::create(prefix, param.name_);
+  for (const auto& param : module.get_attributes()) {
+    result[param] = QualifiedName::create(prefix, param.name());
   }
   for (const auto& elem : module.get_modules()) {
     createTensorToParameterNameMap(
-        *elem->module, QualifiedName::create(prefix, elem.key()), result);
+        *elem, QualifiedName::create(prefix, elem->name()), result);
   }
 }
 
@@ -827,9 +825,9 @@ struct PythonPrintPass {
         if (enforce_importable_) {
           throw script::ErrorReport(node->getSourceLocation())
               << "could not export python function call " << value->name()
-              << ". Remove calls to Python functions before export."
-              << "Did you forget add @script annotation? "
-              << "If this is a modulelist, add it to __constants__.";
+              << ". Remove calls to Python functions before export. "
+              << "Did you forget add @script or @script_method annotation? "
+              << "If this is a nn.ModuleList, add it to __constants__.";
         }
 
         stmt << "^" << value->name();
@@ -1114,7 +1112,7 @@ struct PythonPrintPass {
     }
   }
   void printMethod(script::Method& method) {
-    std::unordered_map<IValue*, QualifiedNamePtr> extra_ivalue_names;
+    std::unordered_map<script::Slot, QualifiedNamePtr> extra_ivalue_names;
     createTensorToParameterNameMap(
         method.owner(), QualifiedName::create("self"), extra_ivalue_names);
     printMethod(method, /*is_class=*/false, extra_ivalue_names);
@@ -1122,10 +1120,12 @@ struct PythonPrintPass {
   void printMethod(
       script::Method& method,
       bool is_class,
-      const std::unordered_map<IValue*, QualifiedNamePtr>& extra_ivalue_names) {
-    std::vector<std::string> ivalue_names = fmap(
-        method.initial_ivalues(),
-        [&](IValue* slot) { return extra_ivalue_names.at(slot)->str(); });
+      const std::unordered_map<script::Slot, QualifiedNamePtr>&
+          extra_ivalue_names) {
+    std::vector<std::string> ivalue_names =
+        fmap(method.initial_ivalues(), [&](const script::Slot& slot) {
+          return extra_ivalue_names.at(slot)->str();
+        });
     const std::string& name = method.name();
     Graph& graph = *method.graph();
     auto defaults = fmap(
@@ -1134,18 +1134,18 @@ struct PythonPrintPass {
     printFunction(graph, name, is_class, defaults, ivalue_names);
   }
   void printModule(script::Module& module) {
-    std::unordered_map<IValue*, QualifiedNamePtr> extra_ivalue_names;
+    std::unordered_map<script::Slot, QualifiedNamePtr> extra_ivalue_names;
     createTensorToParameterNameMap(
         module, QualifiedName::create("self"), extra_ivalue_names);
     for (auto& method : module.get_methods()) {
-      const std::string& name = method.value()->name();
+      const std::string& name = method->name();
       // we skip __forked_functions because they actually get inlined into their
       // callers, exporting them again will lead to more code generated on each
       // export
       if (name.find("__forked_function") == 0) {
         continue;
       }
-      printMethod(*method.value(), /*is_class=*/false, extra_ivalue_names);
+      printMethod(*method, /*is_class=*/false, extra_ivalue_names);
     }
   }
 
@@ -1153,7 +1153,7 @@ struct PythonPrintPass {
     out << "class " << classType->name() << ":\n";
     {
       const auto guard = WithIndented();
-      std::unordered_map<IValue*, QualifiedNamePtr> extra_ivalue_names;
+      std::unordered_map<script::Slot, QualifiedNamePtr> extra_ivalue_names;
       for (auto& method : classType->methods()) {
         printMethod(*method, /*is_class=*/true, extra_ivalue_names);
       }

@@ -1,19 +1,20 @@
 #include <torch/csrc/jit/interpreter.h>
 
+#include <ATen/core/ivalue.h>
+#include <c10/core/thread_pool.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
-#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/jit_exception.h>
-#include <c10/core/thread_pool.h>
+#include <torch/csrc/jit/script/logging.h>
 
 #include <exception>
 #include <iostream>
@@ -306,36 +307,6 @@ struct PreprocessGraph {
   std::unordered_map<Node*, std::vector<uint8_t>> move_flags;
   // Record number of outputs before flattenIO()
   size_t n_outputs;
-};
-
-// Sometimes we want to pass things that are not tensors.  Instead of
-// coming up with some "superclass" for tensor, which is annoying since
-// 99% of values are at::Tensor, we instead we create a fake subclass of
-// TensorImpl that can be subclassed to hold arbitrary things
-// Note: this is currently unused but will probably be useful in the future,
-// so we keep it around
-struct ContainerTensor : public at::TensorImpl {
- public:
-  ContainerTensor()
-      : TensorImpl(
-            at::UndefinedTensorId(),
-            caffe2::TypeMeta(),
-            nullptr,
-            /* is_variable */ false) {}
-
-  ~ContainerTensor() override = default;
-  at::IntArrayRef sizes() const override {
-    throw std::runtime_error("sizes() on ContainerTensor");
-  }
-  at::IntArrayRef strides() const override {
-    throw std::runtime_error("strides() on ContainerTensor");
-  }
-  int64_t dim() const override {
-    throw std::runtime_error("dim() on ContainerTensor");
-  }
-  const at::Storage& storage() const override {
-    throw std::runtime_error("storage() on ContainerTensor");
-  }
 };
 
 // We need some lists for inputs and outputs. To keep all the memory

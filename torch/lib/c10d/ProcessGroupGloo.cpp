@@ -10,10 +10,11 @@
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/CUDAStream.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 #endif
 
 #include <gloo/rendezvous/context.h>
@@ -122,9 +123,15 @@ void setOutput(O& opts, at::Tensor& tensor) {
 #ifdef USE_CUDA
 
 at::Tensor pinnedLike(at::Tensor& tensor) {
-  auto& type = tensor.type().toBackend(at::Backend::CPU);
   auto* allocator = at::cuda::getPinnedMemoryAllocator();
-  return type.tensorWithAllocator(tensor.sizes(), tensor.strides(), allocator);
+  auto storage = c10::Storage(
+      tensor.dtype(),
+      at::detail::computeStorageSize(tensor.sizes(), tensor.strides()),
+      allocator,
+      /*resizable=*/false
+  );
+  return at::empty({0}, tensor.options().device(at::kCPU)).set_(
+      storage, 0, tensor.sizes(), tensor.strides());
 }
 
 // This function initializes a vector of CUDA streams, one for every
@@ -150,6 +157,11 @@ void initializeStreamsEvents(
         /* isHighPriority */ true, tensors[i].device().index()));
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
+
+    // `tensors` are created on a different stream. Hence, they must record
+    // new streams in this Work to prevent being freed before the Work finishes.
+    c10::cuda::CUDACachingAllocator::recordStream(
+      tensors[i].storage().data(), streams[i]);
   }
 }
 
@@ -187,6 +199,14 @@ void initializeStreamsEvents(
         /* isHighPriority */ true, tensors[i][0].device().index()));
     // Ensure the new stream is synchronized with the current stream.
     events[i].block(streams[i]);
+
+    for (at::Tensor& tensor : tensors[i]) {
+      // `tensors` are created on a different stream. Hence, they must record
+      // new streams in this Work to prevent being freed before the Work
+      // finishes.
+      c10::cuda::CUDACachingAllocator::recordStream(
+        tensor.storage().data(), streams[i]);
+    }
   }
 }
 
@@ -276,16 +296,15 @@ ProcessGroupGloo::ProcessGroupGloo(
 
 ProcessGroupGloo::~ProcessGroupGloo() {
   std::unique_lock<std::mutex> lock(workMutex_);
-  while (!workQueue_.empty()) {
-    workConsumeCV_.wait(lock);
-  }
+  workConsumeCV_.wait(lock, [&] { return workQueue_.empty(); });
 
   // Queue is empty, signal stop
   stop_ = true;
 
   // Release lock to allow threads to terminate
-  workProduceCV_.notify_all();
   lock.unlock();
+
+  workProduceCV_.notify_all();
 
   // Wait for worker threads to terminate
   for (auto& thread : threads_) {
@@ -308,10 +327,13 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 
     auto work = std::move(workQueue_.front());
     workQueue_.pop_front();
-    workConsumeCV_.notify_one();
-
     workInProgress_[workerIndex] = work;
     lock.unlock();
+
+    // Notify after releasing the lock so that the waiter
+    // does not immediately block.
+    workConsumeCV_.notify_one();
+
     AsyncWork::execute(std::move(work));
     lock.lock();
     workInProgress_[workerIndex] = nullptr;
@@ -321,6 +343,10 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 void ProcessGroupGloo::enqueue(std::shared_ptr<AsyncWork> work) {
   std::unique_lock<std::mutex> lock(workMutex_);
   workQueue_.push_back(std::move(work));
+  lock.unlock();
+
+  // Notify after releasing the lock so that the waiter
+  // does not immediately block.
   workProduceCV_.notify_one();
 }
 

@@ -8,8 +8,6 @@
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/resource_guard.h>
-#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -27,12 +25,14 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/symbolic_variable.h>
 #include <torch/csrc/jit/tracer.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/logging.h>
 
 #include <cstdint>
 #include <iterator>
@@ -293,7 +293,6 @@ Gradient getGradient(const Node* n) {
   grad.df_output_vjps = fmap<size_t>(n->is(attr::df_output_vjps));
   return grad;
 }
-
 } // anonymous namespace
 
 RegisterOperators reg_graph_executor_ops(
@@ -309,7 +308,6 @@ GraphExecutor* getGradExecutor(Operation& op) {
   }
   return nullptr;
 }
-
 } // namespace detail
 
 // a Graph can be created via tracing, or via a language-based frontend
@@ -324,48 +322,17 @@ struct GraphExecutorImpl {
     return copy;
   }
 
-  static size_t countFlatInputs(const TypePtr& ptr) {
-    if (auto optional_type = ptr->cast<OptionalType>()) {
-      return countFlatInputs(optional_type->getElementType());
-    }
-    if (auto tuple_type = ptr->cast<TupleType>()) {
-      size_t total = 0;
-      for (auto& elem : tuple_type->elements()) {
-        total += countFlatInputs(elem);
-      }
-      return total;
-    }
-    return 1;
-  }
-
-  static size_t countFlatInputs(const std::shared_ptr<Graph>& graph) {
-    size_t total = 0;
-    for (Value* input : graph->inputs()) {
-      total += countFlatInputs(input->type());
-    }
-    return total;
-  }
-
-  inline bool hasMutableOperators(Block* block) {
-    for (auto n : block->nodes()) {
-      if (n->kind().is_aten() && n->schema().is_mutable())
-        return true;
-      for (auto b : n->blocks()) {
-        if (hasMutableOperators(b))
-          return true;
-      }
-    }
-    return false;
-  }
-
   GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize)
       : graph(prepareGraph(graph)),
         // until we have correct alias analysis any use of mutable operators
         // disables all optimization
         optimize(optimize),
         num_inputs(this->graph->inputs().size()),
-        num_flat_inputs(countFlatInputs(graph)),
-        num_outputs(this->graph->outputs().size()) {}
+        arg_spec_creator_(*graph),
+        num_outputs(this->graph->outputs().size()) {
+          logging::getLogger()->addStatValue(
+              logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
+        }
 
   // entry point where execution begins
   void run(Stack& stack) {
@@ -375,6 +342,9 @@ struct GraphExecutorImpl {
         num_inputs,
         " inputs, but got only ",
         stack.size());
+
+    logging::getLogger()->addStatValue(
+        logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
     if (tracer::isTracing()) {
       return runTraced(stack);
@@ -387,9 +357,9 @@ struct GraphExecutorImpl {
 
   std::shared_ptr<Graph> graphFor(const Stack& stack) const {
     AT_ASSERT(stack.size() >= num_inputs);
-    auto inputs = last(stack, num_inputs);
-    ArgumentSpec spec(
-        autograd::GradMode::is_enabled(), inputs, num_flat_inputs);
+
+    ArgumentSpec spec =
+        arg_spec_creator_.create(autograd::GradMode::is_enabled(), stack);
 
     if (!optimize) {
       AT_CHECK(fallback, "No graph found for given inputs");
@@ -437,24 +407,27 @@ struct GraphExecutorImpl {
   const ExecutionPlan& getOrCompile(const Stack& stack) {
     // outside lock guard, to minimize the time holding the lock on the fast
     // path ArgumentSpec even computes its hashCode here.
-    ArgumentSpec spec(
-        autograd::GradMode::is_enabled(),
-        last(stack, num_inputs),
-        num_flat_inputs);
+    ArgumentSpec spec =
+        arg_spec_creator_.create(autograd::GradMode::is_enabled(), stack);
     {
       std::lock_guard<std::mutex> lock(compile_mutex);
       auto it = plan_cache.find(spec);
-      if (it != plan_cache.end())
+      if (it != plan_cache.end()) {
+        logging::getLogger()->addStatValue(
+            logging::runtime_counters::EXECUTION_PLAN_CACHE_HIT, 1.0);
         return it->second;
+      }
       auto plan = compileSpec(spec);
       auto r = plan_cache.emplace(std::move(spec), std::move(plan));
+      logging::getLogger()->addStatValue(
+          logging::runtime_counters::EXECUTION_PLAN_CACHE_MISS, 1.0);
       return r.first->second;
     }
   }
 
   ExecutionPlan compileSpec(const ArgumentSpec& spec) {
     auto opt_graph = graph->copy();
-    setInputTypes(*opt_graph, spec);
+    arg_spec_creator_.setInputTypes(*opt_graph, spec);
 
     // Phase 1. Specialize to input definedness (this is very important for
     //          gradient graphs), and run required passes to bring the graph
@@ -506,6 +479,7 @@ struct GraphExecutorImpl {
     ConstantPooling(graph);
 
     PeepholeOptimize(graph);
+    ConstantPropagation(graph);
 
     // Unroll small loops, and eliminate expressions that are the same at every
     // iteration.
@@ -552,8 +526,8 @@ struct GraphExecutorImpl {
     auto input_values = fmap(
         inputs, [](const IValue& v) { return tracer::getNestedValueTrace(v); });
 
-    ArgumentSpec spec(
-        autograd::GradMode::is_enabled(), inputs, num_flat_inputs);
+    ArgumentSpec spec =
+        arg_spec_creator_.create(autograd::GradMode::is_enabled(), stack);
     // NB: we could just run the fallback in here and call it a day, but that
     // would loose all the control flow information we have in the graph. Thus,
     // we run the fallback to get the correct output values, but we will
@@ -570,7 +544,7 @@ struct GraphExecutorImpl {
     // tracing and so we only do the type propgation if no concrete types have
     // been set.
     auto local_graph = this->graph->copy();
-    setInputTypes(*local_graph, spec);
+    arg_spec_creator_.setInputTypes(*local_graph, spec);
     PropagateInputShapes(local_graph);
     auto output_values =
         inlineCallTo(*state->graph, *local_graph, input_values);
@@ -590,8 +564,7 @@ struct GraphExecutorImpl {
   // Useful for debugging.
   const bool optimize;
   const size_t num_inputs;
-  const size_t num_flat_inputs; // Number of inputs, assuming all tuples would
-                                // be flattened.
+  ArgumentSpecCreator arg_spec_creator_;
   const size_t num_outputs;
 
   // Populated only when optimize is false (and in that case plan_cache will be
@@ -645,6 +618,5 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g) {
   CanonicalizeOps(g);
   EliminateDeadCode(g);
 }
-
 } // namespace jit
 } // namespace torch

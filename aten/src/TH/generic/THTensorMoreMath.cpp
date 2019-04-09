@@ -390,53 +390,6 @@ accreal THTensor_(trace)(THTensor *t)
   return sum;
 }
 
-void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, int dimension)
-{
-  int i;
-
-  if(THTensor_(nDimensionLegacyNoScalars)(a) != THTensor_(nDimensionLegacyNoScalars)(b))
-    THError("inconsistent tensor dimension %dD, %dD",
-        THTensor_(nDimensionLegacyNoScalars)(a), THTensor_(nDimensionLegacyNoScalars)(b));
-
-  for(i = 0; i < a->dim(); i++)
-  {
-    if(THTensor_(size)(a, i) != THTensor_(size)(b, i)) {
-        THDescBuff ba = THTensor_(sizeDesc)(a);
-        THDescBuff bb = THTensor_(sizeDesc)(b);
-        THError("inconsistent tensor sizes %s, %s", ba.str, bb.str);
-    }
-  }
-
-  if(dimension < 0)
-  {
-    for(i = 0; i < THTensor_(nDimensionLegacyNoScalars)(a); i++)
-    {
-      if(THTensor_sizeLegacyNoScalars(a, i) == 3)
-      {
-        dimension = i;
-        break;
-      }
-    }
-    if(dimension < 0) {
-      THDescBuff ba = THTensor_(sizeDesc)(a);
-      THError("no dimension of size 3 in a: %s", ba.str);
-    }
-  }
-
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(a), 3, "dimension %d out of range",
-      dimension);
-  THArgCheck(THTensor_sizeLegacyNoScalars(a, dimension) == 3, 3, "dimension %d does not have size 3",
-      dimension);
-
-  THTensor_(resizeAs)(r_, a);
-
-  TH_TENSOR_DIM_APPLY3(scalar_t, a, scalar_t, b, scalar_t, r_, dimension,
-                       TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
-                       r__data[0*r__stride] = a_data[1*a_stride]*b_data[2*b_stride] - a_data[2*a_stride]*b_data[1*b_stride];
-                       r__data[1*r__stride] = a_data[2*a_stride]*b_data[0*b_stride] - a_data[0*a_stride]*b_data[2*b_stride];
-                       r__data[2*r__stride] = a_data[0*a_stride]*b_data[1*b_stride] - a_data[1*a_stride]*b_data[0*b_stride];);
-}
-
 void THTensor_(cmax)(THTensor *r, THTensor *t, THTensor *src) {
   THTensor_(resizeAs)(r, t);
   TH_TENSOR_APPLY3(scalar_t, r, scalar_t, t, scalar_t, src,
@@ -544,7 +497,7 @@ void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
 /* Emulate NumPy behavior of putting NaNs
  * at the end of an ascending list. */
 #define GT_OR_NAN(x, y) \
-  ((x != x && y == y) || (x > y))
+  ((th_isnan(x) && !(th_isnan(y))) || (x > y))
 
 static void THTensor_(quicksortascend)(scalar_t *arr, int64_t *idx, int64_t elements, int64_t stride)
 {
@@ -1046,31 +999,31 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
   return equal;
 }
 
-#define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)				\
-  void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, scalar_t value)	\
-  {									\
-    THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);		\
-    TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t,			\
-		     *r__data = (*t_data OP value) ? 1 : 0;); \
-  }									\
-  void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, scalar_t value)	\
-  {									\
-    THTensor_(resizeNd)(r_, t->dim(), THTensor_getSizePtr(t), NULL);		\
-    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,					\
-		     *r__data = (*t_data OP value) ? 1 : 0;); \
-  }									\
+#define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)                                \
+  void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, scalar_t value) \
+  {                                                                        \
+    THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);                \
+    TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t,                        \
+                     *r__data = (*t_data OP value) ? 1 : 0;); \
+  }                                                                        \
+  void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, scalar_t value)        \
+  {                                                                        \
+    THTensor_(resizeNd)(r_, t->dim(), THTensor_getSizePtr(t), NULL);                \
+    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,                                        \
+                     *r__data = (*t_data OP value) ? 1 : 0;); \
+  }                                                                        \
   void THTensor_(NAME##Tensor)(THByteTensor *r_, THTensor *ta, THTensor *tb) \
-  {									\
-    THByteTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);		\
-    TH_TENSOR_APPLY3(unsigned char, r_, scalar_t, ta, scalar_t, tb,		\
-		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
-  }									\
+  {                                                                        \
+    THByteTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);                \
+    TH_TENSOR_APPLY3(unsigned char, r_, scalar_t, ta, scalar_t, tb,                \
+                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
+  }                                                                        \
   void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb) \
-  {									\
-    THTensor_(resizeNd)(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);		\
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, ta, scalar_t, tb,			\
-		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
-  }									\
+  {                                                                        \
+    THTensor_(resizeNd)(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);                \
+    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, ta, scalar_t, tb,                        \
+                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
+  }                                                                        \
 
 
 TENSOR_IMPLEMENT_LOGICAL(lt,<)
@@ -1349,10 +1302,10 @@ void THTensor_(norm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, i
                *r__data = TH_MATH_NAME(pow)(sum, 1.0/3), 0);
   } else if (value == INFINITY) {
     DIM_REDUCE(sum = THMax(sum, TH_MATH_NAME(fabs)(t_data[i*t_stride])),
-	       *r__data = sum, 0);
+               *r__data = sum, 0);
   } else if (value == -INFINITY) {
     DIM_REDUCE(sum = THMin(sum, TH_MATH_NAME(fabs)(t_data[i*t_stride])),
-	       *r__data = sum, INFINITY);
+               *r__data = sum, INFINITY);
   } else {
     DIM_REDUCE(sum += TH_MATH_NAME(pow)(TH_MATH_NAME(fabs)(t_data[i*t_stride]), value),
                *r__data = TH_MATH_NAME(pow)(sum, 1.0/value), 0);

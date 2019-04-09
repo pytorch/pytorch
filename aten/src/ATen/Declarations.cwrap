@@ -4,6 +4,7 @@
   variants: function
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   device_guard: False
   return: argument 0
   options:
@@ -41,6 +42,7 @@
   variants: function
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   options:
     - arguments:
       - THTensor* self
@@ -57,6 +59,7 @@
     - function
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   device_guard: False
   return: bool
   arguments:
@@ -72,13 +75,13 @@
     - arguments:
       - arg: THTensor* self
         broadcast: mask inplace fallback types:Byte
-      - THBoolTensor* mask
+      - THByteTensor* mask
       - real value
     - zero_dim_tensor_only: True
       arguments:
       - arg: THTensor* self
         broadcast: mask inplace fallback types:Byte
-      - THBoolTensor* mask
+      - THByteTensor* mask
       - THTensor* value
 ]]
 [[
@@ -89,7 +92,7 @@
   arguments:
     - arg: THTensor* self
       broadcast: mask inplace fallback types:Byte
-    - THBoolTensor* mask
+    - THByteTensor* mask
     - THTensor* source
 ]]
 [[
@@ -103,11 +106,13 @@
       output: True
     - arg: THTensor* self
       broadcast: mask fallback types:Byte
-    - THBoolTensor* mask
+    - THByteTensor* mask
 ]]
 [[
   name: _th_nonzero
   cname: nonzero
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -124,12 +129,16 @@
     - function
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   arguments:
     - THTensor* self
 ]]
 [[
   name: _th_view
   cname: newView
+  cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   device_guard: False
@@ -142,6 +151,9 @@
 [[
   name: _th_resize_as_
   cname: resizeAs
+  cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: self
@@ -243,6 +255,7 @@
     - function
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   device_guard: False
   return: argument 0
   arguments:
@@ -519,13 +532,13 @@
   options:
     - cname: ltValue
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
     - cname: ltTensor
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - arg: THTensor* self
           broadcast: other fallback
@@ -556,13 +569,13 @@
   options:
     - cname: gtValue
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
     - cname: gtTensor
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - arg: THTensor* self
           broadcast: other fallback
@@ -593,13 +606,13 @@
   options:
     - cname: leValue
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
     - cname: leTensor
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - arg: THTensor* self
           broadcast: other fallback
@@ -630,13 +643,13 @@
   options:
     - cname: geValue
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
     - cname: geTensor
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - arg: THTensor* self
           broadcast: other fallback
@@ -667,13 +680,13 @@
   options:
     - cname: eqValue
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
     - cname: eqTensor
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - arg: THTensor* self
           broadcast: other fallback
@@ -704,13 +717,13 @@
   options:
     - cname: neValue
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - THTensor* self
         - real other
     - cname: neTensor
       arguments:
-        - arg: THBoolTensor* result
+        - arg: THByteTensor* result
           output: True
         - arg: THTensor* self
           broadcast: other fallback
@@ -1669,6 +1682,7 @@
   return: self
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   arguments:
@@ -1846,18 +1860,19 @@
     - arg: THTensor* tensor
 ]]
 [[
-  name: _th_cross
-  cname: cross
+  name: _th_cross_kernel
+  cname: crossKernel
   variants:
     - function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
       output: True
     - THTensor* self
     - THTensor* other
-    - arg: long dim
-      default: -1
+    - arg: int64_t dim
 ]]
 [[
   name: _th_diag
@@ -2460,8 +2475,9 @@
     - CPU
     - CUDA
   return: self
-  cpu_bool: True
   variants: function
+  cpu_bool: True
+  cuda_bool: True
   options:
     - cname: random
       arguments:
@@ -2484,6 +2500,45 @@
           kwarg_only: True
         - int64_t from
         - int64_t to
+]]
+[[
+  name: _th_multinomial_alias_setup
+  cname: multinomialAliasSetup
+  variants:
+    - function
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  return: argument 1,2
+  arguments:
+    - arg: THTensor* probs
+    - arg: THIndexTensor* J
+      output: True
+    - arg: THTensor* q
+      output: True
+]]
+[[
+  name: _th_multinomial_alias_draw
+  cname: multinomialAliasDraw
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - function
+  return: argument 0
+  arguments:
+    - arg: THIndexTensor* result
+      output: True
+    - arg: THGenerator* generator
+      default: nullptr
+      kwarg_only: True
+    - THTensor* q
+    - THIndexTensor* J
+    - long num_samples
 ]]
 [[
   name: _th_multinomial
@@ -2686,6 +2741,7 @@
   return: THTensor*
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   options:
@@ -2710,6 +2766,8 @@
   cname: catArray
   variants: [function]
   cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
   return: self
   arguments:
     - arg: THTensor* self
