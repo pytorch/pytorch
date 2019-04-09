@@ -834,7 +834,11 @@ def _write_ninja_file_and_build(name,
                                 verbose,
                                 with_cuda):
     verify_ninja_availability()
-    check_compiler_abi_compatibility(os.environ.get('CXX', 'c++'))
+    if IS_WINDOWS:
+        compiler = os.environ.get('CXX', 'cl')
+    else:
+        compiler = os.environ.get('CXX', 'c++')
+    check_compiler_abi_compatibility(compiler)
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
     extra_ldflags = _prepare_ldflags(
@@ -982,9 +986,14 @@ def _write_ninja_file(path,
     extra_ldflags = [flag.strip() for flag in extra_ldflags]
     extra_include_paths = [flag.strip() for flag in extra_include_paths]
 
+    if IS_WINDOWS:
+        compiler = os.environ.get('CXX', 'cl')
+    else:
+        compiler = os.environ.get('CXX', 'c++')
+
     # Version 1.3 is required for the `deps` directive.
     config = ['ninja_required_version = 1.3']
-    config.append('cxx = {}'.format(os.environ.get('CXX', 'c++')))
+    config.append('cxx = {}'.format(compiler))
     if with_cuda:
         config.append('nvcc = {}'.format(_join_cuda_home('bin', 'nvcc')))
 
