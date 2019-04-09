@@ -152,6 +152,13 @@ struct Module {
             ClassType::createModuleType(std::make_shared<CompilationUnit>()),
             0)) {}
 
+  ~Module() {
+    // ClassType own the compilation unit of their Functions, but each
+    // Function has a self argument which owns the ClassType, created a
+    // referernce cycle. By dropping all the methods of the module's class
+    // here we break the cycle.
+    class_cu().drop_all_functions();
+  }
   const std::string& name() const {
     return name_;
   }

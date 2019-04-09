@@ -251,6 +251,11 @@ struct TORCH_API CompilationUnit {
     return get_function(method_name)({IValue(std::forward<Types>(args))...});
   }
 
+  void drop_all_functions() {
+    dict_.clear();
+    functions_.clear();
+  }
+
  private:
   Function& register_function(std::unique_ptr<Function> fn) {
     AT_CHECK(
