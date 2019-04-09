@@ -120,7 +120,6 @@ struct PythonArgs {
   inline std::vector<at::Tensor> tensorlist(int i);
   template<int N>
   inline std::array<at::Tensor, N> tensorlist_n(int i);
-  inline std::vector<int8_t> int8list(int i);
   inline std::vector<int64_t> intlist(int i);
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline at::Generator* generator(int i);
@@ -131,7 +130,6 @@ struct PythonArgs {
   inline c10::optional<at::Scalar> scalarOptional(int i);
   inline c10::optional<int64_t> toInt64Optional(int i);
   inline c10::optional<bool> toBoolOptional(int i);
-  inline std::vector<int8_t> toInt8Vector(int i);
   inline const THPLayout& layout(int i);
   inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
   inline at::Device device(int i);
@@ -293,10 +291,6 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
 inline std::vector<int64_t> PythonArgs::intlist(int i) {
   return intlistWithDefault(i, signature.params[i].default_intlist);
 }
-
-// inline std::vector<int8_t> PythonArgs::int8list(int i) {
-//   return intlistWithDefault(i, signature.params[i].default_intlist);
-// }
 
 inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<int64_t> default_intlist) {
   if (!args[i]) return default_intlist;

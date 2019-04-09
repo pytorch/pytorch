@@ -516,7 +516,6 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/autograd/python_legacy_variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/python_variable_indexing.cpp
-    ${TORCH_SRC_DIR}/csrc/byte_order.cpp
     ${TORCH_SRC_DIR}/csrc/jit/init.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_loop.cpp

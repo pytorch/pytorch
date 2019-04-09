@@ -50,7 +50,6 @@ TYPE_MAP = {
     # in returns
     'std::vector<Tensor>': 'Tensor[]',
     'IntArrayRef': 'int[]',
-    'std::vector<uint8_t>': 'bytearray',
     'Layout': 'Layout',
     'Layout?': 'Layout?',
     'Device': 'Device',
@@ -114,8 +113,6 @@ FROM_IVALUE = {
     'std::string': '{}.toString()->string()',
     'std::string?': '{}.toOptional<std::string>()',
     'Generator': 'nullptr',
-    'std::vector<uint8_t>': '{}.toUint8Vector()',
-    # 'std::vector<uint8_t>': '{}.toUint8Vector()', VITALYF
     'std::array<bool,2>': 'as_bool_array<2>({}.toBoolListRef())',
     'std::array<bool,3>': 'as_bool_array<3>({}.toBoolListRef())',
     'std::array<bool,4>': 'as_bool_array<4>({}.toBoolListRef())',

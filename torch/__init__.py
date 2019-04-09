@@ -24,7 +24,7 @@ __all__ = [
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
-    'ShortTensor', 'CharTensor', 'ByteTensor', 'Tensor', 'from_buffer2',
+    'ShortTensor', 'CharTensor', 'ByteTensor', 'Tensor',
 ]
 
 ################################################################################
@@ -173,7 +173,6 @@ def set_default_dtype(d):
 
     """
     _C._set_default_dtype(d)
-
 
 # If you edit these imports, please update torch/__init__.py.in as well
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed

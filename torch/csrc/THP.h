@@ -36,7 +36,7 @@
 #include <torch/csrc/Module.h>
 #include <torch/csrc/Types.h>
 #include <torch/csrc/utils.h> // This requires defined Storage and Tensor types
-#include <torch/csrc/byte_order.h>
+#include <ATen/native/byte_order.h>
 
 #ifdef _THP_CORE
 #include <torch/csrc/serialization.h>

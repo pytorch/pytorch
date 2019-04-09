@@ -303,7 +303,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'c10::optional<int64_t>': 'toInt64Optional',
         'c10::optional<bool>': 'toBoolOptional',
         'c10::optional<std::string>': 'toStringOptional',
-        'std::vector<int8_t>': 'toInt8Vector',
         'IntArrayRef': 'intlist',
         'int64_t': 'toInt64',
         'bool': 'toBool',

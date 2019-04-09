@@ -24,7 +24,7 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd)
 #endif
   doWrite(fd, &size, sizeof(int64_t));
   // fast track for bytes and little endian
-  if (sizeof(scalar_t) == 1 || THP_nativeByteOrder() == THPByteOrder::THP_LITTLE_ENDIAN) {
+  if (sizeof(scalar_t) == 1 || at::native::THP_nativeByteOrder() == at::native::THPByteOrder::THP_LITTLE_ENDIAN) {
     doWrite(fd, data, sizeof(scalar_t) * size);
   } else {
     int64_t buffer_size = std::min(size, (int64_t)5000);
@@ -32,19 +32,19 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd)
     for (int64_t i = 0; i < size; i += buffer_size) {
       size_t to_convert = std::min(size - i, buffer_size);
       if (sizeof(scalar_t) == 2) {
-        THP_encodeInt16Buffer((uint8_t*)le_buffer.get(),
+        at::native::THP_encodeInt16Buffer((uint8_t*)le_buffer.get(),
             (const int16_t*)data + i,
-            THPByteOrder::THP_LITTLE_ENDIAN,
+            at::native::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       } else if (sizeof(scalar_t) == 4) {
-        THP_encodeInt32Buffer((uint8_t*)le_buffer.get(),
+        at::native::THP_encodeInt32Buffer((uint8_t*)le_buffer.get(),
             (const int32_t*)data + i,
-            THPByteOrder::THP_LITTLE_ENDIAN,
+            at::native::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       } else if (sizeof(scalar_t) == 8) {
-        THP_encodeInt64Buffer((uint8_t*)le_buffer.get(),
+        at::native::THP_encodeInt64Buffer((uint8_t*)le_buffer.get(),
             (const int64_t*)data + i,
-            THPByteOrder::THP_LITTLE_ENDIAN,
+            at::native::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       }
       doWrite(fd, le_buffer.get(), to_convert * sizeof(scalar_t));
@@ -86,7 +86,7 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
 #endif
 
   // fast track for bytes and little endian
-  if (sizeof(scalar_t) == 1 || THP_nativeByteOrder() == THPByteOrder::THP_LITTLE_ENDIAN) {
+  if (sizeof(scalar_t) == 1 || at::native::THP_nativeByteOrder() == at::native::THPByteOrder::THP_LITTLE_ENDIAN) {
     doRead(file, data, sizeof(scalar_t) * THWStorage_(size)(LIBRARY_STATE storage));
   } else {
     int64_t buffer_size = std::min(size, (int64_t)5000);
@@ -98,19 +98,19 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage)
       doRead(file, le_buffer.get(), sizeof(scalar_t) * to_convert);
 
       if (sizeof(scalar_t) == 2) {
-        THP_decodeInt16Buffer((int16_t*)data + i,
+        at::native::THP_decodeInt16Buffer((int16_t*)data + i,
             le_buffer.get(),
-            THPByteOrder::THP_LITTLE_ENDIAN,
+            at::native::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       } else if (sizeof(scalar_t) == 4) {
-        THP_decodeInt32Buffer((int32_t*)data + i,
+        at::native::THP_decodeInt32Buffer((int32_t*)data + i,
             le_buffer.get(),
-            THPByteOrder::THP_LITTLE_ENDIAN,
+            at::native::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       } else if (sizeof(scalar_t) == 8) {
-        THP_decodeInt64Buffer((int64_t*)data + i,
+        at::native::THP_decodeInt64Buffer((int64_t*)data + i,
             le_buffer.get(),
-            THPByteOrder::THP_LITTLE_ENDIAN,
+            at::native::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       }
     }
