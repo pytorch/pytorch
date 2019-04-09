@@ -2066,7 +2066,6 @@ class TestNN(NNTestCase):
         self._test_embedding_dense_grad("cpu")
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_embedding_dense_grad_cuda(self):
         self._test_embedding_dense_grad("cuda")
 
@@ -2199,7 +2198,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types([torch.float, torch.half])
-    @skipIfRocm
     def test_softmax_dtype(self, dtype=torch.float):
         input = torch.rand(32, 100, device="cuda", dtype=dtype, requires_grad=True)
         inputf = input.to(torch.float).detach().requires_grad_(True)
@@ -2232,7 +2230,6 @@ class TestNN(NNTestCase):
         self._test_softmax_backward(torch.device('cpu'))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_softmax_backward_cuda(self):
         self._test_softmax_backward(torch.device('cuda'))
 
@@ -2745,7 +2742,6 @@ class TestNN(NNTestCase):
         self._test_InstanceNorm_general(nn.InstanceNorm3d, input, dtype=torch.float)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_InstanceNorm3d_general_cuda(self):
         b = random.randint(3, 5)
         c = random.randint(2, 5)
@@ -3229,7 +3225,6 @@ class TestNN(NNTestCase):
         _assertGradAndGradgradChecks(self, lambda y: dp.scatter(y, (0, 1)), (x,))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_scatter_cpu(self):
         self._test_scatter(torch.randn(4, 4))
 
@@ -3602,7 +3597,6 @@ class TestNN(NNTestCase):
         self.assertEqual(out, l(i))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_data_parallel_model_device(self):
         r"""Test device[0] check at forward time.
         """
@@ -3743,7 +3737,6 @@ class TestNN(NNTestCase):
         out = dp.data_parallel(l, i)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_data_parallel_sparse(self):
         l = nn.Embedding(10, 5, sparse=True).to("cuda:1")
         i = torch.randint(10, (20, 5), device="cuda:1", dtype=torch.long)
