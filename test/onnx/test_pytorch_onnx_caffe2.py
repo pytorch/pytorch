@@ -736,12 +736,12 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_maxpool2d_dilation(self):
-        model = nn.MaxPool2d(3, 2, dilation=(2,2))
+        model = nn.MaxPool2d(3, 2, dilation=(2, 2))
         x = torch.randn(20, 16, 50, 32, requires_grad=True)
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_maxpool3d_dilation(self):
-        model = nn.MaxPool3d(3, 2, dilation=(2,2,2))
+        model = nn.MaxPool3d(3, 2, dilation=(2, 2, 2))
         x = torch.randn(20, 16, 50, 44, 31, requires_grad=True)
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
