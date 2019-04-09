@@ -124,6 +124,10 @@ libtorch_sources = [
     "test/cpp/jit/test.cpp",
 ]
 
+libtorch_quantized_cpu_sources = [
+    "aten/src/ATen/native/quantized/cpu/qrelu.cpp",
+]
+
 libtorch_cuda_sources = [
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/nccl.cpp",
@@ -202,7 +206,7 @@ def add_torch_libs():
 
     cpp_library(
         name="libtorch",
-        srcs=libtorch_sources,
+        srcs=libtorch_sources + libtorch_quantized_cpu_sources,
         link_whole=True,
         deps=[
             ":generated-autograd-headers",
