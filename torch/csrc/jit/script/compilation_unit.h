@@ -67,16 +67,16 @@ struct TORCH_API Function {
     return get_executor().graphFor(inputs);
   }
 
-  TORCH_API std::shared_ptr<Graph> graph() const {
+  std::shared_ptr<Graph> graph() const {
     return graph_;
   }
 
-  TORCH_API const std::string& name() const {
+  const std::string& name() const {
     return name_;
   }
 
   // if this isn't yet defined, run its method_creator function
-  TORCH_API void ensure_defined();
+  void ensure_defined();
 
   size_t num_inputs() const {
     return graph()->inputs().size();
@@ -87,7 +87,7 @@ struct TORCH_API Function {
     return *this;
   }
 
-  TORCH_API const FunctionSchema& getSchema() const {
+  const FunctionSchema& getSchema() const {
     if (schema_ == nullptr) {
       schema_ = make_unique<FunctionSchema>(defaultSchemaFor(*this));
     }

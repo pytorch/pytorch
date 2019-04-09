@@ -693,13 +693,13 @@ FunctionSchema getSchemaWithNameAndDefaults(
       schema.is_varret());
 }
 
-static Self moduleSelf(std::shared_ptr<Module> m) {
+static Self moduleSelf(const std::shared_ptr<Module>& m) {
   return [m](Value* v) {
     v->setType(m->module_object()->type());
     return std::make_shared<ModuleValue>(v, m);
   };
 }
-static Self simpleSelf(TypePtr typ) {
+static Self simpleSelf(const TypePtr& typ) {
   return [typ](Value* v) {
     v->setType(typ);
     return std::make_shared<SimpleValue>(v);

@@ -705,6 +705,7 @@ def _try_get_dispatched_fn(fn):
 def _try_get_overloaded_fn(mod, field):
     return mod._overloads.get(field, None) if isinstance(mod, ScriptModule) else None
 
+
 def _try_compile_weak_script(fn):
     entry = _jit_internal.compiled_weak_fns.get(fn)
     if entry is None:
