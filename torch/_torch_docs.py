@@ -4265,8 +4265,8 @@ set_num_threads(int)
 
 Sets the number of threads used for parallelizing CPU operations.
 WARNING:
-To ensure that the number of threads is respected, set_num_threads(int)
-must be called exactly once before running the rest of the user code
+To ensure that the correct number of threads is used, set_num_threads
+must be called before running eager, JIT or autograd code.
 """)
 
 add_docstr(torch.sigmoid,
