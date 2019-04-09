@@ -153,9 +153,15 @@ struct C10_API AutogradMetaInterface {
 // Version counters are not shared when:
 // 1. We replace a `Variable`'s underlying `Tensor` by calling `set_data(...)`.
 //
-// Note that we explicitly don't increment the version counter in non-Variable
+// NOTE: We explicitly don't increment the version counter in non-Variable
 // operations, because it is a useful escape hatch when we want to change the
 // content of a Variable without invalidating it in the autograd graph.
+//
+// NOTE: We explicitly don't put `version_counter_` in AutogradMeta, because
+// after the Variable/Tensor merge, a tensor will not have AutogradMeta when its
+// `requires_grad_` is false, but we still need to keep track of this tensor's
+// version to make sure it's valid in the autograd graph. Hence we put
+// `version_counter_` in TensorImpl instead of AutogradMeta.
 struct C10_API VariableVersion {
  public:
   // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
