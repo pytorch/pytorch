@@ -64,6 +64,7 @@ enum class TypeID {
   SparseCPULong,
   SparseCPUShort,
   SparseCPUQInt8,
+  MkldnnCPUFloat,
   CUDABool,
   CUDAByte,
   CUDAChar,
@@ -447,6 +448,7 @@ struct CAFFE2_API Type {
   virtual std::vector<Tensor> unbind(const Tensor & self, int64_t dim) const = 0;
   virtual Tensor to_sparse(const Tensor & self, int64_t sparse_dim) const = 0;
   virtual Tensor to_sparse(const Tensor & self) const = 0;
+  virtual Tensor to_mkldnn(const Tensor & self) const = 0;
   virtual Tensor quantize_linear(const Tensor & self, double scale, int64_t zero_point) const = 0;
   virtual Tensor dequantize(const Tensor & self) const = 0;
   virtual Scalar q_scale(const Tensor & self) const = 0;
