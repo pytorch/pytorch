@@ -573,6 +573,7 @@ class CAFFE2_API Tensor {
   std::vector<Tensor> unbind(int64_t dim=0) const;
   Tensor to_sparse(int64_t sparse_dim) const;
   Tensor to_sparse() const;
+  Tensor to_mkldnn() const;
   Tensor quantize_linear(double scale, int64_t zero_point) const;
   Tensor dequantize() const;
   Scalar q_scale() const;

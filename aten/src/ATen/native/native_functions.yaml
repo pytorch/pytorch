@@ -2860,8 +2860,11 @@
   dispatch:
     SparseCPU: sparse_to_dense
     SparseCUDA: sparse_to_dense
+    MkldnnCPU: mkldnn_to_dense
   requires_tensor: True
 
+- func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
+  matches_jit_signature: True
 
 - func: sparse_dim(Tensor self) -> int
   matches_jit_signature: True
@@ -3021,6 +3024,15 @@
   dispatch:
     CPU: dense_to_sparse
     CUDA: dense_to_sparse
+
+- func: to_mkldnn(Tensor self) -> Tensor
+  matches_jit_signature: True
+  variants: method
+  dispatch:
+    CPU: dense_to_mkldnn
+
+- func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
+  matches_jit_signature: True
 
 - func: quantize_linear(Tensor self, float scale, int zero_point) -> Tensor
   matches_jit_signature: True
