@@ -51,6 +51,7 @@ TESTS = [
 JIT_TESTS = [
     'fuser',
     'jit',
+    'script',
 ]
 
 TESTS = TESTS + JIT_TESTS
