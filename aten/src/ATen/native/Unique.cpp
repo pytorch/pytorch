@@ -78,22 +78,23 @@ std::tuple<Tensor, Tensor> _unique_dim_cpu_template(
     const Tensor& self,
     const int64_t dim,
     const bool return_inverse) {
-
-  // check if dim is in range and see if the size along that dim is 0    
-  if (dim <= self.dim() && self.size(dim)==0 ){
-    // check the other remaining dimentions, returns true if other dimentions are 0
-    bool well_formed_tensor = false;
-    for (int64t i=0; i< self.dim(); ++i){
-      if (dim == i) continue;
-      if (self.size(i) != 0){
-        well_formed_tensor = true;
+  // check if dim is in range and see if the size along that dim is 0
+  if (dim <= self.dim() && self.size(dim) == 0) {
+    // assume tensor has all dimentions non-zero
+    bool well_formed_tensor = true;
+    for (int64_t i = 0; i < self.dim(); ++i) {
+      if (dim == i)
+        continue;
+      if (self.size(i) == 0) {
+        // found atleast 1 zero sized dimention, hence the tensor is not well formed
+        well_formed_tensor = false;
         break;
       }
     }
-    if (well_formed_tensor){
-
+    if (well_formed_tensor) {
       Tensor output = self;
-      Tensor inverse_indices = at::empty(self.sizes(), self.options().dtype(kLong));
+      Tensor inverse_indices =
+          at::empty(self.sizes(), self.options().dtype(kLong));
 
       return std::make_tuple(output, inverse_indices);
     }
