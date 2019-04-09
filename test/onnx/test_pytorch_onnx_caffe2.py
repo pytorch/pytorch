@@ -730,6 +730,21 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(20, 16, 50, 44, 31, requires_grad=True)
         self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
+    def test_maxpool1d_dilation(self):
+        model = nn.MaxPool1d(3, 2, dilation=2)
+        x = torch.randn(20, 16, 50, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_maxpool2d_dilation(self):
+        model = nn.MaxPool2d(3, 2, dilation=(2,2))
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_maxpool3d_dilation(self):
+        model = nn.MaxPool3d(3, 2, dilation=(2,2,2))
+        x = torch.randn(20, 16, 50, 44, 31, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
     @unittest.skip("C2 and PyTorch have small difference in padding implementation")
     def test_avgpool2d(self):
         model = nn.AvgPool2d(5, padding=(2))
