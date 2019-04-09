@@ -213,8 +213,8 @@ Multiprocessing error without if-clause protection
 .. code-block:: py3tb
 
     RuntimeError:
-   	An attempt has been made to start a new process before the
-   	current process has finished its bootstrapping phase.
+           An attempt has been made to start a new process before the
+           current process has finished its bootstrapping phase.
 
        This probably means that you are not using fork to start your
        child processes and you have forgotten to use the proper idiom

@@ -87,10 +87,10 @@ __global__ void embedding_backward_feature_kernel
           match_found_this_thread = 0;
 #ifdef __HIP_PLATFORM_HCC__
         unsigned long long int matchmask = WARP_BALLOT(match_found_this_thread);
-	int first_remaining_peer = __ffsll(matchmask) - 1;
+        int first_remaining_peer = __ffsll(matchmask) - 1;
 #else
         unsigned int matchmask = WARP_BALLOT(match_found_this_thread);
-	int first_remaining_peer = __ffs(matchmask) - 1;
+        int first_remaining_peer = __ffs(matchmask) - 1;
 #endif
 
         if(threadIdx.y == first_remaining_peer) // Nominate lowest-indexed warp as the leader
@@ -103,7 +103,7 @@ __global__ void embedding_backward_feature_kernel
 #else
             first_remaining_peer = __ffs(matchmask) - 1;
 #endif
-	    my_s[threadIdx.x] += smem[threadIdx.x + WARP_SIZE*first_remaining_peer];
+            my_s[threadIdx.x] += smem[threadIdx.x + WARP_SIZE*first_remaining_peer];
             matchmask ^= (1 << first_remaining_peer);
           }
           if(f < s)

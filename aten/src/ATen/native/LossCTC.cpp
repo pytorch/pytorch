@@ -61,7 +61,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
       tg_batch_offsets[i] = pos;
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
-	 max_target_length = target_lengths[i];
+         max_target_length = target_lengths[i];
     }
     tg_target_stride = targets.stride(0);
     checkSize(c, targets_arg, 0, pos);
@@ -83,8 +83,8 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   int64_t max_input_length = log_probs.size(0);
   for (int64_t b = 0; b < batch_size; b++) {
     AT_CHECK(input_lengths[b] <= max_input_length,
-	     "Expected tensor to have size at least ", max_input_length, " at dimension 1, but got size ", input_lengths[b], " for ", log_probs_arg,
-	     " (while checking arguments for ", c, ")");
+             "Expected tensor to have size at least ", max_input_length, " at dimension 1, but got size ", input_lengths[b], " for ", log_probs_arg,
+             " (while checking arguments for ", c, ")");
   }
 
   Tensor log_alpha = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
@@ -115,11 +115,11 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
     // now the loop over the inputs
     for (int64_t t=1; t<input_length; t++) {
       for (int64_t s=0; s<2*target_length+1; s++) {
-	auto current_target_prime = get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s, BLANK);
-	// this loop over s could be parallel/vectorized, too, but the required items are one index apart
-	// alternatively, one might consider moving s to the outer loop to cache current_target_prime more (but then it needs to be descending)
-	// for the cuda implementation, that gave a speed boost.
-	// This is eq (6) and (7), la1,2,3 are the three summands. We keep track of the maximum for the logsumexp calculation.
+        auto current_target_prime = get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s, BLANK);
+        // this loop over s could be parallel/vectorized, too, but the required items are one index apart
+        // alternatively, one might consider moving s to the outer loop to cache current_target_prime more (but then it needs to be descending)
+        // for the cuda implementation, that gave a speed boost.
+        // This is eq (6) and (7), la1,2,3 are the three summands. We keep track of the maximum for the logsumexp calculation.
 
         scalar_t la1 = log_alpha_a[t-1][s];
         scalar_t lamax = la1;
@@ -141,7 +141,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
         }
         if (lamax == neginf) // cannot do neginf-neginf
           lamax = 0;
-	// this is the assignment of eq (6)
+        // this is the assignment of eq (6)
         log_alpha_a[t][s] = std::log(std::exp(la1-lamax)+std::exp(la2-lamax)+std::exp(la3-lamax))+lamax + log_probs_a[t][current_target_prime];
       }
     }
@@ -182,7 +182,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
       tg_batch_offsets[i] = pos;
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
-	max_target_length = target_lengths[i];
+        max_target_length = target_lengths[i];
     }
     tg_target_stride = targets.stride(0);
   }
@@ -268,9 +268,9 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
 
         log_beta_a[t][s] = std::log(std::exp(lb1-lbmax)+std::exp(lb2-lbmax)+std::exp(lb3-lbmax))+lbmax + log_probs_a[t][current_target_prime];
         // one might check whether one can vectorize this better when done after the t-loop...
-	// now that we have beta, we fill in the sum of alpha*beta in eq (16)
-	// in contrast to the cuda implementation, we only parallelize over the batch, so we don't have a concurrency
-	// issue (several s can map to the same target character)
+        // now that we have beta, we fill in the sum of alpha*beta in eq (16)
+        // in contrast to the cuda implementation, we only parallelize over the batch, so we don't have a concurrency
+        // issue (several s can map to the same target character)
         // collected[b, t, target'[s]] "log+=" log_alpha[t, s]+log_beta[t, s]
         scalar_t log_alpha_beta =  log_alpha_a[t][s] + log_beta_a[t][s];
         scalar_t &lcab = grad_a[t][current_target_prime];
@@ -309,9 +309,9 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu(const Tensor& log_probs, const Tensor& t
   (void)zero_infinity; // only used for backwards
   return AT_DISPATCH_FLOATING_TYPES(log_probs.scalar_type(), "ctc_loss_cpu", [&] {
       if (targets.scalar_type() == kLong) {
-	return ctc_loss_cpu_template<scalar_t, kLong>(log_probs, targets, input_lengths, target_lengths, BLANK);
+        return ctc_loss_cpu_template<scalar_t, kLong>(log_probs, targets, input_lengths, target_lengths, BLANK);
       } else {
-	return ctc_loss_cpu_template<scalar_t, kInt>(log_probs, targets, input_lengths, target_lengths, BLANK);
+        return ctc_loss_cpu_template<scalar_t, kInt>(log_probs, targets, input_lengths, target_lengths, BLANK);
       }
   });
 }
@@ -320,9 +320,9 @@ Tensor ctc_loss_backward_cpu(const Tensor& grad, const Tensor& log_probs, const 
                              const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK, bool zero_infinity) {
   return AT_DISPATCH_FLOATING_TYPES(log_probs.scalar_type(), "ctc_loss_backward_cpu", [&] {
       if (targets.scalar_type() == kLong) {
-	return ctc_loss_backward_cpu_template<scalar_t,kLong>(grad, log_probs, targets, input_lengths, target_lengths, neg_log_likelihood, log_alpha, BLANK, zero_infinity);
+        return ctc_loss_backward_cpu_template<scalar_t,kLong>(grad, log_probs, targets, input_lengths, target_lengths, neg_log_likelihood, log_alpha, BLANK, zero_infinity);
       } else {
-	return ctc_loss_backward_cpu_template<scalar_t,kInt>(grad, log_probs, targets, input_lengths, target_lengths, neg_log_likelihood, log_alpha, BLANK, zero_infinity);
+        return ctc_loss_backward_cpu_template<scalar_t,kInt>(grad, log_probs, targets, input_lengths, target_lengths, neg_log_likelihood, log_alpha, BLANK, zero_infinity);
       }
   });
 }
