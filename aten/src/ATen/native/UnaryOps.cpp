@@ -16,8 +16,6 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/cpu/vec256/vec256_base.h>
-#include <ATen/native/cpu/Loops.h>
 
 #include <algorithm>
 #include <cmath>

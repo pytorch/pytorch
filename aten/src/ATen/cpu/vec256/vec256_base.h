@@ -223,7 +223,8 @@ public:
   }
   Vec256<T> neg() const {
     // NB: the trailing return type is needed because we need to coerce the
-    // return value back to T in the case of unary operator- incuring a promotion
+    // return value back to T in the case of unary operator- incuring a
+    // promotion
     return map([](T x) -> T { return -x; });
   }
   Vec256<T> round() const {

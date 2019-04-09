@@ -50,9 +50,7 @@ static void abs_kernel(TensorIterator& iter) {
     unary_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return std::abs(a); },
-        [=](Vec256<scalar_t> a) {
-          return a.abs();
-        });
+        [=](Vec256<scalar_t> a) { return a.abs(); });
   });
 }
 
@@ -61,9 +59,7 @@ static void frac_kernel(TensorIterator& iter) {
     unary_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return a - std::trunc(a); },
-        [=](Vec256<scalar_t> a) {
-          return a.frac();
-        });
+        [=](Vec256<scalar_t> a) { return a.frac(); });
   });
 }
 
@@ -72,9 +68,7 @@ static void reciprocal_kernel(TensorIterator& iter) {
     unary_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return decltype(a)(1.0) / a; },
-        [=](Vec256<scalar_t> a) {
-          return a.reciprocal();
-        });
+        [=](Vec256<scalar_t> a) { return a.reciprocal(); });
   });
 }
 
@@ -83,9 +77,7 @@ static void neg_kernel(TensorIterator& iter) {
     unary_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return -a; },
-        [=](Vec256<scalar_t> a) {
-          return a.neg();
-        });
+        [=](Vec256<scalar_t> a) { return a.neg(); });
   });
 }
 
@@ -200,7 +192,6 @@ REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
-
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)

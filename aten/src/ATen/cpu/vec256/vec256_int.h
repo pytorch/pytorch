@@ -426,7 +426,6 @@ Vec256<int16_t> inline operator-(const Vec256<int16_t>& a, const Vec256<int16_t>
 }
 
 // Negation. Defined here so we can utilize operator-
-
 Vec256<int64_t> Vec256<int64_t>::neg() const {
   return Vec256<int64_t>(0) - *this;
 }
