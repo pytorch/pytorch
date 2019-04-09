@@ -459,7 +459,7 @@ Tensor indexing_tensor_from_data(
   // Specific to tensor indexing, converts an indexing list to an
   // indexing tensor (type Byte or Long)
   ScalarType inferred_scalar_type = infer_scalar_type(data);
-  if (inferred_scalar_type == ScalarType::Byte) {
+  if (inferred_scalar_type == ScalarType::Byte || inferred_scalar_type == ScalarType::Bool) {
     auto& idx_type = type.toScalarType(inferred_scalar_type);
     return internal_new_from_data(idx_type, inferred_scalar_type, std::move(device), data, false, false, false);
   } else {
