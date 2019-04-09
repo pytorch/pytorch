@@ -12,8 +12,8 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
-#include <torch/csrc/utils/memory.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/ArrayRef.h>
@@ -40,7 +40,6 @@ using ::c10::FunctionSchema;
 // Map which stores filename to content.
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
-
 using ModulePtr = c10::intrusive_ptr<c10::ivalue::Object>;
 // A method in a module, e.g. f in:
 //
@@ -57,10 +56,7 @@ using ModuleLookup =
     std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
 
 struct Method {
-  Method(
-      Module* owner,
-      Function* function,
-      std::vector<Slot> initial_members)
+  Method(Module* owner, Function* function, std::vector<Slot> initial_members)
       : owner_(owner),
         function_(function),
         initial_ivalues_(std::move(initial_members)) {
@@ -83,16 +79,18 @@ struct Method {
   }
 
   IValue operator()(std::vector<IValue> stack) {
+    getSchema().checkInputs(stack);
     for (auto input : initial_ivalues_) {
       push(stack, input.value());
     }
-    return (*function_)(std::move(stack));
+    // use run rather than operator() to skip the second schema check.
+    function_->run(std::move(stack));
+    return stack.front();
   }
 
   const std::vector<Slot>& initial_ivalues() const {
     return initial_ivalues_;
   }
-
 
   // proxies for underlying unbound Function
   std::shared_ptr<Graph> graph_for(Stack inputs) {
@@ -118,7 +116,8 @@ struct Method {
     // we are required to slice out the slot inputs from the schema
     // we can't cache this because setSchema on the underlying function
     // will change the underlying schema
-    auto sliced = ArrayRef<Argument>(function_->getSchema().arguments()).slice(0, num_inputs());
+    auto sliced = ArrayRef<Argument>(function_->getSchema().arguments())
+                      .slice(0, num_inputs());
     return function_->getSchema().withArguments(sliced.vec());
   }
 
@@ -129,18 +128,18 @@ struct Method {
   Function& function() const {
     return *function_;
   }
+
  private:
   // Methods are uniqued onwed by a single module. This raw pointer allows
   // looking up the module.
   Module* owner_;
 
-  //Underlying unbound function
+  // Underlying unbound function
   Function* function_;
 
   // parameters and attributes loaded from the Module and appending
   // before calling function_
   std::vector<Slot> initial_ivalues_;
-
 };
 
 struct Module;
@@ -181,7 +180,7 @@ struct Module {
         name,
         attributes_,
         EntityType::ATTRIBUTE,
-        appendSlot(name, TensorType::get(),std::move(v)));
+        appendSlot(name, TensorType::get(), std::move(v)));
   }
 
   void register_parameter(
@@ -206,7 +205,11 @@ struct Module {
       const std::string& name,
       const TypePtr type,
       IValue ivalue) {
-    insert(name, attributes_, EntityType::ATTRIBUTE, appendSlot(name, type, ivalue));
+    insert(
+        name,
+        attributes_,
+        EntityType::ATTRIBUTE,
+        appendSlot(name, type, ivalue));
   }
   void register_module(
       const std::string& name,
@@ -220,16 +223,16 @@ struct Module {
     //   AT_WARN(
     //       "Attempting to assign submodule '",
     //       name,
-    //       "' but it is already a submodule of another ScriptModule '", module->parent_->name(), "'",
-    //       " Modules of this form do not import and export correctly. This use is deprecated and may be"
-    //       " removed in a future version.");
+    //       "' but it is already a submodule of another ScriptModule '",
+    //       module->parent_->name(), "'", " Modules of this form do not import
+    //       and export correctly. This use is deprecated and may be" " removed
+    //       in a future version.");
     // }
     module->parent_ = this;
     module->name_ = name;
     appendSlot(name, module->module_value_->type(), module->module_value_);
     insert(name, modules_, EntityType::MODULE, std::move(module));
   }
-
 
   Slot parameter_slot(const std::string& name) const {
     return parameters_[get_offset(name, EntityType::PARAMETER)];
@@ -280,7 +283,7 @@ struct Module {
   const std::vector<std::unique_ptr<Method>>& get_methods() const {
     // force methods_ to be up to date by querying all
     // methods. This will go away when lowered_methods_ is deleted
-    for(const auto& m : class_cu().get_functions()) {
+    for (const auto& m : class_cu().get_functions()) {
       get_method(m->name());
     }
     return methods_;
@@ -454,11 +457,10 @@ struct Module {
     return lowered_methods_;
   }
 
-
-  void _define_lowered(const std::vector<Def>& definitions,
-                       const std::vector<Resolver>& resolvers);
-  void _define_lowered(const std::string& src,
-                       const Resolver& resolver);
+  void _define_lowered(
+      const std::vector<Def>& definitions,
+      const std::vector<Resolver>& resolvers);
+  void _define_lowered(const std::string& src, const Resolver& resolver);
 
   Method& _define_lowered(
       std::string name,
@@ -467,8 +469,8 @@ struct Module {
 
  private:
   Method& _create_lowered_method(
-     Function* func,
-     std::vector<Slot> member_inputs);
+      Function* func,
+      std::vector<Slot> member_inputs);
 
   Method& lower_first_class_method(Function* fn);
   void lift_lowered_method(Method& fn);
@@ -585,13 +587,10 @@ struct Module {
   std::unordered_map<std::string, Entry> dict_;
   std::string name_;
 
-
   ModulePtr module_value_;
-
 
   // back reference to parent of this Module if present
   Module* parent_ = nullptr;
-
 
   // Currently we are in a transitionary state
   // where we construct such first class functions but we lower them
@@ -600,8 +599,8 @@ struct Module {
   // So each Method is actually stored twice once in first-class Module
   // form and once in lowered form.
 
-  // first-class: module_value_->type().compilation_unit() holds Functions that treat
-  // modules as first class.
+  // first-class: module_value_->type().compilation_unit() holds Functions that
+  // treat modules as first class.
 
   // lowered: In this lowered form, all the attributes/parameters are appended
   // as additional inputs. lowered_methods_ holds this lowered form
@@ -617,7 +616,8 @@ static void setInputTensorTypes(Graph& g, const Stack& stack) {
   }
 }
 
-inline std::shared_ptr<Graph> propagate_shapes(Graph& graph,
+inline std::shared_ptr<Graph> propagate_shapes(
+    Graph& graph,
     const std::vector<at::Tensor>& inputs,
     const std::vector<Slot>& initial_ivalues,
     bool with_grad = false) {

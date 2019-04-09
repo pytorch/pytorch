@@ -58,7 +58,7 @@ struct TORCH_API Function {
   }
 
   IValue operator()(std::vector<IValue> stack) {
-    checkInputsAgainstSchema(stack);
+    getSchema().checkInputs(stack);
     run(stack);
     return stack.front();
   }
@@ -162,49 +162,6 @@ struct TORCH_API Function {
       returns.emplace_back("", unshapedType(g.outputs()[i]->type()));
     }
     return {function.name(), "", std::move(args), std::move(returns)};
-  }
-
-  void checkInputsAgainstSchema(std::vector<IValue>& inputs) {
-    const auto& schema = getSchema();
-    // Do we have more inputs than the schema accepts?
-    AT_CHECK(
-        inputs.size() <= schema.arguments().size(),
-        "Expected at most ",
-        schema.arguments().size(),
-        " argument(s) for operator '",
-        schema.name(),
-        "', but received ",
-        inputs.size(),
-        " argument(s). Declaration: ",
-        schema);
-
-    for (size_t pos = 0; pos < schema.arguments().size(); ++pos) {
-      const auto& argument = schema.arguments()[pos];
-      if (pos < inputs.size()) {
-        if (!isSubvalueOf(inputs[pos], argument.type())) {
-          AT_ERROR(
-              "Expected value of type ",
-              *argument.type(),
-              " for argument '",
-              argument.name(),
-              "' in position ",
-              pos,
-              ", but instead got value of type ",
-              attemptToRecoverType(inputs[pos])->str(),
-              ". Declaration: ",
-              schema);
-        }
-      } else if (argument.default_value()) {
-        inputs.push_back(*argument.default_value());
-      } else {
-        AT_ERROR(
-            schema.name(),
-            "() is missing value for argument '",
-            argument.name(),
-            "'. Declaration: ",
-            schema);
-      }
-    }
   }
 
   std::string name_;
