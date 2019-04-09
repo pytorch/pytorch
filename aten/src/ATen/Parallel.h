@@ -1,5 +1,7 @@
 #pragma once
 #include <ATen/ATen.h>
+#include <c10/core/thread_pool.h>
+
 #include <atomic>
 #include <cstddef>
 #include <exception>
@@ -141,5 +143,14 @@ inline scalar_t parallel_reduce(
         results_data, results_data + results.size(), ident, sf);
   }
 }
+
+class C10_API PTThreadPool : public c10::ThreadPool {
+ public:
+  explicit PTThreadPool(
+      std::size_t pool_size,
+      int numa_node_id = -1);
+
+  void init_thread() override;
+};
 
 } // namespace at

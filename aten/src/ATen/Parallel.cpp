@@ -60,4 +60,29 @@ size_t get_num_threads() {
 #endif
 }
 
+PTThreadPool::PTThreadPool(
+    std::size_t pool_size,
+    int numa_node_id)
+    : c10::ThreadPool(pool_size, numa_node_id) {}
+
+void PTThreadPool::init_thread() {
+  c10::setThreadName("PTThreadPool");
+  at::init_num_threads();
 }
+
+namespace {
+
+std::shared_ptr<TaskThreadPoolBase> createC10ThreadPool(
+    int /* unused */,
+    int pool_size,
+    bool /* unused */) {
+  static std::shared_ptr<TaskThreadPoolBase> pool =
+      std::make_shared<PTThreadPool>(pool_size);
+  return pool;
+}
+
+} // namespace
+
+C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, createC10ThreadPool);
+
+} // namespace at
