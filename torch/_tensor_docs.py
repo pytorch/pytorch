@@ -2634,6 +2634,13 @@ Example::
            size=(3, 3), nnz=1, layout=torch.sparse_coo)
 """)
 
+add_docstr_all('to_mkldnn',
+               r"""
+to_mkldnn() -> Tensor
+Returns a copy of the tensor in ``torch.mkldnn`` layout.
+
+""")
+
 add_docstr_all('trace',
                r"""
 trace() -> Tensor

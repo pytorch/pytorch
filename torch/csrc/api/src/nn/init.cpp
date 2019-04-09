@@ -123,7 +123,7 @@ Tensor orthogonal_(Tensor tensor, double gain) {
       "Only tensors with 2 or more dimensions are supported");
 
   const auto rows = tensor.size(0);
-  const auto columns = tensor.size(1);
+  const auto columns = tensor.numel() / rows;
   auto flattened = torch::randn({rows, columns});
 
   if (rows < columns) {

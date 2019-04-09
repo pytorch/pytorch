@@ -2860,8 +2860,11 @@
   dispatch:
     SparseCPU: sparse_to_dense
     SparseCUDA: sparse_to_dense
+    MkldnnCPU: mkldnn_to_dense
   requires_tensor: True
 
+- func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
+  matches_jit_signature: True
 
 - func: sparse_dim(Tensor self) -> int
   matches_jit_signature: True
@@ -3021,6 +3024,15 @@
   dispatch:
     CPU: dense_to_sparse
     CUDA: dense_to_sparse
+
+- func: to_mkldnn(Tensor self) -> Tensor
+  matches_jit_signature: True
+  variants: method
+  dispatch:
+    CPU: dense_to_mkldnn
+
+- func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
+  matches_jit_signature: True
 
 - func: quantize_linear(Tensor self, float scale, int zero_point) -> Tensor
   matches_jit_signature: True
@@ -3757,17 +3769,17 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: gels(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!), Tensor(b!))
+- func: gels(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
   matches_jit_signature: True
 
-- func: gels(Tensor self, Tensor A) -> (Tensor, Tensor)
+- func: gels(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
   matches_jit_signature: True
   variants: method, function
 
-- func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!), Tensor(b!))
+- func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
   matches_jit_signature: True
 
-- func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor, Tensor)
+- func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
   matches_jit_signature: True
   variants: method, function
 
