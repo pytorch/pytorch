@@ -6,25 +6,29 @@
 #include <ATen/core/SparseTensorRef.h>
 #include <ATen/core/Type.h>
 #include <c10/core/TensorOptions.h>
+#include <ATen/core/DeprecatedTypeProperties.h>
 
 namespace at {
 
-inline Tensor Tensor::toType(const Type & t, bool non_blocking) const {
-  if(dispatch_type() == t)
+inline Tensor Tensor::toType(const DeprecatedTypeProperties & t, bool non_blocking) const {
+  if(type() == t)
     return *this;
-  return t.copy(*this, non_blocking);
+  return to(
+      at::device(t.device_type()).layout(t.layout()).dtype(t.scalarType()),
+      non_blocking,
+      /*copy*/ true);
 }
 
 inline Tensor Tensor::cpu() const {
-  return toType(dispatch_type().cpu());
+  return toType(type().cpu());
 }
 
 inline Tensor Tensor::cuda() const {
-  return toType(dispatch_type().cuda());
+  return toType(type().cuda());
 }
 
 inline Tensor Tensor::hip() const {
-  return toType(dispatch_type().hip());
+  return toType(type().hip());
 }
 
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
@@ -32,11 +36,11 @@ inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {
-  return toType(dispatch_type().toScalarType(t));
+  return toType(type().toScalarType(t));
 }
 
 inline Tensor Tensor::toBackend(Backend b) const {
-  return toType(dispatch_type().toBackend(b));
+  return toType(type().toBackend(b));
 }
 
 inline TensorOptions Tensor::options() const {

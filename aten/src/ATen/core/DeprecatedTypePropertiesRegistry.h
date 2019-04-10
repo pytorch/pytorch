@@ -5,14 +5,13 @@
 
 #include <c10/core/Backend.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/DeprecatedTypeProperties.h>
 
 namespace at {
 
+struct DeprecatedTypeProperties;
+
 struct CAFFE2_API DeprecatedTypePropertiesDeleter {
-  void operator()(DeprecatedTypeProperties * ptr) {
-      delete ptr;
-  }
+  void operator()(DeprecatedTypeProperties * ptr);
 };
 
 class CAFFE2_API DeprecatedTypePropertiesRegistry {
@@ -20,25 +19,15 @@ class CAFFE2_API DeprecatedTypePropertiesRegistry {
   using DeprecatedTypePropertiesUniquePtr =
       std::unique_ptr<DeprecatedTypeProperties, DeprecatedTypePropertiesDeleter>;
 
-  DeprecatedTypePropertiesRegistry() {
-    for (int b = 0; b < static_cast<int>(Backend::NumOptions); ++b) {
-      for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); ++s) {
-        registry[b][s] = DeprecatedTypePropertiesUniquePtr{
-            new DeprecatedTypeProperties(static_cast<Backend>(b), static_cast<ScalarType>(s)),
-            DeprecatedTypePropertiesDeleter()
-        };
-      }
-    }
-  }
+  DeprecatedTypePropertiesRegistry();
 
-  DeprecatedTypeProperties& getDeprecatedTypeProperties(Backend p, ScalarType s) {
-    return *registry[static_cast<int>(p)][static_cast<int>(s)];
-  }
+  DeprecatedTypeProperties& getDeprecatedTypeProperties(Backend p, ScalarType s, bool is_variable) const;
 
 private:
   DeprecatedTypePropertiesUniquePtr registry
     [static_cast<int>(Backend::NumOptions)]
-    [static_cast<int>(ScalarType::NumOptions)];
+    [static_cast<int>(ScalarType::NumOptions)]
+    [2];  // is_variable
 };
 
 CAFFE2_API DeprecatedTypePropertiesRegistry& globalDeprecatedTypePropertiesRegistry();
