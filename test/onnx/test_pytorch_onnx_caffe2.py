@@ -898,6 +898,25 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(model, train=False, input=(x),
                             batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_interpolate_upsample(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, x):
+                size = [v * 2 for v in x.size()[2:]]
+                size = [float(i) for i in size]
+                size = [int(f) for f in size]
+                return nn.functional.interpolate(x,
+                                                 size=size,
+                                                 mode='nearest')
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        #model = nn.Upsample(size=[v * 2 for v in x.size()[2:]], mode='nearest')
+        model = MyModel()
+        self.run_model_test(model, train=False, input=(x),
+                            batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_repeat_dim_overflow(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
