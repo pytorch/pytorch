@@ -280,6 +280,12 @@ inline Tensor Tensor::floor() const {
 inline Tensor & Tensor::floor_() {
     return dispatch_type().floor_(*this);
 }
+inline Tensor Tensor::frac() const {
+    return dispatch_type().frac(*this);
+}
+inline Tensor & Tensor::frac_() {
+    return dispatch_type().frac_(*this);
+}
 inline Tensor Tensor::ger(const Tensor & vec2) const {
     return dispatch_type().ger(*this, vec2);
 }
@@ -450,6 +456,18 @@ inline Tensor Tensor::pin_memory() const {
 }
 inline Tensor Tensor::pinverse(double rcond) const {
     return dispatch_type().pinverse(*this, rcond);
+}
+inline Tensor Tensor::reciprocal() const {
+    return dispatch_type().reciprocal(*this);
+}
+inline Tensor & Tensor::reciprocal_() {
+    return dispatch_type().reciprocal_(*this);
+}
+inline Tensor Tensor::neg() const {
+    return dispatch_type().neg(*this);
+}
+inline Tensor & Tensor::neg_() {
+    return dispatch_type().neg_(*this);
 }
 inline Tensor Tensor::repeat(IntArrayRef repeats) const {
     return dispatch_type().repeat(*this, repeats);
@@ -1000,17 +1018,8 @@ inline Tensor & Tensor::polygamma_(int64_t n) {
 inline Tensor & Tensor::erfinv_() {
     return dispatch_type().erfinv_(*this);
 }
-inline Tensor & Tensor::frac_() {
-    return dispatch_type().frac_(*this);
-}
 inline Tensor & Tensor::renorm_(Scalar p, int64_t dim, Scalar maxnorm) {
     return dispatch_type().renorm_(*this, p, dim, maxnorm);
-}
-inline Tensor & Tensor::reciprocal_() {
-    return dispatch_type().reciprocal_(*this);
-}
-inline Tensor & Tensor::neg_() {
-    return dispatch_type().neg_(*this);
 }
 inline Tensor & Tensor::pow_(Scalar exponent) {
     return dispatch_type().pow_(*this, exponent);
@@ -1210,17 +1219,8 @@ inline Tensor Tensor::polygamma(int64_t n) const {
 inline Tensor Tensor::erfinv() const {
     return dispatch_type().erfinv(*this);
 }
-inline Tensor Tensor::frac() const {
-    return dispatch_type().frac(*this);
-}
 inline Tensor Tensor::dist(const Tensor & other, Scalar p) const {
     return dispatch_type().dist(*this, other, p);
-}
-inline Tensor Tensor::reciprocal() const {
-    return dispatch_type().reciprocal(*this);
-}
-inline Tensor Tensor::neg() const {
-    return dispatch_type().neg(*this);
 }
 inline Tensor Tensor::atan2(const Tensor & other) const {
     return dispatch_type().atan2(*this, other);
