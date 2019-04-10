@@ -1,6 +1,8 @@
 #include <caffe2/ideep/ideep_utils.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class IDEEPFullyConnectedOp final : public IDEEPOperator {
  public:
@@ -141,4 +143,4 @@ class IDEEPFullyConnectedGradientOp final : public IDEEPOperator {
 REGISTER_IDEEP_OPERATOR(FC, IDEEPFullyConnectedOp);
 REGISTER_IDEEP_OPERATOR(FCGradient, IDEEPFullyConnectedGradientOp);
 
-} // namespace caffe2
+} // namespace

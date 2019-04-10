@@ -1,6 +1,8 @@
 #include <caffe2/ideep/operators/conv_pool_base_op.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class IDEEPConvOp : public IDEEPConvPoolOpBase {
  public:
@@ -336,4 +338,4 @@ REGISTER_IDEEP_OPERATOR(Conv, IDEEPConvOp);
 REGISTER_IDEEP_OPERATOR(ConvFusion, IDEEPConvFusionOp);
 REGISTER_IDEEP_OPERATOR(ConvGradient, IDEEPConvGradientOp);
 
-} // namespace caffe2
+} // namespace
