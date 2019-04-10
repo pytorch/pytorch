@@ -341,13 +341,6 @@ def parse_return_arguments(return_decl, inplace, func_decl):
     return arguments
 
 
-def has_sparse_dispatches(dispatches):
-    for dispatch in dispatches:
-        if 'Sparse' in dispatch:
-            return True
-    return False
-
-
 def parse_native_yaml(path):
     with open(path, 'r') as f:
         return yaml.load(f, Loader=Loader)

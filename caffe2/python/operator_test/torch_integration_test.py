@@ -446,3 +446,7 @@ class TorchIntegration(hu.HypothesisTestCase):
     @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
     def test_roi_align_cuda(self):
         self._test_roi_align(device="cuda")
+
+
+if __name__ == '__main__':
+    unittest.main()

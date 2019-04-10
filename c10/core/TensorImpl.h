@@ -358,6 +358,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return tid == HIPTensorId() || tid == SparseHIPTensorId();
   }
 
+  bool is_mkldnn() const {
+    return type_id() == MkldnnCPUTensorId();
+  }
+
   int64_t get_device() const {
     if (device_opt_.has_value()) {
       // See NOTE [c10::optional operator usage in CUDA]
@@ -384,6 +388,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // NB: This method is not virtual and avoid dispatches for perf.
     if (is_sparse()) {
       return kSparse;
+    } else if (is_mkldnn()) {
+      return kMkldnn;
     } else {
       return kStrided;
     }
@@ -1464,6 +1470,8 @@ protected:
 //    strong refcount           TODO: pack these into one word
 //    weak refcount
 //    storage pointer
+//    autograd metadata pointer
+//    PyObject pointer
 //    sizes SmallVector (begin)
 //    sizes SmallVector (end)
 //    sizes SmallVector (capacity)
@@ -1484,8 +1492,6 @@ protected:
 //    numel
 //    data type pointer
 //    (optional) device
-//    autograd metadata pointer
-//    PyObject pointer
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...

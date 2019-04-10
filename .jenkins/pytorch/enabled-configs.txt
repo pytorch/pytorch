@@ -19,6 +19,7 @@ pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7-build
 pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7-test
 pytorch-linux-xenial-py3-clang5-asan-build
 pytorch-linux-xenial-py3-clang5-asan-test
+pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
 pytorch-linux-trusty-py2.7.9-build
 pytorch-linux-trusty-py2.7.9-test
 pytorch-linux-trusty-py2.7-build
