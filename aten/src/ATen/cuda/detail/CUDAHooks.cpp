@@ -160,7 +160,7 @@ std::string CUDAHooks::showConfig() const {
   };
 
   size_t cudnnVersion = cudnnGetVersion();
-  oss << "  - CudNN ";
+  oss << "  - CuDNN ";
   printCudnnStyleVersion(cudnnVersion);
   size_t cudnnCudartVersion = cudnnGetCudartVersion();
   if (cudnnCudartVersion != CUDART_VERSION) {
@@ -170,7 +170,7 @@ std::string CUDAHooks::showConfig() const {
   }
   oss << "\n";
   if (cudnnVersion != CUDNN_VERSION) {
-    oss << "  - Built with CuDNN ";
+    oss << "    - Built with CuDNN ";
     printCudnnStyleVersion(CUDNN_VERSION);
     oss << "\n";
   }
