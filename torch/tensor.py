@@ -368,6 +368,13 @@ class Tensor(torch._C._TensorBase):
         else:
             return output
 
+    def unique_consecutive(self, return_inverse=False, return_counts=False, dim=None):
+        r"""Eliminates all but the first element from every consecutive group of equivalent elements.
+
+        See :func:`torch.unique_consecutive`
+        """
+        return torch.unique_consecutive(self, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
+
     def __rsub__(self, other):
         return _C._VariableFunctions.rsub(self, other)
 

@@ -2428,6 +2428,20 @@
     CPU: _unique_dim_cpu
     CUDA: _unique_dim_cuda
 
+- func: unique_consecutive(Tensor self, bool return_inverse=False, bool return_counts=False, int? dim=None) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: unique_consecutive_cpu
+    CUDA: unique_consecutive_cuda
+
+- func: unique_dim_consecutive(Tensor self, int dim, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: unique_dim_consecutive_cpu
+    CUDA: unique_dim_consecutive_cuda
+
 # _unique and _unique_dim are fragile and modifying them easily cause internal break
 # below two operators are a temporary hack for adding return_counts support
 # Please don't rely on these two operators, they will be removed soon
