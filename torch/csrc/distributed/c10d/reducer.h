@@ -15,17 +15,20 @@ namespace c10d {
 
 class Reducer {
  public:
-  // The constructor takes a vector<Variable> with model parameters for
-  // every model replica, hence the vector<vector<>>.
+  // The constructor takes a list of variables for every model replica.
+  // The bucket assignment for this reducer is specified as a list of
+  // buckets, each of which is specified as a list of indices into the
+  // variables list for **a single replica** (i.e. `variables[0]`).
   explicit Reducer(
-      std::vector<std::vector<torch::autograd::Variable>> variables,
+      std::vector<std::vector<torch::autograd::Variable>> replicas,
+      std::vector<std::vector<size_t>> bucket_indices,
       std::shared_ptr<c10d::ProcessGroup> process_group);
 
   // To (re-)initialize bucket assignment, pass a list of buckets, each
   // of which is specified by a list of indices in the variables list.
   // This function performs validation that the variables within a bucket
   // all live on the same device and have the same dimensionality.
-  void initialize_buckets(std::vector<std::vector<size_t>> indices);
+  void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
 
   // This function is called when the forward function has produced an output,
   // and the user wishes to reduce gradients in the backwards pass.
@@ -43,7 +46,7 @@ class Reducer {
 
  protected:
   std::mutex mutex_;
-  std::vector<std::vector<torch::autograd::Variable>> variables_;
+  std::vector<std::vector<torch::autograd::Variable>> replicas_;
   std::shared_ptr<c10d::ProcessGroup> process_group_;
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Function>>>
@@ -54,7 +57,10 @@ class Reducer {
   bool has_queued_final_callback_;
   size_t next_bucket_;
 
-  void mark_variable_ready(size_t replica_index, size_t variable_index);
+  void mark_variable_ready(
+      size_t replica_index,
+      size_t variable_index,
+      bool called_from_autograd = false);
 
   void mark_bucket_ready(size_t bucket_index);
 
@@ -112,20 +118,19 @@ class Reducer {
 
   std::vector<Bucket> buckets_;
 
-  // A bucket index locates the position of a particular variable in the bucket
+  // A variable locator locates a particular variable in the bucket
   // structure. The `bucket_index` field points to the bucket in the `buckets_`
   // vector. The `intra_bucket_index` field points to the index of the variable
   // in any of the vector fields in the bucket replica.
-  struct BucketIndex {
+  struct VariableLocator {
     // Index into the `buckets_` variable.
     size_t bucket_index;
     // Index of parameter in single bucket replica.
     size_t intra_bucket_index;
   };
 
-  // Maps variable index to bucket indices. Bucketing across replicas is
-  // identical so no need to include the replica index here.
-  std::vector<BucketIndex> bucket_indices_;
+  // Map the index of a variable to its location in the bucket structure.
+  std::vector<VariableLocator> variable_locators_;
 
   // We collect the relative timestamp of every gradient being ready
   // when executing autograd. This can be used to derive a timeline of

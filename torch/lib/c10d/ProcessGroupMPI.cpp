@@ -273,17 +273,14 @@ ProcessGroupMPI::~ProcessGroupMPI() {
 
 void ProcessGroupMPI::destroy() {
   std::unique_lock<std::mutex> lock(pgMutex_);
+  queueConsumeCV_.wait(lock, [&] { return queue_.empty(); });
 
-  while (!queue_.empty()) {
-    queueConsumeCV_.wait(lock);
-  }
   // Queue is empty, signal stop
   stop_ = true;
 
   // Release lock to allow threads to terminate
-  queueProduceCV_.notify_all();
-
   lock.unlock();
+  queueProduceCV_.notify_all();
 
   // Join the single worker thread
   workerThread_.join();
@@ -310,12 +307,12 @@ void ProcessGroupMPI::runLoop() {
     auto workTuple = std::move(queue_.front());
 
     queue_.pop_front();
-    queueConsumeCV_.notify_one();
 
     auto& workEntry = std::get<0>(workTuple);
     auto& work = std::get<1>(workTuple);
 
     lock.unlock();
+    queueConsumeCV_.notify_one();
 
     try {
       workEntry->run(workEntry);
@@ -333,6 +330,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::enqueue(
   auto work = std::make_shared<WorkMPI>();
   std::unique_lock<std::mutex> lock(pgMutex_);
   queue_.push_back(std::make_tuple(std::move(entry), work));
+  lock.unlock();
   queueProduceCV_.notify_one();
   return work;
 }

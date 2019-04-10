@@ -296,9 +296,16 @@ class Tensor(torch._C._TensorBase):
     def btrifact_with_info(self, pivot=True):
         r"""See :func:`torch.lu`"""
         warnings.warn("torch.btrifact_with_info is deprecated in favour of torch.lu with the "
-                      "and will be removed in the next release. Please use torch.lu with the "
-                      "get_infos argument set to True instead.", stacklevel=2)
+                      "get_infos argument and will be removed in the next release. Please use "
+                      "torch.lu with the get_infos argument set to True instead.", stacklevel=2)
         return torch._lu_with_info(self, pivot=pivot, check_errors=False)
+
+    def btrisolve(self, LU_data, LU_pivots):
+        r"""See :func:`torch.lu_solve`"""
+        warnings.warn("torch.btrisolve is deprecated in favour of torch.lu_solve and will be "
+                      "removed in the next release. Please use torch.lu_solve instead.",
+                      stacklevel=2)
+        return super(Tensor, self).lu_solve(LU_data=LU_data, LU_pivots=LU_pivots)
 
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""

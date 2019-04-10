@@ -76,8 +76,6 @@ def _parse_arg(value, desc):
         return int(tval)
     elif desc == 'f':
         return float(tval)
-    elif desc == 'b':
-        return bool(tval)
     elif desc == 't':
         return tval
     elif desc == 'is':
@@ -425,14 +423,18 @@ def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     return g.op("Gather", weight, indices)
 
 
-@parse_args('v', 'v', 'v', 'i', 'i', 'i')
+@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v')
 def embedding_bag(g,
                   embedding_matrix,
                   indices,
                   offsets,
                   scale_grad_by_freq,
                   mode,
-                  sparse):
+                  sparse,
+                  per_sample_weights):
+    if not per_sample_weights.node().mustBeNone():
+        raise RuntimeError('Unsupported: ONNX export of embedding_bag '
+                           'with per_sample_weights')
     return g.op("ATen",
                 embedding_matrix,
                 indices,
@@ -596,14 +598,22 @@ def softmax(g, input, dim, dtype=None):
     #           [0.167, 0.167, 0.167]]
     # So only when dim and axis both equal to ndim - 1 (the last dimension),
     # their semantics are equivalent.
-    if dim < 0:
-        dim = input.type().dim() + dim
-    if input.type().dim() != dim + 1:
-        return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
-    return_op = g.op('Softmax', input, axis_i=dim)
+    # So use softmax when dim and axis both equal to ndim - 1
+    # otherwise compute softmax using a subgraph with other operators
+    if input.type().kind() == "CompleteTensorType" or input.type().kind() == "DimensionedTensorType":
+        if dim < 0:
+            dim = input.type().dim() + dim
+        if input.type().dim() == dim + 1:
+            softmax = g.op('Softmax', input, axis_i=dim)
+            if dtype:
+                softmax = g.op("Cast", softmax, to_i=scalar_type_to_onnx[dtype])
+            return softmax
+    exp = g.op('Exp', input)
+    sum = g.op('ReduceSum', exp, axes_i=[dim])
+    softmax = g.op('Div', exp, sum)
     if dtype:
-        return_op = g.op("Cast", return_op, to_i=scalar_type_to_onnx[dtype])
-    return return_op
+        softmax = g.op("Cast", softmax, to_i=scalar_type_to_onnx[dtype])
+    return softmax
 
 
 @parse_args('v', 't', 'v')
@@ -1281,50 +1291,49 @@ scalar_type_to_onnx = [
 ]
 
 
-@parse_args('v', 'i', 'v', 'v', 'b')
-def zeros(g, sizes, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v')
+def zeros(g, sizes, dtype, layout, device):
     # NOTE: no way to set device and layout in ONNX, so we ignore it
     return g.op("ConstantOfShape", sizes,
-                value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
+                value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'b')
-def zeros_like(g, input, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v')
+def zeros_like(g, input, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
+                value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'b')
-def ones(g, sizes, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v')
+def ones(g, sizes, dtype, layout, device):
     return g.op("ConstantOfShape", sizes,
-                value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
+                value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'b')
-def ones_like(g, input, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v')
+def ones_like(g, input, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
+                value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-def full(g, sizes, value, dtype, layout, device, pin_memory=False):
+def full(g, sizes, value, dtype, layout, device):
     const_value = _maybe_get_const(value, 't')
     if _is_value(const_value):
-        tmp = zeros(sizes, dtype, layout, device, pin_memory=pin_memory)
+        tmp = zeros(sizes, dtype, layout, device)
         return add(tmp, value, g.op("Constant", value_t=torch.tensor(1)))
     else:
         dtype = _get_const(dtype, 'i', 'dtype')
-        pin_memory = _get_const(pin_memory, 'b', 'pin_memory')
         return g.op("ConstantOfShape", sizes,
-                    value_t=torch.tensor([const_value], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
+                    value_t=torch.tensor([const_value], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'f', 'i', 'v', 'v', 'b')
-def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'f', 'i', 'v', 'v')
+def full_like(g, input, fill_value, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor([fill_value], dtype=scalar_type_to_pytorch_type[dtype], pin_memory=pin_memory))
+                value_t=torch.tensor([fill_value], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'v', 'v', 'v', 'i')
@@ -1384,11 +1393,6 @@ def to(g, self, *args):
         return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
     elif len(args) == 5:
         # aten::to(Tensor, ScalarType, Layout, Device, bool, bool) -> Tensor
-        dtype = _get_const(args[0], 'i', 'dtype')
-        # Layout and device are ignored
-        return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
-    elif len(args) == 6:
-        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool) -> Tensor
         dtype = _get_const(args[0], 'i', 'dtype')
         # Layout and device are ignored
         return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])

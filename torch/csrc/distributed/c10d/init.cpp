@@ -45,6 +45,7 @@ PyObject* c10d_init(PyObject* _unused) {
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(py::init<
            std::vector<std::vector<torch::autograd::Variable>>,
+           std::vector<std::vector<size_t>>,
            std::shared_ptr<::c10d::ProcessGroup>>())
       .def(
           "initialize_buckets",
@@ -104,6 +105,11 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::ScatterOptions::rootRank)
       .def_readwrite("timeout", &::c10d::ScatterOptions::timeout);
+
+  py::class_<::c10d::ReduceScatterOptions>(module, "ReduceScatterOptions")
+      .def(py::init<>())
+      .def_readwrite("reduceOp", &::c10d::ReduceScatterOptions::reduceOp)
+      .def_readwrite("timeout", &::c10d::ReduceScatterOptions::timeout);
 
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
       .def(py::init<>())
@@ -313,6 +319,28 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::arg("output_tensor"),
               py::arg("input_tensors"),
               py::arg("root"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "reduce_scatter",
+              &::c10d::ProcessGroup::reduce_scatter,
+              py::arg("output_tensors"),
+              py::arg("input_tensors"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "reduce_scatter",
+              [](::c10d::ProcessGroup& pg,
+                 at::Tensor& output,
+                 std::vector<at::Tensor>& input) {
+                std::vector<at::Tensor> outputs = {output};
+                std::vector<std::vector<at::Tensor>> inputs = {input};
+                return pg.reduce_scatter(
+                    outputs, inputs, ::c10d::ReduceScatterOptions());
+              },
+              py::arg("output_tensors"),
+              py::arg("input_tensor"),
               py::call_guard<py::gil_scoped_release>())
 
           .def(

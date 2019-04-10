@@ -478,6 +478,10 @@ ClassTypePtr ClassType::create(
   return ptr;
 }
 
+ClassTypePtr ClassType::createModuleType() {
+  return ClassTypePtr(new ClassType("Module", nullptr));
+}
+
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   auto ptr = ClassTypePtr(new ClassType(typename_, module_));
   AT_ASSERT(numAttributes() == refined_slots.size());
@@ -491,6 +495,7 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
 ClassTypePtr ClassType::get(const std::string& name) {
   return getRegistry().getType(name);
 }
+
 
 void ClassType::clearRegistry() {
   getRegistry().clear();
