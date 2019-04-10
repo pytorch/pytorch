@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
 #include <unordered_map>
@@ -287,7 +288,7 @@ void BlockToONNX(
     processSymbolicOutput(n->kind().toUnqualString(), n, raw_output);
   };
 
-  auto callPySymbolicMethod = [&](PythonOp* op) {
+  auto callPySymbolicMethod = [&](ConcretePythonOp* op) {
     // Test if there is a symbolic function; bail if there is not
     auto pyobj = py::handle(op->pyobj.get());
     auto func = op->autogradFunction();
@@ -342,7 +343,7 @@ void BlockToONNX(
       // Pass on Caffe2 opeartor, since we already preprocess it
       cloneNode(node);
     } else if (node->kind() == prim::PythonOp) {
-      callPySymbolicMethod(static_cast<PythonOp*>(node));
+      callPySymbolicMethod(static_cast<ConcretePythonOp*>(node));
     } else {
       callPySymbolicFunction(node);
     }
