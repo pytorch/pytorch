@@ -36,7 +36,7 @@ static Acctype linear_upsampling_compute_source_index(
 
 __device__ __forceinline__
 static int nearest_neighbor_compute_source_index(
-		const float scale, int dst_index, int inputSize) {
+                const float scale, int dst_index, int inputSize) {
   const int src_index = MIN(floor(dst_index * scale), inputSize - 1);
   return src_index;
 }

@@ -1,4 +1,4 @@
-#include <torch/csrc/python_headers.h>
+#include <torch/csrc/jit/python_ir.h>
 
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/export.h>
@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/pybind.h>
 #include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -121,76 +122,88 @@ Node* findNode(Block* block, Symbol kind, bool recurse = true) {
   return findNode(blocks, kind, recurse);
 }
 
-// execute a Python function, used for Ops we can't optimize but that we want to
-// optimize around
-struct ConcretePythonOp : public PythonOp {
-  ConcretePythonOp(Graph* graph) : PythonOp(graph) {}
-  std::string name() const override {
-    AutoGIL gil;
-    if (auto autograd = autogradFunction()) {
-      return getPythonName(autograd->get());
+std::string ConcretePythonOp::name() const {
+  AutoGIL gil;
+  if (auto autograd = autogradFunction()) {
+    return getPythonName(autograd->get());
+  } else {
+    return getPythonName(pyobj.get());
+  }
+}
+
+void ConcretePythonOp::cloneFrom(Node* other_) {
+  Node::cloneFrom(other_);
+  auto other = other_->cast<ConcretePythonOp>();
+  this->cconv = other->cconv;
+  Py_INCREF(other->pyobj.get());
+  this->pyobj = THPObjectPtr(other->pyobj.get());
+  for (auto& sa : other->scalar_args) {
+    Py_INCREF(sa.get());
+    this->scalar_args.emplace_back(sa.get());
+  }
+}
+
+// recover the autograd.Function instance, if this PythonOp's function
+// was originally SomeFunction.apply
+// used in ONNX for discovering symbolics
+c10::optional<THPObjectPtr> ConcretePythonOp::autogradFunction() const {
+  AutoGIL gil;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  py::handle obj = const_cast<PyObject*>(pyobj.get());
+
+  auto r = py::getattr(obj, "__self__", py::none());
+  if (r.is_none())
+    return c10::nullopt;
+
+  auto apply = py::getattr(r, "apply", py::none());
+  if (apply.is_none())
+    return c10::nullopt;
+
+  auto c = PyObject_RichCompareBool(apply.ptr(), obj.ptr(), Py_NE);
+  if (PyErr_Occurred())
+    throw py::error_already_set();
+  if (c)
+    return c10::nullopt;
+
+  return THPObjectPtr(r.release().ptr());
+}
+
+void ConcretePythonOp::writeScalars(std::ostream& out) const {
+  out << "(";
+  int i = 0;
+  for (auto& scalar : scalar_args) {
+    if (i++ > 0)
+      out << ", ";
+    printPyObject(out, scalar);
+  }
+  out << ")";
+}
+
+void ConcretePythonOp::lint_python() const {
+  size_t n_scalars = 0, n_tensors = 0;
+  for (auto c : cconv) {
+    if (c == 'c') {
+      n_scalars++;
+    } else if (c == 'd') {
+      n_tensors++;
     } else {
-      return getPythonName(pyobj.get());
+      AT_ASSERT(0);
     }
+    AT_ASSERT(static_cast<bool>(pyobj));
   }
-  void cloneFrom(Node* other_) override {
-    Node::cloneFrom(other_);
-    auto other = other_->cast<PythonOp>();
-    this->cconv = other->cconv;
-    Py_INCREF(other->pyobj.get());
-    this->pyobj = THPObjectPtr(other->pyobj.get());
-    for (auto& sa : other->scalar_args) {
-      Py_INCREF(sa.get());
-      this->scalar_args.emplace_back(sa.get());
-    }
-  }
-  Node* allocNewInstance(Graph* g) override {
-    return new ConcretePythonOp(g);
-  }
-  // recover the autograd.Function instance, if this PythonOp's function
-  // was originally SomeFunction.apply
-  // used in ONNX for discovering symbolics
-  c10::optional<THPObjectPtr> autogradFunction() const override {
-    AutoGIL gil;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-    py::handle obj = const_cast<PyObject*>(pyobj.get());
+  AT_ASSERT(n_scalars == scalar_args.size());
+  AT_ASSERT(n_tensors == inputs().size());
+}
 
-    auto r = py::getattr(obj, "__self__", py::none());
-    if (r.is_none())
-      return c10::nullopt;
-
-    auto apply = py::getattr(r, "apply", py::none());
-    if (apply.is_none())
-      return c10::nullopt;
-
-    auto c = PyObject_RichCompareBool(apply.ptr(), obj.ptr(), Py_NE);
-    if (PyErr_Occurred())
-      throw py::error_already_set();
-    if (c)
-      return c10::nullopt;
-
-    return THPObjectPtr(r.release().ptr());
-  }
-
-  void writeScalars(std::ostream& out) const override {
-    out << "(";
-    int i = 0;
-    for (auto& scalar : scalar_args) {
-      if (i++ > 0)
-        out << ", ";
-      printPyObject(out, scalar);
-    }
-    out << ")";
-  }
-};
-
-PythonOp* pythonAllocPythonOp(Graph* g) {
-  return new ConcretePythonOp(g);
+Node* Graph::createPythonOp(
+    THPObjectPtr&& pyobj,
+    const std::string& cconv,
+    pyobj_list&& scalar_args) {
+  ConcretePythonOp* op = new ConcretePythonOp(this);
+  return op->init(std::move(pyobj), cconv, std::move(scalar_args));
 }
 
 void initPythonIRBindings(PyObject* module_) {
-  setAllocPythonOp(pythonAllocPythonOp);
-
   auto m = py::handle(module_).cast<py::module>();
 #define GS(name) def(#name, &Graph ::name)
   py::class_<Graph, std::shared_ptr<Graph>>(m, "Graph")
@@ -583,13 +596,13 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "pyobj",
           [](Node& n) {
-            return py::handle(n.expect<PythonOp>()->pyobj.get())
+            return py::handle(n.expect<ConcretePythonOp>()->pyobj.get())
                 .cast<py::object>();
           })
-      .def("cconv", [](Node& n) { return n.expect<PythonOp>()->cconv; })
-      .def("pyname", [](Node& n) { return n.expect<PythonOp>()->name(); })
+      .def("cconv", [](Node& n) { return n.expect<ConcretePythonOp>()->cconv; })
+      .def("pyname", [](Node& n) { return n.expect<ConcretePythonOp>()->name(); })
       .def("scalar_args", [](Node& n) {
-        auto op = n.expect<PythonOp>();
+        auto op = n.expect<ConcretePythonOp>();
         auto scalars = py::list();
         auto append = scalars.attr("append");
         for (auto& arg : op->scalar_args) {
