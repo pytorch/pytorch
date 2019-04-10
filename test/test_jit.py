@@ -5066,6 +5066,11 @@ a")
         def test_log2_float():
             return math.log2(2.0)
 
+        def test_exp_int():
+            return math.exp(2)
+        def test_exp_float():
+            return math.exp(2.0)
+
         self.checkScript(test_floor, ())
         self.checkScript(test_ceil, ())
         self.checkScript(test_log_int, ())
@@ -5076,6 +5081,8 @@ a")
         self.checkScript(test_log10_float, ())
         self.checkScript(test_log2_int, ())
         self.checkScript(test_log2_float, ())
+        self.checkScript(test_exp_int, ())
+        self.checkScript(test_exp_float, ())
 
     def test_if_nest_while(self):
         def func(a, b):
