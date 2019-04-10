@@ -144,8 +144,6 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
   };
   std::vector<ToScan> to_scan;
   std::vector<Node*> to_clean; // nodes that should be dead at the end
-  std::vector<Node*> forks_edited; // we need to potentially de-dup inputs
-                                   // to the fork node
 
   auto getOrAddSlot = [&](const Slot& slot) -> Value* {
     auto it = slot_to_offset.find(slot);
@@ -178,7 +176,6 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
         e.n->addInput(getOrAddSlot(slot));
       }
       e.n->removeInput(e.offset);
-      forks_edited.emplace_back(e.n);
       continue;
     }
     if (e.n->kind() != prim::GetAttr) {
@@ -209,25 +206,6 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
   AT_ASSERT(!self_value->hasUses());
   g->eraseInput(self_offset);
 
-  // for(Node* fork : forks_edited) {
-  //   std::unordered_map<Value*, size_t> input_to_offset;
-  //   auto subgraph = fork->g(attr::Subgraph);
-  //   for(size_t i = 0; i < fork->inputs().size();) {
-  //     Value* input = fork->inputs().at(i);
-  //     auto it = input_to_offset.find(input);
-  //     if (it == input_to_offset.end()) {
-  //       input_to_offset[input] = i;
-  //       ++i;
-  //       continue;
-  //     }
-  //     // remove duplicate for input at offset i with first use at offset
-  //     it->second fork->removeInput(i);
-  //     subgraph->inputs().at(i)->replaceAllUsesWith(
-  //         subgraph->inputs().at(it->second));
-  //     subgraph->eraseInput(i);
-  //   }
-  // }
-
   return std::make_pair(std::move(g), std::move(extra_ivalues));
 }
 
@@ -248,7 +226,7 @@ Method& Module::lower_first_class_method(Function* fn) {
     ss << "slot" << id++;
     args.emplace_back(ss.str(), slot.type());
   }
-  new_func.setSchema(fn->getSchema().withArguments(std::move(args)));
+  new_func.setSchema(fn->getSchema().cloneWithArguments(std::move(args)));
   return _create_lowered_method(&new_func, std::move(lowered.second));
 }
 
@@ -308,13 +286,15 @@ void Module::lift_lowered_method(Method& m) {
 
   Function& new_fn = class_cu().create_function(m.name(), std::move(graph));
   // created lifted schema
-  std::vector<Argument> new_args = {Argument("_self", module_object()->type())};
+  // self argument is named '$self' to prevent accidental name collisions
+  // with another input that the user named 'self'
+  std::vector<Argument> new_args = {Argument("$self", module_object()->type())};
   const auto& lowered_args = m.function().getSchema().arguments();
   new_args.insert(
       new_args.end(),
       lowered_args.begin(),
       lowered_args.begin() + m.num_inputs());
-  new_fn.setSchema(m.function().getSchema().withArguments(std::move(new_args)));
+  new_fn.setSchema(m.function().getSchema().cloneWithArguments(std::move(new_args)));
 }
 
 Method& Module::_create_lowered_method(

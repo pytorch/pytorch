@@ -19,10 +19,6 @@
 #include <unordered_map>
 #include <vector>
 
-// This file contains classes which assist in desugaring Python style
-// modules and their methods into flattened graphs which don't have any
-// function calls.
-
 namespace torch {
 namespace jit {
 
@@ -39,6 +35,10 @@ using Resolver = std::function<std::shared_ptr<SugaredValue>(
     const SourceRange& loc)>;
 using Self = std::function<std::shared_ptr<SugaredValue>(Value*)>;
 
+// A Function is a pure Graph with no implicit `self` object bound.
+// It contains schema information, and the executor that manages the
+// execution of the function. script::Method is a wrapper around a
+// underlying Function that also provides a `self` object.
 struct TORCH_API Function {
   Function(
       std::string name,
@@ -61,7 +61,7 @@ struct TORCH_API Function {
   IValue operator()(
       std::vector<IValue> stack,
       const Kwargs& kwargs = Kwargs()) {
-    getSchema().checkInputs(stack, kwargs);
+    getSchema().checkAndNormalizeInputs(stack, kwargs);
     run(stack);
     return stack.front();
   }
@@ -185,6 +185,12 @@ struct TORCH_API Function {
   // before a call to setSchema
   mutable std::unique_ptr<FunctionSchema> schema_;
 };
+
+// A CompilationUnit is a list of named script::Functions
+// with helper methods to iterate the list, or invoke the function.
+// Classes have a CompilationUnit holding the class methods
+// and Modules also have a CompilationUnit holding the Functions that
+// are used to implement their Methods
 
 struct TORCH_API CompilationUnit {
   std::shared_ptr<Function> find_function(const std::string& name) const {

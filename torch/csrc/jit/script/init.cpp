@@ -388,7 +388,7 @@ struct ModuleValue : public SugaredValue {
           params.emplace_back(g.insertGetAttr(self_, param.name()));
         }
         auto list =
-            g.insertNode(g.createList(TensorType::get(), params))->output();
+            g.insertNode(g.createTuple(params))->output();
         return std::make_shared<ConstantParameterList>(list);
       }
       if (py::isinstance<py::function>(attr) ||

@@ -472,14 +472,14 @@ ClassTypeRegistry& getRegistry() {
 
 ClassTypePtr ClassType::create(
     const std::string& name,
-    std::shared_ptr<CompilationUnit> module) {
-  auto ptr = ClassTypePtr(new ClassType(name, std::move(module)));
+    std::shared_ptr<CompilationUnit> cu) {
+  auto ptr = ClassTypePtr(new ClassType(name, std::move(cu)));
   getRegistry().registerType(name, ptr);
   return ptr;
 }
 
-ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> module) {
-  return ClassTypePtr(new ClassType("Module", std::move(module)));
+ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> cu) {
+  return ClassTypePtr(new ClassType("Module", std::move(cu)));
 }
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {

@@ -166,7 +166,7 @@ public:
     }
     return c10::nullopt;
   }
-  FunctionSchema withArguments(std::vector<Argument> new_arguments) const {
+  FunctionSchema cloneWithArguments(std::vector<Argument> new_arguments) const {
     return FunctionSchema(
         name(),
         overload_name(),
@@ -176,7 +176,9 @@ public:
         is_varret());
   }
 
-  void checkInputs(
+  // Check that inputs have the correct types and appends any missing default
+  // values.
+  void checkAndNormalizeInputs(
       std::vector<IValue>& inputs,
       const std::unordered_map<std::string, IValue>& kwargs) const;
 
