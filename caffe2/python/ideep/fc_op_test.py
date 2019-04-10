@@ -8,6 +8,7 @@ from functools import reduce
 import hypothesis.strategies as st
 from hypothesis import given, settings
 import numpy as np
+from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.ideep_test_util as mu
@@ -259,6 +260,118 @@ class FcTest(hu.HypothesisTestCase):
         for i in range(3):
             self.assertGradientChecks(gc, op, [X, W, b], i, [0])
 
+    @given(n=st.integers(2, 5), m=st.integers(2, 5),
+           k=st.integers(2, 5), **mu.gcs)
+    def test_int8_fc_4_dims(self, n, m, k, gc, dc):
+        X = np.random.rand(m, k, m, m).astype(np.float32) - 0.5
+        w = np.random.rand(n, k, m, m).astype(np.float32) - 0.5
+        b = np.random.rand(n).astype(np.float32) - 0.5
+
+        fc_fp32 = core.CreateOperator(
+            'FC',
+            ['X', 'w', 'b'],
+            ["Y"]
+        )
+
+        old_ws_name = workspace.CurrentWorkspace()
+        workspace.SwitchWorkspace("_device_check_", True)
+
+        workspace.FeedBlob('X', X, dc[0])
+        workspace.FeedBlob('w', w, dc[0])
+        workspace.FeedBlob('b', b, dc[0])
+        workspace.RunOperatorOnce(fc_fp32)
+        Y = workspace.FetchBlob('Y')
+
+        workspace.ResetWorkspace()
+
+        Y_absmax = np.array([np.absolute(Y).max()]).astype(np.float32)
+        if Y.min() >= 0:
+            Y_scale = Y_absmax / 0xFF
+            Y_zero_point = 0
+        else:
+            Y_scale = Y_absmax / 0x7F
+            Y_zero_point = 128
+
+        X_absmax = np.array([np.absolute(X).max()]).astype(np.float32)
+        if X.min() >= 0:
+            X_scale = X_absmax / 0xFF
+            X_zero_point = 0
+        else:
+            X_scale = X_absmax / 0x7F
+            X_zero_point = 128
+
+        w_absmax = np.array([np.absolute(w[i, ...]).max() for i in range(w.shape[0])]).astype(np.float32)
+        w_scale = w_absmax / 0x7F
+        w_zero_point = 128
+        w = np.transpose(w, (0, 2, 3, 1)).astype(np.float32)
+        w_bytes = np.rint([w[i, ...] / w_scale[i] for i in range(w.shape[0])]).astype(np.int8) + w_zero_point
+
+        w_filler = core.CreateOperator(
+            "Int8GivenTensorFill",
+            [], ["wi"],
+            shape=w.shape,
+            values=w_bytes.astype(np.uint8).tobytes(),
+            Y_zero_point=w_zero_point,
+            Y_scales=w_scale,
+            device_option=dc[1],
+        )
+
+        b_scale = w_scale * X_scale
+        b_zero_point = 0
+        b_bytes = np.rint([b[i] / b_scale[i] for i in range(b.shape[0])]).astype(np.int32)
+        b_filler = core.CreateOperator(
+            "Int8GivenIntTensorFill",
+            [], ["bi"],
+            shape=b.shape,
+            values=b_bytes,
+            Y_zero_point=b_zero_point,
+            Y_scales=b_scale,
+            device_option=dc[1],
+        )
+
+        sw2nhwc = core.CreateOperator(
+            "NCHW2NHWC",
+            ["Xi"],
+            ["Xi_nhwc"],
+            device_option=dc[1]
+        )
+
+        quantize_X = core.CreateOperator(
+            "Int8Quantize",
+            ["Xi_nhwc"],
+            ["Xi_quantized"],
+            engine="DNNLOWP",
+            device_option=dc[1],
+            Y_zero_point=X_zero_point,
+            Y_scale=X_scale[0],
+        )
+
+        fc = core.CreateOperator(
+            'Int8FC',
+            ['Xi_quantized', 'wi', 'bi'],
+            ["Y_out"],
+            engine="DNNLOWP",
+            device_option=dc[1],
+            Y_zero_point=Y_zero_point,
+            Y_scale=Y_scale[0],
+        )
+
+        net = caffe2_pb2.NetDef()
+        net.op.extend([w_filler, b_filler, sw2nhwc, quantize_X, fc])
+
+        workspace.FeedBlob("Xi", X, dc[1])
+        workspace.RunNetOnce(net)
+        Y_out = workspace.FetchBlob("Y_out")
+
+        MSE = np.square(np.subtract(Y, Y_out)).mean()
+        if MSE > 0.005:
+            print(Y.flatten())
+            print(Y_out.flatten())
+            print(np.max(np.abs(Y_out - Y)))
+            print("MSE", MSE)
+            self.assertTrue(False)
+
+        workspace.SwitchWorkspace(old_ws_name)
 
 if __name__ == "__main__":
     unittest.main()
