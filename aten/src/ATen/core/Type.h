@@ -282,6 +282,8 @@ struct CAFFE2_API Type {
   virtual Tensor & fill_(Tensor & self, const Tensor & value) const = 0;
   virtual Tensor floor(const Tensor & self) const = 0;
   virtual Tensor & floor_(Tensor & self) const = 0;
+  virtual Tensor frac(const Tensor & self) const = 0;
+  virtual Tensor & frac_(Tensor & self) const = 0;
   virtual Tensor ger(const Tensor & self, const Tensor & vec2) const = 0;
   virtual Tensor fft(const Tensor & self, int64_t signal_ndim, bool normalized) const = 0;
   virtual Tensor ifft(const Tensor & self, int64_t signal_ndim, bool normalized) const = 0;
@@ -339,6 +341,10 @@ struct CAFFE2_API Type {
   virtual Tensor permute(const Tensor & self, IntArrayRef dims) const = 0;
   virtual Tensor pin_memory(const Tensor & self) const = 0;
   virtual Tensor pinverse(const Tensor & self, double rcond) const = 0;
+  virtual Tensor reciprocal(const Tensor & self) const = 0;
+  virtual Tensor & reciprocal_(Tensor & self) const = 0;
+  virtual Tensor neg(const Tensor & self) const = 0;
+  virtual Tensor & neg_(Tensor & self) const = 0;
   virtual Tensor repeat(const Tensor & self, IntArrayRef repeats) const = 0;
   virtual Tensor repeat_interleave(const Tensor & repeats) const = 0;
   virtual Tensor repeat_interleave(const Tensor & self, const Tensor & repeats, c10::optional<int64_t> dim) const = 0;
@@ -523,10 +529,7 @@ struct CAFFE2_API Type {
   virtual Tensor & digamma_(Tensor & self) const = 0;
   virtual Tensor & polygamma_(Tensor & self, int64_t n) const = 0;
   virtual Tensor & erfinv_(Tensor & self) const = 0;
-  virtual Tensor & frac_(Tensor & self) const = 0;
   virtual Tensor & renorm_(Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) const = 0;
-  virtual Tensor & reciprocal_(Tensor & self) const = 0;
-  virtual Tensor & neg_(Tensor & self) const = 0;
   virtual Tensor & pow_(Tensor & self, Scalar exponent) const = 0;
   virtual Tensor & pow_(Tensor & self, const Tensor & exponent) const = 0;
   virtual Tensor & lerp_(Tensor & self, const Tensor & end, Scalar weight) const = 0;
@@ -593,10 +596,7 @@ struct CAFFE2_API Type {
   virtual Tensor digamma(const Tensor & self) const = 0;
   virtual Tensor polygamma(int64_t n, const Tensor & self) const = 0;
   virtual Tensor erfinv(const Tensor & self) const = 0;
-  virtual Tensor frac(const Tensor & self) const = 0;
   virtual Tensor dist(const Tensor & self, const Tensor & other, Scalar p) const = 0;
-  virtual Tensor reciprocal(const Tensor & self) const = 0;
-  virtual Tensor neg(const Tensor & self) const = 0;
   virtual Tensor atan2(const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor lerp(const Tensor & self, const Tensor & end, Scalar weight) const = 0;
   virtual Tensor lerp(const Tensor & self, const Tensor & end, const Tensor & weight) const = 0;

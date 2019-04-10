@@ -162,20 +162,8 @@ Tensor & erfinv_(Tensor& self) {
   return at::legacy::th::_th_erfinv_(self);
 }
 
-Tensor & frac_(Tensor& self) {
-  return at::legacy::th::_th_frac_(self);
-}
-
 Tensor & renorm_(Tensor& self, Scalar p, int64_t dim, Scalar maxnorm) {
   return at::legacy::th::_th_renorm_(self, p, dim, maxnorm);
-}
-
-Tensor & reciprocal_(Tensor& self) {
-  return at::legacy::th::_th_reciprocal_(self);
-}
-
-Tensor & neg_(Tensor& self) {
-  return at::legacy::th::_th_neg_(self);
 }
 
 Tensor & pow_(Tensor& self, Scalar exponent) {
@@ -563,32 +551,8 @@ Tensor erfinv(const Tensor & self) {
   return at::legacy::th::_th_erfinv(self);
 }
 
-Tensor & frac_out(Tensor & result, const Tensor & self) {
-  return at::legacy::th::_th_frac_out(result, self);
-}
-
-Tensor frac(const Tensor & self) {
-  return at::legacy::th::_th_frac(self);
-}
-
 Tensor dist(const Tensor & self, const Tensor & other, Scalar p) {
   return at::legacy::th::_th_dist(self, other, p);
-}
-
-Tensor & reciprocal_out(Tensor & result, const Tensor & self) {
-  return at::legacy::th::_th_reciprocal_out(result, self);
-}
-
-Tensor reciprocal(const Tensor & self) {
-  return at::legacy::th::_th_reciprocal(self);
-}
-
-Tensor & neg_out(Tensor & result, const Tensor & self) {
-  return at::legacy::th::_th_neg_out(result, self);
-}
-
-Tensor neg(const Tensor & self) {
-  return at::legacy::th::_th_neg(self);
 }
 
 Tensor & atan2_out(Tensor & result, const Tensor & self, const Tensor & other) {

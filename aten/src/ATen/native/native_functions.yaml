@@ -1016,6 +1016,23 @@
     CPU: _floor_out_cpu
     CUDA: _floor_out_cuda
 
+- func: frac(Tensor self) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
+
+- func: frac_(Tensor(a!) self) -> Tensor(a!)
+  matches_jit_signature: True
+  variants: function, method
+  dispatch:
+    CPU: _frac__cpu
+    CUDA: _frac__cuda
+
+- func: frac(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
+  dispatch:
+    CPU: _frac_out_cpu
+    CUDA: _frac_out_cuda
+
 - func: full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
   matches_jit_signature: True
 
@@ -1822,6 +1839,40 @@
   dispatch:
     CPU: range_cpu_out
     CUDA: range_cuda_out
+
+- func: reciprocal(Tensor self) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
+
+- func: reciprocal_(Tensor(a!) self) -> Tensor(a!)
+  matches_jit_signature: True
+  variants: function, method
+  dispatch:
+    CPU: _reciprocal__cpu
+    CUDA: _reciprocal__cuda
+
+- func: reciprocal(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
+  dispatch:
+    CPU: _reciprocal_out_cpu
+    CUDA: _reciprocal_out_cuda
+
+- func: neg(Tensor self) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
+
+- func: neg_(Tensor(a!) self) -> Tensor(a!)
+  matches_jit_signature: True
+  variants: function, method
+  dispatch:
+    CPU: _neg__cpu
+    CUDA: _neg__cuda
+
+- func: neg(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: True
+  dispatch:
+    CPU: _neg_out_cpu
+    CUDA: _neg_out_cuda
 
 - func: repeat(Tensor self, int[] repeats) -> Tensor
   matches_jit_signature: True
@@ -3475,19 +3526,7 @@
   matches_jit_signature: True
   variants: method
 
-- func: frac_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
-  variants: method
-
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
-  matches_jit_signature: True
-  variants: method
-
-- func: reciprocal_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
-  variants: method
-
-- func: neg_(Tensor(a!) self) -> Tensor(a!)
   matches_jit_signature: True
   variants: method
 
@@ -3957,28 +3996,7 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: frac(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
-
-- func: frac(Tensor self) -> Tensor
-  matches_jit_signature: True
-  variants: method, function
-
 - func: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
-  matches_jit_signature: True
-  variants: method, function
-
-- func: reciprocal(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
-
-- func: reciprocal(Tensor self) -> Tensor
-  matches_jit_signature: True
-  variants: method, function
-
-- func: neg(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
-
-- func: neg(Tensor self) -> Tensor
   matches_jit_signature: True
   variants: method, function
 
