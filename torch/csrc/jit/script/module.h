@@ -100,11 +100,11 @@ struct TORCH_API Method {
     return function_->get_executor().graphFor(inputs);
   }
 
-  TORCH_API std::shared_ptr<Graph> graph() const {
+  std::shared_ptr<Graph> graph() const {
     return function_->graph();
   }
 
-  TORCH_API const std::string& name() const {
+  const std::string& name() const {
     return function_->name();
   }
 
@@ -360,10 +360,7 @@ struct TORCH_API Module {
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  TORCH_API void to(
-      at::Device device,
-      at::ScalarType dtype,
-      bool non_blocking = false);
+  void to(at::Device device, at::ScalarType dtype, bool non_blocking = false);
 
   /// Recursively casts all parameters to the given dtype.
   ///
@@ -371,7 +368,7 @@ struct TORCH_API Module {
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  TORCH_API void to(at::ScalarType dtype, bool non_blocking = false);
+  void to(at::ScalarType dtype, bool non_blocking = false);
 
   /// Recursively moves all parameters to the given device.
   ///
@@ -379,7 +376,7 @@ struct TORCH_API Module {
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  TORCH_API void to(at::Device device, bool non_blocking = false);
+  void to(at::Device device, bool non_blocking = false);
 
   /// Run a method from this module.
   ///
