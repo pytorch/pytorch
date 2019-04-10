@@ -168,8 +168,8 @@ void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
   // see Note [We regret making Variable hold a Tensor]
   // Let's put an actual error message for this one.
   AT_CHECK(tensor->storage().device() == storage->device(),
-            "Attempted to set the storage of a tensor on device ", tensor->storage().device(),
-             " to a storage on different device ", storage->device(),
-            ".  This is no longer allowed; the devices must match.");
+            "Attempted to set the storage of a tensor on device \"", tensor->storage().device(),
+             "\" to a storage on different device \"", storage->device(),
+            "\".  This is no longer allowed; the devices must match.");
   tensor->set_storage(at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage)));
 }
