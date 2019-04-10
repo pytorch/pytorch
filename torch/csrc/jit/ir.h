@@ -1265,9 +1265,6 @@ struct PythonOp : public Node {
 
   virtual void lint_python() const = 0;
 };
-// patched in when python bindings are loaded
-TORCH_API PythonOp* allocPythonOp(Graph* g);
-TORCH_API void setAllocPythonOp(PythonOp* (*v)(Graph* g));
 
 TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
 

@@ -203,13 +203,7 @@ Node* Graph::createPythonOp(
   return op->init(std::move(pyobj), cconv, std::move(scalar_args));
 }
 
-PythonOp* pythonAllocPythonOp(Graph* g) {
-  return new ConcretePythonOp(g);
-}
-
 void initPythonIRBindings(PyObject* module_) {
-  setAllocPythonOp(pythonAllocPythonOp);
-
   auto m = py::handle(module_).cast<py::module>();
 #define GS(name) def(#name, &Graph ::name)
   py::class_<Graph, std::shared_ptr<Graph>>(m, "Graph")

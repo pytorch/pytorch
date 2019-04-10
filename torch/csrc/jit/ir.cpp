@@ -1458,19 +1458,5 @@ std::vector<Value*> inlineCallTo(
   return outputs;
 }
 
-PythonOp* defaultAllocPythonOp(Graph* g) {
-  throw std::runtime_error(
-      "Trying to allocate a Python object without python bindings loaded");
-}
-std::atomic<decltype(&defaultAllocPythonOp)> alloc_python_op;
-
-// patched in when python bindings are loaded
-PythonOp* allocPythonOp(Graph* g) {
-  return alloc_python_op.load()(g);
-}
-void setAllocPythonOp(PythonOp* (*v)(Graph* g)) {
-  alloc_python_op.store(v);
-}
-
 } // namespace jit
 } // namespace torch
