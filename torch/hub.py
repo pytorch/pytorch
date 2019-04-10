@@ -250,7 +250,7 @@ def list(github, force_reload=False):
     return entrypoints
 
 
-def show(github, model, force_reload=False):
+def help(github, model, force_reload=False):
     r"""
     Show the docstring of entrypoint `model`.
     Args:
@@ -261,13 +261,13 @@ def show(github, model, force_reload=False):
         force_reload: Optional, whether to discard the existing cache and force a fresh download.
             Default is `False`.
     Example:
-        >>> torch.hub.show('pytorch/vision', 'resnet18', force_reload=True)
+        >>> print(torch.hub.help('pytorch/vision', 'resnet18', force_reload=True))
     """
     hub_module = _load_hubconf_module(github, force_reload)
 
     entry = _load_entry_from_hubconf(hub_module, model)
 
-    print(entry.__doc__)
+    return entry.__doc__
 
 
 def load(github, model, force_reload=False, *args, **kwargs):

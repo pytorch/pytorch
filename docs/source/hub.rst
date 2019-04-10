@@ -8,13 +8,12 @@ Publishing models
 Pytorch Hub supports publishing pre-trained models(model definitions and pre-trained weights)
 to a github repository by adding a simple ``hubconf.py`` file;
 
-``hubconf.py`` can have multiple entrypoints. Each entrypoint is a pre-trained model you want to
-publish, defined as a python function with the following signature.
+``hubconf.py`` can have multiple entrypoints. Each entrypoint is defined as a python function
+(example: a pre-trained model you want to publish).
 
 ::
 
-    def entrypoint_name(pretrained=False, *args, **kwargs):
-        # pretrained is required keyword argument.
+    def entrypoint_name(*args, **kwargs):
         # args & kwargs are optional, for models which take positional/keyword arguments.
         ...
 
@@ -31,8 +30,7 @@ for ``resnet18`` model. You can see a full script in
     def resnet18(pretrained=False, **kwargs):
         """
         Resnet18 model
-        pretrained (bool): a required kwargs for all entrypoints
-        kwargs are arguments for the function
+        pretrained (bool): kwargs, load pretrained weights into the model
         """
         # Call the model in the repo
         from torchvision.models.resnet import resnet18 as _resnet18
@@ -48,18 +46,16 @@ for ``resnet18`` model. You can see a full script in
 - Entrypoint function should **ALWAYS** return a model(nn.module).
 - Pretrained weights can either be stored local in the github repo, or loadable by
   ``torch.hub.load_state_dict_from_url()``. In the example above ``torchvision.models.resnet.resnet18``
-  handles ``pretrained``, you can also optionally put the following logic in the entrypoint.
+  handles ``pretrained``, alternatively you can put the following logic in the entrypoint.
 
 ::
-    # The following logic is REQUIRED if pretrained is not handled by _resnet18
-    if pretrained:
+    if kwargs.get('pretrained', False):
         # For checkpoint saved in local repo
         model.load_state_dict(<path_to_saved_checkpoint>)
 
         # For checkpoint saved elsewhere
         checkpoint = 'https://download.pytorch.org/models/resnet18-5c106cde.pth'
         model.load_state_dict(torch.hub.load_state_dict_from_url(checkpoint, progress=False))
-
 
 
 Important Notice
@@ -72,14 +68,14 @@ Loading models from Hub
 -----------------------
 
 Pytorch Hub provides convenient APIs to explore all available models in hub through ``torch.hub.list()``,
-show docstring and examples through ``torch.hub.show()`` and load the pre-trained models using ``torch.hub.load()``
+show docstring and examples through ``torch.hub.help()`` and load the pre-trained models using ``torch.hub.load()``
 
 
 .. automodule:: torch.hub
 
 .. autofunction:: list
 
-.. autofunction:: show
+.. autofunction:: help
 
 .. autofunction:: load
 
