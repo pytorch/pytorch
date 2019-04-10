@@ -190,7 +190,7 @@ struct Method {
       output_values = output_values.at(0)->node()->inputs();
     }
     AT_ASSERT(output_values.size() == outputs.size());
-    for (size_t i = 0; i < retval->outputs().size(); ++i) {
+    for (size_t i = 0; i < outputs.size(); ++i) {
       auto scalar_type = outputs[i].scalar_type();
       auto sizes = outputs[i].sizes();
       auto type =
