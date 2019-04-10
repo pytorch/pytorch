@@ -41,9 +41,9 @@ class MemoryDAG {
   bool mayAlias(const Element* a, const Element* b) const;
   bool mayAlias(Element* a, Element* b) const;
 
-  // Does container hold reference to any memory that is stored in elem ?
-  bool mayContainAlias(const Element* elem, const Element* container) const;
-  bool mayContainAlias(Element* elem, Element* container) const;
+  // Does a hold reference to any memory that is stored in elem, or vice versa?
+  bool mayContainAlias(const Element* a, const Element* b) const;
+  bool mayContainAlias(Element* a, Element* b) const;
 
   // Do any values in group `a` potentially share a memory location with any
   // value in group `b`?

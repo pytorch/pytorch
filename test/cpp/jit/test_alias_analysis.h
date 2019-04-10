@@ -777,12 +777,10 @@ void testMemoryDAG() {
     t.addToContainedElements(a, c);
 
     AT_ASSERT(t.mayContainAlias(a, b));
-    // a does not contain any elements
-    AT_ASSERT(!t.mayContainAlias(b, a));
+    AT_ASSERT(t.mayContainAlias(b, a));
 
     AT_ASSERT(t.mayContainAlias(a, c))
-    // a does not contain any elements
-    AT_ASSERT(!t.mayContainAlias(c, a));
+    AT_ASSERT(t.mayContainAlias(c, a));
 
     AT_ASSERT(t.mayContainAlias(b, c));
     AT_ASSERT(t.mayContainAlias(c, b));
@@ -790,9 +788,7 @@ void testMemoryDAG() {
     // containers contain an element in themselves
     AT_ASSERT(t.mayContainAlias(b, b));
     AT_ASSERT(t.mayContainAlias(c, c));
-
-    // elements that do not contain do not contain themselves
-    AT_ASSERT(!t.mayContainAlias(a, a));
+    AT_ASSERT(t.mayContainAlias(a, a));
 
     auto d = t.makeFreshValue(dValue);
 

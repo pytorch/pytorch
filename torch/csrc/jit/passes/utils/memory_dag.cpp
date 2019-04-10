@@ -42,40 +42,39 @@ bool MemoryDAG::mayContainAlias(Element* contained, Element* container) const {
   return mayContainAliasImpl(contained, container);
 }
 
+void collectContainedElems(
+    const Element* elem,
+    std::unordered_set<const Element*>& cont) {
+  cont.insert(elem->contained_elements.begin(), elem->contained_elements.end());
+  for (const auto& e : elem->contained_elements) {
+    collectContainedElems(e, cont);
+  }
+}
+
+std::unordered_set<const Element*> collectAllContainedMemoryLocations(
+    const Element* elem) {
+  std::unordered_set<const Element*> elem_contained = {elem};
+  collectContainedElems(elem, elem_contained);
+
+  std::unordered_set<const Element*> all_elem_mlocs;
+  for (const auto& e : elem_contained) {
+    const auto& e_loc = e->getMemoryLocations();
+    all_elem_mlocs.insert(e_loc.begin(), e_loc.end());
+  }
+  return elem_contained;
+}
+
 bool MemoryDAG::mayContainAliasImpl(
     const Element* elem,
     const Element* container) const {
-  // If elem contains other elements, does container hold any of those elements?
+  auto all_elem_mlocs = collectAllContainedMemoryLocations(elem);
+  auto all_cont_mlocs = collectAllContainedMemoryLocations(container);
 
-  if (std::any_of(
-          elem->contained_elements.begin(),
-          elem->contained_elements.end(),
-          [&](const Element* e) {
-            return mayContainAliasImpl(e, container);
-          })) {
-    return true;
-  }
-
-  // If container contains other elements, do those containers hold elem?
-  if (std::any_of(
-          container->contained_elements.begin(),
-          container->contained_elements.end(),
-          [&](const Element* cont) {
-            return mayContainAliasImpl(elem, cont);
-          })) {
-    return true;
-  }
-
-  const auto elemMemLoc = elem->getMemoryLocations();
-  const auto contMemLoc = container->getMemoryLocations();
-
-  for (const auto elem_mem : elemMemLoc) {
-    for (const auto container : contMemLoc) {
-      const auto& cont_elem = container->contained_elements;
-      if (std::find(cont_elem.begin(), cont_elem.end(), elem_mem) !=
-          cont_elem.end()) {
+  for (const auto elem_mem : all_elem_mlocs) {
+    for (const auto cont_mem : all_cont_mlocs) {
+      if (elem_mem == cont_mem) {
         return true;
-      };
+      }
     }
   }
 
