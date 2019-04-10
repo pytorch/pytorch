@@ -115,7 +115,7 @@ __global__ void EmbeddingBag_accGradParametersKernel_sum_avg(
     int64_t *input, int64_t *indices, scalar_t *gradOutput,
     scalar_t *gradWeight, int64_t *offset2bag, int64_t *count, ptrdiff_t numel,
     int64_t stride, int mode, const int64_t *bag_size,
-		scalar_t* per_sample_weights, int64_t per_sample_weights_stride) {
+    scalar_t* per_sample_weights, int64_t per_sample_weights_stride) {
 
   using accscalar_t = acc_type<scalar_t, true>;
   int idx = blockIdx.x * 4 + threadIdx.y;
@@ -144,9 +144,9 @@ __global__ void EmbeddingBag_accGradParametersKernel_sum_avg(
       const int gradOutputRow = ((int)seq_number) * stride;
 
       accscalar_t scale = count ? (accscalar_t)1.0 / count[idx] : 1.0;
-			if (per_sample_weights) {
-				scale *= per_sample_weights[origRow * per_sample_weights_stride];
-			}
+      if (per_sample_weights) {
+        scale *= per_sample_weights[origRow * per_sample_weights_stride];
+      }
 
       accscalar_t gradient[SZ];
       accscalar_t weight[SZ];
