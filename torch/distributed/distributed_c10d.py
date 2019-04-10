@@ -276,6 +276,18 @@ def _get_default_group():
     return _default_pg
 
 
+def _get_default_store():
+    """
+    Getting the default store created by init_process_group
+
+    """
+    if not is_initialized():
+        raise RuntimeError("Default process group has not been initialized, "
+                           "please make sure to call init_process_group.")
+    _, default_store = _pg_map[_default_pg]
+    return default_store
+
+
 def get_backend(group=group.WORLD):
     """
     Returns the backend of the given process group.
@@ -378,6 +390,8 @@ def init_process_group(backend,
 
         if store is None:
             store, rank, world_size = next(rendezvous(url))
+            store.set_timeout(timeout)
+
         if backend == Backend.GLOO:
             _default_pg = ProcessGroupGloo(
                 store,

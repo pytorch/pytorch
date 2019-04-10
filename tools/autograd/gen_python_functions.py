@@ -22,7 +22,7 @@ SKIP_PYTHON_BINDINGS = [
     '.*_forward_out', '_unsafe_view', 'tensor', '_?sparse_coo_tensor.*',
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
     '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*',
-    'index', 'unique_dim',
+    'index', 'unique_dim_consecutive', 'unique_dim',
     '_indexCopy_', 'max_values', 'min_values',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',

@@ -304,6 +304,8 @@ while (true) {                                                \
   if (!(success_cond)) {                                      \
     if (errno == EINTR) {                                     \
       continue;                                               \
+    } else if (errno == EAGAIN || errno == EWOULDBLOCK) {     \
+      throw std::runtime_error("Socket Timeout");             \
     } else {                                                  \
       throw std::system_error(errno, std::system_category()); \
     }                                                         \
