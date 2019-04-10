@@ -86,8 +86,8 @@ def _parse_arg(value, desc):
             for v in value.node().inputs():
                 if v.node().kind() != 'onnx::Constant':
                     raise RuntimeError("Failed to export an ONNX attribute, "
-                                  "since it's not constant, please try to make "
-                                  "things (e.g., kernel size) static if possible")
+                                       "since it's not constant, please try to make "
+                                       "things (e.g., kernel size) static if possible")
             return [int(v.node()['value']) for v in value.node().inputs()]
         else:
             raise RuntimeError("ONNX symbolic doesn't know to interpret ListConstruct node")
