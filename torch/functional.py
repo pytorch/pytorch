@@ -5,10 +5,11 @@ from itertools import product
 import warnings
 
 __all__ = [
-    'btriunpack',
     'broadcast_tensors',
     'btrifact',
     'btrifact_with_info',
+    'btrisolve',
+    'btriunpack',
     'cartesian_prod',
     'chain_matmul',
     'einsum',
@@ -819,6 +820,22 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
                   "removed in the next release. Please use torch.lu_unpack instead.", stacklevel=2)
     return lu_unpack(LU_data=LU_data, LU_pivots=LU_pivots,
                      unpack_data=unpack_data, unpack_pivots=unpack_pivots)
+
+
+def btrisolve(b, LU_data, LU_pivots, out=None):
+    r"""Solves the system of equations :math:`Ax = b` using the partially pivoted LU
+    factorization of :math:`A` given by :attr:`LU_data` and :attr:`LU_pivots`.
+
+    For more information regarding :func:`torch.btrisolve`, please check
+    :func:`torch.lu_solve`.
+
+    .. warning::
+        :func:`torch.btrisolve` is deprecated in favour of :func:`torch.lu_solve` and will be
+        removed in the next release. Please use :func:`torch.lu_solve` instead.
+    """
+    warnings.warn("torch.btrisolve is deprecated in favour of torch.lu_solve and will be "
+                  "removed in the next release. Please use torch.lu_solve instead.", stacklevel=2)
+    return torch.lu_solve(b, LU_data=LU_data, LU_pivots=LU_pivots, out=out)
 
 
 def lu(A, pivot=True, get_infos=False, out=None):

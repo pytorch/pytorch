@@ -11,7 +11,7 @@ from cimodel.lib.conf_tree import ConfigNode
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
 
-DOCKER_IMAGE_VERSION = 291
+DOCKER_IMAGE_VERSION = 300
 
 
 class Conf(object):
@@ -64,7 +64,7 @@ class Conf(object):
         return self.get_parms(False) + [build_or_test]
 
     def gen_build_name(self, build_or_test):
-        return ("_".join(map(str, self.get_build_job_name_pieces(build_or_test)))).replace(".", "_")
+        return ("_".join(map(str, self.get_build_job_name_pieces(build_or_test)))).replace(".", "_").replace("-", "_")
 
     def get_dependents(self):
         return self.dependent_tests or []
@@ -208,6 +208,9 @@ CONFIG_TREE_DATA = [
             ("9.2", [X("3.6")]),
             ("10", [X("3.6")]),
         ]),
+        ("android", [
+            ("r19c", [X("3.6")]),
+        ]),
     ]),
 ]
 
@@ -321,6 +324,7 @@ def instantiate_configs():
 
     root = get_root()
     found_configs = conf_tree.dfs(root)
+    restrict_phases = None
     for fc in found_configs:
 
         distro_name = fc.find_prop("distro_name")
@@ -337,6 +341,13 @@ def instantiate_configs():
         cuda_version = None
         if compiler_name == "cuda":
             cuda_version = fc.find_prop("compiler_version")
+
+        elif compiler_name == "android":
+            android_ndk_version = fc.find_prop("compiler_version")
+            # TODO: do we need clang to compile host binaries like protoc?
+            parms_list.append("clang5")
+            parms_list.append("android-ndk-" + android_ndk_version)
+            restrict_phases = ["build"]
 
         elif compiler_name:
             gcc_version = compiler_name + (fc.find_prop("compiler_version") or "")
@@ -361,7 +372,7 @@ def instantiate_configs():
             python_version,
             cuda_version,
             is_xla,
-            None,
+            restrict_phases,
             gpu_resource,
         )
 
@@ -380,7 +391,9 @@ def add_build_env_defs(jobs_dict):
     config_list = instantiate_configs()
     for c in config_list:
 
-        for phase in dimensions.PHASES:
+        phases = c.restrict_phases or dimensions.PHASES
+
+        for phase in phases:
 
             # TODO why does this not have a test?
             if phase == "test" and c.cuda_version == "10":
@@ -410,9 +423,7 @@ def get_workflow_list():
     x = []
     for conf_options in config_list:
 
-        phases = dimensions.PHASES
-        if conf_options.restrict_phases:
-            phases = conf_options.restrict_phases
+        phases = conf_options.restrict_phases or dimensions.PHASES
 
         for phase in phases:
 

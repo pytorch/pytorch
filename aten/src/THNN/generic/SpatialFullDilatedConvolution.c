@@ -3,15 +3,15 @@
 #else
 
 static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
-	THTensor *input, THTensor *gradOutput,
-	THTensor *weight, THTensor *bias,
-	int kH, int kW, int dH, int dW, int padH, int padW,
-	int dilationH, int dilationW, int adjH, int adjW, int weight_nullable) {
+        THTensor *input, THTensor *gradOutput,
+        THTensor *weight, THTensor *bias,
+        int kH, int kW, int dH, int dW, int padH, int padW,
+        int dilationH, int dilationW, int adjH, int adjW, int weight_nullable) {
 
   THArgCheck(kW > 0 && kH > 0, 9,
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 11,
-	     "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
+             "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
   THArgCheck(dilationW > 0 && dilationH > 0, 15,
              "dilation should be greater than zero, but got dilationH: %d, dilationW: %d",
              dilationH, dilationW);
@@ -41,7 +41,7 @@ static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
   }
 
   THNN_ARGCHECK(!input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
-		"non-empty 3D or 4D input tensor expected but got: %s");
+                "non-empty 3D or 4D input tensor expected but got: %s");
 
   int64_t inputHeight  = input->size(dimh);
   int64_t inputWidth   = input->size(dimw);
@@ -50,8 +50,8 @@ static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
 
   if (outputWidth < 1 || outputHeight < 1) {
     THError("Given input size per channel: (%ld x %ld). "
-	    "Calculated output size per channel: (%ld x %ld). Output size is too small",
-	    inputHeight, inputWidth, outputHeight, outputWidth);
+            "Calculated output size per channel: (%ld x %ld). Output size is too small",
+            inputHeight, inputWidth, outputHeight, outputWidth);
   }
 
   if (weight != NULL) {

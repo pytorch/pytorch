@@ -289,10 +289,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
 namespace {
 
-/*
- * Check that all `tensors' have the same type and shape and are distributed
- * across distinct GPUs.
- */
+// Check that all `tensors' have the same type and shape and are distributed
+// across distinct GPUs.
 void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
   if (tensors.size() == 0) {
     throw std::runtime_error("Tensor list must be nonempty");
@@ -329,10 +327,8 @@ void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
   }
 }
 
-/*
- * Flatten each list in `tensor_lists' for a gather or scatter operation, and
- * ensure compatibility with the corresponding tensor in `other'.
- */
+// Flatten each list in `tensor_lists' for a gather or scatter operation, and
+// ensure compatibility with the corresponding tensor in `other'.
 std::vector<at::Tensor> flatten_for_scatter_gather(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
     std::vector<at::Tensor>& other,
@@ -414,7 +410,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     // prevent being freed before the collective finishes.
     //
     // We only record `inputs' here, and leave recording `outputs' to `fn' for
-    // operations where `inputs' and `outputs' are the same.
+    // operations where `inputs' and `outputs' are not the same.
     //
     // See [Sync Streams].
     c10::cuda::CUDACachingAllocator::recordStream(
