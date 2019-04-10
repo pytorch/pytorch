@@ -92,10 +92,11 @@ struct ArgumentSpec {
       // show overhead in extra refcounting along this path
       const at::Tensor* t = reinterpret_cast<const at::Tensor*>(&input);
       if ((arg.defined_ = t->defined())) {
-	arg.requires_grad_ = with_grad && autograd::Variable(*t).requires_grad();
-	arg.dim_ = t->dim();
-	arg.device_ = t->is_cuda() ? t->get_device() : -1;
-	arg.type_ = static_cast<unsigned>(t->scalar_type());
+        arg.requires_grad_ =
+            with_grad && autograd::Variable(*t).requires_grad();
+        arg.dim_ = t->dim();
+        arg.device_ = t->is_cuda() ? t->get_device() : -1;
+        arg.type_ = static_cast<unsigned>(t->scalar_type());
       }
     }
     combineHash(arg);
