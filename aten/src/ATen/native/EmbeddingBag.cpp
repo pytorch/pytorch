@@ -39,6 +39,7 @@ static void index_select_add(const Tensor &select_indices,
                              const Tensor &add_indices,
                              const Tensor &src,
                              Tensor &output) {
+  AT_ASSERT(select_indices.numel() == add_indices.numel());
   auto add_indices_data = add_indices.data<int64_t>();
   auto select_indices_data = select_indices.data<int64_t>();
   auto src_data = src.data<T>();
@@ -49,10 +50,47 @@ static void index_select_add(const Tensor &select_indices,
   auto src_stride1 = src.stride(1);
   auto output_stride0 = output.stride(0);
   auto output_stride1 = output.stride(1);
+
   for (int64_t i = 0; i < numel; i++) {
     THBlas_axpy<T>(ddim, 1,
             src_data + src_stride0 * select_indices_data[i], src_stride1,
             output_data + output_stride0 * add_indices_data[i], output_stride1);
+  }
+}
+
+// This function fuses the following three fns:
+// index_select (using select_indices as the index)
+// mul (scaling by per_sample_weights)
+// index_add (using add_indices as the index)
+template<typename T>
+static void index_select_scale_add(const Tensor &select_indices,
+                                   const Tensor &add_indices,
+                                   const Tensor &scale,
+                                   const Tensor &src,
+                                   Tensor &output) {
+  AT_ASSERT(select_indices.numel() == add_indices.numel());
+  auto add_indices_data = add_indices.data<int64_t>();
+  auto select_indices_data = select_indices.data<int64_t>();
+  auto src_data = src.data<T>();
+  auto output_data = output.data<T>();
+  auto numel = add_indices.numel();
+  int64_t ddim = src.size(1);
+  auto src_stride0 = src.stride(0);
+  auto src_stride1 = src.stride(1);
+  auto output_stride0 = output.stride(0);
+  auto output_stride1 = output.stride(1);
+
+  auto* scale_data = scale.data<T>();
+  auto scale_stride = scale.stride(0);
+
+  // XXX: We could make this faster via vectorization
+  for (int64_t i = 0; i < numel; i++) {
+    auto* src_base = src_data + src_stride0 * select_indices_data[i];
+    auto* output_base = output_data + output_stride0 * add_indices_data[i];
+    auto scale = scale_data[i * scale_stride];
+    for (int64_t j = 0; j < ddim; j++) {
+      output_base[j * output_stride1] += src_base[j * src_stride1] * scale;
+    }
   }
 }
 
@@ -110,7 +148,12 @@ static Tensor apply_bag_size_backward(const Tensor &offsets,
 
 template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor, Tensor> embedding_bag_cpu_max(
-  const Tensor& weight, const Tensor &indices, const Tensor& offset2bag, const Tensor& output, const Tensor& bag_size, const Tensor& offsets) {
+    const Tensor& weight,
+    const Tensor& indices,
+    const Tensor& offset2bag,
+    const Tensor& output,
+    const Tensor& bag_size,
+    const Tensor& offsets) {
 
     auto max_indices = at::zeros({offsets.size(0), weight.size(1)}, indices.options());
 
@@ -132,11 +175,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> embedding_bag_cpu_max(
       auto bag = offset2bag_data[i];
       auto word_idx = indices_data[i];
 
-
       for (int dim = 0; dim < dims; dim++) {
         auto& current_item = output_data[output_stride * bag + dim];
         auto weight_item = weight_data[weight_stride0 * word_idx + dim * weight_stride1];
-
         bool is_first_for_bag = (i == 0) || offset2bag_data[i - 1] != bag;
 
         if (is_first_for_bag || weight_item > current_item) {
@@ -155,9 +196,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> embedding_bag_cpu_max(
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 embedding_bag(const Tensor &weight, const Tensor &indices,
               const Tensor &offsets, const bool scale_grad_by_freq,
-              const int64_t mode, bool sparse) {
+              const int64_t mode, bool sparse,
+              const Tensor &per_sample_weights) {
   return at::_embedding_bag(weight, indices.contiguous(), offsets.contiguous(),
-                            scale_grad_by_freq, mode, sparse);
+                            scale_grad_by_freq, mode, sparse, per_sample_weights);
   };
 
 // Assumes all input tensors except for `weight` are contiguous.
@@ -165,13 +207,24 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
                   const Tensor &offsets, const bool scale_grad_by_freq,
-                  const int64_t mode, bool sparse) {
+                  const int64_t mode, bool sparse,
+                  const Tensor &per_sample_weights) {
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding_bag", indices_arg, kLong);
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
   checkScalarType("embedding_bag", indices_arg, kLong);
   auto weight_arg = TensorArg(weight, "weight", 1);
   checkScalarTypes("embedding_bag", weight_arg, {kFloat, kDouble});
+
+  if (per_sample_weights.defined()) {
+    AT_CHECK(mode == MODE_SUM,
+        "embedding_bag: per_sample_weights only supported with mode='sum'");
+    auto per_input_weights_arg = TensorArg(
+        per_sample_weights,"per_sample_weights", 1);
+    checkSameType("embedding_bag", weight_arg, per_input_weights_arg);
+    AT_ASSERT(per_sample_weights.dim() == 1);
+    AT_ASSERT(per_sample_weights.numel() == indices.numel());
+  }
 
   auto bag_size = at::zeros(offsets.sizes(), indices.options());
   make_bag_size(offsets, indices, mode, bag_size);
@@ -191,14 +244,25 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
 
   if (mode == MODE_MEAN || mode == MODE_SUM) {
     AT_DISPATCH_FLOATING_TYPES(weight.scalar_type(), "embedding_bag_cpu", [&]() {
-      index_select_add<scalar_t>(indices, offset2bag, weight, output);
+      if (per_sample_weights.defined()) {
+        AT_ASSERT(mode == MODE_SUM);
+        index_select_scale_add<scalar_t>(
+            indices, offset2bag, per_sample_weights, weight, output);
+      } else {
+        index_select_add<scalar_t>(indices, offset2bag, weight, output);
+      }
     });
     auto ret = apply_bag_size(offsets, indices, mode, output, bag_size);
     return std::tuple<Tensor, Tensor, Tensor, Tensor>(ret, offset2bag, bag_size, bag_size);
   } else { // MODE_MAX
+    at::optional<Tensor> maybe_per_sample_weights;
+    if (per_sample_weights.defined()) {
+      maybe_per_sample_weights = per_sample_weights;
+    }
     return AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       weight.scalar_type(), "embedding_bag_cpu_max", [&]() {
-        return embedding_bag_cpu_max<scalar_t>(weight, indices, offset2bag, output, bag_size, offsets);
+        return embedding_bag_cpu_max<scalar_t>(
+            weight, indices, offset2bag, output, bag_size, offsets);
       }
     );
   }
@@ -213,7 +277,8 @@ Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices,
                               const Tensor &max_indices_,
                               int64_t num_weights,
                               bool scale_grad_by_freq, int64_t mode,
-                              bool sparse) {
+                              bool sparse,
+                              const Tensor& per_sample_weights) {
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding_bag", indices_arg, kLong);
   checkContiguous("embedding_bag", indices_arg);
@@ -223,6 +288,9 @@ Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices,
   auto offset2bag_arg = TensorArg(offset2bag, "offset2bag", 1);
   checkScalarType("embedding_bag", offset2bag_arg, kLong);
   checkContiguous("embedding_bag", offset2bag_arg);
+
+  AT_CHECK(!per_sample_weights.defined(),
+      "NYI: _embedding_bag_backward: per_sample_weights");
 
   if (sparse) {
     return at::_embedding_bag_sparse_backward(
