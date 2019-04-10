@@ -666,15 +666,31 @@ Tensor var_backward(Tensor grad, const Tensor & self, IntArrayRef dim, bool unbi
 }
 
 Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, IntArrayRef dim, bool unbiased, bool keepdim, bool is_std) {
-  AT_CHECK(grads.size() > 0 && grads.size() <= 2, "grads size should be in interval [0,2]");
+  AT_ASSERTM(grads.size() > 0 && grads.size() <= 2, "grads size should be in interval [0,2]");
   std::vector<Tensor> results;
   if (grads[0].defined()) {
-    Tensor grad = is_std ? static_cast<Tensor>(grads[0]) / (r1 * 2) : static_cast<Tensor>(grads[0]);
-    results.push_back(var_backward(grad, self, dim, unbiased, keepdim));
+    Tensor grad = grads[0];
+    Tensor grad_for_var_backward = is_std ? grad / (r1 * 2) : grad;
+    results.push_back(var_backward(grad_for_var_backward, self, dim, unbiased, keepdim));
   }
   if (grads[1].defined()) {
-    Tensor grad = static_cast<Tensor>(grads[1]);
-    results.push_back(sum_backward(grad, self.sizes(), dim, keepdim) / _safe_size(self.sizes(), dim));
+    Tensor grad_for_mean_backward = grads[1];
+    results.push_back(sum_backward(grad_for_mean_backward, self.sizes(), dim, keepdim) / _safe_size(self.sizes(), dim));
+  }
+  return at::stack(results, 0);
+}
+
+Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, bool unbiased, bool is_std) {
+  AT_ASSERTM(grads.size() > 0 && grads.size() <= 2, "grads size should be in interval [0,2]");
+  std::vector<Tensor> results;
+  if (grads[0].defined()) {
+    Tensor grad = grads[0];
+    Tensor grad_for_var_backward = is_std ? grad / (r1 * 2) : grad;
+    results.push_back(var_backward(grad_for_var_backward, self, unbiased));
+  }
+  if (grads[1].defined()) {
+    Tensor grad_for_mean_backward = grads[1];
+    results.push_back(grad_for_mean_backward.expand(self.sizes()) / self.numel());
   }
   return at::stack(results, 0);
 }

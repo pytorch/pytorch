@@ -82,13 +82,13 @@ struct WelfordOps {
       new_count
     };
   }
-  inline C10_DEVICE scalar_t project(acc_t acc, int value = 0) const {
+  inline C10_DEVICE scalar_t project(acc_t acc, int result_index = 0) const {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-    assert(value >= 0 && value <= 1);
+    assert(result_index >= 0 && result_index <= 1);
 #else
-    AT_ASSERT(value >= 0 && value <= 1);
+    AT_ASSERT(result_index >= 0 && result_index <= 1);
 #endif
-    if (value == 1) {
+    if (result_index == 1) {
       return acc.mean;
     }
     combine_t divisor = unbiased ? (acc.nf - 1) : acc.nf;
@@ -124,11 +124,11 @@ struct MeanOps {
     return reduce(a, b);
   }
 
-  inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
+  inline C10_DEVICE acc_t project(acc_t a, int result_index = 0) const {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-    assert(value == 0);
+    assert(result_index == 0);
 #else
-    AT_ASSERT(value == 0);
+    AT_ASSERT(result_index == 0);
 #endif
     return a * factor;
   }
@@ -154,11 +154,11 @@ struct AbsMinOps {
     return MIN(a, b);
   }
 
-  inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
+  inline C10_DEVICE acc_t project(acc_t a, int result_index = 0) const {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-    assert(value == 0);
+    assert(result_index == 0);
 #else
-    AT_ASSERT(value == 0);
+    AT_ASSERT(result_index == 0);
 #endif
     return a;
   }
@@ -181,11 +181,11 @@ struct AbsMaxOps {
     return MAX(a, b);
   }
 
-  inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
+  inline C10_DEVICE acc_t project(acc_t a, int result_index = 0) const {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-    assert(value == 0);
+    assert(result_index == 0);
 #else
-    AT_ASSERT(value == 0);
+    AT_ASSERT(result_index == 0);
 #endif
     return a;
   }
@@ -209,11 +209,11 @@ struct NormOps {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
+  inline C10_DEVICE acc_t project(acc_t a, int result_index = 0) const {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-    assert(value == 0);
+    assert(result_index == 0);
 #else
-    AT_ASSERT(value == 0);
+    AT_ASSERT(result_index == 0);
 #endif
     return compat_pow(a, acc_t(1.0)/norm);
   }
@@ -238,11 +238,11 @@ struct NormZeroOps {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
+  inline C10_DEVICE acc_t project(acc_t a, int result_index = 0) const {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-    assert(value == 0);
+    assert(result_index == 0);
 #else
-    AT_ASSERT(value == 0);
+    AT_ASSERT(result_index == 0);
 #endif
     return a;
   }
@@ -264,11 +264,11 @@ struct NormOneOps {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a, int value = 0) const {
+  inline C10_DEVICE acc_t project(acc_t a, int result_index = 0) const {
 #if defined(__CUDACC__) || defined(__HIPCC__)
-    assert(value == 0);
+    assert(result_index == 0);
 #else
-    AT_ASSERT(value == 0);
+    AT_ASSERT(result_index == 0);
 #endif
     return a;
   }

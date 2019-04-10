@@ -1474,3 +1474,9 @@
 
 - name: moments(Tensor self, IntArrayRef dim, bool unbiased, bool keepdim)
   self: var_std_mean_backward(grads, self, result0, result1, dim, unbiased, keepdim, false)
+
+- name: std_mean(Tensor self, bool unbiased)
+  self: var_std_mean_backward(grads, self, result0, result1, unbiased, true)
+
+- name: moments(Tensor self, bool unbiased)
+  self: var_std_mean_backward(grads, self, result0, result1, unbiased, false)
