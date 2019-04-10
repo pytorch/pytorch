@@ -1895,6 +1895,15 @@ RegisterOperators reg2({
           return 0;
         }),
 
+    Operator(
+        "aten::ceil(float a) -> int",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, static_cast<int64_t>(std::ceil(a)));
+          return 0;
+        }),
+
     DEFINE_COMPARISON_OP(aten::ne, a != b),
     DEFINE_COMPARISON_OP(aten::eq, a == b),
     DEFINE_COMPARISON_OP(aten::lt, a < b),
@@ -1902,7 +1911,7 @@ RegisterOperators reg2({
     DEFINE_COMPARISON_OP(aten::le, a <= b),
     DEFINE_COMPARISON_OP(aten::ge, a >= b),
 
-    DEFINE_BOOL_OP(aten::__and__, a&& b),
+    DEFINE_BOOL_OP(aten::__and__, a && b),
     DEFINE_BOOL_OP(aten::__or__, a || b),
     DEFINE_BOOL_OP(aten::__xor__, a != b),
 

@@ -5043,7 +5043,11 @@ a")
         def test_floor():
             return math.floor(1.5)
 
+        def test_ceil():
+            return math.ceil(1.5)
+
         self.checkScript(test_floor, ())
+        self.checkScript(test_ceil, ())
 
     def test_if_nest_while(self):
         def func(a, b):
