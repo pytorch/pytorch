@@ -5046,8 +5046,15 @@ a")
         def test_ceil():
             return math.ceil(1.5)
 
+        def test_log_int():
+            return math.log(2)
+        def test_log_float():
+            return math.log(2.0)
+
         self.checkScript(test_floor, ())
         self.checkScript(test_ceil, ())
+        self.checkScript(test_log_int, ())
+        self.checkScript(test_log_float, ())
 
     def test_if_nest_while(self):
         def func(a, b):

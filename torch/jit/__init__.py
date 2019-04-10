@@ -1497,6 +1497,7 @@ def _get_builtin_table():
 
     _builtin_table[id(math.floor)] = "aten::floor"
     _builtin_table[id(math.ceil)] = "aten::ceil"
+    _builtin_table[id(math.log)] = "aten::log"
     _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"
     _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
     _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
