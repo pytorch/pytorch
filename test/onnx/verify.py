@@ -243,7 +243,7 @@ def set_training(model, mode):
             model.train(old_mode)
 
 
-def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=1e-7, 
+def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=1e-7,
            test_args=2, do_constant_folding=False):
     """
     Export a model into ONNX, import it into a specified ONNX backend, and then
@@ -357,7 +357,7 @@ def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=
 
     with set_training(model, training):
         proto_bytes = io.BytesIO()
-        torch_out = torch.onnx._export(model, args, proto_bytes, verbose=verbose, 
+        torch_out = torch.onnx._export(model, args, proto_bytes, verbose=verbose,
                                        do_constant_folding=do_constant_folding)
         proto = load_bytes(proto_bytes)
         prepared = backend.prepare(proto)
@@ -437,7 +437,7 @@ def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=
             backend_out = prepared.run(backend_args(args))
             if isinstance(torch_out, torch.Tensor):
                 torch_out = (torch_out,)
-            if any(isinstance(o, tuple) for o in torch_out): # LSTM and GRU outputs can have nested tuples
+            if any(isinstance(o, tuple) for o in torch_out):  # LSTM and GRU outputs can have nested tuples
                 torch_out, _ = torch._C._jit_flatten(torch_out)
             # NB: onnx backend NEVER returns bare numpy array
             msg = "ONNX backend returned different results from PyTorch"

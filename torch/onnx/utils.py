@@ -305,17 +305,17 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
 def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
                              input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
-                             google_printer=False, opset_version=None, _retain_param_name=False, 
+                             google_printer=False, opset_version=None, _retain_param_name=False,
                              do_constant_folding=False):
     from torch.onnx.symbolic import _default_onnx_opset_version, _set_opset_version
     if opset_version is None:
         opset_version = _default_onnx_opset_version
     _set_opset_version(opset_version)
     graph, params_dict, torch_out = _model_to_graph(model, args, f, verbose,
-                                               training, input_names,
-                                               output_names, operator_export_type,
-                                               example_outputs, propagate, _retain_param_name,
-                                               do_constant_folding)
+                                                    training, input_names,
+                                                    output_names, operator_export_type,
+                                                    example_outputs, propagate, _retain_param_name,
+                                                    do_constant_folding)
 
     return graph._pretty_print_onnx(params_dict, opset_version, False, operator_export_type, google_printer)
 

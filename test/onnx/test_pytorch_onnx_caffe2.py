@@ -176,7 +176,7 @@ class TestCaffe2Backend(unittest.TestCase):
             model, input = self.convert_cuda(model, input)
 
         # Verify the model runs the same in Caffe2
-        verify.verify(model, input, c2, rtol=rtol, atol=atol, 
+        verify.verify(model, input, c2, rtol=rtol, atol=atol,
                       do_constant_folding=do_constant_folding)
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
@@ -891,13 +891,13 @@ class TestCaffe2Backend(unittest.TestCase):
             def forward(self, input, initial_state):
                 return self.lstm(input, initial_state)
 
-        def get_LstmNet_model_and_inputs(input_size, hidden_size, num_layers, batch_size, \
-            seq_len, bidirectional):
+        def get_LstmNet_model_and_inputs(input_size, hidden_size, num_layers, batch_size,
+                                         seq_len, bidirectional):
             num_directions = 2 if bidirectional else 1
             model = LstmNet(input_size, hidden_size, num_layers, bidirectional)
             input = torch.randn(seq_len, batch_size, input_size)
-            h0 = torch.randn(num_layers*num_directions, batch_size, hidden_size)
-            c0 = torch.randn(num_layers*num_directions, batch_size, hidden_size)
+            h0 = torch.randn(num_layers * num_directions, batch_size, hidden_size)
+            c0 = torch.randn(num_layers * num_directions, batch_size, hidden_size)
             return model, (input, (h0, c0))
 
         batch_size1 = 3
@@ -918,12 +918,12 @@ class TestCaffe2Backend(unittest.TestCase):
                 out = self.mygru(input, initial_state)
                 return out
 
-        def get_GruNet_model_and_inputs(input_size, hidden_size, num_layers, batch_size, \
-            seq_len, bidirectional):
+        def get_GruNet_model_and_inputs(input_size, hidden_size, num_layers, batch_size,
+                                        seq_len, bidirectional):
             num_directions = 2 if bidirectional else 1
             model = GruNet(input_size, hidden_size, num_layers, bidirectional)
             input = torch.randn(seq_len, batch_size, input_size)
-            h0 = torch.randn(num_layers*num_directions, batch_size, hidden_size)
+            h0 = torch.randn(num_layers * num_directions, batch_size, hidden_size)
             return model, (input, h0)
 
         batch_size1 = 3
