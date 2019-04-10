@@ -7,7 +7,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/disallow_copy.h>
-#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_stub.h>
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
@@ -22,6 +22,12 @@
 #include <iostream>
 #include <unordered_set>
 #include <vector>
+
+// Forward declare, the real meat is in python_ir.cpp
+template<class T>
+class THPPointer;
+using THPObjectPtr = THPPointer<PyObject>;
+using pyobj_list = std::vector<THPObjectPtr>;
 
 namespace torch {
 namespace jit {
@@ -134,7 +140,6 @@ struct Use {
 using node_list = std::vector<Node*>;
 using value_list = std::vector<Value*>;
 using use_list = std::vector<Use>;
-using pyobj_list = std::vector<THPObjectPtr>;
 template <typename T>
 using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
@@ -1069,6 +1074,7 @@ struct Graph {
       const std::string& field,
       Value* newValue);
   TORCH_API Node* createGetAttr(Value* obj, const std::string& field);
+  // Note: defined in python_ir.cpp and can be used only in python extension
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
@@ -1234,30 +1240,20 @@ inline const Graph* Value::owningGraph() const {
 
 // execute a Python function, used for Ops we can't optimize but that we want to
 // optimize around
+//
+// Note: actual implementation (ConcretePythonOp) is defined in python_ir.cpp
+// which is not included in libtorch.so. We still include some bits and pieces
+// of PythonOp here to enable writing simple passes generically. In general,
+// python-aware bits need to be moved to the descendant classes.
 struct PythonOp : public Node {
   static constexpr Symbol Kind = ::c10::prim::PythonOp;
 
-  PythonOp(Graph* graph) : Node(graph, ::c10::prim::PythonOp) {}
-  PythonOp* init(
-      THPObjectPtr&& pyobj,
-      const std::string& cconv,
-      pyobj_list&& scalar_args) {
-    this->pyobj = std::move(pyobj);
-    this->scalar_args = std::move(scalar_args);
-    this->cconv = cconv;
-    return this;
-  }
-  // The Python object which contains the implementation of this function.
-  // This is either a class (non-legacy) or an object (legacy).  See
-  // TraceInterpreterState for execution semantics.
-  THPObjectPtr pyobj;
-  // The calling convention for the Python function.
-  // 'c' -- constant argument
-  // 'd' -- dynamic argument
-  std::string cconv;
-  // Scalar arguments to the Python function.  Not necessarily passed to
-  // the function in this order; see cconv for the correct order.
-  std::vector<THPObjectPtr> scalar_args;
+  using Node::Node;
+
+  // should this Python function be skipped over when exported (i.e. for
+  // debugging functions that only run in Python)
+  bool ignore_on_export = false;
+
   virtual std::string name() const = 0;
   virtual void writeScalars(std::ostream& out) const = 0;
   void cloneFrom(Node* other_) override = 0;
@@ -1267,20 +1263,8 @@ struct PythonOp : public Node {
   // used in ONNX for discovering symbolics
   virtual c10::optional<THPObjectPtr> autogradFunction() const = 0;
 
-  // should this Python function be skipped over when exported (i.e. for
-  // debugging functions that only run in Python)
-  bool ignore_on_export = false;
+  virtual void lint_python() const = 0;
 };
-// patched in when python bindings are loaded
-TORCH_API PythonOp* allocPythonOp(Graph* g);
-TORCH_API void setAllocPythonOp(PythonOp* (*v)(Graph* g));
-inline Node* Graph::createPythonOp(
-    THPObjectPtr&& pyobj,
-    const std::string& cconv,
-    pyobj_list&& scalar_args) {
-  PythonOp* op = allocPythonOp(this);
-  return op->init(std::move(pyobj), cconv, std::move(scalar_args));
-}
 
 TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
 
