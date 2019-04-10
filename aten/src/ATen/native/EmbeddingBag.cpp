@@ -190,11 +190,9 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
   auto output = at::zeros({offsets.size(0), weight.size(1)}, weight.options());
 
   if (mode == MODE_MEAN || mode == MODE_SUM) {
-    if (weight.scalar_type() == kFloat) {
-      index_select_add<float>(indices, offset2bag, weight, output);
-    } else if (weight.scalar_type() == kDouble) {
-      index_select_add<double>(indices, offset2bag, weight, output);
-    }
+    AT_DISPATCH_FLOATING_TYPES(weight.scalar_type(), "embedding_bag_cpu", [&]() {
+      index_select_add<scalar_t>(indices, offset2bag, weight, output);
+    });
     auto ret = apply_bag_size(offsets, indices, mode, output, bag_size);
     return std::tuple<Tensor, Tensor, Tensor, Tensor>(ret, offset2bag, bag_size, bag_size);
   } else { // MODE_MAX
@@ -237,6 +235,62 @@ Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices,
   }
 }
 
+static Tensor _embedding_bag_dense_backward_cpu_max(
+    const Tensor& grad,
+    const Tensor& bag_size,
+    const Tensor& max_indices,
+    int64_t num_weights) {
+  AT_ASSERT(max_indices.defined());
+  auto index_grad_weight =
+      at::zeros({num_weights, grad.size(1)}, grad.options());
+  auto nonempty_max_indices = max_indices.index_select(0, bag_size.nonzero().view(-1));
+  auto nonempty_grad = grad.index_select(0, bag_size.nonzero().view(-1));
+
+  for (int64_t dim = 0; dim < grad.size(1); dim++) {
+    index_grad_weight.select(1, dim).index_add_(
+      0, nonempty_max_indices.select(1, dim), nonempty_grad.select(1, dim));
+  }
+  return index_grad_weight;
+}
+
+static std::vector<int64_t> compute_counts(
+    int64_t num_weights,
+    int64_t* indices_data,
+    int64_t indices_length) {
+  std::vector<int64_t> counts(num_weights, 0);
+  for (int i = 0; i < indices_length; i++) {
+    counts[indices_data[i]]++;
+  }
+  return counts;
+}
+
+// counts_uniq stores the index of the NEXT unique element
+// of the (sorted) indices vector.
+//
+// For example:
+// indices: [0, 0, 0, 1, 3, 3, 4]
+// counts: [3, 1, 0, 2, 1, 0]
+// counts_uniq: [3, 4, 6, 7]
+//
+// The unique indices can be found at index 0, 3, 4, 6.
+static std::vector<int64_t> compute_counts_uniq(
+    int64_t num_weights,
+    int64_t* indices_data,
+    int64_t indices_length,
+    const std::vector<int64_t>& counts) {
+  std::vector<int64_t> counts_uniq;
+  counts_uniq.reserve(num_weights);
+  int64_t o = 0;
+  for (int64_t i = 0; i < indices_length; i += counts[indices_data[i]]) {
+    counts_uniq.push_back(counts[indices_data[i]]);
+    if (o > 0) {
+      counts_uniq[o] += counts_uniq[o - 1];
+    }
+    o++;
+  }
+  return counts_uniq;
+}
+
 Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indices_,
                                   const Tensor &offsets_,
                                   const Tensor &offset2bag__,
@@ -252,6 +306,15 @@ Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indi
   auto grad_arg = TensorArg(grad, "grad_", 1);
   checkScalarTypes("embedding_bag", grad_arg, {kFloat, kDouble});
 
+  if (mode == MODE_MAX) {
+    return _embedding_bag_dense_backward_cpu_max(
+        grad_, bag_size_, max_indices_, num_weights);
+  }
+  AT_ASSERT(mode == MODE_MEAN || mode == MODE_SUM);
+
+  auto index_grad_weight =
+      at::zeros({num_weights, grad.size(1)}, grad.options());
+
   Tensor &offset2bag_ = const_cast<Tensor &>(offset2bag__);
 
   auto ind_sort_ = indices_.sort();
@@ -264,74 +327,41 @@ Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indi
   auto offset2bag_data = offset2bag.data<int64_t>();
   int64_t numel = indices.numel();
 
-  std::vector<int64_t> counts(num_weights);
-  for (int i = 0; i < numel; i++) {
-    counts[indices_data[i]] = 0;
-  }
-  for (int i = 0; i < numel; i++) {
-    counts[indices_data[i]]++;
-  }
+  auto counts = compute_counts(num_weights, indices_data, numel);
+  auto next_unique_index_idx =
+      compute_counts_uniq(num_weights, indices_data, numel, counts);
 
-  auto index_grad_weight =
-      at::zeros({num_weights, grad.size(1)}, grad.options()).contiguous();
-
-  std::vector<int64_t> counts_uniq;
-  counts_uniq.reserve(num_weights);
-  int64_t o = 0;
-  for (int64_t i = 0; i < numel; i += counts[indices_data[i]]) {
-    counts_uniq.push_back(counts[indices_data[i]]);
-    if (o > 0) {
-      counts_uniq[o] += counts_uniq[o - 1];
-    }
-    o++;
-  }
-
-  if (mode == MODE_MEAN || mode == MODE_SUM) {
-    #pragma omp parallel for if (numel > 1000)
-      for (int64_t i = 0; i < (int64_t)counts_uniq.size(); i++) {
-        int64_t start = i == 0 ? 0 : counts_uniq[i - 1];
-        int64_t index = indices_data[start];
-        for (int64_t j = start; j < counts_uniq[i]; j++) {
-          int64_t source = offset2bag_data[j];
-          double scale = 1.0;
-          if (scale_grad_by_freq) {
-            scale /= counts[indices_data[i]];
-          }
-          if (mode == 1) { // MODE_MEAN
-            if (offsets_.size(0) == 1) {
-              auto bag_size = indices.size(0);
-              scale /= bag_size;
+  #pragma omp parallel for if (numel > 1000)
+    for (int64_t i = 0; i < (int64_t)next_unique_index_idx.size(); i++) {
+      int64_t start = i == 0 ? 0 : next_unique_index_idx[i - 1];
+      int64_t index = indices_data[start];
+      for (int64_t j = start; j < next_unique_index_idx[i]; j++) {
+        int64_t source = offset2bag_data[j];
+        double scale = 1.0;
+        if (scale_grad_by_freq) {
+          scale /= counts[indices_data[i]];
+        }
+        if (mode == 1) { // MODE_MEAN
+          if (offsets_.size(0) == 1) {
+            auto bag_size = indices.size(0);
+            scale /= bag_size;
+          } else {
+            if (source == offsets_.size(0) - 1) {
+              scale /= indices.size(0) - offsets_data[offsets_.size(0) - 1];
             } else {
-              if (source == offsets_.size(0) - 1) {
-                scale /= indices.size(0) - offsets_data[offsets_.size(0) - 1];
-              } else {
-                scale /= offsets_data[source + 1] - offsets_data[source];
-              }
+              scale /= offsets_data[source + 1] - offsets_data[source];
             }
           }
-          int64_t ddim = grad.size(1);
-          if (grad.scalar_type() == kFloat) {
-            auto igwd = index_grad_weight.data<float>();
-            auto gd = grad.data<float>();
-            THBlas_axpy<float>(ddim, (float)scale, gd + ddim * source, 1,
-                        igwd + ddim * index, 1);
-          } else if (grad.scalar_type() == kDouble) {
-            auto igwd = index_grad_weight.data<double>();
-            auto gd = grad.data<double>();
-            THBlas_axpy<double>(ddim, (double)scale, gd + ddim * source, 1,
-                         igwd + ddim * index, 1);
-          }
         }
+        int64_t ddim = grad.size(1);
+        AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "embedding_bag_backward", [&] {
+          auto igwd = index_grad_weight.data<scalar_t>();
+          auto gd = grad.data<scalar_t>();
+          THBlas_axpy<scalar_t>(ddim, (scalar_t)scale, gd + ddim * source, 1,
+                      igwd + ddim * index, 1);
+        });
       }
-  } else if (mode == MODE_MAX) {
-    auto nonempty_max_indices = max_indices_.index_select(0, bag_size_.nonzero().view(-1));
-    auto nonempty_grad = grad_.index_select(0, bag_size_.nonzero().view(-1));
-
-    for (int64_t dim = 0; dim < grad.size(1); dim++) {
-      index_grad_weight.select(1, dim).index_add_(
-        0, nonempty_max_indices.select(1, dim), nonempty_grad.select(1, dim));
     }
-  }
 
   return index_grad_weight;
 }
