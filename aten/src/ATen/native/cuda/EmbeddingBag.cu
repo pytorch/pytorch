@@ -423,5 +423,89 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
   }
 }
 
+template <typename scalar_t>
+__inline__ __device__
+static scalar_t warpReduceSum(scalar_t val) {
+  for (int offset = WARP_SIZE/2; offset > 0; offset /= 2)
+    val += WARP_SHFL_DOWN(val, offset);
+  return val;
+}
+
+template <typename scalar_t>
+__global__ static void _embedding_bag_per_sample_weights_backward_kernel(
+    const scalar_t* grad, int64_t grad_stride0, int64_t grad_stride1,
+    const scalar_t* weight, int64_t weight_stride0, int64_t weight_stride1,
+    const int64_t* indices,  // contiguous
+    const int64_t* offset2bag,  // contiguous
+    int64_t num_samples,
+    int64_t embedding_features,
+    scalar_t* output) {
+  using accscalar_t = acc_type<scalar_t, true>;
+  const int idx = threadIdx.x + blockIdx.x * blockDim.x;
+  const int warp = idx / WARP_SIZE;
+  const int thread_in_warp = idx % WARP_SIZE;
+  const int num_warps = blockDim.x * gridDim.x / WARP_SIZE;
+
+  // Each warp is responsible for the accumulation of one sample.
+  // This involves doing one dot product between grad[bag_idx] and weight[embedding_idx].
+  for (int sample_idx = warp; sample_idx < num_samples; sample_idx += num_warps) {
+    accscalar_t result = 0.;
+    const int bag_idx = (int)offset2bag[sample_idx];
+    const int embedding_idx = (int)indices[sample_idx];
+    for (int feature_idx = thread_in_warp; feature_idx < embedding_features;
+        feature_idx += WARP_SIZE) {
+      result +=
+          grad[grad_stride0 * bag_idx + grad_stride1 * feature_idx] *
+          weight[weight_stride0 * embedding_idx + weight_stride1 * feature_idx];
+    }
+    result = warpReduceSum<accscalar_t>(result);
+    if (thread_in_warp == 0) {
+      output[sample_idx] = result;
+    }
+  }
+}
+
+Tensor _embedding_bag_per_sample_weights_backward_cuda(
+    const Tensor& grad,
+    const Tensor& weight,  // NB: embedding table, not per_sample_weights
+    const Tensor& indices,
+    const Tensor& offset2bag,
+    int64_t mode) {
+  AT_CHECK(
+      mode == MODE_SUM,
+      "embedding_bag_backward: per_sample_weights only supported for mode='sum'");
+
+  AT_ASSERT(grad.dim() == 2)
+  auto embedding_features = grad.size(1);
+
+  AT_ASSERT(indices.dim() == 1);
+  auto num_samples = indices.size(0);
+
+  AT_ASSERT(weight.dim() == 2);
+  AT_ASSERT(weight.size(1) == embedding_features);
+
+  const int threads_per_block = 1024;
+  const int warps_per_block = threads_per_block / WARP_SIZE;
+
+  dim3 block(threads_per_block);
+  dim3 grid((num_samples + warps_per_block - 1) / warps_per_block);
+
+  auto output = at::empty({num_samples}, grad.options());
+  AT_DISPATCH_FLOATING_TYPES(
+    grad.scalar_type(), "_embedding_bag_per_sample_weights_backward_cuda", [&]() {
+      _embedding_bag_per_sample_weights_backward_kernel<scalar_t>
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+          grad.data<scalar_t>(), grad.stride(0), grad.stride(1),
+          weight.data<scalar_t>(), weight.stride(0), weight.stride(1),
+          indices.data<int64_t>(),
+          offset2bag.data<int64_t>(),
+          num_samples,
+          embedding_features,
+          output.data<scalar_t>());
+    }
+  );
+  return output;
+}
+
 }
 }
