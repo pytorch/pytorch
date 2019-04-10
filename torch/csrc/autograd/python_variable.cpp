@@ -516,7 +516,7 @@ void initTensorImplConversion(PyObject* module) {
   });
   // set on the module level to avoid mixing pybind and plain CPython extensions
   m.def("_tensor_impl_raw_handle", [](torch::autograd::Variable* t) -> void* {
-    auto p = t->data().getIntrusivePtr();
+    auto p = t->getIntrusivePtr();
     // We return a raw non-owning pointer here, we rely on surrounding
     // code to keep the original tensor alive
     return p.get();

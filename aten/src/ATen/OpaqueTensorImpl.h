@@ -103,6 +103,29 @@ c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const override {
   // OpaqueTensorImpl-specific fields (none currently).
   return impl;
 }
+
+  // NOTE: `shallow_copy_from()` does not copy the AutogradMeta pointer
+  // because it is unique for each Variable.
+  // yf225 TODO: fix comment regarding version_counter
+  // yf225 TODO: add comment why we don't copy is_variable_
+  void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
+    auto opaque_impl = static_cast<OpaqueTensorImpl<OpaqueHandle>*>(impl.get());
+    type_id_ = opaque_impl->type_id();
+    data_type_ = opaque_impl->dtype();
+    device_opt_ = opaque_impl->device();
+    opaque_handle_ = opaque_impl->opaque_handle_;
+    sizes_ = opaque_impl->sizes_;
+
+    // TensorImpl general fields
+    // Note that some of these fields are not used in opaque tensor code,
+    // and we copy them here only for completeness.
+    strides_ = opaque_impl->strides_;
+    storage_offset_ = opaque_impl->storage_offset_;
+    is_contiguous_ = opaque_impl->is_contiguous_;
+    is_wrapped_number_ = opaque_impl->is_wrapped_number_;
+    reserved_ = opaque_impl->reserved_;
+  }
+
   OpaqueHandle& unsafe_opaque_handle() {
     return opaque_handle_;
   }

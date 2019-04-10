@@ -214,6 +214,36 @@ public:
     impl->refresh_numel();
     return impl;
   }
+
+  // NOTE: `shallow_copy_from()` does not copy the AutogradMeta pointer
+  // because it is unique for each Variable.
+  // yf225 TODO: fix comment regarding version_counter
+  // yf225 TODO: add comment why we don't copy is_variable_
+  void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
+    AT_ASSERT(impl->is_sparse());
+    auto sparse_impl = static_cast<SparseTensorImpl*>(impl.get());
+    type_id_ = sparse_impl->type_id();
+    data_type_ = sparse_impl->dtype();
+
+    // TensorImpl general fields
+    // Note that these fields are not used in sparse tensor code, and we copy them here only for completeness.
+    sizes_ = sparse_impl->sizes_;
+    strides_ = sparse_impl->strides_;
+    storage_offset_ = sparse_impl->storage_offset_;
+    is_contiguous_ = sparse_impl->is_contiguous_;
+    is_wrapped_number_ = sparse_impl->is_wrapped_number_;
+    reserved_ = sparse_impl->reserved_;
+
+    // Sparse-specific fields
+    sparse_dim_ = sparse_impl->sparse_dim();
+    dense_dim_ = sparse_impl->dense_dim();
+    indices_ = sparse_impl->indices();
+    values_ = sparse_impl->values();
+    device_opt_ = sparse_impl->device();
+    coalesced_ = sparse_impl->coalesced();
+    refresh_numel();
+  }
+
 private:
     explicit SparseTensorImpl(at::TensorTypeId, const caffe2::TypeMeta&, at::Tensor indices, at::Tensor values);
 };

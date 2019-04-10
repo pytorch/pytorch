@@ -85,7 +85,7 @@ variable_list grad(
 }
 
 void testADFormulas() {
-  const auto unwrap = [](const Variable& v) { return v.data(); };
+  const auto unwrap = [](const Variable& v) { return static_cast<at::Tensor>(v); };
 
   using VL = variable_list;
   const var_meta_list binary_pointwise = {{2, 3, 4, 5}, {2, 3, 4, 5}};

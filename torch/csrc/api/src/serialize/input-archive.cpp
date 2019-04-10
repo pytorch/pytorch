@@ -41,7 +41,7 @@ void InputArchive::read(
   if (tensor.defined()) {
     torch::NoGradGuard guard;
     if (tensor.device() != read_tensor.device()) {
-      tensor.set_data(autograd::Variable(read_tensor).data());
+      tensor.set_data(read_tensor);
     } else {
       tensor.set_(read_tensor);
     }

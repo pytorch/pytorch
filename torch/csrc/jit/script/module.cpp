@@ -112,11 +112,10 @@ void Module::to_impl(
   for (auto& parameter : get_parameters()) {
     // Need to access the `at::Tensor` as a `Variable` here.
     autograd::Variable variable = parameter.value().toTensor();
-    at::Tensor data = variable.data();
-    // Use the data's original device or dtype if not supplied here.
-    auto new_data = data.to(
-        device.value_or(data.device()),
-        dtype.value_or(data.scalar_type()),
+    // Use the variable's original device or dtype if not supplied here.
+    auto new_data = variable.to(
+        device.value_or(variable.device()),
+        dtype.value_or(variable.scalar_type()),
         non_blocking);
     variable.set_data(new_data);
   }

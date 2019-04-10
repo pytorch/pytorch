@@ -10,7 +10,7 @@ at::Tensor unwrap(at::Tensor&& tensor) {
   if (tensor.requires_grad()) {
     throw std::runtime_error("Autograd not yet supported for c10 ops.");
   }
-  return torch::autograd::Variable(std::move(tensor)).data();
+  return std::move(tensor);
 }
 
 // TODO This currently only handles tensors with requires_grad==False correctly.

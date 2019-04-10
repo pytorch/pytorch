@@ -585,7 +585,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T * data() const {
-    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     AT_CHECK(has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
     AT_ASSERTM(
@@ -615,7 +614,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * can be validly read from this tensor.
    */
   inline void* data() const {
-    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     AT_CHECK(has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
     AT_ASSERT(dtype_initialized());
@@ -875,6 +873,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return impl;
   }
 
+  // NOTE: `shallow_copy_from()` does not copy the AutogradMeta pointer
+  // because it is unique for each Variable.
+  // yf225 TODO: fix comment regarding version_counter
+  // yf225 TODO: add comment why we don't copy is_variable_
+  virtual void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) {
+    type_id_ = impl->type_id();
+    set_storage(impl->storage());
+    set_sizes_and_strides(impl->sizes(), impl->strides());
+    set_storage_offset(impl->storage_offset());
+    is_wrapped_number_ = impl->is_wrapped_number_;
+    reserved_ = impl->reserved_;
+    refresh_numel();
+    refresh_contiguous();
+  }
+
   void set_version_counter(
     const c10::VariableVersion& version_counter) noexcept {
     version_counter_ = version_counter;
@@ -910,7 +923,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * The device type of a Tensor, e.g., DeviceType::CPU or DeviceType::CUDA.
    */
   DeviceType device_type() const {
-    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     AT_ASSERT(device_opt_.has_value());
     // See NOTE [c10::optional operator usage in CUDA]
     return (*device_opt_).type();

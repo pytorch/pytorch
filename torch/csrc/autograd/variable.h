@@ -121,6 +121,10 @@ struct TORCH_API Variable : public at::Tensor {
   /// convert it to a `Variable`, and then free it; it has been found to
   /// decrease the overhead of those operations, in some situations.
   /// The comments about `requires_grad` and `data` on the above version also apply to this one.
+  ///
+  /// NOTE: if the given `Tensor` is already a `Variable`, this function will
+  /// create a new `Variable` that shares the same storage and tensor metadata
+  /// with the original `Variable`, but with a completely new autograd history.
   friend Variable make_variable_consuming(
       at::Tensor data,
       bool requires_grad,
@@ -158,6 +162,10 @@ struct TORCH_API Variable : public at::Tensor {
   }
 
   // NOTE: Assignment operators to Tensor come for free from the constructors.
+
+  // yf225 TODO: add these back! (or should we?) But use them in as few places as possible!
+  // const at::Tensor& data() const noexcept;
+  // at::Tensor& data() noexcept;
 
   // Gradient Function and Edges
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -375,42 +383,9 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   }
 
   AutogradMeta(
-      at::TensorImpl* self_impl,
-      bool requires_grad = false,
-      Edge gradient_edge = Edge());
-
-  ~Impl() override;
-
-  int64_t numel() const override;
-  at::IntArrayRef sizes() const override;
-  at::IntArrayRef strides() const override;
-  bool is_contiguous() const override;
-  int64_t size(int64_t d) const override;
-  int64_t stride(int64_t d) const override;
-  void resize_dim(int64_t ndim) override;
-  void set_size(int64_t dim, int64_t new_size) override;
-  void set_stride(int64_t dim, int64_t new_stride) override;
-  void set_storage_offset(int64_t storage_offset) override;
-
-  int64_t dim() const override;
-  bool has_storage() const override;
-  const at::Storage& storage() const override;
-  void* slow_data() const override;
-
-  void set_data(const at::Tensor &new_data);
-
-  /// Reset all expensive fields to free up resources
-  void release_resources() override;
-
-  Variable::AutogradMeta* get_autograd_meta() const {
-    return static_cast<Variable::AutogradMeta*>(autograd_meta());
-  }
-
-  int64_t storage_offset() const override;
-
-  /// The underlying data tensor for this Variable.
-  /// This field will be removed once VariableImpl and TensorImpl are merged.
-  at::Tensor data_;
+    at::TensorImpl* self_impl,
+    bool requires_grad = false,
+    Edge gradient_edge = Edge());
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -486,7 +461,6 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
 /// through the view relation.
 /// Relevant logic for non-differentiable views is implemented in
 /// make_variable_view below, and wrap_output of gen_variable_type.py.
-
 struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMeta {
   /// The base `Variable` (never a view).
   Variable base_;
@@ -529,18 +503,14 @@ inline Variable make_variable_view(
       /// Differentiable view. Track history with DifferentiableViewMeta.
       auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
       data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      auto diff_view_meta = c10::guts::make_unique<Variable::DifferentiableViewMeta>(
-        data_impl_copy.get(), std::move(base), std::move(gradient_edge));
-      data_impl_copy->set_autograd_meta(std::move(diff_view_meta));
-      data_impl_copy->set_is_variable(true);
+      data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::DifferentiableViewMeta>(
+        data_impl_copy.get(), std::move(base), std::move(gradient_edge)));
       return Variable(data_impl_copy);
     } else {
       /// Non-differentiable view. Just share version counter.
       auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
       data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>(data_impl_copy.get(), false, std::move(gradient_edge));
-      data_impl_copy->set_autograd_meta(std::move(autograd_meta));
-      data_impl_copy->set_is_variable(true);
+      data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl_copy.get(), false, std::move(gradient_edge)));
       auto var = Variable(data_impl_copy);
       var.set_version_counter(base.version_counter());
       return var;
@@ -556,9 +526,7 @@ inline Variable make_variable(
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
     data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-    auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>(data_impl_copy.get(), requires_grad);
-    data_impl_copy->set_autograd_meta(std::move(autograd_meta));
-    data_impl_copy->set_is_variable(true);
+    data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl_copy.get(), requires_grad));
     return Variable(data_impl_copy);
   }
   return Variable();
@@ -568,14 +536,12 @@ inline Variable make_variable_consuming(
     at::Tensor data,
     bool requires_grad = false,
     bool allow_tensor_metadata_change = true) {
-  AT_CHECK(
-      !data.is_variable(),
-      "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
     AT_ASSERT(data.getIntrusivePtr().use_count() == 1);
-    data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-    auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
-    return Variable(c10::make_intrusive<Variable::Impl>(std::move(data), std::move(autograd_meta), requires_grad));
+    auto data_impl = data.getIntrusivePtr();
+    data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    data_impl->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl.get(), requires_grad));
+    return Variable(std::move(data_impl));
   }
   return Variable();
 }
@@ -587,9 +553,7 @@ inline Variable make_variable(
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach();
     data_impl_copy->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-    auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>(data_impl_copy.get(), false, std::move(gradient_edge));
-    data_impl_copy->set_autograd_meta(std::move(autograd_meta));
-    data_impl_copy->set_is_variable(true);
+    data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl_copy.get(), false, std::move(gradient_edge)));
     return Variable(data_impl_copy);
   }
   return Variable();
@@ -617,6 +581,15 @@ inline const Variable& as_variable_ref(const at::Tensor& tensor) {
   return static_cast<const Variable&>(tensor);
 }
 
+// yf225 TODO: clean this up
+// inline const at::Tensor& Variable::data() const noexcept {
+//   return make_variable(*this, /*requires_grad=*/false, /*allow_tensor_metadata_change=*/false);
+// }
+
+// inline at::Tensor& Variable::data() noexcept {
+//   return make_variable(*this, /*requires_grad=*/false, /*allow_tensor_metadata_change=*/false);
+// }
+
 // Gradient Function and Edges
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -636,10 +609,6 @@ inline std::shared_ptr<Function> Variable::try_get_grad_accumulator() const {
 inline Variable Variable::detach() const {
   auto var = make_variable_view(*this, *this, /*is_differentiable=*/false, /*allow_tensor_metadata_change=*/false, Edge());
   return var;
-}
-
-inline void Variable::set_data(const at::Tensor &new_data) {
-  get()->set_data(new_data);
 }
 
 inline void Variable::set_gradient_edge(Edge edge) noexcept {
