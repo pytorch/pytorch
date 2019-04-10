@@ -150,7 +150,7 @@ def supports(o, factory_methods):
 OPTION_TEMPLATE = CT("""\
 case ${key}: { // ${name}
     ${initialization}
-    run_op = [&] {
+    run_op = [=] {
         ${statements}
         auto the_result = ${invocation};
         ${assignments}

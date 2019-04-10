@@ -99,15 +99,15 @@ class TestATen(hu.HypothesisTestCase):
         op = core.CreateOperator(
             "ATen",
             ['self'],
-            ["output", "return_inverse"],
+            ["output"],
             sorted=True,
             return_inverse=True,
             # return_counts=False,
             operator="_unique")
 
         def ref(self):
-            index, inverse = np.unique(self, return_index=False, return_inverse=True, return_counts=False)
-            return (index, inverse)
+            index, _ = np.unique(self, return_index=False, return_inverse=True, return_counts=False)
+            return (index,)
 
         tensor = np.array([1, 2, 6, 4, 2, 3, 2])
         print(ref(tensor))
