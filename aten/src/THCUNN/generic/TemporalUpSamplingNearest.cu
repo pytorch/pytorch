@@ -54,7 +54,7 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
   const int num_threads = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   nearest_neighbor_3d_kernel<scalar_t, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads,
-	 0, stream>>>(num_kernels, idata, odata);
+         0, stream>>>(num_kernels, idata, odata);
   THCudaCheck(cudaGetLastError());
 }
 
@@ -82,7 +82,7 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
   cudaStream_t stream = THCState_getCurrentStream(state);
 
   nearest_neighbor_3d_kernel_backward<scalar_t, accreal> <<<THCCeilDiv(num_kernels, num_threads),
-	  num_threads, 0, stream>>>(num_kernels, data1, data2);
+          num_threads, 0, stream>>>(num_kernels, data1, data2);
 
   THCudaCheck(cudaGetLastError());
   THCTensor_(free)(state, gradOutput);

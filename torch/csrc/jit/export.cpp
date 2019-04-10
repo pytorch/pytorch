@@ -22,6 +22,7 @@
 
 #include <fstream>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <stack>
 #include <string>
@@ -88,7 +89,8 @@ void validateBlock(
       bool is_aten_enabled = operator_export_type ==
               onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
           operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
-      if (!node->kind().is_onnx() && !is_aten_enabled && !node->mustBeNone()) {
+      if (!node->kind().is_onnx() && !node->kind().is_caffe2() &&
+          !is_aten_enabled && !node->mustBeNone()) {
         FAIL_EXPORT(
             "Couldn't export operator " + node->kind().toDisplayString() +
             "\n\nDefined at:\n" + getNodeStackTraceString(node));
@@ -157,6 +159,7 @@ class EncoderBase {
   size_t num_blocks_;
   onnx_torch::OperatorExportTypes operator_export_type_;
   bool strip_doc_;
+  std::set<std::string> domains_;
 };
 
 onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
@@ -271,11 +274,16 @@ void EncoderBase::EncodeBlock(
       p_n->add_output(output->uniqueName());
       EncodeIntermediateValueInfo(graph_proto, output);
     }
+    if (!node->kind().is_onnx()) {
+      p_n->set_domain(node->kind().domainString());
+      domains_.insert(node->kind().domainString());
+    }
     if (is_raw_export) {
       AT_ASSERT(!node->kind().is_onnx());
-      p_n->set_domain(node->kind().domainString());
     } else if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
-      AT_ASSERT(node->kind().is_onnx());
+      AT_ASSERT(!node->kind().is_aten() &&
+          !node->kind().is_prim() &&
+          !node->kind().is_attr());
     }
     p_n->set_op_type(node->kind().toUnqualString());
     for (auto attr_name : node->attributeNames()) {
@@ -429,6 +437,12 @@ GraphEncoder::GraphEncoder(
   imp->set_version(onnx_opset_version);
 
   EncodeGraph(model_proto_.mutable_graph(), graph, initializers);
+
+  for (const std::string& domain : domains_) {
+    auto* opset = model_proto_.add_opset_import();
+    opset->set_domain(domain);
+    opset->set_version(0);
+  }
 }
 
 void GraphEncoder::EncodeTensor(
