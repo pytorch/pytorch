@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
-#include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
+#include <ATen/TensorUtils.h>
 
 #include <TH/THBlasUtils.h>
 
@@ -461,6 +462,78 @@ Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indi
   return index_grad_weight;
 }
 
+template<typename scalar_t>
+Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
+    const Tensor& grad,
+    const Tensor& weight,  // NB: embedding table, not per_sample_weights
+    const Tensor& indices,
+    const Tensor& offset2bag,
+    int64_t mode) {
+  AT_CHECK(
+      mode == MODE_SUM,
+      "embedding_bag_backward: per_sample_weights only supported for mode='sum'");
+
+  AT_ASSERT(grad.dim() == 2)
+  auto embedding_features = grad.size(1);
+
+  AT_ASSERT(indices.dim() == 1);
+  auto num_samples = indices.size(0);
+
+  AT_ASSERT(weight.dim() == 2);
+  AT_ASSERT(weight.size(1) == embedding_features);
+
+  auto output = at::zeros({num_samples}, grad.options());
+
+  auto indices_arg = TensorArg(indices, "indices", 1);
+  checkScalarType("embedding_bag", indices_arg, kLong);
+  checkContiguous("embedding_bag", indices_arg);
+  auto offset2bag_arg = TensorArg(offset2bag, "offset2bag", 1);
+  checkScalarType("embedding_bag", offset2bag_arg, kLong);
+  checkContiguous("embedding_bag", offset2bag_arg);
+
+  auto grad_data = grad.data<scalar_t>();
+  auto grad_stride0 = grad.stride(0);
+  auto grad_stride1 = grad.stride(1);
+
+  auto weight_data = weight.data<scalar_t>();
+  auto weight_stride0 = weight.stride(0);
+  auto weight_stride1 = weight.stride(1);
+
+  auto indices_data = indices.data<int64_t>();
+
+  // The following are contiguous
+  auto output_data = output.data<scalar_t>();
+  auto offset2bag_data = offset2bag.data<int64_t>();
+
+  // XXX: 64 was arbitrarily chosen. There is probably a sweet spot for this number.
+  parallel_for(0, num_samples, 64, [&](int64_t begin, int64_t end) {
+    for (int64_t sample_idx = begin; sample_idx < end; sample_idx++) {
+      auto bag_idx = offset2bag_data[sample_idx];
+      auto embedding_idx = indices_data[sample_idx];
+
+      output_data[sample_idx] = THBlas_dot<scalar_t>(
+          embedding_features,
+          grad_data + grad_stride0 * bag_idx, grad_stride1,
+          weight_data + weight_stride0 * embedding_idx, weight_stride1);
+    }
+  });
+  return output;
+}
+
+Tensor _embedding_bag_per_sample_weights_backward_cpu(
+    const Tensor& grad,
+    const Tensor& weight,  // NB: embedding table, not per_sample_weights
+    const Tensor& indices,
+    const Tensor& offset2bag,
+    int64_t mode) {
+  return AT_DISPATCH_FLOATING_TYPES(
+    grad.scalar_type(), "_embedding_bag_per_sample_weights_backward_cpu", [&]() {
+      return _embedding_bag_per_sample_weights_backward_cpu_template<scalar_t>(
+          grad, weight, indices, offset2bag, mode);
+    }
+  );
+}
+
 Tensor _embedding_bag_sparse_backward(
     const Tensor &grad_, const Tensor &indices, const Tensor &offsets,
     const Tensor &offset2bag, const Tensor &bag_size_, int64_t num_weights,
@@ -476,7 +549,7 @@ Tensor _embedding_bag_sparse_backward(
                                        offset2bag, bag_size_);
   if (per_sample_weights.defined()) {
     AT_ASSERT(mode == MODE_SUM);
-    index_grad *= per_sample_weights.unsqueeze(1);
+    index_grad.mul_(per_sample_weights.unsqueeze(1));
   }
   return native::embedding_backward(index_grad, indices, num_weights, -1,
                                     scale_grad_by_freq, true);

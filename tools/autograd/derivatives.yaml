@@ -955,7 +955,7 @@
   indices: not_differentiable
   offsets: not_differentiable
   weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse, per_sample_weights)
-  per_sample_weights: not_differentiable # TODO(rzou): See issue #4068
+  per_sample_weights: _embedding_bag_per_sample_weights_backward(grad, weight, indices, result1, mode)
 
 - name: embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
   indices: not_differentiable

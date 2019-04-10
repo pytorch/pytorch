@@ -843,6 +843,11 @@
     CPU: _embedding_bag_dense_backward_cpu
     CUDA: _embedding_bag_dense_backward_cuda
 
+- func: _embedding_bag_per_sample_weights_backward(Tensor grad, Tensor weight, Tensor indices, Tensor offset2bag, int mode) -> Tensor
+  dispatch:
+    CPU: _embedding_bag_per_sample_weights_backward_cpu
+    CUDA: _embedding_bag_per_sample_weights_backward_cuda
+
 - func: empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
   matches_jit_signature: True
   cpu_half: True
