@@ -289,17 +289,19 @@ Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices,
   checkScalarType("embedding_bag", offset2bag_arg, kLong);
   checkContiguous("embedding_bag", offset2bag_arg);
 
-  AT_CHECK(!per_sample_weights.defined(),
-      "NYI: _embedding_bag_backward: per_sample_weights");
+  if (per_sample_weights.defined() &&
+      per_sample_weights.device().type() != DeviceType::CPU) {
+    AT_ERROR("NYI: _embedding_bag_backward: per_sample_weights only supported for CPU");
+  }
 
   if (sparse) {
     return at::_embedding_bag_sparse_backward(
         grad, indices, offsets, offset2bag, bag_size_, num_weights,
-        scale_grad_by_freq, mode);
+        scale_grad_by_freq, mode, per_sample_weights);
   } else {
     return at::_embedding_bag_dense_backward(
         grad, indices, offsets, offset2bag, bag_size_, max_indices_, num_weights,
-        scale_grad_by_freq, mode);
+        scale_grad_by_freq, mode, per_sample_weights);
   }
 }
 
@@ -359,12 +361,85 @@ static std::vector<int64_t> compute_counts_uniq(
   return counts_uniq;
 }
 
+template <typename scalar_t>
+void _embedding_bag_dense_backward_cpu_sum_mean(
+    const Tensor& grad,
+    const Tensor& indices_,
+    const Tensor& offsets_,
+    const Tensor& offset2bag__,
+    int64_t num_weights,
+    bool scale_grad_by_freq,
+    int64_t mode,
+    const Tensor& per_sample_weights_,
+    Tensor& index_grad_weight) {
+
+  Tensor &offset2bag_ = const_cast<Tensor &>(offset2bag__);
+
+  auto ind_sort_ = indices_.sort();
+  auto indices = std::get<0>(ind_sort_);
+  auto ind_sort = std::get<1>(ind_sort_);
+  auto offset2bag = offset2bag_.index_select(0, ind_sort);
+
+  optional<Tensor> per_sample_weights;
+  scalar_t* per_sample_weights_data;
+  optional<int64_t> per_sample_weights_stride;
+  if (per_sample_weights_.defined()) {
+    per_sample_weights = per_sample_weights_.index_select(0, ind_sort);
+    per_sample_weights_data = per_sample_weights->data<scalar_t>();
+    per_sample_weights_stride = per_sample_weights->stride(0);
+  }
+
+  auto indices_data = indices.data<int64_t>();
+  auto offsets_data = offsets_.data<int64_t>();
+  auto offset2bag_data = offset2bag.data<int64_t>();
+  int64_t numel = indices.numel();
+
+  auto counts = compute_counts(num_weights, indices_data, numel);
+  auto next_unique_index_idx =
+      compute_counts_uniq(num_weights, indices_data, numel, counts);
+
+  #pragma omp parallel for if (numel > 1000)
+    for (int64_t i = 0; i < (int64_t)next_unique_index_idx.size(); i++) {
+      int64_t start = i == 0 ? 0 : next_unique_index_idx[i - 1];
+      int64_t index = indices_data[start];
+      for (int64_t j = start; j < next_unique_index_idx[i]; j++) {
+        int64_t source = offset2bag_data[j];
+        double scale = 1.0;
+        if (per_sample_weights) {
+          AT_ASSERT(mode == MODE_SUM);
+          scale = per_sample_weights_data[*per_sample_weights_stride * j];
+        }
+        if (scale_grad_by_freq) {
+          scale /= counts[indices_data[i]];
+        }
+        if (mode == 1) { // MODE_MEAN
+          if (offsets_.size(0) == 1) {
+            auto bag_size = indices.size(0);
+            scale /= bag_size;
+          } else {
+            if (source == offsets_.size(0) - 1) {
+              scale /= indices.size(0) - offsets_data[offsets_.size(0) - 1];
+            } else {
+              scale /= offsets_data[source + 1] - offsets_data[source];
+            }
+          }
+        }
+        int64_t ddim = grad.size(1);
+        auto igwd = index_grad_weight.data<scalar_t>();
+        auto gd = grad.data<scalar_t>();
+        THBlas_axpy<scalar_t>(ddim, (scalar_t)scale, gd + ddim * source, 1,
+                    igwd + ddim * index, 1);
+      }
+    }
+}
+
 Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indices_,
                                   const Tensor &offsets_,
                                   const Tensor &offset2bag__,
                                   const Tensor &bag_size_,
                                   const Tensor& max_indices_, int64_t num_weights,
-                                  bool scale_grad_by_freq, int64_t mode) {
+                                  bool scale_grad_by_freq, int64_t mode,
+                                  const Tensor& per_sample_weights_) {
   // indices_, offsets_ and offset2bag__ are assumed having correct dtypes and
   // contiguous here due to the checks in _embedding_bag_backward above.
   // Also see NOTE [ embedding_bag Native Functions ] in native_functions.yaml
@@ -383,61 +458,18 @@ Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indi
   auto index_grad_weight =
       at::zeros({num_weights, grad.size(1)}, grad.options());
 
-  Tensor &offset2bag_ = const_cast<Tensor &>(offset2bag__);
-
-  auto ind_sort_ = indices_.sort();
-  auto indices = std::get<0>(ind_sort_);
-  auto ind_sort = std::get<1>(ind_sort_);
-  auto offset2bag = offset2bag_.index_select(0, ind_sort);
-
-  auto indices_data = indices.data<int64_t>();
-  auto offsets_data = offsets_.data<int64_t>();
-  auto offset2bag_data = offset2bag.data<int64_t>();
-  int64_t numel = indices.numel();
-
-  auto counts = compute_counts(num_weights, indices_data, numel);
-  auto next_unique_index_idx =
-      compute_counts_uniq(num_weights, indices_data, numel, counts);
-
-  #pragma omp parallel for if (numel > 1000)
-    for (int64_t i = 0; i < (int64_t)next_unique_index_idx.size(); i++) {
-      int64_t start = i == 0 ? 0 : next_unique_index_idx[i - 1];
-      int64_t index = indices_data[start];
-      for (int64_t j = start; j < next_unique_index_idx[i]; j++) {
-        int64_t source = offset2bag_data[j];
-        double scale = 1.0;
-        if (scale_grad_by_freq) {
-          scale /= counts[indices_data[i]];
-        }
-        if (mode == 1) { // MODE_MEAN
-          if (offsets_.size(0) == 1) {
-            auto bag_size = indices.size(0);
-            scale /= bag_size;
-          } else {
-            if (source == offsets_.size(0) - 1) {
-              scale /= indices.size(0) - offsets_data[offsets_.size(0) - 1];
-            } else {
-              scale /= offsets_data[source + 1] - offsets_data[source];
-            }
-          }
-        }
-        int64_t ddim = grad.size(1);
-        AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "embedding_bag_backward", [&] {
-          auto igwd = index_grad_weight.data<scalar_t>();
-          auto gd = grad.data<scalar_t>();
-          THBlas_axpy<scalar_t>(ddim, (scalar_t)scale, gd + ddim * source, 1,
-                      igwd + ddim * index, 1);
-        });
-      }
-    }
-
+  AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "embedding_bag_backward", [&] {
+      _embedding_bag_dense_backward_cpu_sum_mean<scalar_t>(
+          grad, indices_, offsets_, offset2bag__, num_weights,
+          scale_grad_by_freq, mode, per_sample_weights_, index_grad_weight);
+  });
   return index_grad_weight;
 }
 
 Tensor _embedding_bag_sparse_backward(
     const Tensor &grad_, const Tensor &indices, const Tensor &offsets,
     const Tensor &offset2bag, const Tensor &bag_size_, int64_t num_weights,
-    bool scale_grad_by_freq, int64_t mode) {
+    bool scale_grad_by_freq, int64_t mode, const Tensor& per_sample_weights) {
   // indices, offsets and offset2bag are assumed having correct dtypes and
   // contiguous here due to the checks in _embedding_bag_backward above.
   // Also see NOTE [ embedding_bag Native Functions ] in native_functions.yaml
@@ -447,6 +479,10 @@ Tensor _embedding_bag_sparse_backward(
   Tensor index_grad = grad_.index_select(0, offset2bag);
   index_grad = apply_bag_size_backward(offsets, indices, mode, index_grad,
                                        offset2bag, bag_size_);
+  if (per_sample_weights.defined()) {
+    AT_ASSERT(mode == MODE_SUM);
+    index_grad *= per_sample_weights.unsqueeze(1);
+  }
   return native::embedding_backward(index_grad, indices, num_weights, -1,
                                     scale_grad_by_freq, true);
 }
