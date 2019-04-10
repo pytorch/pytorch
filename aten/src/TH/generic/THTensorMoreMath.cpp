@@ -6,30 +6,26 @@
 #include <TH/THGenerator.hpp>
 
 #define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)				\
-  void THTensor_(NAME##Value)(THBoolTensor *r_, THTensor* t, scalar_t value) \
+  void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, scalar_t value) \
   { \
-    std::cout << "---> r_: " << r_->dtype().name() << std::endl;								\
-    std::cout << "---> t: " << t->dtype().name() << std::endl;								\
-    std::cout << "---> value: " << value << std::endl; \
-    std::cout << "THTensor_NAME in THTensorMoreMath" << std::endl;								\
-    THBoolTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);		\
+    THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);		\
     TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t,			\
 		     *r__data = (*t_data OP value) ? 1 : 0;); \
   }									\
   void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, scalar_t value)	\
-  {			std::cout << "interesting2" << std::endl;									\
+  {					\
     THTensor_(resizeNd)(r_, t->dim(), THTensor_getSizePtr(t), NULL);		\
     TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,					\
 		     *r__data = (*t_data OP value) ? 1 : 0;); \
   }									\
   void THTensor_(NAME##Tensor)(THByteTensor *r_, THTensor *ta, THTensor *tb) \
-  {					std::cout << "interesting3" << std::endl;							\
+  {					\
     THByteTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);		\
     TH_TENSOR_APPLY3(unsigned char, r_, scalar_t, ta, scalar_t, tb,		\
 		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
   }									\
   void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb) \
-  {				std::cout << "interesting4" << std::endl;								\
+  {				\
     THTensor_(resizeNd)(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);		\
     TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, ta, scalar_t, tb,			\
 		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
