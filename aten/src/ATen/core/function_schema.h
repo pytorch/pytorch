@@ -164,7 +164,7 @@ public:
     }
     return c10::nullopt;
   }
-  FunctionSchema withArguments(std::vector<Argument> new_arguments) const {
+  FunctionSchema cloneWithArguments(std::vector<Argument> new_arguments) const {
     return FunctionSchema(
         name(),
         overload_name(),
@@ -173,7 +173,9 @@ public:
         is_vararg(),
         is_varret());
   }
-  void checkInputs(std::vector<IValue>& inputs) const;
+  // Check that inputs have the correct types and appends any missing default
+  // values.
+  void checkAndNormalizeInputs(std::vector<IValue>& inputs) const;
 };
 
 inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {
@@ -237,7 +239,7 @@ inline std::string toString(const FunctionSchema& schema) {
   return str.str();
 }
 
-inline void FunctionSchema::checkInputs(std::vector<IValue>& inputs) const {
+inline void FunctionSchema::checkAndNormalizeInputs(std::vector<IValue>& inputs) const {
   // Do we have more inputs than the schema accepts?
   AT_CHECK(
       inputs.size() <= arguments().size(),

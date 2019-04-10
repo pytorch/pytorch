@@ -79,7 +79,7 @@ struct TORCH_API Method {
   }
 
   IValue operator()(std::vector<IValue> stack) {
-    getSchema().checkInputs(stack);
+    getSchema().checkAndNormalizeInputs(stack);
     for (auto input : initial_ivalues_) {
       push(stack, input.value());
     }
@@ -118,7 +118,7 @@ struct TORCH_API Method {
     // will change the underlying schema
     auto sliced = ArrayRef<Argument>(function_->getSchema().arguments())
                       .slice(0, num_inputs());
-    return function_->getSchema().withArguments(sliced.vec());
+    return function_->getSchema().cloneWithArguments(sliced.vec());
   }
 
   GraphExecutor& get_executor() {
@@ -322,6 +322,11 @@ struct TORCH_API Module {
     }
 
     if (Function* fn = class_cu().find_function(name).get()) {
+      // temporary lock because technically this is marked const,
+      // but we have to update the internal Method cache.
+      // This can be removed when class_cu() is the source of truth for
+      // methods.
+      std::lock_guard<std::recursive_mutex> guard(find_method_guard_);
       return &const_cast<Module*>(this)->lower_first_class_method(fn);
     }
 
@@ -613,6 +618,7 @@ struct TORCH_API Module {
   // as additional inputs. lowered_methods_ holds this lowered form
   // mutable because it is a cache for class_cu() methods
   mutable CompilationUnit lowered_methods_;
+  mutable std::recursive_mutex find_method_guard_;
 };
 
 static void setInputTensorTypes(Graph& g, const Stack& stack) {
