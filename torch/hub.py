@@ -51,8 +51,9 @@ except ImportError:
 HASH_REGEX = re.compile(r'-([a-f0-9]*)\.')
 
 MASTER_BRANCH = 'master'
-ENV_TORCH_HUB_DIR = 'TORCH_HUB_DIR'
-DEFAULT_TORCH_HUB_DIR = '~/.torch/hub'
+ENV_TORCH_HOME = 'TORCH_HOME'
+ENV_XDG_CACHE_HOME = 'XDG_CACHE_HOME'
+DEFAULT_CACHE_DIR = '~/.cache'
 VAR_DEPENDENCY = 'dependencies'
 MODULE_HUBCONF = 'hubconf.py'
 READ_DATA_CHUNK = 8192
@@ -105,12 +106,22 @@ def _load_attr_from_module(module, func_name):
     return getattr(module, func_name)
 
 
+def _get_torch_home():
+    torch_home = os.path.expanduser(
+        os.getenv(ENV_TORCH_HOME,
+                  os.path.join(os.getenv(ENV_XDG_CACHE_HOME, DEFAULT_CACHE_DIR), 'torch')))
+    return torch_home
+
+
 def _setup_hubdir():
     global hub_dir
-    if hub_dir is None:
-        hub_dir = os.getenv(ENV_TORCH_HUB_DIR, DEFAULT_TORCH_HUB_DIR)
+    # Issue warning to move data if old env is set
+    if os.getenv('TORCH_HUB'):
+        warnings.warn('TORCH_HUB is deprecated, please use env TORCH_HOME instead')
 
-    hub_dir = os.path.expanduser(hub_dir)
+    if hub_dir is None:
+        torch_home = _get_torch_home()
+        hub_dir = os.path.join(torch_home, 'hub')
 
     if not os.path.exists(hub_dir):
         os.makedirs(hub_dir)
@@ -216,8 +227,12 @@ def set_dir(d):
     r"""
     Optionally set hub_dir to a local dir to save downloaded models & weights.
 
-    If this argument is not set, env variable `TORCH_HUB_DIR` will be searched first,
-    `~/.torch/hub` will be created and used as fallback.
+    If ``set_dir`` is not called, default path is ``$TORCH_HOME/hub`` where
+    environment variable ``$TORCH_HOME`` defaults to ``$XDG_CACHE_HOME/torch``.
+    ``$XDG_CACHE_HOME`` follows the X Design Group specification of the Linux
+    filesytem layout, with a default value ``~/.cache`` if the environment
+    variable is not set.
+
 
     Args:
         d: path to a local folder to save downloaded models & weights.
@@ -344,9 +359,10 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
     digits of the SHA256 hash of the contents of the file. The hash is used to
     ensure unique names and to verify the contents of the file.
 
-    The default value of `model_dir` is ``$TORCH_HOME/models`` where
-    ``$TORCH_HOME`` defaults to ``~/.torch``. The default directory can be
-    overridden with the ``$TORCH_MODEL_ZOO`` environment variable.
+    The default value of `model_dir` is ``$TORCH_HOME/checkpoints`` where
+    environment variable ``$TORCH_HOME`` defaults to ``$XDG_CACHE_HOME/torch``.
+    ``$XDG_CACHE_HOME`` follows the X Design Group specification of the Linux
+    filesytem layout, with a default value ``~/.cache`` if not set.
 
     Args:
         url (string): URL of the object to download
@@ -358,9 +374,13 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
         >>> state_dict = torch.hub.load_state_dict_from_url('https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth')
 
     """
+    # Issue warning to move data if old env is set
+    if os.getenv('TORCH_MODEL_ZOO'):
+        warnings.warn('TORCH_MODEL_ZOO is deprecated, please use env TORCH_HOME instead')
+
     if model_dir is None:
-        torch_home = os.path.expanduser(os.getenv('TORCH_HOME', '~/.torch'))
-        model_dir = os.getenv('TORCH_MODEL_ZOO', os.path.join(torch_home, 'models'))
+        torch_home = _get_torch_home()
+        model_dir = os.path.join(torch_home, 'checkpoints')
 
     try:
         os.makedirs(model_dir)
