@@ -28,6 +28,14 @@ class TestDocCoverage(unittest.TestCase):
         return ret
 
     def test_torch(self):
+        # TODO: The algorithm here is kind of unsound; we don't assume
+        # every identifier in torch.rst lives in torch by virtue of
+        # where it lives; instead, it lives in torch because at the
+        # beginning of the file we specified automodule.  This means
+        # that this script can get confused if you have, e.g., multiple
+        # automodule directives in the torch file.  "Don't do that."
+        # (Or fix this to properly handle that case.)
+
         # get symbols documented in torch.rst
         in_rst = self.parse_rst('torch.rst', r1)
         # get symbols in functional.py and _torch_docs.py
@@ -35,6 +43,7 @@ class TestDocCoverage(unittest.TestCase):
             # below are some jit functions
             'wait', 'fork', 'parse_type_comment', 'import_ir_module',
             'import_ir_module_from_buffer', 'merge_type_from_type_comment',
+            'parse_ir',
 
             # below are symbols mistakely binded to torch.*, but should
             # go to torch.nn.functional.* instead

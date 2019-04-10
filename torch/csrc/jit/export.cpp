@@ -22,6 +22,7 @@
 
 #include <fstream>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <stack>
 #include <string>
@@ -88,7 +89,8 @@ void validateBlock(
       bool is_aten_enabled = operator_export_type ==
               onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK ||
           operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN;
-      if (!node->kind().is_onnx() && !is_aten_enabled && !node->mustBeNone()) {
+      if (!node->kind().is_onnx() && !node->kind().is_caffe2() &&
+          !is_aten_enabled && !node->mustBeNone()) {
         FAIL_EXPORT(
             "Couldn't export operator " + node->kind().toDisplayString() +
             "\n\nDefined at:\n" + getNodeStackTraceString(node));
@@ -157,6 +159,7 @@ class EncoderBase {
   size_t num_blocks_;
   onnx_torch::OperatorExportTypes operator_export_type_;
   bool strip_doc_;
+  std::set<std::string> domains_;
 };
 
 onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
@@ -189,7 +192,10 @@ EncoderBase::EncoderBase(
       operator_export_type_(operator_export_type),
       strip_doc_(strip_doc) {
   model_proto_.set_producer_name("pytorch");
-  model_proto_.set_ir_version(onnx::IR_VERSION);
+  // we pin IR version to version 4 (01/22/2019) instead of using
+  // onnx::IR_VERSION. with this change, the test_operators.py will be more
+  // stable. only bump it when it's necessary
+  model_proto_.set_ir_version(4);
   // TODO: set the producer version using appropriate function call
   model_proto_.set_producer_version("1.1");
 }
@@ -268,11 +274,16 @@ void EncoderBase::EncodeBlock(
       p_n->add_output(output->uniqueName());
       EncodeIntermediateValueInfo(graph_proto, output);
     }
+    if (!node->kind().is_onnx()) {
+      p_n->set_domain(node->kind().domainString());
+      domains_.insert(node->kind().domainString());
+    }
     if (is_raw_export) {
       AT_ASSERT(!node->kind().is_onnx());
-      p_n->set_domain(node->kind().domainString());
     } else if (operator_export_type_ == onnx_torch::OperatorExportTypes::ONNX) {
-      AT_ASSERT(node->kind().is_onnx());
+      AT_ASSERT(!node->kind().is_aten() &&
+          !node->kind().is_prim() &&
+          !node->kind().is_attr());
     }
     p_n->set_op_type(node->kind().toUnqualString());
     for (auto attr_name : node->attributeNames()) {
@@ -426,6 +437,12 @@ GraphEncoder::GraphEncoder(
   imp->set_version(onnx_opset_version);
 
   EncodeGraph(model_proto_.mutable_graph(), graph, initializers);
+
+  for (const std::string& domain : domains_) {
+    auto* opset = model_proto_.add_opset_import();
+    opset->set_domain(domain);
+    opset->set_version(0);
+  }
 }
 
 void GraphEncoder::EncodeTensor(
@@ -451,8 +468,7 @@ void GraphEncoder::EncodeTensor(
   } else {
     AT_ASSERT(t.is_contiguous());
     tensor_proto->set_raw_data(std::string(
-        static_cast<char*>(t.data_ptr()),
-        t.element_size() * t.numel()));
+        static_cast<char*>(t.data_ptr()), t.element_size() * t.numel()));
   }
 }
 
@@ -506,7 +522,7 @@ class ScriptModuleSerializer final {
       torch::ModuleDef* module_def);
 
   void convertParameter(
-      const script::NamedIValue& param,
+      const script::Slot & param,
       torch::ParameterDef* param_def,
       bool is_parameter);
 
@@ -662,8 +678,7 @@ void ScriptModuleSerializer::convertAndWriteTensor(
 
   tensor_proto->set_requires_grad(tensor.requires_grad());
 
-  uint64_t record_size =
-      tensor.element_size() * tensor.storage().size();
+  uint64_t record_size = tensor.element_size() * tensor.storage().size();
   auto* key = tensor.storage().unsafeGetStorageImpl();
 
   auto storage_it = storageMap.find(key);
@@ -683,8 +698,7 @@ void ScriptModuleSerializer::convertAndWriteTensor(
                                /* stride = */ {1})
                            .cpu();
       AT_ASSERT(
-          storage_tensor.element_size() *
-              storage_tensor.storage().size() ==
+          storage_tensor.element_size() * storage_tensor.storage().size() ==
           record_size);
     }
     std::string name = "tensors/" + std::to_string(tensor_id);
@@ -718,7 +732,7 @@ void ScriptModuleSerializer::writeAttributeTable() {
   }
   pickler.finish();
   writer_.writeRecord(
-        "attributes.pkl", pickler.stack().data(), pickler.stack().size());
+      "attributes.pkl", pickler.stack().data(), pickler.stack().size());
 }
 
 void ScriptModuleSerializer::convertModule(
@@ -730,17 +744,16 @@ void ScriptModuleSerializer::convertModule(
   module_def->set_optimize(module.is_optimized());
   for (const auto& elem : module.get_parameters()) {
     torch::ParameterDef* param_def = module_def->add_parameters();
-    convertParameter(elem.value(), param_def, /*is_buffer=*/false);
+    convertParameter(elem, param_def, /*is_buffer=*/false);
   }
 
-  for (const auto& item : module.get_attributes()) {
-    auto& attribute = item.value();
+  for (const auto& attribute : module.get_attributes()) {
     // Add attribute to ModuleDef
     torch::AttributeDef* attribute_def = module_def->add_attributes();
     attribute_def->set_name(attribute.name());
     attribute_def->set_type(attribute.type()->python_str());
 
-    attribute_table_.push_back(*attribute.slot());
+    attribute_table_.push_back(attribute.value());
     attribute_def->set_id(attribute_table_.size() - 1);
   }
 
@@ -770,17 +783,17 @@ void ScriptModuleSerializer::convertModule(
 
   for (const auto& elem : module.get_modules()) {
     torch::ModuleDef* sub_def = module_def->add_submodules();
-    convertModule(*elem->module, module_name.str(), elem.key(), sub_def);
+    convertModule(*elem, module_name.str(), elem->name(), sub_def);
   }
 }
 
 void ScriptModuleSerializer::convertParameter(
-    const script::NamedIValue& param,
+    const script::Slot& param,
     torch::ParameterDef* param_def,
     bool is_parameter) {
   param_def->set_name(param.name());
   param_def->set_is_buffer(is_parameter);
-  param_def->set_tensor_id(addTensor(param.slot()->toTensor()));
+  param_def->set_tensor_id(addTensor(param.value().toTensor()));
 }
 
 // Pretty printing for ONNX

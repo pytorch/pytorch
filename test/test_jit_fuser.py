@@ -894,6 +894,5 @@ class TestFuser(JitTestCase):
         self.assertGraphContainsExactly(
             ge.graph_for(*inputs), 'prim::FusionGroup', 0, consider_subgraphs=True)
 
-
 if __name__ == '__main__':
     run_tests()

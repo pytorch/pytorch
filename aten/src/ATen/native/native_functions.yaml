@@ -556,6 +556,7 @@
   matches_jit_signature: True
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   dispatch:
     CPU: _s_copy__cpu
     CUDA: _s_copy__cuda
@@ -563,6 +564,8 @@
 - func: _s_copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   matches_jit_signature: True
   cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
   dispatch:
     CUDA: _s_copy_from_cuda
 
@@ -570,6 +573,7 @@
   matches_jit_signature: True
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   dispatch:
     CPU: _copy_same_type__cpu
 
@@ -796,7 +800,7 @@
 - func: embedding_backward(Tensor grad, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor
   matches_jit_signature: True
 
-- func: embedding_dense_backward(Tensor grad, IndexTensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
+- func: embedding_dense_backward(Tensor grad_output, IndexTensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
   dispatch:
     CPU: embedding_dense_backward_cpu
     CUDA: embedding_dense_backward_cuda
@@ -843,6 +847,7 @@
   matches_jit_signature: True
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda
@@ -853,6 +858,7 @@
   matches_jit_signature: True
   variants: method
   cpu_bool: True
+  cuda_bool: True
   cpu_half: True
   device_guard: False
   dispatch:
@@ -873,6 +879,8 @@
 
 - func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
   cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
   matches_jit_signature: True
   dispatch:
     CPU: empty_strided_cpu
@@ -1109,19 +1117,15 @@
 
 - func: _cufft_get_plan_cache_size() -> int
   matches_jit_signature: True
-  device_guard: False
 
 - func: _cufft_get_plan_cache_max_size() -> int
   matches_jit_signature: True
-  device_guard: False
 
 - func: _cufft_set_plan_cache_max_size(int max_size) -> void
   matches_jit_signature: True
-  device_guard: False
 
 - func: _cufft_clear_plan_cache() -> void
   matches_jit_signature: True
-  device_guard: False
 
 - func: index(Tensor self, Tensor?[] indices) -> Tensor
   matches_jit_signature: True
@@ -1818,6 +1822,21 @@
   matches_jit_signature: True
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
+- func: repeat_interleave(Tensor repeats) -> Tensor
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: repeat_interleave_cpu
+    CUDA: repeat_interleave_cuda
+
+- func: repeat_interleave(Tensor self, Tensor repeats, int? dim=None) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
+
+- func: repeat_interleave(Tensor self, int repeats, int? dim=None) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
+
 - func: reshape(Tensor self, int[] shape) -> Tensor
   matches_jit_signature: True
   variants: function, method
@@ -2353,6 +2372,24 @@
     CPU: _unique_dim_cpu
     CUDA: _unique_dim_cuda
 
+# _unique and _unique_dim are fragile and modifying them easily cause internal break
+# below two operators are a temporary hack for adding return_counts support
+# Please don't rely on these two operators, they will be removed soon
+
+- func: _unique2_temporary_will_remove_soon(Tensor self, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: _unique2_cpu
+    CUDA: _unique2_cuda
+
+- func: _unique_dim2_temporary_will_remove_soon(Tensor self, int dim, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function
+  dispatch:
+    CPU: _unique_dim2_cpu
+    CUDA: _unique_dim2_cuda
+
 - func: _unsafe_view(Tensor self, int[] size) -> Tensor
   matches_jit_signature: True
 
@@ -2531,55 +2568,58 @@
   matches_jit_signature: True
   variants: function
 
-- func: native_clone(Tensor self) -> Tensor
-  matches_jit_signature: True
-  dispatch:
-    SparseCPU: clone_sparse
-    SparseCUDA: clone_sparse
-
 - func: clone(Tensor self) -> Tensor
   matches_jit_signature: True
   variants: function, method
-
-- func: native_resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
-  matches_jit_signature: True
+  cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
   dispatch:
-    SparseCPU: resize_as_sparse_
-    SparseCUDA: resize_as_sparse_
+    CPU: clone
+    CUDA: clone
+    SparseCPU: clone_sparse
+    SparseCUDA: clone_sparse
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   matches_jit_signature: True
+  cpu_bool: True
+  cuda_bool: True
+  cpu_half: True
   variants: function, method
-
-- func: native_pow(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
-    SparseCPU: pow_out_sparse_scalar
-    SparseCUDA: pow_out_sparse_scalar
-
-- func: native_pow(Tensor self, Scalar exponent) -> Tensor
-  matches_jit_signature: True
-  dispatch:
-    SparseCPU: pow_sparse_scalar
-    SparseCUDA: pow_sparse_scalar
+    CPU: resize_as_
+    CUDA: resize_as_
+    SparseCPU: resize_as_sparse_
+    SparseCUDA: resize_as_sparse_
 
 - func: pow(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
+  dispatch:
+    CPU: pow_out
+    CUDA: pow_out
+    SparseCPU: pow_out_sparse_scalar
+    SparseCUDA: pow_out_sparse_scalar
 
 - func: pow(Tensor self, Scalar exponent) -> Tensor
   matches_jit_signature: True
   variants: function, method
-  variants: method, function
-
-- func: native_zero_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
-    SparseCPU: zero_sparse_
-    SparseCUDA: zero_sparse_
+    CPU: pow
+    CUDA: pow
+    SparseCPU: pow_sparse_scalar
+    SparseCUDA: pow_sparse_scalar
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   matches_jit_signature: True
   variants: method, function
+  cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
+  dispatch:
+    CPU: zero_
+    CUDA: zero_
+    SparseCPU: zero_sparse_
+    SparseCUDA: zero_sparse_
 
 - func: sub(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -2820,8 +2860,11 @@
   dispatch:
     SparseCPU: sparse_to_dense
     SparseCUDA: sparse_to_dense
+    MkldnnCPU: mkldnn_to_dense
   requires_tensor: True
 
+- func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
+  matches_jit_signature: True
 
 - func: sparse_dim(Tensor self) -> int
   matches_jit_signature: True
@@ -2982,6 +3025,35 @@
     CPU: dense_to_sparse
     CUDA: dense_to_sparse
 
+- func: to_mkldnn(Tensor self) -> Tensor
+  matches_jit_signature: True
+  variants: method
+  dispatch:
+    CPU: dense_to_mkldnn
+
+- func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
+  matches_jit_signature: True
+
+- func: quantize_linear(Tensor self, float scale, int zero_point) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
+  requires_tensor: True
+
+- func: dequantize(Tensor self) -> Tensor
+  matches_jit_signature: True
+  variants: function, method
+  requires_tensor: True
+
+- func: q_scale(Tensor self) -> Scalar
+  matches_jit_signature: True
+  variants: function, method
+  requires_tensor: True
+
+- func: q_zero_point(Tensor self) -> Scalar
+  matches_jit_signature: True
+  variants: function, method
+  requires_tensor: True
+
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
 # See NOTE [ TensorOptions Constructors ].
@@ -3027,6 +3099,7 @@
   matches_jit_signature: True
   cpu_half: True
   cpu_bool: True
+  cuda_bool: True
   dispatch:
     CPU: _local_scalar_dense_cpu
     CUDA: _local_scalar_dense_cuda
@@ -3143,11 +3216,12 @@
 - func: set_(Tensor(a!) self) -> Tensor(a!)
   matches_jit_signature: True
   variants: method
-  device_guard: False
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   matches_jit_signature: True
   variants: method
+  cpu_bool: True
+  cuda_bool: True
   device_guard: False
 
 - func: masked_fill_(Tensor(a!) self, Tensor mask, Scalar value) -> Tensor(a!)
@@ -3175,6 +3249,9 @@
   variants: function, method
 
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
+  cpu_half: True
+  cpu_bool: True
+  cuda_bool: True
   matches_jit_signature: True
   variants: method
   device_guard: False
@@ -3515,10 +3592,10 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: cross(Tensor self, Tensor other, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
+- func: cross(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
-- func: cross(Tensor self, Tensor other, int dim=-1) -> Tensor
+- func: cross(Tensor self, Tensor other, int? dim=None) -> Tensor
   matches_jit_signature: True
   variants: method, function
 
@@ -3692,17 +3769,17 @@
   matches_jit_signature: True
   variants: method, function
 
-- func: gels(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!), Tensor(b!))
+- func: gels(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
   matches_jit_signature: True
 
-- func: gels(Tensor self, Tensor A) -> (Tensor, Tensor)
+- func: gels(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
   matches_jit_signature: True
   variants: method, function
 
-- func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!), Tensor(b!))
+- func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
   matches_jit_signature: True
 
-- func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor, Tensor)
+- func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
   matches_jit_signature: True
   variants: method, function
 
@@ -3825,10 +3902,10 @@
     CPU: _lu_with_info_cpu
     CUDA: _lu_with_info_cuda
 
-- func: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
+- func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
 
-- func: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
+- func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   matches_jit_signature: True
   variants: method, function
 
@@ -3838,6 +3915,14 @@
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
   matches_jit_signature: True
   variants: method, function
+
+- func: _multinomial_alias_setup(Tensor probs) -> (Tensor, Tensor)
+  matches_jit_signature: True
+  variants: function
+
+- func: _multinomial_alias_draw(Tensor J, Tensor q, int num_samples, *, Generator? generator=None) -> Tensor
+  matches_jit_signature: True
+  variants: function
 
 - func: lgamma(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   matches_jit_signature: True
@@ -4038,7 +4123,6 @@
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
   matches_jit_signature: True
   variants: method
-  device_guard: False
 
 - func: equal(Tensor self, Tensor other) -> bool
   matches_jit_signature: True
