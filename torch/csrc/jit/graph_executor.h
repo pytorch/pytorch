@@ -37,7 +37,6 @@ struct TORCH_API GraphExecutor {
   std::shared_ptr<Graph> graph() const;
   std::shared_ptr<Graph> graphFor(const Stack& inputs) const;
   GraphExecutorState getDebugState();
-  void debugDisableAutodiffSubgraphInlining();
 
  private:
   std::shared_ptr<GraphExecutorImpl> pImpl;
@@ -46,6 +45,8 @@ struct TORCH_API GraphExecutor {
 // These passes need to run before it is valid to pass to the interpreter
 // regardless of whether sizes have been specialized or not.
 TORCH_API void runRequiredPasses(const std::shared_ptr<Graph>& g);
+
+TORCH_API void debugSetAutodiffSubgraphInlining(bool state);
 
 namespace detail {
 
