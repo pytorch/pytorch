@@ -4789,7 +4789,10 @@ a")
         res = fn(None, 1)
         self.assertEqual(res, 1)
         g = fn.graph_for(None, 1)
-        self.assertEqual(next(g.inputs()).type().kind(), 'NoneType')
+        first_input = next(g.inputs())
+        # check if input is disconnected
+        self.assertEqual(first_input.type().kind(), 'OptionalType')
+        self.assertEqual(first_input.uses(), [])
         t = torch.ones(1)
         res = fn(t, 1)
         self.assertEqual(res, 0)
@@ -4807,7 +4810,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
             res = fn(None, 2.0)
         g = fn.graph_for(None, 2.0)
-        self.assertEqual(next(g.nodes()).output().type().str(), "Tensor")
+        self.assertEqual(next(g.outputs()).type().str(), "Tensor")
 
     def test_optional_list(self):
         @torch.jit.script
@@ -4824,7 +4827,10 @@ a")
         res = fn(None, 1)
         self.assertEqual(res, 1)
         g = fn.graph_for(None, 1)
-        self.assertEqual(next(g.inputs()).type().kind(), 'NoneType')
+        first_input = next(g.inputs())
+        # check if input is disconnected
+        self.assertEqual(first_input.type().kind(), 'OptionalType')
+        self.assertEqual(first_input.uses(), [])
         l = [2, 3]
         res = fn(l, 1)
         self.assertEqual(res, 5)
@@ -4842,7 +4848,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "Unwrapping null optional"):
             res = fn(None, 1)
         g = fn.graph_for(None, 1)
-        self.assertEqual(list(g.nodes())[-1].output().type().str(), "int[]")
+        self.assertEqual(next(g.outputs()).type().str(), "int[]")
 
     def test_while_write_outer_then_read(self):
         def func(a, b):

@@ -25,12 +25,6 @@ struct ArgumentInfo {
   bool defined() const {
     return defined_;
   }
-  bool isNone() const {
-    return is_none_;
-  }
-  bool isNontensorOptional() const {
-    return is_nontensor_optional_;
-  }
   int device() const {
     return device_;
   }
@@ -53,15 +47,9 @@ struct ArgumentInfo {
   }
 
  private:
-  unsigned is_nontensor_optional_ : 1;
-    // =0 if it is an Optional[Tensor] or Tensor. =1 other optional type.
-    // if this is set, values below is_none_ must be 0
-    // Non-optional other types are not considered
-  unsigned is_none_ : 1;
-    // is_none_  =1 if an Optional[T] is None, remaining bits undefined
   unsigned defined_ : 1;
   unsigned requires_grad_ : 1;
-  unsigned : 4;
+  unsigned : 5;
   unsigned dim_ : 8;
   int device_ : 8; // NOTE: this needs to be signed because we use -1 to
                    // represent CPU
@@ -76,34 +64,27 @@ static_assert(
     "ArgumentInfo is expected to be a 32-bit struct");
 
 struct ArgumentSpec {
-  ArgumentSpec(size_t num_flat_inputs) {
-    hash_code = num_flat_inputs;
-    args.reserve(num_flat_inputs);
+  ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs) {
+    hash_code = hash_combine(num_flat_tensor_inputs, num_flat_optional_inputs);
+    tensor_args.reserve(num_flat_tensor_inputs);
+    optional_presence.reserve(num_flat_optional_inputs);
   }
 
-  void addNontensorOptional(const IValue& input) {
-    args.emplace_back();
-    auto& arg = args.back();
-    // Initialize all fields to 0. This is convenient, because e.g.
-    // requires_grad() can be checked even on tensors AND will make
-    // padding bits all 0s.
-    std::memset(&arg, 0, sizeof(ArgumentInfo));
-    arg.is_nontensor_optional_ = true;
-    arg.is_none_ = input.isNone();
-    combineHash(arg);
+  void addOptional(const IValue& input) {
+    bool is_present = !input.isNone();
+    optional_presence.push_back(is_present);
+    hash_code = hash_combine(hash_code, is_present);
   }
 
   void addTensor(const IValue& input, bool with_grad) {
-    args.emplace_back();
-    auto& arg = args.back();
+    tensor_args.emplace_back();
+    auto& arg = tensor_args.back();
     // Initialize all fields to 0. This is convenient, because e.g.
     // requires_grad() can be checked even on tensors AND will make
     // padding bits all 0s.
     std::memset(&arg, 0, sizeof(ArgumentInfo));
 
-    if (input.isNone()) {
-      arg.is_none_ = 1;
-    } else {
+    if (!input.isNone()) {
       AT_ASSERT(input.isTensor());
       // [argspec refcounting] reinterpret the IValue to avoid having to refcount
       // the Tensor microbenchmarks
@@ -128,26 +109,36 @@ struct ArgumentSpec {
 
   // equality is fast: check ninputs, and then check the raw array data,
   // there are no size/stride indirections
+  // hopefully std::vector<bool> has fast equality
   bool operator==(const ArgumentSpec& spec) const {
-    if (args.size() != spec.args.size())
+    if (optional_presence != spec.optional_presence) {
+      return false;
+    }
+    if (tensor_args.size() != spec.tensor_args.size())
       return false;
     // NB: we need to break out early when there are no elements, because
     // passing a nullptr to memcmp is UB.
-    if (args.size() == 0)
+    if (tensor_args.size() == 0)
       return true;
     return std::memcmp(
-               args.data(),
-               spec.args.data(),
-               args.size() * sizeof(ArgumentInfo)) == 0;
+               tensor_args.data(),
+               spec.tensor_args.data(),
+               tensor_args.size() * sizeof(ArgumentInfo)) == 0;
   }
   bool operator!=(const ArgumentSpec& spec) const {
     return !(*this == spec);
   }
-  size_t size() const {
-    return args.size();
+  size_t numTensors() const {
+    return tensor_args.size();
   }
-  const ArgumentInfo& at(size_t i) const {
-    return args[i];
+  const ArgumentInfo& tensorAt(size_t i) const {
+    return tensor_args[i];
+  }
+  size_t numOptionals() const {
+    return optional_presence.size();
+  }
+  bool isPresent(size_t i) const {
+    return optional_presence[i];
   }
   size_t hashCode() const {
     return hash_code;
@@ -155,7 +146,8 @@ struct ArgumentSpec {
 
  private:
   size_t hash_code; // precomputed on construction
-  std::vector<ArgumentInfo> args;
+  std::vector<ArgumentInfo> tensor_args;
+  std::vector<bool> optional_presence;
 };
 
 // ArgumentSpecCreator takes an initial graph and comes up with a set
@@ -172,18 +164,18 @@ struct TORCH_API ArgumentSpecCreator {
     ENTER_OBJECT, // same as ENTER_TUPLE, but the input is a class
     LEAVE, // pop the top-most list from the stack
     SKIP, // consume an element from the top-most list, and discard
-    SPECIALIZE_TENSOR, // consume a tensor or optional tensor for the top-most
+    SPECIALIZE_OPTIONAL_TENSOR, // consume a optional tensor for the top-most
+                                // list, and add it to the ArgSpec key being
+                                // created
+    SPECIALIZE_TENSOR, // consume a tensor for the top-most
                        // list, and add it to the ArgSpec key being created
-    SPECIALIZE_NONTENSOR_OPTIONAL,
-                       // consume a nontensor optional from the top-most list,
-                       // and add it to the ArgSpec key being created
+    SPECIALIZE_OPTIONAL,
+    // consume a nontensor optional from the top-most list,
+    // and add it to the ArgSpec key being created
   };
   ArgumentSpecCreator(Graph& graph);
   ArgumentSpec create(bool with_grad, const Stack& stack) const;
-  void setInputTypes(Graph& g, const ArgumentSpec& spec) const;
-  std::vector<TypePtr> getSpecializedTypes(
-      Graph& graph,
-      const ArgumentSpec& spec) const;
+  void specializeTypes(Graph& g, const ArgumentSpec& spec) const;
   void dump() const;
   using WrittenSlots = std::unordered_set<std::string>;
 
@@ -194,8 +186,182 @@ struct TORCH_API ArgumentSpecCreator {
       size_t depth,
       const WrittenSlots& written_slots);
   size_t num_inputs_;
-  size_t num_tensors_or_optionals_ = 0;
+  size_t num_tensors_ = 0;
+  size_t num_optionals_ = 0;
   std::vector<Inst> instructions_;
+};
+
+// CompleteArgumentSpec represents one particular specialization.
+// It is designed so that it can be created, hashed, and compared quickly
+// since it is used along the hot-path of the JIT to check if the code
+// we have created is valid for the given inputs.
+
+// COmpleteArgumentInfoPOD is only used internally in CompleteArgumentSpec
+// API users should use ArgumentInfo
+struct CompleteArgumentInfoPOD {
+  // total size is 64-bit
+  unsigned is_tensor : 8; // all other fields are invalid if this is false
+  unsigned type : 8; // scalar type
+  unsigned defined : 1;
+  unsigned requires_grad : 1;
+  signed device : 14;
+  uint32_t total_dims; // all TensorInfoPODs are in CompleteArgumentSpec's
+                       // tensor_info() array. total_dims is the total number of
+                       // dimensions seen so far in all previous members of
+                       // tensor_info(), including this tensor 2*total_dims
+                       // becomes the offset into the sizes_strides list for the
+                       // _next_ tensor in the tensor_info array for tensor 0,
+                       // the offset is always 0
+};
+
+static_assert(
+    sizeof(CompleteArgumentInfoPOD) == sizeof(int64_t),
+    "CompleteArgumentInfoPOD must be 64-bit struct for CompleteArgumentSpec encoding to work");
+
+struct CompleteArgumentInfo;
+
+struct CompleteArgumentSpec {
+  CompleteArgumentSpec(bool with_grad, at::ArrayRef<IValue> inputs)
+      : hash_code(0), ninputs(inputs.size()) {
+    int32_t all_dims = 0;
+    const int32_t num_inputs = inputs.size();
+    for (int32_t i = 0; i < num_inputs; i++) {
+      if (!inputs[i].isTensor())
+        continue;
+      auto tensor = inputs[i].toTensor();
+      all_dims += tensor.defined() ? tensor.ndimension() : 0;
+    }
+    // allocate enough room for all TensorPODs and dimensions
+    data.resize(ninputs + all_dims * 2);
+
+    // and reinterpret our data array as these structs
+    auto* pods = reinterpret_cast<CompleteArgumentInfoPOD*>(data.data());
+    int64_t* next_dim = sizes_strides();
+    int32_t total_dims = 0;
+    for (int32_t i = 0; i < num_inputs; i++) {
+      auto& pod = pods[i];
+      pod.is_tensor = static_cast<uint32_t>(inputs[i].isTensor());
+      if (pod.is_tensor) {
+        at::Tensor t = inputs[i].toTensor();
+        pod.defined = t.defined();
+        if (pod.defined) {
+          pod.type = static_cast<int>(t.scalar_type());
+          pod.device = (!t.is_cuda()) ? -1 : t.get_device();
+          pod.requires_grad =
+              with_grad && autograd::as_variable_ref(t).requires_grad();
+          total_dims += t.ndimension();
+          auto sizes = t.sizes();
+          std::copy(sizes.begin(), sizes.end(), next_dim);
+          next_dim += sizes.size();
+          auto strides = t.strides();
+          std::copy(strides.begin(), strides.end(), next_dim);
+          next_dim += strides.size();
+        }
+      }
+      // each POD has a running tally of all dimensions including its own
+      pod.total_dims = total_dims;
+    }
+    // we precompute the hash_code to minimize the time inside of hash
+    // table operations where we may need to hold a compiler cache lock.
+    hash_code = hash_combine(0, ninputs);
+    for (auto d : data) {
+      hash_code = hash_combine(hash_code, d);
+    }
+  }
+
+  // equality is fast: check ninputs, and then check the raw array data,
+  // there are no size/stride indirections
+  bool operator==(const CompleteArgumentSpec& spec) const {
+    return ninputs == spec.ninputs && data == spec.data;
+  }
+  bool operator!=(const CompleteArgumentSpec& spec) const {
+    return !(*this == spec);
+  }
+  friend struct CompleteArgumentInfo;
+  CompleteArgumentInfo at(size_t i) const;
+  size_t size() const {
+    return ninputs;
+  }
+  size_t hashCode() const {
+    return hash_code;
+  }
+
+ private:
+  ArrayRef<CompleteArgumentInfoPOD> tensor_info() const {
+    return ArrayRef<CompleteArgumentInfoPOD>(
+        reinterpret_cast<const CompleteArgumentInfoPOD*>(data.data()), ninputs);
+  }
+  // the start of the sizes_strides information, which comes after the
+  // CompleteArgumentInfoPOD list.
+  const int64_t* sizes_strides() const {
+    return data.data() + ninputs;
+  }
+  int64_t* sizes_strides() {
+    return data.data() + ninputs;
+  }
+  size_t hash_code; // precomputed on construction
+  int32_t ninputs;
+  // layout is ninputs of TensorPOD (each 64-bit) followed by their size and
+  // stride info for 3 tensors:
+  // [t0POD][t1POD][t2POD]...
+  // [t0 sizes][t0 strides][t1 sizes][t1 strides][t2 sizes][t2 strides]
+  std::vector<int64_t> data;
+};
+
+// public view of compressed CompleteArgumentInfo
+struct CompleteArgumentInfo {
+  CompleteArgumentInfo(const CompleteArgumentSpec& spec, const int i)
+      : spec(spec), i(i) {}
+  bool isTensor() const {
+    return pod(i).is_tensor;
+  }
+  at::ScalarType type() const {
+    return at::ScalarType(pod(i).type);
+  }
+  bool defined() const {
+    return pod(i).defined;
+  }
+  bool requires_grad() const {
+    return pod(i).requires_grad;
+  }
+  int device() const {
+    return pod(i).device;
+  }
+  int ndimension() const {
+    // See [valid range], it is always valid to ask for offset for (i + 1)
+    return (sizes_strides_offset(i + 1) - sizes_strides_offset(i)) / 2;
+  }
+  at::IntArrayRef sizes() const {
+    return at::IntArrayRef(
+        spec.sizes_strides() + sizes_strides_offset(i), ndimension());
+  }
+  at::IntArrayRef strides() const {
+    int ndim = ndimension();
+    return at::IntArrayRef(
+        spec.sizes_strides() + sizes_strides_offset(i) + ndim, ndim);
+  }
+  operator TypePtr() const {
+    if (!defined())
+      return TensorType::get();
+    return CompleteTensorType::create(
+        type(), ConvertIntToCPUOrCUDA(device()), sizes(), strides());
+  }
+
+ private:
+  // offsetinto sizes_strides() array where the sizes start for tensor j
+  // [valid range] valid range is [0, ninputs]
+  // (i.e. you can ask for the offset at ninputs, which would be the offset of
+  // the next tensor if it existed)
+  int sizes_strides_offset(int j) const {
+    if (j == 0)
+      return 0;
+    return 2 * pod(j - 1).total_dims;
+  }
+  const CompleteArgumentInfoPOD& pod(int j) const {
+    return spec.tensor_info().at(j);
+  }
+  const CompleteArgumentSpec& spec;
+  const int i;
 };
 
 inline std::ostream& operator<<(std::ostream& out, const ArgumentInfo& info) {
@@ -210,6 +376,37 @@ inline std::ostream& operator<<(std::ostream& out, const ArgumentInfo& info) {
 
 inline std::ostream& operator<<(std::ostream& out, const ArgumentSpec& spec) {
   out << "{";
+  for (size_t i = 0; i < spec.numTensors(); ++i) {
+    if (i > 0)
+      out << ", ";
+    out << spec.tensorAt(i);
+  }
+  out << "; ";
+  for (size_t i = 0; i < spec.numOptionals(); ++i) {
+    if (i > 0)
+      out << ", ";
+    out << spec.isPresent(i);
+  }
+  out << "}";
+  return out;
+}
+
+inline std::ostream& operator<<(
+    std::ostream& out,
+    const CompleteArgumentInfo& info) {
+  if (!info.defined()) {
+    return out << "<undefined>";
+  }
+  out << "Tensor(device=" << info.device() << ", type=" << toString(info.type())
+      << ", requires_grad=" << info.requires_grad()
+      << ", sizes=" << info.sizes() << ", strides=" << info.strides() << ")";
+  return out;
+}
+
+inline std::ostream& operator<<(
+    std::ostream& out,
+    const CompleteArgumentSpec& spec) {
+  out << "{";
   for (size_t i = 0; i < spec.size(); ++i) {
     if (i > 0)
       out << ", ";
@@ -219,6 +416,10 @@ inline std::ostream& operator<<(std::ostream& out, const ArgumentSpec& spec) {
   return out;
 }
 
+inline CompleteArgumentInfo CompleteArgumentSpec::at(size_t i) const {
+  return CompleteArgumentInfo(*this, i);
+}
+
 } // namespace jit
 } // namespace torch
 
@@ -226,6 +427,12 @@ namespace std {
 template <>
 struct hash<torch::jit::ArgumentSpec> {
   size_t operator()(const torch::jit::ArgumentSpec& spec) const {
+    return spec.hashCode();
+  }
+};
+template <>
+struct hash<torch::jit::CompleteArgumentSpec> {
+  size_t operator()(const torch::jit::CompleteArgumentSpec& spec) const {
     return spec.hashCode();
   }
 };

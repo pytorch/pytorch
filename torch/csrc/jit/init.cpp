@@ -166,7 +166,7 @@ void initJITBindings(PyObject* module) {
 	    }
 	    ArgumentSpec spec =
 	      arg_spec_creator.create(with_grad, stack);
-	    arg_spec_creator.setInputTypes(*graph, spec);
+            arg_spec_creator.specializeTypes(*graph, spec);
             // We only get DimensionedTensorType from the arg_spec_creator, but
             // we want CompleteTensorType. The alternative would be to have a
             // "complete type inference" function in ArguemntSpecCreator.
@@ -243,6 +243,13 @@ void initJITBindings(PyObject* module) {
             return debugGetFusedKernelCode(g, inps);
           });
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
+      .def("__repr__", [](CompleteArgumentSpec& self) {
+        std::ostringstream s;
+        s << self;
+        return s.str();
+      });
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ArgumentSpec>(m, "ArgumentSpec");
   py::class_<Code>(m, "Code").def("grad_executors", [](Code& c) {

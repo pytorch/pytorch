@@ -69,6 +69,7 @@ namespace jit {
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
+  _(CompleteArgumentSpec)       \
   _(Fusion)                     \
   _(GraphExecutor)              \
   _(Interp)

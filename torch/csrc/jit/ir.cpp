@@ -639,7 +639,7 @@ std::shared_ptr<Graph> Graph::copy() {
 }
 
 bool Value::mustBeNone() const {
-  return type() == NoneType::get() || node_->mustBeNone();
+  return node_->mustBeNone();
 }
 bool Value::mustNotBeNone() const {
   return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
