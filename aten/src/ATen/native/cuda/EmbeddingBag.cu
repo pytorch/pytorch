@@ -376,7 +376,8 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
                                    const Tensor &bag_size_,
                                    const Tensor &max_indices,
                                    int64_t num_weights,
-                                   bool scale_grad_by_freq, int64_t mode) {
+                                   bool scale_grad_by_freq, int64_t mode,
+                                   const Tensor& per_sample_weights) {
   // indices, offsets and offset2bag are assumed having correct dtypes and
   // contiguous here due to the checks in _embedding_bag_backward in
   // EmbeddingBag.cpp.
@@ -389,6 +390,8 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
   auto grad_arg = TensorArg(grad, "grad", 1);
   checkSameGPU("embedding_bag_cuda", grad_arg, offsets_arg);
   checkSameGPU("embedding_bag_cuda", grad_arg, indices_arg);
+
+  AT_ASSERT(!per_sample_weights.defined());
 
   switch (mode) {
     case MODE_SUM:

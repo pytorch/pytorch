@@ -2326,8 +2326,9 @@ class TestNN(NNTestCase):
                                         device='cpu',
                                         dtype=torch.float,
                                         test_per_sample_weights=False,
-                                        sparse=True,
-                                        test_backward=True):
+                                        sparse=False,
+                                        test_backward=True,
+                                        backward_prec=None):
         es = nn.EmbeddingBag(N, D, mode=mode, sparse=sparse, max_norm=max_norm).to(device, dtype)
         e = nn.Embedding(N, D, max_norm=max_norm).to(device, dtype)
         e.weight.data.copy_(es.weight)
@@ -2336,7 +2337,9 @@ class TestNN(NNTestCase):
         grad_output = torch.rand(B, D, device=device, dtype=dtype)
 
         if test_per_sample_weights:
-            per_sample_weights = torch.randn(B, L, device=device, dtype=dtype)
+            # To prevent large gradients, weights should sum to 1 for each bag
+            per_sample_weights = \
+                torch.randn(B, L, device=device, dtype=dtype).softmax(dim=-1)
             output = es(input.view(-1), offsets, per_sample_weights.view(-1))
         else:
             output = es(input.view(-1), offsets)
@@ -2366,7 +2369,10 @@ class TestNN(NNTestCase):
             es_weight_grad = es.weight.grad.data.to_dense()
 
         # We have more floating point error here because we are dealing with larger numbers
-        needed_prec = dtype2prec[dtype] * 2
+        if backward_prec is None:
+            needed_prec = dtype2prec[dtype] * 2
+        else:
+            needed_prec = backward_prec
         self.assertEqual(es_weight_grad, e.weight.grad, needed_prec)
 
     def _test_EmbeddingBag(self, cuda, mode, sparse, dtype=torch.double):
@@ -2623,11 +2629,17 @@ class TestNN(NNTestCase):
             input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=torch.long)
             offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=torch.long)
             per_sample_weights = torch.randn_like(input, dtype=dtype)
+            reference_weights = es.weight.detach().requires_grad_()
 
             expected = self._embedding_bag_reference_impl(
-                input, es.weight, offsets, mode, per_sample_weights)
+                input, reference_weights, offsets, mode, per_sample_weights)
             result = es(input, offsets, per_sample_weights)
             self.assertEqual(result, expected)
+
+            grad = torch.randn_like(expected)
+            result.backward(grad)
+            expected.backward(grad)
+            self.assertEqual(es.weight.grad, reference_weights.grad)
 
         dtypes = (torch.float, torch.double)
         modes = ('sum',)
@@ -2641,9 +2653,10 @@ class TestNN(NNTestCase):
     def _test_EmbeddingBag_per_sample_weights_and_no_offsets(self, device='cpu'):
         dtypes = (torch.float, torch.double)
         modes = ('sum',)
-        for dtype, mode in itertools.product(dtypes, modes):
-            kwargs = dict(test_per_sample_weights=True, test_backward=False,
-                          mode=mode, dtype=dtype, device=device)
+        sparsity = (True, False)
+        for dtype, mode, sparse in itertools.product(dtypes, modes, sparsity):
+            kwargs = dict(test_per_sample_weights=True, device=device,
+                          mode=mode, dtype=dtype, sparse=sparse)
 
             # Simple case
             self._test_EmbeddingBag_vs_Embedding(2, 3, 5, 7, **kwargs)
