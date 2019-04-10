@@ -3014,6 +3014,13 @@ class _TestTorchMixin(object):
         self.assertTrue(x.is_cuda)
         torch.set_default_tensor_type(saved_type)
 
+    def test_bool_tensor_value_change(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.tensor([True, False], dtype=torch.bool)
+            x[0] = False
+            x[1] = True
+            self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool))
+
     def test_unfold_all_devices_and_dtypes(self):
         for device in torch.testing.get_all_device_types():
             for dt in torch.testing.get_all_dtypes():
