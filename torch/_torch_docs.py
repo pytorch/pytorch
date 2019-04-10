@@ -5495,9 +5495,9 @@ Example::
     tensor([ 1.7444,  1.1363,  0.7356,  0.5112])
 """.format(**multi_dim_common))
 
-add_docstr(torch.var_mean,
+add_docstr(torch.moments,
            r"""
-.. function:: var_mean(input, unbiased=True) -> Tensor
+.. function:: moments(input, unbiased=True) -> Tensor
 
 Returns the variance and mean of all elements in the :attr:`input` tensor.
 
@@ -5513,7 +5513,7 @@ Example::
     >>> a = torch.randn(1, 3)
     >>> a
     tensor([[0.0146, 0.4258, 0.2211]])
-    >>> torch.var_mean(a)
+    >>> torch.moments(a)
     (tensor(0.0423), tensor(0.2205))
 """.format(**multi_dim_common))
 

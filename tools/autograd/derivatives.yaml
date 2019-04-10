@@ -1472,5 +1472,5 @@
 - name: std_mean(Tensor self, IntArrayRef dim, bool unbiased, bool keepdim)
   self: var_std_mean_backward(grads, self, result0, result1, dim, unbiased, keepdim, true)
 
-- name: var_mean(Tensor self, IntArrayRef dim, bool unbiased, bool keepdim)
+- name: moments(Tensor self, IntArrayRef dim, bool unbiased, bool keepdim)
   self: var_std_mean_backward(grads, self, result0, result1, dim, unbiased, keepdim, false)

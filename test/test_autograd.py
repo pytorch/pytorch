@@ -2181,22 +2181,22 @@ class TestAutograd(TestCase):
         torch.autograd.backward(mean2, grad)
         self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
 
-    def test_var_backward_in_var_mean(self):
+    def test_var_backward_in_moments(self):
         dim = 0
         input1 = torch.randn(4, 3, requires_grad=True)
         input2 = deepcopy(input1)
-        var1, mean1 = torch.var_mean(input1, dim=dim)
+        var1, mean1 = torch.moments(input1, dim=dim)
         var2 = input2.var(dim=dim)
         grad = torch.randn(4, 3, requires_grad=True)
         torch.autograd.backward(var1, grad)
         torch.autograd.backward(var2, grad)
         self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
 
-    def test_mean_backward_in_var_mean(self):
+    def test_mean_backward_in_moments(self):
         dim = 2
         input1 = torch.randn(3, 4, 6, requires_grad=True)
         input2 = deepcopy(input1)
-        var1, mean1 = torch.var_mean(input1, dim=dim)
+        var1, mean1 = torch.moments(input1, dim=dim)
         mean2 = input2.mean(dim=dim)
         grad = torch.randn(3, 4, requires_grad=True)
         torch.autograd.backward(mean1, grad)

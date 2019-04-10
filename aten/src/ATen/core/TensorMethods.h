@@ -667,11 +667,11 @@ inline Tensor Tensor::var(bool unbiased) const {
 inline Tensor Tensor::var(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return dispatch_type().var(*this, dim, unbiased, keepdim);
 }
-inline std::tuple<Tensor,Tensor> Tensor::var_mean(bool unbiased) const {
-    return dispatch_type().var_mean(*this, unbiased);
+inline std::tuple<Tensor,Tensor> Tensor::moments(bool unbiased) const {
+    return dispatch_type().moments(*this, unbiased);
 }
-inline std::tuple<Tensor,Tensor> Tensor::var_mean(IntArrayRef dim, bool unbiased, bool keepdim) const {
-    return dispatch_type().var_mean(*this, dim, unbiased, keepdim);
+inline std::tuple<Tensor,Tensor> Tensor::moments(IntArrayRef dim, bool unbiased, bool keepdim) const {
+    return dispatch_type().moments(*this, dim, unbiased, keepdim);
 }
 inline Tensor Tensor::view_as(const Tensor & other) const {
     return dispatch_type().view_as(*this, other);

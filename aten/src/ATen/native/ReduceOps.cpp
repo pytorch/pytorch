@@ -657,10 +657,10 @@ static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, 
   return result;
 }
 
-static std::tuple<Tensor&,Tensor&> std_var_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, c10::optional<IntArrayRef> dim, bool unbiased, bool keepdim, bool take_sqrt) {
+static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &result1, Tensor &result2, const Tensor &self, c10::optional<IntArrayRef> dim, bool unbiased, bool keepdim, bool take_sqrt) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "std and var only support CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  AT_CHECK(at::isFloatingType(self.type().scalarType()), "std and var only support floating-point dtypes");
+           fname, " only support CPU AND CUDA backend, got: ", toString(self.type().backend()));
+  AT_CHECK(at::isFloatingType(self.type().scalarType()), fname, " only support floating-point dtypes");
   ScalarType dtype;
   if (result1.defined()) {
     AT_CHECK(!result2.defined() || result1.type().scalarType() == result2.type().scalarType(),
@@ -673,7 +673,7 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(Tensor &result1, Tensor &res
   } else {
     dtype = get_dtype(result2, self, {}, true);
   }
-  auto iter = make_reduction("std or var", result1, result2, self, dim, keepdim, dtype);
+  auto iter = make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
   if (iter->numel() == 0) {
     result1.fill_(NAN);
     result2.fill_(NAN);
@@ -683,26 +683,26 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(Tensor &result1, Tensor &res
   return std::tuple<Tensor&, Tensor&>(result1, result2);
 }
 
-std::tuple<Tensor&,Tensor&> var_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, c10::optional<IntArrayRef> dim, bool unbiased, bool keepdim) {
-  return std_var_mean_out(result1, result2, self, dim, unbiased, keepdim, false);
+std::tuple<Tensor&,Tensor&> moments_out(Tensor &result1, Tensor &result2, const Tensor &self, c10::optional<IntArrayRef> dim, bool unbiased, bool keepdim) {
+  return std_var_mean_out("moments", result1, result2, self, dim, unbiased, keepdim, false);
 }
 
 std::tuple<Tensor&,Tensor&> std_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, c10::optional<IntArrayRef> dim, bool unbiased, bool keepdim) {
-  return std_var_mean_out(result1, result2, self, dim, unbiased, keepdim, true);
+  return std_var_mean_out("std_mean", result1, result2, self, dim, unbiased, keepdim, true);
 }
 
-std::tuple<Tensor&,Tensor&> var_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, bool unbiased) {
-  return std_var_mean_out(result1, result2, self, c10::nullopt, unbiased, false, false);
+std::tuple<Tensor&,Tensor&> moments_out(Tensor &result1, Tensor &result2, const Tensor &self, bool unbiased) {
+  return std_var_mean_out("moments", result1, result2, self, c10::nullopt, unbiased, false, false);
 }
 
 std::tuple<Tensor&,Tensor&> std_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, bool unbiased) {
-  return std_var_mean_out(result1, result2, self, c10::nullopt, unbiased, false, true);
+  return std_var_mean_out("std_mean", result1, result2, self, c10::nullopt, unbiased, false, true);
 }
 
-std::tuple<Tensor,Tensor> var_mean(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
+std::tuple<Tensor,Tensor> moments(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   Tensor result1 = at::empty({0}, self.options());
   Tensor result2 = at::empty({0}, self.options());
-  return at::native::var_mean_out(result1, result2, self, dim, unbiased, keepdim);
+  return at::native::moments_out(result1, result2, self, dim, unbiased, keepdim);
 }
 
 std::tuple<Tensor,Tensor> std_mean(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
@@ -717,10 +717,10 @@ std::tuple<Tensor,Tensor> std_mean(const Tensor& self, bool unbiased) {
   return at::native::std_mean_out(result1, result2, self, unbiased);
 }
 
-std::tuple<Tensor,Tensor> var_mean(const Tensor& self, bool unbiased) {
+std::tuple<Tensor,Tensor> moments(const Tensor& self, bool unbiased) {
   Tensor result1 = at::empty({0}, self.options());
   Tensor result2 = at::empty({0}, self.options());
-  return at::native::var_mean_out(result1, result2, self, unbiased);
+  return at::native::moments_out(result1, result2, self, unbiased);
 }
 
 Tensor var(const Tensor& self, bool unbiased) {
