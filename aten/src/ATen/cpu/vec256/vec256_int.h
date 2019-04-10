@@ -96,6 +96,8 @@ struct Vec256<int64_t> : public Vec256i {
     auto inverse = _mm256_xor_si256(values, is_larger);
     return _mm256_sub_epi64(inverse, is_larger);
   }
+  Vec256<int64_t> frac() const;
+  Vec256<int64_t> neg() const;
   Vec256<int64_t> operator==(const Vec256<int64_t>& other) const {
     return _mm256_cmpeq_epi64(values, other.values);
   }
@@ -185,6 +187,8 @@ struct Vec256<int32_t> : public Vec256i {
   Vec256<int32_t> abs() const {
     return _mm256_abs_epi32(values);
   }
+  Vec256<int32_t> frac() const;
+  Vec256<int32_t> neg() const;
   Vec256<int32_t> operator==(const Vec256<int32_t>& other) const {
     return _mm256_cmpeq_epi32(values, other.values);
   }
@@ -369,6 +373,8 @@ struct Vec256<int16_t> : public Vec256i {
   Vec256<int16_t> abs() const {
     return _mm256_abs_epi16(values);
   }
+  Vec256<int16_t> frac() const;
+  Vec256<int16_t> neg() const;
   Vec256<int16_t> operator==(const Vec256<int16_t>& other) const {
     return _mm256_cmpeq_epi16(values, other.values);
   }
@@ -417,6 +423,19 @@ Vec256<int32_t> inline operator-(const Vec256<int32_t>& a, const Vec256<int32_t>
 template <>
 Vec256<int16_t> inline operator-(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
   return _mm256_sub_epi16(a, b);
+}
+
+// Negation. Defined here so we can utilize operator-
+Vec256<int64_t> Vec256<int64_t>::neg() const {
+  return Vec256<int64_t>(0) - *this;
+}
+
+Vec256<int32_t> Vec256<int32_t>::neg() const {
+  return Vec256<int32_t>(0) - *this;
+}
+
+Vec256<int16_t> Vec256<int16_t>::neg() const {
+  return Vec256<int16_t>(0) - *this;
 }
 
 // Emulate operations with no native 64-bit support in avx,
