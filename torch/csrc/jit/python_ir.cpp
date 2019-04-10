@@ -137,6 +137,7 @@ struct ConcretePythonOp : public PythonOp {
     Node::cloneFrom(other_);
     auto other = other_->cast<PythonOp>();
     this->cconv = other->cconv;
+    this->ignore_on_export = other->ignore_on_export;
     Py_INCREF(other->pyobj.get());
     this->pyobj = THPObjectPtr(other->pyobj.get());
     for (auto& sa : other->scalar_args) {
