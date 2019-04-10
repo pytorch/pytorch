@@ -18,8 +18,6 @@ foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
    endforeach()
 endforeach()
 
-set(extra_src)
-# loop over files which need to be split between types (because of long compile times)
 foreach(THC_FILE TensorMathCompareT TensorMathCompare)
    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu")
       FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu"
