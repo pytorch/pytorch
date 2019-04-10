@@ -388,6 +388,13 @@ struct C10_API TensorOptions {
           default:
             AT_ERROR("Unsupported device type for sparse layout: ", device().type());
         }
+      case Layout::Mkldnn:
+        switch (device().type()) {
+          case DeviceType::CPU:
+            return MkldnnCPUTensorId();
+          default:
+            AT_ERROR("Unsupported device type for mkldnn layout: ", device().type());
+        }
       default:
         AT_ERROR("Unsupported layout: ", layout());
     }
@@ -591,6 +598,8 @@ inline DeviceType computeDeviceType(TensorTypeId tid) {
     return DeviceType::CUDA;
   } else if (tid == SparseHIPTensorId()) {
     return DeviceType::HIP;
+  } else if (tid == MkldnnCPUTensorId()) {
+    return DeviceType::CPU;
   } else {
     AT_ASSERTM(false, "Unknown TensorTypeId: ", tid);
   }

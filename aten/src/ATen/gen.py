@@ -175,7 +175,7 @@ generators = {
 }
 
 backends = ['CPU', 'CUDA']
-densities = ['Dense', 'Sparse']
+densities = ['Dense', 'Sparse', 'Mkldnn']  # TODO: layout instead of densities?
 extension_backends = ['MSNPU', 'XLA']
 
 # scalar_name, c_type, accreal, is_floating_type
@@ -259,7 +259,7 @@ def format_yaml(data):
 def generate_storage_type_and_tensor(backend, density, scalar_type, declarations):
     scalar_name, c_type, accreal, is_floating_type = scalar_type
     env = {}
-    density_tag = 'Sparse' if density == 'Sparse' else ''
+    density_tag = density if density != 'Dense' else ''
     env['Density'] = density
     env['ScalarName'] = scalar_name
     env['ScalarType'] = c_type
@@ -401,7 +401,7 @@ def generate_type_extension_backend_derived_types(backend):
 
 
 def generate_legacy_th_dispatcher(backend, density, scalar_type, declarations):
-    assert density != 'Sparse'
+    assert density == 'Dense'
     scalar_name, c_type, accreal, is_floating_type = scalar_type
     env = {}
     env['Backend'] = backend
@@ -421,6 +421,8 @@ def iterate_types():
     for backend in backends:
         for density in densities:
             for scalar_type in scalar_types:
+                if density == 'Mkldnn' and (backend != 'CPU' or scalar_type[0] != 'Float'):
+                    continue
                 if density == 'Sparse' and scalar_type[0] == 'Half':
                     # THS does not do half type yet.
                     continue
@@ -450,7 +452,7 @@ def declare_outputs():
         fm.will_write(fname)
     for backend, density, scalar_type in iterate_types():
         scalar_name = scalar_type[0]
-        full_backend = "Sparse" + backend if density == "Sparse" else backend
+        full_backend = backend if density == "Dense" else density + backend
         fm = file_manager
         if backend == 'CUDA':
             fm = cuda_file_manager
@@ -461,7 +463,7 @@ def declare_outputs():
             fm.will_write("{}{}{}.h".format(full_backend, scalar_name, kind))
             fm.will_write("{}{}{}.cpp".format(full_backend, scalar_name, kind))
         # output LegacyTHDispatchers
-        if density != 'Sparse':
+        if density == 'Dense':
             fm.will_write("{}{}{}{}.h".format('LegacyTH', full_backend, scalar_name, 'Dispatcher'))
             fm.will_write("{}{}{}{}.cpp".format('LegacyTH', full_backend, scalar_name, 'Dispatcher'))
     for backend in extension_backends:
@@ -533,7 +535,7 @@ def generate_outputs():
         generate_type_extension_backend_derived_types(backend)
 
     for backend, density, scalar_type in iterate_types():
-        if density != 'Sparse':
+        if density == 'Dense':
             generate_legacy_th_dispatcher(backend, density, scalar_type, [])
 
     core_files = {
