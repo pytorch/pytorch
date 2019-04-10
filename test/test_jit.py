@@ -5076,6 +5076,11 @@ a")
         def test_sqrt_float():
             return math.sqrt(2.0)
 
+        def test_pow_float():
+            return math.pow(2.0, 2.0)
+        def test_pow_int():
+            return math.pow(2.0, 2)
+
         self.checkScript(test_floor, ())
         self.checkScript(test_ceil, ())
         self.checkScript(test_log_int, ())
@@ -5090,6 +5095,8 @@ a")
         self.checkScript(test_exp_float, ())
         self.checkScript(test_sqrt_int, ())
         self.checkScript(test_sqrt_float, ())
+        self.checkScript(test_pow_float, ())
+        self.checkScript(test_pow_int, ())
 
     def test_if_nest_while(self):
         def func(a, b):

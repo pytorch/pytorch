@@ -1503,6 +1503,7 @@ def _get_builtin_table():
     _builtin_table[id(math.log2)] = "aten::log2"
     _builtin_table[id(math.exp)] = "aten::exp"
     _builtin_table[id(math.sqrt)] = "aten::sqrt"
+    _builtin_table[id(math.pow)] = "aten::pow"
     _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"
     _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
     _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
