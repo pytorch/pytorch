@@ -451,6 +451,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: unfold
    .. automethod:: uniform_
    .. automethod:: unique
+   .. automethod:: unique_consecutive
    .. automethod:: unsqueeze
    .. automethod:: unsqueeze_
    .. automethod:: values
