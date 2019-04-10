@@ -17,7 +17,7 @@ from torch.autograd.profiler import profile
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm,
-                          load_tests)
+                          load_tests, random_symmetric_pd_matrix)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
@@ -2167,11 +2167,7 @@ class TestAutograd(TestCase):
             return torch.cholesky(x, upper)
 
         def run_test(upper, dims):
-            root = torch.rand(*dims)
-            indices = torch.ones(dims[-1], dims[-1], dtype=torch.uint8).tril()
-            indices = indices.expand_as(root)
-            root[indices] = 0
-            root.requires_grad_()
+            root = torch.rand(*dims, requires_grad=True)
 
             gradcheck(func, [root])
             gradgradcheck(func, [root])
@@ -2179,6 +2175,25 @@ class TestAutograd(TestCase):
         for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
             run_test(upper, dims)
+
+        # Testing the inverse using standard inverse and cholesky
+        def mat_test(mat_size, batch_sizes, upper):
+            x = random_symmetric_pd_matrix(mat_size, *batch_sizes)
+            x_clone = x.clone().requires_grad_()
+            x.requires_grad_()
+            standard_inv = x.inverse()
+            chol_factor = x_clone.cholesky(upper=upper)
+            chol_factor_inv = chol_factor.inverse()
+            if upper:
+                chol_inv = torch.matmul(chol_factor_inv, chol_factor_inv.transpose(-1, -2))
+            else:
+                chol_inv = torch.matmul(chol_factor_inv.transpose(-1, -2), chol_factor_inv)
+            standard_inv.sum().backward()
+            chol_inv.sum().backward()
+            self.assertTrue(torch.allclose(x.grad, x_clone.grad))
+
+        for mat_size, batch_sizes, upper in product([3, 5], [(), (3,), (3, 3)], [True, False]):
+            mat_test(mat_size, batch_sizes, upper)
 
     @skipIfNoLapack
     def test_triangular_solve(self):
