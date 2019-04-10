@@ -1,6 +1,8 @@
 #include <caffe2/ideep/ideep_utils.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 // Takes a shape and data tensor and reshapes it
 class IDEEPReshapeOp final : public IDEEPOperator {
@@ -127,4 +129,4 @@ class IDEEPReshapeOp final : public IDEEPOperator {
 
 REGISTER_IDEEP_OPERATOR(Reshape, IDEEPReshapeOp);
 
-} // namespace caffe2
+} // namespace
