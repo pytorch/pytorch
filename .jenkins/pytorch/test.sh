@@ -186,6 +186,8 @@ test_xla() {
   assert_git_not_dirty
 }
 
+(cd test && python -c "import torch; print(torch.__config__.show())")
+
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   test_torchvision
   test_xla
