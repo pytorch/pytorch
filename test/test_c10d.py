@@ -529,7 +529,7 @@ class TimeoutTest(TestCase):
                 args=(backend, init_method, c2p))
             t.daemon = True
             t.start()
-            t.join(5)
+            t.join()
 
             self.assertEqual(1, len(c2p))
             # waiting time should be 1s, use 3s to rule out false alarm
