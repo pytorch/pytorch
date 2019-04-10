@@ -151,13 +151,19 @@ struct C10_API AutogradMetaInterface {
 // 3. Unpacked saved variables share the version counter of the source.
 //
 // Version counters are not shared when:
+//
 // 1. We replace a `Variable`'s underlying `Tensor` by calling `set_data(...)`.
 //
-// NOTE: We explicitly don't increment the version counter in non-Variable
+// Question 1: Why do we not increment the version counter in non-Variable
+// operations?
+//
+// Answer: We explicitly don't increment the version counter in non-Variable
 // operations, because it is a useful escape hatch when we want to change the
 // content of a Variable without invalidating it in the autograd graph.
 //
-// NOTE: After the Variable/Tensor merge, a tensor will not have AutogradMeta when
+// Question 2: Why do we put the version counter in TensorImpl instead of AutogradMeta?
+//
+// Answer: After the Variable/Tensor merge, a tensor will not have AutogradMeta when
 // its `requires_grad_` is false, but when we use this tensor in the forward pass of
 // a function that requires saving this tensor for backward, we need to keep track of
 // this tensor's version to make sure it's always valid in the autograd graph.
