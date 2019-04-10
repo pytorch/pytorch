@@ -45,7 +45,8 @@ class AliasDb {
   bool writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks = false)
       const;
 
-  // Does `container` hold in memory any element that exist in elem
+  // Does `a` and `b` potentially share a memory location or do either
+  // hold in memory any element that exists in the other
   bool mayContainAlias(const Value* elem, const Value* container) const;
 
   // Do `a` and `b` potentially share a memory location?

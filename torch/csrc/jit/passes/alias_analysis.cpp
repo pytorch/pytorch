@@ -24,13 +24,13 @@ bool AliasDb::shouldAnnotate(const Value* v) {
 }
 
 bool AliasDb::isContainerType(const TypePtr& type) {
-  return type->kind() == TypeKind::ListType ||
-      type->kind() == TypeKind::TupleType ||
-      type->kind() == TypeKind::DictType ||
-      (type->kind() == TypeKind::FutureType &&
-       isContainerType(type->cast<FutureType>()->getElementType())) ||
-      (type->kind() == TypeKind::OptionalType &&
-       isContainerType(type->cast<OptionalType>()->getElementType()));
+  if (type->kind() == TypeKind::FutureType) {
+    return isContainerType(type->cast<FutureType>()->getElementType());
+  } else if (type->kind() == TypeKind::OptionalType) {
+    return isContainerType(type->cast<OptionalType>()->getElementType());
+  } else {
+    return type->containedTypes().size() > 0;
+  }
 }
 
 AliasDb::~AliasDb() = default;
@@ -800,9 +800,15 @@ bool AliasDb::mayContainAlias(const Value* elem, const Value* container) const {
     return false;
   }
 
-  // don't know how to analyze nested containers
+  // don't know how to analyze containers other than tuple
   if (isContainerType(elem->type())) {
-    return true;
+    if (elem->node()->kind() != prim::TupleConstruct) {
+      return true;
+    }
+    auto inp = elem->node()->inputs();
+    return std::any_of(inp.begin(), inp.end(), [&](const Value* v) {
+      return mayContainAlias(v, container);
+    });
   }
 
   // if it's not a container type case already covered through mayAlias
@@ -815,12 +821,12 @@ bool AliasDb::mayContainAlias(const Value* elem, const Value* container) const {
     return true;
   }
 
-  for (const auto& container_elem :
-       container->type()->expect<TupleType>()->elements()) {
-    if (isContainerType(container_elem)) {
-      return true;
-    }
-  }
+  auto inp = container->node()->inputs();
+  if (std::any_of(inp.begin(), inp.end(), [&](const Value* cont) {
+        return mayContainAlias(elem, cont);
+      })) {
+    return true;
+  };
 
   for (const auto& input : container->node()->inputs()) {
     if (isWildcard(input)) {

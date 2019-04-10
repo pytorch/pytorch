@@ -762,6 +762,52 @@ void testMemoryDAG() {
     ASSERT_TRUE(t.mayAlias(bar, baz));
     ASSERT_FALSE(t.mayAlias(foo, baz));
   }
+
+  {
+    // x(y) -> x contains y
+
+    // b(a)
+    // c(a)
+    MemoryDAG t;
+    auto a = t.makeFreshValue(aValue);
+    auto b = t.makeFreshValue(bValue);
+    t.addToContainedElements(a, b);
+
+    auto c = t.makeFreshValue(cValue);
+    t.addToContainedElements(a, c);
+
+    AT_ASSERT(t.mayContainAlias(a, b));
+    // a does not contain any elements
+    AT_ASSERT(!t.mayContainAlias(b, a));
+
+    AT_ASSERT(t.mayContainAlias(a, c))
+    // a does not contain any elements
+    AT_ASSERT(!t.mayContainAlias(c, a));
+
+    AT_ASSERT(t.mayContainAlias(b, c));
+    AT_ASSERT(t.mayContainAlias(c, b));
+
+    // containers contain an element in themselves
+    AT_ASSERT(t.mayContainAlias(b, b));
+    AT_ASSERT(t.mayContainAlias(c, c));
+
+    // elements that do not contain do not contain themselves
+    AT_ASSERT(!t.mayContainAlias(a, a));
+
+    auto d = t.makeFreshValue(dValue);
+
+    // b(a)
+    // c(a)
+    // d(b(a))
+    t.addToContainedElements(b, d);
+    AT_ASSERT(t.mayContainAlias(b, d));
+    AT_ASSERT(t.mayContainAlias(d, b));
+
+    AT_ASSERT(t.mayContainAlias(c, d));
+    AT_ASSERT(t.mayContainAlias(d, c));
+
+    AT_ASSERT(t.mayContainAlias(a, d));
+  }
 }
 } // namespace jit
 } // namespace torch

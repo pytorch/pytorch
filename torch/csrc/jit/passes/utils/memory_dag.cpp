@@ -46,9 +46,10 @@ bool MemoryDAG::mayContainAliasImpl(
     const Element* elem,
     const Element* container) const {
   // If elem contains other elements, does container hold any of those elements?
+
   if (std::any_of(
           elem->contained_elements.begin(),
-          elem->contained_elements.begin(),
+          elem->contained_elements.end(),
           [&](const Element* e) {
             return mayContainAliasImpl(e, container);
           })) {
@@ -58,7 +59,7 @@ bool MemoryDAG::mayContainAliasImpl(
   // If container contains other elements, do those containers hold elem?
   if (std::any_of(
           container->contained_elements.begin(),
-          container->contained_elements.begin(),
+          container->contained_elements.end(),
           [&](const Element* cont) {
             return mayContainAliasImpl(elem, cont);
           })) {
