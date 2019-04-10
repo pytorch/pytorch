@@ -646,22 +646,27 @@
 # applying indices = indices.contiguous().
 # The backward functions apply a check that these input tensors are contiguous.
 
-- func: embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False) -> (Tensor, Tensor, Tensor, Tensor)
+- func: embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None) -> (Tensor, Tensor, Tensor, Tensor)
 
-- func: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False) -> (Tensor, Tensor, Tensor, Tensor)
+- func: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CPU: _embedding_bag_cpu
     CUDA: _embedding_bag_cuda
 
-- func: _embedding_bag_backward(Tensor grad, Tensor indices, Tensor offsets, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, int num_weights, bool scale_grad_by_freq, int mode, bool sparse) -> Tensor
+- func: _embedding_bag_backward(Tensor grad, Tensor indices, Tensor offsets, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, int num_weights, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights) -> Tensor
 
-- func: _embedding_bag_sparse_backward(Tensor grad, Tensor indices, Tensor offsets, Tensor offset2bag, Tensor bag_size, int num_weights, bool scale_grad_by_freq, int mode) -> Tensor
+- func: _embedding_bag_sparse_backward(Tensor grad, Tensor indices, Tensor offsets, Tensor offset2bag, Tensor bag_size, int num_weights, bool scale_grad_by_freq, int mode, Tensor? per_sample_weights) -> Tensor
 
-- func: _embedding_bag_dense_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, IndexTensor maximum_indices, int num_weights, bool scale_grad_by_freq, int mode) -> Tensor
+- func: _embedding_bag_dense_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, IndexTensor maximum_indices, int num_weights, bool scale_grad_by_freq, int mode, Tensor? per_sample_weights) -> Tensor
   matches_jit_signature: False
   dispatch:
     CPU: _embedding_bag_dense_backward_cpu
     CUDA: _embedding_bag_dense_backward_cuda
+
+- func: _embedding_bag_per_sample_weights_backward(Tensor grad, Tensor weight, Tensor indices, Tensor offset2bag, int mode) -> Tensor
+  dispatch:
+    CPU: _embedding_bag_per_sample_weights_backward_cpu
+    CUDA: _embedding_bag_per_sample_weights_backward_cuda
 
 - func: empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
   cpu_half: True
@@ -800,6 +805,20 @@
   dispatch:
     CPU: _floor_out_cpu
     CUDA: _floor_out_cuda
+
+- func: frac(Tensor self) -> Tensor
+  variants: function, method
+
+- func: frac_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    CPU: _frac__cpu
+    CUDA: _frac__cuda
+
+- func: frac(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _frac_out_cpu
+    CUDA: _frac_out_cuda
 
 - func: full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
@@ -1350,7 +1369,6 @@
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: rand(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: False
 
 - func: rand(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -1363,12 +1381,10 @@
 - func: randint(int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: randint(int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: False
 
 - func: randint(int low, int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: randint(int low, int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: False
 
 - func: randint(int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -1389,7 +1405,6 @@
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: randn(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: False
 
 - func: randn(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -1402,7 +1417,6 @@
 - func: randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: randperm(int n, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: False
 
 - func: randperm(int n, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -1420,8 +1434,48 @@
     CPU: range_cpu_out
     CUDA: range_cuda_out
 
+- func: reciprocal(Tensor self) -> Tensor
+  variants: function, method
+
+- func: reciprocal_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    CPU: _reciprocal__cpu
+    CUDA: _reciprocal__cuda
+
+- func: reciprocal(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _reciprocal_out_cpu
+    CUDA: _reciprocal_out_cuda
+
+- func: neg(Tensor self) -> Tensor
+  variants: function, method
+
+- func: neg_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    CPU: _neg__cpu
+    CUDA: _neg__cuda
+
+- func: neg(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _neg_out_cpu
+    CUDA: _neg_out_cuda
+
 - func: repeat(Tensor self, int[] repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+
+- func: repeat_interleave(Tensor repeats) -> Tensor
+  variants: function
+  dispatch:
+    CPU: repeat_interleave_cpu
+    CUDA: repeat_interleave_cuda
+
+- func: repeat_interleave(Tensor self, Tensor repeats, int? dim=None) -> Tensor
+  variants: function, method
+
+- func: repeat_interleave(Tensor self, int repeats, int? dim=None) -> Tensor
+  variants: function, method
 
 - func: reshape(Tensor self, int[] shape) -> Tensor
   variants: function, method
@@ -1850,6 +1904,18 @@
     CPU: _unique_dim_cpu
     CUDA: _unique_dim_cuda
 
+- func: unique_consecutive(Tensor self, bool return_inverse=False, bool return_counts=False, int? dim=None) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: unique_consecutive_cpu
+    CUDA: unique_consecutive_cuda
+
+- func: unique_dim_consecutive(Tensor self, int dim, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: unique_dim_consecutive_cpu
+    CUDA: unique_dim_consecutive_cuda
+
 # _unique and _unique_dim are fragile and modifying them easily cause internal break
 # below two operators are a temporary hack for adding return_counts support
 # Please don't rely on these two operators, they will be removed soon
@@ -2268,8 +2334,10 @@
   dispatch:
     SparseCPU: sparse_to_dense
     SparseCUDA: sparse_to_dense
+    MkldnnCPU: mkldnn_to_dense
   requires_tensor: True
 
+- func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
 
 - func: sparse_dim(Tensor self) -> int
   variants: method
@@ -2410,6 +2478,13 @@
   dispatch:
     CPU: dense_to_sparse
     CUDA: dense_to_sparse
+
+- func: to_mkldnn(Tensor self) -> Tensor
+  variants: method
+  dispatch:
+    CPU: dense_to_mkldnn
+
+- func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
 
 - func: quantize_linear(Tensor self, float scale, int zero_point) -> Tensor
   variants: function, method
@@ -2745,16 +2820,7 @@
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
   variants: method
 
-- func: frac_(Tensor(a!) self) -> Tensor(a!)
-  variants: method
-
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
-  variants: method
-
-- func: reciprocal_(Tensor(a!) self) -> Tensor(a!)
-  variants: method
-
-- func: neg_(Tensor(a!) self) -> Tensor(a!)
   variants: method
 
 - func: pow_(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
@@ -2971,14 +3037,14 @@
 - func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method, function
 
-- func: gels(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!), Tensor(b!))
+- func: gels(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
 
-- func: gels(Tensor self, Tensor A) -> (Tensor, Tensor)
+- func: gels(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
   variants: method, function
 
-- func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!), Tensor(b!))
+- func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
 
-- func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor, Tensor)
+- func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
   variants: method, function
 
 - func: _triangular_solve_helper(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular) -> (Tensor, Tensor)
@@ -3071,9 +3137,9 @@
     CPU: _lu_with_info_cpu
     CUDA: _lu_with_info_cuda
 
-- func: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
+- func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
+- func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   variants: method, function
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
@@ -3107,22 +3173,7 @@
 - func: erfinv(Tensor self) -> Tensor
   variants: method, function
 
-- func: frac(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: frac(Tensor self) -> Tensor
-  variants: method, function
-
 - func: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
-  variants: method, function
-
-- func: reciprocal(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: reciprocal(Tensor self) -> Tensor
-  variants: method, function
-
-- func: neg(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: neg(Tensor self) -> Tensor
   variants: method, function
 
 - func: atan2(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
