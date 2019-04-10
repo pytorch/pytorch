@@ -85,7 +85,7 @@ def _parse_arg(value, desc):
         if desc == 'is':
             for v in value.node().inputs():
                 if v.node().kind() != 'onnx::Constant':
-                    raise Runtime("Failed to export an ONNX attribute, "
+                    raise RuntimeError("Failed to export an ONNX attribute, "
                                   "since it's not constant, please try to make "
                                   "things (i.e., kernel size) static if possible")
             return [int(v.node()['value']) for v in value.node().inputs()]
