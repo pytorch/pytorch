@@ -340,7 +340,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
                                                         training, input_names,
                                                         output_names, operator_export_type,
                                                         example_outputs, propagate,
-                                                        _retain_param_name)
+                                                        _retain_param_name, do_constant_folding)
 
         # TODO: Don't allocate a in-memory string for the protobuf
         defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
