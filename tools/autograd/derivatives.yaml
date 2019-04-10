@@ -951,10 +951,11 @@
 - name: embedding_dense_backward(Tensor grad_output, Tensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq)
   grad_output: embedding_dense_double_backward(grad, indices)
 
-- name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int64_t mode, bool sparse)
+- name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int64_t mode, bool sparse, Tensor per_sample_weights)
   indices: not_differentiable
   offsets: not_differentiable
-  weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse)
+  weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse, per_sample_weights)
+  per_sample_weights: not_differentiable # TODO(rzou): See issue #4068
 
 - name: embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
   indices: not_differentiable
