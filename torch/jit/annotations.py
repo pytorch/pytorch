@@ -3,7 +3,8 @@ import ast
 import inspect
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
-    BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict
+    BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, \
+    is_script_class, get_script_class
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType
 from textwrap import dedent
@@ -179,6 +180,12 @@ def ann_to_type(ann):
         return IntType.get()
     elif ann is str:
         return StringType.get()
+    elif inspect.isclass(ann):
+        if is_script_class(ann.__name__):
+            return get_script_class(ann.__name__)["type"]
+        else:
+            raise ValueError("Class annotation is not a script class "
+                             "(did you decorate the class with '@torch.jit.script'?)")
     raise ValueError("Unknown type annotation: '{}'".format(ann.__name__))
 
 

@@ -28,6 +28,24 @@ boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
 # with an operator that always throws an error
 ignored_fns = weakref.WeakSet()  # noqa: T484
 
+# User defined class registry
+script_classes = {}
+
+
+def add_script_class(cls, name, class_type):
+    script_classes[name] = {"class": cls, "type": class_type}
+
+
+def get_script_class(name):
+    if name not in script_classes:
+        raise RuntimeError("Unknown reference to ScriptClass '{}'. "
+                           "Did you forget to import it?".format(name))
+    return script_classes[name]
+
+
+def is_script_class(name):
+    return name in script_classes
+
 COMPILATION_PENDING = object()
 COMPILED = object()
 

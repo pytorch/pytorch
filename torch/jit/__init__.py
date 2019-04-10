@@ -743,8 +743,8 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
         ast = get_jit_class_def(obj)
-        _jit_script_class_compile(mod, ast, _rcb)
-        _add_script_class(obj, obj.__name__)
+        new_mod, class_type = _jit_script_class_compile(mod, ast, _rcb)
+        _jit_internal.add_script_class(obj, obj.__name__, class_type)
         return obj
     else:
         ast = get_jit_def(obj)
@@ -1516,21 +1516,6 @@ def _find_builtin(fn):
 
 _register_builtin(len, 'aten::len')
 _register_builtin(_wait, 'aten::wait')
-
-_script_classes = {}
-
-
-def _add_script_class(cls, name):
-    global _script_classes
-    _script_classes[name] = cls
-
-
-def _get_script_class(name):
-    global _script_classes
-    if name not in _script_classes:
-        raise RuntimeError("Unknown reference to ScriptClass '{}'. "
-                           "Did you forget to import it?".format(name))
-    return _script_classes[name]
 
 # torch.jit.Error
 Error = torch._C.JITException

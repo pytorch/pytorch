@@ -687,6 +687,11 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](TypePtr key, TypePtr value) {
         return DictType::create(key, value);
       }));
+  py::class_<ClassType, Type, std::shared_ptr<ClassType>>(m, "ClassType")
+      .def(py::init(
+          [](const std::string& name, std::shared_ptr<script::Module> module) {
+            return ClassType::create(name, module);
+          }));
   py::class_<OptionalType, Type, std::shared_ptr<OptionalType>>(
       m, "OptionalType")
       .def(py::init([](TypePtr a) { return OptionalType::create(a); }))

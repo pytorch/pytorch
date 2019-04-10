@@ -1044,7 +1044,7 @@ void initJitScriptBindings(PyObject* module) {
           rcbs.push_back(pythonResolver(rcb));
         }
         defineMethodsInModule(module, methodDefs, rcbs, Self(classType));
-        return module;
+        return std::make_pair(module, classType);
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {
