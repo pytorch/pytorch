@@ -146,58 +146,6 @@ class Tensor(torch._C._TensorBase):
         self._backward_hooks[handle.id] = hook
         return handle
 
-    def reinforce(self, reward):
-        def trim(str):
-            return '\n'.join([line.strip() for line in str.split('\n')])
-
-        raise RuntimeError(trim(r"""reinforce() was removed.
-            Use torch.distributions instead.
-            See https://pytorch.org/docs/master/distributions.html
-
-            Instead of:
-
-            probs = policy_network(state)
-            action = probs.multinomial()
-            next_state, reward = env.step(action)
-            action.reinforce(reward)
-            action.backward()
-
-            Use:
-
-            probs = policy_network(state)
-            # NOTE: categorical is equivalent to what used to be called multinomial
-            m = torch.distributions.Categorical(probs)
-            action = m.sample()
-            next_state, reward = env.step(action)
-            loss = -m.log_prob(action) * reward
-            loss.backward()
-        """))
-
-    detach = _add_docstr(_C._TensorBase.detach, r"""
-    Returns a new Tensor, detached from the current graph.
-
-    The result will never require gradient.
-
-    .. note::
-
-      Returned Tensor shares the same storage with the original one.
-      In-place modifications on either of them will be seen, and may trigger
-      errors in correctness checks.
-      IMPORTANT NOTE: Previously, in-place size / stride / storage changes
-      (such as `resize_` / `resize_as_` / `set_` / `transpose_`) to the returned tensor
-      also update the original tensor. Now, these in-place changes will not update the
-      original tensor anymore, and will instead trigger an error.
-      For sparse tensors:
-      In-place indices / values changes (such as `zero_` / `copy_` / `add_`) to the
-      returned tensor will not update the original tensor anymore, and will instead
-      trigger an error.
-    """)
-
-    detach_ = _add_docstr(_C._TensorBase.detach_, r"""
-    Detaches the Tensor from the graph that created it, making it a leaf.
-    Views cannot be detached in-place.
-    """)
-
     def retain_grad(self):
         r"""Enables .grad attribute for non-leaf Tensors."""
         if self.grad_fn is None:  # no-op for leaves

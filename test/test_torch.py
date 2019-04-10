@@ -199,7 +199,6 @@ class _TestTorchMixin(object):
                        'polygamma',
                        'polygamma_',
                        'record_stream',
-                       'reinforce',
                        'relu',
                        'relu_',
                        'prelu',
