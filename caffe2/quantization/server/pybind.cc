@@ -76,7 +76,7 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
         const auto* blob = gWorkspace->GetBlob(blob_name);
         if (blob == nullptr) {
           LOG(WARNING) << "Can't find blob " << blob_name;
-        } else if (BlobIsTensorType(*blob, CPU)) {
+        } else if (!BlobIsTensorType(*blob, CPU)) {
           LOG(WARNING) << "Blob " << blob_name << " is not a tensor";
         } else {
           const auto& tensor = blob->template Get<Tensor>();

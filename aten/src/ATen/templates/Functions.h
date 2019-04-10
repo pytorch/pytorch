@@ -28,11 +28,18 @@ inline Tensor from_blob(
     IntArrayRef strides,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
+  auto device = getType(options).getDeviceFromPtr(data);
+  if (options.device().has_index()) {
+    AT_CHECK(
+        options.device() == device,
+        "Specified device ", options.device(),
+        " does not match device of data ", device);
+  }
   auto storage = Storage(
       options.dtype(),
       detail::computeStorageSize(sizes, strides),
       InefficientStdFunctionContext::makeDataPtr(
-          data, deleter, options.device()),
+          data, deleter, device),
       /*allocator=*/nullptr,
       /*resizable=*/false);
   return empty({0}, options).set_(storage, 0, sizes, strides);
