@@ -135,4 +135,27 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
   }
   return shape_map;
 }
+
+void BackendTransformerBase::dumpNet(
+    const NetDef& pred_net,
+    const ShapeInfoMap& shape_hints,
+    const std::string& fname) const {
+  NetDef shape_net(pred_net);
+  auto* shape_arg = shape_net.add_arg();
+  auto* qshape_arg = shape_net.add_arg();
+  shape_arg->set_name("shape_info");
+  qshape_arg->set_name("qshape_info");
+  for (const auto& kv : shape_hints) {
+    if (!kv.second.is_quantized) {
+      auto t = wrapShapeInfoIntoTensorProto(kv.first, kv.second);
+      t.add_int32_data(static_cast<int32_t>(kv.second.dim_type));
+      shape_arg->mutable_tensors()->Add()->CopyFrom(t);
+    } else {
+      auto t = wrapShapeInfoIntoQTensorProto(kv.first, kv.second);
+      t.add_data(static_cast<int32_t>(kv.second.dim_type));
+      qshape_arg->mutable_qtensors()->Add()->CopyFrom(t);
+    }
+  }
+  WriteProtoToTextFile(shape_net, "debug_ssa_net.pb_txt");
+}
 } // namespace caffe2
