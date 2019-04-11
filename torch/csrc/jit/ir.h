@@ -1074,6 +1074,10 @@ struct Graph {
       const std::string& field,
       Value* newValue);
   TORCH_API Node* createGetAttr(Value* obj, const std::string& field);
+  TORCH_API Value* insertGetAttr(Value* obj, const std::string& field) {
+    return insertNode(createGetAttr(obj, field))->output();
+  }
+
   // Note: defined in python_ir.cpp and can be used only in python extension
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
