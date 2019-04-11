@@ -346,7 +346,7 @@ class Tensor(torch._C._TensorBase):
             return super(Tensor, self).split_with_sizes(split_size, dim)
 
     def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
-        r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
+        r"""Returns the unique elements of the input tensor.
 
         See :func:`torch.unique`
         """
