@@ -7,7 +7,6 @@
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
-#include <torch/csrc/autograd/variable_version.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -171,8 +170,13 @@ void Variable::Impl::set_data(const at::Tensor &new_data) {
   device_opt_ = new_data.device();
   type_id_ = new_data.dispatch_type().type_id();
 
-  auto new_data_copy = at::Tensor(new_data.getIntrusivePtr()->shallow_copy_and_detach());
-  data_ = std::move(new_data_copy);
+  auto new_data_impl_copy = new_data.getIntrusivePtr()->shallow_copy_and_detach();
+  // Version counter is not shared when we replace a `Variable`'s underlying `Tensor`
+  // by calling `set_data(...)`. The original version of the `Variable` is always preserved.
+  // See NOTE [ Version Counter Sharing ] for details.
+  auto saved_version_ = data_.unsafeGetTensorImpl()->version_counter().current_version();
+  new_data_impl_copy->set_version_counter(saved_version_);
+  data_ = std::move(at::Tensor(new_data_impl_copy));
 }
 
 void Variable::Impl::release_resources() {
@@ -189,8 +193,8 @@ Variable::DifferentiableViewImpl::DifferentiableViewImpl(Variable base, at::Tens
     diff_view_meta->base_ = diff_view_meta->base_.base();
   }
   diff_view_meta->is_view_ = true;
-  diff_view_meta->version_counter_ = diff_view_meta->base_.version_counter();
-  diff_view_meta->attr_version = diff_view_meta->version_counter_.current_version();
+  data_.unsafeGetTensorImpl()->set_version_counter(diff_view_meta->base_.version_counter());
+  diff_view_meta->attr_version = data_.unsafeGetTensorImpl()->version_counter().current_version();
 }
 
 const std::shared_ptr<Function>& Variable::grad_fn() const {
@@ -200,7 +204,7 @@ const std::shared_ptr<Function>& Variable::grad_fn() const {
     if (!diff_view_meta->grad_fn_ && !diff_view_meta->base_.requires_grad()) {
       return diff_view_meta->grad_fn_;
     }
-    auto current_version = diff_view_meta->version_counter_.current_version();
+    auto current_version = this->current_version();
     if (diff_view_meta->attr_version != current_version) {
       AT_ASSERT(diff_view_meta->output_nr_ == 0);
       auto fn = std::make_shared<generated::AsStridedBackward>();
