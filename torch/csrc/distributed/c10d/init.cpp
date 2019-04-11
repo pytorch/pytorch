@@ -341,11 +341,6 @@ They are used in specifying strategies for reduction collectives, e.g.,
               "barrier",
               &::c10d::ProcessGroup::barrier,
               py::arg("opts") = ::c10d::BarrierOptions(),
-              py::call_guard<py::gil_scoped_release>())
-
-          .def(
-              "group_ranks",
-              &::c10d::ProcessGroup::getGroupRank,
               py::call_guard<py::gil_scoped_release>());
 
   auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
