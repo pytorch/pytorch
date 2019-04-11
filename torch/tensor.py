@@ -350,7 +350,7 @@ class Tensor(torch._C._TensorBase):
 
         See :func:`torch.unique`
         """
-        return torch.unique(self, sorted=sorted, return_inverse=return_inverse, return_counts=False, dim=dim)
+        return torch.unique(self, sorted=sorted, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
     def unique_consecutive(self, return_inverse=False, return_counts=False, dim=None):
         r"""Eliminates all but the first element from every consecutive group of equivalent elements.
