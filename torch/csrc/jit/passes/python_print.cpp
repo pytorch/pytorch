@@ -1133,6 +1133,16 @@ struct PythonPrintPass {
         [](const Argument& arg) { return arg.default_value(); });
     printFunction(graph, name, is_class, defaults, ivalue_names);
   }
+  void printFunction(
+      script::Function& method,
+      bool is_class) {
+    const std::string& name = method.name();
+    Graph& graph = *method.graph();
+    auto defaults = fmap(
+        method.getSchema().arguments(),
+        [](const Argument& arg) { return arg.default_value(); });
+    printFunction(graph, name, is_class, defaults, {});
+  }
   void printModule(script::Module& module) {
     std::unordered_map<script::Slot, QualifiedNamePtr> extra_ivalue_names;
     createTensorToParameterNameMap(
@@ -1153,9 +1163,8 @@ struct PythonPrintPass {
     out << "class " << classType->name() << ":\n";
     {
       const auto guard = WithIndented();
-      std::unordered_map<script::Slot, QualifiedNamePtr> extra_ivalue_names;
       for (auto& method : classType->methods()) {
-        printMethod(*method, /*is_class=*/true, extra_ivalue_names);
+        printFunction(*method, /*is_class=*/true);
       }
     }
   }
