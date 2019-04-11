@@ -42,7 +42,7 @@ from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from torch.testing import FileCheck
-from torch._C import TensorType, parse_ir, propagate_shapes
+from torch._C import TensorType, parse_ir, propagate_shapes, _jit_python_print
 from copy import deepcopy
 import random
 from typing import List, Dict, Optional, Tuple
@@ -2634,7 +2634,7 @@ graph(%x : Tensor,
         def foo(x, y):
             return 2 * x + y
 
-        r, _ = foo._python_print()
+        r, _ = _jit_python_print(foo)
         mod = torch.jit.ScriptModule()
         torch._C._jit_import_methods(mod, "op_version_set = 0\n{}".format(r), [])
         self.assertExpected(mod.graph.pretty_print())
@@ -2923,7 +2923,7 @@ class TestScript(JitTestCase):
             def bar(x):
                 return foo(x, y=x)
         ''')
-        self.assertTrue('*' in cu.module._get_method('foo').pretty_print_schema())
+        self.assertTrue('*' in str(cu.module._get_method('foo').schema))
         with self.assertRaisesRegex(RuntimeError, "not provided"):
             torch.jit.CompilationUnit('''
                 def foo(x, *, y) -> Tuple[Tensor, Tensor]:
@@ -2943,7 +2943,7 @@ class TestScript(JitTestCase):
             def foo():
                 return math.pi, 0.1, mod.inf, mod.ninf, 2.225073858507201e-308, mod.nan
 
-            pp, table = foo._get_method('forward').python_print()
+            pp, table = _jit_python_print(foo)
             ppv = "op_version_set = 0\n{}".format(pp)
             sm = torch.jit.ScriptModule()
             torch._C._jit_import_methods(sm, ppv, table)
@@ -8236,7 +8236,7 @@ a")
                 return x, x
         ''')
 
-        self.assertExpected(cu.__getattr__('foo').pretty_print_schema())
+        self.assertExpected(str(cu.__getattr__('foo').schema))
 
     def test_parser_type_annotations_comment(self):
         cu = torch.jit.CompilationUnit('''
@@ -8245,7 +8245,7 @@ a")
                 return x, x
         ''')
 
-        self.assertExpected(cu.__getattr__('foo').pretty_print_schema())
+        self.assertExpected(str(cu.__getattr__('foo').schema))
 
     def test_parser_type_annotations_unknown_type(self):
         with self.assertRaisesRegex(RuntimeError, r'Unknown type name Foo'):
@@ -9464,7 +9464,7 @@ a")
             # type: (Tensor, Tuple[Tensor, Tensor, Tensor], Tuple[Tensor, Tuple[Tensor, Tensor]]) -> Tensor
             return x
 
-        self.assertExpected(foo.__getattr__('forward').pretty_print_schema())
+        self.assertExpected(str(foo.__getattr__('forward').schema))
 
     def test_annotated_script_method(self):
         class SM(torch.jit.ScriptModule):
@@ -9475,7 +9475,7 @@ a")
 
         sm = SM()
 
-        self.assertExpected(sm.__getattr__('forward').pretty_print_schema())
+        self.assertExpected(str(sm.__getattr__('forward').schema))
 
     def test_annotated_script_fn_return_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, "but is actually of type"):
@@ -9569,7 +9569,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             cu = torch.jit.CompilationUnit(self.format_code(code, pair))
-            test_str.append(cu.__getattr__('foo').pretty_print_schema())
+            test_str.append(str(cu.__getattr__('foo').schema))
         self.assertExpected("\n".join(test_str))
 
     #  String frontend , Python 3-style type annotations , Script method
@@ -9586,7 +9586,7 @@ a")
         for pair in self.type_input_return_pairs():
             tm = TestModule()
             tm.define(self.format_code(code, pair))
-            test_str.append(tm.__getattr__('foo').pretty_print_schema())
+            test_str.append(str(tm.__getattr__('foo').schema))
         self.assertExpected("\n".join(test_str))
 
     #  String frontend , MyPy-style type comments , Script function
@@ -9599,7 +9599,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             cu = torch.jit.CompilationUnit(self.format_code(code, pair))
-            test_str.append(cu.__getattr__('foo').pretty_print_schema())
+            test_str.append(str(cu.__getattr__('foo').schema))
         self.assertExpected("\n".join(test_str))
 
     #  String frontend , MyPy-style type comments , Script method
@@ -9618,7 +9618,7 @@ a")
         for pair in self.type_input_return_pairs():
             tm = TestModule()
             tm.define(self.format_code(code, pair))
-            test_str.append(tm.__getattr__('foo').pretty_print_schema())
+            test_str.append(str(tm.__getattr__('foo').schema))
         self.assertExpected("\n".join(test_str))
 
     # Helper function to eval Python3 code without causing a syntax error for
@@ -9650,7 +9650,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'foo')
-            test_str.append(fn.__getattr__('forward').pretty_print_schema())
+            test_str.append(str(fn.__getattr__('forward').schema))
         self.assertExpected("\n".join(test_str))
 
     #  Python AST Frontend , Python 3-style type annotations , Script method
@@ -9672,7 +9672,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'instance')
-            test_str.append(fn.__getattr__('foo').pretty_print_schema())
+            test_str.append(str(fn.__getattr__('foo').schema))
         self.assertExpected("\n".join(test_str))
 
     #  Python AST Frontend , MyPy-style type comments , Script function
@@ -9689,7 +9689,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'foo')
-            test_str.append(fn.__getattr__('forward').pretty_print_schema())
+            test_str.append(str(fn.__getattr__('forward').schema))
         self.assertExpected("\n".join(test_str))
 
     #  Python AST Frontend , MyPy-style type comments , Script method
@@ -9708,7 +9708,7 @@ a")
         test_str = []
         for pair in self.type_input_return_pairs():
             fn = self._get_py3_code(self.format_code(code, pair), 'instance')
-            test_str.append(fn.__getattr__('foo').pretty_print_schema())
+            test_str.append(str(fn.__getattr__('foo').schema))
         self.assertExpected("\n".join(test_str))
 
     def test_method_casts_script(self):
@@ -10901,7 +10901,7 @@ a")
         self.assertEqual(m.some_state, torch.zeros(1) + 100)
 
         # Export and ensure ignored code not present
-        pp, constants = m._python_print()
+        pp, constants = _jit_python_print(m._get_method('forward'))
         printed = torch.jit.ScriptModule()
         ppv = "op_version_set = 0\n{}".format(pp)
         torch._C._jit_import_methods(printed, ppv, constants)
