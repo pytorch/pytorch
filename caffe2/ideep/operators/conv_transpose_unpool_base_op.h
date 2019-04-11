@@ -3,7 +3,9 @@
 #include "caffe2/ideep/ideep_utils.h"
 #include "caffe2/proto/caffe2_legacy.pb.h"
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class IDEEPConvTransposeUnpoolBase : public IDEEPOperator {
  public:
@@ -259,4 +261,4 @@ class IDEEPConvTransposeUnpoolBase : public IDEEPOperator {
   /* using override */ using IDEEPConvTransposeUnpoolBase::Input; \
   /* using override */ using IDEEPConvTransposeUnpoolBase::Output;
 
-} // namespace caffe2
+} // namespace

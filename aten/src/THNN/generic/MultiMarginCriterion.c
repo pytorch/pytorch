@@ -40,7 +40,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   {
     THIndex_t idx = THIndexTensor_(get1d)(target, t);
     THArgCheck((idx >= 0) && (idx < dim), 3,
-	       "target out of range");
+               "target out of range");
   }
 
   input = THTensor_(newContiguous)(input);
