@@ -10,7 +10,10 @@ namespace jit {
 // On Windows will noop, NYI
 TORCH_API void FuseGraph(std::shared_ptr<Graph>& graph);
 
-TORCH_API void CustomFuseGraph(std::shared_ptr<Graph>& graph, std::function<bool(Node*)> fn, Symbol tag);
+TORCH_API void CustomFuseGraph(
+    std::shared_ptr<Graph>& graph,
+    std::function<bool(Node*)> fn,
+    Symbol tag);
 
 TORCH_API bool trackSingleGradSumToSizeToOutputs(
     Value* gradSumToSizeOutput,

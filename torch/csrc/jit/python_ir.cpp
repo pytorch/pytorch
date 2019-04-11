@@ -333,7 +333,9 @@ void initPythonIRBindings(PyObject* module_) {
             g.prettyPrint(oss);
             return oss.str();
           })
-      .GS(createFusionGroup)
+      .def(
+          "createFusionGroup",
+          [](Graph& g) { return g.createWithSubgraph(prim::FusionGroup); })
       .def(
           "createClone",
           [](Graph& g, Node* n, py::object fn) {

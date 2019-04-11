@@ -1220,7 +1220,7 @@ Node* Graph::createNone(TypePtr typ) {
   return n;
 }
 
-Node* Graph::createFusionGroup(Symbol kind) {
+Node* Graph::createWithSubgraph(Symbol kind) {
   auto n = create(kind, 0);
   n->g_(attr::Subgraph, std::make_shared<Graph>(current_scope()));
   return n;
