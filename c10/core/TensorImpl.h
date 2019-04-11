@@ -347,7 +347,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     auto tid = type_id();
     // NB: At the moment, variables have the same TensorTypeId as their
     // corresponding tensor, but if this ever changes, we need to modify this.
-    return tid == AffineCPUTensorId() || tid == PerChannelAffineCPUTensorId();
+    return tid == QuantizedCPUTensorId();
   }
 
   bool is_cuda() const {
@@ -364,6 +364,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // NB: At the moment, variables have the same TensorTypeId as their
     // corresponding tensor, but if this ever changes, we need to modify this.
     return tid == HIPTensorId() || tid == SparseHIPTensorId();
+  }
+
+  bool is_mkldnn() const {
+    return type_id() == MkldnnCPUTensorId();
   }
 
   int64_t get_device() const {
@@ -392,6 +396,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // NB: This method is not virtual and avoid dispatches for perf.
     if (is_sparse()) {
       return kSparse;
+    } else if (is_mkldnn()) {
+      return kMkldnn;
     } else {
       return kStrided;
     }
@@ -1472,6 +1478,8 @@ protected:
 //    strong refcount           TODO: pack these into one word
 //    weak refcount
 //    storage pointer
+//    autograd metadata pointer
+//    PyObject pointer
 //    sizes SmallVector (begin)
 //    sizes SmallVector (end)
 //    sizes SmallVector (capacity)
@@ -1492,8 +1500,6 @@ protected:
 //    numel
 //    data type pointer
 //    (optional) device
-//    autograd metadata pointer
-//    PyObject pointer
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...

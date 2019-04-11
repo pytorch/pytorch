@@ -10,7 +10,7 @@ void THNN_(LookupTableBag_updateOutput)(
            THCTensor *weight,
            THCTensor *output,
            THCIndexTensor *offset2bag,
-	   int mode,
+           int mode,
            THCIndexTensor *bag_size)
 {
   THCUNN_assertSameGPU(state, 5, input, offsets, weight, output, offset2bag);
@@ -65,8 +65,8 @@ void THNN_(LookupTableBag_accGradParameters)(
            THCIndexTensor *sortedIndices,
            THCIndexTensor *origIndices,
            bool scaleGradByFreq,
-	   int mode,
-	   THCIndexTensor *bag_size,
+           int mode,
+           THCIndexTensor *bag_size,
            accreal scale_)
 {
   scalar_t scale = ScalarConvert<accreal, scalar_t>::to(scale_);

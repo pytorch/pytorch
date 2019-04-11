@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python_ir.h>
 
 #include <typeinfo>
 
@@ -29,10 +30,10 @@ namespace {
 // Note: const_cast is used twice below to acquire a handle to a pyobject.
 Operation createPythonOperation(const Node* op_) {
   AutoGIL gil;
-  const PythonOp* op = static_cast<const PythonOp*>(op_);
+  const ConcretePythonOp* op = static_cast<const ConcretePythonOp*>(op_);
   const py::function func = py::reinterpret_borrow<const py::function>(
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      py::handle(const_cast<PythonOp*>(op)->pyobj.get()));
+      py::handle(const_cast<ConcretePythonOp*>(op)->pyobj.get()));
 
   size_t num_inputs = 0;
   for (auto arg_type : op->cconv) {
@@ -52,7 +53,7 @@ Operation createPythonOperation(const Node* op_) {
       if (arg_type == 'c') {
         py_inputs[i] = py::reinterpret_borrow<const py::object>(
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-            const_cast<PythonOp*>(op)->scalar_args[next_scalar++].get());
+            const_cast<ConcretePythonOp*>(op)->scalar_args[next_scalar++].get());
       } else if (arg_type == 'd') {
         py_inputs[i] =
             toPyObject(std::move(peek(stack, next_tensor, num_inputs)));
