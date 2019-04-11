@@ -132,8 +132,8 @@ void ScriptModuleDeserializer::deserialize(
 
   loadTensorTable(&model_def);
   if (model_def.proto_version() >= 2) {
-    loadAttributeTable();
     loadLibs(&model_def);
+    loadAttributeTable();
   }
 
   // TODO: this can be simplified when C++/Python interop lands,

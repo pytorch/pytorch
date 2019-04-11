@@ -2,6 +2,7 @@
 #include <vector>
 
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/utils/disallow_copy.h>
 
@@ -83,7 +84,7 @@ enum class OpCode : char {
   FRAME = '\x95'
 };
 
-enum PicklerClass : uint8_t { TENSOR = 0, INTLIST = 1 };
+enum PicklerClass : uint8_t { TENSOR = 0, INTLIST = 1, OBJECT = 2 };
 
 using ::c10::IValue;
 
@@ -91,8 +92,10 @@ class Pickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
  public:
-  Pickler(std::vector<at::Tensor>* tensor_table)
-      : tensor_table_(tensor_table) {}
+  Pickler(
+      std::vector<at::Tensor>* tensor_table,
+      std::vector<at::ClassTypePtr>* class_table)
+      : tensor_table_(tensor_table), class_table_(class_table) {}
 
   const std::vector<char>& stack();
   void start();
@@ -113,6 +116,7 @@ class Pickler {
   void pushDict(const IValue& ivalue);
   void pushClass(PicklerClass cls);
   void pushInt(const IValue& ivalue);
+  void pushObject(const IValue& ivalue);
   const void* getPointer(const IValue& ivalue);
 
   // These convert values to bytes and add them to the stack (NB: since T is to
@@ -134,6 +138,8 @@ class Pickler {
 
   // External table of tensors to serialize
   std::vector<at::Tensor>* tensor_table_;
+  // External table of classes to serialize
+  std::vector<at::ClassTypePtr>* class_table_;
 
   // TODO: only use this if necessary (add a pass to find all shared ivalues,
   // and only memoize those)

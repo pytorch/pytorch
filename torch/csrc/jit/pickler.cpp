@@ -10,6 +10,8 @@ PicklerClass getClass(const std::string& str) {
     return PicklerClass::TENSOR;
   } else if (str == "IntList") {
     return PicklerClass::INTLIST;
+  } else if (str == "Object") {
+    return PicklerClass::OBJECT;
   }
   AT_ERROR("Unknown class name for unpickler: ", str);
 }
@@ -17,11 +19,14 @@ PicklerClass getClass(const std::string& str) {
 const std::string& getClassName(PicklerClass cls) {
   static const std::string tensor_class("TensorID\n");
   static const std::string intlist_class("IntList\n");
+  static const std::string object_class("Object\n");
   switch (cls) {
     case PicklerClass::TENSOR:
       return tensor_class;
     case PicklerClass::INTLIST:
       return intlist_class;
+    case PicklerClass::OBJECT:
+      return object_class;
     default:
       AT_ERROR("Unknown class for pickler");
   }
@@ -87,6 +92,8 @@ void Pickler::addIValue(const IValue& ivalue) {
     push<OpCode>(OpCode::NONE);
   } else if (ivalue.isIntList()) {
     pushIntList(ivalue);
+  } else if (ivalue.isObject()) {
+    pushObject(ivalue);
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
@@ -125,6 +132,19 @@ void Pickler::pushInt(const IValue& ivalue) {
     push<uint8_t>(8);
     push<int64_t>(n);
   }
+}
+
+void Pickler::pushObject(const IValue& ivalue) {
+  auto obj = ivalue.toObject();
+  at::ClassTypePtr class_type = obj->type();
+  if (std::find(class_table_->cbegin(), class_table_->cend(), class_type) ==
+      class_table_->cend()) {
+    class_table_->push_back(class_type);
+  }
+  pushClass(PicklerClass::OBJECT);
+  addIValue(c10::ivalue::Tuple::create(
+      {class_type->python_str(), static_cast<int64_t>(obj->slots().size())}));
+  push<OpCode>(OpCode::BUILD);
 }
 
 void Pickler::pushBinGet(uint32_t memo_id) {
@@ -444,6 +464,21 @@ OpCode Unpickler::readInstruction() {
         case PicklerClass::INTLIST:
           stack_.push_back(setitem_data);
           break;
+        case PicklerClass::OBJECT: {
+          auto data = setitem_data.toTuple();
+          auto class_type =
+              at::ClassType::get(data->elements().at(0).toStringRef());
+          auto num_slots = data->elements().at(1).toInt();
+
+          AT_CHECK(
+              class_type != nullptr,
+              "Unpickler could not find class '",
+              setitem_data.toStringRef(),
+              "'");
+          stack_.emplace_back(
+              c10::ivalue::Object::create(class_type, num_slots));
+          break;
+        }
         default:
           AT_ERROR("Unknown pickler class id");
       }

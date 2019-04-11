@@ -13770,23 +13770,27 @@ class TestClassType(JitTestCase):
         FileCheck().check_count("Double(*, *) = prim::GetAttr", 4).run(graphstr)
 
     def test_attribute(self):
-        @torch.jit.script
-        class Foo(object):
-            def __init__(self, x):
-                self.x = x
+        with self.disableModuleHook():
+            @torch.jit.script
+            class Foo(object):
+                def __init__(self, x):
+                    self.x = x
 
-            def getFoo(self):
-                return self.x
+                def getFoo(self):
+                    return self.x
 
-        class M(torch.jit.ScriptModule):
-            def __init__(self):
-                super(M, self).__init__()
-                foo = Foo(torch.ones(2, 2) + 100)
-                self.x = torch.jit.Attribute(foo, Foo)
+            class M(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(M, self).__init__()
+                    foo = Foo(torch.ones(2, 2) + 100)
+                    self.x = torch.jit.Attribute(foo, Foo)
 
-            @torch.jit.script_method
-            def forward(self, x):
-                return x + self.x.getFooTest()
+                @torch.jit.script_method
+                def forward(self, x):
+                    return x + self.x.getFoo()
+
+            m = M()
+            self.assertEqual(m(torch.ones(2, 2)), torch.ones(2, 2) + 101)
 
 
 class TestLogging(JitTestCase):
