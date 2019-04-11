@@ -1,5 +1,3 @@
-#pragma once
-
 #include <ATen/core/function_schema.h>
 
 namespace c10 {
