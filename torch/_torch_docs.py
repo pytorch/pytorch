@@ -1940,10 +1940,10 @@ Args:
     out (tuple, optional): the optional destination tensor
 
 Returns:
-    (Tensor, Tensor): A tuple containing:
+    (Tensor, Tensor): A namedtuple (solution, QR) containing:
 
-        - **X** (*Tensor*): the least squares solution
-        - **qr** (*Tensor*): the details of the QR factorization
+        - **solution** (*Tensor*): the least squares solution
+        - **QR** (*Tensor*): the details of the QR factorization
 
 .. note::
 
@@ -2568,6 +2568,32 @@ Example::
     >>> torch.lt(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
     tensor([[ 0,  0],
             [ 1,  0]], dtype=torch.uint8)
+""")
+
+add_docstr(torch.lu_solve,
+           r"""
+lu_solve(b, LU_data, LU_pivots, out=None) -> Tensor
+
+Batch LU solve.
+
+Returns the LU solve of the linear system :math:`Ax = b` using the partially pivoted
+LU factorization of A from :meth:`torch.lu`.
+
+Arguments:
+    b (Tensor): the RHS tensor
+    LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu`.
+    LU_pivots (IntTensor): the pivots of the LU factorization
+    out (Tensor, optional): the optional output tensor
+
+Example::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> b = torch.randn(2, 3)
+    >>> A_LU = torch.lu(A)
+    >>> x = torch.lu_solve(b, *A_LU)
+    >>> torch.norm(torch.bmm(A, x.unsqueeze(2)) - b.unsqueeze(2))
+    tensor(1.00000e-07 *
+           2.8312)
 """)
 
 add_docstr(torch.masked_select,
@@ -5134,9 +5160,9 @@ Args:
         1 and not referenced from :math:`A`. Default: ``False``.
 
 Returns:
-    A tuple :math:`(X, M)` where :math:`M` is a clone of :math:`A` and :math:`X`
-    is the solution to :math:`AX = b` (or whatever variant of the system of
-    equations, depending on the keyword arguments.)
+    A namedtuple :math:`(solution, cloned_coefficient)` where :math:`cloned_coefficient`
+    is a clone of :math:`A` and :math:`solution` is the solution :math:`X` to :math:`AX = b`
+    (or whatever variant of the system of equations, depending on the keyword arguments.)
 
 Examples::
 
@@ -5149,8 +5175,10 @@ Examples::
     tensor([[-0.0210,  2.3513, -1.5492],
             [ 1.5429,  0.7403, -1.0243]])
     >>> torch.triangular_solve(b, A)
-    (tensor([[ 1.7840,  2.9045, -2.5405],
-            [ 1.9319,  0.9269, -1.2826]]), tensor([[ 1.1527, -1.0753],
+    torch.return_types.triangular_solve(
+    solution=tensor([[ 1.7841,  2.9046, -2.5405],
+            [ 1.9320,  0.9270, -1.2826]]),
+    cloned_coefficient=tensor([[ 1.1527, -1.0753],
             [ 0.0000,  0.7986]]))
 """)
 
@@ -5526,30 +5554,6 @@ Example::
     tensor([[ 0.,  0.,  0.],
             [ 0.,  0.,  0.]])
 """.format(**factory_like_common_args))
-
-add_docstr(torch.btrisolve,
-           r"""
-btrisolve(b, LU_data, LU_pivots) -> Tensor
-
-Batch LU solve.
-
-Returns the LU solve of the linear system :math:`Ax = b`.
-
-Arguments:
-    b (Tensor): the RHS tensor
-    LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu`.
-    LU_pivots (IntTensor): the pivots of the LU factorization
-
-Example::
-
-    >>> A = torch.randn(2, 3, 3)
-    >>> b = torch.randn(2, 3)
-    >>> A_LU = torch.lu(A)
-    >>> x = torch.btrisolve(b, *A_LU)
-    >>> torch.norm(torch.bmm(A, x.unsqueeze(2)) - b.unsqueeze(2))
-    tensor(1.00000e-07 *
-           2.8312)
-""")
 
 add_docstr(torch.empty,
            r"""
