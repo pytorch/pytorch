@@ -41,8 +41,8 @@ def set_training(model, mode):
 
 def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
-           operator_export_type=None, opset_version=None, add_doc_string=False,
-           _retain_param_name=True):
+           operator_export_type=None, opset_version=None, _retain_param_name=True,
+           strip_doc_string=True):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -94,8 +94,8 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             opset version. Right now, supported stable opset version is 9.
             The opset_version must be _onnx_master_opset or in _onnx_stable_opsets
             which are defined in torch/onnx/symbolic.py
-        add_doc_string (bool, default False): if specified, adds a field
-            "doc_string" in the exported model, with information about the stack
+        strip_doc_string (bool, default True): if True, strips the field
+            "doc_string" from the exported model, which information about the stack
             trace.
     """
     if aten or export_raw_ir:
@@ -109,7 +109,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             operator_export_type = OperatorExportTypes.ONNX
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
-            add_doc_string=add_doc_string, _retain_param_name=_retain_param_name)
+            _retain_param_name=_retain_param_name, strip_doc_string=strip_doc_string)
 
 
 # ONNX can't handle constants that are lists of tensors, which can
@@ -311,7 +311,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 def _export(model, args, f, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
-            opset_version=None, add_doc_string=False, _retain_param_name=False):
+            opset_version=None, _retain_param_name=False, strip_doc_string=True):
     from torch.onnx.symbolic import _default_onnx_opset_version, _set_opset_version
     if opset_version is None:
         opset_version = _default_onnx_opset_version
@@ -326,9 +326,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
     if export_params:
         proto, export_map = graph._export_onnx(params_dict, opset_version, defer_weight_export, operator_export_type,
-                                               not add_doc_string)
+                                               strip_doc_string)
     else:
-        proto, export_map = graph._export_onnx({}, opset_version, False, operator_export_type, not add_doc_string)
+        proto, export_map = graph._export_onnx({}, opset_version, False, operator_export_type, strip_doc_string)
 
     if export_type == ExportTypes.PROTOBUF_FILE:
         assert(len(export_map) == 0)
