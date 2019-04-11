@@ -11,6 +11,7 @@ from common_utils import TestCase, run_tests
 def canonical(graph):
     return str(torch._C._jit_pass_canonicalize(graph))
 
+
 @unittest.skip("Skipping due to the protobuf dependency in the CI's")
 # @unittest.skipIf("Relu_ENGINE_DNNLOWP" not in core._REGISTERED_OPERATORS, "fbgemm-based Caffe2 ops are not linked")
 class TestQuantized(TestCase):

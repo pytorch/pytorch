@@ -253,6 +253,14 @@ def enable_cpu_fuser(fn):
     return wrapper
 
 
+# helper function to get sum of List[Tensor]
+def _sum_of_list(tensorlist):
+    s = 0
+    for t in tensorlist:
+        s += t.sum()
+    return s
+
+
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
     _restored_warnings = False
@@ -621,6 +629,38 @@ class FooToPickle(torch.nn.Module):
 
 
 class TestJit(JitTestCase):
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_large_nbr_kernel_args(self):
+        class Recurrence(nn.Module):
+            def __init__(self, seq_len):
+                super(Recurrence, self).__init__()
+                self.seq_len = seq_len
+
+            def forward(self, input):
+                input = input.transpose(0, 1)
+
+                # Main loop
+                output = []
+                for i in range(self.seq_len):
+                    b = input[i] * 2
+                    output.append(b)
+
+                output = torch.cat(output, 0).view(input.size(0), *output[0].size())
+                output = output.transpose(0, 1)
+                return output
+
+        input_size = 8
+        batch_size = 2
+        seq_len = 130
+
+        rec = Recurrence(seq_len)
+        input = torch.rand(batch_size, seq_len, input_size)
+
+        torch.cuda.set_device(0)
+        rec = rec.cuda()
+        input = input.cuda()
+
+        traced_rec = torch.jit.trace(rec, (input))
 
     @unittest.skip("Requires a lot of RAM")
     def test_big(self):
@@ -3672,10 +3712,20 @@ a")
         @torch.jit.script
         def func2(x, y):
             return torch.cat((x, x), y)
+        func2.debug_disable_autodiff_subgraph_inlining()
 
-        x = torch.rand([2, 2])
+        x = torch.rand([2, 2]).requires_grad_()
         y = torch.tensor(1)
-        self.assertEqual(func2(x, y), torch.cat((x, x), y))
+
+        output = func2(x, y)
+        output_ref = torch.cat((x, x), y)
+        self.assertEqual(output, output_ref)
+
+        self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::cat'], [])
+
+        grad = torch.autograd.grad(output.sum(), x)
+        grad_ref = torch.autograd.grad(output_ref.sum(), x)
+        self.assertEqual(grad, grad_ref)
 
     def test_cat_lifts(self):
         @torch.jit.script
@@ -3692,6 +3742,73 @@ a")
 
         for g in [foo.graph, foo2.graph, foo3.graph]:
             FileCheck().check("int =").check("ListConstruct").check("aten::cat").run(str(g))
+
+    @unittest.skipIf(PY2, "Requires python 3")
+    def test_stack(self):
+        @torch.jit.script
+        def func(x):
+            return torch.stack((x, x), dim=1)
+        x = torch.rand(10, 10)
+        self.assertEqual(func(x), torch.stack((x, x), dim=1))
+
+        @torch.jit.script
+        def func2(x, y):
+            return torch.stack((x, y), dim=0)
+
+        func2.debug_disable_autodiff_subgraph_inlining()
+
+        x = torch.randn([2, 2]).requires_grad_()
+        y = torch.randn([2, 2]).requires_grad_()
+
+        output = func2(x, y)
+        output_ref = torch.stack((x, y), 0)
+        self.assertEqual(output, output_ref)
+
+        self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::stack'], [])
+
+        grads = torch.autograd.grad(output.sum(), (x, y))
+        grads_ref = torch.autograd.grad(output_ref.sum(), (x, y))
+        self.assertEqual(grads, grads_ref)
+
+    def test_unbind(self):
+        @torch.jit.script
+        def func(x, y):
+            # type: (Tensor, int) -> List[Tensor]
+            return torch.unbind(x, y)
+        func.debug_disable_autodiff_subgraph_inlining()
+
+        x = torch.rand([2, 2]).requires_grad_()
+        y = 0
+        outputs = func(x, y)
+        outputs_ref = torch.unbind(x, dim=y)
+        self.assertEqual(outputs, outputs_ref)
+
+        self.assertAutodiffNode(func.graph_for(x, y), True, ['aten::unbind'], [])
+
+        grad = torch.autograd.grad(_sum_of_list(outputs), x)
+        grad_ref = torch.autograd.grad(_sum_of_list(outputs_ref), x)
+        self.assertEqual(grad, grad_ref)
+
+    def test_meshgrid(self):
+        @torch.jit.script
+        def func(a):
+            # type: (List[Tensor]) -> List[Tensor]
+            return torch.meshgrid(a)
+        func.debug_disable_autodiff_subgraph_inlining()
+
+        a = torch.tensor([1.0, 2, 3]).requires_grad_()
+        b = torch.tensor([1.0, 2, 3, 4]).requires_grad_()
+        inputs = [a, b]
+
+        outputs_ref = torch.meshgrid(inputs)
+        outputs = func(inputs)
+        self.assertEqual(outputs, outputs_ref)
+
+        self.assertAutodiffNode(func.graph_for(inputs), True, ['aten::meshgrid'], [])
+
+        grads = torch.autograd.grad(_sum_of_list(outputs), inputs)
+        grads_ref = torch.autograd.grad(_sum_of_list(outputs_ref), inputs)
+        self.assertEqual(grads, grads_ref)
 
     def test_list_literal(self):
         def reassign():
@@ -11869,10 +11986,16 @@ EXCLUDE_SCRIPT = {
 # chunk returns a list in scripting and we don't unpack the list,
 # Thus it won't be replaced by ConstantChunk and run AD.
 # It's explicitly checked in test_chunk_constant_script_ad
+# Similary for split, it's replaced by split_with_sizes in tracing,
+# but we don't have AD formula for aten::split(Tensor, int[], int),
+# an op registered in JIT so AD is not triggered in scripting.
 EXCLUDE_SCRIPT_AD_CHECK = {
     'test_chunk',
     'test_chunk_dim',
     'test_chunk_dim_neg0',
+    'test_split_size_list',
+    'test_split_size_list_dim',
+    'test_split_size_list_dim_neg0',
 }
 
 EXCLUDE_PYTHON_PRINT = {
