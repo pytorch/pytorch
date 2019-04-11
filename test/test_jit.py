@@ -11239,7 +11239,25 @@ a")
                 ''',
             'archive/attributes.pkl': b'\x80\x02](e.',
             'archive/libs.py': b'op_version_set = 0\n',
-            'archive/model.json': b'{"protoVersion":"2","mainModule":{"torchscriptArena":{"key":"code/archive.py"},"name":"archive","optimize":true},"producerName":"pytorch","producerVersion":"1.0","libs":{"torchscriptArena":{"key":"libs.py"}}}'}
+            'archive/model.json':
+                b'''
+                {
+                   "protoVersion":"2",
+                   "mainModule":{
+                      "torchscriptArena":{
+                         "key":"code/archive.py"
+                      },
+                      "name":"archive",
+                      "optimize":true
+                   },
+                   "producerName":"pytorch",
+                   "producerVersion":"1.0",
+                   "libs":{
+                      "torchscriptArena":{
+                         "key":"libs.py"
+                      }
+                   }
+                }'''}
         with TemporaryFileName() as fname:
             archive_name = os.path.basename(os.path.normpath(fname))
             print(archive_name)
@@ -11251,7 +11269,7 @@ a")
             with open(fname, "rb") as f:
                 fn = torch.jit.load(f)
 
-        x = torch.zeros(5)
+        x = torch.zeros(10)
         fn(x)
 
     def test_submodule_attribute_serialization(self):
