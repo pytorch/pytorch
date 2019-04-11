@@ -5,9 +5,9 @@ ModelProto {
   graph:
     GraphProto {
       name: "torch-jit-export"
-      inputs: [{name: "x.1", type:Tensor dims: 1 10},{name: "1", type:Tensor dims: 20 10},{name: "2", type:Tensor dims: 20}]
+      inputs: [{name: "x.1", type:Tensor dims: 1 10},{name: "1", type:Tensor dims: 20},{name: "2", type:Tensor dims: 20 10}]
       outputs: [{name: "8", type:Tensor dims: 1 20}]
-      initializers: [TensorProto shape: [20 10],TensorProto shape: [20]]
+      initializers: [TensorProto shape: [20],TensorProto shape: [20 10]]
       nodes: [
         Node {type: "Add", inputs: [x.1,x.1], outputs: [3], attributes: []},
         Node {type: "ReduceSum", inputs: [3], outputs: [4], attributes: [{ name: 'keepdims', type: int, value: 0}]},
@@ -28,7 +28,7 @@ ModelProto {
                       outputs: [{name: "10", type:Tensor dims: 1 20}]
                       initializers: []
                       nodes: [
-                        Node {type: "Gemm", inputs: [3,1,2], outputs: [10], attributes: [{ name: 'alpha', type: float, value: 1},{ name: 'beta', type: float, value: 1},{ name: 'transB', type: int, value: 1}]}
+                        Node {type: "Gemm", inputs: [3,2,1], outputs: [10], attributes: [{ name: 'alpha', type: float, value: 1},{ name: 'beta', type: float, value: 1},{ name: 'transB', type: int, value: 1}]}
                       ]
                     }
 
@@ -39,7 +39,7 @@ ModelProto {
                       outputs: [{name: "11", type:Tensor dims: 1 20}]
                       initializers: []
                       nodes: [
-                        Node {type: "Gemm", inputs: [3,1,2], outputs: [11], attributes: [{ name: 'alpha', type: float, value: 1},{ name: 'beta', type: float, value: 1},{ name: 'transB', type: int, value: 1}]}
+                        Node {type: "Gemm", inputs: [3,2,1], outputs: [11], attributes: [{ name: 'alpha', type: float, value: 1},{ name: 'beta', type: float, value: 1},{ name: 'transB', type: int, value: 1}]}
                       ]
                     }
 
@@ -54,7 +54,7 @@ ModelProto {
               outputs: [{name: "12", type:Tensor dims: 1 20}]
               initializers: []
               nodes: [
-                Node {type: "Gemm", inputs: [3,1,2], outputs: [12], attributes: [{ name: 'alpha', type: float, value: 1},{ name: 'beta', type: float, value: 1},{ name: 'transB', type: int, value: 1}]}
+                Node {type: "Gemm", inputs: [3,2,1], outputs: [12], attributes: [{ name: 'alpha', type: float, value: 1},{ name: 'beta', type: float, value: 1},{ name: 'transB', type: int, value: 1}]}
               ]
             }
 

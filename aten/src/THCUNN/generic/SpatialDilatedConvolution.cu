@@ -11,7 +11,7 @@ static inline void THNN_(SpatialDilatedConvolution_shapeCheck)(
                          int kH, int kW, int dH, int dW, int padH, int padW,
                          int dilationH, int dilationW, int weight_nullable) {
   THArgCheck(kW > 0 && kH > 0, 9,
-	           "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
+                   "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 11,
              "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
   THArgCheck(dilationW > 0 && dilationH > 0, 14,

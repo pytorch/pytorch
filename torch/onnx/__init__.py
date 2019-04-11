@@ -16,7 +16,8 @@ class ExportTypes:
 
 def _export(*args, **kwargs):
     from torch.onnx import utils
-    return utils._export(*args, **kwargs)
+    result = utils._export(*args, **kwargs)
+    return result
 
 
 def export(*args, **kwargs):
@@ -52,3 +53,8 @@ def _run_symbolic_function(*args, **kwargs):
 def _run_symbolic_method(*args, **kwargs):
     from torch.onnx import utils
     return utils._run_symbolic_method(*args, **kwargs)
+
+
+def is_in_onnx_export():
+    from torch.onnx import utils
+    return utils.is_in_onnx_export()

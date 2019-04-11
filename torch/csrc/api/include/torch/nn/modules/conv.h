@@ -18,9 +18,9 @@ struct ConvOptions {
       int64_t input_channels,
       int64_t output_channels,
       ExpandingArray<D> kernel_size) :
-		input_channels_(input_channels),
-		output_channels_(output_channels),
-		kernel_size_(std::move(kernel_size)) {}
+                input_channels_(input_channels),
+                output_channels_(output_channels),
+                kernel_size_(std::move(kernel_size)) {}
 
   /// The number of channels the input volumes will have.
   /// Changing this parameter after construction __has no effect__.

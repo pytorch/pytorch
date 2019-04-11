@@ -232,7 +232,12 @@ struct GraphFuser {
       return false;
     if (!node->is_constant(attr::dim))
       return false;
+
     auto tensors_node = node->namedInput(attr::tensors)->node();
+    if( (tensors_node->inputs().size() + node->outputs().size()) >
+        fusion_kernel_args_limit ) {
+      return false;
+    }
     if (tensors_node->kind() != prim::ListConstruct)
       return false;
     // NB: Note that technically other uses of the list aren't a big problem for
@@ -283,10 +288,9 @@ struct GraphFuser {
             norm_invstd = 1 / (eps + torch.sqrt(norm_var))
             return ((input - norm_mean) * norm_invstd)
       )SCRIPT";
-          auto module = std::make_shared<script::Module>();
-          defineMethodsInModule(
-              module, source, script::nativeResolver, /*self=*/c10::nullopt);
-          *graph_ptr = module->get_method("batch_norm").graph();
+          script::CompilationUnit cu;
+          cu.define(source, script::nativeResolver, nullptr);
+          *graph_ptr = cu.get_function("batch_norm").graph();
         },
         &bn_graph);
 
@@ -494,6 +498,13 @@ struct GraphFuser {
     if (!shouldFuse) {
       return at::nullopt;
     }
+
+    if( (consumer->inputs().size() + consumer->outputs().size() +
+         producer->node()->inputs().size() + producer->node()->outputs().size()) >
+        fusion_kernel_args_limit ) {
+        return at::nullopt;
+    }
+
     if (producer->node()->kind() == aten::_grad_sum_to_size &&
         consumer->kind() == prim::FusionGroup) {
       // check that we will be able to move the _grad_sum_to_size to be fused
@@ -1083,6 +1094,16 @@ struct GraphFuser {
             producer->node(), before_check)) {
       return false;
     }
+
+    // If the number of kernel args could exceed the limit, skip.
+    if ((before_check->inputs().size() +
+         before_check->outputs().size() +
+         producer->node()->inputs().size() +
+         producer->node()->outputs().size())
+        > fusion_kernel_args_limit) {
+      return false;
+    }
+
     // Fusion groups can be merged with concat's group if and only if
     // - the value they produce isn't already coming from a concat and
     // - the fusion group does not contain GradSumToSize
