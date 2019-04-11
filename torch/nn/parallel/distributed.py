@@ -361,6 +361,13 @@ class DistributedDataParallel(Module):
                                                   self.modules_params[1:]):
                     for tensor, param in zip(tensors, module_params):
                         param.set_(tensor)
+                        # Assume we have just run the optimizer and zeroed the
+                        # grads of the parameters on the root model. We need
+                        # to zero the grads on all model replicas as well.
+                        # This snippet is copied from torch.optim.Optimizer.
+                        if param.grad is not None:
+                            param.grad.detach_()
+                            param.grad.zero_()
 
             # module buffer sync
             if self.broadcast_buffers and len(self.modules_buffers[0]) > 0:
