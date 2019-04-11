@@ -57,6 +57,8 @@ namespace py = pybind11;
 
 PyObject* module;
 
+THPGenerator *THPDefaultCPUGenerator = nullptr;
+
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -235,6 +237,13 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
     // never modified.
     //NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     m->d_getset->doc = const_cast<char *>(doc_str);
+  } else if (Py_TYPE(obj) == &PyType_Type) {
+    PyTypeObject* t = (PyTypeObject *)obj;
+    if (t->tp_doc) {
+      return PyErr_Format(PyExc_RuntimeError,
+          "Type '%s' already has a docstring", t->tp_name);
+    }
+    t->tp_doc = doc_str;
   } else {
     return PyErr_Format(PyExc_TypeError,
         "don't know how to add docstring to type '%s'", Py_TYPE(obj)->tp_name);
@@ -657,6 +666,11 @@ PyObject* initModule() {
 #else
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
 #endif
+
+  auto defaultGenerator = at::detail::getDefaultCPUGenerator().get();
+  THPDefaultCPUGenerator = (THPGenerator*)THPGenerator_initDefaultGenerator(defaultGenerator);
+  // This reference is meant to be given away, so no need to incref here.
+  ASSERT_TRUE(set_module_attr("default_generator", (PyObject*)THPDefaultCPUGenerator, /* incref= */ false));
 
 #ifdef USE_NUMPY
   if (_import_array() < 0) return nullptr;

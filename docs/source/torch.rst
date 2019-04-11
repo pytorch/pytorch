@@ -75,18 +75,19 @@ Indexing, Slicing, Joining, Mutating Ops
 
 Generators
 ----------------------------------
-.. autoclass:: torch.Generator
+.. autoclass:: torch._C.Generator
    :members:
 
 .. _random-sampling:
 
 Random sampling
 ----------------------------------
+.. autofunction:: seed
 .. autofunction:: manual_seed
 .. autofunction:: initial_seed
 .. autofunction:: get_rng_state
 .. autofunction:: set_rng_state
-.. autoattribute:: random.default_generator
+.. autoattribute:: default_generator
 .. autofunction:: bernoulli
 .. autofunction:: multinomial
 .. autofunction:: normal

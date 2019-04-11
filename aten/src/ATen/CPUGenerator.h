@@ -17,19 +17,18 @@ struct CAFFE2_API CPUGenerator : public CloneableGenerator<CPUGenerator, Generat
   static DeviceType device_type();
   uint32_t random();
   uint64_t random64();
-  uint32_t normal_cache_index();
-  void set_normal_cache_index(uint32_t index);
-  at::detail::Array<float, 2> normal_cache_floats();
-  at::detail::Array<double, 2> normal_cache_doubles();
-  void set_normal_cache_floats(at::detail::Array<float, 2> randoms);
-  void set_normal_cache_doubles(at::detail::Array<double, 2> randoms);
+  bool is_normal_cache_available();
+  float normal_cache_float();
+  double normal_cache_double();
+  void set_normal_cache_float(float randn);
+  void set_normal_cache_double(double randn);
 
 private:
   CloneableGenerator<CPUGenerator, Generator>* clone_impl() const override;
   at::mt19937 engine_;
-  uint32_t normal_cache_index_;
-  at::detail::Array<float, 2> normal_cache_floats_;
-  at::detail::Array<double, 2> normal_cache_doubles_;
+  bool is_normal_cache_available_;
+  float normal_cache_float_;
+  double normal_cache_double_;
 };
 
 namespace detail {

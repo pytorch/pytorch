@@ -1,8 +1,7 @@
 import contextlib
 import warnings
-from .generator import Generator
 
-default_generator = Generator(default=True)
+from torch._C import default_generator
 
 
 def set_rng_state(new_state):
@@ -21,7 +20,7 @@ def get_rng_state():
 
 def manual_seed(seed):
     r"""Sets the seed for generating random numbers. Returns a
-    `torch.Generator` object.
+    `torch._C.Generator` object.
 
     Args:
         seed (int): The desired seed.
@@ -36,8 +35,8 @@ def manual_seed(seed):
 
 
 def seed():
-    r"""Sets the seed for generating random numbers to a random number. Returns
-    a 64 bit number used to seed the RNG.
+    r"""Sets the seed for generating random numbers to a non-deterministic
+    random number. Returns a 64 bit number used to seed the RNG.
     """
     seed = default_generator.seed()
     import torch.cuda

@@ -14,6 +14,7 @@
 #include <sstream>
 #include <typeinfo>
 #include <numeric>
+#include <memory>
 
 #if defined(__clang__)
 #define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
@@ -137,16 +138,14 @@ inline int64_t prod_intlist(ArrayRef<int64_t> list) {
  * See Note [Thread-safety and Generators]
  */
 template <typename T>
-static inline T * check_generator_with_default(Generator * expr, Generator * defaultValue) {
+static inline T * check_generator_with_default(Generator * expr, std::unique_ptr<T>& defaultValue) {
   if (!expr) {
-    expr = defaultValue;
+    expr = defaultValue.get();
   }
-  // See Note [Thread-safety and Generators]
-  std::lock_guard<std::mutex> lock(expr->mutex_);
   if (T::device_type() == expr->device().type()) {
     return static_cast<T*>(expr);
   }
-  AT_ERROR("Expected a '", typeid(T).name(), "' but found '", typeid(expr).name(), "'");
+  AT_ERROR("Expected a '", T::device_type(), "' device type for generator but found '", expr->device().type(), "'");
 }
 
 } // at

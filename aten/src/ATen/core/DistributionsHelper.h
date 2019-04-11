@@ -79,14 +79,9 @@ template <typename T>
 struct uniform_real_distribution {
 
   C10_HOST_DEVICE inline uniform_real_distribution(T a_in, T b_in) {
-    #ifndef __HIP_PLATFORM_HCC__
-      #ifdef __CUDA_ARCH__
-        assert(a_in <= b_in);
-        assert(b_in-a_in <= std::numeric_limits<T>::max());
-      #else
-        AT_ASSERT(a_in <= b_in);
-        AT_ASSERT(b_in-a_in <= std::numeric_limits<T>::max());
-      #endif
+    #if !defined(__CUDACC__) || !defined(__HIP_PLATFORM_HCC__)
+      AT_ASSERT(a_in <= b_in);
+      AT_ASSERT(b_in-a_in <= std::numeric_limits<T>::max());
     #endif
     a = a_in;
     b = b_in;
@@ -115,44 +110,37 @@ template <typename T>
 struct normal_distribution {
 
   C10_HOST_DEVICE inline normal_distribution(T mean_in, T stdv_in) {
-    #ifndef __HIP_PLATFORM_HCC__
-      #ifdef __CUDA_ARCH__
-        assert(stdv_in > 0);
-      #else
-        AT_ASSERT(stdv_in > 0);
-      #endif
+    #if !defined(__CUDACC__) || !defined(__HIP_PLATFORM_HCC__)
+      AT_ASSERT(stdv_in > 0);
     #endif
     mean = mean_in;
     stdv = stdv_in;
   }
 
   C10_HOST inline dist_acctype<T> operator()(at::CPUGenerator* generator){
-    uint32_t cache_index = generator->normal_cache_index();
-    if(cache_index == 0) {
+    dist_acctype<T> ret;
+    bool is_cache_available = generator->is_normal_cache_available();
+    if (!is_cache_available) {
       uniform_real_distribution<T> uniform(0.0, 1.0);
       const dist_acctype<T> u1 = uniform(generator);
       const dist_acctype<T> u2 = uniform(generator);
       const dist_acctype<T> r = ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0)-u2));
       const dist_acctype<T> theta = static_cast<T>(2.0) * static_cast<T>(M_PI) * u1;
       if (std::is_same<T, double>::value) {
-        vect_type<double> result;
-        result[0] = r * ::cos(theta) * stdv + mean;
-        result[1] = r * ::sin(theta) * stdv + mean;
-        generator->set_normal_cache_doubles(result);
+        dist_acctype<double> cache = r * ::sin(theta) * stdv + mean;
+        generator->set_normal_cache_double(cache);
       } else {
-        vect_type<float> result;
-        result[0] = r * ::cos(theta) * stdv + mean;
-        result[1] = r * ::sin(theta) * stdv + mean;
-        generator->set_normal_cache_floats(result);
+        dist_acctype<float> cache = r * ::sin(theta) * stdv + mean;
+        generator->set_normal_cache_float(cache);
       }
-    }
-    dist_acctype<T> ret;
-    if (std::is_same<T, double>::value) {
-      ret = generator->normal_cache_doubles()[cache_index];
+      ret = r * ::cos(theta) * stdv + mean;
     } else {
-      ret = generator->normal_cache_floats()[cache_index];
+      if (std::is_same<T, double>::value) {
+        ret = generator->normal_cache_double();
+      } else {
+        ret = generator->normal_cache_float();
+      } 
     }
-    generator->set_normal_cache_index((cache_index + 1) & 1);
     return ret;
   }
 
@@ -168,12 +156,8 @@ template <typename T>
 struct bernoulli_distribution {
 
   C10_HOST_DEVICE inline bernoulli_distribution(T p_in) {
-    #ifndef __HIP_PLATFORM_HCC__
-      #ifdef __CUDA_ARCH__
-        assert(p_in >= 0 && p_in <= 1);
-      #else
-        AT_ASSERT(p_in >= 0 && p_in <= 1);
-      #endif
+    #if !defined(__CUDACC__) || !defined(__HIP_PLATFORM_HCC__)
+      AT_ASSERT(p_in >= 0 && p_in <= 1);
     #endif
     p = p_in;
   }
@@ -194,12 +178,8 @@ template <typename T>
 struct geometric_distribution {
 
   C10_HOST_DEVICE inline geometric_distribution(T p_in) {
-    #ifndef __HIP_PLATFORM_HCC__
-      #ifdef __CUDA_ARCH__
-        assert(p_in > 0 && p_in < 1);
-      #else
-        AT_ASSERT(p_in > 0 && p_in < 1);
-      #endif
+    #if !defined(__CUDACC__) || !defined(__HIP_PLATFORM_HCC__)
+      AT_ASSERT(p_in > 0 && p_in < 1);
     #endif
     p = p_in;
   }
@@ -264,12 +244,8 @@ template <typename T>
 struct lognormal_distribution {
 
   C10_HOST_DEVICE inline lognormal_distribution(T mean_in, T stdv_in) {
-    #ifndef __HIP_PLATFORM_HCC__
-      #ifdef __CUDA_ARCH__
-        assert(stdv_in > 0);
-      #else
-        AT_ASSERT(stdv_in > 0);
-      #endif
+    #if !defined(__CUDACC__) || !defined(__HIP_PLATFORM_HCC__)
+      AT_ASSERT(stdv_in > 0);
     #endif
     mean = mean_in;
     stdv = stdv_in;

@@ -72,26 +72,24 @@ uint64_t getNonDeterministicRandom() {
 CPUGenerator::CPUGenerator(uint64_t seed_in)
   : CloneableGenerator(Device(DeviceType::CPU)),
     engine_(seed_in),
-    normal_cache_index_(0) { }
+    is_normal_cache_available_(false) { }
 
 CPUGenerator::CPUGenerator(mt19937 engine_in)
   : CloneableGenerator(Device(DeviceType::CPU)),
     engine_(engine_in),
-    normal_cache_index_(0) { }
+    is_normal_cache_available_(false) { }
 
 /**
  * Manually seeds the engine with the seed input
  * See Note [Thread-safety and Generators]
  */
 void CPUGenerator::set_current_seed(uint64_t seed) {
-  normal_cache_index_ = 0;
+  is_normal_cache_available_ = false;
   engine_ = mt19937(seed);
 }
 
 /**
  * Gets the current seed of CPUGenerator.
- * 
- * See Note [Thread-safety and Generators]
  */
 uint64_t CPUGenerator::current_seed() const {
   return engine_.seed();
@@ -100,8 +98,6 @@ uint64_t CPUGenerator::current_seed() const {
 /**
  * Gets the DeviceType of CPUGenerator.
  * Used for type checking during run time.
- * 
- * See Note [Thread-safety and Generators]
  */
 DeviceType CPUGenerator::device_type() {
   return DeviceType::CPU;
@@ -133,54 +129,48 @@ uint64_t CPUGenerator::random64() {
  * 
  * See Note [Thread-safety and Generators]
  */
-uint32_t CPUGenerator::normal_cache_index() {
-  return normal_cache_index_;
+bool CPUGenerator::is_normal_cache_available() {
+  return is_normal_cache_available_;
 }
 
 /**
- * Set the current cache index of normal randoms in normal
- * distribution.
+ * Get the cached normal random in float
  * 
  * See Note [Thread-safety and Generators]
  */
-void CPUGenerator::set_normal_cache_index(uint32_t index) {
-  normal_cache_index_ = index;
+float CPUGenerator::normal_cache_float() {
+  is_normal_cache_available_ = false;
+  return normal_cache_float_;
 }
 
 /**
- * Get the cached normal randoms in floats
+ * Get the cached normal random in double
  * 
  * See Note [Thread-safety and Generators]
  */
-at::detail::Array<float, 2> CPUGenerator::normal_cache_floats() {
-  return normal_cache_floats_;
+double CPUGenerator::normal_cache_double() {
+  is_normal_cache_available_ = false;
+  return normal_cache_double_;
 }
 
 /**
- * Get the cached normal randoms in doubles
+ * Cache normal random in float
  * 
  * See Note [Thread-safety and Generators]
  */
-at::detail::Array<double, 2> CPUGenerator::normal_cache_doubles() {
-  return normal_cache_doubles_;
+void CPUGenerator::set_normal_cache_float(float randn) {
+  normal_cache_float_ = randn;
+  is_normal_cache_available_ = true;
 }
 
 /**
- * Cache normal randoms in floats
+ * Cache normal random in double
  * 
  * See Note [Thread-safety and Generators]
  */
-void CPUGenerator::set_normal_cache_floats(at::detail::Array<float, 2> randoms) {
-  normal_cache_floats_ = randoms;
-}
-
-/**
- * Cache normal randoms in doubles
- * 
- * See Note [Thread-safety and Generators]
- */
-void CPUGenerator::set_normal_cache_doubles(at::detail::Array<double, 2> randoms) {
-  normal_cache_doubles_ = randoms;
+void CPUGenerator::set_normal_cache_double(double randn) {
+  normal_cache_double_ = randn;
+  is_normal_cache_available_ = true;
 }
 
 /**

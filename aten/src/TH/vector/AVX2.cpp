@@ -77,7 +77,7 @@ void THFloatVector_normal_fill_AVX2(float *data,
                                     const float stddev)
 {
   THAssert(size >= 16 && "Size must be >= 16 for AVX2 normal fill");
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(generator, at::detail::getDefaultCPUGenerator().get());
+  auto gen = at::check_generator_with_default<at::CPUGenerator>(generator, at::detail::getDefaultCPUGenerator());
   // See Note [Thread-safety and Generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
   

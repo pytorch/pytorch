@@ -10,8 +10,6 @@ Generator::Generator(Device device_in) : device_(device_in) {}
 /**
  * Clone this generator. Note that clone() is the only
  * method for copying for Generators in ATen.
- * 
- * See Note [Thread-safety and Generators]
  */
 std::unique_ptr<Generator> Generator::clone() const {
   return std::unique_ptr<Generator>(static_cast<Generator*>(this->clone_impl()));
@@ -19,8 +17,6 @@ std::unique_ptr<Generator> Generator::clone() const {
 
 /**
  * Gets the device of a generator.
- * 
- * See Note [Thread-safety and Generators]
  */
 Device Generator::device() const {
   return device_;

@@ -34,13 +34,12 @@
 /**
  * Note [Thread-safety and Generators]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * Generator and its derived classes are NOT thread-safe. Please use the public mutex_ when 
- * using any methods from these classes. You can learn about the usage by looking into the 
- * unittests (aten/src/ATen/cpu_generator_test.cpp). Note that we call
- * std::lock_guard<std::mutex> AFTER every call of at::check_generator_with_default. This is
- * because, check_generator_with_default uses the mutex_ in its definition and if you call
- * std::lock_guard before check_generator_with_default, you'll hang inside 
- * check_generator_with_default.
+ * Generator and its derived classes are NOT thread-safe. Please note that most of the
+ * places where we have inserted locking for generators are historically based, and we
+ * haven't actually checked that everything is truly thread safe (and it probably isn't).
+ * Please use the public mutex_ when using any methods from these classes, except for the
+ * read-only methods. You can learn about the usage by looking into the unittests
+ * (aten/src/ATen/cpu_generator_test.cpp) and other places where we have used lock_guard.
  * 
  * TODO: Look into changing the threading semantics of Generators in ATen (e.g., making
  * them non-thread safe and instead making the generator state splittable, to accommodate
@@ -79,6 +78,7 @@ struct CAFFE2_API Generator {
   // Delete all copy and move assignment in favor of clone()
   // method
   Generator(const Generator& other) = delete;
+  Generator(Generator&& other) = delete;
   Generator& operator=(const Generator& other) = delete;
 
   virtual ~Generator() = default;

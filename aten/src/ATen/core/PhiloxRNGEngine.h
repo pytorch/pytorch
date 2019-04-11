@@ -37,12 +37,12 @@ typedef at::detail::Array<float, 2> FLOAT2;
  * Refer to: http://www.thesalmons.org/john/random123/papers/random123sc11.pdf
  * for details regarding the engine.
  *
- * The Philox engine is currently used in CUDA distributions
- * kernels as its random engine. 
+ * Note that currently this implementation of the philox engine is not used
+ * anywhere except for tests in cpu_generator_test.cpp. However, this engine
+ * will replace curandStatePhilox4_32_10_t in the future.
  * 
- * It takes a seed value, a subsequeunce
- * for starting the generation and an offset for the sequence.
- *
+ * The philox engine takes a seed value, a subsequeunce
+ * for starting the generation and an offset for the subsequence.
  * Think of this engine as an algorithm producing a huge array. We are 
  * parallelizing this array by partitioning the huge array and assigning 
  * a thread index to each partition. In other words, each seed value 

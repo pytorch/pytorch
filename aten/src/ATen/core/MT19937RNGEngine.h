@@ -27,6 +27,25 @@ constexpr uint32_t LMASK = 0x7fffffff;
  * and modified with C++ constructs. Moreover the state array of the engine
  * has been modified to hold 32 bit uints instead of 64 bits.
  * 
+ * Note that we reimplemented mt19937 instead of using std::mt19937 because,
+ * at::mt19937 turns out to be faster in the pytorch codebase. PyTorch builds with -O2
+ * by default and following are the benchmark numbers (benchmark code can be found at
+ * https://github.com/syed-ahmed/benchmark-rngs):
+ * 
+ * with -O2
+ * Time to get 100000000 philox randoms with at::uniform_real_distribution = 0.462759s
+ * Time to get 100000000 at::mt19937 randoms with at::uniform_real_distribution = 0.39628s
+ * Time to get 100000000 std::mt19937 randoms with std::uniform_real_distribution = 0.352087s
+ * Time to get 100000000 std::mt19937 randoms with at::uniform_real_distribution = 0.419454s
+ * 
+ * std::mt19937 is faster when used in conjuction with std::uniform_real_distribution,
+ * however we can't use std::uniform_real_distribution because of this bug:
+ * http://open-std.org/JTC1/SC22/WG21/docs/lwg-active.html#2524. Plus, even if we used
+ * std::uniform_real_distribution and filtered out the 1's, it is a different algorithm
+ * than what's in pytorch currently and that messes up the tests in tests_distributions.py.
+ * The other option, using std::mt19937 with at::uniform_real_distribution is a tad bit slower
+ * than at::mt19937 with at::uniform_real_distribution and hence, we went with the latter.
+ * 
  * Copyright notice:
  * A C-program for MT19937, with initialization improved 2002/2/10.
  * Coded by Takuji Nishimura and Makoto Matsumoto.
@@ -85,12 +104,6 @@ public:
     init_with_uint32(seed);
   }
 
-  inline explicit mt19937_engine(uint64_t seed, std::array<uint32_t, MERSENNE_STATE_N*INIT_KEY_MULTIPLIER>& init_key) 
-    : seed_(seed) {
-    init_with_uint32(19650218);
-    init_with_array(init_key);
-  }
-
   inline uint64_t seed() const {
     return seed_;
   }
@@ -122,27 +135,6 @@ private:
       state_[j] = (1812433253 * (state_[j-1] ^ (state_[j-1] >> 30)) + j);
       state_[j] &= 0xffffffff;
     }
-    left_ = 1;
-  }
-
-  inline void init_with_array(std::array<uint32_t, MERSENNE_STATE_N*INIT_KEY_MULTIPLIER>& init_key) {
-    int i = 0;
-    int j = 0;
-    int k = MERSENNE_STATE_N > init_key.size() ? MERSENNE_STATE_N : init_key.size();
-    for(; k; k--) {
-      state_[i] = (state_[i] ^ ((state_[i-1] ^ (state_[i-1] >> 30)) * 1664525)) + init_key[j] + j;
-      state_[i] &= 0xffffffff;
-      i++; j++;
-      if (i >= MERSENNE_STATE_N) { state_[0] = state_[MERSENNE_STATE_N - 1]; i = 1; }
-      if (j >= init_key.size()) { j = 0; }
-    }
-    for (k = MERSENNE_STATE_N - 1; k; k--) {
-      state_[i] = (state_[i] ^ ((state_[i-1] ^ (state_[i-1] >> 30)) * 1566083941)) - i;
-      state_[i] &= 0xffffffff;
-      i++;
-      if (i >= MERSENNE_STATE_N) { state_[0] = state_[MERSENNE_STATE_N - 1]; i = 1; }
-    }
-    state_[0] = UMASK;
     left_ = 1;
   }
 

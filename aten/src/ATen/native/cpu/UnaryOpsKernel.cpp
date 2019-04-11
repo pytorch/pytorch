@@ -50,11 +50,11 @@ void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
 }
 #else
 void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
-  CPUGenerator* generator = check_generator_with_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator().get());
-  // See Note [Thread-safety and Generators]
-  std::lock_guard<std::mutex> lock(generator->mutex_);
+  CPUGenerator* generator = check_generator_with_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
   int64_t seed;
   {
+    // See Note [Thread-safety and Generators]
+    std::lock_guard<std::mutex> lock(generator->mutex_);
     seed = generator->random64();
   }
   int64_t n = self.numel();
