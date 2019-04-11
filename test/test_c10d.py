@@ -145,7 +145,7 @@ def simple_multi_input_reduce_tests(rank, world_size):
     ]
 
 
-def simple_sparse_reduce_tests(rank, world_size):
+def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
     """
     Generate a number of basic test cases for sparse reduction.
     These cover tensors with a varying number of sparse dimensions and a varying
@@ -168,9 +168,14 @@ def simple_sparse_reduce_tests(rank, world_size):
 
     return [
         (
-            c10d.ReduceOp.SUM,
-            fn(rank, world_size),
-            compute_sum(fn, world_size),
+            [
+                fn(num_inputs * rank + i, num_inputs * world_size)
+                for i in range(num_inputs)
+            ],
+            [
+                compute_sum(fn, num_inputs * world_size)
+                for i in range(num_inputs)
+            ],
         )
         for fn in [
             partial(generate, sparse_dims=1),
@@ -181,10 +186,6 @@ def simple_sparse_reduce_tests(rank, world_size):
             partial(generate, dense_dims=3),
         ]
     ]
-
-
-def simple_multi_input_sparse_reduce_tests(rank, world_size):
-    pass
 
 
 class StoreTestBase(object):
@@ -810,19 +811,46 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_allreduce_stress(inputs)
 
+    def test_sparse_allreduce_checks(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        t1 = torch.zeros([1])
+        t2 = torch.sparse_coo_tensor([[0]], [1], size=(2,))
+        t3 = torch.sparse_coo_tensor([[0]], [1], size=(4,))
+
+        with self.assertRaisesRegex(ValueError, "requires non-empty tensor list"):
+            opts = c10d.AllreduceOptions()
+            pg.allreduce([], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid tensor layout"):
+            opts = c10d.AllreduceOptions()
+            pg.allreduce([t1, t2], opts)
+
+        with self.assertRaisesRegex(ValueError, "invalid tensor size"):
+            opts = c10d.AllreduceOptions()
+            pg.allreduce([t2, t3], opts)
+
+        # Sparse allreduce only works with c10d.ReduceOp.SUM.
+        for op in [c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX]:
+            with self.assertRaisesRegex(ValueError, "unsupported reduction operation"):
+                opts = c10d.AllreduceOptions()
+                opts.reduceOp = op
+                pg.allreduce([t3], opts)
+
     def _test_sparse_allreduce_basics(self, fn):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
-        # Single input tests
-        tests = simple_sparse_reduce_tests(self.rank, self.world_size)
-        for (op, input, output) in tests:
-            opts = c10d.AllreduceOptions()
-            opts.reduceOp = op
-            tensor = fn(input)
-            work = pg.allreduce([tensor], opts)
-            work.wait()
-            self.assertEqual(work.result(), [output])
+        for num_inputs_per_rank in [1, 2]:
+            tests = simple_sparse_reduce_tests(
+                self.rank,
+                self.world_size,
+                num_inputs=num_inputs_per_rank)
+            for (inputs, outputs) in tests:
+                work = pg.allreduce([fn(input) for input in inputs])
+                work.wait()
+                self.assertEqual(work.result(), outputs)
 
     def test_sparse_allreduce_basics(self):
         self._test_sparse_allreduce_basics(lambda t: t)

@@ -565,14 +565,12 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
   AsyncSparseAllreduceWork(
       const std::shared_ptr<gloo::Context>& context,
       std::vector<at::Tensor>& inputs,
-      ReduceOp reduceOp,
       uint32_t tag)
-      : context(context), inputs(inputs), reduceOp(reduceOp), tag(tag) {}
+      : context(context), inputs(inputs), tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
   std::vector<at::Tensor> inputs;
   std::vector<at::Tensor> outputs;
-  const ReduceOp reduceOp;
   const uint32_t tag;
 
   // We share dimensionality about the sparse tensors before collecting
@@ -599,10 +597,6 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
       AT_ASSERT(metadata.size(0) == dim);
     }
 
-    // Construct from nothing to facilitate building local metadata.
-    SparseTensorMetadata()
-        : SparseTensorMetadata(at::zeros({dim}, at::kLong)) {}
-
     // Populate the metadata.
     void populate_from_sparse_tensor(const at::Tensor& tensor) {
       const auto sparse_dim = tensor.sparse_dim();
@@ -620,10 +614,6 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
         }
       }
       data_[8] = tensor._nnz();
-    }
-
-    at::Tensor metadata() {
-      return metadata_;
     }
 
     std::vector<int64_t> sizes() const {
@@ -874,9 +864,8 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
   AsyncSparseAllreduceCUDAWork(
       const std::shared_ptr<gloo::Context>& context,
       std::vector<at::Tensor>& inputs,
-      ReduceOp reduceOp,
       uint32_t tag)
-      : AsyncSparseAllreduceWork(context, inputs, reduceOp, tag) {
+      : AsyncSparseAllreduceWork(context, inputs, tag) {
     initializeStreamsEvents(inputs, streams, events);
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
@@ -953,10 +942,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   assertLayoutMatch(invalidArgument, inputs);
   assertTypeAndSizesMatch(invalidArgument, inputs);
 
-  for (const auto& input : inputs) {
-    // AT_CHECK(!input.is_variable(), "input musn't be a variable");
-  }
-
   const auto& device = inputs[0].device();
   switch (device.type()) {
     case at::kCPU:
@@ -969,6 +954,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   }
 
   const auto& layout = inputs[0].layout();
+  if (layout == c10::kSparse && opts.reduceOp != ReduceOp::SUM) {
+    invalidArgument(
+        "unsupported reduction operation "
+        "(allreduce of sparse tensors only works with ReduceOp.SUM)");
+  }
+
   std::shared_ptr<AsyncWork> work;
   auto& context = contexts_[0];
   if (device.type() == at::kCPU) {
@@ -977,7 +968,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
           context, inputs, opts.reduceOp, nextTag());
     } else if (layout == c10::kSparse) {
       work = std::make_shared<AsyncSparseAllreduceWork>(
-          context, inputs, opts.reduceOp, nextTag());
+          context, inputs, nextTag());
     } else {
       invalidArgument("unsupported layout");
     }
@@ -988,7 +979,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
           context, inputs, opts.reduceOp, nextTag());
     } else if (layout == c10::kSparse) {
       work = std::make_shared<AsyncSparseAllreduceCUDAWork>(
-          context, inputs, opts.reduceOp, nextTag());
+          context, inputs, nextTag());
     } else {
       invalidArgument("unsupported layout");
     }
