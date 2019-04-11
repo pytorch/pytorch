@@ -6,58 +6,47 @@
 # specialized operators for each datatype.
 # TODO: remove when we have Type support in the IR
 - func: _cast_Byte(Tensor self, bool non_blocking=False) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: _cast_Char(Tensor self, bool non_blocking=False) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: _cast_Double(Tensor self, bool non_blocking=False) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: _cast_Float(Tensor self, bool non_blocking=False) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: _cast_Int(Tensor self, bool non_blocking=False) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: _cast_Long(Tensor self, bool non_blocking=False) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: _cast_Short(Tensor self, bool non_blocking=False) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: _cast_Half(Tensor self, bool non_blocking=False) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: _cudnn_ctc_loss
 
 - func: _cudnn_rnn_flatten_weight(Tensor[] weight_arr, int weight_stride0, int input_size, int mode, int hidden_size, int num_layers, bool batch_first, bool bidirectional) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: _cudnn_rnn_flatten_weight
 
 - func: _cudnn_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: _cudnn_rnn
 
 - func: _cudnn_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, BoolTensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
+  matches_jit_signature: False
   dispatch:
     CUDA: _cudnn_rnn_backward
 
 - func: _cudnn_init_dropout_state(float dropout, bool train, int dropout_seed, *, ScalarType dtype, Layout layout, Device device) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: _cudnn_init_dropout_state
 
@@ -65,185 +54,137 @@
   variants: function
 
 - func: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
   dispatch:
      CUDA: fused_dropout_cuda
 
 - func: _masked_scale(Tensor self, Tensor mask, float scale) -> Tensor
-  matches_jit_signature: True
   variants: function
   dispatch:
      CUDA: masked_scale_cuda
 
 - func: _sobol_engine_draw(Tensor quasi, int n, Tensor sobolstate, int dimension, int num_generated, ScalarType? dtype) -> (Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: _sobol_engine_ff_(Tensor(a!) self, int n, Tensor sobolstate, int dimension, int num_generated) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: _sobol_engine_scramble_(Tensor(a!) self, Tensor ltm, int dimension) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: _sobol_engine_initialize_state_(Tensor(a!) self, int dimension) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: _reshape_from_tensor(Tensor self, Tensor shape) -> Tensor
-  matches_jit_signature: True
 
 - func: _shape_as_tensor(Tensor self) -> Tensor
-  matches_jit_signature: True
 
 - func: dropout(Tensor input, float p, bool train) -> Tensor
-  matches_jit_signature: True
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: feature_dropout(Tensor input, float p, bool train) -> Tensor
-  matches_jit_signature: True
 
 - func: feature_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: alpha_dropout(Tensor input, float p, bool train) -> Tensor
-  matches_jit_signature: True
 
 - func: alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: feature_alpha_dropout(Tensor input, float p, bool train) -> Tensor
-  matches_jit_signature: True
 
 - func: feature_alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: abs(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: abs_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _abs__cpu
     CUDA: _abs__cuda
 
 - func: abs(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _abs_out_cpu
     CUDA: _abs_out_cuda
 
 - func: acos(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: acos_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _acos__cpu
     CUDA: _acos__cuda
 
 - func: acos(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _acos_out_cpu
     CUDA: _acos_out_cuda
 
 - func: avg_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
-  matches_jit_signature: True
 
 - func: adaptive_avg_pool1d(Tensor self, int[1] output_size) -> Tensor
-  matches_jit_signature: True
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool1d(Tensor self, int[1] output_size) -> (Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: add_(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: add(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: add(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: add_(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: addmv_(Tensor(a!) self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: addr_(Tensor(a!) self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: affine_grid_generator(Tensor theta, int[] size) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: affine_grid_generator_backward(Tensor grad, int[] size) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: all(Tensor self, int dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: all(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: allclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> bool
-  matches_jit_signature: True
   variants: function, method
 
 - func: any(Tensor self, int dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: any(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: arange(Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: arange(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: arange(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: arange(Scalar end, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: arange(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: arange_cpu_out
     CUDA: arange_cuda_out
@@ -254,118 +195,94 @@
 # preserve tracing.  Get rid of this when arange can directly take tensors for bounds
 # (so that it can be traced directly).
 - func: _dim_arange(Tensor like, int dim) -> Tensor
-  matches_jit_signature: True
 
 - func: argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: as_strided_(Tensor(a!) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: asin(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: asin_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _asin__cpu
     CUDA: _asin__cuda
 
 - func: asin(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _asin_out_cpu
     CUDA: _asin_out_cuda
 
 - func: atan(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: atan_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _atan__cpu
     CUDA: _atan__cuda
 
 - func: atan(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _atan_out_cpu
     CUDA: _atan_out_cuda
 
 - func: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: baddbmm_cpu
     CUDA: baddbmm_cuda
 
 - func: baddbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   dispatch:
     CPU: baddbmm__cpu
     CUDA: baddbmm__cuda
 
 - func: _baddbmm_mkl_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function
 
 - func: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: baddbmm_out_cpu
     CUDA: baddbmm_out_cuda
 
 - func: bartlett_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: bartlett_window(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor
-  matches_jit_signature: True
 
 - func: _batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, int)
-  matches_jit_signature: True
 
 - func: _batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
 
 # Sample bernoulli with values in `self` as probability.
 - func: bernoulli(Tensor self, *, Generator? generator=None) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: bernoulli(Tensor self, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function
 
 - func: bernoulli_(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   dispatch:
     CPU: bernoulli_tensor_cpu_
     CUDA: bernoulli_tensor_cuda_
 
 - func: bernoulli_(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   dispatch:
     CPU: bernoulli_scalar_cpu_
@@ -375,185 +292,143 @@
 # There is no default valid on `p` here because it would introduce ambiguity
 # with `bernoulli(Tensor self, *, Generator? generator=None)` declaration.
 - func: bernoulli(Tensor self, float p, *, Generator? generator=None) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
-  matches_jit_signature: True
 
 - func: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight, Tensor? pos_weight, int reduction) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: binary_cross_entropy_with_logits_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, Tensor? pos_weight, int reduction) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: bincount(Tensor self, Tensor? weights=None, int minlength=0) -> Tensor
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _bincount_cpu
     CUDA: _bincount_cuda
 
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: blackman_window(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: bmm(Tensor self, Tensor mat2) -> Tensor
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: bmm_cpu
     CUDA: bmm_cuda
 
 - func: bmm(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: bmm_out_cpu
     CUDA: bmm_out_cuda
 
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
-  matches_jit_signature: True
   device_guard: False
 
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
-  matches_jit_signature: True
 
 - func: cat(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: ceil(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: ceil_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _ceil__cpu
     CUDA: _ceil__cuda
 
 - func: ceil(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _ceil_out_cpu
     CUDA: _ceil_out_cuda
 
 - func: chain_matmul(Tensor[] matrices) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor(a)[]
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _clamp__cpu
     CUDA: _clamp__cuda
 
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _clamp_out_cpu
     CUDA: _clamp_out_cuda
 
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: clamp_max_(Tensor(a!) self, Scalar max) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _clamp_max__cpu
     CUDA: _clamp_max__cuda
 
 - func: clamp_max(Tensor self, Scalar max, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _clamp_max_out_cpu
     CUDA: _clamp_max_out_cuda
 
 - func: clamp_min(Tensor self, Scalar min) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: clamp_min_(Tensor(a!) self, Scalar min) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _clamp_min__cpu
     CUDA: _clamp_min__cuda
 
 - func: clamp_min(Tensor self, Scalar min, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _clamp_min_out_cpu
     CUDA: _clamp_min_out_cuda
 
 - func: cudnn_is_acceptable(Tensor self) -> bool
-  matches_jit_signature: True
   device_guard: False
 
 - func: constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: contiguous(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method
 
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
-  matches_jit_signature: True
 
 - func: _convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor
-  matches_jit_signature: True
 
 - func: _convolution_nogroup(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding) -> Tensor
-  matches_jit_signature: True
 
 - func: _convolution_double_backward(Tensor? ggI, Tensor? ggW, Tensor? ggb, Tensor gO, Tensor weight, Tensor self, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor
-  matches_jit_signature: True
 
 - func: conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor
-  matches_jit_signature: True
 
 - func: conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor
-  matches_jit_signature: True
 
 - func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int pad=0) -> Tensor
-  matches_jit_signature: True
 
 - func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int pad) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
 
 # NB: we inherit the goofy argument order from PyTorch torch.nn.functional
 - func: conv_transpose1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] output_padding=0, int groups=1, int[1] dilation=1) -> Tensor
-  matches_jit_signature: True
 
 - func: conv_transpose2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int groups=1, int[2] dilation=1) -> Tensor
-  matches_jit_signature: True
 
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int groups=1, int[3] dilation=1) -> Tensor
-  matches_jit_signature: True
 
 - func: s_copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
-  matches_jit_signature: True
   cpu_half: True
   cpu_bool: True
   cuda_bool: True
@@ -562,7 +437,6 @@
     CUDA: _s_copy__cuda
 
 - func: _s_copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
-  matches_jit_signature: True
   cpu_half: True
   cpu_bool: True
   cuda_bool: True
@@ -570,7 +444,6 @@
     CUDA: _s_copy_from_cuda
 
 - func: _copy_same_type_(Tensor(a!) self, Tensor src) -> void
-  matches_jit_signature: True
   cpu_half: True
   cpu_bool: True
   cuda_bool: True
@@ -578,241 +451,191 @@
     CPU: _copy_same_type__cpu
 
 - func: cos(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: cos_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _cos__cpu
     CUDA: _cos__cuda
 
 - func: cos(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _cos_out_cpu
     CUDA: _cos_out_cuda
 
 - func: cosh(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: cosh_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _cosh__cpu
     CUDA: _cosh__cuda
 
 - func: cosh(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _cosh_out_cpu
     CUDA: _cosh_out_cuda
 
 - func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
-  matches_jit_signature: True
 
 - func: cudnn_affine_grid_generator(Tensor theta, int N, int C, int H, int W) -> Tensor grid
-  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_affine_grid_generator_forward
 
 # TODO: Why do I have to call this grad?!
 - func: cudnn_affine_grid_generator_backward(Tensor grad, int N, int C, int H, int W) -> Tensor grad_theta
-  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_affine_grid_generator_backward
 
 - func: cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_batch_norm
 
 # NB: You can only use this if you used cudnn_batch_norm training=True
 - func: cudnn_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, float epsilon) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_batch_norm_backward
 
 - func: cudnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_convolution
 
 - func: cudnn_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_convolution_backward_input
 
 - func: cudnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_convolution_backward
 
 - func: cudnn_convolution_backward_bias(Tensor grad_output) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_convolution_backward_bias
 
 - func: cudnn_convolution_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_convolution_backward_weight
 
 - func: cudnn_convolution_transpose(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_convolution_transpose
 
 # NB: output_padding not strictly needed here, but it's helpful for the float
 # backwards
 - func: cudnn_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_convolution_transpose_backward
 
 - func: cudnn_convolution_transpose_backward_bias(Tensor grad_output) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_convolution_backward_bias
 
 - func: cudnn_convolution_transpose_backward_input(Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_convolution_transpose_backward_input
 
 - func: cudnn_convolution_transpose_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_convolution_transpose_backward_weight
 
 # NB: input is special cased in a way I don't quite understand
 - func: cudnn_grid_sampler(Tensor self, Tensor grid) -> Tensor output
-  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_grid_sampler_forward
 
 - func: cudnn_grid_sampler_backward(Tensor self, Tensor grid, Tensor grad_output) -> (Tensor grad_self, Tensor grad_grid)
-  matches_jit_signature: True
   dispatch:
     CUDA: cudnn_grid_sampler_backward
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: cumsum(Tensor self, int dim, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: cumsum(Tensor self, int dim) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: cumsum(Tensor self, int dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: cumsum(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: cumprod(Tensor self, int dim, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: cumprod(Tensor self, int dim) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: cumprod(Tensor self, int dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: cumprod(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
-  matches_jit_signature: True
 
 # convenience function that converts to intlists for you
 - func: ctc_loss(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
-  matches_jit_signature: True
 
 - func: _ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, bool zero_infinity=False) -> (Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CPU:  ctc_loss_cpu
     CUDA: ctc_loss_gpu
 
 - func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CPU: ctc_loss_backward_cpu
     CUDA: ctc_loss_backward_gpu
 
 - func: det(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: diag_embed(Tensor self, int offset=0, int dim1=-2, int dim2=-1) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: diagflat(Tensor self, int offset=0) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
-  matches_jit_signature: True
   variants: function, method
 
 - func: div(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: div_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: div(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: div(Tensor self, Scalar other) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: div_(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: dot(Tensor self, Tensor tensor) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: dot(Tensor self, Tensor tensor, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: einsum(str equation, Tensor[] tensors) -> Tensor
-  matches_jit_signature: True
 
 - func: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
-  matches_jit_signature: True
 
 - func: embedding_backward(Tensor grad, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor
-  matches_jit_signature: True
 
 - func: embedding_dense_backward(Tensor grad_output, IndexTensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
+  matches_jit_signature: False
   dispatch:
     CPU: embedding_dense_backward_cpu
     CUDA: embedding_dense_backward_cuda
 
 - func: embedding_renorm_(Tensor(a!) self, Tensor indices, float max_norm, float norm_type) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: embedding_renorm_cpu_
     CUDA: embedding_renorm_cuda_
 
 - func: embedding_sparse_backward(Tensor grad, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
-  matches_jit_signature: True
 
 # NOTE [ embedding_bag Native Functions ]
 # The `_embedding_bag.*` variants assume that input tensors except for `weight`,
@@ -824,21 +647,18 @@
 # The backward functions apply a check that these input tensors are contiguous.
 
 - func: embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None) -> (Tensor, Tensor, Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None) -> (Tensor, Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CPU: _embedding_bag_cpu
     CUDA: _embedding_bag_cuda
 
 - func: _embedding_bag_backward(Tensor grad, Tensor indices, Tensor offsets, Tensor offset2bag, Tensor bag_size, Tensor maximum_indices, int num_weights, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights) -> Tensor
-  matches_jit_signature: True
 
 - func: _embedding_bag_sparse_backward(Tensor grad, Tensor indices, Tensor offsets, Tensor offset2bag, Tensor bag_size, int num_weights, bool scale_grad_by_freq, int mode, Tensor? per_sample_weights) -> Tensor
-  matches_jit_signature: True
 
 - func: _embedding_bag_dense_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, IndexTensor maximum_indices, int num_weights, bool scale_grad_by_freq, int mode, Tensor? per_sample_weights) -> Tensor
+  matches_jit_signature: False
   dispatch:
     CPU: _embedding_bag_dense_backward_cpu
     CUDA: _embedding_bag_dense_backward_cuda
@@ -849,7 +669,6 @@
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
 
 - func: empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
   cpu_half: True
   cpu_bool: True
   cuda_bool: True
@@ -860,7 +679,6 @@
     SparseCUDA: empty_sparse
 
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   cpu_bool: True
   cuda_bool: True
@@ -871,179 +689,144 @@
     CUDA: resize_cuda_
 
 - func: empty(int[] size, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   device_guard: False
 
 - func: empty_like(Tensor self) -> Tensor
-  matches_jit_signature: True
   device_guard: False
 
 - func: empty_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
-  matches_jit_signature: True
   device_guard: False
 
 - func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
   cpu_half: True
   cpu_bool: True
   cuda_bool: True
-  matches_jit_signature: True
   dispatch:
     CPU: empty_strided_cpu
     CUDA: empty_strided_cuda
 
 - func: erf(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: erf_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _erf__cpu
     CUDA: _erf__cuda
 
 - func: erf(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _erf_out_cpu
     CUDA: _erf_out_cuda
 
 - func: erfc(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: erfc_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _erfc__cpu
     CUDA: _erfc__cuda
 
 - func: erfc(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _erfc_out_cpu
     CUDA: _erfc_out_cuda
 
 - func: exp(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: exp_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _exp__cpu
     CUDA: _exp__cuda
 
 - func: exp(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _exp_out_cpu
     CUDA: _exp_out_cuda
 
 - func: expm1(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: expm1_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _expm1__cpu
     CUDA: _expm1__cuda
 
 - func: expm1(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _expm1_out_cpu
     CUDA: _expm1_out_cuda
 
 - func: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
-  matches_jit_signature: True
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   device_guard: False
 
 - func: expand_as(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   device_guard: False
 
 - func: eye(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: eye(int n, int m, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: eye(int n, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
 
 - func: eye(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
 
 - func: flatten(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: fill_(Tensor(a!) self, Scalar value) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
 
 - func: fill_(Tensor(a!) self, Tensor value) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
 
 - func: floor(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: floor_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _floor__cpu
     CUDA: _floor__cuda
 
 - func: floor(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _floor_out_cpu
     CUDA: _floor_out_cuda
 
 - func: frac(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: frac_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _frac__cpu
     CUDA: _frac__cuda
 
 - func: frac(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _frac_out_cpu
     CUDA: _frac_out_cuda
 
 - func: full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: full(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: full_like(Tensor self, Scalar fill_value) -> Tensor
-  matches_jit_signature: True
 
 - func: full_like(Tensor self, Scalar fill_value, *, ScalarType dtype, Layout layout, Device device) -> Tensor
-  matches_jit_signature: True
 
 # NOTE [ grid_sampler Native Functions ]
 # `grid_sampler` does all the shape checking and then dispatches to one of
@@ -1055,264 +838,203 @@
 # enums defined in `native/GridSampler.h`. `cudnn_grid_sampler` doesn't take in
 # `interpolation_mode` because it only supports Bilinear interpolation mode.
 - func: grid_sampler(Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> Tensor
-  matches_jit_signature: True
 
 - func: grid_sampler_2d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CPU: grid_sampler_2d_cpu
     CUDA: grid_sampler_2d_cuda
 
 - func: grid_sampler_2d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> (Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CPU: grid_sampler_2d_backward_cpu
     CUDA: grid_sampler_2d_backward_cuda
 
 - func: grid_sampler_3d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CPU: grid_sampler_3d_cpu
     CUDA: grid_sampler_3d_cuda
 
 - func: grid_sampler_3d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode) -> (Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CPU: grid_sampler_3d_backward_cpu
     CUDA: grid_sampler_3d_backward_cuda
 
 - func: hann_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: hann_window(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: hamming_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: hamming_window(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: hamming_window(int window_length, bool periodic, float alpha, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: hamming_window(int window_length, bool periodic, float alpha, float beta, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor
-  matches_jit_signature: True
 
 - func: ger(Tensor self, Tensor vec2) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: ger(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor
-  matches_jit_signature: True
 
 # FFT
 
 - func: fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: ifft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: rfft(Tensor self, int signal_ndim, bool normalized=False, bool onesided=True) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: irfft(Tensor self, int signal_ndim, bool normalized=False, bool onesided=True, int[] signal_sizes=[]) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: _fft_with_size(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, bool normalized, bool onesided, int[] output_sizes) -> Tensor
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: _fft_mkl
     CUDA: _fft_cufft
 
 - func: _cufft_get_plan_cache_size() -> int
-  matches_jit_signature: True
 
 - func: _cufft_get_plan_cache_max_size() -> int
-  matches_jit_signature: True
 
 - func: _cufft_set_plan_cache_max_size(int max_size) -> void
-  matches_jit_signature: True
 
 - func: _cufft_clear_plan_cache() -> void
-  matches_jit_signature: True
 
 - func: index(Tensor self, Tensor?[] indices) -> Tensor
-  matches_jit_signature: True
   variants: function, method
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 
 - func: index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: index_copy(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
 
 - func: index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: inverse(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: inverse(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: _inverse_helper(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: _inverse_helper_cpu
     CUDA: _inverse_helper_cuda
 
 - func: isclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: isnan(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function
   device_guard: False
 
 - func: is_distributed(Tensor self) -> bool
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: is_floating_point(Tensor self) -> bool
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: is_complex(Tensor self) -> bool
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: is_nonzero(Tensor self) -> bool
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: is_same_size(Tensor self, Tensor other) -> bool
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: is_signed(Tensor self) -> bool
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  matches_jit_signature: True
 
 - func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CPU: kl_div_backward_cpu
     CUDA: kl_div_backward_cuda
 
 - func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
-  matches_jit_signature: True
   variants: function, method
 
 - func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  matches_jit_signature: True
   dispatch:
     CPU: kthvalue_out_cpu
     CUDA: kthvalue_out_cuda
 
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
-  matches_jit_signature: True
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
-  matches_jit_signature: True
 
 - func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
-  matches_jit_signature: True
 
 - func: fbgemm_linear_quantize_weight(Tensor input) -> (Tensor, Tensor, float, int)
-  matches_jit_signature: True
 
 - func: fbgemm_pack_quantized_matrix(Tensor input, int K, int N) -> Tensor
-  matches_jit_signature: True
 
 - func: fbgemm_is_cpu_supported() -> bool
-  matches_jit_signature: True
 
 - func: linspace(Scalar start, Scalar end, int steps=100, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: linspace(Scalar start, Scalar end, int steps=100, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: linspace_cpu_out
     CUDA: linspace_cuda_out
 
 - func: log(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: log_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _log__cpu
     CUDA: _log__cuda
 
 - func: log(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _log_out_cpu
     CUDA: _log_out_cuda
 
 - func: log10(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: log10_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _log10__cpu
     CUDA: _log10__cuda
 
 - func: log10(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _log10_out_cpu
     CUDA: _log10_out_cuda
 
 - func: log1p(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: log1p_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _log1p__cpu
@@ -1321,7 +1043,6 @@
     SparseCUDA: log1p_sparse_
 
 - func: log1p(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _log1p_out_cpu
     CUDA: _log1p_out_cuda
@@ -1329,298 +1050,226 @@
     SparseCUDA: log1p_out_sparse
 
 - func: log2(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: log2_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _log2__cpu
     CUDA: _log2__cuda
 
 - func: log2(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _log2_out_cpu
     CUDA: _log2_out_cuda
 
 - func: logdet(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: logspace(Scalar start, Scalar end, int steps=100, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: logspace(Scalar start, Scalar end, int steps=100, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: logspace_cpu_out
     CUDA: logspace_cuda_out
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: log_softmax(Tensor self, int dim, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: log_softmax(Tensor self, int dim) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CPU: log_softmax_cpu
     CUDA: log_softmax_cuda
 
 - func: _log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CPU: log_softmax_backward_cpu
     CUDA: log_softmax_backward_cuda
 
 - func: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: logsumexp(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
-  matches_jit_signature: True
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: matmul(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: matrix_rank(Tensor self, float tol, bool symmetric=False) -> Tensor
-  matches_jit_signature: True
 
 - func: matrix_rank(Tensor self, bool symmetric=False) -> Tensor
-  matches_jit_signature: True
 
 - func: matrix_power(Tensor self, int n) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: max(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  matches_jit_signature: True
   variants: function, method
 
 - func: max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
-  matches_jit_signature: True
 
 - func: max_values(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool1d_with_indices(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: max_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
-  matches_jit_signature: True
 
 - func: max_pool2d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
-  matches_jit_signature: True
 
 - func: max_pool3d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
-  matches_jit_signature: True
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: mean(Tensor self, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: mean(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: mean(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: mean(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: mean(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: mean(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: mean(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: mean(Tensor self, int[1] dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: median(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  matches_jit_signature: True
   variants: function, method
 
 - func: median(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  matches_jit_signature: True
 
 - func: min(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  matches_jit_signature: True
   variants: function, method
 
 - func: min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  matches_jit_signature: True
 
 - func: min_values(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
-  matches_jit_signature: True
 
 - func: mkldnn_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool bias_defined) -> Tensor
-  matches_jit_signature: True
 
 - func: mkldnn_convolution_backward_weights(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool bias_defined) -> (Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: miopen_batch_norm
 
 - func: miopen_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, float epsilon) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: miopen_batch_norm_backward
 
 - func: miopen_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: miopen_convolution
 
 - func: miopen_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: miopen_convolution_backward_input
 
 - func: miopen_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: miopen_convolution_backward
 
 - func: miopen_convolution_backward_bias(Tensor grad_output) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: miopen_convolution_backward_bias
 
 - func: miopen_convolution_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: miopen_convolution_backward_weight
 
 - func: miopen_convolution_transpose(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: miopen_convolution_transpose
 
 # NB: output_padding not strictly needed here, but it's helpful for the float
 # backwards
 - func: miopen_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: miopen_convolution_transpose_backward
 
 - func: miopen_convolution_transpose_backward_input(Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: miopen_convolution_transpose_backward_input
 
 - func: miopen_convolution_transpose_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: miopen_convolution_transpose_backward_weight
 
 - func: miopen_depthwise_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: miopen_depthwise_convolution
 
 - func: miopen_depthwise_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: miopen_depthwise_convolution_backward_input
 
 - func: miopen_depthwise_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: miopen_depthwise_convolution_backward
 
 - func: miopen_depthwise_convolution_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: miopen_depthwise_convolution_backward_weight
 
 - func: mm(Tensor self, Tensor mat2) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: mm(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
-  matches_jit_signature: True
 
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
-  matches_jit_signature: True
   variants: function, method
 
 - func: mode(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  matches_jit_signature: True
 
 - func: mul(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: mul_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: mul(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
   # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: mul(Tensor self, Scalar other) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: mul_(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: mv(Tensor self, Tensor vec) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: mv(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: mvlgamma(Tensor self, int p) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: mvlgamma_(Tensor(a!) self, int p) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: narrow_copy(Tensor self, int dim, int start, int length) -> Tensor
-  matches_jit_signature: True
   variants: method
   dispatch:
     CPU: narrow_copy_dense
@@ -1629,549 +1278,429 @@
     SparseCUDA: narrow_copy_sparse
 
 - func: narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CPU: batch_norm_cpu
     CUDA: batch_norm_cuda
 
 - func: batch_norm_stats(Tensor input, float eps) -> (Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: batch_norm_stats_cuda
 
 - func: batch_norm_elemt(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor invstd, float eps) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: batch_norm_elemt_cuda
 
 - func: batch_norm_gather_stats(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, int count) -> (Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: batch_norm_gather_stats_cuda
 
 - func: native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CPU: batch_norm_backward_cpu
     CUDA: batch_norm_backward_cuda
 
 - func: batch_norm_backward_reduce(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, bool input_g, bool weight_g, bool bias_g) -> (Tensor, Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: batch_norm_backward_reduce_cuda
 
 - func: batch_norm_backward_elemt(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, Tensor mean_dy, Tensor mean_dy_xmu) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CUDA: batch_norm_backward_elemt_cuda
 
 - func: batch_norm_update_stats(Tensor input, Tensor? running_mean, Tensor? running_var, float momentum) -> (Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CPU: batch_norm_update_stats_cpu
     CUDA: batch_norm_update_stats_cuda
 
 - func: _nnpack_available() -> bool
-  matches_jit_signature: True
 
 - func: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int[2] padding) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: _nnpack_spatial_convolution_backward(Tensor input, Tensor grad_output, Tensor weight, int[2] padding, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
 
 - func: _nnpack_spatial_convolution_backward_input(Tensor input, Tensor grad_output, Tensor weight, int[2] padding) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: _nnpack_spatial_convolution_backward_weight(Tensor input, int[] weightsize, Tensor grad_output, int[2] padding) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: ones(int[] size, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: ones_like(Tensor self) -> Tensor
-  matches_jit_signature: True
 
 - func: ones_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
-  matches_jit_signature: True
 
 - func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
 
 - func: cdist(Tensor x1, Tensor x2, float p=2) -> Tensor
-  matches_jit_signature: True
 
 - func: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
 
 - func: pdist(Tensor self, float p=2) -> Tensor
-  matches_jit_signature: True
 
 - func: _pdist_forward(Tensor self, float p=2) -> Tensor
-  matches_jit_signature: True
 
 - func: _pdist_backward(Tensor grad, Tensor self, float p, Tensor pdist) -> Tensor
-  matches_jit_signature: True
 
 - func: cosine_similarity(Tensor x1, Tensor x2, int dim=1, float eps=1e-08) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
-  matches_jit_signature: True
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
-  matches_jit_signature: True
 
 - func: pin_memory(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: rand(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: rand(int[] size, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: rand(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: rand_like(Tensor self) -> Tensor
-  matches_jit_signature: True
 
 - func: rand_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
-  matches_jit_signature: True
 
 - func: randint(int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: randint(int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: randint(int low, int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: randint(int low, int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: randint(int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: randint(int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: randint(int low, int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: randint(int low, int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: randint_like(Tensor self, int high) -> Tensor
-  matches_jit_signature: True
 
 - func: randint_like(Tensor self, int low, int high) -> Tensor
-  matches_jit_signature: True
 
 - func: randint_like(Tensor self, int high, *, ScalarType dtype, Layout layout, Device device) -> Tensor
-  matches_jit_signature: True
 
 - func: randint_like(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device) -> Tensor
-  matches_jit_signature: True
 
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: randn(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: randn(int[] size, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: randn(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: randn_like(Tensor self) -> Tensor
-  matches_jit_signature: True
 
 - func: randn_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
-  matches_jit_signature: True
 
 - func: randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: randperm(int n, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
 
 - func: randperm(int n, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: randperm(int n, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: randperm_out_cpu
     CUDA: randperm_out_cuda
 
 - func: range(Scalar start, Scalar end, Scalar step=1, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: range(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: range(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: range_cpu_out
     CUDA: range_cuda_out
 
 - func: reciprocal(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: reciprocal_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _reciprocal__cpu
     CUDA: _reciprocal__cuda
 
 - func: reciprocal(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _reciprocal_out_cpu
     CUDA: _reciprocal_out_cuda
 
 - func: neg(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _neg__cpu
     CUDA: _neg__cuda
 
 - func: neg(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _neg_out_cpu
     CUDA: _neg_out_cuda
 
 - func: repeat(Tensor self, int[] repeats) -> Tensor
-  matches_jit_signature: True
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: repeat_interleave(Tensor repeats) -> Tensor
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: repeat_interleave_cpu
     CUDA: repeat_interleave_cuda
 
 - func: repeat_interleave(Tensor self, Tensor repeats, int? dim=None) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: repeat_interleave(Tensor self, int repeats, int? dim=None) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: reshape(Tensor self, int[] shape) -> Tensor
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: reshape_as(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method
   device_guard: False
 
 - func: round(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: round_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _round__cpu
     CUDA: _round__cuda
 
 - func: round(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _round_out_cpu
     CUDA: _round_out_cuda
 
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
-  matches_jit_signature: True
 
 - func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: relu(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
 
 - func: prelu(Tensor self, Tensor weight) -> Tensor
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: prelu_cpu
     CUDA: prelu_cuda
 
 - func: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: prelu_backward_cpu
     CUDA: prelu_backward_cuda
 
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: hardshrink_cpu
     CUDA: hardshrink_cuda
 
 - func: hardshrink_backward(Tensor grad_out, Tensor self, Scalar lambd) -> Tensor
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: hardshrink_backward_cpu
     CUDA: hardshrink_backward_cuda
 
 - func: rsqrt(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: rsqrt_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _rsqrt__cpu
     CUDA: _rsqrt__cuda
 
 - func: rsqrt(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _rsqrt_out_cpu
     CUDA: _rsqrt_out_cuda
 
 - func: select(Tensor(a) self, int dim, int index) -> Tensor(a)
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: selu(Tensor self) -> Tensor
-  matches_jit_signature: True
 
 - func: selu_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: celu(Tensor self, Scalar alpha=1.0) -> Tensor
-  matches_jit_signature: True
 
 - func: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: sigmoid(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: sigmoid_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _sigmoid__cpu
     CUDA: _sigmoid__cuda
 
 - func: sigmoid(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _sigmoid_out_cpu
     CUDA: _sigmoid_out_cuda
 
 - func: sin(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: sin_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _sin__cpu
     CUDA: _sin__cuda
 
 - func: sin(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _sin_out_cpu
     CUDA: _sin_out_cuda
 
 - func: sinh(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: sinh_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _sinh__cpu
     CUDA: _sinh__cuda
 
 - func: sinh(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _sinh_out_cpu
     CUDA: _sinh_out_cuda
 
 - func: detach(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: detach_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
 
 - func: size(Tensor self, int dim) -> int
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: slice(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
-  matches_jit_signature: True
   variants: function, method
 
 - func: smm(Tensor self, Tensor mat2) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: softmax(Tensor self, int dim, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: softmax(Tensor self, int dim) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CPU: softmax_cpu
     CUDA: softmax_cuda
 
 - func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
 
 - func: _sparse_add(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     SparseCPU: add_out_sparse_cpu
     SparseCUDA: add_out_sparse_cuda
 
 - func: _sparse_dense_add(Tensor self, SparseTensorRef other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: add_out_dense_sparse_cpu
     CUDA: add_out_dense_sparse_cuda
 
 - func: _sparse_div_zerodim(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     SparseCPU: div_out_sparse_zerodim
     SparseCUDA: div_out_sparse_zerodim
 
 - func: _sparse_div_scalar(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     SparseCPU: div_out_sparse_scalar
     SparseCUDA: div_out_sparse_scalar
 
 - func: _sparse_mul(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     SparseCPU: mul_out_sparse_cpu
     SparseCUDA: mul_out_sparse_cuda
 
 - func: _sparse_mul_zerodim(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     SparseCPU: mul_out_sparse_zerodim
     SparseCUDA: mul_out_sparse_zerodim
 
 - func: _sparse_mul_scalar(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     SparseCPU: mul_out_sparse_scalar
     SparseCUDA: mul_out_sparse_scalar
 
 - func: split(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: squeeze(Tensor(a) self) -> Tensor(a)
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: squeeze(Tensor(a) self, int dim) -> Tensor(a)
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: squeeze_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   device_guard: False
 
 - func: squeeze_(Tensor(a!) self, int dim) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   device_guard: False
 
 - func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _sspaddmm_out_only_sparse
     CUDA: _sspaddmm_out_only_sparse_cuda
@@ -2179,188 +1708,146 @@
     SparseCUDA: _sspaddmm_out_cuda
 
 - func: stack(Tensor[] tensors, int dim=0) -> Tensor
-  matches_jit_signature: True
 
 - func: stack(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 # The signature is designed to be consistent with librosa except that it is
 # missing the `pad_mode` and `center` arguments, which are taken care of at
 # `torch.functional.py`. They shall be moved here once we have mapping between
 # Python strings and C++ Enum in codegen.
 - func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool onesided=True) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: stride(Tensor self, int dim) -> int
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: sum(Tensor self, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: sum(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: sum(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: sum(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: sum(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: sum(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: sum(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: sum(Tensor self, int[1] dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: sum_to_size(Tensor self, int[] size) -> Tensor
-  matches_jit_signature: True
   variants: method
   device_guard: False
 
 - func: sqrt(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: sqrt_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _sqrt__cpu
     CUDA: _sqrt__cuda
 
 - func: sqrt(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _sqrt_out_cpu
     CUDA: _sqrt_out_cuda
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: std(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: std(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: prod(Tensor self, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: prod(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: prod(Tensor self, int dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: prod(Tensor self, int dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: prod(Tensor self, int dim, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: prod(Tensor self, int dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: prod(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: prod(Tensor self, int dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: t(Tensor(a) self) -> Tensor(a)
-  matches_jit_signature: True
   device_guard: False
   variants: function, method
 
 - func: t_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   device_guard: False
   variants: method
 
 - func: tan(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: tan_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _tan__cpu
     CUDA: _tan__cuda
 
 - func: tan(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _tan_out_cpu
     CUDA: _tan_out_cuda
 
 - func: tanh(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _tanh__cpu
     CUDA: _tanh__cuda
 
 - func: tanh(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _tanh_out_cpu
     CUDA: _tanh_out_cuda
 
 - func: tensordot(Tensor self, Tensor other, int[] dims_self, int[] dims_other) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 # TODO: namespace threshold in 'nn'
 - func: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function
 
 - func: threshold(Tensor self, Scalar threshold, Scalar value, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   device_guard: False
 
@@ -2369,14 +1856,12 @@
   variants: function
 
 - func: flip(Tensor self, int[] dims) -> Tensor
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: flip_cpu
     CUDA: flip_cuda
 
 - func: roll(Tensor self, int[1] shifts, int[1] dims=[]) -> Tensor
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: roll_cpu
@@ -2384,59 +1869,48 @@
 
 # default int[] value [0,1] should not add space after comma, since native_parse.py uses ', ' to split args
 - func: rot90(Tensor self, int k=1, int[] dims=[0,1]) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
-  matches_jit_signature: True
 
 - func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-06, bool swap=False, int reduction=Mean) -> Tensor
-  matches_jit_signature: True
 
 - func: trunc(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: trunc_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: _trunc__cpu
     CUDA: _trunc__cuda
 
 - func: trunc(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _trunc_out_cpu
     CUDA: _trunc_out_cuda
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method
 
 - func: _unique(Tensor self, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: _unique_cpu
     CUDA: _unique_cuda
 
 - func: _unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: _unique_dim_cpu
     CUDA: _unique_dim_cuda
 
 - func: unique_consecutive(Tensor self, bool return_inverse=False, bool return_counts=False, int? dim=None) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: unique_consecutive_cpu
     CUDA: unique_consecutive_cuda
 
 - func: unique_dim_consecutive(Tensor self, int dim, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: unique_dim_consecutive_cpu
@@ -2447,45 +1921,36 @@
 # Please don't rely on these two operators, they will be removed soon
 
 - func: _unique2_temporary_will_remove_soon(Tensor self, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: _unique2_cpu
     CUDA: _unique2_cuda
 
 - func: _unique_dim2_temporary_will_remove_soon(Tensor self, int dim, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: _unique_dim2_cpu
     CUDA: _unique_dim2_cuda
 
 - func: _unsafe_view(Tensor self, int[] size) -> Tensor
-  matches_jit_signature: True
 
 - func: unsqueeze(Tensor(a) self, int dim) -> Tensor(a)
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: unsqueeze_(Tensor(a!) self, int dim) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   device_guard: False
 
 - func: var(Tensor self, bool unbiased=True) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: var(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: var(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: view_as(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method
   device_guard: False
 
@@ -2493,77 +1958,62 @@
 # this allows us to implicitly calculate the broadcast derivative, while only dealing with the
 # _s_where derivative.
 - func: where(Tensor condition, Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: _s_where_cpu
     CUDA: _s_where_cuda
 
 - func: norm_except_dim(Tensor v, int pow=2, int dim=0) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 # VariableType::_weight_norm does not want to be given a gap in the autograd graph,
 # so we don't define "dispatch" variants for it.
 - func: _weight_norm(Tensor v, Tensor g, int dim=0) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: _weight_norm_cuda_interface(Tensor v, Tensor g, int dim=0) -> (Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
   dispatch:
     CUDA: weight_norm_cuda
 
 - func: _weight_norm_cuda_interface_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int dim) -> (Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
   dispatch:
     CUDA: weight_norm_cuda_backward
 
 - func: _weight_norm_differentiable_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int dim) -> (Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
 
 - func: zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: zeros(int[] size, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: zeros_like(Tensor self) -> Tensor
-  matches_jit_signature: True
 
 - func: zeros_like(Tensor self, *, ScalarType dtype, Layout layout, Device device) -> Tensor
-  matches_jit_signature: True
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: _standard_gamma_grad_cpu
     CUDA: _standard_gamma_grad_cuda
 
 - func: _standard_gamma(Tensor self, Generator? generator=None) -> Tensor
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: _s_gamma_cpu
     CUDA: _s_gamma_cuda
 
 - func: _sample_dirichlet(Tensor self, Generator? generator=None) -> Tensor
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: _s_dirichlet_cpu
     CUDA: _s_dirichlet_cuda
 
 - func: poisson(Tensor self, Generator? generator=None) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
@@ -2572,74 +2022,56 @@
 # complicated
 
 - func: native_norm(Tensor self, Scalar p=2) -> Tensor
-  matches_jit_signature: True
   dispatch:
     SparseCPU: norm_sparse
     SparseCUDA: norm_sparse
 
 # TODO: reduce signatures down to one when optional args is available
 - func: _sparse_sum(Tensor self) -> Tensor
-  matches_jit_signature: True
 
 - func: _sparse_sum(Tensor self, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
 
 - func: _sparse_sum(Tensor self, int[1] dim) -> Tensor
-  matches_jit_signature: True
 
 - func: _sparse_sum(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
 
 - func: _sparse_sum_backward(Tensor grad, Tensor self, int[] dim) -> Tensor
-  matches_jit_signature: True
   dispatch:
       SparseCPU: _sparse_sum_backward_cpu
       SparseCUDA: _sparse_sum_backward_cuda
 
 - func: norm(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: norm(Tensor self, Scalar p=2) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: norm(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: norm(Tensor self, Scalar? p, int[1] dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: norm(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: norm(Tensor self, Scalar? p, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: frobenius_norm(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: frobenius_norm(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: frobenius_norm(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function
 
 - func: nuclear_norm(Tensor self, bool keepdim=False) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: nuclear_norm(Tensor self, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function
 
 - func: clone(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
   cpu_half: True
   cpu_bool: True
@@ -2651,7 +2083,6 @@
     SparseCUDA: clone_sparse
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
-  matches_jit_signature: True
   cpu_bool: True
   cuda_bool: True
   cpu_half: True
@@ -2663,7 +2094,6 @@
     SparseCUDA: resize_as_sparse_
 
 - func: pow(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: pow_out
     CUDA: pow_out
@@ -2671,7 +2101,6 @@
     SparseCUDA: pow_out_sparse_scalar
 
 - func: pow(Tensor self, Scalar exponent) -> Tensor
-  matches_jit_signature: True
   variants: function, method
   dispatch:
     CPU: pow
@@ -2680,7 +2109,6 @@
     SparseCUDA: pow_sparse_scalar
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method, function
   cpu_half: True
   cpu_bool: True
@@ -2692,64 +2120,50 @@
     SparseCUDA: zero_sparse_
 
 - func: sub(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: sub(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: sub_(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: sub(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: sub_(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: rsub(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: rsub(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: s_native_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: s_addmm_out_sparse_dense_cpu
     CUDA: s_addmm_out_sparse_dense_cuda
 
 - func: s_native_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CPU: s_addmm_sparse_dense_cpu
     CUDA: s_addmm_sparse_dense_cuda
 
 - func: s_native_addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: s_addmm_sparse_dense_cpu_
     CUDA: s_addmm_sparse_dense_cuda_
 
 - func: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  matches_jit_signature: True
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 
@@ -2872,26 +2286,20 @@
 # FIXME: would be nicer if TensorOptions was optional based; not adding default arguments for options given
 # the default would never make sense.
 - func: sparse_coo_tensor(int[] size, *, ScalarType dtype, Layout layout, Device device) -> Tensor
-  matches_jit_signature: True
 
 - func: sparse_coo_tensor(Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: sparse_coo_tensor(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: _sparse_coo_tensor_unsafe(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None) -> Tensor
-  matches_jit_signature: True
 
 - func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType dtype, Layout layout, Device device) -> Tensor
-  matches_jit_signature: True
   dispatch:
     SparseCPU: new_with_dims_sparse
     SparseCUDA: new_with_dims_sparse
   requires_tensor: True
 
 - func: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType dtype, Layout layout, Device device) -> Tensor
-  matches_jit_signature: True
   dispatch:
     SparseCPU: new_with_dims_and_tensor_sparse
     SparseCUDA: new_with_dims_and_tensor_sparse
@@ -2899,7 +2307,6 @@
 
 
 - func: sparse_resize_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: sparse_resize_
@@ -2907,7 +2314,6 @@
   requires_tensor: True
 
 - func: sparse_resize_and_clear_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: sparse_resize_and_clear_
@@ -2916,7 +2322,6 @@
 
 
 - func: sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor
-  matches_jit_signature: True
   variants: method
   dispatch:
     CPU: sparse_mask_cpu
@@ -2925,7 +2330,6 @@
 
 
 - func: to_dense(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: sparse_to_dense
@@ -2934,10 +2338,8 @@
   requires_tensor: True
 
 - func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
-  matches_jit_signature: True
 
 - func: sparse_dim(Tensor self) -> int
-  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: sparse_dim_sparse
@@ -2947,7 +2349,6 @@
 
 # legacy method
 - func: _dimI(Tensor self) -> int
-  matches_jit_signature: True
   variants: method
   dispatch: sparse_dim_sparse
   requires_tensor: True
@@ -2955,7 +2356,6 @@
 
 
 - func: dense_dim(Tensor self) -> int
-  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: dense_dim_sparse
@@ -2965,7 +2365,6 @@
 
 # legacy method
 - func: _dimV(Tensor self) -> int
-  matches_jit_signature: True
   variants: method
   dispatch: dense_dim_sparse
   requires_tensor: True
@@ -2973,7 +2372,6 @@
 
 
 - func: _nnz(Tensor self) -> int
-  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: _nnz_sparse
@@ -2983,7 +2381,6 @@
 
 
 - func: coalesce(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: coalesce_sparse_cpu
@@ -2992,7 +2389,6 @@
 
 
 - func: is_coalesced(Tensor self) -> bool
-  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: is_coalesced_sparse
@@ -3002,7 +2398,6 @@
 
 
 - func: _indices(Tensor(a) self) -> Tensor(a)
-  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: _indices_sparse
@@ -3011,7 +2406,6 @@
   device_guard: False
 
 - func: _values(Tensor(a) self) -> Tensor(a)
-  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: _values_sparse
@@ -3023,7 +2417,6 @@
 # a bit unsafe. Similar to _indices and _values, this is useful for implementing
 # custom sparse operations in Python/C++ extension.
 - func: _coalesced_(Tensor(a!) self, bool coalesced) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: _coalesced_sparse_
@@ -3032,7 +2425,6 @@
   device_guard: False
 
 - func: indices(Tensor(a) self) -> Tensor(a)
-  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: indices_sparse
@@ -3041,7 +2433,6 @@
   device_guard: False
 
 - func: values(Tensor(a) self) -> Tensor(a)
-  matches_jit_signature: True
   variants: method
   dispatch:
     SparseCPU: values_sparse
@@ -3051,21 +2442,18 @@
 
 
 - func: hspmm(Tensor mat1, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     SparseCPU: hspmm_out_sparse_cpu
     SparseCUDA: hspmm_out_sparse_cuda
   requires_tensor: True
 
 - func: hspmm(Tensor mat1, Tensor mat2) -> Tensor
-  matches_jit_signature: True
   dispatch:
     SparseCPU: hspmm_sparse_cpu
     SparseCUDA: hspmm_sparse_cuda
   requires_tensor: True
 
 - func: copy_sparse_to_sparse_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
-  matches_jit_signature: True
   variants: function
   dispatch:
     SparseCPU: copy_sparse_
@@ -3073,54 +2461,44 @@
   requires_tensor: True
 
 - func: numel(Tensor self) -> int
-  matches_jit_signature: True
   variants: function, method
   device_guard: False
 
 - func: unbind(Tensor(a) self, int dim=0) -> Tensor(a)[]
-  matches_jit_signature: True
   variants: function, method
 
 - func: to_sparse(Tensor self, int sparse_dim) -> Tensor
-  matches_jit_signature: True
   variants: method
   dispatch:
     CPU: dense_to_sparse
     CUDA: dense_to_sparse
 
 - func: to_sparse(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method
   dispatch:
     CPU: dense_to_sparse
     CUDA: dense_to_sparse
 
 - func: to_mkldnn(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method
   dispatch:
     CPU: dense_to_mkldnn
 
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
-  matches_jit_signature: True
 
 - func: quantize_linear(Tensor self, float scale, int zero_point) -> Tensor
-  matches_jit_signature: True
   variants: function, method
   requires_tensor: True
 
 - func: dequantize(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: function, method
   requires_tensor: True
 
 - func: q_scale(Tensor self) -> Scalar
-  matches_jit_signature: True
   variants: function, method
   requires_tensor: True
 
 - func: q_zero_point(Tensor self) -> Scalar
-  matches_jit_signature: True
   variants: function, method
   requires_tensor: True
 
@@ -3128,45 +2506,36 @@
 # TensorOptions. Otherwise, an ambiguity error is thrown.
 # See NOTE [ TensorOptions Constructors ].
 - func: to(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool non_blocking=False, bool copy=False) -> Tensor
-  matches_jit_signature: True
   variants: method
   device_guard: False
 
 - func: to(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False) -> Tensor
-  matches_jit_signature: True
   variants: method
   device_guard: False
 
 - func: to(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False) -> Tensor
-  matches_jit_signature: True
   variants: method
   device_guard: False
 
 - func: to(Tensor self, Tensor other, bool non_blocking=False, bool copy=False) -> Tensor
-  matches_jit_signature: True
   variants: method
   device_guard: False
 
 - func: meshgrid(Tensor[] tensors) -> Tensor[]
-  matches_jit_signature: True
 
 - func: cartesian_prod(Tensor[] tensors) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: combinations(Tensor self, int r=2, bool with_replacement=False) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: item(Tensor self) -> Scalar
-  matches_jit_signature: True
   variants: method
 
 # NB: Does NOT check precondition that numel == 1
 # WARNING: Use of cpu_half here is generally not supported; please
 # don't use it.
 - func: _local_scalar_dense(Tensor self) -> Scalar
-  matches_jit_signature: True
   cpu_half: True
   cpu_bool: True
   cuda_bool: True
@@ -3177,1468 +2546,1107 @@
 
 # Fused RNN kernels
 - func: _thnn_fused_lstm_cell(Tensor input_gates, Tensor hidden_gates, Tensor cx, Tensor? input_bias=None, Tensor? hidden_bias=None) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: _thnn_fused_lstm_cell_cuda
 
 - func: _thnn_fused_lstm_cell_backward(Tensor? grad_hy, Tensor? grad_cy, Tensor cx, Tensor cy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: _thnn_fused_lstm_cell_backward_cuda
 
 - func: _thnn_fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor? input_bias=None, Tensor? hidden_bias=None) -> (Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: _thnn_fused_gru_cell_cuda
 
 - func: _thnn_fused_gru_cell_backward(Tensor grad_hy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   dispatch:
     CUDA: _thnn_fused_gru_cell_backward_cuda
 
 # RNN cells and layers
 - func: lstm(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: lstm(Tensor data, Tensor batch_sizes, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: gru(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: gru(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: rnn_tanh(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: rnn_tanh(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: rnn_relu(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: rnn_relu(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: lstm_cell(Tensor input, Tensor[] hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih=None, Tensor? b_hh=None) -> (Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: gru_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih=None, Tensor? b_hh=None) -> Tensor
-  matches_jit_signature: True
 
 - func: rnn_tanh_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih=None, Tensor? b_hh=None) -> Tensor
-  matches_jit_signature: True
 
 - func: rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih=None, Tensor? b_hh=None) -> Tensor
-  matches_jit_signature: True
 
 # Quantized RNN layers
 - func: quantized_lstm(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
 
 # Quantized RNN cells
 - func: quantized_lstm_cell(Tensor input, Tensor[] hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> (Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: quantized_gru_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
-  matches_jit_signature: True
 
 - func: quantized_rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
-  matches_jit_signature: True
 
 - func: quantized_rnn_tanh_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
-  matches_jit_signature: True
 
 
 # PackedSequence utilities
 - func: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
-  matches_jit_signature: True
 
 - func: _pack_padded_sequence_backward(Tensor grad, int[] input_size, Tensor batch_sizes, bool batch_first) -> Tensor
-  matches_jit_signature: True
 
 - func: _pad_packed_sequence(Tensor data, Tensor batch_sizes, bool batch_first, Scalar padding_value, int total_length) -> (Tensor, Tensor)
-  matches_jit_signature: True
 
 # wrappers for legacy TH methods
 
 - func: data_ptr(Tensor self) -> void*
-  matches_jit_signature: True
   variants: method
   device_guard: False
 
 - func: set_(Tensor(a!) self, Storage source) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   device_guard: False
 
 - func: set_(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   device_guard: False
 
 - func: set_(Tensor(a!) self, Tensor source) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   device_guard: False
 
 - func: set_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
-  matches_jit_signature: True
   variants: method
   cpu_bool: True
   cuda_bool: True
   device_guard: False
 
 - func: masked_fill_(Tensor(a!) self, Tensor mask, Scalar value) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: masked_fill(Tensor self, Tensor mask, Scalar value) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: masked_fill_(Tensor(a!) self, Tensor mask, Tensor value) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: masked_fill(Tensor self, Tensor mask, Tensor value) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: masked_scatter_(Tensor(a!) self, Tensor mask, Tensor source) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
   cpu_half: True
   cpu_bool: True
   cuda_bool: True
-  matches_jit_signature: True
   variants: method
   device_guard: False
 
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: index_add(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: index_fill_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: index_fill(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: index_fill_(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: index_fill(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: scatter_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: scatter(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: scatter_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: scatter(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: lt_(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: lt_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: gt_(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: gt_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: le_(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: le_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: ge_(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: ge_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: eq_(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: eq_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: ne_(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: ne_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: __and__(Tensor self, Scalar other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: __and__(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: __iand__(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: __iand__(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: __or__(Tensor self, Scalar other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: __or__(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: __ior__(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: __ior__(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: __xor__(Tensor self, Scalar other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: __xor__(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: __ixor__(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: __ixor__(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: __lshift__(Tensor self, Scalar other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: __lshift__(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: __ilshift__(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: __ilshift__(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: __rshift__(Tensor self, Scalar other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: __rshift__(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: __irshift__(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: __irshift__(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: tril_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   dispatch:
     CPU: tril_cpu_
     CUDA: tril_cuda_
 
 - func: triu_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   dispatch:
     CPU: triu_cpu_
     CUDA: triu_cuda_
 
 - func: digamma_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: pow_(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: pow_(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: lerp_(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   dispatch:
     CPU: lerp_cpu_scalar_
     CUDA: lerp_cuda_scalar_
 
 - func: lerp_(Tensor(a!) self, Tensor end, Tensor weight) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
   dispatch:
     CPU: lerp_cpu_tensor_
     CUDA: lerp_cuda_tensor_
 
 - func: sign_(Tensor(a!) self) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: fmod_(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: fmod_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: remainder_(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: remainder_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: addbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: random_(Tensor(a!) self, int from, int to, *, Generator? generator=None) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: random_(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
-  matches_jit_signature: True
   variants: method
 
 # wrappers for TH functions
 
 - func: diag(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: diag(Tensor self, int diagonal=0) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: cross(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: cross(Tensor self, Tensor other, int? dim=None) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: triu(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: triu_cpu_out
     CUDA: triu_cuda_out
 
 - func: triu(Tensor self, int diagonal=0) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: tril(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: tril_cpu_out
     CUDA: tril_cuda_out
 
 - func: tril(Tensor self, int diagonal=0) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: tril_indices(int row, int col, int offset=0, *, TensorOptions options=at::kLong) -> Tensor
+  matches_jit_signature: False
   dispatch:
     CPU: tril_indices_cpu
     CUDA: tril_indices_cuda
 
 - func: triu_indices(int row, int col, int offset=0, *, TensorOptions options=at::kLong) -> Tensor
+  matches_jit_signature: False
   dispatch:
     CPU: triu_indices_cpu
     CUDA: triu_indices_cuda
 
 - func: trace(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: ne(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: ne(Tensor self, Scalar other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: ne(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: ne(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: eq(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: eq(Tensor self, Scalar other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: eq(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: eq(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: ge(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: ge(Tensor self, Scalar other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: ge(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: ge(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: le(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: le(Tensor self, Scalar other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: le(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: le(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: gt(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: gt(Tensor self, Scalar other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: gt(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: gt(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: lt(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: lt(Tensor self, Scalar other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: lt(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: lt(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: take(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: take(Tensor self, Tensor index) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: index_select(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: index_select(Tensor self, int dim, Tensor index) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: masked_select(Tensor self, Tensor mask, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: masked_select(Tensor self, Tensor mask) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: nonzero(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: nonzero(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: _gather_sparse_backward(Tensor self, int dim, Tensor index, Tensor grad) -> Tensor
-  matches_jit_signature: True
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: gels(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
-  matches_jit_signature: True
 
 - func: gels(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
-  matches_jit_signature: True
   variants: method, function
 
 - func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
-  matches_jit_signature: True
 
 - func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
-  matches_jit_signature: True
   variants: method, function
 
 - func: _triangular_solve_helper(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular) -> (Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: _triangular_solve_helper_cpu
     CUDA: _triangular_solve_helper_cuda
 
 - func: symeig(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
-  matches_jit_signature: True
 
 - func: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
-  matches_jit_signature: True
   variants: method, function
 
 - func: eig(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
-  matches_jit_signature: True
 
 - func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
-  matches_jit_signature: True
   variants: method, function
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
-  matches_jit_signature: True
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
-  matches_jit_signature: True
   variants: method, function
 
 - func: cholesky(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: cholesky(Tensor self, bool upper=False) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: _cholesky_helper(Tensor self, bool upper) -> Tensor
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: _cholesky_helper_cpu
     CUDA: _cholesky_helper_cuda
 
 - func: cholesky_solve(Tensor self, Tensor input2, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: _cholesky_solve_helper(Tensor self, Tensor A, bool upper) -> Tensor
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: _cholesky_solve_helper_cpu
     CUDA: _cholesky_solve_helper_cuda
 
 - func: solve(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
-  matches_jit_signature: True
   variants: function, method
 
 - func: solve(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) lu) -> (Tensor(a!) solution, Tensor(b!) LU)
-  matches_jit_signature: True
 
 - func: _solve_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: _solve_helper_cpu
     CUDA: _solve_helper_cuda
 
 - func: potri(Tensor self, bool upper=True, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: potri(Tensor self, bool upper=True) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: pstrf(Tensor self, bool upper=True, Scalar tol=-1, *, Tensor(a!) u, Tensor(b!) pivot) -> (Tensor(a!) u, Tensor(b!) pivot)
-  matches_jit_signature: True
 
 - func: pstrf(Tensor self, bool upper=True, Scalar tol=-1) -> (Tensor u, Tensor pivot)
-  matches_jit_signature: True
   variants: method, function
 
 - func: qr(Tensor self, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
-  matches_jit_signature: True
 
 - func: qr(Tensor self) -> (Tensor Q, Tensor R)
-  matches_jit_signature: True
   variants: method, function
 
 - func: geqrf(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
-  matches_jit_signature: True
 
 - func: geqrf(Tensor self) -> (Tensor a, Tensor tau)
-  matches_jit_signature: True
   variants: method, function
 
 - func: orgqr(Tensor self, Tensor input2, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor, Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
   dispatch:
     CPU: _lu_with_info_cpu
     CUDA: _lu_with_info_cuda
 
 - func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: _multinomial_alias_setup(Tensor probs) -> (Tensor, Tensor)
-  matches_jit_signature: True
   variants: function
 
 - func: _multinomial_alias_draw(Tensor J, Tensor q, int num_samples, *, Generator? generator=None) -> Tensor
-  matches_jit_signature: True
   variants: function
 
 - func: lgamma(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: lgamma(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: digamma(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: digamma(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: polygamma(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: polygamma(int n, Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: erfinv(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: erfinv(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: atan2(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: atan2(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: lerp(Tensor self, Tensor end, Scalar weight, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: lerp_cpu_scalar_out
     CUDA: lerp_cuda_scalar_out
 
 - func: lerp(Tensor self, Tensor end, Tensor weight, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: lerp_cpu_tensor_out
     CUDA: lerp_cuda_tensor_out
 
 - func: lerp(Tensor self, Tensor end, Scalar weight) -> Tensor
-  matches_jit_signature: True
   variants: method, function
   dispatch:
     CPU: lerp_cpu_scalar
     CUDA: lerp_cuda_scalar
 
 - func: lerp(Tensor self, Tensor end, Tensor weight) -> Tensor
-  matches_jit_signature: True
   variants: method, function
   dispatch:
     CPU: lerp_cpu_tensor
     CUDA: lerp_cuda_tensor
 
 - func: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   dispatch:
     CPU: _histc_out_cpu
     CUDA: _histc_out_cuda
 
 - func: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
-  matches_jit_signature: True
   variants: method, function
   dispatch:
     CPU: _histc_cpu
     CUDA: _histc_cuda
 
 - func: sign(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: sign(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: fmod(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: fmod(Tensor self, Scalar other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: fmod(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: fmod(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: remainder(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: remainder(Tensor self, Scalar other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: remainder(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: remainder(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: min(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: min(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: min(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: max(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: max(Tensor self, Tensor other) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: max(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: median(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method, function
   dispatch:
     CPU: median_cpu
     CUDA: median_cuda
 
 - func: sort(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  matches_jit_signature: True
 
 - func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
-  matches_jit_signature: True
   variants: method, function
 
 - func: argsort(Tensor self, int dim=-1, bool descending=False) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!) values, Tensor(b!) indices)
-  matches_jit_signature: True
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
-  matches_jit_signature: True
   variants: method, function
 
 - func: all(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: any(Tensor self) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
-  matches_jit_signature: True
   variants: method
 
 - func: equal(Tensor self, Tensor other) -> bool
-  matches_jit_signature: True
   variants: method, function
 
 - func: pow(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: pow(Tensor self, Tensor exponent) -> Tensor
-  matches_jit_signature: True
   variants: method, function
 
 - func: pow(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: pow(Scalar self, Tensor exponent) -> Tensor
-  matches_jit_signature: True
 
 - func: normal(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: normal(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
-  matches_jit_signature: True
 
 - func: normal(float mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: normal(float mean, Tensor std, *, Generator? generator=None) -> Tensor
-  matches_jit_signature: True
 
 - func: normal(Tensor mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: normal(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
-  matches_jit_signature: True
 
 - func: alias(Tensor(a) self) -> Tensor(a)
-  matches_jit_signature: True
   variants: method, function
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
-  matches_jit_signature: True
 
 ## NN wrappers
 
 - func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor weight, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor weight, int reduction) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: mse_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: l1_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: multi_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: multi_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, int reduction) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: multilabel_margin_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: multilabel_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: multilabel_margin_loss_forward(Tensor self, Tensor target, int reduction, *, Tensor(a!) output, Tensor(b!) is_target) -> (Tensor(a!), Tensor(b!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: multilabel_margin_loss_forward(Tensor self, Tensor target, int reduction) -> (Tensor output, Tensor is_target)
-  matches_jit_signature: True
   python_module: nn
 
 - func: multilabel_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: multilabel_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, *, Tensor(a!) output, Tensor(b!) total_weight) -> (Tensor(a!), Tensor(b!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)
-  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss2d(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss2d(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss2d_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, *, Tensor(a!) output, Tensor(b!) total_weight) -> (Tensor(a!), Tensor(b!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss2d_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)
-  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: elu_(Tensor(a!) self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: glu(Tensor self, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: hardtanh_backward(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: hardtanh_backward(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: hardtanh_(Tensor(a!) self, Scalar min_val=-1, Scalar max_val=1) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: leaky_relu(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: leaky_relu_(Tensor(a!) self, Scalar negative_slope=0.01) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: log_sigmoid(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: log_sigmoid(Tensor self) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: log_sigmoid_forward(Tensor self, *, Tensor(a!) output, Tensor(b!) buffer) -> (Tensor(a!), Tensor(b!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
-  matches_jit_signature: True
   python_module: nn
 
 - func: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: softplus(Tensor self, Scalar beta=1, Scalar threshold=20, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: softshrink(Tensor self, Scalar lambd=0.5, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: softshrink(Tensor self, Scalar lambd=0.5) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: adaptive_avg_pool2d(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: adaptive_avg_pool2d_out_cpu
     CUDA: adaptive_avg_pool2d_out_cuda
 
 - func: adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
-  matches_jit_signature: True
   dispatch:
     CPU: adaptive_avg_pool2d_cpu
     CUDA: adaptive_avg_pool2d_cuda
 
 - func: _adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: adaptive_avg_pool2d_backward_cpu
     CUDA: adaptive_avg_pool2d_backward_cuda
 
 - func: adaptive_avg_pool3d(Tensor self, int[3] output_size, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool2d(Tensor self, int[2] output_size, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
-  matches_jit_signature: True
   python_module: nn
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool2d(Tensor self, int[2] output_size) -> (Tensor, Tensor)
-  matches_jit_signature: True
   python_module: nn
 
 - func: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d(Tensor self, int[3] output_size, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
-  matches_jit_signature: True
   python_module: nn
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d(Tensor self, int[3] output_size) -> (Tensor, Tensor)
-  matches_jit_signature: True
   python_module: nn
 
 - func: adaptive_max_pool3d_backward(Tensor grad_output, Tensor self, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: adaptive_max_pool3d_backward(Tensor grad_output, Tensor self, Tensor indices) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool2d(Tensor self, int[2] kernel_size, int[2] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: fractional_max_pool2d_out_cpu
@@ -4646,21 +3654,18 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool2d(Tensor self, int[2] kernel_size, int[2] output_size, Tensor random_samples) -> (Tensor, Tensor)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: fractional_max_pool2d_cpu
     CUDA: fractional_max_pool2d_cuda
 
 - func: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] output_size, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: fractional_max_pool2d_backward_out_cpu
     CUDA: fractional_max_pool2d_backward_out_cuda
 
 - func: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] output_size, Tensor indices) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: fractional_max_pool2d_backward_cpu
@@ -4668,7 +3673,6 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool3d(Tensor self, int[3] kernel_size, int[3] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: fractional_max_pool3d_out_cpu
@@ -4676,21 +3680,18 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool3d(Tensor self, int[3] kernel_size, int[3] output_size, Tensor random_samples) -> (Tensor, Tensor)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: fractional_max_pool3d_cpu
     CUDA: fractional_max_pool3d_cuda
 
 - func: fractional_max_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] output_size, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: fractional_max_pool3d_backward_out_cpu
     CUDA: fractional_max_pool3d_backward_out_cuda
 
 - func: fractional_max_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] output_size, Tensor indices) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: fractional_max_pool3d_backward_cpu
@@ -4698,604 +3699,490 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
-  matches_jit_signature: True
   python_module: nn
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
-  matches_jit_signature: True
   python_module: nn
 
 - func: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool3d_with_indices(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
-  matches_jit_signature: True
   python_module: nn
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool3d_with_indices(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
-  matches_jit_signature: True
   python_module: nn
 
 - func: max_pool3d_with_indices_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: max_pool3d_with_indices_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: max_unpool2d(Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: max_unpool2d(Tensor self, Tensor indices, int[2] output_size) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: max_unpool3d_backward(Tensor grad_output, Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: max_unpool3d_backward(Tensor grad_output, Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: reflection_pad1d(Tensor self, int[2] padding, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: reflection_pad1d_out_cpu
     CUDA: reflection_pad1d_out_cuda
 
 - func: reflection_pad1d(Tensor self, int[2] padding) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: reflection_pad1d_cpu
     CUDA: reflection_pad1d_cuda
 
 - func: reflection_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: reflection_pad1d_backward_out_cpu
     CUDA: reflection_pad1d_backward_out_cuda
 
 - func: reflection_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: reflection_pad1d_backward_cpu
     CUDA: reflection_pad1d_backward_cuda
 
 - func: reflection_pad2d(Tensor self, int[4] padding, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: reflection_pad2d_out_cpu
     CUDA: reflection_pad2d_out_cuda
 
 - func: reflection_pad2d(Tensor self, int[4] padding) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: reflection_pad2d_cpu
     CUDA: reflection_pad2d_cuda
 
 - func: reflection_pad2d_backward(Tensor grad_output, Tensor self, int[4] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: reflection_pad2d_backward_out_cpu
     CUDA: reflection_pad2d_backward_out_cuda
 
 - func: reflection_pad2d_backward(Tensor grad_output, Tensor self, int[4] padding) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: reflection_pad2d_backward_cpu
     CUDA: reflection_pad2d_backward_cuda
 
 - func: replication_pad1d(Tensor self, int[2] padding, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad1d_out_cpu
     CUDA: replication_pad1d_out_cuda
 
 - func: replication_pad1d(Tensor self, int[2] padding) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad1d_cpu
     CUDA: replication_pad1d_cuda
 
 - func: replication_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad1d_backward_out_cpu
     CUDA: replication_pad1d_backward_out_cuda
 
 - func: replication_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad1d_backward_cpu
     CUDA: replication_pad1d_backward_cuda
 
 - func: replication_pad2d(Tensor self, int[4] padding, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad2d_out_cpu
     CUDA: replication_pad2d_out_cuda
 
 - func: replication_pad2d(Tensor self, int[4] padding) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad2d_cpu
     CUDA: replication_pad2d_cuda
 
 - func: replication_pad2d_backward(Tensor grad_output, Tensor self, int[4] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad2d_backward_out_cpu
     CUDA: replication_pad2d_backward_out_cuda
 
 - func: replication_pad2d_backward(Tensor grad_output, Tensor self, int[4] padding) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad2d_backward_cpu
     CUDA: replication_pad2d_backward_cuda
 
 - func: replication_pad3d(Tensor self, int[6] padding, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad3d_out_cpu
     CUDA: replication_pad3d_out_cuda
 
 - func: replication_pad3d(Tensor self, int[6] padding) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad3d_cpu
     CUDA: replication_pad3d_cuda
 
 - func: replication_pad3d_backward(Tensor grad_output, Tensor self, int[6] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad3d_backward_out_cpu
     CUDA: replication_pad3d_backward_out_cuda
 
 - func: replication_pad3d_backward(Tensor grad_output, Tensor self, int[6] padding) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: replication_pad3d_backward_cpu
     CUDA: replication_pad3d_backward_cuda
 
 - func: upsample_linear1d(Tensor self, int[1] output_size, bool align_corners, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_linear1d_out_cpu
     CUDA: upsample_linear1d_out_cuda
 
 - func: upsample_linear1d(Tensor self, int[1] output_size, bool align_corners) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_linear1d_cpu
     CUDA: upsample_linear1d_cuda
 
 - func: upsample_linear1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, bool align_corners, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_linear1d_backward_out_cpu
     CUDA: upsample_linear1d_backward_out_cuda
 
 - func: upsample_linear1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, bool align_corners) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_linear1d_backward_cpu
     CUDA: upsample_linear1d_backward_cuda
 
 - func: upsample_bilinear2d(Tensor self, int[2] output_size, bool align_corners, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_bilinear2d_out_cpu
     CUDA: upsample_bilinear2d_out_cuda
 
 - func: upsample_bilinear2d(Tensor self, int[2] output_size, bool align_corners) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_bilinear2d_cpu
     CUDA: upsample_bilinear2d_cuda
 
 - func: upsample_bilinear2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_bilinear2d_backward_out_cpu
     CUDA: upsample_bilinear2d_backward_out_cuda
 
 - func: upsample_bilinear2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_bilinear2d_backward_cpu
     CUDA: upsample_bilinear2d_backward_cuda
 
 - func: upsample_bicubic2d(Tensor self, int[2] output_size, bool align_corners, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_bicubic2d_out_cpu
     CUDA: upsample_bicubic2d_out_cuda
 
 - func: upsample_bicubic2d(Tensor self, int[2] output_size, bool align_corners) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_bicubic2d_cpu
     CUDA: upsample_bicubic2d_cuda
 
 - func: upsample_bicubic2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_bicubic2d_backward_out_cpu
     CUDA: upsample_bicubic2d_backward_out_cuda
 
 - func: upsample_bicubic2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_bicubic2d_backward_cpu
     CUDA: upsample_bicubic2d_backward_cuda
 
 - func: upsample_trilinear3d(Tensor self, int[3] output_size, bool align_corners, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_trilinear3d_out_cpu
     CUDA: upsample_trilinear3d_out_cuda
 
 - func: upsample_trilinear3d(Tensor self, int[3] output_size, bool align_corners) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_trilinear3d_cpu
     CUDA: upsample_trilinear3d_cuda
 
 - func: upsample_trilinear3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, bool align_corners, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_trilinear3d_backward_out_cpu
     CUDA: upsample_trilinear3d_backward_out_cuda
 
 - func: upsample_trilinear3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, bool align_corners) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_trilinear3d_backward_cpu
     CUDA: upsample_trilinear3d_backward_cuda
 
 - func: upsample_nearest1d(Tensor self, int[1] output_size, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_nearest1d_out_cpu
     CUDA: upsample_nearest1d_out_cuda
 
 - func: upsample_nearest1d(Tensor self, int[1] output_size) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_nearest1d_cpu
     CUDA: upsample_nearest1d_cuda
 
 - func: upsample_nearest1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_nearest1d_backward_out_cpu
     CUDA: upsample_nearest1d_backward_out_cuda
 
 - func: upsample_nearest1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_nearest1d_backward_cpu
     CUDA: upsample_nearest1d_backward_cuda
 
 - func: upsample_nearest2d(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_nearest2d_out_cpu
     CUDA: upsample_nearest2d_out_cuda
 
 - func: upsample_nearest2d(Tensor self, int[2] output_size) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_nearest2d_cpu
     CUDA: upsample_nearest2d_cuda
 
 - func: upsample_nearest2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_nearest2d_backward_out_cpu
     CUDA: upsample_nearest2d_backward_out_cuda
 
 - func: upsample_nearest2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_nearest2d_backward_cpu
     CUDA: upsample_nearest2d_backward_cuda
 
 - func: upsample_nearest3d(Tensor self, int[3] output_size, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_nearest3d_out_cpu
     CUDA: upsample_nearest3d_out_cuda
 
 - func: upsample_nearest3d(Tensor self, int[3] output_size) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_nearest3d_cpu
     CUDA: upsample_nearest3d_cuda
 
 - func: upsample_nearest3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_nearest3d_backward_out_cpu
     CUDA: upsample_nearest3d_backward_out_cuda
 
 - func: upsample_nearest3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size) -> Tensor
-  matches_jit_signature: True
   python_module: nn
   dispatch:
     CPU: upsample_nearest3d_backward_cpu
     CUDA: upsample_nearest3d_backward_cuda
 
 - func: sigmoid_backward(Tensor grad_output, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: tanh_backward(Tensor grad_output, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: tanh_backward(Tensor grad_output, Tensor output) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, *, Tensor(a!) output, Tensor(b!) columns, Tensor(c!) ones) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation) -> (Tensor output, Tensor columns, Tensor ones)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int[3] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int[3] dilation=1) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, *, Tensor(a!) output, Tensor(b!) finput, Tensor(c!) fgrad_input) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation) -> (Tensor output, Tensor finput, Tensor fgrad_input)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_transpose3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, *, Tensor(a!) output, Tensor(b!) finput, Tensor(c!) fgrad_input) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding) -> (Tensor output, Tensor finput, Tensor fgrad_input)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_depthwise2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_depthwise2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_depthwise2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_depthwise2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_depthwise2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight) -> (Tensor(a!), Tensor(b!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_depthwise2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool[2] output_mask) -> (Tensor grad_input, Tensor grad_weight)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, *, Tensor(a!) output, Tensor(b!) finput, Tensor(c!) fgrad_input) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding) -> (Tensor output, Tensor finput, Tensor fgrad_input)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_dilated2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_dilated2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_dilated2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!) output, Tensor(b!) columns, Tensor(c!) ones) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_dilated2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation) -> (Tensor output, Tensor columns, Tensor ones)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_dilated3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_dilated3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_dilated3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, int[3] dilation, *, Tensor(a!) output, Tensor(b!) columns, Tensor(c!) ones) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_dilated3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, int[3] dilation) -> (Tensor output, Tensor columns, Tensor ones)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_col2im(Tensor self, int[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_col2im_backward(Tensor grad_output, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_im2col(Tensor self, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  matches_jit_signature: True
   python_module: nn
 
 - func: thnn_im2col_backward(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  matches_jit_signature: True
   python_module: nn
