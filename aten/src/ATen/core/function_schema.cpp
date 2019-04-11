@@ -90,7 +90,9 @@ void FunctionSchema::findErrorInKwargs(const std::vector<std::string>& kwargs) c
   }
 }
 
-void FunctionSchema::checkAndNormalizeInputs(std::vector<IValue>& inputs, const std::unordered_map<std::string, IValue> & kwargs) const {
+void FunctionSchema::checkAndNormalizeInputs(
+    std::vector<IValue>& inputs,
+    const std::unordered_map<std::string, IValue>& kwargs) const {
   // Do we have more inputs than the schema accepts?
   AT_CHECK(
       inputs.size() <= arguments().size(),
