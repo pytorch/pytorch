@@ -603,7 +603,7 @@ Tensor new_empty(const Type& type, ScalarType scalar_type, PyObject* args, PyObj
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     const auto& actual_type = typeWithDefault(r, 1, 2, type, scalar_type);
-    return new_with_sizes(actual_type, r.deviceOptional(2), r.intlist(0)).set_requires_grad(r.toBool(3));
+    return new_with_sizes(actual_type, r.deviceOptional(2), r.intlist(0)).set_requires_grad(r.toBool(4));
   }
   throw std::runtime_error("new_empty(): invalid arguments");
 }
