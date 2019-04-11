@@ -11,7 +11,6 @@
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
-#include <torch/csrc/utils/object_ptr.h>
 
 #include <torch/csrc/jit/constants.h>
 
@@ -2489,6 +2488,17 @@ struct to_ir {
         loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }
 
+  Value* emitUnsqueeze(const SourceRange& loc, Value* input, int64_t dim) {
+    return emitBuiltinCall(
+        loc,
+        *graph,
+        aten::unsqueeze,
+        c10::nullopt,
+        {input, graph->insertConstant(dim, nullptr, loc)},
+        {},
+        true);
+  }
+
   Value* emitIndex(
       const SourceRange& loc,
       Value* input,
@@ -2534,6 +2544,10 @@ struct to_ir {
       if (index->type() == IntType::get()) {
         sliceable = emitSelect(loc, sliceable, dim, index);
         continue;
+      } else if (index->type()->isSubtypeOf(NoneType::get())) {
+        sliceable = emitUnsqueeze(loc, sliceable, dim);
+        dim++;
+        continue;
       } else if (index->type()->isSubtypeOf(OptionalType::ofTensor())) {
         // NB:index type can either be a Tensor or : (None of Optional Tensor)
         handle_tensor(index);
@@ -2555,7 +2569,7 @@ struct to_ir {
     return std::make_pair(sliceable, tensor_indices);
   }
 
-  // Desugars multidim slicing into slice/select/index calls.
+  // Desugars multidim slicing into slice/select/index/unsqueeze calls.
   //
   // XXX: Errors in user code are not elegantly reported.
   // Let's say someone were to do the following:

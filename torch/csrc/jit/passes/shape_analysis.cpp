@@ -89,8 +89,13 @@ class ShapePropagator {
 
   bool resizesInput(Node* n) {
     static std::unordered_set<Symbol> resize_ops{
-        aten::resize_,
-        aten::resize_as_,
+        aten::resize_,    aten::resize_as_, aten::copy_,    aten::set_,
+        aten::add_,       aten::addbmm_,    aten::addcdiv_, aten::addcmul_,
+        aten::addmv_,     aten::addr_,      aten::baddbmm_, aten::ge_,
+        aten::gt_,        aten::le_,        aten::lerp_,    aten::lt_,
+        aten::mul_,       aten::ne_,        aten::sub_,     aten::unsqueeze_,
+        aten::t_, // could preserve DimensionedTensorType Here
+        aten::transpose_,
     };
 
     if (resize_ops.count(n->kind()))
@@ -773,11 +778,12 @@ class ShapePropagator {
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types =
                   gatherTensorTypes<DimensionedTensorType>(node)) {
-            AT_ASSERT(maybe_tensor_types->size() == 2);
+            AT_ASSERT(maybe_tensor_types->size() >= 2);
             auto first_scalar_type = (*maybe_tensor_types)[0]->scalarType();
             auto second_scalar_type = (*maybe_tensor_types)[1]->scalarType();
             size_t arg_for_type = 0;
-            if (c10::promoteTypes(first_scalar_type, second_scalar_type) != first_scalar_type) {
+            if (c10::promoteTypes(first_scalar_type, second_scalar_type) !=
+                first_scalar_type) {
               arg_for_type = 1;
             }
             return {broadcast(*maybe_tensor_types, arg_for_type)};
@@ -1175,7 +1181,7 @@ class ShapePropagator {
       if (!maybe_dtype_option)
         return {};
       auto dtype =
-          (maybe_dtype_option->isNone() ? at::kFloat
+          (maybe_dtype_option->isNone() ? at::kDouble
                                         : maybe_dtype_option->toScalarType());
 
       return {DimensionedTensorType::create(dtype, device, dim)};

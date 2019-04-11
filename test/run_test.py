@@ -33,6 +33,7 @@ TESTS = [
     'indexing',
     'indexing_cuda',
     'jit',
+    'mkldnn',
     'multiprocessing',
     'multiprocessing_spawn',
     'nccl',
