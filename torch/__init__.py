@@ -289,12 +289,14 @@ import torch.sparse
 import torch.utils.backcompat
 import torch.onnx
 import torch.jit
+import torch.hub
 import torch.random
 import torch.distributions
 import torch.testing
 import torch.backends.cuda
 import torch.backends.mkl
 import torch.backends.openmp
+import torch.__config__
 
 _C._init_names(list(torch._storage_classes))
 

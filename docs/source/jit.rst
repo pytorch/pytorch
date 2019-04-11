@@ -770,34 +770,34 @@ Interpreting Graphs
 
     The example script above produces the graph::
 
-	graph(%len : int) {
-	  %15 : int = prim::Constant[value=1]()
-	  %9 : bool = prim::Constant[value=1]()
-	  %7 : Device = prim::Constant[value="cpu"]()
-	  %6 : int = prim::Constant[value=0]()
-	  %5 : int = prim::Constant[value=6]()
-	  %1 : int = prim::Constant[value=3]()
-	  %2 : int = prim::Constant[value=4]()
-	  %11 : int = prim::Constant[value=10]()
-	  %14 : float = prim::Constant[value=1]()
-	  %4 : int[] = prim::ListConstruct(%1, %2)
-	  %rv.1 : Tensor = aten::zeros(%4, %5, %6, %7)
-	  %rv : Tensor = prim::Loop(%len, %9, %rv.1)
-	    block0(%i : int, %13 : Tensor) {
-	      %12 : bool = aten::lt(%i, %11)
-	      %rv.4 : Tensor = prim::If(%12)
-		block0() {
-		  %rv.2 : Tensor = aten::sub(%13, %14, %15)
-		  -> (%rv.2)
-		}
-		block1() {
-		  %rv.3 : Tensor = aten::add(%13, %14, %15)
-		  -> (%rv.3)
-		}
-	      -> (%9, %rv.4)
-	    }
-	  return (%rv);
-	}
+        graph(%len : int) {
+          %15 : int = prim::Constant[value=1]()
+          %9 : bool = prim::Constant[value=1]()
+          %7 : Device = prim::Constant[value="cpu"]()
+          %6 : int = prim::Constant[value=0]()
+          %5 : int = prim::Constant[value=6]()
+          %1 : int = prim::Constant[value=3]()
+          %2 : int = prim::Constant[value=4]()
+          %11 : int = prim::Constant[value=10]()
+          %14 : float = prim::Constant[value=1]()
+          %4 : int[] = prim::ListConstruct(%1, %2)
+          %rv.1 : Tensor = aten::zeros(%4, %5, %6, %7)
+          %rv : Tensor = prim::Loop(%len, %9, %rv.1)
+            block0(%i : int, %13 : Tensor) {
+              %12 : bool = aten::lt(%i, %11)
+              %rv.4 : Tensor = prim::If(%12)
+                block0() {
+                  %rv.2 : Tensor = aten::sub(%13, %14, %15)
+                  -> (%rv.2)
+                }
+                block1() {
+                  %rv.3 : Tensor = aten::add(%13, %14, %15)
+                  -> (%rv.3)
+                }
+              -> (%9, %rv.4)
+            }
+          return (%rv);
+        }
 
 
     Take the instruction ``%rv.1 : Dynamic = aten::zeros(%3, %4, %5, %6)`` for
@@ -850,39 +850,39 @@ Automatic Trace Checking
         traced = torch.jit.trace(loop_in_traced_fn, inputs, check_inputs=check_inputs)
 
     Gives us the following diagnostic information::
-	ERROR: Graphs differed across invocations!
-	Graph diff::
+        ERROR: Graphs differed across invocations!
+        Graph diff::
 
-		  graph(%x : Tensor) {
-		    %1 : int = prim::Constant[value=0]()
-		    %2 : int = prim::Constant[value=0]()
-		    %result.1 : Tensor = aten::select(%x, %1, %2)
-		    %4 : int = prim::Constant[value=0]()
-		    %5 : int = prim::Constant[value=0]()
-		    %6 : Tensor = aten::select(%x, %4, %5)
-		    %result.2 : Tensor = aten::mul(%result.1, %6)
-		    %8 : int = prim::Constant[value=0]()
-		    %9 : int = prim::Constant[value=1]()
-		    %10 : Tensor = aten::select(%x, %8, %9)
-		-   %result : Tensor = aten::mul(%result.2, %10)
-		+   %result.3 : Tensor = aten::mul(%result.2, %10)
-		?          ++
-		    %12 : int = prim::Constant[value=0]()
-		    %13 : int = prim::Constant[value=2]()
-		    %14 : Tensor = aten::select(%x, %12, %13)
-		+   %result : Tensor = aten::mul(%result.3, %14)
-		+   %16 : int = prim::Constant[value=0]()
-		+   %17 : int = prim::Constant[value=3]()
-		+   %18 : Tensor = aten::select(%x, %16, %17)
-		-   %15 : Tensor = aten::mul(%result, %14)
-		?     ^                                 ^
-		+   %19 : Tensor = aten::mul(%result, %18)
-		?     ^                                 ^
-		-   return (%15);
-		?             ^
-		+   return (%19);
-		?             ^
-		  }
+                  graph(%x : Tensor) {
+                    %1 : int = prim::Constant[value=0]()
+                    %2 : int = prim::Constant[value=0]()
+                    %result.1 : Tensor = aten::select(%x, %1, %2)
+                    %4 : int = prim::Constant[value=0]()
+                    %5 : int = prim::Constant[value=0]()
+                    %6 : Tensor = aten::select(%x, %4, %5)
+                    %result.2 : Tensor = aten::mul(%result.1, %6)
+                    %8 : int = prim::Constant[value=0]()
+                    %9 : int = prim::Constant[value=1]()
+                    %10 : Tensor = aten::select(%x, %8, %9)
+                -   %result : Tensor = aten::mul(%result.2, %10)
+                +   %result.3 : Tensor = aten::mul(%result.2, %10)
+                ?          ++
+                    %12 : int = prim::Constant[value=0]()
+                    %13 : int = prim::Constant[value=2]()
+                    %14 : Tensor = aten::select(%x, %12, %13)
+                +   %result : Tensor = aten::mul(%result.3, %14)
+                +   %16 : int = prim::Constant[value=0]()
+                +   %17 : int = prim::Constant[value=3]()
+                +   %18 : Tensor = aten::select(%x, %16, %17)
+                -   %15 : Tensor = aten::mul(%result, %14)
+                ?     ^                                 ^
+                +   %19 : Tensor = aten::mul(%result, %18)
+                ?     ^                                 ^
+                -   return (%15);
+                ?             ^
+                +   return (%19);
+                ?             ^
+                  }
 
 
     This message indicates to us that the computation differed between when
@@ -912,19 +912,19 @@ Automatic Trace Checking
 
     Which produces::
 
-	graph(%x : Tensor) {
-	  %5 : bool = prim::Constant[value=1]()
-	  %1 : int = prim::Constant[value=0]()
-	  %result.1 : Tensor = aten::select(%x, %1, %1)
-	  %4 : int = aten::size(%x, %1)
-	  %result : Tensor = prim::Loop(%4, %5, %result.1)
-	    block0(%i : int, %7 : Tensor) {
-	      %10 : Tensor = aten::select(%x, %1, %i)
-	      %result.2 : Tensor = aten::mul(%7, %10)
-	      -> (%5, %result.2)
-	    }
-	  return (%result);
-	}
+        graph(%x : Tensor) {
+          %5 : bool = prim::Constant[value=1]()
+          %1 : int = prim::Constant[value=0]()
+          %result.1 : Tensor = aten::select(%x, %1, %1)
+          %4 : int = aten::size(%x, %1)
+          %result : Tensor = prim::Loop(%4, %5, %result.1)
+            block0(%i : int, %7 : Tensor) {
+              %10 : Tensor = aten::select(%x, %1, %i)
+              %result.2 : Tensor = aten::mul(%7, %10)
+              -> (%5, %result.2)
+            }
+          return (%result);
+        }
 
 Tracer Warnings
 ^^^^^^^^^^^^^^^
