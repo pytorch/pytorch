@@ -776,6 +776,16 @@ class TestLayers(LayersTestCase):
         loss = self.model.BatchLRLoss(input_record)
         self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
 
+    def testBatchLRLossWithUncertainty(self):
+        input_record = self.new_record(schema.Struct(
+            ('label', schema.Scalar((np.float64, (1,)))),
+            ('logit', schema.Scalar((np.float32, (2,)))),
+            ('weight', schema.Scalar((np.float64, (1,)))),
+            ('log_variance', schema.Scalar((np.float64, (1,)))),
+        ))
+        loss = self.model.BatchLRLoss(input_record)
+        self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
+
     def testMarginRankLoss(self):
         input_record = self.new_record(schema.Struct(
             ('pos_prediction', schema.Scalar((np.float32, (1,)))),

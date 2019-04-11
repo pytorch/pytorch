@@ -150,9 +150,18 @@ std::string CUDAHooks::showConfig() const {
 
 #ifndef __HIP_PLATFORM_HCC__
 #if AT_CUDNN_ENABLED()
+
+
+  auto printCudnnStyleVersion = [&](int v) {
+    oss << (v / 1000) << "." << (v / 100 % 10);
+    if (v % 100 != 0) {
+      oss << "." << (v % 100);
+    }
+  };
+
   size_t cudnnVersion = cudnnGetVersion();
-  oss << "  - CudNN ";
-  printCudaStyleVersion(cudnnVersion);
+  oss << "  - CuDNN ";
+  printCudnnStyleVersion(cudnnVersion);
   size_t cudnnCudartVersion = cudnnGetCudartVersion();
   if (cudnnCudartVersion != CUDART_VERSION) {
     oss << "  (built against CUDA ";
@@ -161,8 +170,8 @@ std::string CUDAHooks::showConfig() const {
   }
   oss << "\n";
   if (cudnnVersion != CUDNN_VERSION) {
-    oss << "  - Built with CuDNN ";
-    printCudaStyleVersion(CUDNN_VERSION);
+    oss << "    - Built with CuDNN ";
+    printCudnnStyleVersion(CUDNN_VERSION);
     oss << "\n";
   }
 #endif
