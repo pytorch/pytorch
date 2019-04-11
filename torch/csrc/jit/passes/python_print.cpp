@@ -1263,7 +1263,7 @@ TORCH_API bool printerHasSpecialCaseFor(Symbol sym) {
   };
 
   return handled.count(sym) || unneeded.count(sym) ||
-    !required_namespaces.count(sym.ns());
+      !required_namespaces.count(sym.ns());
 }
 
 } // namespace jit
