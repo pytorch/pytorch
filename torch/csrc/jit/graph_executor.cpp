@@ -75,53 +75,157 @@ struct ExecutionPlan {
   std::shared_ptr<Graph> graph;
 };
 
-struct DifferentiableGraphBackward : public autograd::Function {
-  DifferentiableGraphBackward(GraphExecutor executor, size_t capture_size)
-      : executor(std::move(executor)) {
-    is_var_capture.reserve(capture_size);
-    var_captures.reserve(capture_size);
-    ivalue_captures.reserve(capture_size);
+struct CaptureList {
+  CaptureList(size_t capture_size) {
+    capture_types_.reserve(capture_size);
+    var_captures_.reserve(capture_size); // var_captures_.size() might be greater than capture_size
+    ivalue_captures_.reserve(capture_size);
   }
+
+  void captureTensor(const at::Tensor& tensor, bool is_output) {
+    var_captures_.emplace_back(Variable(tensor), is_output);
+  }
+
+  void capture(const IValue& val, bool is_output) {
+    if (val.isTensor()) {
+      capture_types_.emplace_back(CAPTURE_TENSOR);
+      captureTensor(val.toTensor(), is_output);
+    } else if (val.isTensorList()) {
+      //  For TensorList, we have to flatten it to Tensors during saving and
+      //  unflatten it back to TensorList when using it in backward apply().
+      //  This is to avoid any implicit mutation to TensorList happened
+      //  between forward & backward.
+      capture_types_.emplace_back(CAPTURE_LIST);
+      const std::vector<at::Tensor>& tensors = val.toTensorListRef();
+      sizes_.push_back(tensors.size());
+
+      for (const at::Tensor& tensor: tensors) {
+        captureTensor(tensor, is_output);
+      }
+    } else {
+      capture_types_.emplace_back(CAPTURE_IVALUE);
+      ivalue_captures_.push_back(val);
+    }
+  }
+
+  size_t size() const {
+    return capture_types_.size();
+  }
+
+  void unpack(Stack & stack, const std::shared_ptr<autograd::Function>& saved_for) {
+    auto var_capture_it = var_captures_.begin();
+    auto ivalue_capture_it = ivalue_captures_.begin();
+    auto size_it = sizes_.begin();
+    for (Capture capture_type : capture_types_) {
+      switch(capture_type) {
+        case CAPTURE_TENSOR: {
+          stack.emplace_back(var_capture_it->unpack(saved_for));
+          ++var_capture_it;
+        } break;
+        case CAPTURE_LIST: {
+          std::vector<at::Tensor> lst;
+          auto size = *size_it++;
+          for (size_t i = 0; i < size; i++) {
+            lst.emplace_back(var_capture_it->unpack(saved_for));
+            var_capture_it++;
+          }
+          stack.emplace_back(TensorList::create(std::move(lst)));
+        } break;
+        case CAPTURE_IVALUE: {
+          stack.push_back(*ivalue_capture_it++);
+        } break;
+      }
+    }
+  }
+private:
+  enum Capture: uint8_t {
+    CAPTURE_TENSOR,
+    CAPTURE_LIST,
+    CAPTURE_IVALUE,
+  };
+
+  std::vector<Capture> capture_types_;
+  std::vector<autograd::SavedVariable> var_captures_;
+  std::vector<IValue> ivalue_captures_;
+  std::vector<size_t> sizes_;
+};
+
+// how do we turn a flattened list of tensors back into the ivalues that
+// the DifferentiableGraphBackward expects
+struct UnpackInstructions {
+  UnpackInstructions(size_t num_inputs) {
+    insts_.reserve(num_inputs);
+  }
+  void pushTensor() {
+    insts_.emplace_back(PUSH_TENSOR);
+  }
+  void pushTensorList(size_t size) {
+    insts_.emplace_back(PUSH_LIST);
+    sizes_.push_back(size);
+  }
+  void unpack(variable_list&& inputs, Stack& stack) {
+    auto input_it = std::make_move_iterator(inputs.begin());
+    auto sizes_it = sizes_.begin();
+    for(Inst inst : insts_) {
+      switch(inst) {
+        case PUSH_TENSOR: {
+          at::Tensor t = *input_it++;
+          stack.emplace_back(std::move(t));
+        } break;
+        case PUSH_LIST: {
+          std::vector<at::Tensor> lst(input_it, input_it + *sizes_it++);
+          stack.emplace_back(TensorList::create(std::move(lst)));
+        } break;
+      }
+    }
+  }
+private:
+  enum Inst : uint8_t {
+    PUSH_TENSOR,
+    PUSH_LIST, // consumes one size
+  };
+  std::vector<Inst> insts_;
+  std::vector<size_t> sizes_;
+};
+
+struct DifferentiableGraphBackward : public autograd::Function {
+  DifferentiableGraphBackward(GraphExecutor executor, size_t input_size, size_t capture_size)
+      : executor(std::move(executor))
+      , captures_(capture_size)
+      , input_instructions_(input_size) {}
 
   variable_list apply(variable_list&& inputs) override {
     Stack stack;
-    stack.reserve(is_var_capture.size() + inputs.size());
-    stack.insert(
-        stack.end(),
-        std::make_move_iterator(inputs.begin()),
-        std::make_move_iterator(inputs.end()));
-    auto var_capture_it = var_captures.begin();
-    auto ivalue_capture_it = ivalue_captures.begin();
-    for (bool is_var : is_var_capture) {
-      if (is_var) {
-        stack.emplace_back(var_capture_it->unpack(this->shared_from_this()));
-        ++var_capture_it;
-      } else {
-        stack.push_back(*ivalue_capture_it);
-        ++ivalue_capture_it;
-      }
-    }
+    stack.reserve(captures_.size() + inputs.size());
 
+    input_instructions_.unpack(std::move(inputs), stack);
+    captures_.unpack(stack, shared_from_this());
     executor.run(stack);
-    AT_ASSERT(stack.size() == num_outputs());
 
+    // NB: stack.size() == num_outputs() is not always true
+    // after we added TensorList support.
+    // Example: aten::stack(Tensor[] tensors, int) where
+    // tensors = [x, x]
+    // Here stack.size()[=1] with a TensorList IValue of
+    // backward graph output.
+    // num_outputs()[=2], however, is the number of outputs of
+    // grad_fn (an autograd::Function). grad_fn's outputs are
+    // grads with regard to Tensor/Variables `x`, but not
+    // graph input TensorList [x, x]. These two grads will
+    // be accumulated to x.grad later using autograd::InputBuffer.
     variable_list outputs;
     outputs.reserve(num_outputs());
-    for (size_t i = 0; i < num_outputs(); ++i) {
-      // Input grad can also be None even if it requires grad
-      // Example: `other` in expand_as(self, other)
-      if (should_compute_output(i) && !stack[i].isNone()) {
-        auto output = std::move(stack[i]).toTensor();
-        const auto& edge = next_edge(i);
-        if (output.defined()) {
-          outputs.emplace_back(std::move(output));
-        } else if (edge.is_valid()) {
-          outputs.emplace_back(
-              edge.function->input_metadata(edge.input_nr).zeros_like());
-        } else {
-          outputs.emplace_back();
+    size_t output_index = 0;
+    for (IValue& v : stack) {
+      if (v.isTensorList()) {
+        for(at::Tensor tensor : v.toTensorListRef()) {
+          produceOutput(output_index++, std::move(tensor), outputs);
         }
+      } else if (v.isTensor()) {
+        produceOutput(output_index++, std::move(v).toTensor(), outputs);
       } else {
+        // Input grad can also be None even if it requires grad
+        // Example: `other` in expand_as(self, other)
         outputs.emplace_back();
       }
     }
@@ -129,24 +233,72 @@ struct DifferentiableGraphBackward : public autograd::Function {
   }
 
   void capture(const IValue& val, bool is_output) {
-    const bool is_tensor = val.isTensor();
-    is_var_capture.push_back(is_tensor);
-    if (is_tensor) {
-      var_captures.emplace_back(Variable(val.toTensor()), is_output);
+    captures_.capture(val, is_output);
+  }
+
+
+  void addOutputForTensor(const at::Tensor& tensor) {
+    auto v = Variable(tensor);
+    add_next_edge(
+        v.defined() ? v.gradient_edge() : autograd::Edge{});
+  }
+  void addOutputForIValue(const IValue& value) {
+    if (value.isTensorList()){
+      for(const at::Tensor& tensor : value.toTensorListRef()) {
+        addOutputForTensor(tensor);
+      }
     } else {
-      ivalue_captures.push_back(val);
+      addOutputForTensor(value.toTensor());
     }
   }
 
- private:
+  void addInputVariable(Variable output) {
+    // NB: since our requires_grad setting is only a heuristic we might end
+    // up wanting to differentiate through integral tensors, which is
+    // generally a hard error in autograd.
+    if (at::isFloatingType(output.type().scalarType())) {
+      autograd::create_gradient_edge(output, shared_from_this());
+      output.set_requires_grad(true);
+    } else {
+      add_input_metadata(autograd::Function::undefined_input{});
+    }
+  }
+
+  void addInputIValue(const IValue& v) {
+    if (v.isTensorList()) {
+      const std::vector<at::Tensor>& tensors = v.toTensorListRef();
+      input_instructions_.pushTensorList(tensors.size());
+      for (const at::Tensor& tensor : tensors) {
+        addInputVariable(tensor);
+      }
+    } else if (v.isTensor()) {
+      input_instructions_.pushTensor();
+      addInputVariable(v.toTensor());
+    }
+  }
+
+private:
+
+  void produceOutput(size_t i, at::Tensor output, variable_list& outputs) {
+    if (should_compute_output(i)) {
+      const auto& edge = next_edge(i);
+      if (output.defined()) {
+        outputs.emplace_back(std::move(output));
+      } else if (edge.is_valid()) {
+        outputs.emplace_back(
+            edge.function->input_metadata(edge.input_nr).zeros_like());
+      } else {
+        outputs.emplace_back();
+      }
+    } else {
+      outputs.emplace_back();
+    }
+  }
+
   friend struct ExecutionPlan;
   GraphExecutor executor;
-
-  // INVARIANT: is_var_capture.size() == var_captures.size() +
-  // ivalue_captures.size()
-  std::vector<bool> is_var_capture;
-  std::vector<autograd::SavedVariable> var_captures;
-  std::vector<IValue> ivalue_captures;
+  CaptureList captures_;
+  UnpackInstructions input_instructions_;
 };
 
 // an optimized way of executing the subgraph computed directly on
@@ -166,6 +318,7 @@ struct DifferentiableGraphOp {
   int operator()(Stack& stack) const {
     auto grad_fn = std::make_shared<DifferentiableGraphBackward>(
         grad_executor,
+        grad.df_input_vjps.size(),
         grad.df_input_captured_inputs.size() +
             grad.df_input_captured_outputs.size());
 
@@ -174,9 +327,7 @@ struct DifferentiableGraphOp {
       // hook up the outputs of df to the gradient functions of the inputs that
       // require gradients
       for (auto idx : grad.df_output_vjps) {
-        auto v = Variable(inputs[idx].toTensor());
-        grad_fn->add_next_edge(
-            v.defined() ? v.gradient_edge() : autograd::Edge{});
+        grad_fn->addOutputForIValue(inputs[idx]);
       }
       captureInputs(*grad_fn, inputs);
     }
@@ -194,24 +345,7 @@ struct DifferentiableGraphOp {
       // this is currently intentionally not done here so we can get an idea of
       // our perf before introducing overhead for correctness
       for (auto idx : grad.df_input_vjps) {
-        // Note: we have to set this up in place, or we have to throw away and
-        // reallocate variables that were already created in wrapTensors. We
-        // should add an API for this.
-
-        // XXX: undefined tensor syntax in autograd
-        Variable output;
-        if (!outputs[idx].isNone()) {
-          output = outputs[idx].toTensor();
-        }
-        // NB: since our requires_grad setting is only a heuristic we might end
-        // up wanting to differentiate through integral tensors, which is
-        // generally a hard error in autograd.
-        if (at::isFloatingType(output.scalar_type())) {
-          autograd::create_gradient_edge(output, grad_fn);
-          output.set_requires_grad(true);
-        } else {
-          grad_fn->add_input_metadata(autograd::Function::undefined_input{});
-        }
+        grad_fn->addInputIValue(outputs[idx]);
       }
       captureOutputs(*grad_fn, outputs);
       // drop the temporary outputs so that we return the same number of
@@ -225,6 +359,26 @@ struct DifferentiableGraphOp {
  private:
   friend GraphExecutor* detail::getGradExecutor(Operation& op);
 
+  void detach(at::Tensor& t) const {
+    if (t.defined()) {
+      t = autograd::as_variable_ref(t).detach();
+    }
+  }
+
+  void detach(IValue& v) const {
+    if(v.isTensor()) {
+      auto t = std::move(v).toTensor();
+      detach(t);
+      v = IValue{t};
+    } else if(v.isTensorList()) {
+      std::vector<at::Tensor> lst = v.toTensorListRef();
+      for(at::Tensor& t : lst) {
+        detach(t);
+      }
+      v = TensorList::create(std::move(lst));
+    }
+  }
+
   void detachVariables(Stack& stack) const {
     // It would be nice to use an ArrayRef here, but unfortunately those can
     // only return const references, so we need to do a bunch of indexing
@@ -232,12 +386,7 @@ struct DifferentiableGraphOp {
     const int64_t stack_size = stack.size();
     const int64_t stack_offset = stack_size - num_inputs;
     for (int64_t i = stack_offset; i < stack_size; ++i) {
-      auto& v = stack[i];
-      if (!v.isTensor())
-        continue;
-      auto t = std::move(v).toTensor();
-      v = IValue{t.defined() ? autograd::as_variable_ref(t).detach()
-                             : std::move(t)};
+      detach(stack[i]);
     }
   }
   // Capture (save) inputs that would be required to subsequently run backwards

@@ -6,7 +6,6 @@ namespace {
 std::mutex lock;
 const std::vector<std::string> functions = {
     R"(
-
         ####     HELPER FUNCTIONS           ###
         ####     PREFIX: AD_                ###
         ####     SCHEMA NOT SAVED IN CACHE  ###
@@ -474,6 +473,91 @@ const std::vector<std::string> functions = {
                 return grad_self, grad_other
 
             return self * other, backward
+
+        def reshape(self,
+                    shape: List[int]):
+            self_size = self.size()
+            def backward(grad_output):
+                grad_self = grad_output.reshape(self_size)
+                return grad_self, None
+
+            return torch.reshape(self, shape), backward
+
+        def split(self,
+                  split_size: int,
+                  dim: int):
+            def backward(grad_outputs: List[Tensor]):
+                grad_self = torch.cat(grad_outputs, dim)
+                return grad_self, None, None
+
+            return torch.split(self, split_size, dim), backward
+
+        def split_with_sizes(self,
+                             split_sizes: List[int],
+                             dim: int=0):
+            def backward(grad_outputs: List[Tensor]):
+                size = len(grad_outputs)
+                grad_self = torch.cat(grad_outputs, dim)
+                return grad_self, None, None
+
+            return torch.split_with_sizes(self, split_sizes, dim), backward
+
+        def stack(tensors: List[Tensor],
+                  dim: int=0):
+            def backward(grad_output):
+                grad_tensors = torch.unbind(grad_output, dim)
+                return grad_tensors, None
+
+            return torch.stack(tensors, dim), backward
+
+        def unbind(self,
+                   dim: int=0):
+            def backward(grad_outputs: List[Tensor]):
+                grad_self = torch.stack(grad_outputs, dim)
+                return grad_self, None
+
+            return torch.unbind(self, dim), backward
+
+        def cat(tensors: List[Tensor],
+                dim: int=0):
+            size = len(tensors)
+            split_sizes = [0] * size
+            for i in range(size):
+                if tensors[i].numel() > 0:
+                    split_sizes[i] = tensors[i].size()[dim]
+
+            def backward(grad_output):
+                grad_tensors = torch.split_with_sizes(grad_output, split_sizes, dim)
+                return grad_tensors, None
+
+            return torch.cat(tensors, dim), backward
+
+        def index(self,
+                  indices: List[Tensor]):
+            def backward(grad_output):
+                grad_self = torch.zeros_like(self).index_put_(indices, grad_output, True)
+                return grad_self, None
+
+            return torch.index(self, indices), backward
+
+        def meshgrid(tensors: List[Tensor]):
+            size = len(tensors)
+            sizes = [0] * size
+            for i in range(size):
+                if tensors[i].dim() != 0:
+                    sizes[i] = tensors[i].size()[0]
+            def backward(grad_outputs: List[Tensor]):
+                grads_tensors = []
+                for i in range(size):
+                    view_shape = [1] * size
+                    if sizes[i] == 0:
+                        view_shape[i] = 1
+                        grads_tensors.append((grad_outputs[i]._grad_sum_to_size(view_shape)).reshape(()))
+                    else:
+                        view_shape[i] = sizes[i]
+                        grads_tensors.append((grad_outputs[i]._grad_sum_to_size(view_shape)).reshape([sizes[i]]))
+                return grads_tensors
+            return torch.meshgrid(tensors), backward
 
         def mv(self, vec):
             def backward(grad_output):
