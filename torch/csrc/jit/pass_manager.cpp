@@ -3,14 +3,14 @@
 namespace torch {
 namespace jit {
 
-std::vector<Pass>& getPasses() {
+std::vector<Pass>& getCustomPasses() {
   static std::vector<Pass> passes;
   return passes;
 }
 
 RegisterPass::RegisterPass(Pass p) {
-  getPasses().emplace_back(std::move(p));
+  getCustomPasses().emplace_back(std::move(p));
 }
 
-}
-}
+} // namespace jit
+} // namespace torch

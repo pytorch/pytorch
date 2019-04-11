@@ -494,7 +494,7 @@ struct GraphExecutorImpl {
   }
 
   void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
-    for (const auto& pass : getPasses()) {
+    for (const auto& pass : getCustomPasses()) {
       pass(graph);
     }
     FuseGraph(graph);

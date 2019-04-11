@@ -742,7 +742,7 @@ void testNoneSchemaMatch() {
 }
 
 static int testPassValue = 0;
-void fakePass(std::shared_ptr<Graph>&g) {
+void fakePass(std::shared_ptr<Graph>& g) {
   testPassValue++;
   return;
 }
@@ -750,14 +750,14 @@ void fakePass(std::shared_ptr<Graph>&g) {
 RegisterPass p(fakePass);
 
 void testPassManagement() {
-  std::shared_ptr<Graph> graph = std::make_shared<Graph>(); 
+  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
   script::parseIR(
       R"IR(
 graph(%a):
   return (%a))IR",
       &*graph);
 
-  std::vector<IValue> stack = { IValue(torch::randn({22}, at::kCPU)) };
+  std::vector<IValue> stack = {IValue(torch::randn({22}, at::kCPU))};
   auto run = [&](std::shared_ptr<Graph>& graph, std::vector<IValue> stack) {
     Code code(graph);
     InterpreterState interp(code);
