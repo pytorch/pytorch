@@ -37,6 +37,8 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     get_weight, smoothl1loss_reference, kldivloss_reference, \
     ctcloss_reference, new_module_tests
 
+from torch.nn import MultiheadAttention
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -3175,6 +3177,191 @@ class TestNN(NNTestCase):
                         m = module(reduction=reduction)
                         output = m(sigmoid(input), target)
                         verify_reduction_scalars(input, reduction, output)
+
+    def test_multihead_attention(self):
+        def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=False, src_lengths=None):
+            """ Numpy-based reference implementation of scaled dot attention
+            for testing"""
+            QKT = _batchmatmul(
+                Q,
+                np.transpose(K, axes=[0, 1, 3, 2])
+                / np.sqrt(dims[3], dtype=np.float32),  # divide by sqrt(d_head)
+            )
+            if unseen_mask or src_lengths is not None:
+                b1, b2, s1, s2 = QKT.shape
+                # assert s1 == s2
+                for i in range(b1):
+                    for j in range(b2):
+                        for m in range(s1):
+                            for n in range(s2):
+                                if unseen_mask and n > m:
+                                    QKT[i, j, m, n] = -np.inf
+                                if src_lengths is not None and n >= src_lengths[i]:
+                                    QKT[i, j, m, n] = -np.inf
+            reference = _softmax(QKT)
+            reference = _batchmatmul(reference, V)
+            return reference
+
+        def _batchmatmul(a, b):  # batchmatmul over 4 dim matrix
+            """ Numpy-based batch matrix multiply over 4 dim matrix"""
+            assert a.shape[0] == b.shape[0]
+            assert a.shape[1] == b.shape[1]
+            retval = np.zeros(
+                (a.shape[0], a.shape[1], a.shape[2], b.shape[3]), dtype=np.float32
+            )
+            for i in range(a.shape[0]):
+                for j in range(a.shape[1]):
+                    retval[i, j, :, :] = np.matmul(a[i, j, :, :], b[i, j, :, :])
+            return retval
+
+        def _softmax(x):  # softmax over 4 dim matrix
+            """ Numpy-based reference softmax over 4 dim matrix"""
+            output = np.zeros(x.shape, dtype=np.float32)
+            for i in range(x.shape[0]):
+                for j in range(x.shape[1]):
+                    for k in range(x.shape[2]):
+                        x_curr = x[i, j, k, :]
+                        e_x = np.exp(x_curr - np.amax(x_curr))
+                        output[i, j, k, :] = e_x / np.sum(e_x)
+            return output
+
+        def _generate_src_lengths(batch_size, seq_len):
+            src_lengths = np.array([random.randint(1, seq_len) for i in range(batch_size)])
+
+            # max source length has to equal seq_len, so randomly choose
+            # one example to have source length = seq_len
+            max_len_example_i = random.randint(0, batch_size - 1)
+            src_lengths[max_len_example_i] = seq_len
+
+            src_lengths_tensor = torch.from_numpy(src_lengths).int()
+            return src_lengths, src_lengths_tensor
+
+        def _split_heads_ref(X, dims, nheads, d_head):
+            X_split = np.reshape(X, dims[:2] + [nheads, d_head])
+            X_split_transposed = np.transpose(X_split, [0, 2, 1, 3])
+            reference = np.reshape(X_split_transposed, [dims[0], nheads, dims[1], d_head])
+            return reference
+
+        def _combine_heads_ref(X, dims, nheads, d_head):
+            X_transposed = np.transpose(X, [0, 2, 1, 3])
+            reference = np.reshape(X_transposed, dims[:2] + [nheads * d_head])
+            return reference
+
+        def _fc(X, X_name, module, start=None, end=None):
+            X_fc_b = None
+            X_fc_w = None
+            for name, param in module.named_parameters():
+                if X_name + "weight" in name:
+                    if X_fc_w is not None:
+                        raise Exception("Duplicate FC name found")
+                    X_fc_w = param[start:end, :].detach().numpy()
+                elif X_name + "bias" in name:
+                    if X_fc_b is not None:
+                        raise Exception("Duplicate FC name found")
+                    X_fc_b = param[start:end].detach().numpy()
+            return np.matmul(X, np.transpose(X_fc_w)) + X_fc_b
+
+        def _create_src_lengths_mask(batch_size, src_lengths):
+            """
+            Generate boolean mask to prevent attention beyond the end of source
+
+            Inputs:
+              batch_size : int
+              src_lengths : [batch_size] of sentence lengths
+
+            Outputs:
+              [batch_size, max_src_len]
+            """
+            max_srclen = src_lengths.max()
+            src_indices = torch.arange(0, max_srclen).unsqueeze(0).type_as(src_lengths)
+            src_indices = src_indices.expand(batch_size, max_srclen)
+            src_lengths = src_lengths.unsqueeze(dim=1).expand(batch_size, max_srclen)
+            # returns [batch_size, max_seq_len]
+            return (src_indices < src_lengths).int().detach()
+
+        def _multihead_attn_test_helper(use_src_lengths):
+            for _ in range(100):
+                batch_sz, seq_len = [random.randint(2, 10) for r in range(2)]
+                d_head = random.randint(3, 10)
+                nheads = random.randint(3, 10)
+                d_model = d_head * nheads
+                dims = [batch_sz, seq_len, d_model]
+
+                src_lengths = None
+                src_lengths_tensor = None
+                if use_src_lengths:
+                    src_lengths, src_lengths_tensor = _generate_src_lengths(
+                        batch_size=batch_sz, seq_len=seq_len
+                    )
+
+                decoder_state = np.random.rand(batch_sz, d_model).astype(np.float64)
+                K = np.random.rand(*dims).astype(np.float64)
+                V = K
+                Q = np.expand_dims(decoder_state, 1)
+
+                decoder_state_tensor = torch.from_numpy(decoder_state).double()
+                source_hid_tensor = torch.from_numpy(K).double().transpose(0, 1)
+
+                multihead_attn_module = MultiheadAttention(d_model, nheads)
+
+                _batch_size = decoder_state_tensor.shape[0]
+                _Q = decoder_state_tensor.unsqueeze(1).transpose(0, 1)
+                _V = source_hid_tensor
+                _K = source_hid_tensor
+                src_len_mask = None
+                if src_lengths is not None and use_src_lengths:
+                    # [batch_size, 1, seq_len]
+                    src_len_mask_int = _create_src_lengths_mask(
+                        batch_size=_batch_size, src_lengths=src_lengths_tensor
+                    )
+                    src_len_mask = src_len_mask_int != 1
+
+                result = multihead_attn_module(
+                    _Q, _K, _V,
+                    key_padding_mask=src_len_mask,
+                    need_weights=True)[0].squeeze(0).detach().numpy()
+
+                Q_fc = _fc(Q, "in_proj_", multihead_attn_module, end=d_model)
+                K_fc = _fc(
+                    K, "in_proj_", multihead_attn_module, start=d_model, end=2 * d_model
+                )
+                V_fc = _fc(V, "in_proj_", multihead_attn_module, start=2 * d_model)
+
+                Q_split = _split_heads_ref(
+                    Q_fc, [batch_sz, 1, d_model], nheads, d_head
+                )
+                K_split = _split_heads_ref(K_fc, dims, nheads, d_head)
+                V_split = _split_heads_ref(V_fc, dims, nheads, d_head)
+
+                attn_heads = _scaled_dot_attn_ref(
+                    Q=Q_split,
+                    K=K_split,
+                    V=V_split,
+                    dims=Q_split.shape,
+                    src_lengths=src_lengths,
+                )
+
+                combined_attn_heads = _combine_heads_ref(
+                    X=attn_heads, dims=[batch_sz, 1], nheads=nheads, d_head=d_head
+                )
+
+                reference = _fc(
+                    combined_attn_heads, "out_proj.", multihead_attn_module
+                )
+                reference = np.squeeze(reference, axis=1)
+
+                # result = reference
+                self.assertEqual(tuple(result.shape), (batch_sz, d_model))
+                np.testing.assert_allclose(result, reference, atol=1e-5)
+
+        def test_multihead_attn_no_masking():
+            _multihead_attn_test_helper(use_src_lengths=None)
+
+        def test_multihead_attn_with_src_lengths():
+            _multihead_attn_test_helper(use_src_lengths=True)
+
+        test_multihead_attn_no_masking()   # Test MultiheadAttention without masking
+        test_multihead_attn_with_src_lengths()  # Test MultiheadAttention with src lengths
 
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
