@@ -28,7 +28,6 @@ QTensorImpl* get_qtensorimpl(const QTensor& self) {
 inline QTensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
-    bool is_variable,
     QuantizerPtr quantizer) {
   AT_ASSERT(options.device().is_cpu());
 
@@ -44,7 +43,7 @@ inline QTensor new_qtensor(
       allocator,
       /*resizable=*/true);
   auto tensor = detail::make_tensor<QTensorImpl>(
-      storage_impl, at::CPUTensorId(), is_variable, quantizer);
+      storage_impl, at::CPUTensorId(), quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   return tensor;
 }
@@ -76,7 +75,6 @@ QTensor PerTensorAffineQuantizer::quantize(RealTensor tensor) {
   QTensor qv = new_qtensor(
       sizes,
       tensor.options().dtype(at::kQInt8),
-      tensor.is_variable(),
       intrusive_from_this());
   auto qvd = qv.data<qint8>();
   tensor.contiguous();

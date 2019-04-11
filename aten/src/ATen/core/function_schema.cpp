@@ -41,7 +41,7 @@ std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
 
 void FunctionSchema::checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const {
   if (!isSubvalueOf(value, argument.type())) {
-    std::string position = pos ? ::c10::str("in position ", *pos) : "";
+    std::string position = pos ? ::c10::str(" in position ", *pos) : "";
     AT_ERROR(
         "Expected value of type ",
         *argument.type(),
