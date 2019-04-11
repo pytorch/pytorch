@@ -98,10 +98,10 @@ list(APPEND ATen_CPU_INCLUDE
 
 if (MSVC)
   list(APPEND ATen_CPU_INCLUDE
-    ../aten/lib/libshm_windows)
+    ../coffe2/lib/libshm_windows)
 else()
   list(APPEND ATen_CPU_INCLUDE
-    ../aten/lib/libshm)
+    ../coffe2/lib/libshm)
 endif()
 
 add_subdirectory(src/ATen)

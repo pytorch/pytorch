@@ -335,7 +335,9 @@ if (MSVC AND BUILD_SHARED_LIBS)
 endif()
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
 target_compile_options(caffe2 PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
-#install(TARGETS ashm EXPORT Caffe2Targets DESTINATION lib)
+
+#install(TARGETS ashm EXPORT Caffe2Targets)
+target_link_libraries(caffe2 PRIVATE ashm)
 install(TARGETS caffe2 EXPORT Caffe2Targets DESTINATION lib)
 
 caffe2_interface_library(caffe2 caffe2_library)

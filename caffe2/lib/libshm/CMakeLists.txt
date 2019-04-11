@@ -25,8 +25,8 @@ ENDIF ()
 ADD_LIBRARY(ashm SHARED core.cpp)
 
 target_include_directories(ashm PUBLIC
-  ${TORCH_ROOT}/caffe2/lib # provides "libshm/libshm.h"
-  ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
+  $<BUILD_INTERFACE:${TORCH_ROOT}/caffe2/lib> # provides "libshm/libshm.h"
+  $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/caffe2/aten/src> # provides <TH/THGeneral.h> to THC.h
   )
 
 ADD_EXECUTABLE(atorch_shm_manager manager.cpp)
@@ -75,7 +75,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 
-INSTALL(TARGETS ashm LIBRARY DESTINATION ${LIBSHM_INSTALL_LIB_SUBDIR})
-install(TARGETS ashm EXPORT Caffe2Targets DESTINATION lib)
+#INSTALL(TARGETS ashm LIBRARY DESTINATION ${LIBSHM_INSTALL_LIB_SUBDIR})
+install(TARGETS ashm EXPORT Caffe2Targets DESTINATION ${LIBSHM_INSTALL_LIB_SUBDIR})
 INSTALL(FILES libshm.h DESTINATION "include")
-INSTALL(TARGETS atorch_shm_manager DESTINATION "bin")
+#INSTALL(TARGETS atorch_shm_manager DESTINATION "bin")
