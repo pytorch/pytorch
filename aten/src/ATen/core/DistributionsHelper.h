@@ -105,6 +105,8 @@ struct uniform_real_distribution {
 /**
  * Samples a normal distribution using the Box-Muller method
  * Takes mean and standard deviation as inputs
+ * Note that Box-muller method returns two samples at a time.
+ * Hence, we cache the "next" sample in the CPUGenerator class.
  */
 template <typename T>
 struct normal_distribution {
