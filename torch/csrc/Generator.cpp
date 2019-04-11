@@ -49,7 +49,6 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   auto device = r.deviceWithDefault(0, at::Device(at::kCPU));
   auto is_default_generator = r.toBool(1);
 
-  THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
   if (device.type() == at::kCPU) {
     if(is_default_generator) {
       auto module = THPObjectPtr(PyImport_ImportModule("torch._C"));
@@ -58,6 +57,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
       if (!default_cpu_gen) throw python_error();
       return default_cpu_gen;
     } else {
+      THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
       self->cdata = new CPUGenerator();
       self->owner = true;
       return (PyObject*)self.release();

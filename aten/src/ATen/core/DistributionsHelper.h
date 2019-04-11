@@ -79,7 +79,7 @@ template <typename T>
 struct uniform_real_distribution {
 
   C10_HOST_DEVICE inline uniform_real_distribution(T a_in, T b_in) {
-    #if !defined(__CUDACC__) || !defined(__HIP_PLATFORM_HCC__)
+    #if !defined(__CUDACC__) || !defined(__HIPCC__)
       AT_ASSERT(a_in <= b_in);
       AT_ASSERT(b_in-a_in <= std::numeric_limits<T>::max());
     #endif
@@ -112,7 +112,7 @@ template <typename T>
 struct normal_distribution {
 
   C10_HOST_DEVICE inline normal_distribution(T mean_in, T stdv_in) {
-    #if !defined(__CUDACC__) || !defined(__HIP_PLATFORM_HCC__)
+    #if !defined(__CUDACC__) || !defined(__HIPCC__)
       AT_ASSERT(stdv_in > 0);
     #endif
     mean = mean_in;
@@ -158,7 +158,7 @@ template <typename T>
 struct bernoulli_distribution {
 
   C10_HOST_DEVICE inline bernoulli_distribution(T p_in) {
-    #if !defined(__CUDACC__) || !defined(__HIP_PLATFORM_HCC__)
+    #if !defined(__CUDACC__) || !defined(__HIPCC__)
       AT_ASSERT(p_in >= 0 && p_in <= 1);
     #endif
     p = p_in;
@@ -180,7 +180,7 @@ template <typename T>
 struct geometric_distribution {
 
   C10_HOST_DEVICE inline geometric_distribution(T p_in) {
-    #if !defined(__CUDACC__) || !defined(__HIP_PLATFORM_HCC__)
+    #if !defined(__CUDACC__) || !defined(__HIPCC__)
       AT_ASSERT(p_in > 0 && p_in < 1);
     #endif
     p = p_in;
@@ -246,7 +246,7 @@ template <typename T>
 struct lognormal_distribution {
 
   C10_HOST_DEVICE inline lognormal_distribution(T mean_in, T stdv_in) {
-    #if !defined(__CUDACC__) || !defined(__HIP_PLATFORM_HCC__)
+    #if !defined(__CUDACC__) || !defined(__HIPCC__)
       AT_ASSERT(stdv_in > 0);
     #endif
     mean = mean_in;
