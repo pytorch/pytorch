@@ -78,16 +78,14 @@ constexpr float FLOAT_DIVISOR = 1.0f / (1 << 24);
 template <typename T>
 struct uniform_real_distribution {
 
-  C10_HOST_DEVICE inline uniform_real_distribution(T a_in, T b_in) {
-    #if !defined(__CUDACC__) || !defined(__HIPCC__)
-      AT_ASSERT(a_in <= b_in);
-      AT_ASSERT(b_in-a_in <= std::numeric_limits<T>::max());
-    #endif
+  inline uniform_real_distribution(T a_in, T b_in) {
+    AT_ASSERT(a_in <= b_in);
+    AT_ASSERT(b_in-a_in <= std::numeric_limits<T>::max());
     a = a_in;
     b = b_in;
   }
 
-  C10_HOST inline dist_acctype<T> operator()(at::CPUGenerator* generator){
+  inline dist_acctype<T> operator()(at::CPUGenerator* generator){
     dist_acctype<T> x;
     if(std::is_same<T, double>::value) {
       x = (generator->random64() & DOUBLE_MASK) * DOUBLE_DIVISOR;
@@ -111,15 +109,13 @@ struct uniform_real_distribution {
 template <typename T>
 struct normal_distribution {
 
-  C10_HOST_DEVICE inline normal_distribution(T mean_in, T stdv_in) {
-    #if !defined(__CUDACC__) || !defined(__HIPCC__)
-      AT_ASSERT(stdv_in > 0);
-    #endif
+  inline normal_distribution(T mean_in, T stdv_in) {
+    AT_ASSERT(stdv_in > 0);
     mean = mean_in;
     stdv = stdv_in;
   }
 
-  C10_HOST inline dist_acctype<T> operator()(at::CPUGenerator* generator){
+  inline dist_acctype<T> operator()(at::CPUGenerator* generator){
     dist_acctype<T> ret;
     bool is_cache_available = generator->is_normal_cache_available();
     if (!is_cache_available) {
@@ -157,14 +153,12 @@ struct normal_distribution {
 template <typename T>
 struct bernoulli_distribution {
 
-  C10_HOST_DEVICE inline bernoulli_distribution(T p_in) {
-    #if !defined(__CUDACC__) || !defined(__HIPCC__)
-      AT_ASSERT(p_in >= 0 && p_in <= 1);
-    #endif
+  inline bernoulli_distribution(T p_in) {
+    AT_ASSERT(p_in >= 0 && p_in <= 1);
     p = p_in;
   }
 
-  C10_HOST inline T operator()(at::CPUGenerator* generator) { 
+  inline T operator()(at::CPUGenerator* generator) { 
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return uniform(generator) <= p;
   }
@@ -179,14 +173,12 @@ struct bernoulli_distribution {
 template <typename T>
 struct geometric_distribution {
 
-  C10_HOST_DEVICE inline geometric_distribution(T p_in) {
-    #if !defined(__CUDACC__) || !defined(__HIPCC__)
-      AT_ASSERT(p_in > 0 && p_in < 1);
-    #endif
+  inline geometric_distribution(T p_in) {
+    AT_ASSERT(p_in > 0 && p_in < 1);
     p = p_in;
   }
 
-  C10_HOST inline int operator()(at::CPUGenerator* generator) {
+  inline int operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     dist_acctype<T> sample = uniform(generator);
     return static_cast<int>(::log(static_cast<T>(1.0)-sample) / ::log(p)) + 1;
@@ -202,11 +194,11 @@ struct geometric_distribution {
 template <typename T>
 struct exponential_distribution {
 
-  C10_HOST_DEVICE inline exponential_distribution(T lambda_in) {
+  inline exponential_distribution(T lambda_in) {
     lambda = lambda_in;
   }
 
-  C10_HOST inline T operator()(at::CPUGenerator* generator) {
+  inline T operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     dist_acctype<T> sample = uniform(generator);
     return static_cast<T>(-1.0) / lambda * ::log(static_cast<T>(1.0)-sample);
@@ -222,12 +214,12 @@ struct exponential_distribution {
 template <typename T>
 struct cauchy_distribution {
 
-  C10_HOST_DEVICE inline cauchy_distribution(T median_in, T sigma_in) {
+  inline cauchy_distribution(T median_in, T sigma_in) {
     median = median_in;
     sigma = sigma_in;
   }
 
-  C10_HOST inline T operator()(at::CPUGenerator* generator) {
+  inline T operator()(at::CPUGenerator* generator) {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return median + sigma * ::tan(static_cast<T>(M_PI) * (uniform(generator)-static_cast<T>(0.5)));
   }
@@ -245,15 +237,13 @@ struct cauchy_distribution {
 template <typename T>
 struct lognormal_distribution {
 
-  C10_HOST_DEVICE inline lognormal_distribution(T mean_in, T stdv_in) {
-    #if !defined(__CUDACC__) || !defined(__HIPCC__)
-      AT_ASSERT(stdv_in > 0);
-    #endif
+  inline lognormal_distribution(T mean_in, T stdv_in) {
+    AT_ASSERT(stdv_in > 0);
     mean = mean_in;
     stdv = stdv_in;
   }
 
-  C10_HOST inline T operator()(at::CPUGenerator* generator){
+  inline T operator()(at::CPUGenerator* generator){
     normal_distribution<T> normal(mean, stdv);
     return ::exp(normal(generator));
   }
