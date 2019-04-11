@@ -9,7 +9,7 @@ Tensor DeprecatedTypeProperties::unsafeTensorFromTH(void * th_pointer, bool reta
   return getDispatchType().unsafeTensorFromTH(th_pointer, retain);
 }
 
-Tensor DeprecatedTypeProperties::copy(const Tensor & src, bool non_blocking, optional<Device> to_device) const {
+Tensor DeprecatedTypeProperties::copy(const Tensor & src, bool non_blocking, c10::optional<Device> to_device) const {
   return getDispatchType().copy(src, non_blocking, to_device);
 }
 
