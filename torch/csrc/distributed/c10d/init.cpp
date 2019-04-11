@@ -435,11 +435,17 @@ They are used in specifying strategies for reduction collectives, e.g.,
 #endif
 
 #ifdef USE_C10D_MPI
-  shared_ptr_class_<::c10d::ProcessGroupMPI>(
-      module, "ProcessGroupMPI", processGroup)
-      .def(py::init([](std::vector<int> ranks) {
+  auto processGroupMPI = shared_ptr_class_<::c10d::ProcessGroupMPI>(
+      module, "ProcessGroupMPI", processGroup);
+
+  // Define static create function instead of a constructor, because
+  // this function may return null. This happens if this process is not
+  // part of a sub group that is to be created.
+  processGroupMPI.def_static(
+      "create",
+      [](std::vector<int> ranks) {
         return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
-      }));
+      });
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
