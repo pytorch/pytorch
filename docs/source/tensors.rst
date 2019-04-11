@@ -308,6 +308,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lt
    .. automethod:: lt_
    .. automethod:: lu
+   .. automethod:: lu_solve
    .. automethod:: map_
    .. automethod:: masked_scatter_
    .. automethod:: masked_scatter
@@ -424,6 +425,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: t
    .. automethod:: t_
    .. automethod:: to
+   .. automethod:: to_mkldnn
    .. automethod:: take
    .. automethod:: tan
    .. automethod:: tan_

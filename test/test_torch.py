@@ -1549,11 +1549,12 @@ class _TestTorchMixin(object):
                 self.assertTrue(y.le(0).any())
 
     def test_reciprocal(self):
-        a = torch.randn(100, 89)
-        res_div = 1 / a
-        res_reciprocal = a.clone()
-        res_reciprocal.reciprocal_()
-        self.assertEqual(res_reciprocal, res_div)
+        for dtype in [torch.float, torch.double]:
+            a = torch.randn(100, 89, dtype=dtype)
+            res_div = 1 / a
+            res_reciprocal = a.clone()
+            res_reciprocal.reciprocal_()
+            self.assertEqual(res_reciprocal, res_div)
 
     def test_mul(self):
         m1 = torch.randn(10, 10)
@@ -1773,7 +1774,7 @@ class _TestTorchMixin(object):
         self._test_lu(self, lambda t: t)
 
     @staticmethod
-    def _test_btrisolve(self, cast):
+    def _test_lu_solve(self, cast):
         a = torch.FloatTensor((((1.3722, -0.9020),
                                 (1.8849, 1.9169)),
                                ((0.7187, -1.1695),
@@ -1786,13 +1787,13 @@ class _TestTorchMixin(object):
         a, b = cast(a), cast(b)
         LU_data, pivots, info = a.lu(get_infos=True)
         self.assertEqual(info.abs().sum(), 0)
-        x = torch.btrisolve(b, LU_data, pivots)
+        x = torch.lu_solve(b, LU_data, pivots)
         b_ = torch.bmm(a, x.unsqueeze(2)).squeeze()
         self.assertEqual(b_, b)
 
     @skipIfNoLapack
-    def test_btrisolve(self):
-        self._test_btrisolve(self, lambda t: t)
+    def test_lu_solve(self):
+        self._test_lu_solve(self, lambda t: t)
 
     @staticmethod
     def _test_lu_unpack(self, cast):
@@ -7602,120 +7603,6 @@ class _TestTorchMixin(object):
         val2 = rec.select(-1, -1).data.abs()[0][0][0].sum()
         self.assertEqual(val1, val2, 1e-8, 'absolute value')
 
-    def test_namedtuple_return(self):
-        a = torch.randn(5, 5)
-
-        # test max, min, median, mode
-        for f in ['max', 'min', 'median', 'mode']:
-            ret = getattr(a, f)(dim=0)
-            self.assertEqual(ret.values, ret[0])
-            self.assertEqual(ret.indices, ret[1])
-            ret1 = getattr(torch, f)(a, dim=0, out=ret)
-            self.assertEqual(ret1.values, ret1[0])
-            self.assertEqual(ret1.indices, ret1[1])
-            self.assertEqual(ret1.values, ret[0])
-            self.assertEqual(ret1.indices, ret[1])
-
-        # test kthvalue
-        ret = a.kthvalue(1, dim=0)
-        self.assertEqual(ret.values, ret[0])
-        self.assertEqual(ret.indices, ret[1])
-        ret1 = torch.kthvalue(a, 1, dim=0, out=ret)
-        self.assertEqual(ret1.values, ret1[0])
-        self.assertEqual(ret1.indices, ret1[1])
-        self.assertEqual(ret1.values, ret[0])
-        self.assertEqual(ret1.indices, ret[1])
-
-        # test svd
-        ret = a.svd()
-        self.assertEqual(ret.U, ret[0])
-        self.assertEqual(ret.S, ret[1])
-        self.assertEqual(ret.V, ret[2])
-        ret1 = torch.svd(a, out=ret)
-        self.assertEqual(ret1.U, ret1[0])
-        self.assertEqual(ret1.S, ret1[1])
-        self.assertEqual(ret1.V, ret1[2])
-        self.assertEqual(ret1.U, ret[0])
-        self.assertEqual(ret1.S, ret[1])
-        self.assertEqual(ret1.V, ret[2])
-
-        # test gesv
-        ret = a.solve(a)
-        self.assertEqual(ret.solution, ret[0])
-        self.assertEqual(ret.LU, ret[1])
-        ret1 = torch.solve(a, a, out=tuple(ret))
-        self.assertEqual(ret1.solution, ret1[0])
-        self.assertEqual(ret1.LU, ret1[1])
-        self.assertEqual(ret1.solution, ret[0])
-        self.assertEqual(ret1.LU, ret[1])
-
-        # test slogdet
-        ret = a.slogdet()
-        self.assertEqual(ret.sign, ret[0])
-        self.assertEqual(ret.logabsdet, ret[1])
-
-        # test sort
-        ret = a.sort(dim=0)
-        self.assertEqual(ret.values, ret[0])
-        self.assertEqual(ret.indices, ret[1])
-        ret1 = torch.sort(a, dim=0, out=tuple(ret))
-        self.assertEqual(ret1.values, ret1[0])
-        self.assertEqual(ret1.indices, ret1[1])
-        self.assertEqual(ret1.values, ret[0])
-        self.assertEqual(ret1.indices, ret[1])
-
-        # test topk
-        ret = a.topk(2)
-        self.assertEqual(ret.values, ret[0])
-        self.assertEqual(ret.indices, ret[1])
-        ret1 = torch.topk(a, 2, out=tuple(ret))
-        self.assertEqual(ret1.values, ret1[0])
-        self.assertEqual(ret1.indices, ret1[1])
-        self.assertEqual(ret1.values, ret[0])
-        self.assertEqual(ret1.indices, ret[1])
-
-        # test symeig, eig
-        fn = ['symeig', 'eig']
-        for f in fn:
-            ret = getattr(torch, f)(a, eigenvectors=True)
-            self.assertEqual(ret.eigenvalues, ret[0])
-            self.assertEqual(ret.eigenvectors, ret[1])
-            ret1 = getattr(torch, f)(a, out=tuple(ret))
-            self.assertEqual(ret1.eigenvalues, ret[0])
-            self.assertEqual(ret1.eigenvectors, ret[1])
-            self.assertEqual(ret1.eigenvalues, ret1[0])
-            self.assertEqual(ret1.eigenvectors, ret1[1])
-
-        # test pstrf
-        b = torch.mm(a, a.t())
-        # add a small number to the diagonal to make the matrix numerically positive semidefinite
-        for i in range(a.size(0)):
-            b[i][i] = b[i][i] + 1e-7
-        ret = b.pstrf()
-        self.assertEqual(ret.u, ret[0])
-        self.assertEqual(ret.pivot, ret[1])
-        ret1 = torch.pstrf(b, out=tuple(ret))
-        self.assertEqual(ret1.u, ret1[0])
-        self.assertEqual(ret1.pivot, ret1[1])
-        self.assertEqual(ret1.u, ret[0])
-        self.assertEqual(ret1.pivot, ret[1])
-
-        # test qr
-        ret = a.qr()
-        self.assertEqual(ret.Q, ret[0])
-        self.assertEqual(ret.R, ret[1])
-        ret1 = torch.qr(a, out=tuple(ret))
-        self.assertEqual(ret1.Q, ret1[0])
-        self.assertEqual(ret1.R, ret1[1])
-
-        # test geqrf
-        ret = a.geqrf()
-        self.assertEqual(ret.a, ret[0])
-        self.assertEqual(ret.tau, ret[1])
-        ret1 = torch.geqrf(a, out=tuple(ret))
-        self.assertEqual(ret1.a, ret1[0])
-        self.assertEqual(ret1.tau, ret1[1])
-
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
         float_types = [
@@ -10864,6 +10751,10 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             run_test(torch.double, torch.device('cuda'))
             run_test(torch.long, torch.device('cuda'))
             run_test(torch.uint8, torch.device('cuda'))
+
+    def test_show_config(self):
+        # We can't usefully test the output; just make sure this doesn't crash
+        torch.__config__.show()
 
     @staticmethod
     def _test_bincount(self, device):

@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch
 import torch.jit
 import numpy as np
@@ -45,10 +47,9 @@ graph(%x : (Tensor, float, int)):
 
 class TestQuantizedRelu(unittest.TestCase):
     """Tests the correctness of the quantized::relu op."""
-    def test_passthrough_qrelu(self):
+    def test_qrelu(self):
         relu = torch.ops.quantized.relu
 
-        # If using `torch.ops.c10.quantized_relu`, dtype should be uint8.
         X_tensor = np.arange(0, 10, dtype=np.uint8)
         scale = 255.0
         zero_point = 5
