@@ -166,10 +166,11 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
 }
 
 struct GraphFuser {
+  using FusionCallback = std::function<bool(Node*)>;
+
   Block* block_;
   std::unique_ptr<AliasDb> aliasDb_;
   std::shared_ptr<Graph> graph_;
-  using FusionCallback = std::function<bool(Node*)>;
   FusionCallback callback_ = [&](Node* n) { return isFusableDefault(n); };
   Symbol kind_ = prim::FusionGroup;
 
@@ -177,8 +178,15 @@ struct GraphFuser {
       : block_(block), graph_(std::move(graph)) {}
 
   // Custom passes require kind to specified
-  GraphFuser(Block* block, std::shared_ptr<Graph> graph, FusionCallback callback, Symbol kind)
-      : block_(block), graph_(std::move(graph)), callback_(callback), kind_(kind) {}
+  GraphFuser(
+      Block* block,
+      std::shared_ptr<Graph> graph,
+      FusionCallback callback,
+      Symbol kind)
+      : block_(block),
+        graph_(std::move(graph)),
+        callback_(callback),
+        kind_(kind) {}
 
   value_list tensorInputs(Node* node) {
     return filter(node->inputs(), [](Value* v) {
@@ -449,7 +457,7 @@ struct GraphFuser {
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
   Node* createSingletonFusionGroup(Node* n) {
-    auto group = block_->owningGraph()->createFusionGroup(kind_);
+    auto group = block_->owningGraph()->createWithSubgraph(kind_);
     // propogate position information for the new node so we can always
     // have a valid mapping
     group->insertBefore(n);
@@ -1354,10 +1362,11 @@ void FuseGraph(std::shared_ptr<Graph>& graph) {
   }
 }
 
-void CustomFuseGraph(std::shared_ptr<Graph>& graph, std::function<bool(Node*)> fn, Symbol kind) {
-  if (canFuseOnCPU() || canFuseOnGPU()) {
-    GraphFuser(graph->block(), graph, fn, kind).run();
-  }
+void CustomFuseGraph(
+    std::shared_ptr<Graph>& graph,
+    std::function<bool(Node*)> fn,
+    Symbol kind) {
+  GraphFuser(graph->block(), graph, fn, kind).run();
 }
 
 } // namespace jit

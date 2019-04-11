@@ -359,7 +359,10 @@ void testCustomFusion() {
   graph->registerOutput(d.value());
 
   torch::jit::overrideCanFuseOnCPU(true);
-  CustomFuseGraph(graph, [](Node* n) { return n->kind() != prim::Param; }, Symbol::fromQualString("prim::FusionGroup"));
+  CustomFuseGraph(
+      graph,
+      [](Node* n) { return n->kind() != prim::Param; },
+      Symbol::fromQualString("prim::FusionGroup"));
   torch::jit::overrideCanFuseOnCPU(false);
 
   const auto& nodes = graph->nodes();
