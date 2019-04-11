@@ -11,7 +11,7 @@ import unittest
 from datetime import timedelta
 
 from itertools import groupby
-from functools import wraps
+from functools import partial, reduce, wraps
 from collections import namedtuple
 
 import torch
@@ -143,6 +143,48 @@ def simple_multi_input_reduce_tests(rank, world_size):
             torch.Tensor([2 * world_size]),
         ),
     ]
+
+
+def simple_sparse_reduce_tests(rank, world_size):
+    """
+    Generate a number of basic test cases for sparse reduction.
+    These cover tensors with a varying number of sparse dimensions and a varying
+    number of dense dimensions. The only reduction operation we support is sum.
+    """
+    def generate(rank, world_size, sparse_dims=1, dense_dims=0):
+        # First sparse dimension is [0..rank].
+        # Subsequent dimensions are always 0, so we know there is
+        # a non-empty intersection between any two sparse tensors.
+        indices = [range(rank + 1)]
+        shape = [world_size] + [2 for _ in range(dense_dims)]
+        for _ in range(sparse_dims - 1):
+            indices.append([0] * (rank + 1))
+            shape.append(world_size)
+        values = torch.ones([rank + 1] + [2 for _ in range(dense_dims)])
+        return torch.sparse_coo_tensor(indices, values, shape)
+
+    def compute_sum(fn, world_size):
+        return reduce(lambda a, b: a + b, [fn(rank, world_size) for rank in range(world_size)])
+
+    return [
+        (
+            c10d.ReduceOp.SUM,
+            fn(rank, world_size),
+            compute_sum(fn, world_size),
+        )
+        for fn in [
+            partial(generate, sparse_dims=1),
+            partial(generate, sparse_dims=2),
+            partial(generate, sparse_dims=3),
+            partial(generate, dense_dims=1),
+            partial(generate, dense_dims=2),
+            partial(generate, dense_dims=3),
+        ]
+    ]
+
+
+def simple_multi_input_sparse_reduce_tests(rank, world_size):
+    pass
 
 
 class StoreTestBase(object):
@@ -767,6 +809,27 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_allreduce_stress_cuda(self):
         inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_allreduce_stress(inputs)
+
+    def _test_sparse_allreduce_basics(self, fn):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        # Single input tests
+        tests = simple_sparse_reduce_tests(self.rank, self.world_size)
+        for (op, input, output) in tests:
+            opts = c10d.AllreduceOptions()
+            opts.reduceOp = op
+            tensor = fn(input)
+            work = pg.allreduce([tensor], opts)
+            work.wait()
+            self.assertEqual(work.result(), [output])
+
+    def test_sparse_allreduce_basics(self):
+        self._test_sparse_allreduce_basics(lambda t: t)
+
+    @skip_if_not_multigpu
+    def test_sparse_allreduce_basics_cuda(self):
+        self._test_sparse_allreduce_basics(lambda t: t.clone().cuda())
 
     def test_scatter_checks(self):
         store = c10d.FileStore(self.file.name, self.world_size)
