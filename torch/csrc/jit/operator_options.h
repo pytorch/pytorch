@@ -6,13 +6,12 @@ namespace torch {
 namespace jit {
 
 enum class AliasAnalysisKind {
-  DEFAULT, // The most conservative alias analysis type
-  CREATOR,
-  EXTRACTOR 
+  DEFAULT, // The most conservative alias analysis type, assumes side-effects
+  PURE
 };
 
 struct OperatorOptions {
-  OperatorOptions() {};
+  OperatorOptions(){};
 
   OperatorOptions aliasAnalysis(AliasAnalysisKind aak) const noexcept {
     OperatorOptions r = *this;
@@ -28,4 +27,3 @@ struct OperatorOptions {
 
 } // namespace jit
 } // namespace torch
-

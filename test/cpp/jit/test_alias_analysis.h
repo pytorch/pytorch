@@ -607,19 +607,34 @@ void testMemoryDAG() {
 }
 
 void testAliasRegistration() {
-  auto opts = OperatorOptions().aliasAnalysis(AliasAnalysisKind::CREATOR);
-  RegisterOperators reg({
-      createOperator(
-        "foo::rand", [](at::Tensor) -> at::Tensor {
-          return at::rand({2,2});
-         }, opts)
-      });
-  const auto rand_op = Symbol::fromQualString("foo::rand");
-  auto graph = std::make_shared<Graph>();
-  auto a = graph->addInput();
-  auto b = graph->insert(rand_op, {a});
-  AliasDb aliasDb(graph);
-  ASSERT_FALSE(aliasDb.mayAlias(a, b));
+  {
+    auto opts = OperatorOptions().aliasAnalysis(AliasAnalysisKind::DEFAULT);
+    RegisterOperators reg({createOperator(
+        "foo::rand",
+        [](at::Tensor) -> at::Tensor {
+          return at::rand({2, 2});
+        },
+        opts)});
+    const auto rand_op = Symbol::fromQualString("foo::rand");
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto b = graph->insert(rand_op, {a});
+    AliasDb aliasDb(graph);
+    // Conservatively we assume there is a reference
+    ASSERT_TRUE(aliasDb.mayAlias(a, b));
+  }
+  {
+    auto opts = OperatorOptions().aliasAnalysis(AliasAnalysisKind::PURE);
+    RegisterOperators reg({createOperator(
+        "foo::pure", [](at::Tensor t) -> at::Tensor { return t * 2; }, opts)});
+    const auto rand_op = Symbol::fromQualString("foo::pure");
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto b = graph->insert(rand_op, {a});
+    AliasDb aliasDb(graph);
+    // PURE means there is no reference
+    ASSERT_FALSE(aliasDb.mayAlias(a, b));
+  }
 }
 
 } // namespace jit

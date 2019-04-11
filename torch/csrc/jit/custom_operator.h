@@ -202,16 +202,20 @@ Operator createOperator(
         name.ns().toUnqualString());
   }
 
-  return Operator(schema, [implementation, schema](Stack& stack) {
-    ArgumentTuple tuple;
-    torch::jit::detail::callOperatorWithTuple(
-        schema,
-        std::move(implementation), // NOLINT(bugprone-move-forwarding-reference)
-        stack,
-        tuple,
-        typename MakeIndices<kNumberOfArguments>::indices{});
-    return 0;
-  }, std::move(options));
+  return Operator(
+      schema,
+      [implementation, schema](Stack& stack) {
+        ArgumentTuple tuple;
+        torch::jit::detail::callOperatorWithTuple(
+            schema,
+            std::move(
+                implementation), // NOLINT(bugprone-move-forwarding-reference)
+            stack,
+            tuple,
+            typename MakeIndices<kNumberOfArguments>::indices{});
+        return 0;
+      },
+      std::move(options));
 }
 
 /// Registration class for new operators. Effectively calls
