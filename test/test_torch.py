@@ -8925,7 +8925,7 @@ class _TestTorchMixin(object):
     def test_generator_cpu(self):
         # test default generators are equal
         self.assertEqual(torch.Generator(default=True), torch.Generator(default=True))
-        
+
         # tests Generator API
         # manual_seed, seed, initial_seed, get_state, set_state
         g1 = torch.Generator()

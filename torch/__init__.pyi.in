@@ -46,8 +46,6 @@ class device:
     @overload
     def __init__(self, type: str, index: _int) -> None: ...
 
-class Generator: ...
-
 class Size(tuple): ...
 
 class Storage: ...
@@ -60,6 +58,18 @@ _size = Union[Size, List[_int], Tuple[_int, ...]]
 
 # Meta-type for "numeric" things; matches our docs
 Number = Union[builtins.int, builtins.float]
+
+class Generator:
+    device: _device = ...
+
+    @overload
+    def __init__(self, device: _device, default: bool) -> None: ...
+
+    @overload
+    def __init__(self, device='cpu', default=False) -> None: ...
+
+    @overload
+    def __init__(self, default: bool, device='cpu') -> None: ...
 
 # TODO: One downside of doing it this way, is direct use of
 # torch.tensor.Tensor doesn't get type annotations.  Nobody
