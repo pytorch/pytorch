@@ -243,7 +243,7 @@ unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse, con
     return unique_dim_cpu(self, dim.value(), sorted, return_inverse, return_counts);
   }
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique", [&] {
-    return _unique_cpu_template<scalar_t>(self, sorted, return_inverse, return_counts);
+    return unique_cpu_template<scalar_t>(self, sorted, return_inverse, return_counts);
   });
 }
 
