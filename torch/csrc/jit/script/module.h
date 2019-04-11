@@ -633,13 +633,11 @@ struct Module {
       parameter_remap[param] = curr->parameter_slot(param.name());
     }
     for (auto& attr : get_attributes()) {
-      if (attr.type()->isSubtypeOf(TensorType::get())) {
-        curr->register_buffer(attr.name(), attr.value().toTensor());
-        parameter_remap[attr] = *curr->find_buffer(attr.name());
-      } else {
-        curr->register_attribute(attr.name(), attr.type(), attr.value());
-        parameter_remap[attr] = *curr->find_attribute(attr.name());
+      if (!attr.type()->isSubtypeOf(TensorType::get())) {
+        continue;
       }
+      curr->register_buffer(attr.name(), attr.value().toTensor());
+      parameter_remap[attr] = *curr->find_buffer(attr.name());
     }
     for (auto& mod : get_modules()) {
       names.push_back(mod->name());
