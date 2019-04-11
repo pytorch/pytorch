@@ -12,7 +12,7 @@ namespace c10 {
 // errors. These objects should be constructed from C10 schema once those
 // are available.
 
-struct Argument {
+struct C10_API Argument {
   Argument(
       std::string name = "",
       TypePtr type = nullptr,
