@@ -243,7 +243,7 @@ def generate_type_hints(fname, decls, is_tensor=False):
                 try:
                     python_args.append(arg_to_type_hint(a))
                 except Exception:
-                    print("Error while processing function %s" % fname)
+                    print("Error while processing function {}".format(fname))
                     raise
 
         if is_tensor:
