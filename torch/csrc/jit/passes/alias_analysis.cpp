@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/alias_analysis.h>
 
-#include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace torch {
@@ -353,11 +353,8 @@ bool AliasDb::tryRegisteredAnalysis(Node* node) {
   const Operator& op = getOperatorFor(node);
   auto analysis = op.options().aliasAnalysis();
   switch (analysis) {
-    case AliasAnalysisKind::CREATOR:
+    case AliasAnalysisKind::PURE:
       analyzeCreator(node);
-      return true;
-    case AliasAnalysisKind::EXTRACTOR:
-      analyzeExtractor(node);
       return true;
     case AliasAnalysisKind::DEFAULT:
       return false;
