@@ -5,6 +5,41 @@
 #include <TH/generic/THTensorApply.hpp>
 #include <TH/THGenerator.hpp>
 
+#define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)				\
+  void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, scalar_t value) \
+  { \
+    THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);		\
+    TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t,			\
+		     *r__data = (*t_data OP value) ? 1 : 0;); \
+  }									\
+  void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, scalar_t value)	\
+  {					\
+    THTensor_(resizeNd)(r_, t->dim(), THTensor_getSizePtr(t), NULL);		\
+    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,					\
+		     *r__data = (*t_data OP value) ? 1 : 0;); \
+  }									\
+  void THTensor_(NAME##Tensor)(THByteTensor *r_, THTensor *ta, THTensor *tb) \
+  {					\
+    THByteTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);		\
+    TH_TENSOR_APPLY3(unsigned char, r_, scalar_t, ta, scalar_t, tb,		\
+		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
+  }									\
+  void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb) \
+  {				\
+    THTensor_(resizeNd)(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);		\
+    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, ta, scalar_t, tb,			\
+		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
+  }									\
+
+TENSOR_IMPLEMENT_LOGICAL(lt,<)
+TENSOR_IMPLEMENT_LOGICAL(gt,>)
+TENSOR_IMPLEMENT_LOGICAL(le,<=)
+TENSOR_IMPLEMENT_LOGICAL(ge,>=)
+TENSOR_IMPLEMENT_LOGICAL(eq,==)
+TENSOR_IMPLEMENT_LOGICAL(ne,!=)
+
+#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
+
 void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
 {
   int64_t batch;
@@ -999,41 +1034,6 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
   return equal;
 }
 
-#define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)                                \
-  void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, scalar_t value) \
-  {                                                                        \
-    THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);                \
-    TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t,                        \
-                     *r__data = (*t_data OP value) ? 1 : 0;); \
-  }                                                                        \
-  void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, scalar_t value)        \
-  {                                                                        \
-    THTensor_(resizeNd)(r_, t->dim(), THTensor_getSizePtr(t), NULL);                \
-    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,                                        \
-                     *r__data = (*t_data OP value) ? 1 : 0;); \
-  }                                                                        \
-  void THTensor_(NAME##Tensor)(THByteTensor *r_, THTensor *ta, THTensor *tb) \
-  {                                                                        \
-    THByteTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);                \
-    TH_TENSOR_APPLY3(unsigned char, r_, scalar_t, ta, scalar_t, tb,                \
-                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
-  }                                                                        \
-  void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb) \
-  {                                                                        \
-    THTensor_(resizeNd)(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);                \
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, ta, scalar_t, tb,                        \
-                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
-  }                                                                        \
-
-
-TENSOR_IMPLEMENT_LOGICAL(lt,<)
-TENSOR_IMPLEMENT_LOGICAL(gt,>)
-TENSOR_IMPLEMENT_LOGICAL(le,<=)
-TENSOR_IMPLEMENT_LOGICAL(ge,>=)
-TENSOR_IMPLEMENT_LOGICAL(eq,==)
-TENSOR_IMPLEMENT_LOGICAL(ne,!=)
-
-
 #ifdef _OPENMP
 
 #define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, OMP_THRESHOLD)             \
@@ -1680,5 +1680,7 @@ void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THT
 #undef TH_MATH_NAME
 #endif /* floating point only part */
 #undef IS_NONZERO
+
+#endif /* !defined(TH_REAL_IS_BOOL) */
 
 #endif /* TH_GENERIC_FILE */
