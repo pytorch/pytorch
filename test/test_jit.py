@@ -42,7 +42,7 @@ from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from torch.testing import FileCheck
-from torch._C import TensorType, parse_ir
+from torch._C import TensorType, parse_ir, propagate_shapes
 from copy import deepcopy
 import random
 from typing import List, Dict, Optional, Tuple
@@ -3693,8 +3693,8 @@ a")
         # test that shape analysis is written correctly for sum with IntArrayRef[1] dim argument
         self.run_pass('constant_propagation', func.graph)
         self.run_pass('constant_propagation', func2.graph)
-        g = func._get_method('forward').propagate_shapes((torch.zeros(1, 1, 1, 1, 4),), False)
-        g2 = func2._get_method('forward').propagate_shapes((torch.zeros(1, 1, 1, 1, 4),), False)
+        g = propagate_shapes(func.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
+        g2 = propagate_shapes(func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
         self.assertTrue(g.findNode("aten::sum").output().type().kind()
                         == "DimensionedTensorType")
         self.assertTrue(g2.findNode("aten::sum").output().type().kind()
@@ -4395,8 +4395,8 @@ a")
                 torch.mul(x, y, out=z)
                 return z
 
-            graph = test._get_method('forward').propagate_shapes(
-                (torch.zeros(2, 1), torch.zeros(1, 2), torch.zeros(1, 1, 1)), False)
+            graph = propagate_shapes(test.graph,
+                                     (torch.zeros(2, 1), torch.zeros(1, 2), torch.zeros(1, 1, 1)), False)
             self.assertTrue(next(graph.outputs()).type() == TensorType.get())
         out_op_graph_input()
 
@@ -4415,7 +4415,7 @@ a")
                 return after_resize_alias
 
             self.run_pass('constant_propagation', test.graph)
-            g = test._get_method('forward').propagate_shapes((torch.zeros(1, 1),), False)
+            g = propagate_shapes(test.graph, (torch.zeros(1, 1),), False)
             resize_node = g.findNode("aten::resize_")
             # first input and output of b.resize_ is b
             self.assertTrue(next(resize_node.inputs()).type() == TensorType.get())
@@ -4439,7 +4439,7 @@ a")
 
             g = test.graph
             self.run_pass('constant_propagation', g)
-            g = test._get_method('forward').propagate_shapes((torch.zeros(1, 1),), False)
+            g = propagate_shapes(test.graph, (torch.zeros(1, 1),), False)
 
             # x doesn't alias a resized op so it shouldn't be set to base Tensor type
             self.assertTrue(next(g.inputs()).type() != TensorType.get())
@@ -4494,7 +4494,7 @@ a")
 
         x = torch.randn(3, 1, 5, requires_grad=True)
         fn = torch.jit.script(fn)
-        graph = fn._get_method('forward').propagate_shapes((x,), False)
+        graph = propagate_shapes(fn.graph, (x,), False)
         a = next(graph.outputs()).type().kind()
         self.assertTrue(next(graph.outputs()).type().kind() != 'TensorType')
 
@@ -4504,7 +4504,7 @@ a")
             return x + y
 
         x, y = torch.rand(3, 4, dtype=torch.float), torch.rand(3, 4, dtype=torch.double)
-        graph = fn._get_method('forward').propagate_shapes((x, y), False)
+        graph = propagate_shapes(fn.graph, (x, y), False)
         FileCheck().check('Double(*, *) = aten::add').run(graph)
 
     def test_shape_prop_promote_scalar_arg(self):
@@ -4513,7 +4513,7 @@ a")
             return math.pi + x
 
         x = torch.zeros(3, 4, dtype=torch.long)
-        graph = fn._get_method('forward').propagate_shapes((x,), False)
+        graph = propagate_shapes(fn.graph, (x,), False)
         FileCheck().check('Long(*, *) = aten::add').run(graph)
 
     def test_integral_shape_inference(self):
@@ -7087,7 +7087,7 @@ a")
             return torch.cat(c)
 
         b = torch.zeros(2, 4)
-        test_list._get_method('forward').propagate_shapes((b,), False)
+        propagate_shapes(test_list.graph, (b,), False)
 
     def test_if_supertype(self):
         @torch.jit.script
@@ -7104,7 +7104,7 @@ a")
         b = torch.zeros(2, 4, dtype=torch.long)
         c = torch.zeros(2, 4, dtype=torch.float)
 
-        graph = tensor_unifying._get_method('forward').propagate_shapes((a, b, c), False)
+        graph = propagate_shapes(tensor_unifying.graph, (a, b, c), False)
         if_outputs = list(graph.findNode("prim::If").outputs())
         self.assertTrue(if_outputs[0].type().str() == "Float(*, *)")
         self.assertTrue(if_outputs[1].type().str() == "Tensor")
