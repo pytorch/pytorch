@@ -319,16 +319,16 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                  '(c10::Storage(caffe2::TypeMeta::Make<${ScalarType}>(), 0, allocator(), true),'
-                 '${Backend}TensorId(), false).release()',
+                 '${Backend}TensorId()).release()',
     'THByteTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
-                     '${Backend}TensorId(), false).release()',
+                     '${Backend}TensorId()).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
-                     '${Backend}TensorId(), false).release()',
+                     '${Backend}TensorId()).release()',
     'THIntegerTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                         '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Int), 0, allocator(), true),'
-                        '${Backend}TensorId(), false).release()',
+                        '${Backend}TensorId()).release()',
 }
 
 ALLOC_WRAP = {

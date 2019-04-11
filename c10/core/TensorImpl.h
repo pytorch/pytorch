@@ -215,19 +215,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Construct a 1-dim 0-size tensor backed by the given storage.
    */
-  TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
+  TensorImpl(Storage&& storage, TensorTypeId type_id);
 
   /**
    * Construct a 1-dim 0 size tensor that doesn't have a storage.
    */
-  TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt, bool is_variable);
+  TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt);
 
  private:
   // This constructor is private, because the data_type is redundant with
   // storage.  Still, we pass it in separately because it's easier to write
   // the initializer list if we're not worried about storage being moved out
   // from under us.
-  TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, c10::optional<c10::Device>, bool is_variable);
+  TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, c10::optional<c10::Device>);
 
  public:
   TensorImpl(const TensorImpl&) = delete;
@@ -808,7 +808,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
    */
-  bool is_variable() const { return is_variable_; };
+  bool is_variable() const { return autograd_meta_ != nullptr; };
 
   /**
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
@@ -852,7 +852,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // `allow_tensor_metadata_change_` to false would prevent those changes from happening and is
   // undesirable.
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
-    auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id(), is_variable());
+    auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id());
     impl->set_sizes_and_strides(sizes(), strides());
     impl->storage_offset_ = storage_offset_;
     impl->is_wrapped_number_ = is_wrapped_number_;
@@ -1419,7 +1419,6 @@ protected:
   // should pack this into a bitfield.
   TensorTypeId type_id_;
   bool is_contiguous_ = true;
-  bool is_variable_ = false;
   bool is_wrapped_number_ = false;
 
   // Previously, if we change the tensor metadata (e.g. sizes / strides / storage / storage_offset)
