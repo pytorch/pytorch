@@ -65,6 +65,16 @@ struct THCNumerics<uint8_t> {
 };
 
 template <>
+struct THCNumerics<bool> {
+  static inline __host__ __device__ bool lt(uint8_t a, uint8_t b) { return a < b; }
+  static inline __host__ __device__ bool le(uint8_t a, uint8_t b) { return a <= b; }
+  static inline __host__ __device__ bool gt(uint8_t a, uint8_t b) { return a > b; }
+  static inline __host__ __device__ bool ge(uint8_t a, uint8_t b) { return a >= b; }
+  static inline __host__ __device__ bool eq(uint8_t a, uint8_t b) { return a == b; }
+  static inline __host__ __device__ bool ne(uint8_t a, uint8_t b) { return a != b; }
+};
+
+template <>
 struct THCNumerics<int8_t> {
   static inline __host__ __device__ int8_t min() { return at::numeric_limits<int8_t>::lowest(); }
   static inline __host__ __device__ int8_t max() { return at::numeric_limits<int8_t>::max(); }

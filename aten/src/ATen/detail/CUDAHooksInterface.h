@@ -102,6 +102,10 @@ struct CAFFE2_API CUDAHooksInterface {
     AT_ERROR("Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
   }
 
+  virtual std::string showConfig() const {
+    AT_ERROR("Cannot query detailed CUDA version without ATen_cuda library. ", CUDA_HELP);
+  }
+
   virtual double batchnormMinEpsilonCuDNN() const {
     AT_ERROR(
         "Cannot query batchnormMinEpsilonCuDNN() without ATen_cuda library. ", CUDA_HELP);

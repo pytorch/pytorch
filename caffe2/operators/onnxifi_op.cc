@@ -169,6 +169,7 @@ OnnxifiOp<float, CPUContext>::buildInitializationList(
 template <>
 bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(input_desc_.size(), InputSize());
+  input_shapes_.clear();
   for (unsigned i = 0U; i < InputSize(); ++i) {
     const auto& input_tensor = Input(i);
     const auto tensor_dims = input_tensor.sizes();
@@ -182,6 +183,7 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
   }
 
   CAFFE_ENFORCE_EQ(output_desc_.size(), OutputSize());
+  output_shapes_.clear();
   for (unsigned i = 0U; i < OutputSize(); ++i) {
     std::vector<size_t> tensor_dims;
     uint64_t type = SetOutputShapeAndType(i, &tensor_dims);

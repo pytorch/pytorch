@@ -198,7 +198,7 @@ class NYIError(Exception):
 TYPE_FORMAL_GENERIC = {
     'THTensor*': 'Tensor &',
     'THSTensor*': 'SparseTensorRef',
-    'THBoolTensor*': 'Tensor &',
+    'THByteTensor*': 'Tensor &',
     'THIndexTensor*': 'Tensor &',
     'THIntegerTensor*': 'Tensor &',
     'THDenseTensor*': 'Tensor &',
@@ -214,7 +214,7 @@ TYPE_FORMAL_GENERIC = {
 DYNAMIC_TYPE = {
     'THTensor*': 'Tensor',
     'THSTensor*': 'SparseTensorRef',
-    'THBoolTensor*': 'BoolTensor',
+    'THByteTensor*': 'BoolTensor',
     'THIndexTensor*': 'IndexTensor',
     'THIntegerTensor*': 'IntegerTensor',
     'THDenseTensor*': 'Tensor',
@@ -235,7 +235,7 @@ NATIVE_DYNAMIC_TYPE = {
 TYPE_RETURN = {
     'THTensor*': 'Tensor',
     'THIndexTensor*': 'Tensor',
-    'THBoolTensor*': 'Tensor',
+    'THByteTensor*': 'Tensor',
     'THIntegerTensor*': 'Tensor',
     'THSTensor*': 'Tensor',
     'THDenseTensor*': 'Tensor',
@@ -256,7 +256,7 @@ CHECKED_CAST = {
             'checked_tensor_unwrap('
             '${arg_name}.tref,"${arg_name}",${arg_pos},false, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
-    'THBoolTensor*':
+    'THByteTensor*':
         CodeTemplate(
             'checked_tensor_unwrap('
             '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
@@ -305,7 +305,7 @@ CHECKED_USE = {
     'THTensor*': '{}_',
     'THSTensor*': '{}_',
     'THIndexTensor*': '{}_',
-    'THBoolTensor*': '{}_',
+    'THByteTensor*': '{}_',
     'THIntegerTensor*': '{}_',
     'THDenseTensor*': '{}_',
     'THDenseIndexTensor*': '{}_',
@@ -319,21 +319,21 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                  '(c10::Storage(caffe2::TypeMeta::Make<${ScalarType}>(), 0, allocator(), true),'
-                 '${Backend}TensorId(), false).release()',
-    'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
+                 '${Backend}TensorId()).release()',
+    'THByteTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Byte), 0, allocator(), true),'
-                     '${Backend}TensorId(), false).release()',
+                     '${Backend}TensorId()).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Long), 0, allocator(), true),'
-                     '${Backend}TensorId(), false).release()',
+                     '${Backend}TensorId()).release()',
     'THIntegerTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                         '(c10::Storage(scalarTypeToTypeMeta(ScalarType::Int), 0, allocator(), true),'
-                        '${Backend}TensorId(), false).release()',
+                        '${Backend}TensorId()).release()',
 }
 
 ALLOC_WRAP = {
     'THTensor*': '${arguments}',
-    'THBoolTensor*': '${arguments}',
+    'THByteTensor*': '${arguments}',
     'THIndexTensor*': '${arguments}',
     'THIntegerTensor*': '${arguments}',
     'THDenseTensor*': '${arguments}',

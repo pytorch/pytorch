@@ -16,10 +16,10 @@ class TestATen(hu.HypothesisTestCase):
     @given(inputs=hu.tensors(n=2), **hu.gcs)
     def test_add(self, inputs, gc, dc):
         op = core.CreateOperator(
-             "ATen",
-             ["X", "Y"],
-             ["Z"],
-             operator="add")
+            "ATen",
+            ["X", "Y"],
+            ["Z"],
+            operator="add")
 
         def ref(X, Y):
             return [X + Y]
@@ -28,10 +28,10 @@ class TestATen(hu.HypothesisTestCase):
     @given(inputs=hu.tensors(n=2, dtype=np.float16), **hu.gcs_gpu_only)
     def test_add_half(self, inputs, gc, dc):
         op = core.CreateOperator(
-             "ATen",
-             ["X", "Y"],
-             ["Z"],
-             operator="add")
+            "ATen",
+            ["X", "Y"],
+            ["Z"],
+            operator="add")
 
         def ref(X, Y):
             return [X + Y]
@@ -77,19 +77,6 @@ class TestATen(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, inputs, ref)
 
     @given(**hu.gcs)
-    def test_ones(self, gc, dc):
-        op = core.CreateOperator(
-            "ATen",
-            [],
-            ["Z"],
-            operator="ones", type="float", size={2, 4})
-
-        def ref():
-            return [np.ones([2, 4])]
-
-        self.assertReferenceChecks(gc, op, [], ref)
-
-    @given(**hu.gcs)
     def test_index_put(self, gc, dc):
         op = core.CreateOperator(
             "ATen",
@@ -101,13 +88,30 @@ class TestATen(hu.HypothesisTestCase):
             self[indices] = values
             return (self,)
 
-
         tensor = np.random.randn(3, 3).astype(np.float32)
         mask = np.array([[True, True, True], [True, False, False], [True, True, False]])
         values = np.random.randn(6).astype(np.float32)
 
         self.assertReferenceChecks(gc, op, [tensor, mask, values], ref)
 
+    @given(**hu.gcs)
+    def test_unique(self, gc, dc):
+        op = core.CreateOperator(
+            "ATen",
+            ['self'],
+            ["output"],
+            sorted=True,
+            return_inverse=True,
+            # return_counts=False,
+            operator="_unique")
+
+        def ref(self):
+            index, _ = np.unique(self, return_index=False, return_inverse=True, return_counts=False)
+            return (index,)
+
+        tensor = np.array([1, 2, 6, 4, 2, 3, 2])
+        print(ref(tensor))
+        self.assertReferenceChecks(gc, op, [tensor], ref)
 
 
 if __name__ == "__main__":

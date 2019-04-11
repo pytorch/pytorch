@@ -1342,7 +1342,7 @@ static void THFloatVector_divs_VSX(float *y, const float*x, const float c, const
 //    $ gcc VSX.c -O2 -D RUN_VSX_TESTS -o vsxtest
 //    $ ./vsxtest
 //
-//	TODO
+//        TODO
 //
 //
 //    Finished running all tests. All tests PASSED.

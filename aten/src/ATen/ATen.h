@@ -14,6 +14,7 @@
 #include <ATen/TensorGeometry.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/Type.h>
+#include <ATen/Version.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
 #include <c10/core/Layout.h>
