@@ -6,6 +6,39 @@ namespace torch {
 namespace jit {
 namespace script {
 
+// this is a much simpler accessor that only handles modules, parameters, and
+// and methods. It does not depend on python to work.
+struct ModuleAccessorValue : public SugaredValue {
+  ModuleAccessorValue(std::shared_ptr<Module> module)
+      : module(std::move(module)) {}
+  std::string kind() const override {
+    return "module";
+  }
+  // select an attribute on it, e.g. `this.field`
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Method& m,
+      const std::string& field) override {
+    if (std::shared_ptr<Module> v = module->find_module(field)) {
+      return std::make_shared<ModuleAccessorValue>(std::move(v));
+    } else if (script::Slot* v = module->find_parameter(field)) {
+      return std::make_shared<SimpleValue>(m.get_or_add_parameter(*v));
+    } else if (script::Slot* v = module->find_buffer(field)) {
+      return std::make_shared<SimpleValue>(m.get_or_add_parameter(*v));
+    } else if (script::Slot* v = module->find_attribute(field)) {
+      return std::make_shared<script::SimpleValue>(
+          m.get_or_add_attribute(*v));
+    } else if (Method* m = module->find_method(field)) {
+      return std::make_shared<MethodValue>(shared_from_this(), *m);
+    } else {
+      throw ErrorReport(loc) << "unknown attr: " << field;
+    }
+  }
+
+ private:
+  std::shared_ptr<Module> module;
+};
+
 struct OpsValue : public SugaredValue {
   OpsValue(size_t version) : version_(version) {}
   std::string kind() const override {
@@ -13,7 +46,7 @@ struct OpsValue : public SugaredValue {
   }
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      Method& m,
       const std::string& field) override {
     return std::make_shared<BuiltinModule>(field, version_);
   }
@@ -26,7 +59,7 @@ struct ConstantValue : public SugaredValue {
   std::string kind() const override {
     return "constant";
   }
-  Value* asValue(const SourceRange& loc, Function& m) override {
+  Value* asValue(const SourceRange& loc, Method& m) override {
     return m.graph()->insertConstant(value_);
   }
 };
@@ -42,7 +75,7 @@ struct ConstantTableValue : public SugaredValue {
   // select an attribute on it, e.g. `this.field`
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      Method& m,
       const std::string& field) override {
     const char* field_s = field.c_str();
     char* end;
@@ -84,7 +117,7 @@ struct SourceImporter {
     };
 
     resolver_ = [&](const std::string& name,
-                    Function& m,
+                    Method& m,
                     const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
       auto it = env_.find(name);
       if (it == env_.end()) {
@@ -100,7 +133,7 @@ struct SourceImporter {
   const std::vector<at::Tensor>& constant_table_;
   std::unordered_map<std::string, std::shared_ptr<SugaredValue>> env_;
   std::function<std::shared_ptr<
-      SugaredValue>(const std::string& name, Function& m, const SourceRange& loc)>
+      SugaredValue>(const std::string& name, Method& m, const SourceRange& loc)>
       resolver_;
 
   size_t parseVersionNumber() {
@@ -134,11 +167,8 @@ void import_methods(
     definitions.emplace_back(def);
     resolvers.emplace_back(importer.resolver_);
   }
-  auto self = [&](Value* v) {
-    v->setType(mod->module_object()->type());
-    return std::make_shared<SimpleValue>(v);
-  };
-  mod->module_object()->type()->compilation_unit().define(definitions, resolvers, self);
+  auto self = std::make_shared<ModuleAccessorValue>(mod);
+  defineMethodsInModule(mod, definitions, resolvers, Self(self));
 }
 
 void import_libs(
@@ -156,13 +186,9 @@ void import_libs(
       resolvers.emplace_back(importer.resolver_);
     }
 
-    auto cu = std::make_shared<CompilationUnit>();
-    auto class_type = ClassType::create(class_def.name().name(), cu);
-    auto self = [&](Value* v) {
-      v->setType(class_type);
-      return std::make_shared<SimpleValue>(v);
-    };
-    cu->define(definitions, resolvers, self);
+    auto mod = std::make_shared<Module>();
+    Self self(ClassType::create(class_def.name().name(), mod));
+    defineMethodsInModule(mod, definitions, resolvers, self);
   }
 }
 

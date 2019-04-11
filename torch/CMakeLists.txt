@@ -175,7 +175,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/register_quantized_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
-  ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
   ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
@@ -237,6 +236,7 @@ if (NOT NO_API)
     ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/random.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/sequential.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/stream.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
@@ -528,6 +528,7 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/jit/python_tracer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/init.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/python_tree_views.cpp
     ${TORCH_SRC_DIR}/csrc/multiprocessing/init.cpp
     ${TORCH_SRC_DIR}/csrc/nn/THNN.cpp
