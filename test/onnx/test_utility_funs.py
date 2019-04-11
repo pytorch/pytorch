@@ -7,9 +7,9 @@ import torch.onnx
 import io
 
 
-class TestOperators(TestCase):
+class TestUtilityFuns(TestCase):
 
-    def test_master_opset(self):
+    def test_is_in_onnx_export(self):
         test_self = self
 
         class MyModule(torch.nn.Module):
