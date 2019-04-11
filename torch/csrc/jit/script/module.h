@@ -168,6 +168,7 @@ struct TORCH_API Module {
   // note this doesn't change the flags of existing methods just ones
   // added afterward.
   void set_optimized(bool o) {
+    lowered_methods().set_optimized(o);
     class_cu().set_optimized(o);
   }
 
