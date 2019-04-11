@@ -40,6 +40,7 @@ TESTS = [
     'nn',
     'numba_integration',
     'optim',
+    'quantized',
     'sparse',
     'thd_distributed',
     'torch',
