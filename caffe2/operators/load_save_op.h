@@ -485,6 +485,8 @@ class SaveOp final : public Operator<Context> {
     };
 
     const vector<const Blob*>& inputs = OperatorBase::Inputs();
+    VLOG(0) << "Saving " << inputs.size() << " inputs to " << db_type_ << ": "
+            << full_db_name;
     for (int i = 0; i < inputs.size(); ++i) {
       SerializeBlob(*inputs[i], blob_names_[i], acceptor, chunk_size_);
     }
