@@ -21,7 +21,7 @@ struct TensorOptions;
 namespace at {
 struct Generator;
 struct Type;
-struct DeprecatedTypeProperties;
+class DeprecatedTypeProperties;
 class Tensor;
 } // namespace at
 

@@ -8,7 +8,7 @@
 
 namespace at {
 
-struct DeprecatedTypeProperties;
+class DeprecatedTypeProperties;
 
 struct CAFFE2_API DeprecatedTypePropertiesDeleter {
   void operator()(DeprecatedTypeProperties * ptr);
@@ -16,15 +16,12 @@ struct CAFFE2_API DeprecatedTypePropertiesDeleter {
 
 class CAFFE2_API DeprecatedTypePropertiesRegistry {
  public:
-  using DeprecatedTypePropertiesUniquePtr =
-      std::unique_ptr<DeprecatedTypeProperties, DeprecatedTypePropertiesDeleter>;
-
   DeprecatedTypePropertiesRegistry();
 
   DeprecatedTypeProperties& getDeprecatedTypeProperties(Backend p, ScalarType s, bool is_variable) const;
 
 private:
-  DeprecatedTypePropertiesUniquePtr registry
+  std::unique_ptr<DeprecatedTypeProperties> registry
     [static_cast<int>(Backend::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)]
     [2];  // is_variable
