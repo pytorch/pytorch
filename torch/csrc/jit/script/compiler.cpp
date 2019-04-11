@@ -25,7 +25,7 @@ namespace jit {
 namespace script {
 
 using SugaredValuePtr = std::shared_ptr<SugaredValue>;
-using FunctionTable = std::unordered_map<std::string, Function&>;
+using FunctionTable = std::unordered_map<std::string, Method&>;
 using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
@@ -190,7 +190,7 @@ static bool meaningfulName(const std::string& name) {
 //      delete unnecessary ones later with replaceAllusesWith().
 struct Environment {
   Environment(
-      Function& method,
+      Method& method,
       Resolver resolver,
       Block* b,
       std::shared_ptr<Environment> next = nullptr)
@@ -199,7 +199,7 @@ struct Environment {
         b(b),
         next(std::move(next)) {}
 
-  Function& method;
+  Method& method;
   Resolver resolver;
   std::vector<std::string> captured_inputs;
   std::unordered_map<std::string, std::string> error_messages;
@@ -518,8 +518,8 @@ struct to_ir {
   to_ir(
       const Def& def,
       Resolver resolver_,
-      const Self& self,
-      Function& method) // method being constructed
+      const c10::optional<Self>& self,
+      Method& method) // method being constructed
       : method(method),
         graph(method.graph()),
         resolver(std::move(resolver_)),
@@ -541,7 +541,7 @@ struct to_ir {
   }
 
  private:
-  Function& method;
+  Method& method;
   std::shared_ptr<Graph> graph;
   Resolver resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
@@ -577,7 +577,7 @@ struct to_ir {
 
   FunctionSchema emitDef(
       const Def& def,
-      const Self& self,
+      const c10::optional<Self>& self,
       Block* block) {
     auto schema = extractSchemaFromDef(def, self);
     // TODO need guards on init returning none
@@ -624,16 +624,15 @@ struct to_ir {
         blank_decl,
         List<Stmt>::create(r, {ret}));
     auto m = std::make_shared<Module>();
-    CompilationUnit cu;
-    cu.define({def}, {resolver}, nullptr);
+    defineMethodsInModule(m, {def}, {resolver}, c10::nullopt);
     Stack stack;
-    cu.get_function("defaults").run(stack);
+    m->get_method("defaults").run(stack);
     return stack.at(0).toTuple()->elements();
   }
 
   std::vector<Argument> parseArgsFromDecl(
       const Decl& decl,
-      const Self& self) {
+      const c10::optional<Self>& self) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
     if (self) {
@@ -707,7 +706,7 @@ struct to_ir {
   }
   FunctionSchema extractSchemaFromDef(
       const Def& def,
-      const Self& self) {
+      const c10::optional<Self>& self) {
     const auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
     std::vector<Argument> returns = parseReturnFromDecl(def.decl());
@@ -717,10 +716,9 @@ struct to_ir {
 
   std::vector<Argument> emitFormalArguments(
       const Def& def,
-      const Self& self,
+      const c10::optional<Self>& self,
       const FunctionSchema& schema,
       Block* block) {
-
     std::vector<Argument> arguments; // for schema
     // inputs
     auto it = def.decl().params().begin();
@@ -740,9 +738,14 @@ struct to_ir {
     if (self) {
       AT_ASSERT(it != end);
       const auto& name = (*it).ident().name();
-      Value* new_input = block->addInput()->setUniqueName(name);
-      environment_stack->setSugaredVar((*it).ident().range(), name, self(new_input));
-      arguments.emplace_back(name, new_input->type());
+      if (auto type = self->asFirstClass()) {
+        Value* new_input =
+            block->addInput()->setUniqueName(name)->setType(type);
+        environment_stack->setVar((*it).ident().range(), name, new_input);
+        arguments.emplace_back(name, type);
+      } else {
+        environment_stack->setSugaredVar(def.range(), name, self->asSugared());
+      }
       ++it;
     }
     size_t arg_annotation_idx = 0;
@@ -828,7 +831,7 @@ struct to_ir {
       pushFrame(block, /*starts_def=*/true);
       emitDef(
           def,
-          nullptr,
+          c10::nullopt,
           block); // ignore schema return, we just wont use it for now since we
                   // never create a Method for the closure
       popFrame(/*ends_def=*/true);
@@ -2260,6 +2263,7 @@ struct to_ir {
       node_output = fork_node->output()->setType(
           FutureType::create(fn_simple_output->type()));
     }
+
     // Lambda lift block(0) into attr::Subgraph
     lambdaLiftFork(fork_node);
 
@@ -2751,14 +2755,15 @@ struct to_ir {
   }
 };
 
-void CompilationUnit::define(
+void defineMethodsInModule(
+    const std::shared_ptr<Module>& m,
     const std::vector<Def>& definitions,
     const std::vector<Resolver>& resolvers,
-    const Self& self) {
+    const c10::optional<Self>& self) {
   AT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
-  std::vector<Function*> methods;
-  std::unordered_map<std::string, Function*> function_table;
+  std::vector<Method*> methods;
+  std::unordered_map<std::string, Method*> function_table;
   for (const Def& def : definitions) {
     const std::string& name = def.name().name();
     auto resolver = *resolver_it++;
@@ -2769,34 +2774,37 @@ void CompilationUnit::define(
       // the function table so the methods can see each other
       resolver = [resolver, &function_table](
                      const std::string& name,
-                     Function& m,
+                     Method& m,
                      const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
         auto it = function_table.find(name);
         if (it != function_table.end()) {
-          return std::make_shared<MethodValue>(c10::nullopt, *it->second);
+          return std::make_shared<MethodValue>(nullptr, *it->second);
         }
         return resolver(name, m, loc);
       };
     }
-    auto creator = [def, resolver, self](Function& method) {
+    auto creator = [def, resolver, self](Method& method) {
       AT_ASSERT(resolver);
       to_ir(def, resolver, self, method);
     };
-    std::unique_ptr<Function> fn(
-        new Function(name, is_optimized(), std::make_shared<Graph>(), creator));
-    function_table[name] = fn.get();
-    methods.push_back(fn.get());
-    register_function(std::move(fn));
+    Method& method = m->create_method(name, creator);
+    function_table[name] = &method;
+    methods.push_back(&method);
   }
-  for (Function* method : methods) {
+  for (Method* method : methods) {
     method->ensure_defined();
+  }
+  if (!self || !self->asFirstClass()) {
+    // Disable module hooks if the module is only used to store a class's code.
+    didFinishEmitModule(m);
   }
 }
 
-void CompilationUnit::define(
+void defineMethodsInModule(
+    const std::shared_ptr<Module>& m,
     const std::string& source,
     const Resolver& resolver,
-    const Self& self) {
+    const c10::optional<Self>& self) {
   Parser p(source);
   std::vector<Def> definitions;
   std::vector<Resolver> resolvers;
@@ -2805,7 +2813,7 @@ void CompilationUnit::define(
     definitions.push_back(def);
     resolvers.push_back(resolver);
   }
-  define(definitions, resolvers, self);
+  defineMethodsInModule(m, definitions, resolvers, self);
 }
 
 void lambdaLiftFork(Node* fork_node) {
@@ -2830,7 +2838,6 @@ void lambdaLiftFork(Node* fork_node) {
   fork_node->g_(attr::Subgraph, forked_graph);
   fork_node->eraseBlock(0);
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch

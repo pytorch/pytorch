@@ -65,8 +65,7 @@ namespace jit {
   _(NoneSchemaMatch)               \
   _(ClassParser)                   \
   _(PeepholeOptimize)              \
-  _(RecordFunction)                \
-  _(ModuleDefine)
+  _(RecordFunction)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
