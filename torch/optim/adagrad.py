@@ -40,7 +40,12 @@ class Adagrad(Optimizer):
         for group in self.param_groups:
             for p in group['params']:
                 state = self.state[p]
-                state['sum'].share_memory_()
+                if len(state) != 0:
+                    state['sum'].share_memory_()
+
+    def __getstate__(self):
+        base_dict = super().__getstate__()
+        base_dict['_is_share_memory'] = self._is_share_memory
 
     def step(self, closure=None):
         """Performs a single optimization step.

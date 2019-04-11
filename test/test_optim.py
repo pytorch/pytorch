@@ -402,6 +402,19 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
             optim.Adagrad(None, lr=1e-2, lr_decay=-0.5)
 
+    def test_adagrad_share_memory(self):
+        "Adagrad has a unique share_memory method"
+        linear = torch.nn.Linear(1, 1)
+        optimizer = optim.Adagrad([linear.weight], lr=1e-2)
+        optimizer.share_memory()
+        optimizer.add_param_group({'params': [linear.bias]})
+        dummy_loss = linear.weight.sum() + linear.bias.sum()
+        dummy_loss.backward()
+        optimizer.step()
+        for pg in optimizer.param_groups:
+            for p in pg['params']:
+                self.assertTrue(optimizer.state[p]['sum'].is_shared())
+
     def test_adagrad_sparse(self):
         self._test_rosenbrock_sparse(
             lambda params: optim.Adagrad(params, lr=1e-1)
