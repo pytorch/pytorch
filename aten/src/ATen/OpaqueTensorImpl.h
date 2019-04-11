@@ -20,7 +20,7 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
   // public constructor for now...
   OpaqueTensorImpl(at::TensorTypeId type_id, const caffe2::TypeMeta& data_type, c10::Device device,
                    OpaqueHandle opaque_handle, c10::IntArrayRef sizes)
-  :   TensorImpl(type_id, data_type, device, false),
+  :   TensorImpl(type_id, data_type, device),
       opaque_handle_(std::move(opaque_handle))
   {
     sizes_ = sizes.vec();
