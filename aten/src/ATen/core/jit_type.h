@@ -38,6 +38,7 @@ _(FloatType) \
 _(FutureType) \
 _(IntType) \
 _(NoneType) \
+_(BottomType) \
 _(StringType) \
 _(GeneratorType) \
 _(BoolType) \
@@ -911,6 +912,31 @@ struct CAFFE2_API NoneType : public Type {
 private:
   NoneType()
   : Type(TypeKind::NoneType) {}
+};
+
+struct BottomType;
+using BottomTypePtr = std::shared_ptr<BottomType>;
+// This type represents a type which subtypes all other types
+struct CAFFE2_API BottomType : public Type {
+  static BottomTypePtr create() {
+    return BottomTypePtr(new BottomType()); // NOLINT(modernize-make-shared)
+  }
+  DEFINE_IS_SUBCLASS(BottomType);
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    return true;
+  }
+  std::string str() const override {
+    return "Bottom";
+  }
+  static const TypeKind Kind = TypeKind::BottomType;
+  // global singleton
+  static BottomTypePtr get();
+private:
+  BottomType()
+  : Type(TypeKind::BottomType) {}
 };
 
 struct GeneratorType;

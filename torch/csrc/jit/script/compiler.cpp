@@ -535,9 +535,9 @@ struct to_ir {
       throw ErrorReport(def.decl().params().range())
           << "methods must have a self argument";
     }
-
     method.setSchema(emitDef(def, self, graph->block()));
-
+    // NB: moving returns to end needs to run before all other passes
+    moveAllReturnsToEnd(graph);
     runCleanupPasses(graph);
   }
 
@@ -547,6 +547,8 @@ struct to_ir {
   Resolver resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
   std::unordered_map<double, Value*> fp_constants;
+  Value* bottom_val;
+  std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
 
   // Singly-linked list of environments. This top element contains a member
@@ -576,6 +578,26 @@ struct to_ir {
     ConstantPooling(to_clean);
   }
 
+  // If the graph might not return, at an implicit None return at the end
+  void handleMaybeNoReturn(const Def& def) {
+    if (exit_blocks.count(graph->block()) == 0) {
+      auto decl_ret = def_stack_.back().declared_return_type_;
+      if (decl_ret && decl_ret != NoneType::get() &&
+          !decl_ret->cast<OptionalType>()) {
+        throw ErrorReport(def.range())
+            << "Return value was annotated as having type "
+            << decl_ret->python_str() << " but is actually of type "
+            << OptionalType::create(decl_ret)->python_str()
+            << " because it does not return on all paths";
+      }
+      auto insert = graph->block()->appendNode(graph->create(prim::Constant));
+      WithInsertPoint b(insert);
+      emitReturn(Return::create(
+          def.range(), Expr(Compound::create(TK_NONE, def.range(), {}))));
+      insert->destroy();
+    }
+  }
+
   FunctionSchema emitDef(
       const Def& def,
       const c10::optional<Self>& self,
@@ -589,8 +611,9 @@ struct to_ir {
         emitFormalArguments(def, self, schema, block);
 
     // body
-    auto stmts_list = moveAllReturnsToEnd(def.statements());
+    auto stmts_list = def.statements();
     emitStatements(stmts_list.begin(), stmts_list.end());
+    handleMaybeNoReturn(def);
     std::vector<Argument> returns = {emitOutput(def.range(), schema, block)};
     return {def.name().name(), "", std::move(arguments), std::move(returns)};
   }
@@ -773,8 +796,6 @@ struct to_ir {
     // rewrites ensure there is always a return statement in program
     AT_ASSERT(def_stack_.back().merged_return_type_);
     // outputs
-    Value* result = environment_stack->getVar("$return", range);
-    block->registerOutput(result);
     return Argument("", def_stack_.back().merged_return_type_);
   }
 
@@ -888,7 +909,8 @@ struct to_ir {
     }
     AT_ASSERT(result_type);
     def_stack_.back().merged_return_type_ = result_type;
-    environment_stack->setVar(stmt.range(), "$return", result);
+    graph->insertNode(graph->create(prim::ReturnStmt, {result}, 0));
+    exit_blocks.insert(environment_stack->block());
   }
 
   void emitStatements(
@@ -943,6 +965,17 @@ struct to_ir {
               << "Unrecognized statement kind " << kindToString(stmt.kind());
       }
     }
+  }
+
+  Value* getBottomVal() {
+    if (bottom_val != nullptr) {
+      return bottom_val;
+    }
+    WithInsertPoint guard(graph->block()->nodes().front());
+    bottom_val = graph->insertNode(graph->create(prim::Bottom, {}, 1))
+                     ->output()
+                     ->setType(BottomType::get());
+    return bottom_val;
   }
 
   std::shared_ptr<Environment> emitSingleIfBranch(
@@ -1145,6 +1178,35 @@ struct to_ir {
     return v;
   }
 
+  // If one block exits and the other does not, propagate all variables set
+  // in the non exit block, so that below, `a` will escape scope.
+  // if ...:
+  //   a =
+  // else:
+  //   return 1
+  void emitOneExitBlock(
+      Block* exit_b,
+      Block* other_b,
+      const std::shared_ptr<Environment>& save,
+      const SourceRange& range) {
+    // ordered set, because we want deterministic graph output
+    std::set<std::string> mutated_variables;
+    for (auto& v : save->definedVariables()) {
+      mutated_variables.insert(v);
+    }
+    WithInsertPoint guard(graph->block()->nodes().front());
+    auto b_val = graph->insertNode(graph->create(prim::Bottom, {}, 1))
+                     ->output()
+                     ->setType(BottomType::get());
+    for (const auto& x : mutated_variables) {
+      auto new_v = save->getVar(x, range);
+      other_b->registerOutput(new_v);
+      exit_b->registerOutput(b_val);
+      environment_stack->setVar(
+          range, x, other_b->owningNode()->addOutput()->setType(new_v->type()));
+    }
+  }
+
   void emitIfElseBlocks(Value* cond_value, const If& stmt) {
     Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
     n->addInput(cond_value);
@@ -1157,6 +1219,20 @@ struct to_ir {
         true_block, stmt.trueBranch(), bool_info.true_refinements_);
     auto save_false = emitSingleIfBranch(
         false_block, stmt.falseBranch(), bool_info.false_refinements_);
+
+    if (exit_blocks.count(true_block) && exit_blocks.count(false_block)) {
+      exit_blocks.insert(n->owningBlock());
+      return;
+    }
+
+    if (exit_blocks.count(true_block) || exit_blocks.count(false_block)) {
+      if (exit_blocks.count(true_block)) {
+        emitOneExitBlock(true_block, false_block, save_false, stmt.range());
+      } else {
+        emitOneExitBlock(false_block, true_block, save_true, stmt.range());
+      }
+      return;
+    }
 
     // In python, every variable assigned in an if statement escapes
     // the scope of the if statement (all variables are scoped to the function).

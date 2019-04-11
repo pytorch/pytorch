@@ -239,6 +239,7 @@ inline IValue toIValue(
       }
       return userObj;
     }
+    case TypeKind::BottomType:
     case TypeKind::NumberType:
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
@@ -347,10 +348,9 @@ inline py::object toPyObject(IValue&& ivalue) {
     const auto obj = ivalue.toObject();
     const auto classType = ClassType::get(obj->name());
     AT_ASSERT(classType);
-    auto pyClass = py::module::import("torch.jit")
-                       .attr("_get_script_class")(obj->name());
+    auto pyClass =
+        py::module::import("torch.jit").attr("_get_script_class")(obj->name());
     auto pyObj = pyClass.attr("__new__")(pyClass);
-
 
     const auto numAttrs = classType->numAttributes();
 

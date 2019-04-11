@@ -855,6 +855,14 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
+         "prim::Bottom() -> Bottom",
+         [](Stack& stack) {
+           // Todo: add special unitialized ivalue that will error
+           // whenever it is used
+           push(stack, 1);
+           return 0;
+         }),
+     Operator(
          prim::CreateObject,
          [](const Node* node) {
            const auto type = node->output()->type()->expect<ClassType>();

@@ -83,6 +83,10 @@ NoneTypePtr NoneType::get() {
   static auto value = NoneType::create();
   return value;
 }
+BottomTypePtr BottomType::get() {
+  static auto value = BottomType::create();
+  return value;
+}
 GeneratorTypePtr GeneratorType::get() {
   static auto value = GeneratorType::create();
   return value;

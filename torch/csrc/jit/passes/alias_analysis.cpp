@@ -406,6 +406,7 @@ void AliasDb::analyzeImpl(Node* node) {
       break;
     }
     case prim::Print:
+    case prim::Bottom:
       // These ops do nothing
       return;
     default:
@@ -723,6 +724,10 @@ void AliasDb::analyzeBroadcastingChunk(Node* node) {
 
 // Register the fact that `value` is a pointer to `to`
 void AliasDb::makePointerTo(const Value* from, const Value* to) {
+  if (from->type() == BottomType::get() || to->type() == BottomType::get()) {
+    return;
+  }
+
   if (!shouldAnnotate(from)) {
     AT_ASSERT(!shouldAnnotate(to));
     return;
@@ -1158,6 +1163,7 @@ TORCH_API bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::FusionGroup,
       prim::DifferentiableGraph,
       prim::Constant,
+      prim::Bottom,
       prim::DictConstruct,
       prim::ListConstruct,
       prim::TupleConstruct,

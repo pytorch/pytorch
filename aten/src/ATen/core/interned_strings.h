@@ -22,6 +22,7 @@ namespace c10 {
   _(prim, Assign)                  \
   _(prim, BroadcastingChunk)       \
   _(prim, BroadcastSizes)          \
+  _(prim, Bottom)                  \
   _(prim, Constant)                \
   _(prim, ChunkSizes)              \
   _(prim, Drop)                    \
@@ -44,6 +45,7 @@ namespace c10 {
   _(prim, IgnoredPythonOp)         \
   _(prim, Reverse)                 \
   _(prim, Return)                  \
+  _(prim, ReturnStmt)              \
   _(prim, Store)                   \
   _(prim, AutogradZero)            \
   _(prim, AutogradAnyNonZero)      \

@@ -22,6 +22,7 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
       {"int", IntType::get()},
       {"bool", BoolType::get()},
       {"None", NoneType::get()},
+      {"Bottom", BottomType::get()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE)) {
