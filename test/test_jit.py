@@ -11260,7 +11260,6 @@ a")
                 }'''}
         with TemporaryFileName() as fname:
             archive_name = os.path.basename(os.path.normpath(fname))
-            print(archive_name)
             with zipfile.ZipFile(fname, 'w') as archive:
                 for k, v in model.items():
                     with archive.open(k, 'w') as myfile:
