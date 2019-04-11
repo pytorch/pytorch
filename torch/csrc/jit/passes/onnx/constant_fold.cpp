@@ -38,17 +38,16 @@ static void buildParamsMapFromValueToParamsMap(
   }
 }
 
-static void eraseUnusedNodeOutputs(Node* node) {
-  std::vector<std::string> removedOutputNames;
-  for (size_t i_1 = node->outputs().size(); i_1 > 0; --i_1) {
+static void eraseUnusedBlockInputs(Block* b) {
+  for (size_t i_1 = b->inputs().size(); i_1 > 0; --i_1) {
       size_t i = i_1 - 1;
-      if (!node->outputs().at(i)->hasUses()) {
-        node->eraseOutput(i);
+      if (!b->inputs().at(i)->hasUses()) {
+        b->eraseInput(i);
       }
   }
 }
 
-static at::Tensor runTorchBackendForOnnx(const Node* node, std::vector<at::Tensor>& inputTensorValues) {
+static c10::optional<at::Tensor> runTorchBackendForOnnx(const Node* node, std::vector<at::Tensor>& inputTensorValues) {
   at::Tensor updated_val;
   if (node->kind() == onnx::Slice) {
     assert(inputTensorValues.size() == 1);
@@ -65,9 +64,11 @@ static at::Tensor runTorchBackendForOnnx(const Node* node, std::vector<at::Tenso
     for (size_t i = 0; i < axesAttr.size(); ++i) {
       updated_val = at::narrow(updated_val, axesAttr[i], startsAttr[i], endsAttr[i] - startsAttr[i]);
     }
+    return c10::optional<at::Tensor>(updated_val);
   }  
   else if (node->kind() == onnx::Concat) {
     updated_val = at::cat(at::TensorList(inputTensorValues), node->i(attr::axis));
+    return c10::optional<at::Tensor>(updated_val);
   }
   else if (node->kind() == onnx::Unsqueeze) {
     assert(inputTensorValues.size() == 1);
@@ -78,6 +79,7 @@ static at::Tensor runTorchBackendForOnnx(const Node* node, std::vector<at::Tenso
     for (auto axis: node->is(attr::axes)) {
       updated_val = at::unsqueeze(updated_val, axis);
     }
+    return c10::optional<at::Tensor>(updated_val);
   }
   else if (node->kind() == onnx::Transpose) {
     assert(inputTensorValues.size() == 1);
@@ -85,12 +87,11 @@ static at::Tensor runTorchBackendForOnnx(const Node* node, std::vector<at::Tenso
       throw std::runtime_error("Missing attribute 'perm' in onnx::Transpose op.");
     }
     updated_val = inputTensorValues[0].permute(node->is(attr::perm));
+    return c10::optional<at::Tensor>(updated_val);
   }
   else {
-    updated_val = at::empty({0});
-    auto qe = updated_val.size(0);
+    return c10::nullopt;
   }
-  return updated_val;
 }
 
 static bool isConstant(Value* val, const ValueToParamPairMap& valsToParamsMap) {
@@ -139,8 +140,7 @@ static void eraseUnusedValuesFromMap(ValueToParamPairMap& valsToParamsMap) {
 // This method updates the block in-place to fold all the one-time 
 // constant-based computations/ops into an initializer node.
 void ConstantFoldONNX(Block* b, ParamMap& paramsDict) {
-  auto sourceNode = b->param_node();
-  AT_ASSERT(sourceNode);
+  AT_ASSERT(b->param_node());
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
   // Only the root block is constant-folded. Folding nested blocks is
   // not supported for now.
@@ -161,24 +161,25 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict) {
         // This is a terminal node with no inputs, such as onnx::Constant. Skip it.
         continue;
     }
-    auto updated_val = runTorchBackendForOnnx(node, inputTensorValues);
-    if (updated_val.size(0) == 0) {
+    auto updatedValWrapped = runTorchBackendForOnnx(node, inputTensorValues);
+    if (updatedValWrapped == c10::nullopt) {
         // Constant folding is not supported for this op. Skip it.
         continue;
-      }
-    // Create a new source node output value. Add a corresponding entry
-    // in valToParamMap. Replace the downstream inputs with this value, 
-    // and disconnect all the input values of the folded node.
-    auto newSourceNodeOutput = sourceNode->addOutput();
+    }    
+    // Create a new input to the block (prim::Param node output). Add a
+    // corresponding entryin valToParamMap. Replace the downstream inputs
+    // with this value, and disconnect all the input values of the folded node.
+    at::Tensor updatedVal = *updatedValWrapped;
+    auto newSourceNodeOutput = b->addInput();
     valsToParamsMap.insert({newSourceNodeOutput, 
-                            std::make_pair(newSourceNodeOutput->uniqueName(), updated_val)});
-    newSourceNodeOutput->inferTypeFrom(updated_val);
+                            std::make_pair(newSourceNodeOutput->uniqueName(), updatedVal)});
+    newSourceNodeOutput->inferTypeFrom(updatedVal);
     node->outputs().at(0)->replaceAllUsesWith(newSourceNodeOutput);
 
     node->removeAllInputs();
   }
   eraseUnusedValuesFromMap(valsToParamsMap);
-  eraseUnusedNodeOutputs(sourceNode);
+  eraseUnusedBlockInputs(b);
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
   return;
 }
