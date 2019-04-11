@@ -5048,36 +5048,37 @@ a")
 
         def test_log_int():
             return math.log(2)
+
         def test_log_float():
             return math.log(2.0)
 
         def test_log1p_int():
             return math.log1p(1)
+
         def test_log1p_float():
             return math.log1p(1.0)
 
         def test_log10_int():
             return math.log10(2)
+
         def test_log10_float():
             return math.log10(2.0)
 
-        def test_log2_int():
-            return math.log2(2)
-        def test_log2_float():
-            return math.log2(2.0)
-
         def test_exp_int():
             return math.exp(2)
+
         def test_exp_float():
             return math.exp(2.0)
 
         def test_sqrt_int():
             return math.sqrt(2)
+
         def test_sqrt_float():
             return math.sqrt(2.0)
 
         def test_pow_float():
             return math.pow(2.0, 2.0)
+
         def test_pow_int():
             return math.pow(2.0, 2)
 
@@ -5089,8 +5090,6 @@ a")
         self.checkScript(test_log1p_float, ())
         self.checkScript(test_log10_int, ())
         self.checkScript(test_log10_float, ())
-        self.checkScript(test_log2_int, ())
-        self.checkScript(test_log2_float, ())
         self.checkScript(test_exp_int, ())
         self.checkScript(test_exp_float, ())
         self.checkScript(test_sqrt_int, ())

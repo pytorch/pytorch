@@ -1500,7 +1500,6 @@ def _get_builtin_table():
     _builtin_table[id(math.log)] = "aten::log"
     _builtin_table[id(math.log1p)] = "aten::log1p"
     _builtin_table[id(math.log10)] = "aten::log10"
-    _builtin_table[id(math.log2)] = "aten::log2"
     _builtin_table[id(math.exp)] = "aten::exp"
     _builtin_table[id(math.sqrt)] = "aten::sqrt"
     _builtin_table[id(math.pow)] = "aten::pow"

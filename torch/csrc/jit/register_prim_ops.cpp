@@ -1974,23 +1974,6 @@ RegisterOperators reg2({
         }),
 
     Operator(
-        "aten::log2(float a) -> float",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::log2(a));
-          return 0;
-        }),
-    Operator(
-        "aten::log2(int a) -> float",
-        [](Stack& stack) {
-          int64_t a;
-          pop(stack, a);
-          push(stack, std::log2(a));
-          return 0;
-        }),
-
-    Operator(
         "aten::exp(float a) -> float",
         [](Stack& stack) {
           double a;
