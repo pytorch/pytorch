@@ -4,14 +4,39 @@ import copy, math
 import torch.nn.functional as F
 from torch.autograd import Variable
 
+from torch.nn import MultiheadAttention
+
 def get_clones(module, N):
 	return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
+
+
+def buildTransformerModel(src_vocab, tgt_vocab, d_model=512, nhead=8, num_encoder_layers=6, num_decoder_layers=6, d_ff=2048, dropout=0.1):
+	encoder_layer = EncoderLayer(d_model, nhead, d_ff, dropout)
+	src_embed = Embeddings(d_model, src_vocab) 
+	pos_encoder = PositionalEncoding(d_model, dropout) 
+	encoder_norm = Tensor1DNorm(d_model) 
+	encoder = Encoder(encoder_layer, num_encoder_layers, src_embed, pos_encoder, encoder_norm)
+
+	decoder_layer = DecoderLayer(d_model, nhead, d_ff, dropout)	
+	tgt_embed = Embeddings(d_model, tgt_vocab) 
+	pos_decoder = PositionalEncoding(d_model, dropout) 
+	decoder_norm = Tensor1DNorm(d_model) 
+	decoder = Decoder(decoder_layer, num_decoder_layers, tgt_embed, pos_decoder, decoder_norm)
+
+	generator = Generator(d_model, tgt_vocab)
+	model = Transformer(encoder, decoder, generator)
+
+	for p in model.parameters():
+		if p.dim() > 1:
+			nn.init.xavier_uniform_(p)
+	return model
 
 
 class Transformer(nn.Module):
 	"""
 	A base class for transformer. The transformer is based on a standard
 	Encoder-Decoder architecture.
+	Docs comming...
 	"""
 	def __init__(self,  encoder, decoder, generator = None):
 		super(Transformer, self).__init__()
@@ -33,7 +58,10 @@ class Transformer(nn.Module):
 
 
 class Encoder(nn.Module):
-	"Encoder is a stack of N layers"
+	"""
+	Encoder is a stack of N layers
+	Docs comming...
+	"""
 	def __init__(self, encoder_layer, num_layers, src_embed=None, pos_encoder=None, norm=None):
 		super(Encoder, self).__init__()
 		self.layers = get_clones(encoder_layer, num_layers)
@@ -61,7 +89,10 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-	"Decoder is a stack of N layers"
+	"""
+	Decoder is a stack of N layers
+	Docs comming...
+	"""
 	def __init__(self, decoder_layer, num_layers, tgt_embed=None, pos_encoder=None, norm=None):
 		super(Decoder, self).__init__()
 		self.layers = get_clones(decoder_layer, num_layers)
@@ -88,7 +119,10 @@ class Decoder(nn.Module):
 		return output
 
 class EncoderLayer(nn.Module):
-	"Encoder layer is made up of self-attn and feed forward (defined below)"
+	"""
+	Encoder layer is made up of self-attn and feed forward (defined below)
+	Docs comming...
+	"""
 	def __init__(self, d_model, nhead, d_ff=2048,dropout=0.1):
 		super(EncoderLayer, self).__init__()
 		self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
@@ -100,14 +134,17 @@ class EncoderLayer(nn.Module):
 
 	def forward(self, x, mask):
 		x2 = self.norm1(x)
-		x = x + self.dropout1(self.self_attn(x2,x2,x2,mask))
+		x = x + self.dropout1(self.self_attn(x2, x2, x2, mask=None))
 		x2 = self.norm2(x)
 		x = x + self.dropout2(self.ff(x2))
 		return x
 
 
 class DecoderLayer(nn.Module):
-	"Decoder layer is made up of self-attn, multihead_attn and feed forward (defined below)"
+	"""
+	Decoder layer is made up of self-attn, multihead_attn and feed forward (defined below)
+	Docs comming...
+	"""
 	def __init__(self, d_model, nhead, d_ff=2048, dropout=0.1):
 		super(DecoderLayer, self).__init__()
 		self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
@@ -124,10 +161,11 @@ class DecoderLayer(nn.Module):
 		x2 = self.norm1(x)
 		x = x + self.dropout1(self.self_attn(x2, x2, x2, tgt_mask))
 		x2 = self.norm2(x)
-		x = x + self.dropout2(self.multihead_attn(x2, memory, memory, src_mask))
+		x = x + self.dropout2(self.multihead_attn(x2, memory, memory))
 		x2 = self.norm3(x)
 		x = x + self.dropout3(self.ff(x2))		
 		return x
+
 
 # Temporarily leave Tensor1DNorm module here. Will bemoved somewhere else.
 class Tensor1DNorm(nn.Module):
@@ -193,60 +231,12 @@ class PositionalEncoding(nn.Module):
 
 # Temporarily leave Generator module here. Will be moved somewhere else.
 class Generator(nn.Module):
-    "Define standard linear + softmax generation step."
-    def __init__(self, d_model, vocab):
-        super(Generator, self).__init__()
-        self.proj = nn.Linear(d_model, vocab)
+	"Define standard linear + softmax generation step."
+	def __init__(self, d_model, vocab):
+		super(Generator, self).__init__()
+		self.proj = nn.Linear(d_model, vocab)
 
-    def forward(self, x):
-        return F.log_softmax(self.proj(x), dim=-1)
-
-
-# Temporarily leave MultiheadAttention here. Will be removed once the MultiheadAttention PR landed.
-def attention(query, key, value, mask=None, dropout=None):
-	"Compute 'Scaled Dot Product Attention'"
-	d_k = query.size(-1)
-	scores = torch.matmul(query, key.transpose(-2, -1)) \
-			 / math.sqrt(d_k)
-	if mask is not None:
-		scores = scores.masked_fill(mask == 0, -1e9)
-	p_attn = F.softmax(scores, dim = -1)
-	if dropout is not None:
-		p_attn = dropout(p_attn)
-	return torch.matmul(p_attn, value), p_attn
-
-
-class MultiheadAttention(nn.Module):
-	def __init__(self, d_model, h, dropout=0.1):
-		"Take in model size and number of heads."
-		super(MultiheadAttention, self).__init__()
-		assert d_model % h == 0
-		# We assume d_v always equals d_k
-		self.d_k = d_model // h
-		self.h = h
-		self.linears = get_clones(nn.Linear(d_model, d_model), 4)
-		self.attn = None
-		self.dropout = nn.Dropout(p=dropout)
-		
-	def forward(self, query, key, value, mask=None):
-		"Implements Figure 2"
-		if mask is not None:
-			# Same mask applied to all h heads.
-			mask = mask.unsqueeze(1)
-		nbatches = query.size(0)
-		
-		# 1) Do all the linear projections in batch from d_model => h x d_k 
-		query, key, value = \
-			[l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
-			 for l, x in zip(self.linears, (query, key, value))]
-		
-		# 2) Apply attention on all the projected vectors in batch. 
-		x, self.attn = attention(query, key, value, mask=mask, 
-								 dropout=self.dropout)
-		
-		# 3) "Concat" using a view and apply a final linear. 
-		x = x.transpose(1, 2).contiguous() \
-			 .view(nbatches, -1, self.h * self.d_k)
-		return self.linears[-1](x)
+	def forward(self, x):
+		return F.log_softmax(self.proj(x), dim=-1)
 
 
