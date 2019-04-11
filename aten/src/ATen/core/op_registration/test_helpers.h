@@ -23,7 +23,7 @@ inline at::Tensor dummyTensor(c10::TensorTypeId dispatch_key) {
     allocator->allocate(nelements * dtype.itemsize()),
     allocator,
     /*resizable=*/true);
-  return at::detail::make_tensor<c10::TensorImpl>(storage_impl, dispatch_key, false);
+  return at::detail::make_tensor<c10::TensorImpl>(storage_impl, dispatch_key);
 }
 
 template<class... Args>
