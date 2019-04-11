@@ -5128,7 +5128,11 @@ a")
         def test_floor():
             return math.floor(1.5)
 
+        def test_sinh():
+            return math.sinh(1.5)
+
         self.checkScript(test_floor, ())
+        self.checkScript(test_sinh, ())
 
     def test_if_nest_while(self):
         def func(a, b):
