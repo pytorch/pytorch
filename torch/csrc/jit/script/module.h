@@ -94,14 +94,6 @@ struct TORCH_API Method {
     return initial_ivalues_;
   }
 
-  // proxies for underlying unbound Function
-  std::shared_ptr<Graph> graph_for(Stack inputs) {
-    for (auto tp : initial_ivalues_) {
-      inputs.emplace_back(tp.value());
-    }
-    return function_->get_executor().graphFor(inputs);
-  }
-
   std::shared_ptr<Graph> graph() const {
     return function_->graph();
   }

@@ -66,10 +66,6 @@ struct TORCH_API Function {
     return stack.front();
   }
 
-  std::shared_ptr<Graph> graph_for(Stack inputs) {
-    return get_executor().graphFor(inputs);
-  }
-
   std::shared_ptr<Graph> graph() const {
     return graph_;
   }
