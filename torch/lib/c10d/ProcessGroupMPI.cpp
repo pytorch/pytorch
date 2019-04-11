@@ -162,7 +162,6 @@ void ProcessGroupMPI::AsyncWork::populateException() {
 }
 
 // Static global states
-int ProcessGroupMPI::numProcessGroups_ = 0;
 int ProcessGroupMPI::mpiThreadSupport_ = 0;
 std::mutex ProcessGroupMPI::pgGlobalMutex_;
 // We only want to initialize once
@@ -196,72 +195,51 @@ std::shared_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
   // Once initialization
   initMPIOnce();
 
-  std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
-
+  MPI_Comm groupComm = MPI_COMM_WORLD;
   int rank = -1;
   int size = -1;
 
-  // Update the world size and rank
-  MPI_CHECK(MPI_Comm_size(MPI_COMM_WORLD, &size));
-  MPI_CHECK(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
+  {
+    std::lock_guard<std::mutex> globalLock(pgGlobalMutex_);
 
-  if (rank < 0 || size < 0) {
-    throw std::runtime_error("Failed to get the world_size / rank");
+    // If no ranks are specified, assume we're creating the root group
+    if (!ranks.empty()) {
+      MPI_Group worldGroup;
+      MPI_Group ranksGroup;
+      MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &worldGroup));
+      MPI_CHECK(
+          MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
+      MPI_CHECK(MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm));
+      MPI_CHECK(MPI_Group_free(&worldGroup));
+      MPI_CHECK(MPI_Group_free(&ranksGroup));
+    }
+
+    // Fetch rank and world size for this group (MPI_COMM_WORLD or new)
+    if (groupComm != MPI_COMM_NULL) {
+      MPI_CHECK(MPI_Comm_rank(groupComm, &rank));
+      MPI_CHECK(MPI_Comm_size(groupComm, &size));
+
+      if (rank < 0 || size < 0) {
+        throw std::runtime_error("Failed to get the world_size / rank");
+      }
+    }
   }
 
-  // If no ranks are specified, assume we're creating the root group
-  if (ranks.empty()) {
-    globalLock.unlock();
-    return std::make_shared<ProcessGroupMPI>(rank, size, MPI_COMM_WORLD);
+  // If this process is not part of the group, we don't construct a
+  // process group instance. This is in line with the semantics of the
+  // other process group types.
+  if (groupComm == MPI_COMM_NULL) {
+    return std::shared_ptr<ProcessGroupMPI>();
   }
 
-  MPI_Group worldGroup;
-  MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &worldGroup));
-
-  MPI_Group ranksGroup;
-  MPI_CHECK(
-      MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
-
-  MPI_Comm groupComm;
-  MPI_CHECK(MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm));
-
-  MPI_CHECK(MPI_Group_free(&worldGroup));
-  MPI_CHECK(MPI_Group_free(&ranksGroup));
-
-  globalLock.unlock();
   return std::make_shared<ProcessGroupMPI>(rank, size, groupComm);
 }
 
 ProcessGroupMPI::ProcessGroupMPI(int rank, int size, MPI_Comm pgComm)
-    : ProcessGroup(rank, size),
-      stop_(false),
-      pgComm_(pgComm),
-      groupRank_(-1),
-      groupSize_(-1) {
-  std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
-
-  if (pgComm_ != MPI_COMM_NULL) {
-    MPI_CHECK(MPI_Comm_rank(pgComm_, &groupRank_));
-    MPI_CHECK(MPI_Comm_size(pgComm_, &groupSize_));
-    std::vector<int> rankToGroupRank{rank_, groupRank_};
-    std::vector<int> allRankToGroupRank;
-    allRankToGroupRank.resize(2 * groupSize_);
-    MPI_CHECK(MPI_Allgather(
-        rankToGroupRank.data(),
-        2,
-        MPI_INT,
-        allRankToGroupRank.data(),
-        2,
-        MPI_INT,
-        pgComm_));
-    for (size_t i = 0; i < allRankToGroupRank.size(); i += 2) {
-      groupRankMap_[allRankToGroupRank[i]] = allRankToGroupRank[i + 1];
-    }
+    : ProcessGroup(rank, size), stop_(false), pgComm_(pgComm) {
+  if (pgComm_ == MPI_COMM_NULL) {
+    throw std::runtime_error("pgComm_ must not be MPI_COMM_NULL");
   }
-
-  // increase the total PG count
-  ++numProcessGroups_;
-  globalLock.unlock();
 
   // Start the worker thread accepting MPI calls
   workerThread_ = std::thread(&ProcessGroupMPI::runLoop, this);
@@ -284,10 +262,6 @@ void ProcessGroupMPI::destroy() {
 
   // Join the single worker thread
   workerThread_.join();
-
-  // Decrease the number of PG created
-  std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
-  --numProcessGroups_;
 }
 
 void ProcessGroupMPI::abort() {
@@ -338,9 +312,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::enqueue(
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
-  if (pgComm_ == MPI_COMM_NULL) {
-    return nullptr;
-  }
   checkSingleTensor(tensors);
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [opts, this](std::unique_ptr<WorkEntry>& entry) {
@@ -361,9 +332,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::broadcast(
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
-  if (pgComm_ == MPI_COMM_NULL) {
-    return nullptr;
-  }
   checkSingleTensor(tensors);
 
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
@@ -386,17 +354,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allreduce(
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
-  if (pgComm_ == MPI_COMM_NULL) {
-    return nullptr;
-  }
   checkSingleTensor(tensors);
 
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [opts, this](std::unique_ptr<WorkEntry>& entry) {
         auto data = (entry->src)[0];
         auto dataPtr = (entry->src)[0].data_ptr();
-        void* sendbuf = (groupRank_ == opts.rootRank) ? MPI_IN_PLACE : dataPtr;
-        void* recvbuf = (groupRank_ == opts.rootRank) ? dataPtr : nullptr;
+        void* sendbuf = (rank_ == opts.rootRank) ? MPI_IN_PLACE : dataPtr;
+        void* recvbuf = (rank_ == opts.rootRank) ? dataPtr : nullptr;
 
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
         MPI_CHECK(MPI_Reduce(
@@ -417,16 +382,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
-  if (pgComm_ == MPI_COMM_NULL) {
-    return nullptr;
-  }
   checkSingleTensor(inputTensors);
   if (outputTensors.size() != 1) {
     throw std::runtime_error(
         "MPI process group only supports a single "
         "tensor op");
   }
-  if (static_cast<size_t>(groupSize_) != outputTensors[0].size()) {
+  if (static_cast<size_t>(size_) != outputTensors[0].size()) {
     throw std::runtime_error(
         "All gather: number of output tensors should equal "
         "to the world size");
@@ -463,12 +425,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const GatherOptions& opts) {
-  if (pgComm_ == MPI_COMM_NULL) {
-    return nullptr;
-  }
   checkSingleTensor(inputTensors);
 
-  if (groupRank_ != opts.rootRank) {
+  if (rank_ != opts.rootRank) {
     if (outputTensors.size() > 0) {
       throw std::runtime_error(
           "Gather: number of output tensors should be 0 "
@@ -478,7 +437,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
     if (outputTensors.size() != 1) {
       throw std::runtime_error("Gather: multi-GPU collective is not supported");
     }
-    if (static_cast<size_t>(groupSize_) != outputTensors[0].size()) {
+    if (static_cast<size_t>(size_) != outputTensors[0].size()) {
       throw std::runtime_error(
           "Gather: number of output tensors should equal "
           "to the world size");
@@ -492,7 +451,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
         void* recvbuf = nullptr;
         at::Tensor flatOutputTensor;
 
-        if (groupRank_ == opts.rootRank) {
+        if (rank_ == opts.rootRank) {
           flatOutputTensor = newLikeFlat(entry->dst);
           recvbuf = flatOutputTensor.data_ptr();
         }
@@ -508,7 +467,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
             opts.rootRank,
             pgComm_));
 
-        if (groupRank_ == opts.rootRank) {
+        if (rank_ == opts.rootRank) {
           std::vector<at::Tensor>& outputDataVec = entry->dst;
           // copy the flattened output tensors to the outputs
           for (size_t i = 0; i < outputDataVec.size(); ++i) {
@@ -517,7 +476,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::gather(
         }
       };
 
-  if (groupRank_ == opts.rootRank) {
+  if (rank_ == opts.rootRank) {
     auto entry = std::unique_ptr<WorkEntry>(
         new WorkEntry(&inputTensors, &outputTensors[0], std::move(runFunc)));
     return enqueue(std::move(entry));
@@ -532,12 +491,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
-  if (pgComm_ == MPI_COMM_NULL) {
-    return nullptr;
-  }
   checkSingleTensor(outputTensors);
 
-  if (groupRank_ != opts.rootRank) {
+  if (rank_ != opts.rootRank) {
     if (inputTensors.size() > 0) {
       throw std::runtime_error(
           "Scatter: number of input tensors should be 0 "
@@ -545,9 +501,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
     }
   } else {
     if (inputTensors.size() != 1) {
-      throw std::runtime_error("Scatter: multi-GPU collective is not supported");
+      throw std::runtime_error(
+          "Scatter: multi-GPU collective is not supported");
     }
-    if (static_cast<size_t>(groupSize_) != inputTensors[0].size()) {
+    if (static_cast<size_t>(size_) != inputTensors[0].size()) {
       throw std::runtime_error(
           "Scatter: number of input tensors should equal "
           "to the world size");
@@ -561,7 +518,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
         void* sendbuf = nullptr;
         at::Tensor flatInputTensor;
 
-        if (groupRank_ == opts.rootRank) {
+        if (rank_ == opts.rootRank) {
           std::vector<at::Tensor>& inputDataVec = entry->src;
           flatInputTensor = newLikeFlat(inputDataVec);
           sendbuf = flatInputTensor.data_ptr();
@@ -584,7 +541,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
             pgComm_));
       };
 
-  if (groupRank_ == opts.rootRank) {
+  if (rank_ == opts.rootRank) {
     auto entry = std::unique_ptr<WorkEntry>(
         new WorkEntry(&inputTensors[0], &outputTensors, std::move(runFunc)));
     return enqueue(std::move(entry));
@@ -599,10 +556,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
-  if (pgComm_ == MPI_COMM_NULL) {
-    return nullptr;
-  }
-
   checkSingleTensor(tensors);
 
   auto& tensor = tensors[0];
@@ -627,10 +580,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
-  if (pgComm_ == MPI_COMM_NULL) {
-    return nullptr;
-  }
-
   checkSingleTensor(tensors);
 
   auto& tensor = tensors[0];
@@ -654,10 +603,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
     std::vector<at::Tensor>& tensors,
     int tag) {
-  if (pgComm_ == MPI_COMM_NULL) {
-    return nullptr;
-  }
-
   checkSingleTensor(tensors);
 
   auto& tensor = tensors[0];
@@ -680,9 +625,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier(
     const BarrierOptions& opts) {
-  if (pgComm_ == MPI_COMM_NULL) {
-    return nullptr;
-  }
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [this](std::unique_ptr<WorkEntry>& entry) {
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
@@ -694,7 +636,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier(
 }
 
 std::unordered_map<int, int> ProcessGroupMPI::getGroupRank() {
-  return groupRankMap_;
+  throw std::runtime_error("ProcessGroupMPI does not support getGroupRank");
 }
 
 } // namespace c10d
