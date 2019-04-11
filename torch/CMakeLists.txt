@@ -429,6 +429,8 @@ if (MSVC AND NOT TORCH_STATIC)
   install(FILES $<TARGET_PDB_FILE:torch> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
 endif()
 
+
+
 if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
   add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
 endif()
@@ -481,6 +483,7 @@ if (USE_DISTRIBUTED)
 endif()
 
 if (BUILD_PYTHON)
+
   if (MSVC)
     add_subdirectory(${TORCH_SRC_DIR}/lib/libshm_windows)
   else()

@@ -1,3 +1,5 @@
+
+
 if (BUILD_ATEN_MOBILE)
   return()
 endif()
@@ -17,6 +19,7 @@ cmake_policy(SET CMP0012 NEW)
 set(ATen_CPU_SRCS)
 set(ATen_CPU_TEST_SRCS)
 set(ATen_CPU_INCLUDE)
+list(APPEND ATen_CPU_INCLUDE bananas)
 set(ATen_THIRD_PARTY_INCLUDE)
 set(ATen_CUDA_SRCS)
 set(ATen_CUDA_TEST_SRCS)
@@ -92,6 +95,15 @@ endif()
 list(APPEND ATen_CPU_INCLUDE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/catch/single_include)
+
+if (MSVC)
+  list(APPEND ATen_CPU_INCLUDE
+    ../aten/lib/libshm_windows)
+else()
+  list(APPEND ATen_CPU_INCLUDE
+    ../aten/lib/libshm)
+endif()
+
 add_subdirectory(src/ATen)
 
 # Pass source, includes, and libs to parent

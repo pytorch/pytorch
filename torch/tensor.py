@@ -309,6 +309,14 @@ class Tensor(torch._C._TensorBase):
         else:
             return LU, pivots
 
+    def have_base(self):
+        return self.storage().size() != self.numel()
+
+    def get_base(self):
+        if not self.have_base():
+            raise("Can't get base tensor of base tensor.")
+        return torch.Tensor(self.storage())
+
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
         r"""See :func:`torch.stft`

@@ -24,9 +24,12 @@
 #include <ATen/native/byte_order.h>
 // ~/local/pytorch_wp2/aten/src/
 
+#include <libshm.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+
 
 namespace at {
 namespace native {
@@ -88,6 +91,32 @@ Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
 
 Tensor _dim_arange(const Tensor& like, int64_t dim) {
   return at::arange(like.size(dim), like.options().dtype(at::kLong));
+}
+
+
+// std::tuple<int64_t,int64_t> _share_fd(const Tensor& self) {
+int64_t _share_fd(const Tensor& self) {
+  auto storage = self.storage();
+  // THWStorage *storage = self->cdata/;
+  THManagedMapAllocator *ctx;
+  // Storage is already in shared memory, just return a handle
+  if ((ctx = THManagedMapAllocator::fromDataPtr(storage.data_ptr()))) {}
+    // done
+  // }; else {
+  //   // TODO: retry on collision
+  //   // TODO: free GIL - but remember to reacquire it when an exception is thrown
+  //   THWStoragePtr new_storage(THPStorage_(newFilenameStorage)(storage->numel()));
+  //   THWStorage_(copy)(new_storage, storage);
+  //   THWStorage_(swap)(storage, new_storage);
+  //   ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr());
+  //   AT_ASSERT(ctx);
+  // }
+  return 0;
+ // return std::make_tuple(1, -1);
+}
+
+Tensor _new_shared_fd(int64_t fd, int64_t size) {
+ return at::native::empty_cpu({size});
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

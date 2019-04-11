@@ -1,3 +1,10 @@
+if (MSVC)
+  add_subdirectory(lib/libshm_windows)
+else()
+  add_subdirectory(lib/libshm)
+endif()
+
+
 # ---[ Generate and install header and cpp files
 include(../cmake/Codegen.cmake)
 
@@ -28,6 +35,7 @@ if (NOT BUILD_ATEN_MOBILE)
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h)
   add_library(aten_op_header_gen INTERFACE)
   add_dependencies(aten_op_header_gen __aten_op_header_gen)
+
 
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
@@ -233,6 +241,9 @@ if (USE_OPENMP AND OPENMP_FOUND)
   target_link_libraries(caffe2 PRIVATE ${OpenMP_CXX_LIBRARIES})
 endif()
 
+#install(TARGETS ashm EXPORT Caffe2Targets)
+target_link_libraries(caffe2 PUBLIC ashm)
+
 target_link_libraries(caffe2 PUBLIC c10)
 target_link_libraries(caffe2 PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
@@ -324,7 +335,9 @@ if (MSVC AND BUILD_SHARED_LIBS)
 endif()
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
 target_compile_options(caffe2 PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
+#install(TARGETS ashm EXPORT Caffe2Targets DESTINATION lib)
 install(TARGETS caffe2 EXPORT Caffe2Targets DESTINATION lib)
+
 caffe2_interface_library(caffe2 caffe2_library)
 list(APPEND Caffe2_MAIN_LIBS caffe2_library)
 # Install PDB files for MSVC builds
@@ -494,6 +507,9 @@ if (BUILD_TEST)
   endif()
 endif()
 
+
+
+
 # Note: we only install the caffe2 python files if BUILD_CAFFE2_OPS is ON
 # This is because the build rules here written in such a way that they always
 # appear to need to be re-run generating >600 pieces of work during the pytorch
@@ -569,6 +585,9 @@ if (BUILD_PYTHON)
     target_link_libraries(caffe2_pybind11_state ${PYTHON_LIBRARIES})
     target_link_libraries(caffe2_pybind11_state onnx_proto)
   endif(WIN32)
+
+
+
 
   # Install caffe2_pybind11_state(_gpu|hip) in site-packages/caffe2/python,
   # so it needs an rpath to find libcaffe2
