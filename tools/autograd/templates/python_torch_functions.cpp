@@ -116,7 +116,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
           .pinned_memory(r.toBool(5));
       return wrap(dispatch_arange(end, options));
     } else {
-      AT_ASSERTM(!r.toBool(5), " `pin_memory` and `out` parameters are incompatible");
+      AT_CHECK(!r.toBool(5), " `pin_memory` and `out` parameters are incompatible");
       check_out_type_matches(r.tensor(1), r.scalartype(2), r.isNone(2), r.layout(3), r.isNone(3),
                              r.device(4), r.isNone(4));
       return wrap(dispatch_arange(r.scalar(0), r.tensor(1)).set_requires_grad(r.toBool(6)));
@@ -136,7 +136,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
           .pinned_memory(r.toBool(7));
       return wrap(dispatch_arange(start, end, step, options));
     } else {
-      AT_ASSERTM(!r.toBool(7), " `pin_memory` and `out` parameters are incompatible");
+      AT_CHECK(!r.toBool(7), " `pin_memory` and `out` parameters are incompatible");
       check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4), r.layout(5), r.isNone(5),
                                r.device(6), r.isNone(6));
       return wrap(dispatch_arange(r.scalar(0), r.scalar(1), r.scalar(2), r.tensor(3)).set_requires_grad(r.toBool(8)));
