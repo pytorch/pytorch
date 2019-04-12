@@ -737,7 +737,7 @@ Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
 AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
 #undef TENSOR
 
-Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<long> size, const TensorOptions& options) {
+Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {
     AT_CHECK(!options.pinned_memory(), "tensors constructed from a file cannot be pinned");
     size_t my_size = size.value_or(0);
     int flags = shared.value_or(false) ? TH_ALLOCATOR_MAPPED_SHARED : 0;

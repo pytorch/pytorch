@@ -122,6 +122,9 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   return result;
 }
 
+
+
+
 Tensor einsum(std::string eqn, TensorList tensors) {
   constexpr size_t number_of_letters = 26;
   std::string in_eqn;
