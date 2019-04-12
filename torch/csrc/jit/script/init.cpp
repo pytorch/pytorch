@@ -334,7 +334,7 @@ std::shared_ptr<Module> as_module(const py::object& obj) {
 // anticipating we will eventually need to replace Module with a py::object
 // holding the actual nn.Module class.
 
-struct ModuleValue : public SugaredValue {
+struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
   ModuleValue(Value* self, std::shared_ptr<Module> module, py::object py_module)
       : self_(self),
         module_(std::move(module)),
