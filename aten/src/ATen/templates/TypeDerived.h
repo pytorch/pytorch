@@ -16,7 +16,7 @@ $extra_cuda_headers
 
 namespace at {
 
-struct ${Type} final : public ${DenseBackend}TypeDefault {
+struct ${Type} final : public ${DeviceType}TypeDefault {
   explicit ${Type}();
   virtual ScalarType scalarType() const override;
   virtual caffe2::TypeMeta typeMeta() const override;

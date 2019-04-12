@@ -1926,11 +1926,12 @@
     CPU: _unique2_cpu
     CUDA: _unique2_cuda
 
-- func: _unique_dim2_temporary_will_remove_soon(Tensor self, int dim, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
+- func: unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
+  matches_jit_signature: True
   variants: function
   dispatch:
-    CPU: _unique_dim2_cpu
-    CUDA: _unique_dim2_cuda
+    CPU: unique_dim_cpu
+    CUDA: unique_dim_cuda
 
 - func: _unsafe_view(Tensor self, int[] size) -> Tensor
 
@@ -2488,19 +2489,23 @@
 
 - func: quantize_linear(Tensor self, float scale, int zero_point) -> Tensor
   variants: function, method
-  requires_tensor: True
+  dispatch:
+    CPU: quantize_linear_cpu
 
 - func: dequantize(Tensor self) -> Tensor
   variants: function, method
-  requires_tensor: True
+  dispatch:
+    QuantizedCPU: dequantize_quant
 
 - func: q_scale(Tensor self) -> Scalar
   variants: function, method
-  requires_tensor: True
+  dispatch:
+    QuantizedCPU: q_scale_quant
 
 - func: q_zero_point(Tensor self) -> Scalar
   variants: function, method
-  requires_tensor: True
+  dispatch:
+    QuantizedCPU: q_zero_point_quant
 
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
