@@ -707,7 +707,7 @@ static void setInputTensorTypes(Graph& g, const Stack& stack) {
   }
 }
 
-static std::shared_ptr<Graph> propagate_shapes(
+static std::shared_ptr<Graph> _propagate_shapes(
     Graph& graph,
     std::vector<at::Tensor> inputs,
     bool with_grad = false) {
@@ -718,7 +718,7 @@ static std::shared_ptr<Graph> propagate_shapes(
   return retval;
 }
 
-static std::shared_ptr<Graph> propagate_and_assign_input_and_output_shapes(
+static std::shared_ptr<Graph> _propagate_and_assign_input_and_output_shapes(
     Graph& graph,
     std::vector<at::Tensor> inputs,
     std::vector<at::Tensor> outputs,
@@ -1162,11 +1162,11 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
   m.def("_jit_clear_class_registry", ClassType::clearRegistry);
   m.def(
-      "debug_set_autodiff_subgraph_inlining", debugSetAutodiffSubgraphInlining);
-  m.def("propagate_shapes", propagate_shapes);
+      "_debug_set_autodiff_subgraph_inlining", debugSetAutodiffSubgraphInlining);
+  m.def("_propagate_shapes", _propagate_shapes);
   m.def(
-      "propagate_and_assign_input_and_output_shapes",
-      propagate_and_assign_input_and_output_shapes);
+      "_propagate_and_assign_input_and_output_shapes",
+      _propagate_and_assign_input_and_output_shapes);
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())
       .def("check", &testing::FileCheck::check)
