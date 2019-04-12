@@ -319,6 +319,14 @@ struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
   std::vector<std::string> method_names_;
 };
 
+std::shared_ptr<Module> as_module(const py::object& obj) {
+  if (py::isinstance(
+          obj, py::module::import("torch.jit").attr("ScriptModule"))) {
+    return py::cast<std::shared_ptr<Module>>(obj.attr("_c"));
+  }
+  return nullptr;
+}
+
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
 // in the future, we will add the ability to resolve `self.foo` to python
@@ -327,8 +335,10 @@ struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
 // holding the actual nn.Module class.
 
 struct ModuleValue : public SugaredValue {
-  ModuleValue(Value* self, std::shared_ptr<Module> module)
-      : self_(self), module_(std::move(module)) {}
+  ModuleValue(Value* self, std::shared_ptr<Module> module, py::object py_module)
+      : self_(self),
+        module_(std::move(module)),
+        py_module_(std::move(py_module)) {}
 
   std::string kind() const override {
     return "module";
@@ -345,8 +355,7 @@ struct ModuleValue : public SugaredValue {
     if (field == "training") {
       Slot* v = module_->find_buffer(field);
       if (!v) {
-        py::object py_module = py::cast(module_);
-        bool training = py::cast<bool>(py::getattr(py_module, "training"));
+        bool training = py::cast<bool>(py::getattr(py_module_, "training"));
         auto t =
             autograd::make_variable(at::full({}, training ? 1 : 0, at::kLong));
         module_->register_buffer("training", std::move(t));
@@ -359,7 +368,9 @@ struct ModuleValue : public SugaredValue {
 
     if (std::shared_ptr<Module> v = module_->find_module(field)) {
       return std::make_shared<ModuleValue>(
-          m.graph()->insertGetAttr(self_, field), v);
+          m.graph()->insertGetAttr(self_, field),
+          v,
+          py_module_.attr(field.c_str()));
     } else if (auto kind = module_->kind_of(field)) {
       // methods, parameters, attributes, and buffers are all first class
       return SimpleValue(self_).attr(loc, m, field);
@@ -367,16 +378,15 @@ struct ModuleValue : public SugaredValue {
 
     // This can also be a call to a non-script module, or a plain
     // python method. If so return this as a python value.
-    py::object py_module = py::cast(module_);
 
     py::object overloads =
-        py_module.attr("_overloads").attr("get")(field, py::none());
+        py_module_.attr("_overloads").attr("get")(field, py::none());
     if (!overloads.is_none()) {
       return std::make_shared<OverloadedFunctionValue>(
           self_, py::cast<std::vector<std::string>>(overloads));
     }
 
-    if (py::object attr = py::getattr(py_module, field.c_str(), py::none())) {
+    if (py::object attr = py::getattr(py_module_, field.c_str(), py::none())) {
       if (py::isinstance<py::function>(attr) &&
           py::hasattr(attr, "_is_parameter_list") &&
           py::cast<bool>(py::getattr(attr, "_is_parameter_list"))) {
@@ -393,7 +403,7 @@ struct ModuleValue : public SugaredValue {
       }
       if (py::isinstance<py::function>(attr) ||
           py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
-          py_module.attr("_constants_set").contains(field.c_str())) {
+          py_module_.attr("_constants_set").contains(field.c_str())) {
         return toSugaredValue(attr, m, loc, true);
       } else {
         std::string hint = "did you forget to add it __constants__?";
@@ -423,19 +433,17 @@ struct ModuleValue : public SugaredValue {
       const SourceRange& loc,
       Function& m,
       const c10::optional<size_t>& size_hint = {}) override {
-    py::object py_module = py::cast(module_);
     if (!py::isinstance(
-            py_module,
+            py_module_,
             py::module::import("torch.jit").attr("_ConstModuleList")))
       return SugaredValue::asTuple(loc, m, size_hint);
     std::vector<std::shared_ptr<SugaredValue>> result;
-    for (py::handle py_submodule : py_module) {
+    for (py::handle py_submodule : py_module_) {
       py::object obj = py::reinterpret_borrow<py::object>(py_submodule);
-      if (py::isinstance<Module>(obj)) {
-        auto sub_module = py::cast<std::shared_ptr<Module>>(obj);
+      if (auto sub_module = as_module(obj)) {
         Value* module_v = m.graph()->insertGetAttr(self_, sub_module->name());
         result.emplace_back(
-            std::make_shared<ModuleValue>(module_v, sub_module));
+            std::make_shared<ModuleValue>(module_v, sub_module, obj));
       } else {
         result.push_back(toSugaredValue(
             obj,
@@ -450,6 +458,7 @@ struct ModuleValue : public SugaredValue {
  private:
   Value* self_;
   std::shared_ptr<Module> module_;
+  py::object py_module_;
 };
 
 struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
@@ -564,12 +573,11 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (!weak_obj.is_none()) {
     obj = weak_obj;
   }
-  if (py::isinstance<Module>(obj)) {
+  if (auto mod = as_module(obj)) {
     // In the case that this Python object is not a submodule, inline *ONLY
     // PURE* ScriptModules. This allows us to call arbitrary @script functions
     // within a scripting context while still enforcing that parameters from
     // stateful submodules are properly accounted for.
-    auto mod = py::cast<std::shared_ptr<Module>>(obj);
     return moduleToMethod(mod);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
@@ -591,7 +599,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
     if (!compiled_fn.is(py::none())) {
-      auto mod = py::cast<std::shared_ptr<Module>>(compiled_fn);
+      auto mod = as_module(compiled_fn);
       return moduleToMethod(mod);
     }
   }
@@ -693,10 +701,12 @@ FunctionSchema getSchemaWithNameAndDefaults(
       schema.is_varret());
 }
 
-static Self moduleSelf(const std::shared_ptr<Module>& m) {
-  return [m](Value* v) {
+static Self moduleSelf(
+    const std::shared_ptr<Module>& m,
+    const py::object& py_m) {
+  return [m, py_m](Value* v) {
     v->setType(m->module_object()->type());
-    return std::make_shared<ModuleValue>(v, m);
+    return std::make_shared<ModuleValue>(v, m, py_m);
   };
 }
 
@@ -789,13 +799,14 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_define",
           [](std::shared_ptr<Module> m,
+             py::object py_m,
              const std::string& script,
              ResolutionCallback rcb,
              bool has_self) {
             c10::optional<Self> self;
             if (has_self) {
               m->class_compilation_unit().define(
-                  script, pythonResolver(rcb), moduleSelf(m));
+                  script, pythonResolver(rcb), moduleSelf(m, py_m));
             } else {
               m->_define_lowered(script, pythonResolver(rcb));
             }
@@ -804,6 +815,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_create_methods",
           [](std::shared_ptr<Module> m,
+             py::object py_m,
              const std::vector<Def>& defs,
              const std::vector<ResolutionCallback>& rcbs,
              const std::vector<FunctionDefaults>& defaults) {
@@ -812,7 +824,8 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& callback : rcbs) {
               resolvers.push_back(pythonResolver(callback));
             }
-            m->class_compilation_unit().define(defs, resolvers, moduleSelf(m));
+            m->class_compilation_unit().define(
+                defs, resolvers, moduleSelf(m, py_m));
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
             auto defs_it = defs.begin();
@@ -962,23 +975,6 @@ void initJitScriptBindings(PyObject* module) {
             throw std::runtime_error(
                 "Attempted to call get_debug_state on a Module without a compiled forward()");
           })
-      .def(
-          "forward",
-          [](py::args args, py::kwargs kwargs) {
-            // We implement this in C++ to avoid incurring the pybind11 dispatch
-            // overhead twice: once to call into the method lookup for "forward"
-            // and once to actually invoke the method.
-            //
-            // There is a thin wrapper on top of this method in the C++ version
-            // of ScriptModule.
-
-            // see: [pybind11 varargs]
-            Module& self = py::cast<Module&>(args[0]);
-            return invokeScriptMethodFromPython(
-                self.get_method("forward"),
-                tuple_slice(std::move(args), 1),
-                std::move(kwargs));
-          })
       .def_property_readonly(
           "code",
           [](Module& self) {
@@ -1122,9 +1118,8 @@ void initJitScriptBindings(PyObject* module) {
     std::ostringstream ss;
     std::vector<at::Tensor> constants;
     std::vector<ClassTypePtr> classes;
-    if (py::isinstance<Module>(obj)) {
-      auto& self = py::cast<Module&>(obj);
-      PythonPrint(ss, self, constants, classes, true);
+    if (auto self = as_module(obj)) {
+      PythonPrint(ss, *self, constants, classes, true);
     } else {
       auto& m = py::cast<Method&>(obj);
       PythonPrint(ss, m, constants, classes, true);
