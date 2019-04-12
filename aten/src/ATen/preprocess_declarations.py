@@ -23,8 +23,8 @@ type_map = {
 all_types = type_map['floating_point'] + type_map['integral']
 type_map['all'] = all_types
 
-all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA', 'AffineCPU', 'PerChannelAffineCPU']
-default_backends = ['CPU', 'CUDA', 'AffineCPU', 'PerChannelAffineCPU']
+all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA', 'MkldnnCPU', 'QuantizedCPU']
+default_backends = ['CPU', 'CUDA']
 
 
 def process_types_and_backends(option):

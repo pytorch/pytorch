@@ -220,7 +220,8 @@ inline std::string _all_equal_numel_error(at::ArrayRef<Tensor> tensors) {
 }
 
 inline bool _apply_preamble(ArrayRef<Tensor> tensors) {
-  checkBackend("CPU_tensor_apply", tensors, Backend::CPU);
+  checkDeviceType("CPU_tensor_apply", tensors, kCPU);
+  checkLayout("CPU_tensor_apply", tensors, kStrided);
   if (!_all_equal_numel(tensors))
     AT_ERROR(_all_equal_numel_error(tensors));
   // An empty tensor has no elements

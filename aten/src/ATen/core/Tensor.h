@@ -13,6 +13,7 @@
 #include <c10/util/Optional.h>
 #include <c10/core/Tensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 
 namespace c10{
 struct TensorOptions;
@@ -176,6 +177,26 @@ class CAFFE2_API Tensor {
     return impl_->is_contiguous();
   }
 
+  bool is_transposed() const {
+    if (is_contiguous()) {
+      return false;
+    }
+    int64_t max_stride = 1;
+    int64_t size_max_stride = 1;
+    int64_t z = 1;
+    int d;
+    for (d = 0; d < dim(); ++d) {
+      if (stride(d) == 0 && size(d) != 1)
+        return false;
+      if (stride(d) > max_stride) {
+        max_stride = stride(d);
+        size_max_stride = size(d);
+      }
+      z *= size(d);
+    }
+    return z == max_stride * size_max_stride;
+  }
+
   // Total bytes consumed by the "view" of elements of the array.  Does not
   // include size of metadata.  The number reported here does not necessarily
   // correspond to the true physical memory consumed by a tensor; instead,
@@ -196,7 +217,11 @@ class CAFFE2_API Tensor {
     return impl_->itemsize();
   }
 
-  Type & type() const {
+  DeprecatedTypeProperties & type() const {
+    return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+        tensorTypeIdToBackend(type_id()), scalar_type());
+  }
+  Type & dispatch_type() const {
     return legacyTensorType(*impl_);
   }
   TensorTypeId type_id() const {
@@ -406,6 +431,8 @@ class CAFFE2_API Tensor {
   Tensor & fill_(const Tensor & value);
   Tensor floor() const;
   Tensor & floor_();
+  Tensor frac() const;
+  Tensor & frac_();
   Tensor ger(const Tensor & vec2) const;
   Tensor fft(int64_t signal_ndim, bool normalized=false) const;
   Tensor ifft(int64_t signal_ndim, bool normalized=false) const;
@@ -463,7 +490,13 @@ class CAFFE2_API Tensor {
   Tensor permute(IntArrayRef dims) const;
   Tensor pin_memory() const;
   Tensor pinverse(double rcond=1e-15) const;
+  Tensor reciprocal() const;
+  Tensor & reciprocal_();
+  Tensor neg() const;
+  Tensor & neg_();
   Tensor repeat(IntArrayRef repeats) const;
+  Tensor repeat_interleave(const Tensor & repeats, c10::optional<int64_t> dim=c10::nullopt) const;
+  Tensor repeat_interleave(int64_t repeats, c10::optional<int64_t> dim=c10::nullopt) const;
   Tensor reshape(IntArrayRef shape) const;
   Tensor reshape_as(const Tensor & other) const;
   Tensor round() const;
@@ -569,10 +602,12 @@ class CAFFE2_API Tensor {
   std::vector<Tensor> unbind(int64_t dim=0) const;
   Tensor to_sparse(int64_t sparse_dim) const;
   Tensor to_sparse() const;
+  Tensor to_mkldnn() const;
   Tensor quantize_linear(double scale, int64_t zero_point) const;
   Tensor dequantize() const;
   Scalar q_scale() const;
   Scalar q_zero_point() const;
+  Tensor int_repr() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
@@ -643,10 +678,7 @@ class CAFFE2_API Tensor {
   Tensor & digamma_();
   Tensor & polygamma_(int64_t n);
   Tensor & erfinv_();
-  Tensor & frac_();
   Tensor & renorm_(Scalar p, int64_t dim, Scalar maxnorm);
-  Tensor & reciprocal_();
-  Tensor & neg_();
   Tensor & pow_(Scalar exponent);
   Tensor & pow_(const Tensor & exponent);
   Tensor & lerp_(const Tensor & end, Scalar weight);
@@ -707,16 +739,13 @@ class CAFFE2_API Tensor {
   std::tuple<Tensor,Tensor> geqrf() const;
   Tensor orgqr(const Tensor & input2) const;
   Tensor ormqr(const Tensor & input2, const Tensor & input3, bool left=true, bool transpose=false) const;
-  Tensor btrisolve(const Tensor & LU_data, const Tensor & LU_pivots) const;
+  Tensor lu_solve(const Tensor & LU_data, const Tensor & LU_pivots) const;
   Tensor multinomial(int64_t num_samples, bool replacement=false, Generator * generator=nullptr) const;
   Tensor lgamma() const;
   Tensor digamma() const;
   Tensor polygamma(int64_t n) const;
   Tensor erfinv() const;
-  Tensor frac() const;
   Tensor dist(const Tensor & other, Scalar p=2) const;
-  Tensor reciprocal() const;
-  Tensor neg() const;
   Tensor atan2(const Tensor & other) const;
   Tensor lerp(const Tensor & end, Scalar weight) const;
   Tensor lerp(const Tensor & end, const Tensor & weight) const;

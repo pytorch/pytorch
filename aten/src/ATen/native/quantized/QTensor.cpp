@@ -32,5 +32,9 @@ Quantizer* quantizer(const QTensor& self) {
   return get_qtensorimpl(self)->quantizer().get();
 }
 
+Tensor int_repr_quant(const QTensor& self) {
+  return self.to(self.device(), at::kByte);
+}
+
 } // namespace native
 } // namespace at

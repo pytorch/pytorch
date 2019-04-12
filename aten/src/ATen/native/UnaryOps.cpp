@@ -17,6 +17,8 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
 
+#include <ATen/native/cpu/Loops.h>
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -85,8 +87,16 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
   return legacy::th::_th_clamp_min_out(result, self, min);
 }
 
-Tensor& fill_(Tensor& self, Scalar value) {
-  return at::legacy::th::_th_fill_(self, value);
+Tensor& _fill__cpu(Tensor& self, Scalar value) {
+  auto iter = TensorIterator::unary_op(self, self);
+  AT_DISPATCH_ALL_TYPES(iter->dtype(), "fill_cpu", [&]() {
+      scalar_t fill_value = value.to<scalar_t>();
+      unary_kernel(
+          *iter,
+          [=](scalar_t a) -> scalar_t { return fill_value; }
+      );
+    });
+  return self;
 }
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
@@ -114,7 +124,6 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   args = args.add(self.unsqueeze(-1));
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
 }
-
 
 Tensor sigmoid(const Tensor& self) {
   Tensor result = at::empty({0}, self.options());
@@ -167,7 +176,7 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
 
 // NB: Temp. defaulting to TH implementation of abs due to issues with Apple
 
-IMPLEMENT_UNARY_OP_TH(abs)
+IMPLEMENT_UNARY_OP_VEC(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)
@@ -179,10 +188,13 @@ IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC(exp)
 IMPLEMENT_UNARY_OP_VEC(expm1)
 IMPLEMENT_UNARY_OP_VEC(floor)
+IMPLEMENT_UNARY_OP_VEC(frac)
 IMPLEMENT_UNARY_OP_VEC(log)
 IMPLEMENT_UNARY_OP_VEC(log10)
 IMPLEMENT_UNARY_OP_VEC(log1p)
 IMPLEMENT_UNARY_OP_VEC(log2)
+IMPLEMENT_UNARY_OP_VEC(neg)
+IMPLEMENT_UNARY_OP_VEC(reciprocal)
 IMPLEMENT_UNARY_OP_VEC(round)
 IMPLEMENT_UNARY_OP_VEC(rsqrt)
 IMPLEMENT_UNARY_OP_VEC(sin)
@@ -203,10 +215,13 @@ DEFINE_DISPATCH(erfc_stub);
 DEFINE_DISPATCH(exp_stub);
 DEFINE_DISPATCH(expm1_stub);
 DEFINE_DISPATCH(floor_stub);
+DEFINE_DISPATCH(frac_stub);
 DEFINE_DISPATCH(log_stub);
 DEFINE_DISPATCH(log10_stub);
 DEFINE_DISPATCH(log1p_stub);
 DEFINE_DISPATCH(log2_stub);
+DEFINE_DISPATCH(neg_stub);
+DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);
 DEFINE_DISPATCH(rsqrt_stub);
 DEFINE_DISPATCH(sigmoid_stub);

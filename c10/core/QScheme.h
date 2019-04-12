@@ -25,17 +25,21 @@ constexpr auto kPerTensorAffine = QScheme::PER_TENSOR_AFFINE;
 constexpr auto kPerChannelAffine = QScheme::PER_CHANNEL_AFFINE;
 constexpr auto kPerTensorSymmetric = QScheme::PER_TENSOR_SYMMETRIC;
 constexpr auto kPerChannelSymmetric = QScheme::PER_CHANNEL_SYMMETRIC;
-constexpr int COMPILE_TIME_NUM_QSCHEMES = static_cast<int>(QScheme::COMPILE_TIME_NUM_QSCHEMES);
+constexpr int COMPILE_TIME_NUM_QSCHEMES =
+  static_cast<int>(QScheme::COMPILE_TIME_NUM_QSCHEMES);
 
-inline TensorTypeId qschemeToTensorTypeId(QScheme qscheme, DeviceType device_type) {
-  AT_CHECK(device_type == kCPU, "Right now only CPU is supported in quantized TensorTypeId");
+inline std::string toString(QScheme qscheme) {
   switch(qscheme) {
     case kPerTensorAffine:
-      return AffineCPUTensorId();
+      return "PerTensorAffine";
     case kPerChannelAffine:
-      return PerChannelAffineCPUTensorId();
+      return "PerChannelAffine";
+    case kPerTensorSymmetric:
+      return "PerTensorSymmetric";
+    case kPerChannelSymmetric:
+      return "PerChannelSymmetric";
     default:
-      AT_ERROR("QScheme not supported in qschemeToTensorTypeId");
+      AT_ERROR("Unrecognized qscheme: ", static_cast<int>(qscheme));
   }
 }
 

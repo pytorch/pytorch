@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/LegacyTHFunctions.h>
 
 namespace at { namespace native {
 
@@ -39,6 +40,10 @@ Tensor& _clamp_min_out_cuda(Tensor& result, const Tensor& self, Scalar min) {
   return _th_clamp_min_out(result, self, min);
 }
 
+Tensor& _fill__cuda(Tensor& self, Scalar value) {
+  return legacy::th::_th_fill_(self, value);
+}
+
 // These are just forwarding stubs
 
 #define IMPLEMENT_UNARY_OP_PREQUEL(op)                           \
@@ -61,11 +66,14 @@ IMPLEMENT_UNARY_OP_PREQUEL(erf)
 IMPLEMENT_UNARY_OP_PREQUEL(erfc)
 IMPLEMENT_UNARY_OP_PREQUEL(exp)
 IMPLEMENT_UNARY_OP_PREQUEL(expm1)
+IMPLEMENT_UNARY_OP_PREQUEL(frac)
 IMPLEMENT_UNARY_OP_PREQUEL(floor)
 IMPLEMENT_UNARY_OP_PREQUEL(log)
 IMPLEMENT_UNARY_OP_PREQUEL(log10)
 IMPLEMENT_UNARY_OP_PREQUEL(log1p)
 IMPLEMENT_UNARY_OP_PREQUEL(log2)
+IMPLEMENT_UNARY_OP_PREQUEL(neg)
+IMPLEMENT_UNARY_OP_PREQUEL(reciprocal)
 IMPLEMENT_UNARY_OP_PREQUEL(round)
 IMPLEMENT_UNARY_OP_PREQUEL(rsqrt)
 IMPLEMENT_UNARY_OP_PREQUEL(sigmoid)

@@ -40,6 +40,7 @@ namespace jit {
   _(ControlFlow)                   \
   _(CreateAutodiffSubgraphs)       \
   _(CustomOperators)               \
+  _(CustomOperatorAliasing)        \
   _(Differentiate)                 \
   _(DifferentiateWithRequiresGrad) \
   _(DynamicDAG)                    \
@@ -64,7 +65,8 @@ namespace jit {
   _(NoneSchemaMatch)               \
   _(ClassParser)                   \
   _(PeepholeOptimize)              \
-  _(RecordFunction)
+  _(RecordFunction)                \
+  _(ModuleDefine)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
@@ -90,9 +92,11 @@ TH_FORALL_TESTS_CUDA(JIT_GTEST_CUDA)
 #endif
 
 #define JIT_TEST(name) test##name();
-void runJITCPPTests() {
+void runJITCPPTests(bool runCuda) {
   TH_FORALL_TESTS(JIT_TEST)
-  TH_FORALL_TESTS_CUDA(JIT_TEST)
+  if (runCuda) {
+    TH_FORALL_TESTS_CUDA(JIT_TEST)
+  }
 
   // This test is special since it requires prior setup in python.
   // So it's included here but not in the pure cpp gtest suite

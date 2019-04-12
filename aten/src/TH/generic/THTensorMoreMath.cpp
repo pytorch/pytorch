@@ -999,31 +999,31 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
   return equal;
 }
 
-#define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)				\
+#define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)                                \
   void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, scalar_t value) \
-  {									\
-    THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);		\
-    TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t,			\
-		     *r__data = (*t_data OP value) ? 1 : 0;); \
-  }									\
-  void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, scalar_t value)	\
-  {									\
-    THTensor_(resizeNd)(r_, t->dim(), THTensor_getSizePtr(t), NULL);		\
-    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,					\
-		     *r__data = (*t_data OP value) ? 1 : 0;); \
-  }									\
+  {                                                                        \
+    THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);                \
+    TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t,                        \
+                     *r__data = (*t_data OP value) ? 1 : 0;); \
+  }                                                                        \
+  void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, scalar_t value)        \
+  {                                                                        \
+    THTensor_(resizeNd)(r_, t->dim(), THTensor_getSizePtr(t), NULL);                \
+    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,                                        \
+                     *r__data = (*t_data OP value) ? 1 : 0;); \
+  }                                                                        \
   void THTensor_(NAME##Tensor)(THByteTensor *r_, THTensor *ta, THTensor *tb) \
-  {									\
-    THByteTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);		\
-    TH_TENSOR_APPLY3(unsigned char, r_, scalar_t, ta, scalar_t, tb,		\
-		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
-  }									\
+  {                                                                        \
+    THByteTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);                \
+    TH_TENSOR_APPLY3(unsigned char, r_, scalar_t, ta, scalar_t, tb,                \
+                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
+  }                                                                        \
   void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb) \
-  {									\
-    THTensor_(resizeNd)(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);		\
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, ta, scalar_t, tb,			\
-		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
-  }									\
+  {                                                                        \
+    THTensor_(resizeNd)(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);                \
+    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, ta, scalar_t, tb,                        \
+                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
+  }                                                                        \
 
 
 TENSOR_IMPLEMENT_LOGICAL(lt,<)
@@ -1302,10 +1302,10 @@ void THTensor_(norm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, i
                *r__data = TH_MATH_NAME(pow)(sum, 1.0/3), 0);
   } else if (value == INFINITY) {
     DIM_REDUCE(sum = THMax(sum, TH_MATH_NAME(fabs)(t_data[i*t_stride])),
-	       *r__data = sum, 0);
+               *r__data = sum, 0);
   } else if (value == -INFINITY) {
     DIM_REDUCE(sum = THMin(sum, TH_MATH_NAME(fabs)(t_data[i*t_stride])),
-	       *r__data = sum, INFINITY);
+               *r__data = sum, INFINITY);
   } else {
     DIM_REDUCE(sum += TH_MATH_NAME(pow)(TH_MATH_NAME(fabs)(t_data[i*t_stride]), value),
                *r__data = TH_MATH_NAME(pow)(sum, 1.0/value), 0);

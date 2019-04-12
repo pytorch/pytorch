@@ -33,7 +33,7 @@ struct TensorGroup {
 
   at::Type& type() {
     AT_ASSERT(!tensors.empty());
-    return tensors[0].type();
+    return tensors[0].dispatch_type();
   }
 };
 
