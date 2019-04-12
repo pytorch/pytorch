@@ -1130,7 +1130,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
   m.def("_jit_clear_class_registry", ClassType::clearRegistry);
   m.def(
-      "debug_set_autodiff_subgraph_inlining", debugSetAutodiffSubgraphInlining);
+      "_debug_set_autodiff_subgraph_inlining", debugSetAutodiffSubgraphInlining);
 
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())

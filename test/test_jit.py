@@ -255,9 +255,9 @@ def enable_cpu_fuser(fn):
 # note: not re-entrant, use unnested only
 @contextmanager
 def disable_autodiff_subgraph_inlining(enabled=True):
-    torch._C.debug_set_autodiff_subgraph_inlining(not enabled)
+    torch._C._debug_set_autodiff_subgraph_inlining(not enabled)
     yield
-    torch._C.debug_set_autodiff_subgraph_inlining(True)
+    torch._C._debug_set_autodiff_subgraph_inlining(True)
 
 
 # helper function to get sum of List[Tensor]
@@ -3719,20 +3719,20 @@ a")
         @torch.jit.script
         def func2(x, y):
             return torch.cat((x, x), y)
-        func2.debug_disable_autodiff_subgraph_inlining()
+        with disable_autodiff_subgraph_inlining():
 
-        x = torch.rand([2, 2]).requires_grad_()
-        y = torch.tensor(1)
+            x = torch.rand([2, 2]).requires_grad_()
+            y = torch.tensor(1)
 
-        output = func2(x, y)
-        output_ref = torch.cat((x, x), y)
-        self.assertEqual(output, output_ref)
+            output = func2(x, y)
+            output_ref = torch.cat((x, x), y)
+            self.assertEqual(output, output_ref)
 
-        self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::cat'], [])
+            self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::cat'], [])
 
-        grad = torch.autograd.grad(output.sum(), x)
-        grad_ref = torch.autograd.grad(output_ref.sum(), x)
-        self.assertEqual(grad, grad_ref)
+            grad = torch.autograd.grad(output.sum(), x)
+            grad_ref = torch.autograd.grad(output_ref.sum(), x)
+            self.assertEqual(grad, grad_ref)
 
     def test_cat_lifts(self):
         @torch.jit.script
@@ -3762,60 +3762,57 @@ a")
         def func2(x, y):
             return torch.stack((x, y), dim=0)
 
-        func2.debug_disable_autodiff_subgraph_inlining()
+        with disable_autodiff_subgraph_inlining():
+            x = torch.randn([2, 2]).requires_grad_()
+            y = torch.randn([2, 2]).requires_grad_()
 
-        x = torch.randn([2, 2]).requires_grad_()
-        y = torch.randn([2, 2]).requires_grad_()
+            output = func2(x, y)
+            output_ref = torch.stack((x, y), 0)
+            self.assertEqual(output, output_ref)
 
-        output = func2(x, y)
-        output_ref = torch.stack((x, y), 0)
-        self.assertEqual(output, output_ref)
+            self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::stack'], [])
 
-        self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::stack'], [])
-
-        grads = torch.autograd.grad(output.sum(), (x, y))
-        grads_ref = torch.autograd.grad(output_ref.sum(), (x, y))
-        self.assertEqual(grads, grads_ref)
+            grads = torch.autograd.grad(output.sum(), (x, y))
+            grads_ref = torch.autograd.grad(output_ref.sum(), (x, y))
+            self.assertEqual(grads, grads_ref)
 
     def test_unbind(self):
         @torch.jit.script
         def func(x, y):
             # type: (Tensor, int) -> List[Tensor]
             return torch.unbind(x, y)
-        func.debug_disable_autodiff_subgraph_inlining()
+        with disable_autodiff_subgraph_inlining():
+            x = torch.rand([2, 2]).requires_grad_()
+            y = 0
+            outputs = func(x, y)
+            outputs_ref = torch.unbind(x, dim=y)
+            self.assertEqual(outputs, outputs_ref)
 
-        x = torch.rand([2, 2]).requires_grad_()
-        y = 0
-        outputs = func(x, y)
-        outputs_ref = torch.unbind(x, dim=y)
-        self.assertEqual(outputs, outputs_ref)
+            self.assertAutodiffNode(func.graph_for(x, y), True, ['aten::unbind'], [])
 
-        self.assertAutodiffNode(func.graph_for(x, y), True, ['aten::unbind'], [])
-
-        grad = torch.autograd.grad(_sum_of_list(outputs), x)
-        grad_ref = torch.autograd.grad(_sum_of_list(outputs_ref), x)
-        self.assertEqual(grad, grad_ref)
+            grad = torch.autograd.grad(_sum_of_list(outputs), x)
+            grad_ref = torch.autograd.grad(_sum_of_list(outputs_ref), x)
+            self.assertEqual(grad, grad_ref)
 
     def test_meshgrid(self):
         @torch.jit.script
         def func(a):
             # type: (List[Tensor]) -> List[Tensor]
             return torch.meshgrid(a)
-        func.debug_disable_autodiff_subgraph_inlining()
+        with disable_autodiff_subgraph_inlining():
+            a = torch.tensor([1.0, 2, 3]).requires_grad_()
+            b = torch.tensor([1.0, 2, 3, 4]).requires_grad_()
+            inputs = [a, b]
 
-        a = torch.tensor([1.0, 2, 3]).requires_grad_()
-        b = torch.tensor([1.0, 2, 3, 4]).requires_grad_()
-        inputs = [a, b]
+            outputs_ref = torch.meshgrid(inputs)
+            outputs = func(inputs)
+            self.assertEqual(outputs, outputs_ref)
 
-        outputs_ref = torch.meshgrid(inputs)
-        outputs = func(inputs)
-        self.assertEqual(outputs, outputs_ref)
+            self.assertAutodiffNode(func.graph_for(inputs), True, ['aten::meshgrid'], [])
 
-        self.assertAutodiffNode(func.graph_for(inputs), True, ['aten::meshgrid'], [])
-
-        grads = torch.autograd.grad(_sum_of_list(outputs), inputs)
-        grads_ref = torch.autograd.grad(_sum_of_list(outputs_ref), inputs)
-        self.assertEqual(grads, grads_ref)
+            grads = torch.autograd.grad(_sum_of_list(outputs), inputs)
+            grads_ref = torch.autograd.grad(_sum_of_list(outputs_ref), inputs)
+            self.assertEqual(grads, grads_ref)
 
     def test_list_literal(self):
         def reassign():
