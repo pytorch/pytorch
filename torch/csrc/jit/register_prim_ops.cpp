@@ -1905,20 +1905,20 @@ RegisterOperators reg2({
         }),
 
     Operator(
-        "aten::floor(float a) -> int",
+        "aten::floor(float a) -> float",
         [](Stack& stack) {
           double a;
           pop(stack, a);
-          push(stack, static_cast<int64_t>(std::floor(a)));
+          push(stack, std::floor(a));
           return 0;
         }),
 
     Operator(
-        "aten::ceil(float a) -> int",
+        "aten::ceil(float a) -> float",
         [](Stack& stack) {
           double a;
           pop(stack, a);
-          push(stack, static_cast<int64_t>(std::ceil(a)));
+          push(stack, std::ceil(a));
           return 0;
         }),
 
