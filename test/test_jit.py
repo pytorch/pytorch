@@ -11262,8 +11262,7 @@ a")
             archive_name = os.path.basename(os.path.normpath(fname))
             with zipfile.ZipFile(fname, 'w') as archive:
                 for k, v in model.items():
-                    with archive.open(k, 'w') as myfile:
-                        myfile.write(v)
+                    archive.writestr(k, v)
 
             with open(fname, "rb") as f:
                 fn = torch.jit.load(f)
