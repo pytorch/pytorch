@@ -60,7 +60,7 @@ static void replication_pad1d_out_batch(
 void replication_pad1d_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   int dimw = 1;
   int dimslices = 0;
@@ -97,7 +97,7 @@ void replication_pad1d_out_cpu_template(
   if (input.ndimension() == 2)
   {
     output.resize_({nslices, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "replication_pad1d", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad1d_cpu", [&] {
       auto input_data = input.data<scalar_t>();
       auto output_data = output.data<scalar_t>();
       replication_pad1d_out_frame<scalar_t>(
@@ -113,7 +113,7 @@ void replication_pad1d_out_cpu_template(
   else
   {
     output.resize_({nbatch, nslices, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "replication_pad1d", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad1d_cpu", [&] {
       auto input_data = input.data<scalar_t>();
       auto output_data = output.data<scalar_t>();
       replication_pad1d_out_batch<scalar_t>(
@@ -185,7 +185,7 @@ Tensor& replication_pad1d_backward_out_cpu_template(
     Tensor& gradInput,
     const Tensor& gradOutput_,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   int dimw = 1;
   int dimslices = 0;
@@ -219,7 +219,7 @@ Tensor& replication_pad1d_backward_out_cpu_template(
   if (input.ndimension() == 2)
   {
     AT_DISPATCH_FLOATING_TYPES(
-      input.type(), "replication_pad1d_backward", [&] {
+      input.scalar_type(), "replication_pad1d_backward_cpu", [&] {
       scalar_t *gradInput_data = gradInput.data<scalar_t>();
       scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
 
@@ -236,7 +236,7 @@ Tensor& replication_pad1d_backward_out_cpu_template(
   else
   {
     AT_DISPATCH_FLOATING_TYPES(
-      input.type(), "replication_pad1d_backward", [&] {
+      input.scalar_type(), "replication_pad1d_backward_cpu", [&] {
       scalar_t *gradInput_data = gradInput.data<scalar_t>();
       scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
 
@@ -323,7 +323,7 @@ static void replication_pad2d_out_batch(
 
 void replication_pad2d_out_cpu_template(Tensor& output,
     const Tensor& input_,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   AT_CHECK(paddingSize.size() == 4, "padding size is expected to be 4");
   int pad_l = paddingSize[0];
@@ -365,7 +365,7 @@ void replication_pad2d_out_cpu_template(Tensor& output,
   if (input.dim() == 3)
   {
     output.resize_({nslices, oheight, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "replication_pad2d", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad2d_cpu", [&] {
       auto input_data = input.data<scalar_t>();
       auto output_data = output.data<scalar_t>();
       replication_pad2d_out_frame<scalar_t> (input_data, output_data,
@@ -380,7 +380,7 @@ void replication_pad2d_out_cpu_template(Tensor& output,
   else
   {
     output.resize_({nbatch, nslices, oheight, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "replication_pad2d", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad2d_cpu", [&] {
       auto input_data = input.data<scalar_t>();
       auto output_data = output.data<scalar_t>();
       replication_pad2d_out_batch<scalar_t> (input_data, output_data,
@@ -466,7 +466,7 @@ Tensor& replication_pad2d_backward_out_cpu_template(
     Tensor& gradInput,
     const Tensor& gradOutput_,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   AT_CHECK(paddingSize.size() == 4, "padding size is expected to be 4");
   int pad_l = paddingSize[0];
@@ -511,7 +511,7 @@ Tensor& replication_pad2d_backward_out_cpu_template(
   if (input.dim() == 3)
   {
     AT_DISPATCH_FLOATING_TYPES(
-      input.type(), "replication_pad2d_backward", [&] {
+      input.scalar_type(), "replication_pad2d_backward_cpu", [&] {
       replication_pad2d_backward_out_frame<scalar_t>(
         gradInput.data<scalar_t>(),
         gradOutput.data<scalar_t>(),
@@ -526,7 +526,7 @@ Tensor& replication_pad2d_backward_out_cpu_template(
   else
   {
     AT_DISPATCH_FLOATING_TYPES(
-      input.type(), "replication_pad2d_backward", [&] {
+      input.scalar_type(), "replication_pad2d_backward_cpu", [&] {
       replication_pad2d_backward_out_batch<scalar_t>(
         gradInput.data<scalar_t>(),
         gradOutput.data<scalar_t>(),
@@ -666,7 +666,7 @@ static void replication_pad3d_out_batch(
 void replication_pad3d_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   AT_CHECK(paddingSize.size() == 6, "padding size is expected to be 6");
   int pleft = paddingSize[0];
@@ -709,7 +709,7 @@ void replication_pad3d_out_cpu_template(
   if (input.dim() == 4)
   {
     output.resize_({nslices, odepth, oheight, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "replication_pad3d", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
       auto input_data = input.data<scalar_t>();
       auto output_data = output.data<scalar_t>();
       replication_pad3d_out_frame<scalar_t>(
@@ -722,7 +722,7 @@ void replication_pad3d_out_cpu_template(
   else
   {
     output.resize_({nbatch, nslices, odepth, oheight, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.type(), "replication_pad3d", [&] {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
       auto input_data = input.data<scalar_t>();
       auto output_data = output.data<scalar_t>();
       replication_pad3d_out_batch<scalar_t>(
@@ -823,7 +823,7 @@ Tensor& replication_pad3d_backward_out_cpu_template(
     Tensor& gradInput,
     const Tensor& gradOutput_,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   AT_CHECK(paddingSize.size() == 6, "padding size is expected to be 6");
   int pleft = paddingSize[0];
@@ -871,7 +871,7 @@ Tensor& replication_pad3d_backward_out_cpu_template(
   if (input.dim() == 4)
   {
     AT_DISPATCH_FLOATING_TYPES(
-      input.type(), "replication_pad3d_backward", [&] {
+      input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
       replication_pad3d_backward_out_frame<scalar_t> (
         gradInput.data<scalar_t>(),
         gradOutput.data<scalar_t>(),
@@ -887,7 +887,7 @@ Tensor& replication_pad3d_backward_out_cpu_template(
   else
   {
     AT_DISPATCH_FLOATING_TYPES(
-      input.type(), "replication_pad3d_backward", [&] {
+      input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
       replication_pad3d_backward_out_batch<scalar_t> (
         gradInput.data<scalar_t>(),
         gradOutput.data<scalar_t>(),
@@ -908,7 +908,7 @@ Tensor& replication_pad3d_backward_out_cpu_template(
 Tensor& replication_pad1d_out_cpu(
     Tensor& output,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad1d_out_cpu_template(
       output, input, paddingSize);
@@ -917,7 +917,7 @@ Tensor& replication_pad1d_out_cpu(
 
 Tensor replication_pad1d_cpu(
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto output = at::empty({0}, input.options());
   replication_pad1d_out_cpu_template(
@@ -929,7 +929,7 @@ Tensor& replication_pad1d_backward_out_cpu(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   gradInput.resize_as_(input);
   replication_pad1d_backward_out_cpu_template(
@@ -940,7 +940,7 @@ Tensor& replication_pad1d_backward_out_cpu(
 Tensor replication_pad1d_backward_cpu(
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto gradInput = at::zeros_like(input);
   replication_pad1d_backward_out_cpu_template(
@@ -951,7 +951,7 @@ Tensor replication_pad1d_backward_cpu(
 Tensor& replication_pad2d_out_cpu(
     Tensor& output,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad2d_out_cpu_template(
       output, input, paddingSize);
@@ -960,7 +960,7 @@ Tensor& replication_pad2d_out_cpu(
 
 Tensor replication_pad2d_cpu(
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto output = at::empty({0}, input.options());
   replication_pad2d_out_cpu_template(
@@ -972,7 +972,7 @@ Tensor& replication_pad2d_backward_out_cpu(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad2d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
@@ -982,7 +982,7 @@ Tensor& replication_pad2d_backward_out_cpu(
 Tensor replication_pad2d_backward_cpu(
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto gradInput = at::zeros_like(input);
   replication_pad2d_backward_out_cpu_template(
@@ -993,7 +993,7 @@ Tensor replication_pad2d_backward_cpu(
 Tensor& replication_pad3d_out_cpu(
     Tensor& output,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad3d_out_cpu_template(
       output, input, paddingSize);
@@ -1002,7 +1002,7 @@ Tensor& replication_pad3d_out_cpu(
 
 Tensor replication_pad3d_cpu(
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto output = at::empty({0}, input.options());
   replication_pad3d_out_cpu_template(
@@ -1014,7 +1014,7 @@ Tensor& replication_pad3d_backward_out_cpu(
     Tensor& gradInput,
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   replication_pad3d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
@@ -1024,7 +1024,7 @@ Tensor& replication_pad3d_backward_out_cpu(
 Tensor replication_pad3d_backward_cpu(
     const Tensor& gradOutput,
     const Tensor& input,
-    IntList paddingSize)
+    IntArrayRef paddingSize)
 {
   auto gradInput = at::zeros_like(input);
   replication_pad3d_backward_out_cpu_template(

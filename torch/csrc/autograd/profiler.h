@@ -17,6 +17,9 @@
 #include <ctime>
 #endif
 
+#include <torch/csrc/autograd/record_function.h>
+#include <torch/csrc/jit/code_template.h>
+
 typedef struct CUevent_st* CUDAEventStub;
 
 namespace torch { namespace autograd {
@@ -95,13 +98,8 @@ enum class EventKind : uint16_t {
 };
 
 struct TORCH_API Event final {
-  Event(EventKind kind, std::string name, uint16_t thread_id, bool record_cuda)
-  : owned_name_(new std::string(std::move(name)))
-  , name_ptr_(owned_name_->c_str())
-  , kind_(kind)
-  , thread_id_(thread_id) { record(record_cuda); }
-  Event(EventKind kind, const char* name, uint16_t thread_id, bool record_cuda)
-  : name_ptr_(name)
+  Event(EventKind kind, StringView name, uint16_t thread_id, bool record_cuda)
+  : name_(std::move(name))
   , kind_(kind)
   , thread_id_(thread_id) { record(record_cuda); }
 
@@ -115,7 +113,7 @@ struct TORCH_API Event final {
     throw std::runtime_error("unknown EventKind");
   }
   const char* name() const {
-    return name_ptr_;
+    return name_.str();
   }
   uint16_t thread_id() const {
     return thread_id_;
@@ -132,11 +130,7 @@ struct TORCH_API Event final {
   }
 private:
   int64_t cpu_ns_ = 0; // signed to allow for negative intervals, initialized for safety.
-  // std::string is a very large object (usually around 32B),
-  // and this field is used only for user-created ranges, so
-  // it's better to save on size of Events.
-  std::unique_ptr<std::string> owned_name_;
-  const char * name_ptr_;
+  StringView name_;
   EventKind kind_;
   uint16_t thread_id_;
   int device_ = -1;
@@ -201,25 +195,31 @@ TORCH_API void mark(std::string name, bool include_cuda = true);
 TORCH_API void pushRange(std::string name);
 TORCH_API void popRange();
 
-struct TORCH_API RecordFunction {
-  explicit RecordFunction(Function* fn);
-
-  explicit RecordFunction(std::string name);
-
-  explicit RecordFunction(const char* name);
-
-  explicit RecordFunction(const char* name, int64_t current_sequence_nr);
-
-  ~RecordFunction() {
-    popRange();
-  }
-};
-
 using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that
 // there no autograd functions are being executed when these function are used.
 TORCH_API void enableProfiler(ProfilerState new_state);
 TORCH_API thread_event_lists disableProfiler();
+
+
+// Usage:
+//   {
+//     RecordProfile guard("filename.trace");
+//     // code you want to profile
+//   }
+// Then open filename.trace in chrome://tracing
+struct TORCH_API RecordProfile {
+  RecordProfile(std::ostream& out);
+  RecordProfile(const std::string& filename);
+
+  ~RecordProfile();
+private:
+  void init();
+  std::unique_ptr<std::ofstream> file_;
+  std::ostream& out_;
+  void processEvents(const std::vector<Event*>& events);
+};
+
 
 } // namespace profiler
 }} // namespace torch::autograd

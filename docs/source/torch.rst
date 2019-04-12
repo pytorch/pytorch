@@ -107,6 +107,13 @@ There are a few more in-place random sampling functions defined on Tensors as we
 - :func:`torch.Tensor.random_` - numbers sampled from the discrete uniform distribution
 - :func:`torch.Tensor.uniform_` - numbers sampled from the continuous uniform distribution
 
+Quasi-random sampling
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: torch.quasirandom.SobolEngine
+    :members:
+    :exclude-members: MAXBIT, MAXDIM
+    :undoc-members:
 
 Serialization
 ----------------------------------
@@ -218,6 +225,7 @@ Reduction Ops
 .. autofunction:: std
 .. autofunction:: sum
 .. autofunction:: unique
+.. autofunction:: unique_consecutive
 .. autofunction:: var
 
 
@@ -259,6 +267,8 @@ Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: bincount
 .. autofunction:: broadcast_tensors
+.. autofunction:: cartesian_prod
+.. autofunction:: combinations
 .. autofunction:: cross
 .. autofunction:: diag
 .. autofunction:: diag_embed
@@ -271,11 +281,14 @@ Other Operations
 .. autofunction:: histc
 .. autofunction:: meshgrid
 .. autofunction:: renorm
+.. autofunction:: repeat_interleave
 .. autofunction:: roll
 .. autofunction:: tensordot
 .. autofunction:: trace
 .. autofunction:: tril
+.. autofunction:: tril_indices
 .. autofunction:: triu
+.. autofunction:: triu_indices
 
 
 BLAS and LAPACK Operations
@@ -304,6 +317,9 @@ BLAS and LAPACK Operations
 .. autofunction:: det
 .. autofunction:: logdet
 .. autofunction:: slogdet
+.. autofunction:: lu
+.. autofunction:: lu_solve
+.. autofunction:: lu_unpack
 .. autofunction:: matmul
 .. autofunction:: matrix_power
 .. autofunction:: matrix_rank
@@ -317,8 +333,10 @@ BLAS and LAPACK Operations
 .. autofunction:: potrs
 .. autofunction:: pstrf
 .. autofunction:: qr
+.. autofunction:: solve
 .. autofunction:: svd
 .. autofunction:: symeig
+.. autofunction:: triangular_solve
 .. autofunction:: trtrs
 
 Utilities

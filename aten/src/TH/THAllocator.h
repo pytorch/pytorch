@@ -2,7 +2,7 @@
 
 #include <TH/THGeneral.h>
 
-#include <ATen/Allocator.h>
+#include <c10/core/Allocator.h>
 
 #define TH_ALLOCATOR_MAPPED_SHARED 1
 #define TH_ALLOCATOR_MAPPED_SHAREDMEM 2

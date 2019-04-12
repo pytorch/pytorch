@@ -278,10 +278,14 @@ bool TCPStoreDaemon::checkKeys(const std::vector<std::string>& keys) const {
 TCPStore::TCPStore(
     const std::string& masterAddr,
     PortType masterPort,
+    int numWorkers,
     bool isServer)
     : isServer_(isServer),
       tcpStoreAddr_(masterAddr),
-      tcpStorePort_(masterPort) {
+      tcpStorePort_(masterPort),
+      numWorkers_(numWorkers),
+      initKey_("init/"),
+      regularPrefix_("/") {
   if (isServer_) {
     // Opening up the listening socket
     std::tie(masterListenSocket_, std::ignore) = tcputil::listen(masterPort);
@@ -291,6 +295,8 @@ TCPStore::TCPStore(
   }
   // Connect to the daemon
   storeSocket_ = tcputil::connect(tcpStoreAddr_, tcpStorePort_);
+
+  waitForWorkers_();
 }
 
 TCPStore::~TCPStore() {
@@ -303,20 +309,56 @@ TCPStore::~TCPStore() {
   }
 }
 
+void TCPStore::waitForWorkers_() {
+  addHelper_(initKey_, 1);
+  // Let server block until all workers have completed, this ensures that
+  // the server daemon thread is always running until the very end
+  if (isServer_) {
+    const auto start = std::chrono::steady_clock::now();
+    while (true) {
+      std::vector<uint8_t> value = getHelper_(initKey_);
+      auto buf = reinterpret_cast<const char*>(value.data());
+      auto len = value.size();
+      int numWorkersCompleted = std::stoi(std::string(buf, len));
+      if (numWorkersCompleted >= numWorkers_) {
+        break;
+      }
+      const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+          std::chrono::steady_clock::now() - start);
+      if (timeout_ != kNoTimeout && elapsed > timeout_) {
+        break;
+      }
+      /* sleep override */
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  }
+}
+
 void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
+  std::string regKey = regularPrefix_ + key;
   tcputil::sendValue<QueryType>(storeSocket_, QueryType::SET);
-  tcputil::sendString(storeSocket_, key, true);
+  tcputil::sendString(storeSocket_, regKey, true);
   tcputil::sendVector<uint8_t>(storeSocket_, data);
 }
 
 std::vector<uint8_t> TCPStore::get(const std::string& key) {
-  wait({key});
+  std::string regKey = regularPrefix_ + key;
+  return getHelper_(regKey);
+}
+
+std::vector<uint8_t> TCPStore::getHelper_(const std::string& key) {
+  waitHelper_({key}, timeout_);
   tcputil::sendValue<QueryType>(storeSocket_, QueryType::GET);
   tcputil::sendString(storeSocket_, key);
   return tcputil::recvVector<uint8_t>(storeSocket_);
 }
 
 int64_t TCPStore::add(const std::string& key, int64_t value) {
+  std::string regKey = regularPrefix_ + key;
+  return addHelper_(regKey, value);
+}
+
+int64_t TCPStore::addHelper_(const std::string& key, int64_t value) {
   tcputil::sendValue<QueryType>(storeSocket_, QueryType::ADD);
   tcputil::sendString(storeSocket_, key, true);
   tcputil::sendValue<int64_t>(storeSocket_, value);
@@ -328,7 +370,8 @@ bool TCPStore::check(const std::vector<std::string>& keys) {
   SizeType nkeys = keys.size();
   tcputil::sendBytes<SizeType>(storeSocket_, &nkeys, 1, (nkeys > 0));
   for (size_t i = 0; i < nkeys; i++) {
-    tcputil::sendString(storeSocket_, keys[i], (i != (nkeys - 1)));
+    std::string regKey = regularPrefix_ + keys[i];
+    tcputil::sendString(storeSocket_, regKey, (i != (nkeys - 1)));
   }
   auto checkResponse = tcputil::recvValue<CheckResponseType>(storeSocket_);
   if (checkResponse == CheckResponseType::READY) {
@@ -345,6 +388,17 @@ void TCPStore::wait(const std::vector<std::string>& keys) {
 }
 
 void TCPStore::wait(
+    const std::vector<std::string>& keys,
+    const std::chrono::milliseconds& timeout) {
+  std::vector<std::string> regKeys;
+  regKeys.resize(keys.size());
+  for (size_t i = 0; i < keys.size(); ++i) {
+    regKeys[i] = regularPrefix_ + keys[i];
+  }
+  waitHelper_(regKeys, timeout);
+}
+
+void TCPStore::waitHelper_(
     const std::vector<std::string>& keys,
     const std::chrono::milliseconds& timeout) {
   // Set the socket timeout if there is a wait timeout

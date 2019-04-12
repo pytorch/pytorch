@@ -10,7 +10,7 @@ void THNN_(LookupTableBag_updateOutput)(
            THCTensor *weight,
            THCTensor *output,
            THCIndexTensor *offset2bag,
-	   int mode,
+           int mode,
            THCIndexTensor *bag_size)
 {
   THCUNN_assertSameGPU(state, 5, input, offsets, weight, output, offset2bag);
@@ -65,8 +65,8 @@ void THNN_(LookupTableBag_accGradParameters)(
            THCIndexTensor *sortedIndices,
            THCIndexTensor *origIndices,
            bool scaleGradByFreq,
-	   int mode,
-	   THCIndexTensor *bag_size,
+           int mode,
+           THCIndexTensor *bag_size,
            accreal scale_)
 {
   scalar_t scale = ScalarConvert<accreal, scalar_t>::to(scale_);
@@ -111,7 +111,7 @@ void THNN_(LookupTableBag_accGradParameters)(
       origIndicesIter(THCIndexTensor_(data)(state, origIndices));
 
     // Fill sortedOrigIndices with sequential indices
-    thrust::counting_iterator<THCIndex_t> countIter(TH_INDEX_BASE);
+    thrust::counting_iterator<THCIndex_t> countIter(0);
 
     thrust::copy(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__

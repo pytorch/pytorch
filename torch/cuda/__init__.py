@@ -102,6 +102,7 @@ def _check_capability():
     old_gpu_warn = """
     Found GPU%d %s which is of cuda capability %d.%d.
     PyTorch no longer supports this GPU because it is too old.
+    The minimum cuda capability that we support is 3.5.
     """
 
     CUDA_VERSION = torch._C._cuda_getCompiledVersion()
@@ -221,7 +222,7 @@ class device(object):
         self.prev_idx = -1
 
     def __enter__(self):
-        if self.idx is -1:
+        if self.idx == -1:
             return
         self.prev_idx = torch._C._cuda_getDevice()
         if self.prev_idx != self.idx:
@@ -264,7 +265,7 @@ def set_device(device):
         torch._C._cuda_setDevice(device)
 
 
-def get_device_name(device):
+def get_device_name(device=None):
     r"""Gets the name of a device.
 
     Arguments:
@@ -276,7 +277,7 @@ def get_device_name(device):
     return get_device_properties(device).name
 
 
-def get_device_capability(device):
+def get_device_capability(device=None):
     r"""Gets the cuda capability of a device.
 
     Arguments:
@@ -313,19 +314,28 @@ def stream(stream):
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
 
-    .. note:: Streams are per-device, and this function changes the "current
-       stream" only for the currently selected device.  It is illegal to select
-       a stream that belongs to a different device.
+    .. note:: Streams are per-device. If the selected stream is not on the
+        current device, this function will also change the current device to
+        match the stream.
     """
     if stream is None:
         yield
         return
-    prev_stream = current_stream()
+    src_prev_stream = current_stream()
+
+    if src_prev_stream.device != stream.device:
+        # The given stream is on a different device; have to restore the
+        # current_stream on that device on exit as well
+        with device(stream.device):
+            dst_prev_stream = current_stream()
+
     torch._C._cuda_setStream(stream._cdata)
     try:
         yield
     finally:
-        torch._C._cuda_setStream(prev_stream._cdata)
+        if src_prev_stream.device != stream.device:
+            torch._C._cuda_setStream(dst_prev_stream._cdata)
+        torch._C._cuda_setStream(src_prev_stream._cdata)
 
 
 def device_count():
@@ -348,10 +358,45 @@ def synchronize():
     return torch._C._cuda_synchronize()
 
 
-def current_stream():
-    r"""Returns a currently selected :class:`Stream`."""
+def ipc_collect():
+    r"""Force collects GPU memory after it has been released by CUDA IPC.
+
+    .. note::
+        Checks if any sent CUDA tensors could be cleaned from the memory. Force
+        closes shared memory file used for reference counting if there is no
+        active counters. Useful when the producer process stopped actively sending
+        tensors and want to release unused memory.
+    """
     _lazy_init()
-    return torch.cuda.Stream(_cdata=torch._C._cuda_getCurrentStream())
+    return torch._C._cuda_ipc_collect()
+
+
+def current_stream(device=None):
+    r"""Returns the currently selected :class:`Stream` for a given device.
+
+    Arguments:
+        device (torch.device or int, optional): selected device. Returns
+            the currently selected :class:`Stream` for the current device, given
+            by :meth:`~torch.cuda.current_device`, if :attr:`device` is ``None``
+            (default).
+    """
+    _lazy_init()
+    return torch.cuda.Stream(_cdata=torch._C._cuda_getCurrentStream(
+        _get_device_index(device, optional=True)))
+
+
+def default_stream(device=None):
+    r"""Returns the default :class:`Stream` for a given device.
+
+    Arguments:
+        device (torch.device or int, optional): selected device. Returns
+            the default :class:`Stream` for the current device, given by
+            :meth:`~torch.cuda.current_device`, if :attr:`device` is ``None``
+            (default).
+    """
+    _lazy_init()
+    return torch.cuda.Stream(_cdata=torch._C._cuda_getDefaultStream(
+        _get_device_index(device, optional=True)))
 
 
 def current_blas_handle():
@@ -528,7 +573,7 @@ def _dummy_type(name):
 
 if not hasattr(torch._C, 'CudaDoubleStorageBase'):
     # Define dummy base classes
-    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half']:
+    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half', 'Bool']:
         storage_name = 'Cuda{0}StorageBase'.format(t)
         tensor_name = 'Cuda{0}TensorBase'.format(t)
 
@@ -536,6 +581,7 @@ if not hasattr(torch._C, 'CudaDoubleStorageBase'):
         torch._C.__dict__[tensor_name] = _dummy_type(tensor_name)
 
     torch._C.__dict__['_CudaStreamBase'] = _dummy_type('CudaStreamBase')
+    torch._C.__dict__['_CudaEventBase'] = _dummy_type('CudaEventBase')
 
 
 @staticmethod
@@ -589,6 +635,9 @@ class HalfStorage(_CudaBase, torch._C.CudaHalfStorageBase, _StorageBase):
     pass
 
 
+class BoolStorage(_CudaBase, torch._C.CudaBoolStorageBase, _StorageBase):
+    pass
+
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
 torch._storage_classes.add(LongStorage)
@@ -597,8 +646,9 @@ torch._storage_classes.add(ShortStorage)
 torch._storage_classes.add(CharStorage)
 torch._storage_classes.add(ByteStorage)
 torch._storage_classes.add(HalfStorage)
+torch._storage_classes.add(BoolStorage)
 
-from . import sparse
-from . import profiler
-from . import nvtx
-from .streams import Stream, Event
+from . import sparse  # noqa: F401
+from . import profiler  # noqa: F401
+from . import nvtx  # noqa: F401
+from .streams import Stream, Event  # noqa: F401

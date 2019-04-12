@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/python_headers.h>
+#include <c10/core/ScalarType.h>
 
 namespace c10 {
 struct Device;
@@ -31,7 +32,7 @@ void py_set_default_dtype(PyObject* dtype_obj);
 // returned value will be a VariableType instance.
 at::Type& get_default_tensor_type();
 
-// Gets the torch::Device object of a given at::Tensor
-c10::Device getDevice(const at::Tensor& tensor);
+// Gets the ScalarType for the default tensor type.
+at::ScalarType get_default_scalar_type();
 
 }} // namespace torch::tensors

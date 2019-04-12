@@ -29,10 +29,9 @@ void VariableLengthSequencePadding(
 template <typename T, typename Context>
 class VariableLengthSequencePaddingOp : public Operator<Context> {
  public:
-  VariableLengthSequencePaddingOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit VariableLengthSequencePaddingOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {

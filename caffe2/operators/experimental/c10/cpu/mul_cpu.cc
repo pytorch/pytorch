@@ -1,8 +1,8 @@
-#include <c10/core/dispatch/KernelRegistration.h>
-#include "caffe2/operators/elementwise_ops_utils.h"
-#include "caffe2/operators/experimental/c10/schemas/mul.h"
-#include "caffe2/utils/math.h"
+#include <ATen/core/op_registration/op_registration.h>
+#include "caffe2/core/operator_c10wrapper.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/operators/elementwise_ops_utils.h"
+#include "caffe2/utils/math.h"
 
 using caffe2::BaseContext;
 using caffe2::Tensor;
@@ -12,14 +12,14 @@ namespace {
 
 template <class DataType>
 void mul_op_cpu_impl(
-    const C10Tensor& A_,
-    const C10Tensor& B_,
-    const C10Tensor& C_,
+    const at::Tensor& A_,
+    const at::Tensor& B_,
+    const at::Tensor& C_,
     bool legacy_broadcast,
-    int axis) {
-  Tensor A(A_);
-  Tensor B(B_);
-  Tensor C(C_);
+    int64_t axis) {
+  Tensor A{C10Tensor(A_)};
+  Tensor B{C10Tensor(B_)};
+  Tensor C{C10Tensor(C_)};
   CPUContext context;
   const DataType* A_data = A.template data<DataType>();
   const DataType* B_data = B.template data<DataType>();
@@ -70,18 +70,25 @@ void mul_op_cpu_impl(
       C.mutable_data<DataType>(),
       static_cast<CPUContext*>(&context));
 }
-} // namespace
-} // namespace caffe2
 
-namespace c10 {
-C10_REGISTER_KERNEL(caffe2::ops::Mul)
-    .kernel(&caffe2::mul_op_cpu_impl<float>)
-    .dispatchKey(c10::DispatchKey<2>{
-        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
-                                                 LayoutId(0),
-                                                 caffe2::TypeMeta::Id<float>()},
-        c10::details::TensorParameterDispatchKey{
-            DeviceTypeId::CPU,
-            LayoutId(0),
-            caffe2::TypeMeta::Id<float>()}});
-} // namespace c10
+static auto registry = c10::RegisterOperators().op(
+    FunctionSchema(
+        "_c10_experimental::Mul",
+        "",
+        (std::vector<c10::Argument>{
+            c10::Argument("input1"),
+            c10::Argument("input2"),
+            c10::Argument("output"),
+            c10::Argument("legacy_broadcast", BoolType::get()),
+            c10::Argument("axis", IntType::get())}),
+        (std::vector<c10::Argument>{})),
+    c10::kernel<decltype(mul_op_cpu_impl<float>), &mul_op_cpu_impl<float>>(),
+    c10::dispatchKey(CPUTensorId()));
+
+} // namespace
+
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::Mul",
+    C10Mul_DontUseThisOpYet)
+
+} // namespace caffe2

@@ -21,17 +21,30 @@ enum class DeviceType : int16_t {
   IDEEP = 5, // IDEEP.
   HIP = 6, // AMD HIP
   FPGA = 7, // FPGA
+  MSNPU = 8, // MSNPU
+  XLA = 9, // XLA / TPU
   // NB: If you add more devices:
   //  - Change the implementations of DeviceTypeName and isValidDeviceType
   //    in DeviceType.cpp
   //  - Change the number below
-  COMPILE_TIME_MAX_DEVICE_TYPES = 8,
+  COMPILE_TIME_MAX_DEVICE_TYPES = 10,
   ONLY_FOR_TEST = 20901, // This device type is only for test.
 };
 
 // define explicit int constant
 constexpr int COMPILE_TIME_MAX_DEVICE_TYPES =
     static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
+
+static_assert(COMPILE_TIME_MAX_DEVICE_TYPES <= 16,
+    "Hey!  You seem to be adding a lot of new DeviceTypes.  The intent was "
+    "for this constant to reflect the actual number of DeviceTypes we support "
+    "in PyTorch; it's important that this number is not too large as we "
+    "use this to allocate stack arrays in some places in our code.  If you "
+    "are indeed just adding the 17th device type, feel free to change "
+    "the check to 32; but if you are adding some sort of extensible device "
+    "types registration, please be aware that you are affecting code that "
+    "this number is small.  Try auditing uses of this constant.");
+
 C10_API std::string DeviceTypeName(
     DeviceType d,
     bool lower_case = false);

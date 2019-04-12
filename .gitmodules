@@ -52,15 +52,12 @@
 [submodule "third_party/python-six"]
 	path = third_party/python-six
 	url = https://github.com/benjaminp/six.git
-[submodule "third_party/ComputeLibrary"]
-	path = third_party/ComputeLibrary
-	url = https://github.com/ARM-software/ComputeLibrary.git
 [submodule "third_party/onnx"]
 	path = third_party/onnx
 	url = https://github.com/onnx/onnx.git
 [submodule "third_party/onnx-tensorrt"]
 	path = third_party/onnx-tensorrt
-	url = https://github.com/bddppq/onnx-tensorrt
+	url = https://github.com/onnx/onnx-tensorrt
 [submodule "third_party/sleef"]
 	path = third_party/sleef
 	url = https://github.com/zdevito/sleef
@@ -82,3 +79,6 @@
 [submodule "third_party/fbgemm"]
 	path = third_party/fbgemm
 	url = https://github.com/pytorch/fbgemm
+[submodule "third_party/foxi"]
+	path = third_party/foxi
+	url = https://github.com/houseroad/foxi.git

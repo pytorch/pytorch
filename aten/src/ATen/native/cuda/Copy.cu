@@ -25,7 +25,17 @@ struct CopyOp {
 #else
           dst_val = static_cast<dst_T>(static_cast<native::inter_copy_type_t<dst_T>>(src_val));
 #endif
-        });
+      });
+  }
+};
+
+template<typename dst_T>
+struct CopyOp<dst_T, bool> {
+  static void apply(Tensor& dst, const Tensor& src) {
+    CUDA_tensor_apply2<dst_T, bool>(
+      dst, src, [] __device__(dst_T & dst_val, const bool& src_val) {
+        dst_val = static_cast<dst_T>(static_cast<native::inter_copy_type_t<dst_T>>(src_val));
+      });
   }
 };
 
@@ -60,29 +70,22 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
   bool p2pEnabled = THCState_getPeerToPeerAccess(
       globalContext().getTHCState(), src_device.index(), dst_device.index());
 
-  // We always perform the copy on the source device, using the
-  // current stream on the source device.
-  // If the copy is on the default stream, then we fully synchronize
-  // both src and dst's default streams for completion of the
-  // copy. We have to explicitly do this for non-contig copies.
-  // This mimics the behavior of cross-device cudaMemcpyAsync on
-  // the default stream.
-  // If the copy is not on the default stream, then it is up to the
-  // user to add needed synchronization on the dst device, since the
-  // stream on the dst device that wishes to synchronize may not be
-  // the same index as the one on the src device.
+  // We always perform the copy on the source device, using the current stream
+  // on the source device, and we fully synchronize on both src and dst's
+  // current streams for completion of the copy. We have to explicitly do this
+  // for non-contig copies. This mimics the behavior of cross-device
+  // cudaMemcpyAsync on the default stream.
   CUDAStream copy_stream = getCurrentCUDAStream(src_device.index());
-  if (src_device != dst_device && copy_stream == nullptr) {
-    // This is a cross-device copy on the default stream. We perform a
-    // two-way barrier between both devices' default streams before
-    // the copy. This ensures that any write-after-write and
-    // write-after-read dependencies on the destination side are
-    // handled, so that no one is operating on the dst memory when
-    // we perform the copy.
+  if (src_device != dst_device) {
+    // This is a cross-device copy on the src current stream and dst current
+    // stream. We perform a two-way barrier between both devices' streams
+    // before the copy. This ensures that any write-after-write and
+    // write-after-read dependencies on the destination side are handled, so
+    // that no one is operating on the dst memory when we perform the copy.
     // src waits on dst barrier (src already waits on src)
     CUDAEvent dst_ready;
     device_guard.set_device(dst_device);
-    dst_ready.record(getDefaultCUDAStream(dst_device.index()));
+    dst_ready.record(getCurrentCUDAStream(dst_device.index()));
 
     device_guard.set_device(src_device);
     dst_ready.block(copy_stream);
@@ -148,16 +151,16 @@ void copy_device_to_device(Tensor& dst, const Tensor& src) {
     }
   }
 
-  if (src_device != dst_device && copy_stream == nullptr) {
+  if (src_device != dst_device) {
     // dst waits on src barrier (dst already waits on dst). We cannot
     // operate on dst's copy until the copy is complete.
 
-    // Still on src_device, record default stream event
+    // Still on src_device, record stream event
     CUDAEvent src_ready;
     src_ready.record(copy_stream);
 
     device_guard.set_device(dst_device);
-    src_ready.block(getDefaultCUDAStream(dst_device.index()));
+    src_ready.block(getCurrentCUDAStream(dst_device.index()));
   }
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -172,11 +175,11 @@ void copy_from_cpu(Tensor& dst, const Tensor& src) {
   AT_CUDA_CHECK(cudaMemcpyAsync(
       dst_contig.data_ptr(),
       src_contig.data_ptr(),
-      src.numel() * src.dtype().itemsize(),
+      src.numel() * src.element_size(),
       cudaMemcpyHostToDevice,
       stream));
   AT_CUDA_CHECK(cudaStreamSynchronize(stream));
-  AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_from_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, src.scalar_type(), "copy_from_cpu", [&]() {
     copy_device_to_device<scalar_t, scalar_t>(dst, dst_contig);
   });
 }
@@ -191,7 +194,7 @@ void copy_to_cpu(Tensor& dst, const Tensor& src) {
   AT_CUDA_CHECK(cudaMemcpyAsync(
       dst_contig.data_ptr(),
       src_contig.data_ptr(),
-      src.numel() * src.dtype().itemsize(),
+      src.numel() * src.element_size(),
       cudaMemcpyDeviceToHost,
       stream));
   AT_CUDA_CHECK(cudaStreamSynchronize(stream));
@@ -209,7 +212,7 @@ void copy_from_cpu_async_(Tensor& dst, const Tensor& src) {
   CUDAGuard device_guard(dst.device());
   CUDAStream stream = getCurrentCUDAStream();
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_from_cpu_async", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, src.scalar_type(), "copy_from_cpu_async", [&]() {
     AT_CUDA_CHECK(cudaMemcpyAsync(
         dst.data<scalar_t>(),
         src.data<scalar_t>(),
@@ -232,7 +235,7 @@ void copy_to_cpu_async_(Tensor& dst, const Tensor& src) {
   CUDAGuard device_guard(src.device());
   CUDAStream stream = getCurrentCUDAStream();
 
-  AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "copy_to_cpu_async", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, src.scalar_type(), "copy_to_cpu_async", [&]() {
     AT_CUDA_CHECK(cudaMemcpyAsync(
         dst.data<scalar_t>(),
         src.data<scalar_t>(),
@@ -247,7 +250,7 @@ void copy_to_cpu_async_(Tensor& dst, const Tensor& src) {
 template <typename dst_T>
 void _copy__cuda(Tensor& dst, const Tensor& src, bool non_blocking) {
   AT_CHECK(dst.numel() == src.numel(), "sizes do not match");
-  AT_DISPATCH_ALL_TYPES_AND_HALF(src.type(), "_copy__cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, src.scalar_type(), "_copy__cuda", [&]() {
     if (dst.is_cuda() && src.is_cuda()) {
       copy_device_to_device<dst_T, scalar_t>(dst, src);
     } else if (dst.is_cuda()) {
@@ -286,7 +289,7 @@ namespace at {
 namespace native {
 
 Tensor& _s_copy__cuda(Tensor& self, const Tensor& src, bool non_blocking) {
-  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "_copy__cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, self.scalar_type(), "_copy__cuda", [&]() {
     ::_copy__cuda<scalar_t>(self, src, non_blocking);
   });
   return self;

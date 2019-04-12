@@ -19,8 +19,8 @@
 
 namespace c10d {
 
-// Turns at::IntList into "(1, 2, 3, 4)".
-inline std::string toString(at::IntList l) {
+// Turns at::IntArrayRef into "(1, 2, 3, 4)".
+inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;
   ss << "(";
   for (size_t i = 0; i < l.size(); i++) {
@@ -34,7 +34,7 @@ inline std::string toString(at::IntList l) {
 }
 
 inline void assertSameType(
-    const at::Type& type,
+    const at::DeprecatedTypeProperties& type,
     const std::vector<at::Tensor>& tensors) {
   for (size_t i = 0; i < tensors.size(); i++) {
     if (tensors[i].type() != type) {
@@ -47,7 +47,7 @@ inline void assertSameType(
 }
 
 inline void assertSameSizes(
-    const at::IntList& sizes,
+    const at::IntArrayRef& sizes,
     const std::vector<at::Tensor>& tensors) {
   for (size_t i = 0; i < tensors.size(); i++) {
     if (!tensors[i].sizes().equals(sizes)) {
@@ -66,7 +66,7 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   }
 
   // Ensure all tensors have identical type and shape
-  auto& type = tensors[0].type();
+  auto type = tensors[0].type();
   auto sizes = tensors[0].sizes();
   for (size_t i = 1; i < tensors.size(); i++) {
     if (tensors[i].type() != type) {
@@ -88,7 +88,7 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
 
 inline void assertTypeMatch(
     std::function<void(const std::string&)> fn,
-    const at::Type& type,
+    const at::DeprecatedTypeProperties& type,
     const at::ArrayRef<at::Tensor>& tensors,
     size_t index) {
   if (tensors[index].type() != type) {
@@ -99,7 +99,7 @@ inline void assertTypeMatch(
 
 inline void assertSizesMatch(
     std::function<void(const std::string&)> fn,
-    const at::IntList& sizes,
+    const at::IntArrayRef& sizes,
     const at::ArrayRef<at::Tensor>& tensors,
     size_t index) {
   if (tensors[index].sizes() != sizes) {
@@ -179,8 +179,8 @@ inline void assertCPU(
 inline void assertTypeAndSizesMatch(
     std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor>& tensors,
-    const at::Type& type,
-    const at::IntList& sizes) {
+    const at::DeprecatedTypeProperties& type,
+    const at::IntArrayRef& sizes) {
   for (size_t i = 0; i < tensors.size(); i++) {
     assertTypeMatch(fn, type, tensors, i);
     assertSizesMatch(fn, sizes, tensors, i);
@@ -195,7 +195,7 @@ inline void assertTypeAndSizesMatch(
   assertTypeAndSizesMatch(fn, tensors.slice(1), type, sizes);
 }
 
-// Copied from torch/csrc/utils/functional.h.
+// Copied from ATen/core/functional.h.
 template <typename F, typename T>
 inline auto fmap(T& inputs, const F& fn)
     -> std::vector<decltype(fn(*inputs.begin()))> {
@@ -304,6 +304,8 @@ while (true) {                                                \
   if (!(success_cond)) {                                      \
     if (errno == EINTR) {                                     \
       continue;                                               \
+    } else if (errno == EAGAIN || errno == EWOULDBLOCK) {     \
+      throw std::runtime_error("Socket Timeout");             \
     } else {                                                  \
       throw std::system_error(errno, std::system_category()); \
     }                                                         \

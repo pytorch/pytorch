@@ -22,6 +22,7 @@ class FullyConnectedDNNLowPPackWeightOp final
 
  private:
   int axis_w_;
+  bool quantize_channelwise_;
   int nbits_in_non_outlier_; // only for DNNLOWP_ACC16
 
   INPUT_TAGS(FILTER, BIAS);
@@ -80,6 +81,13 @@ void ComputeColumnOffsets(
     const T* W,
     const vector<dnnlowp::TensorQuantizationParams>& qparams,
     vector<int32_t>& col_offsets);
+
+int CountOutliers(
+    int groups,
+    int kernel_dim,
+    int M,
+    int nbits_in_non_outlier,
+    vector<std::int8_t>& W_quantized);
 
 /**
  * @param W_quantized input quantized weight that is not packed yet

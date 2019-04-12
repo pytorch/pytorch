@@ -309,12 +309,7 @@ void THCTensor_(sort)(THCState* state,
   int maxSliceSize = 2048;
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
-  // TODO bitonicSortKVInPlace hangs on ROCm currently.
-  if (0) {
-#else
   if (sliceSize <= maxSliceSize) {
-#endif
     // Fill `indices` (the values) with the
     // slice-relative index.
     THCudaLongTensor_fillSliceWithIndex(state, indices, dim);

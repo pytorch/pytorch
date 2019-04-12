@@ -1,6 +1,8 @@
 #include <caffe2/ideep/ideep_utils.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 // Takes a shape and data tensor and reshapes it
 class IDEEPReshapeOp final : public IDEEPOperator {
@@ -23,10 +25,19 @@ class IDEEPReshapeOp final : public IDEEPOperator {
       // shape info live on CPU
       auto& shape = OperatorBase::Input<TensorCPU>(1, CPU);
       CAFFE_ENFORCE(shape.ndim() == 1, "Shape should be 1-D");
-      const int* shape_data = shape.template data<int>();
-
       actual_new_shape.reserve(shape.size());
-      actual_new_shape.assign(shape_data, shape_data + shape.size());
+      if (shape.template IsType<int>()) {
+        const int* shape_data = shape.template data<int>();
+        actual_new_shape.assign(shape_data, shape_data + shape.size());
+      } else if (shape.template IsType<int64_t>()) {
+        const int64_t* shape_data = shape.template data<int64_t>();
+        for (int i = 0; i < shape.size(); ++i) {
+          actual_new_shape.push_back(static_cast<int>(shape_data[i]));
+        }
+      } else {
+        CAFFE_THROW(
+            "IDEEP reshape only supports shape data in int32_t or int64_t");
+      }
     } else {
       CAFFE_ENFORCE(
           OperatorBase::HasArgument("shape"), "Argument `shape` is missing.");
@@ -118,4 +129,4 @@ class IDEEPReshapeOp final : public IDEEPOperator {
 
 REGISTER_IDEEP_OPERATOR(Reshape, IDEEPReshapeOp);
 
-} // namespace caffe2
+} // namespace

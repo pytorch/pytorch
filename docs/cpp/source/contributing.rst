@@ -11,7 +11,7 @@ Specifically for the C++ frontend, just a note about tests: We have very
 extensive tests in the `test/cpp/api
 <https://github.com/pytorch/pytorch/blob/master/test/cpp/api/>`_ folder. The
 tests are a great way to see how certain components are intended to be used.
-Wh∑en compiling PyTorch from source, the test runner binary will be written to
+When compiling PyTorch from source, the test runner binary will be written to
 ``build/bin/test_api``. The tests use the `GoogleTest
 <https://github.com/google/googletest/blob/master/googletest/>`_ framework,
 which you can read up about to learn how to configure the test runner. When

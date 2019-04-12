@@ -23,11 +23,33 @@ def parse_kwargs(desc):
     return {desc.split(' ')[0]: desc for desc in kwargs}
 
 
+def merge_dicts(*dicts):
+    return {x: d[x] for d in dicts for x in d}
+
+
 reduceops_common_args = parse_kwargs("""
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         If specified, the input tensor is casted to :attr:`dtype` before the operation
         is performed. This is useful for preventing data type overflows. Default: None.
+    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
 """)
+
+multi_dim_common = merge_dicts(reduceops_common_args, parse_kwargs("""
+    dim (int or tuple of ints): the dimension or dimensions to reduce
+"""), {'keepdim_details': """
+If :attr:`keepdim` is ``True``, the output tensor is of the same size
+as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
+Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
+output tensor having 1 (or ``len(dim)``) fewer dimension(s).
+"""})
+
+single_dim_common = merge_dicts(reduceops_common_args, parse_kwargs("""
+    dim (int): the dimension to reduce
+"""), {'keepdim_details': """If :attr:`keepdim` is ``True``, the output tensor is of the same size
+as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
+the output tensor having 1 fewer dimension than :attr:`input`."""})
+
 
 factory_common_args = parse_kwargs("""
     out (Tensor, optional): the output tensor
@@ -197,7 +219,7 @@ If :attr:`batch1` is a :math:`(b \times n \times m)` tensor, :attr:`batch2` is a
 and :attr:`out` will be a :math:`(n \times p)` tensor.
 
 .. math::
-    out = \beta\ \text{mat} + \alpha\ (\sum_{i=0}^{b} \text{batch1}_i \mathbin{@} \text{batch2}_i)
+    out = \beta\ \text{mat} + \alpha\ (\sum_{i=0}^{b-1} \text{batch1}_i \mathbin{@} \text{batch2}_i)
 
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and :attr:`alpha`
 must be real numbers, otherwise they should be integers.
@@ -1533,20 +1555,20 @@ Args:
     out (tuple, optional): the output tensors
 
 Returns:
-    (Tensor, Tensor): A tuple containing
+    (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
 
-        - **e** (*Tensor*): Shape :math:`(n \times 2)`. Each row is an eigenvalue of ``a``,
+        - **eigenvalues** (*Tensor*): Shape :math:`(n \times 2)`. Each row is an eigenvalue of ``a``,
           where the first element is the real part and the second element is the imaginary part.
           The eigenvalues are not necessarily ordered.
-        - **v** (*Tensor*): If ``eigenvectors=False``, it's an empty tensor.
+        - **eigenvectors** (*Tensor*): If ``eigenvectors=False``, it's an empty tensor.
           Otherwise, this tensor of shape :math:`(n \times n)` can be used to compute normalized (unit length)
-          eigenvectors of corresponding eigenvalues ``e`` as follows.
-          If the corresponding e[j] is a real number, column v[:, j] is the eigenvector corresponding to
-          eigenvalue e[j].
-          If the corresponding e[j] and e[j + 1] eigenvalues form a complex conjugate pair, then the true eigenvectors
-          can be computed as
-          :math:`\text{eigenvector}[j] = v[:, j] + i \times v[:, j + 1]`,
-          :math:`\text{eigenvector}[j + 1] = v[:, j] - i \times v[:, j + 1]`.
+          eigenvectors of corresponding eigenvalues as follows.
+          If the corresponding `eigenvalues[j]` is a real number, column `eigenvectors[:, j]` is the eigenvector
+          corresponding to `eigenvalues[j]`.
+          If the corresponding `eigenvalues[j]` and `eigenvalues[j + 1]` form a complex conjugate pair, then the
+          true eigenvectors can be computed as
+          :math:`\text{true eigenvector}[j] = eigenvectors[:, j] + i \times eigenvectors[:, j + 1]`,
+          :math:`\text{true eigenvector}[j + 1] = eigenvectors[:, j] - i \times eigenvectors[:, j + 1]`.
 """)
 
 add_docstr(torch.eq,
@@ -1822,7 +1844,7 @@ Example::
 
 add_docstr(torch.gather,
            r"""
-gather(input, dim, index, out=None) -> Tensor
+gather(input, dim, index, out=None, sparse_grad=False) -> Tensor
 
 Gathers values along an axis specified by `dim`.
 
@@ -1843,6 +1865,7 @@ Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to gather
     out (Tensor, optional): the destination tensor
+    sparse_grad(bool,optional): If ``True``, gradient w.r.t. :attr:`input` will be a sparse tensor.
 
 Example::
 
@@ -1911,10 +1934,10 @@ Args:
     out (tuple, optional): the optional destination tensor
 
 Returns:
-    (Tensor, Tensor): A tuple containing:
+    (Tensor, Tensor): A namedtuple (solution, QR) containing:
 
-        - **X** (*Tensor*): the least squares solution
-        - **qr** (*Tensor*): the details of the QR factorization
+        - **solution** (*Tensor*): the least squares solution
+        - **QR** (*Tensor*): the details of the QR factorization
 
 .. note::
 
@@ -1947,7 +1970,8 @@ add_docstr(torch.geqrf,
            r"""
 geqrf(input, out=None) -> (Tensor, Tensor)
 
-This is a low-level function for calling LAPACK directly.
+This is a low-level function for calling LAPACK directly. This function
+returns a namedtuple (a, tau) as defined in `LAPACK documentation for geqrf`_ .
 
 You'll generally want to use :func:`torch.qr` instead.
 
@@ -1994,29 +2018,24 @@ Example::
             [  4.,   8.,  12.]])
 """)
 
-add_docstr(torch.gesv,
+add_docstr(torch.solve,
            r"""
-torch.gesv(B, A, out=None) -> (Tensor, Tensor)
+torch.solve(B, A, out=None) -> (Tensor, Tensor)
 
 This function returns the solution to the system of linear
 equations represented by :math:`AX = B` and the LU factorization of
-A, in order as a tuple `X, LU`.
+A, in order as a namedtuple `solution, LU`.
 
 `LU` contains `L` and `U` factors for LU factorization of `A`.
 
-`torch.gesv(B, A)` can take in 2D inputs `B, A` or inputs that are
+`torch.solve(B, A)` can take in 2D inputs `B, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
-batched outputs `X, LU`.
-
-.. note::
-
-    The :attr:`out` keyword only supports 2D matrix inputs, that is,
-    `B, A` must be 2D matrices.
+batched outputs `solution, LU`.
 
 .. note::
 
     Irrespective of the original strides, the returned matrices
-    `X` and `LU` will be transposed, i.e. with strides like
+    `solution` and `LU` will be transposed, i.e. with strides like
     `B.contiguous().transpose(-1, -2).strides()` and
     `A.contiguous().transpose(-1, -2).strides()` respectively.
 
@@ -2037,7 +2056,7 @@ Example::
     >>> B = torch.tensor([[4.02,  6.19, -8.22, -7.57, -3.03],
                           [-1.56,  4.00, -8.67,  1.75,  2.86],
                           [9.81, -4.09, -4.57, -8.61,  8.99]]).t()
-    >>> X, LU = torch.gesv(B, A)
+    >>> X, LU = torch.solve(B, A)
     >>> torch.dist(B, torch.mm(A, X))
     tensor(1.00000e-06 *
            7.0977)
@@ -2045,7 +2064,7 @@ Example::
     >>> # Batched solver example
     >>> A = torch.randn(2, 3, 1, 4, 4)
     >>> B = torch.randn(2, 3, 1, 4, 6)
-    >>> X, LU = torch.gesv(B, A)
+    >>> X, LU = torch.solve(B, A)
     >>> torch.dist(B, A.matmul(X))
     tensor(1.00000e-06 *
        3.6386)
@@ -2205,6 +2224,22 @@ Example::
     tensor(1.9073e-06)
 """)
 
+add_docstr(torch.isnan,
+           r"""
+Returns a new tensor with boolean elements representing if each element is `NaN` or not.
+
+Arguments:
+    tensor (Tensor): A tensor to check
+
+Returns:
+    Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `NaN` elements.
+
+Example::
+
+    >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
+    tensor([ 0,  1,  0], dtype=torch.uint8)
+""")
+
 add_docstr(torch.is_floating_point,
            r"""
 is_floating_point(tensor) -> (bool)
@@ -2220,13 +2255,11 @@ add_docstr(torch.kthvalue,
            r"""
 kthvalue(input, k, dim=None, keepdim=False, out=None) -> (Tensor, LongTensor)
 
-Returns the :attr:`k` th smallest element of the given :attr:`input` tensor
-along a given dimension.
+Returns a namedtuple ``(values, indices)`` where ``values`` is the :attr:`k` th
+smallest element of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`. And ``indices`` is the index location of each element found.
 
 If :attr:`dim` is not given, the last dimension of the `input` is chosen.
-
-A tuple of `(values, indices)` is returned, where the `indices` is the indices
-of the kth-smallest element in the original `input` tensor in dimension `dim`.
 
 If :attr:`keepdim` is ``True``, both the :attr:`values` and :attr:`indices` tensors
 are the same size as :attr:`input`, except in the dimension :attr:`dim` where
@@ -2248,14 +2281,14 @@ Example::
     >>> x
     tensor([ 1.,  2.,  3.,  4.,  5.])
     >>> torch.kthvalue(x, 4)
-    (tensor(4.), tensor(3))
+    torch.return_types.kthvalue(values=tensor(4.), indices=tensor(3))
 
     >>> x=torch.arange(1.,7.).resize_(2,3)
     >>> x
     tensor([[ 1.,  2.,  3.],
             [ 4.,  5.,  6.]])
-    >>> torch.kthvalue(x,2,0,True)
-    (tensor([[ 4.,  5.,  6.]]), tensor([[ 1,  1,  1]]))
+    >>> torch.kthvalue(x, 2, 0, True)
+    torch.return_types.kthvalue(values=tensor([[4., 5., 6.]]), indices=tensor([[1, 1, 1]]))
 """)
 
 add_docstr(torch.le,
@@ -2287,18 +2320,19 @@ add_docstr(torch.lerp,
 lerp(start, end, weight, out=None)
 
 Does a linear interpolation of two tensors :attr:`start` and :attr:`end` based
-on a scalar :attr:`weight` and returns the resulting :attr:`out` tensor.
+on a scalar or tensor :attr:`weight` and returns the resulting :attr:`out` tensor.
 
 .. math::
-    \text{out}_i = \text{start}_i + \text{weight} \times (\text{end}_i - \text{start}_i)
+    \text{out}_i = \text{start}_i + \text{weight}_i \times (\text{end}_i - \text{start}_i)
 
 The shapes of :attr:`start` and :attr:`end` must be
-:ref:`broadcastable <broadcasting-semantics>`.
+:ref:`broadcastable <broadcasting-semantics>`. If :attr:`weight` is a tensor, then
+the shapes of :attr:`start`, :attr:`end` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     start (Tensor): the tensor with the starting points
     end (Tensor): the tensor with the ending points
-    weight (float): the weight for the interpolation formula
+    weight (float or tensor): the weight for the interpolation formula
     out (Tensor, optional): the output tensor
 
 Example::
@@ -2310,6 +2344,8 @@ Example::
     >>> end
     tensor([ 10.,  10.,  10.,  10.])
     >>> torch.lerp(start, end, 0.5)
+    tensor([ 5.5000,  6.0000,  6.5000,  7.0000])
+    >>> torch.lerp(start, end, torch.full_like(start, 0.5))
     tensor([ 5.5000,  6.0000,  6.5000,  7.0000])
 """)
 
@@ -2487,17 +2523,14 @@ stabilized.
 For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
 
     .. math::
-        \text{logsumexp}(x)_{i} = \log \sum_j \exp(x_{ij})
+        \text{{logsumexp}}(x)_{{i}} = \log \sum_j \exp(x_{{ij}})
 
-If :attr:`keepdim` is ``True``, the output tensor is of the same size
-as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
-the output tensor having 1 fewer dimension than :attr:`input`.
+{keepdim_details}
 
 Args:
     input (Tensor): the input tensor
-    dim (int): the dimension to reduce
-    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
+    {dim}
+    {keepdim}
     out (Tensor, optional): the output tensor
 
 
@@ -2505,7 +2538,7 @@ Example::
     >>> a = torch.randn(3, 3)
     >>> torch.logsumexp(a, 1)
     tensor([ 0.8442,  1.4322,  0.8711])
-""")
+""".format(**multi_dim_common))
 
 add_docstr(torch.lt,
            r"""
@@ -2529,6 +2562,32 @@ Example::
     >>> torch.lt(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
     tensor([[ 0,  0],
             [ 1,  0]], dtype=torch.uint8)
+""")
+
+add_docstr(torch.lu_solve,
+           r"""
+lu_solve(b, LU_data, LU_pivots, out=None) -> Tensor
+
+Batch LU solve.
+
+Returns the LU solve of the linear system :math:`Ax = b` using the partially pivoted
+LU factorization of A from :meth:`torch.lu`.
+
+Arguments:
+    b (Tensor): the RHS tensor
+    LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu`.
+    LU_pivots (IntTensor): the pivots of the LU factorization
+    out (Tensor, optional): the optional output tensor
+
+Example::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> b = torch.randn(2, 3)
+    >>> A_LU = torch.lu(A)
+    >>> x = torch.lu_solve(b, *A_LU)
+    >>> torch.norm(torch.bmm(A, x.unsqueeze(2)) - b.unsqueeze(2))
+    tensor(1.00000e-07 *
+           2.8312)
 """)
 
 add_docstr(torch.masked_select,
@@ -2649,9 +2708,10 @@ Example::
 
 .. function:: max(input, dim, keepdim=False, out=None) -> (Tensor, LongTensor)
 
-Returns the maximum value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. The second return value is the index location of each
-maximum value found (argmax).
+Returns a namedtuple ``(values, indices)`` where ``values`` is the maximum
+value of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`. And ``indices`` is the index location of each maximum value found
+(argmax).
 
 If :attr:`keepdim` is ``True``, the output tensors are of the same size
 as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
@@ -2673,7 +2733,7 @@ Example::
             [ 1.5717, -0.9207,  0.1297, -1.8768],
             [-0.6172,  1.0036, -0.6060, -0.2432]])
     >>> torch.max(a, 1)
-    (tensor([ 0.8475,  1.1949,  1.5717,  1.0036]), tensor([ 3,  0,  0,  1]))
+    torch.return_types.max(values=tensor([0.8475, 1.1949, 1.5717, 1.0036]), indices=tensor([3, 0, 0, 1]))
 
 .. function:: max(input, other, out=None) -> Tensor
 
@@ -2706,6 +2766,55 @@ Example::
     tensor([ 0.8722, -0.7416,  0.2653, -0.1584])
 """)
 
+add_docstr(torch.argmax,
+           r"""
+.. function:: argmax(input) -> LongTensor
+
+Returns the indices of all elements in the :attr:`input` tensor.
+
+This is the second value returned by :meth:`torch.max`. See its
+documentation for the exact semantics of this method.
+
+Args:
+    input (Tensor): the input tensor
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 1.3398,  0.2663, -0.2686,  0.2450],
+            [-0.7401, -0.8805, -0.3402, -1.1936],
+            [ 0.4907, -1.3948, -1.0691, -0.3132],
+            [-1.6092,  0.5419, -0.2993,  0.3195]])
+    >>> torch.argmax(a)
+    tensor(0)
+
+.. function:: argmax(input, dim, keepdim=False) -> LongTensor
+
+Returns the indices of the maximum values of a tensor across a dimension.
+
+This is the second value returned by :meth:`torch.max`. See its
+documentation for the exact semantics of this method.
+
+Args:
+    input (Tensor): the input tensor
+    dim (int): the dimension to reduce. If ``None``, the argmax of the
+        flattened input is returned.
+    keepdim (bool): whether the output tensors have :attr:`dim`
+        retained or not. Ignored if ``dim=None``.
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 1.3398,  0.2663, -0.2686,  0.2450],
+            [-0.7401, -0.8805, -0.3402, -1.1936],
+            [ 0.4907, -1.3948, -1.0691, -0.3132],
+            [-1.6092,  0.5419, -0.2993,  0.3195]])
+    >>> torch.argmax(a, dim=1)
+    tensor([ 0,  2,  0,  1])
+""")
+
 add_docstr(torch.mean,
            r"""
 .. function:: mean(input) -> Tensor
@@ -2729,15 +2838,12 @@ Returns the mean value of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
 reduce over all of them.
 
-If :attr:`keepdim` is ``True``, the output tensor is of the same size
-as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
-output tensor having 1 (or ``len(dim)``) fewer dimension(s).
+{keepdim_details}
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints): the dimension or dimensions to reduce
-    keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not
+    {dim}
+    {keepdim}
     out (Tensor): the output tensor
 
 Example::
@@ -2755,7 +2861,7 @@ Example::
             [-0.5085],
             [-0.4599],
             [ 0.1807]])
-""")
+""".format(**multi_dim_common))
 
 add_docstr(torch.median,
            r"""
@@ -2776,9 +2882,9 @@ Example::
 
 .. function:: median(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
 
-Returns the median value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. Also returns the index location of the median value
-as a `LongTensor`.
+Returns a namedtuple ``(values, indices)`` where ``values`` is the median
+value of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`. And ``indices`` is the index location of each median value found.
 
 By default, :attr:`dim` is the last dimension of the :attr:`input` tensor.
 
@@ -2803,7 +2909,7 @@ Example::
             [-0.2751,  0.7303,  0.2192,  0.3321,  0.2488],
             [ 1.0778, -1.9510,  0.7048,  0.4742, -0.7125]])
     >>> torch.median(a, 1)
-    (tensor([-0.3982,  0.2270,  0.2488,  0.4742]), tensor([ 1,  4,  4,  3]))
+    torch.return_types.median(values=tensor([-0.3982,  0.2270,  0.2488,  0.4742]), indices=tensor([1, 4, 4, 3]))
 """)
 
 add_docstr(torch.min,
@@ -2825,9 +2931,10 @@ Example::
 
 .. function:: min(input, dim, keepdim=False, out=None) -> (Tensor, LongTensor)
 
-Returns the minimum value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. The second return value is the index location of each
-minimum value found (argmin).
+Returns a namedtuple ``(values, indices)`` where ``values`` is the minimum
+value of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`. And ``indices`` is the index location of each minimum value found
+(argmin).
 
 If :attr:`keepdim` is ``True``, the output tensors are of the same size as
 :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
@@ -2849,7 +2956,7 @@ Example::
             [ 0.2457,  0.0384,  1.0128,  0.7015],
             [-0.1153,  2.9849,  2.1458,  0.5788]])
     >>> torch.min(a, 1)
-    (tensor([-1.1899, -1.4644,  0.0384, -0.1153]), tensor([ 2,  0,  1,  0]))
+    torch.return_types.min(values=tensor([-1.1899, -1.4644,  0.0384, -0.1153]), indices=tensor([2, 0, 1, 0]))
 
 .. function:: min(input, other, out=None) -> Tensor
 
@@ -2881,6 +2988,55 @@ Example::
     tensor([-0.1369,  0.1555,  0.4019, -0.1929])
     >>> torch.min(a, b)
     tensor([-0.1369, -1.1740, -0.6460, -0.1929])
+""")
+
+add_docstr(torch.argmin,
+           r"""
+.. function:: argmin(input) -> LongTensor
+
+Returns the indices of the minimum value of all elements in the :attr:`input` tensor.
+
+This is the second value returned by :meth:`torch.min`. See its
+documentation for the exact semantics of this method.
+
+Args:
+    input (Tensor): the input tensor
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 0.1139,  0.2254, -0.1381,  0.3687],
+            [ 1.0100, -1.1975, -0.0102, -0.4732],
+            [-0.9240,  0.1207, -0.7506, -1.0213],
+            [ 1.7809, -1.2960,  0.9384,  0.1438]])
+    >>> torch.argmin(a)
+    tensor(13)
+
+.. function:: argmin(input, dim, keepdim=False, out=None) -> LongTensor
+
+Returns the indices of the minimum values of a tensor across a dimension.
+
+This is the second value returned by :meth:`torch.min`. See its
+documentation for the exact semantics of this method.
+
+Args:
+    input (Tensor): the input tensor
+    dim (int): the dimension to reduce. If ``None``, the argmin of the
+        flattened input is returned.
+    keepdim (bool): whether the output tensors have :attr:`dim`
+        retained or not. Ignored if ``dim=None``.
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 0.1139,  0.2254, -0.1381,  0.3687],
+            [ 1.0100, -1.1975, -0.0102, -0.4732],
+            [-0.9240,  0.1207, -0.7506, -1.0213],
+            [ 1.7809, -1.2960,  0.9384,  0.1438]])
+    >>> torch.argmin(a, dim=1)
+    tensor([ 2,  1,  3,  1])
 """)
 
 add_docstr(torch.mm,
@@ -2977,9 +3133,10 @@ add_docstr(torch.mode,
            r"""
 mode(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
 
-Returns the mode value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. Also returns the index location of the mode value
-as a `LongTensor`.
+Returns a namedtuple ``(values, indices)`` where ``values`` is the mode
+value of each row of the :attr:`input` tensor in the given dimension
+:attr:`dim`, i.e. a value which appears most often
+in that row, and ``indices`` is the index location of each mode value found.
 
 By default, :attr:`dim` is the last dimension of the :attr:`input` tensor.
 
@@ -2999,14 +3156,12 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4, 5)
+    >>> a = torch.randint(10, (5,))
     >>> a
-    tensor([[-1.2808, -1.0966, -1.5946, -0.1148,  0.3631],
-            [ 1.1395,  1.1452, -0.6383,  0.3667,  0.4545],
-            [-0.4061, -0.3074,  0.4579, -1.3514,  1.2729],
-            [-1.0130,  0.3546, -1.4689, -0.1254,  0.0473]])
-    >>> torch.mode(a, 1)
-    (tensor([-1.5946, -0.6383, -1.3514, -1.4689]), tensor([ 2,  2,  3,  2]))
+    tensor([6, 5, 1, 0, 2])
+    >>> b = a + (torch.randn(50, 1) * 5).long()
+    >>> torch.mode(b, 0)
+    torch.return_types.mode(values=tensor([6, 5, 1, 0, 2]), indices=tensor([2, 2, 2, 2, 2]))
 """)
 
 add_docstr(torch.mul,
@@ -3095,8 +3250,10 @@ If replacement is ``True``, samples are drawn with replacement.
 If not, they are drawn without replacement, which means that when a
 sample index is drawn for a row, it cannot be drawn again for that row.
 
-This implies the constraint that :attr:`num_samples` must be lower than
-:attr:`input` length (or number of columns of :attr:`input` if it is a matrix).
+.. note::
+    When drawn without replacement, :attr:`num_samples` must be lower than
+    number of non-zero elements in :attr:`input` (or the min number of non-zero
+    elements in each row of :attr:`input` if it is a matrix).
 
 Args:
     input (Tensor): the input tensor containing probabilities
@@ -3107,8 +3264,11 @@ Args:
 Example::
 
     >>> weights = torch.tensor([0, 10, 3, 0], dtype=torch.float) # create a tensor of weights
-    >>> torch.multinomial(weights, 4)
-    tensor([ 1,  2,  0,  0])
+    >>> torch.multinomial(weights, 2)
+    tensor([1, 2])
+    >>> torch.multinomial(weights, 4) # ERROR!
+    RuntimeError: invalid argument 2: invalid multinomial distribution (with replacement=False,
+    not enough non-negative category to sample) at ../aten/src/TH/generic/THTensorRandom.cpp:320
     >>> torch.multinomial(weights, 4, replacement=True)
     tensor([ 2,  1,  1,  1])
 """)
@@ -3142,12 +3302,12 @@ add_docstr(torch.mvlgamma,
            r"""
 mvlgamma(input, p) -> Tensor
 
-Computes the multivariate log-gamma function with dimension :math:`p` element-wise, given by
+Computes the multivariate log-gamma function (`[reference]`_) with dimension :math:`p` element-wise, given by
 
 .. math::
     \log(\Gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log\left(\Gamma\left(a - \frac{i - 1}{2}\right)\right)
 
-where :math:`C = \log(\pi) \times \frac{p (p - 1)}{2}` and :math:`\Gamma(\cdot)` is the Gamma function.
+where :math:`C = \log(\pi) \times \frac{p (p - 1)}{4}` and :math:`\Gamma(\cdot)` is the Gamma function.
 
 If any of the elements are less than or equal to :math:`\frac{p - 1}{2}`, then an error
 is thrown.
@@ -3165,6 +3325,8 @@ Example::
     >>> torch.mvlgamma(a, 2)
     tensor([[0.3928, 0.4007, 0.7586],
             [1.0311, 0.3901, 0.5049]])
+
+.. _`[reference]`: https://en.wikipedia.org/wiki/Multivariate_gamma_function
 """)
 
 add_docstr(torch.narrow,
@@ -3581,15 +3743,12 @@ Example::
 Returns the product of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`.
 
-If :attr:`keepdim` is ``True``, the output tensor is of the same size as
-:attr:`input` except in the dimension :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
-in the output tensor having 1 fewer dimension than :attr:`input`.
+{keepdim_details}
 
 Args:
     input (Tensor): the input tensor
-    dim (int): the dimension to reduce
-    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
+    {dim}
+    {keepdim}
     {dtype}
 
 Example::
@@ -3602,53 +3761,14 @@ Example::
             [ 1.1131, -1.0629]])
     >>> torch.prod(a, 1)
     tensor([-0.2018, -0.2962, -0.0821, -1.1831])
-""".format(**reduceops_common_args))
-
-add_docstr(torch.pstrf, r"""
-pstrf(a, upper=True, out=None) -> (Tensor, Tensor)
-
-Computes the pivoted Cholesky decomposition of a positive semidefinite
-matrix :attr:`a`. returns matrices `u` and `piv`.
-
-If :attr:`upper` is ``True`` or not provided, `u` is upper triangular
-such that :math:`a = p^T u^T u p`, with `p` the permutation given by `piv`.
-
-If :attr:`upper` is ``False``, `u` is lower triangular such that
-:math:`a = p^T u u^T p`.
-
-Args:
-    a (Tensor): the input 2-D tensor
-    upper (bool, optional): whether to return a upper (default) or lower triangular matrix
-    out (tuple, optional): tuple of `u` and `piv` tensors
-
-Example::
-
-    >>> a = torch.randn(3, 3)
-    >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> a
-    tensor([[ 3.5405, -0.4577,  0.8342],
-            [-0.4577,  1.8244, -0.1996],
-            [ 0.8342, -0.1996,  3.7493]])
-    >>> u,piv = torch.pstrf(a)
-    >>> u
-    tensor([[ 1.9363,  0.4308, -0.1031],
-            [ 0.0000,  1.8316, -0.2256],
-            [ 0.0000,  0.0000,  1.3277]])
-    >>> piv
-    tensor([ 2,  0,  1], dtype=torch.int32)
-    >>> p = torch.eye(3).index_select(0,piv.long()).index_select(0,piv.long()).t() # make pivot permutation
-    >>> torch.mm(torch.mm(p.t(),torch.mm(u.t(),u)),p) # reconstruct
-    tensor([[ 3.5405, -0.4577,  0.8342],
-            [-0.4577,  1.8244, -0.1996],
-            [ 0.8342, -0.1996,  3.7493]])
-""")
+""".format(**single_dim_common))
 
 add_docstr(torch.qr,
            r"""
 qr(input, out=None) -> (Tensor, Tensor)
 
-Computes the QR decomposition of a matrix :attr:`input`, and returns matrices
-`Q` and `R` such that :math:`\text{input} = Q R`, with :math:`Q` being an
+Computes the QR decomposition of a matrix :attr:`input`, and returns a namedtuple
+(Q, R) of matrices such that :math:`\text{input} = Q R`, with :math:`Q` being an
 orthogonal matrix and :math:`R` being an upper triangular matrix.
 
 This returns the thin (reduced) QR factorization.
@@ -3880,7 +4000,7 @@ Constructs a tensor with :attr:`data`.
     ``data`` and want to avoid a copy, use :func:`torch.Tensor.requires_grad_`
     or :func:`torch.Tensor.detach`.
     If you have a NumPy ``ndarray`` and want to avoid a copy, use
-    :func:`torch.from_numpy`.
+    :func:`torch.as_tensor`.
 
 .. warning::
 
@@ -3937,7 +4057,11 @@ Args:
     end (float): the ending value for the set of points
     step (float): the gap between each pair of adjacent points. Default: ``1``.
     {out}
-    {dtype}
+    {dtype} If `dtype` is not given, infer the data type from the other input
+        arguments. If any of `start`, `end`, or `stop` are floating-point, the
+        `dtype` is inferred to be the default dtype, see
+        :meth:`~torch.get_default_dtype`. Otherwise, the `dtype` is inferred to
+        be `torch.int64`.
     {layout}
     {device}
     {requires_grad}
@@ -4249,7 +4373,7 @@ Example::
 
 add_docstr(torch.sort,
            r"""
-sort(input, dim=None, descending=False, out=None) -> (Tensor, LongTensor)
+sort(input, dim=-1, descending=False, out=None) -> (Tensor, LongTensor)
 
 Sorts the elements of the :attr:`input` tensor along a given dimension
 in ascending order by value.
@@ -4259,8 +4383,9 @@ If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 If :attr:`descending` is ``True`` then the elements are sorted in descending
 order by value.
 
-A tuple of (sorted_tensor, sorted_indices) is returned, where the
-sorted_indices are the indices of the elements in the original `input` tensor.
+A namedtuple of (values, indices) is returned, where the `values` are the
+sorted values and `indices` are the indices of the elements in the original
+`input` tensor.
 
 Args:
     input (Tensor): the input tensor
@@ -4291,6 +4416,38 @@ Example::
     tensor([[ 2,  0,  0,  1],
             [ 0,  1,  1,  2],
             [ 1,  2,  2,  0]])
+""")
+
+add_docstr(torch.argsort,
+           r"""
+argsort(input, dim=-1, descending=False, out=None) -> LongTensor
+
+Returns the indices that sort a tensor along a given dimension in ascending
+order by value.
+
+This is the second value returned by :meth:`torch.sort`.  See its documentation
+for the exact semantics of this method.
+
+Args:
+    input (Tensor): the input tensor
+    dim (int, optional): the dimension to sort along
+    descending (bool, optional): controls the sorting order (ascending or descending)
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 0.0785,  1.5267, -0.8521,  0.4065],
+            [ 0.1598,  0.0788, -0.0745, -1.2700],
+            [ 1.2208,  1.0722, -0.7064,  1.2564],
+            [ 0.0669, -0.2318, -0.8229, -0.9280]])
+
+
+    >>> torch.argsort(a, dim=1)
+    tensor([[2, 0, 3, 1],
+            [3, 2, 1, 0],
+            [2, 1, 0, 3],
+            [3, 2, 1, 0]])
 """)
 
 add_docstr(torch.sparse_coo_tensor,
@@ -4460,18 +4617,15 @@ Returns the standard-deviation of each row of the :attr:`input` tensor in the
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
 reduce over all of them.
 
-If :attr:`keepdim` is ``True``, the output tensor is of the same size
-as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
-output tensor having 1 (or ``len(dim)``) fewer dimension(s).
+{keepdim_details}
 
 If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated
 via the biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints): the dimension or dimensions to reduce
-    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
+    {dim}
+    {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
     out (Tensor, optional): the output tensor
 
@@ -4485,7 +4639,7 @@ Example::
             [ 0.1264, -0.5080,  1.6420,  0.1992]])
     >>> torch.std(a, dim=1)
     tensor([ 1.0311,  0.7477,  1.2204,  0.9087])
-""")
+""".format(**multi_dim_common))
 
 add_docstr(torch.sum,
            r"""
@@ -4511,15 +4665,12 @@ Returns the sum of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
 reduce over all of them.
 
-If :attr:`keepdim` is ``True``, the output tensor is of the same size
-as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
-output tensor having 1 (or ``len(dim)``) fewer dimension(s).
+{keepdim_details}
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints): the dimension or dimensions to reduce
-    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
+    {dim}
+    {keepdim}
     {dtype}
 
 Example::
@@ -4535,14 +4686,15 @@ Example::
     >>> b = torch.arange(4 * 5 * 6).view(4, 5, 6)
     >>> torch.sum(b, (2, 1))
     tensor([  435.,  1335.,  2235.,  3135.])
-""".format(**reduceops_common_args))
+""".format(**multi_dim_common))
 
 add_docstr(torch.svd,
            r"""
 svd(input, some=True, compute_uv=True, out=None) -> (Tensor, Tensor, Tensor)
 
-`U, S, V = torch.svd(A)` returns the singular value decomposition of a
-real matrix `A` of size `(n x m)` such that :math:`A = USV^T`.
+``svd(A)`` returns a namedtuple ``(U, S, V)`` which the singular value
+decomposition of a input real matrix `A` of size `(n x m)` such that
+:math:`A = USV^T`.
 
 `U` is of shape :math:`(n \times n)`.
 
@@ -4591,6 +4743,8 @@ Example::
                           [5.45, -0.27,  4.85,  0.74, 10.00, -6.02],
                           [3.16,  7.98,  3.01,  5.80,  4.27, -5.31]]).t()
 
+    >>> torch.svd(a).__class__
+    <class 'torch.return_types.svd'>
     >>> u, s, v = torch.svd(a)
     >>> u
     tensor([[-0.5911,  0.2632,  0.3554,  0.3143,  0.2299],
@@ -4617,7 +4771,8 @@ add_docstr(torch.symeig,
 symeig(input, eigenvectors=False, upper=True, out=None) -> (Tensor, Tensor)
 
 This function returns eigenvalues and eigenvectors
-of a real symmetric matrix :attr:`input`, represented by a tuple :math:`(e, V)`.
+of a real symmetric matrix :attr:`input`, represented by a namedtuple
+(eigenvalues, eigenvectors).
 
 :attr:`input` and :math:`V` are :math:`(m \times m)` matrices and :math:`e` is a
 :math:`m` dimensional vector.
@@ -4650,11 +4805,11 @@ Args:
     out (tuple, optional): the output tuple of (Tensor, Tensor)
 
 Returns:
-    (Tensor, Tensor): A tuple containing
+    (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
 
-        - **e** (*Tensor*): Shape :math:`(m)`. Each element is an eigenvalue of ``input``,
+        - **eigenvalues** (*Tensor*): Shape :math:`(m)`. Each element is an eigenvalue of ``input``,
           The eigenvalues are in ascending order.
-        - **V** (*Tensor*): Shape :math:`(m \times m)`.
+        - **eigenvectors** (*Tensor*): Shape :math:`(m \times m)`.
           If ``eigenvectors=False``, it's a tensor filled with zeros.
           Otherwise, this tensor contains the orthonormal eigenvectors of the ``input``.
 
@@ -4681,16 +4836,27 @@ add_docstr(torch.t,
            r"""
 t(input) -> Tensor
 
-Expects :attr:`input` to be a matrix (2-D tensor) and transposes dimensions 0
+Expects :attr:`input` to be <= 2-D tensor and transposes dimensions 0
 and 1.
 
-Can be seen as a short-hand function for ``transpose(input, 0, 1)``.
+0-D and 1-D tensors are returned as it is and
+2-D tensor can be seen as a short-hand function for ``transpose(input, 0, 1)``.
 
 Args:
     input (Tensor): the input tensor
 
 Example::
 
+    >>> x = torch.randn(())
+    >>> x
+    tensor(0.1995)
+    >>> torch.t(x)
+    tensor(0.1995)
+    >>> x = torch.randn(3)
+    >>> x
+    tensor([ 2.4320, -0.4608,  0.7702])
+    >>> torch.t(x)
+    tensor([.2.4320,.-0.4608,..0.7702])
     >>> x = torch.randn(2, 3)
     >>> x
     tensor([[ 0.4875,  0.9158, -0.5872],
@@ -4883,7 +5049,7 @@ If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 
 If :attr:`largest` is ``False`` then the `k` smallest elements are returned.
 
-A tuple of `(values, indices)` is returned, where the `indices` are the indices
+A namedtuple of `(values, indices)` is returned, where the `indices` are the indices
 of the elements in the original `input` tensor.
 
 The boolean option :attr:`sorted` if ``True``, will make sure that the returned
@@ -4906,7 +5072,7 @@ Example::
     >>> x
     tensor([ 1.,  2.,  3.,  4.,  5.])
     >>> torch.topk(x, 3)
-    (tensor([ 5.,  4.,  3.]), tensor([ 4,  3,  2]))
+    torch.return_types.topk(values=tensor([5., 4., 3.]), indices=tensor([4, 3, 2]))
 """)
 
 add_docstr(torch.trace,
@@ -4952,6 +5118,61 @@ Example::
     tensor([[ 1.0028, -0.1669],
             [-0.9893,  0.7299],
             [ 0.5809,  0.4942]])
+""")
+
+add_docstr(torch.triangular_solve,
+           r"""
+triangular_solve(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
+
+Solves a system of equations with a triangular coefficient matrix :math:`A`
+and multiple right-hand sides :attr:`b`.
+
+In particular, solves :math:`AX = b` and assumes :math:`A` is upper-triangular
+with the default keyword arguments.
+
+`torch.triangular_solve(b, A)` can take in 2D inputs `b, A` or inputs that are
+batches of 2D matrices. If the inputs are batches, then returns
+batched outputs `X`
+
+.. note::
+
+    The :attr:`out` keyword only supports 2D matrix inputs, that is,
+    `b, A` must be 2D matrices.
+
+Args:
+    A (Tensor): the input triangular coefficient matrix of size :math:`(*, m, m)`
+                where :math:`*` is zero or more batch dimensions
+    b (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
+                :math:`*` is zero of more batch dimensions
+    upper (bool, optional): whether to solve the upper-triangular system
+        of equations (default) or the lower-triangular system of equations. Default: ``True``.
+    transpose (bool, optional): whether :math:`A` should be transposed before
+        being sent into the solver. Default: ``False``.
+    unitriangular (bool, optional): whether :math:`A` is unit triangular.
+        If True, the diagonal elements of :math:`A` are assumed to be
+        1 and not referenced from :math:`A`. Default: ``False``.
+
+Returns:
+    A namedtuple :math:`(solution, cloned_coefficient)` where :math:`cloned_coefficient`
+    is a clone of :math:`A` and :math:`solution` is the solution :math:`X` to :math:`AX = b`
+    (or whatever variant of the system of equations, depending on the keyword arguments.)
+
+Examples::
+
+    >>> A = torch.randn(2, 2).triu()
+    >>> A
+    tensor([[ 1.1527, -1.0753],
+            [ 0.0000,  0.7986]])
+    >>> b = torch.randn(2, 3)
+    >>> b
+    tensor([[-0.0210,  2.3513, -1.5492],
+            [ 1.5429,  0.7403, -1.0243]])
+    >>> torch.triangular_solve(b, A)
+    torch.return_types.triangular_solve(
+    solution=tensor([[ 1.7841,  2.9046, -2.5405],
+            [ 1.9320,  0.9270, -1.2826]]),
+    cloned_coefficient=tensor([[ 1.1527, -1.0753],
+            [ 0.0000,  0.7986]]))
 """)
 
 add_docstr(torch.tril,
@@ -5172,55 +5393,6 @@ Example::
             [1, 2, 2]])
 """.format(**factory_common_args))
 
-add_docstr(torch.trtrs,
-           r"""
-trtrs(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
-
-Solves a system of equations with a triangular coefficient matrix :math:`A`
-and multiple right-hand sides :attr:`b`.
-
-In particular, solves :math:`AX = b` and assumes :math:`A` is upper-triangular
-with the default keyword arguments.
-
-Args:
-    A (Tensor): the input triangular coefficient matrix
-    b (Tensor): multiple right-hand sides. Each column of :math:`b` is a
-        right-hand side for the system of equations.
-    upper (bool, optional): whether to solve the upper-triangular system
-        of equations (default) or the lower-triangular system of equations. Default: True.
-    transpose (bool, optional): whether :math:`A` should be transposed before
-        being sent into the solver. Default: False.
-    unitriangular (bool, optional): whether :math:`A` is unit triangular.
-        If True, the diagonal elements of :math:`A` are assumed to be
-        1 and not referenced from :math:`A`. Default: False.
-
-Returns:
-    A tuple :math:`(X, M)` where :math:`M` is a clone of :math:`A` and :math:`X`
-    is the solution to :math:`AX = b` (or whatever variant of the system of
-    equations, depending on the keyword arguments.)
-
-Shape:
-    - A: :math:`(N, N)`
-    - b: :math:`(N, C)`
-    - output[0]: :math:`(N, C)`
-    - output[1]: :math:`(N, N)`
-
-Examples::
-
-    >>> A = torch.randn(2, 2).triu()
-    >>> A
-    tensor([[ 1.1527, -1.0753],
-            [ 0.0000,  0.7986]])
-    >>> b = torch.randn(2, 3)
-    >>> b
-    tensor([[-0.0210,  2.3513, -1.5492],
-            [ 1.5429,  0.7403, -1.0243]])
-    >>> torch.trtrs(b, A)
-    (tensor([[ 1.7840,  2.9045, -2.5405],
-            [ 1.9319,  0.9269, -1.2826]]), tensor([[ 1.1527, -1.0753],
-            [ 0.0000,  0.7986]]))
-""")
-
 add_docstr(torch.trunc,
            r"""
 trunc(input, out=None) -> Tensor
@@ -5298,18 +5470,15 @@ Example::
 Returns the variance of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`.
 
-If :attr:`keepdim` is ``True``, the output tensors are of the same size
-as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
-the outputs tensor having 1 fewer dimension than :attr:`input`.
+{keepdim_details}
 
 If :attr:`unbiased` is ``False``, then the variance will be calculated via the
 biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
     input (Tensor): the input tensor
-    dim (int): the dimension to reduce
-    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
+    {dim}
+    {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
     out (Tensor, optional): the output tensor
 
@@ -5323,7 +5492,7 @@ Example::
             [-0.7700,  0.6074, -0.1469,  0.7777]])
     >>> torch.var(a, 1)
     tensor([ 1.7444,  1.1363,  0.7356,  0.5112])
-""")
+""".format(**multi_dim_common))
 
 add_docstr(torch.zeros,
            r"""
@@ -5378,90 +5547,6 @@ Example::
     tensor([[ 0.,  0.,  0.],
             [ 0.,  0.,  0.]])
 """.format(**factory_like_common_args))
-
-add_docstr(torch.btrifact,
-           r"""
-btrifact(A, pivot=True) -> (Tensor, IntTensor)
-
-Batch LU factorization.
-
-Returns a tuple containing the LU factorization and pivots. Pivoting is done if
-:attr:`pivot` is set.
-
-Arguments:
-    A (Tensor): the tensor to factor
-    pivot (bool, optional): controls whether pivoting is done
-
-Returns:
-    A tuple containing factorization and pivots.
-
-Example::
-
-    >>> A = torch.randn(2, 3, 3)
-    >>> A_LU, pivots = torch.btrifact(A)
-    >>> A_LU
-    tensor([[[ 1.3506,  2.5558, -0.0816],
-             [ 0.1684,  1.1551,  0.1940],
-             [ 0.1193,  0.6189, -0.5497]],
-
-            [[ 0.4526,  1.2526, -0.3285],
-             [-0.7988,  0.7175, -0.9701],
-             [ 0.2634, -0.9255, -0.3459]]])
-
-    >>> pivots
-    tensor([[ 3,  3,  3],
-            [ 3,  3,  3]], dtype=torch.int32)
-""")
-
-add_docstr(torch.btrifact_with_info,
-           r"""
-btrifact_with_info(A, pivot=True) -> (Tensor, IntTensor, IntTensor)
-
-Batch LU factorization with additional error information.
-
-This is a version of :meth:`torch.btrifact` that always creates an info
-`IntTensor`, and returns it as the third return value.
-
-Arguments:
-    A (Tensor): the tensor to factor
-    pivot (bool, optional): controls whether pivoting is done
-
-Returns:
-    A tuple containing factorization, pivots, and an `IntTensor` where non-zero
-    values indicate whether factorization for each minibatch sample succeeds.
-
-Example::
-
-    >>> A = torch.randn(2, 3, 3)
-    >>> A_LU, pivots, info = A.btrifact_with_info()
-    >>> if info.nonzero().size(0) == 0:
-    >>>   print('LU factorization succeeded for all samples!')
-    LU factorization succeeded for all samples!
-""")
-
-add_docstr(torch.btrisolve,
-           r"""
-btrisolve(b, LU_data, LU_pivots) -> Tensor
-
-Batch LU solve.
-
-Returns the LU solve of the linear system :math:`Ax = b`.
-
-Arguments:
-    b (Tensor): the RHS tensor
-    LU_data (Tensor): the pivoted LU factorization of A from :meth:`btrifact`.
-    LU_pivots (IntTensor): the pivots of the LU factorization
-
-Example::
-
-    >>> A = torch.randn(2, 3, 3)
-    >>> b = torch.randn(2, 3)
-    >>> A_LU = torch.btrifact(A)
-    >>> x = torch.btrisolve(b, *A_LU)
-    >>> torch.norm(torch.bmm(A, x.unsqueeze(2)) - b.unsqueeze(2))
-    tensor(1.00000e-07 *
-           2.8312)
-""")
 
 add_docstr(torch.empty,
            r"""
@@ -5659,18 +5744,22 @@ Arguments:
     A (Tensor): The input 2D square tensor
 
 Returns:
-    A tuple containing the sign of the determinant, and the log value of the
-    absolute determinant.
+    A namedtuple (sign, logabsdet) containing the sign of the determinant, and the log
+    value of the absolute determinant.
 
 Example::
 
     >>> A = torch.randn(3, 3)
+    >>> A
+    tensor([[ 0.0032, -0.2239, -1.1219],
+            [-0.6690,  0.1161,  0.4053],
+            [-1.6218, -0.9273, -0.0082]])
     >>> torch.det(A)
-    tensor(-4.8215)
+    tensor(-0.7576)
     >>> torch.logdet(A)
     tensor(nan)
     >>> torch.slogdet(A)
-    (tensor(-1.), tensor(1.5731))
+    torch.return_types.slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))
 """)
 
 add_docstr(torch.pinverse,
@@ -5730,7 +5819,7 @@ Ignoring the batch dimensions, it computes the following expression:
 
 .. math::
     X[\omega_1, \dots, \omega_d] =
-        \sum_{n_1=0}^{N_1} \dots \sum_{n_d=0}^{N_d} x[n_1, \dots, n_d]
+        \sum_{n_1=0}^{N_1-1} \dots \sum_{n_d=0}^{N_d-1} x[n_1, \dots, n_d]
          e^{-j\ 2 \pi \sum_{i=0}^d \frac{\omega_i n_i}{N_i}},
 
 where :math:`d` = :attr:`signal_ndim` is number of dimensions for the
@@ -5833,7 +5922,7 @@ expression:
 
 .. math::
     X[\omega_1, \dots, \omega_d] =
-        \frac{1}{\prod_{i=1}^d N_i} \sum_{n_1=0}^{N_1} \dots \sum_{n_d=0}^{N_d} x[n_1, \dots, n_d]
+        \frac{1}{\prod_{i=1}^d N_i} \sum_{n_1=0}^{N_1-1} \dots \sum_{n_d=0}^{N_d-1} x[n_1, \dots, n_d]
          e^{\ j\ 2 \pi \sum_{i=0}^d \frac{\omega_i n_i}{N_i}},
 
 where :math:`d` = :attr:`signal_ndim` is number of dimensions for the
@@ -6310,4 +6399,50 @@ Example::
             [2, 2],
             [2, 3],
             [3, 3]])
+""")
+
+
+add_docstr(torch.repeat_interleave,
+           r"""
+.. function:: repeat_interleave(input, repeats, dim=None) -> Tensor
+
+Repeat elements of a tensor.
+
+.. warning::
+
+    This is different from :func:`torch.repeat` but similar to `numpy.repeat`.
+
+Args:
+    input (Tensor): The input tensor
+    repeats (Tensor or int): The number of repetitions for each element.
+        repeats is broadcasted to fit the shape of the given axis.
+    dim (int, optional): The dimension along which to repeat values.
+        By default, use the flattened input array, and return a flat output
+        array.
+
+Returns:
+    Tensor: Repeated tensor which has the same shape as input, except along the
+     given axis.
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3])
+    >>> x.repeat_interleave(2)
+    tensor([1, 1, 2, 2, 3, 3])
+    >>> y = torch.tensor([[1, 2], [3, 4]])
+    >>> torch.repeat_interleave(y, 2)
+    tensor([1, 1, 2, 2, 3, 3, 4, 4])
+    >>> torch.repeat_interleave(y, 3, dim=1)
+    tensor([[1, 1, 1, 2, 2, 2],
+            [3, 3, 3, 4, 4, 4]])
+    >>> torch.repeat_interleave(y, torch.tensor([1, 2]), dim=0)
+    tensor([[1, 2],
+            [3, 4],
+            [3, 4]])
+
+.. function:: repeat_interleave(repeats) -> Tensor
+
+If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
+`tensor([0, 0, ..., 1, 1, ..., 2, 2, ..., ...])` where `0` appears `n1` times,
+`1` appears `n2` times, `2` appears `n3` times, etc.
 """)

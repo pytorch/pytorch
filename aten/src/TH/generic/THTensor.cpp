@@ -34,14 +34,14 @@ int THTensor_(nDimensionLegacyAll)(const THTensor *self)
 int64_t THTensor_(size)(const THTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->dim()), 2, "dimension %d out of range of %dD tensor",
-      dim+TH_INDEX_BASE, THTensor_(nDimensionLegacyNoScalars)(self));
+      dim, THTensor_(nDimensionLegacyNoScalars)(self));
   return self->size(dim);
 }
 
 int64_t THTensor_(stride)(const THTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->dim()), 2, "dimension %d out of range of %dD tensor",
-      dim+TH_INDEX_BASE, THTensor_(nDimensionLegacyNoScalars)(self));
+      dim, THTensor_(nDimensionLegacyNoScalars)(self));
   return self->stride(dim);
 }
 
@@ -56,8 +56,7 @@ THTensor *THTensor_(new)(void)
 {
   return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
-    at::CPUTensorId(),
-    false
+    at::CPUTensorId()
   ).release();
 }
 
@@ -66,8 +65,7 @@ THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 {
   THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
-    at::CPUTensorId(),
-    false
+    at::CPUTensorId()
   ).release();
   THTensor_(setStorageNd)(self,
                           THTensor_getStoragePtr(tensor),
@@ -79,14 +77,13 @@ THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 }
 
 /* Storage init */
-THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset, at::IntList sizes, at::IntList strides) {
+THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset, at::IntArrayRef sizes, at::IntArrayRef strides) {
   if (strides.data()) {
     AT_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
   }
   THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
-    at::CPUTensorId(),
-    false
+    at::CPUTensorId()
   ).release();
   THTensor_(setStorageNd)(self, storage, storageOffset, sizes.size(),
                           const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
@@ -126,7 +123,7 @@ THTensor *THTensor_(newWithStorage4d)(THStorage *storage, ptrdiff_t storageOffse
                                           {stride0, stride1, stride2, stride3});
 }
 
-THTensor *THTensor_(newWithSize)(at::IntList size, at::IntList stride)
+THTensor *THTensor_(newWithSize)(at::IntArrayRef size, at::IntArrayRef stride)
 {
   return THTensor_(newWithStorage)(NULL, 0, size, stride);
 }
@@ -193,14 +190,7 @@ THTensor *THTensor_(newTranspose)(THTensor *tensor, int dimension1_, int dimensi
   return self;
 }
 
-THTensor *THTensor_(newUnfold)(THTensor *tensor, int dimension_, int64_t size_, int64_t step_)
-{
-  THTensor *self = THTensor_(newWithTensor)(tensor);
-  THTensor_(unfold)(self, NULL, dimension_, size_, step_);
-  return self;
-}
-
-THTensor *THTensor_(newView)(THTensor *tensor, at::IntList size)
+THTensor *THTensor_(newView)(THTensor *tensor, at::IntArrayRef size)
 {
   ptrdiff_t numel = THTensor_(nElement)(tensor);
   THTensor *self = THTensor_(new)();
@@ -217,7 +207,7 @@ THTensor *THTensor_(newView)(THTensor *tensor, at::IntList size)
 }
 
 /* Resize */
-void THTensor_(resize)(THTensor *self, at::IntList size, at::IntList stride)
+void THTensor_(resize)(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride)
 {
   return THTensor_resize(self, size, stride);
 }
@@ -274,7 +264,7 @@ void THTensor_(set)(THTensor *self, THTensor *src)
                             THTensor_getStridePtr(src));
 }
 
-void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_)
+void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_)
 {
   THTensor_setStorage(self, storage_, storageOffset_, size_, stride_);
 }
@@ -351,12 +341,21 @@ void THTensor_(select)(THTensor *self, THTensor *src, int dimension, int64_t sli
 
   THTensor_(set)(self, src);
   THTensor_(narrow)(self, NULL, dimension, sliceIndex, 1);
+
+  std::vector<int64_t> newSize(self->dim()-1);
+  std::vector<int64_t> newStride(self->dim()-1);
+  for (d = 0; d < dimension; d++)
+  {
+    newSize[d] = self->size(d);
+    newStride[d] = self->stride(d);
+  }
+
   for(d = dimension; d < self->dim()-1; d++)
   {
-    self->set_size(d, self->size(d+1));
-    self->set_stride(d, self->stride(d+1));
+    newSize[d] = self->size(d+1);
+    newStride[d] = self->stride(d+1);
   }
-  self->resize_dim((unsigned int)(self->dim() - 1));
+  self->set_sizes_and_strides(newSize, newStride);
 }
 
 void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1, int dimension2)
@@ -421,28 +420,23 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
 /* we have to handle the case where the result is a number */
 void THTensor_(squeeze)(THTensor *self, THTensor *src)
 {
-  int ndim = 0;
-  int d;
-
   if(!src)
     src = self;
 
   THTensor_(set)(self, src);
 
-  for(d = 0; d < src->dim(); d++)
+  std::vector<int64_t> newSize;
+  std::vector<int64_t> newStride;
+  for(int d = 0; d < src->dim(); ++d)
   {
     if(src->size(d) != 1)
     {
-      if(d != ndim)
-      {
-        self->set_size(ndim, src->size(d));
-        self->set_stride(ndim, src->stride(d));
-      }
-      ndim++;
+      newSize.push_back(src->size(d));
+      newStride.push_back(src->stride(d));
     }
   }
 
-  self->resize_dim(ndim);
+  self->set_sizes_and_strides(newSize, newStride);
 }
 
 void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
@@ -458,12 +452,20 @@ void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
 
   if(src->size(dimension) == 1)
   {
+    std::vector<int64_t> newSize(self->dim() - 1);
+    std::vector<int64_t> newStride(self->dim() - 1);
+    for (d = 0; d < dimension; d++)
+    {
+      newSize[d] = self->size(d);
+      newStride[d] = self->stride(d);
+    }
+
     for(d = dimension; d < self->dim()-1; d++)
     {
-      self->set_size(d, self->size(d+1));
-      self->set_stride(d, self->stride(d+1));
+      newSize[d] = self->size(d+1);
+      newStride[d] = self->stride(d+1);
     }
-    self->resize_dim((unsigned int)(self->dim() - 1));
+    self->set_sizes_and_strides(newSize, newStride);
   }
 }
 
@@ -478,17 +480,29 @@ void THTensor_(unsqueeze1d)(THTensor *self, THTensor *src, int dimension)
 
   THTensor_(set)(self, src);
 
-  self->resize_dim(self->dim() + 1);
-  for (d = self->dim()-1; d > dimension; d--) {
-    self->set_size(d, self->size(d-1));
-    self->set_stride(d, self->stride(d-1));
+  std::vector<int64_t> newSize(/* size */ self->dim()+1);
+  std::vector<int64_t> newStride(/* size */ self->dim()+1);
+
+  for(d = self->dim(); d > dimension; d--)
+  {
+    newSize[d] = self->size(d-1);
+    newStride[d] = self->stride(d-1);
   }
-  if (dimension+1 < self->dim()) {
-    self->set_stride(dimension, self->size(dimension+1) * self->stride(dimension+1));
-  } else {
-    self->set_stride(dimension, 1);
+  if (dimension < self->dim())
+  {
+    newStride[dimension] = self->size(dimension) * self->stride(dimension);
   }
-  self->set_size(dimension, 1);
+  else
+  {
+    newStride[dimension] = 1;
+  }
+  newSize[dimension] = 1;
+  for(d = dimension - 1; d >= 0; d--)
+  {
+    newSize[d] = self->size(d);
+    newStride[d] = self->stride(d);
+  }
+  self->set_sizes_and_strides(newSize, newStride);
 }
 
 int THTensor_(isTransposed)(const THTensor *self)
@@ -666,6 +680,148 @@ scalar_t THTensor_(get4d)(const THTensor *tensor, int64_t x0, int64_t x1, int64_
   THArgCheck(THTensor_nDimensionLegacyAll(tensor) == 4, 1, "tensor must have four dimensions");
   THArgCheck((x0 >= 0) && (x0 < tensor->size(0)) && (x1 >= 0) && (x1 < tensor->size(1)) && (x2 >= 0) && (x2 < tensor->size(2)) && (x3 >= 0) && (x3 < tensor->size(3)), 2, "out of range");
   return THStorage_(get)(THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*tensor->stride(0)+x1*tensor->stride(1)+x2*tensor->stride(2)+x3*tensor->stride(3));
+}
+
+
+/* Shape manipulation methods */
+void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension)
+{
+  THTensor* inputs[2];
+  inputs[0] = ta;
+  inputs[1] = tb;
+  THTensor_(catArray)(r_, inputs, 2, dimension);
+}
+
+void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second, int dimension);
+inline void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second, int dimension)
+{
+  int first_dims = first->dim();
+  int second_dims = second->dim();
+  THArgCheck(first_dims == second_dims, 0,
+      "Tensors must have same number of dimensions: got %d and %d",
+      first_dims, second_dims);
+  for (int dim = 0; dim < first_dims; dim++) {
+    if (dim == dimension) {
+      continue;
+    }
+    int64_t first_dim_size = first->size(dim);
+    int64_t second_dim_size = second->size(dim);
+    THArgCheck(first_dim_size == second_dim_size, 0,
+        "Sizes of tensors must match except in dimension %d. Got %lld and %lld in dimension %d",
+        dimension, (long long)first_dim_size, (long long)second_dim_size, dim);
+  }
+}
+
+void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int dimension)
+{
+  // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
+  // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
+  // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
+  // size (i.e. other empty sizes are not skipped).
+  // FIXME: warn if this is the case
+  bool allSkipped= true;
+  int64_t nDims = 0;
+  THTensor *notSkippedTensor;  // non-owning reference
+  auto should_skip = [](THTensor *t) { return t->is_empty() && t->dim() == 1; };
+  for (int i = 0; i < numInputs; i++) {
+    if (should_skip(inputs[i])) {
+      continue;
+    }
+    // We've found a non-empty tensor
+    allSkipped = false;
+    notSkippedTensor = inputs[i];
+    nDims = notSkippedTensor->dim();
+    break;
+  }
+  if (allSkipped) {
+    return;
+  }
+
+  // Compute cat_dimension based on the non-empty tensor
+  THArgCheck(dimension < nDims, 4, "invalid dimension %d", dimension);
+  THArgCheck(numInputs > 0, 3, "invalid number of inputs %d", numInputs);
+
+  // Compute size of the result in the cat dimension
+  int64_t cat_dim_size = 0;
+  for (int i = 0; i < numInputs; i++) {
+    THTensor *tensor = inputs[i];
+    if (should_skip(tensor)) {
+      continue;
+    }
+    THTensor_(check_shape_except_dim)(notSkippedTensor, tensor, dimension);
+    cat_dim_size += tensor->size(dimension);
+  }
+
+  // Compute the size of the result
+  std::vector<int64_t> size(nDims);
+  for (int dim = 0; dim < nDims; dim++) {
+    int64_t result_dim_size = notSkippedTensor->size(dim);
+    if (dim == dimension) {
+      result_dim_size = cat_dim_size;
+    }
+    size[dim] = result_dim_size;
+  }
+  THTensor_(resize)(result, size, {});
+
+  // Check contiguity of all inputs and result
+  bool allContiguous = true;
+  for (int i = 0; i < numInputs; i++) {
+    if(!should_skip(inputs[i])) {
+      allContiguous = allContiguous && THTensor_(isContiguous)(inputs[i]);
+    }
+  }
+  allContiguous = allContiguous && THTensor_(isContiguous)(result);
+
+  // First path is for contiguous inputs
+  // Second path for non-contiguous
+  int64_t offset;
+  if (allContiguous) {
+    int64_t outer = 1, inner = 1;
+
+    // Outer is the product of dimensions from the left up to (and not
+    // including the concatenation dimension). This becomes the number of times
+    // we have to replicate the memcpy call.
+    for (int i = 0; i < dimension; ++i) {
+      outer *= size[i];
+    }
+
+    // The product of dimensions to the right of the concatenation dimension.
+    // We go on to multiply this by the size of the concat dimension for
+    // each input tensor.
+    for (int i = dimension + 1; i < size.size(); ++i) {
+      inner *= size[i];
+    }
+
+    scalar_t* result_data = THStorage_(data)(THTensor_getStoragePtr(result)) + result->storage_offset();
+    offset = 0;
+    for (int o = 0; o < outer; ++o) {
+      for (int j = 0; j < numInputs; ++j) {
+        if (!should_skip(inputs[j])) {
+          THTensor* input0 = inputs[j];
+          scalar_t* input0_data = THStorage_(data)(THTensor_getStoragePtr(input0)) + input0->storage_offset();
+          int local_inner = inner * input0->size(dimension);
+          if (local_inner != 0) {
+            memcpy(result_data + offset, input0_data + o*local_inner, local_inner*sizeof(scalar_t));
+          } // input0_size != 0
+          offset += local_inner;
+        }  // should_skip
+      } // for j
+    } // for i
+  } else {
+    offset = 0;
+    for (int j = 0; j < numInputs; j++) {
+      if (!should_skip(inputs[j])) {
+        int64_t dimSize = inputs[j]->size(dimension);
+        THTensor *nt = THTensor_(newWithTensor)(result);
+        THTensor_(narrow)(nt, NULL, dimension, offset, dimSize);
+        at::Tensor nt__wrap = THTensor_wrap(nt);
+        at::Tensor inputs_wrap = THTensor_wrap(inputs[j]);
+        at::_copy_same_type_(nt__wrap, inputs_wrap);
+        c10::raw::intrusive_ptr::decref(nt);
+        offset += dimSize;
+      }
+    }
+  }
 }
 
 THDescBuff THTensor_(desc)(const THTensor *tensor) {

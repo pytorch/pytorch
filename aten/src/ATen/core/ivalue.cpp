@@ -1,4 +1,5 @@
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
 #include <ATen/core/Formatting.h>
 #include <cmath>
 
@@ -25,6 +26,23 @@ std::ostream& printList(std::ostream & out, const List &v,
     out << IValue(v->elements()[i]);
   }
   out << finish;
+  return out;
+}
+
+template<typename Dict>
+std::ostream& printDict(std::ostream& out, const Dict& v) {
+  out << "{";
+
+  bool first = true;
+  for (const auto& pair : v->elements()) {
+    if (!first) {
+      out << ", ";
+    }
+    out << pair.first << ": " << pair.second;
+    first = false;
+  }
+
+  out << "}";
   return out;
 }
 
@@ -67,13 +85,19 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::TensorList:
       return printList(out, v.toTensorList(), "[", "]");
     case IValue::Tag::Blob:
-      return out << v.toBlob();
+      return out << *v.toBlob();
     case IValue::Tag::GenericList:
       return printList(out, v.toGenericList(), "[", "]");
     case IValue::Tag::Future:
       return out << "Future";
     case IValue::Tag::Device:
       return out << v.toDevice();
+    case IValue::Tag::GenericDict:
+      return printDict(out, v.toGenericDict());
+    case IValue::Tag::Object:
+      // TODO we should print the object contents
+      return out << "Object<" << v.toObject()->name()
+                 << ">";
   }
   AT_ERROR("Tag not found\n");
 }
@@ -82,6 +106,16 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
 
 void IValue::dump() const {
   std::cout << *this << "\n";
+}
+
+
+const std::string& ivalue::Object::name() const {
+  return this->type_->name();
+}
+
+void ivalue::Object::resizeObject(size_t slot) {
+  AT_ASSERT(slot < type()->numAttributes());
+  slots_.resize(type()->numAttributes());
 }
 
 } // namespace c10

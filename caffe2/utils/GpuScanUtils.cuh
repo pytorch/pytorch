@@ -123,7 +123,7 @@ __device__ void exclusiveBinaryPrefixScan(T* smem, bool in, T* out, T* carry, Bi
 
   // The outgoing carry for all threads is the last warp's sum
 #if defined(__HIP_PLATFORM_HCC__)
-  *carry = smem[math::divUp<int>(blockDim.x, kWarpSize) - 1];
+  *carry = smem[math::DivUp<int>(blockDim.x, kWarpSize) - 1];
 #else
   *carry = smem[(blockDim.x / kWarpSize) - 1];
 #endif  // __HIP_PLATFORM_HCC__

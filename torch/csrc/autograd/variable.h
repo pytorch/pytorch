@@ -5,7 +5,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function_hook.h>
-#include <torch/csrc/autograd/variable_version.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -104,11 +103,22 @@ struct TORCH_API Variable : public at::Tensor {
       bool allow_tensor_metadata_change,
       Edge gradient_edge);
 
-  /// Creates a `Variable` from the given `Tensor`. `requires_grad` should be
+  /// Creates a `Variable` from the given `Tensor`, copying its underlying `TensorImpl`.
+  /// `requires_grad` should be
   /// set only for leaves, and determines whether the `Variable` will accumulate
   /// gradients. NOTE: `data` must *not* be a `Variable` already. Its dynamic
   /// type *must* be `Tensor`.
   friend Variable make_variable(
+      at::Tensor data,
+      bool requires_grad,
+      bool allow_tensor_metadata_change);
+
+  /// Creates a `Variable` from the given `Tensor`, consuming its underlying `TensorImpl`.
+  /// This is intended to be used from functions that immediately create a `Tensor`,
+  /// convert it to a `Variable`, and then free it; it has been found to
+  /// decrease the overhead of those operations, in some situations.
+  /// The comments about `requires_grad` and `data` on the above version also apply to this one.
+  friend Variable make_variable_consuming(
       at::Tensor data,
       bool requires_grad,
       bool allow_tensor_metadata_change);
@@ -219,8 +229,11 @@ struct TORCH_API Variable : public at::Tensor {
       bool keep_graph,
       bool create_graph) const;
 
-  /// Sets the type of the Variable.
-  void set_data(Tensor new_data) const;
+  /// Sets the `Tensor` held by this `Variable` to the one supplied.
+  /// It is rarely necessary to call this; it's used, for example, when
+  /// a non-sparse gradient gets added to a sparse gradient, requiring
+  /// the type of the gradient `Variable` to become non-sparse.
+  void set_data(const at::Tensor &new_data);
 
   /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
   /// `Variable`.
@@ -231,7 +244,8 @@ struct TORCH_API Variable : public at::Tensor {
   void set_gradient_edge(Edge edge) noexcept;
 
   /// Returns the input index of the gradient `Function` to which this
-  /// `Variable` is connected.
+  /// `Variable` is connected.  Note: input indexes of the gradient `Function`
+  /// correspond to output indexes of the corresponding forward `Function`.
   uint32_t output_nr() const noexcept;
 
   /// True if this `Variable` is a leaf and thus does not have a `grad_fn`.
@@ -242,10 +256,10 @@ struct TORCH_API Variable : public at::Tensor {
 
   /// Increments the version count of this `Variable`.
   void bump_version() noexcept;
-  void set_version_counter(const VariableVersion& version_counter) noexcept;
+  void set_version_counter(const c10::VariableVersion& version_counter) noexcept;
 
   /// Retrieves this `Variable`s version counter.
-  const VariableVersion& version_counter() const noexcept;
+  const c10::VariableVersion& version_counter() const noexcept;
 
   /// Retrieves the current value of the `Variable`'s version counter.
   /// Equivalent to calling `version_counter().current_version()`.
@@ -320,7 +334,6 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   std::shared_ptr<Function> grad_fn_;
   std::weak_ptr<Function> grad_accumulator_;
 
-  VariableVersion version_counter_;
   std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
 
   // Only meaningful on leaf variables (must be false otherwise)
@@ -333,7 +346,6 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   // We use this to make sure we can setup the backwards trace
   // correctly when this variable is passed to another function.
   uint32_t output_nr_;
-  PyObject* pyobj_ = nullptr; // weak reference
 
   // Mutex to ensure that concurrent read operations that modify internal
   // state are still thread-safe. Used by grad_fn() and
@@ -396,8 +408,8 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   ~Impl() override;
 
   int64_t numel() const override;
-  at::IntList sizes() const override;
-  at::IntList strides() const override;
+  at::IntArrayRef sizes() const override;
+  at::IntArrayRef strides() const override;
   bool is_contiguous() const override;
   int64_t size(int64_t d) const override;
   int64_t stride(int64_t d) const override;
@@ -407,10 +419,11 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   void set_storage_offset(int64_t storage_offset) override;
 
   int64_t dim() const override;
+  bool has_storage() const override;
   const at::Storage& storage() const override;
   void* slow_data() const override;
 
-  void set_data(Tensor new_data);
+  void set_data(const at::Tensor &new_data);
 
   /// Reset all expensive fields to free up resources
   void release_resources() override;
@@ -424,9 +437,6 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   /// The underlying data tensor for this Variable.
   /// This field will be removed once VariableImpl and TensorImpl are merged.
   at::Tensor data_;
-
- private:
-  int64_t get_device_slow() const override;
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -575,6 +585,22 @@ inline Variable make_variable(
   return Variable();
 }
 
+inline Variable make_variable_consuming(
+    at::Tensor data,
+    bool requires_grad = false,
+    bool allow_tensor_metadata_change = true) {
+  AT_CHECK(
+      !data.is_variable(),
+      "Must not create a new variable from a variable, use its .data()");
+  if (data.defined()) {
+    AT_ASSERT(data.getIntrusivePtr().use_count() == 1);
+    data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    auto autograd_meta = c10::guts::make_unique<Variable::AutogradMeta>();
+    return Variable(c10::make_intrusive<Variable::Impl>(std::move(data), std::move(autograd_meta), requires_grad));
+  }
+  return Variable();
+}
+
 inline Variable make_variable(
     at::Tensor data,
     Edge gradient_edge,
@@ -643,8 +669,8 @@ inline Variable Variable::detach() const {
   return var;
 }
 
-inline void Variable::set_data(Tensor new_data) const {
-  get()->set_data(std::move(new_data));
+inline void Variable::set_data(const at::Tensor &new_data) {
+  get()->set_data(new_data);
 }
 
 inline void Variable::set_gradient_edge(Edge edge) noexcept {
@@ -664,20 +690,20 @@ inline bool Variable::is_leaf() const noexcept {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline void Variable::set_version_counter(
-    const VariableVersion& version_counter) noexcept {
-  get_autograd_meta()->version_counter_ = version_counter;
+    const c10::VariableVersion& version_counter) noexcept {
+  data().unsafeGetTensorImpl()->set_version_counter(version_counter);
 }
 
 inline void Variable::bump_version() noexcept {
-  get_autograd_meta()->version_counter_.bump();
+  data().unsafeGetTensorImpl()->bump_version();
 }
 
 inline uint32_t Variable::current_version() const noexcept {
-  return get_autograd_meta()->version_counter_.current_version();
+  return data().unsafeGetTensorImpl()->version_counter().current_version();
 }
 
-inline const VariableVersion& Variable::version_counter() const noexcept {
-  return get_autograd_meta()->version_counter_;
+inline const c10::VariableVersion& Variable::version_counter() const noexcept {
+  return data().unsafeGetTensorImpl()->version_counter();
 }
 
 // Hooks
@@ -724,11 +750,11 @@ inline const std::string& Variable::name() const noexcept {
 }
 
 inline void Variable::set_pyobj(PyObject* pyobj) noexcept {
-  get_autograd_meta()->pyobj_ = pyobj;
+  get()->set_pyobj(pyobj);
 }
 
 inline PyObject* Variable::pyobj() const noexcept {
-  return get_autograd_meta()->pyobj_;
+  return get()->pyobj();
 }
 
 inline Variable::AutogradMeta* Variable::get_autograd_meta() const noexcept {

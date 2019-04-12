@@ -1,11 +1,8 @@
 import argparse
 import cProfile
 import pstats
-import subprocess
 import sys
 import os
-import re
-import contextlib
 
 import torch
 from torch.autograd import profiler
@@ -130,7 +127,7 @@ def print_autograd_prof_summary(prof, mode, sortby='cpu_time', topk=15):
         print(warn.format(autograd_prof_sortby))
         sortby = 'cpu_time'
 
-    if mode is 'CUDA':
+    if mode == 'CUDA':
         cuda_warning = ('\n\tBecause the autograd profiler uses the CUDA event API,\n'
                         '\tthe CUDA time column reports approximately max(cuda_time, cpu_time).\n'
                         '\tPlease ignore this output if your code does not use CUDA.\n')

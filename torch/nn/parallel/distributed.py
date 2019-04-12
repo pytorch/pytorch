@@ -3,7 +3,6 @@ import copy
 import torch
 
 from torch.cuda.comm import broadcast_coalesced
-from torch.cuda import nccl
 import torch.distributed as dist
 
 if dist.is_available():
@@ -18,7 +17,7 @@ from torch.cuda._utils import _get_device_index
 
 class DistributedDataParallel(Module):
     r"""Implements distributed data parallelism that is based on
-    torch.distributed package at the module level.
+    ``torch.distributed`` package at the module level.
 
     This container parallelizes the application of the given module by
     splitting the input across the specified devices by chunking in the batch
@@ -32,7 +31,7 @@ class DistributedDataParallel(Module):
     The same constraints on input as in :class:`torch.nn.DataParallel` apply.
 
     Creation of this class requires that ``torch.distributed`` to be already
-    initialized, by calling :func:`torch.distributed.init_process_group`
+    initialized, by calling :func:`torch.distributed.init_process_group`.
 
     ``DistributedDataParallel`` can be used in the following two ways:
 
@@ -44,7 +43,7 @@ class DistributedDataParallel(Module):
     this way, you can simply construct the model as the following:
 
         >>> torch.distributed.init_process_group(backend="nccl")
-        >>> model = DistributedDataParallel(model) # device_ids will include all GPU devices be default
+        >>> model = DistributedDataParallel(model) # device_ids will include all GPU devices by default
 
     (2) Multi-Process Single-GPU
 
@@ -84,6 +83,12 @@ class DistributedDataParallel(Module):
         Also note that ``nccl`` backend is currently the fastest and highly
         recommended backend for fp16/fp32 mixed-precision training.
 
+    .. note:: If you use ``torch.save`` on one process to checkpoint the module,
+        and ``torch.load`` on some other processes to recover it, make sure that
+        ``map_location`` is configured properly for every process. Without
+        ``map_location``, ``torch.load`` would recover the module to devices
+        where the module was saved from.
+
     .. warning::
         This module works only with the ``gloo`` and ``nccl`` backends.
 
@@ -102,9 +107,9 @@ class DistributedDataParallel(Module):
         This module assumes all parameters are registered in the model of each
         distributed processes are in the same order. The module itself will
         conduct gradient all-reduction following the reverse order of the
-        registered parameters of the model. In other wise, it is users'
+        registered parameters of the model. In other words, it is users'
         responsibility to ensure that each distributed process has the exact
-        same model and thus the exact parameter registeration order.
+        same model and thus the exact same parameter registration order.
 
     .. warning::
         This module assumes all buffers and gradients are dense.
@@ -152,30 +157,31 @@ class DistributedDataParallel(Module):
         output_device (int or torch.device): device location of output (default: device_ids[0])
         broadcast_buffers (bool): flag that enables syncing (broadcasting) buffers of
                            the module at beginning of the forward function.
-                           (default: True)
+                           (default: ``True``)
         process_group: the process group to be used for distributed data
-                       all-reduction. If None, the default process group, which
+                       all-reduction. If ``None``, the default process group, which
                        is created by ```torch.distributed.init_process_group```,
-                       will be used. (default: None)
+                       will be used. (default: ``None``)
         bucket_cap_mb: DistributedDataParallel will bucket parameters into
                        multiple buckets so that gradient reduction of each
                        bucket can potentially overlap with backward computation.
-                       bucket_cap_mb controls the bucket size in MegaBytes (MB)
+                       :attr:`bucket_cap_mb` controls the bucket size in MegaBytes (MB)
                        (default: 25)
-        check_reduction: when setting to True, it enables DistributedDataParallel
+        check_reduction: when setting to ``True``, it enables DistributedDataParallel
                          to automatically check if the previous iteration's
                          backward reductions were successfully issued at the
                          beginning of every iteration's forward function.
                          You normally don't need this option enabled unless you
                          are observing weird behaviors such as different ranks
                          are getting different gradients, which should not
-                         happen if DistributedDataParallel is corrected used.
-                         (default: False)
+                         happen if DistributedDataParallel is correctly used.
+                         (default: ``False``)
 
     Attributes:
         module (Module): the module to be parallelized
 
     Example::
+
         >>> torch.distributed.init_process_group(backend='nccl', world_size=4, init_method='...')
         >>> net = torch.nn.DistributedDataParallel(model, pg)
     """
@@ -229,6 +235,7 @@ class DistributedDataParallel(Module):
         (2) bucketing the parameters for reductions
         (3) resetting the bucketing states
         (4) registering the grad hooks
+        (5) passing a handle of DDP to SyncBatchNorm Layer
         """
         if len(self.device_ids) > 1:
             # TODO: we don't need to replicate params in here. they're always going to
@@ -244,12 +251,8 @@ class DistributedDataParallel(Module):
         else:
             self._module_copies = [self.module]
 
-        self.modules_params_data = [[] for _ in range(len(self.device_ids))]
-        self.modules_buffers_data = [[] for _ in range(len(self.device_ids))]
-
-        for dev_idx, module in enumerate(self._module_copies):
-            self.modules_params_data[dev_idx] = [p.data for p in module.parameters()]
-            self.modules_buffers_data[dev_idx] = [b.data for b in module.buffers()]
+        self.modules_params = [list(m.parameters()) for m in self._module_copies]
+        self.modules_buffers = [list(m.buffers()) for m in self._module_copies]
 
         # This is a triply-nested list where the "dimensions" are: devices, buckets, bucket_elems
         param_buckets = []
@@ -306,6 +309,9 @@ class DistributedDataParallel(Module):
         self.devs_ready = [0 for _ in range(len(self.bucket_sizes))]
         self._register_grad_hooks()
 
+        # passing a handle to torch.nn.SyncBatchNorm layer
+        self._passing_sync_batchnorm_handle(self._module_copies)
+
     def __getstate__(self):
         self._check_default_group()
         attrs = copy.copy(self.__dict__)
@@ -347,8 +353,8 @@ class DistributedDataParallel(Module):
             if not self.all_buckets_reduced:
                 raise RuntimeError("Not all gradients have been reduced from "
                                    "the backward of the previous iteration. "
-                                   "This is unexpected and fatal error. Please "
-                                   "check and ensure that the model's "
+                                   "This is an unexpected and fatal error. "
+                                   "Please check and ensure that the model's "
                                    "parameters are not changed after you wrap "
                                    "up the model with DistributedDataParallel.")
         self.all_buckets_reduced = False
@@ -382,29 +388,37 @@ class DistributedDataParallel(Module):
         dist._dist_broadcast_coalesced(self.process_group, tensors, buffer_size, False)
 
     def _sync_params(self):
-        if len(self.device_ids) > 1:
-            # intra-node parameter sync
-            result = broadcast_coalesced(self.modules_params_data[0],
-                                         self.device_ids,
-                                         self.broadcast_bucket_size)
-            for tensors, module_params_data in zip(result[1:], self.modules_params_data[1:]):
-                for tensor, param_data in zip(tensors, module_params_data):
-                    param_data.set_(tensor)
+        with torch.no_grad():
+            if len(self.device_ids) > 1:
+                # intra-node parameter sync
+                result = broadcast_coalesced(self.modules_params[0],
+                                             self.device_ids,
+                                             self.broadcast_bucket_size)
+                for tensors, module_params in zip(result[1:],
+                                                  self.modules_params[1:]):
+                    for tensor, param in zip(tensors, module_params):
+                        param.set_(tensor)
 
-        # module buffer sync
-        if self.broadcast_buffers:
-            if len(self.modules_buffers_data[0]) > 0:
+            # module buffer sync
+            if self.broadcast_buffers and len(self.modules_buffers[0]) > 0:
                 # cross-node buffer sync
-                self._dist_broadcast_coalesced(self.modules_buffers_data[0],
+                self._dist_broadcast_coalesced(self.modules_buffers[0],
                                                self.broadcast_bucket_size)
                 if len(self.device_ids) > 1:
                     # intra-node buffer sync
-                    result = broadcast_coalesced(self.modules_buffers_data[0],
+                    result = broadcast_coalesced(self.modules_buffers[0],
                                                  self.device_ids,
                                                  self.broadcast_bucket_size)
-                    for tensors, module_buffers_data in zip(result[1:], self.modules_buffers_data[1:]):
-                        for tensor, buffer_data in zip(tensors, module_buffers_data):
-                            buffer_data.set_(tensor)
+                    for tensors, module_buffers in zip(result[1:],
+                                                       self.modules_buffers[1:]):
+                        for tensor, buffer in zip(tensors, module_buffers):
+                            buffer.set_(tensor)
+
+    def _passing_sync_batchnorm_handle(self, module_copies):
+        for dev_idx, module in enumerate(module_copies):
+            for layer in module.modules():
+                if isinstance(layer, torch.nn.modules.SyncBatchNorm):
+                    layer._specify_ddp_gpu_num(len(self.device_ids))
 
     def _register_grad_hooks(self):
         self._grad_accs = []  # need to keep them in scope
@@ -437,7 +451,8 @@ class DistributedDataParallel(Module):
             # We can flush these and save memory for replicas
             if device_idx > 0:
                 param.grad = None
-                param.data.set_()
+                with torch.no_grad():
+                    param.set_()
 
             # Current device's bucket is full
             if self.buckets_ready_size[bucket_idx][device_idx] == self.bucket_sizes[bucket_idx]:

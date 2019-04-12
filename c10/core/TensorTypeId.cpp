@@ -7,4 +7,8 @@ std::ostream& operator<<(std::ostream& str, c10::TensorTypeId rhs) {
   return str << c10::to_string(rhs.underlyingId());
 }
 
+std::string toString(TensorTypeId id) {
+  return c10::to_string(id.underlyingId());
+}
+
 } // namespace c10

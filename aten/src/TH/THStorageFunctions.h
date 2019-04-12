@@ -11,11 +11,17 @@
 #include <TH/generic/THStorage.h>
 #include <TH/THGenerateHalfType.h>
 
+#include <TH/generic/THStorage.h>
+#include <TH/THGenerateBoolType.h>
+
 #include <TH/generic/THStorageCopy.h>
 #include <TH/THGenerateAllTypes.h>
 
 #include <TH/generic/THStorageCopy.h>
 #include <TH/THGenerateHalfType.h>
+
+#include <TH/generic/THStorageCopy.h>
+#include <TH/THGenerateBoolType.h>
 
 // This exists to have a data-type independent way of freeing (necessary for THPPointer).
 TH_API void THStorage_free(THStorage *storage);

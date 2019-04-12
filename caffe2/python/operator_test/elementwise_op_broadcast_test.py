@@ -327,7 +327,7 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
         dc_cpu_only = [d for d in dc if d.device_type != caffe2_pb2.CUDA]
         self.assertDeviceChecks(dc_cpu_only, op, [X, Y], [0])
 
-    @unittest.skipIf(not workspace.has_gpu_support and not workspace.has_hip_support, "No gpu support")
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     @given(**hu.gcs)
     def test_sum_reduce_fp16(self, gc, dc):
         assume(core.IsGPUDeviceType(gc.device_type))

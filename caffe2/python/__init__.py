@@ -20,13 +20,13 @@ if platform.system() == 'Windows':
         NVTOOLEXT_HOME = os.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt')
 
         if os.path.exists(NVTOOLEXT_HOME):
-            return NVTOOLEXT_HOME + '\\bin\\x64\\'
+            return os.path.join(NVTOOLEXT_HOME, 'bin', 'x64')
         else:
             return ''
 
-    py_dll_path = os.path.join(os.path.dirname(sys.executable), 'Library\\bin')
+    py_dll_path = os.path.join(os.path.dirname(sys.executable), 'Library', 'bin')
     th_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'torch')
-    th_dll_path = th_root + '\\lib\\'
+    th_dll_path = os.path.join(th_root, 'lib')
 
     dll_paths = [th_dll_path, py_dll_path, get_nvToolsExt_path(), os.environ['PATH']]
 

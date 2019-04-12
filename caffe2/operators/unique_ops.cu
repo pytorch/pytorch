@@ -53,12 +53,12 @@ bool UniqueOp<CUDAContext>::DoRunWithType() {
   auto& inputTensor = Input(0);
   // use dim32 to enforce that it's fine to have remapping of type int
   int N = inputTensor.dim32(0);
-  CAFFE_ENFORCE_EQ(inputTensor.ndim(), 1, "Input should be a vector");
+  CAFFE_ENFORCE_EQ(inputTensor.dim(), 1, "Input should be a vector");
 
   int* remapping = nullptr;
   if (REMAPPING < OutputSize()) {
-    auto* remappingTensor = Output(REMAPPING);
-    remappingTensor->ResizeLike(inputTensor);
+    auto* remappingTensor =
+        Output(REMAPPING, inputTensor.sizes(), at::dtype<int>());
     remapping = remappingTensor->template mutable_data<int>();
   }
 

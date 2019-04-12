@@ -6,7 +6,7 @@
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_spec.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/stack.h>
+#include <ATen/core/stack.h>
 
 #include <cstdint>
 #include <vector>

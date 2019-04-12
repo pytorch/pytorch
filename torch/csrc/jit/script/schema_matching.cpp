@@ -1,8 +1,7 @@
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/builtin_functions.h>
 #include <torch/csrc/jit/script/error_report.h>
-#include <torch/csrc/jit/script/schema_matching.h>
 
 namespace torch {
 namespace jit {
@@ -84,20 +83,21 @@ Value* tryConvertToType(
 
   if (value->type()->isSubtypeOf(NoneType::get()) &&
       !concrete_type->isSubtypeOf(NoneType::get())) {
-    if (concrete_type->isSubtypeOf(OptionalType::ofTensor())) {
-      // create undefined tensor when None pass to a optional[tensor] formal arg
-      value = graph.insertNode(graph.createUndefined())->output();
-    } else if (auto optional_type = concrete_type->cast<OptionalType>()) {
+    if (auto optional_type = concrete_type->cast<OptionalType>()) {
       value =
           graph.insertNode(graph.createNone(optional_type->getElementType()))
               ->output();
+    } else {
+      // When try to convert None to non-optional concrete type, create a None
+      // node with the return value type of Optional[concrete_type]
+      value = graph.insertNode(graph.createNone(concrete_type))->output();
     }
   }
 
   // implicit conversions
   if (allow_conversions) {
     if (concrete_type->isSubtypeOf(NumberType::get()) &&
-        value->type()->isSubtypeOf(DynamicType::get())) {
+        value->type()->isSubtypeOf(TensorType::get())) {
       auto n = graph.createImplicitTensorToNum(concrete_type, value);
       value = graph.insertNode(n)
                   ->setSourceLocation(std::make_shared<SourceRange>(loc))
@@ -106,6 +106,10 @@ Value* tryConvertToType(
     if (value->type()->isSubtypeOf(StringType::get()) &&
         DeviceObjType::get()->isSubtypeOf(concrete_type)) {
       return graph.insert(aten::device, {value}, {}, loc);
+    }
+    if (concrete_type == FloatType::get() &&
+        value->type() == NumberType::get()) {
+      return graph.insert(prim::Float, {value}, {}, loc);
     }
   }
 
@@ -145,10 +149,24 @@ Value* tryMatchArgument(
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
 
   if (!value->type()->isSubtypeOf(concrete_type)) {
-    err() << "expected a value of type " << concrete_type->str()
-          << " for argument '" << arg.name() << "' but found "
-          << value->type()->str() << "\n"
-          << named_value.locOr(loc);
+    auto& ostream = err() << "expected a value of type " << concrete_type->str()
+                          << " for argument '" << arg.name() << "' but found "
+                          << value->type()->str() << "\n";
+
+    if (auto v = value->type()->cast<ListType>()) {
+      if (v->getElementType()->isSubtypeOf(TensorType::get())) {
+        ostream << "Empty lists default to List[Tensor]. Use torch.jit."
+                   "annotate(List[my_type], []) to create an empty list of"
+                   " another type\n";
+      }
+    }
+
+    if (value->type() == NumberType::get() &&
+        value->node()->kind() == aten::item) {
+      ostream
+          << "Use int(tensor) or float(tensor) to retrieve item() from a tensor with the appropriate type\n";
+    }
+    ostream << named_value.locOr(loc);
     return nullptr;
   }
   return value;
@@ -211,8 +229,9 @@ c10::optional<MatchedSchema> tryMatchSchema(
       v = self;
       self = c10::nullopt;
     } else if (!arg.kwarg_only() && used_args < args.size()) {
-      // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
-      if (allow_conversions && arg.type()->kind() ==
+      // allow zeros(IntArrayRef sizes) to work with zeros(1, 2) or zeros(1)
+      if (allow_conversions &&
+          arg.type()->kind() ==
               TypeKind::ListType && // the formal must be a list
           !arg.N() && // it must not be a broadcasting list like int[3],
                       // otherwise a single int is a valid input
@@ -299,19 +318,37 @@ c10::optional<MatchedSchema> tryMatchSchema(
       return c10::nullopt;
     }
   }
-  auto return_types = fmap(schema.returns(), [&](const Argument& r) {
+
+  const auto& returns = schema.returns();
+  auto return_types = fmap(returns, [&](const Argument& r) {
     return evalTypeVariables(r.type(), type_env);
   });
-  return MatchedSchema{std::move(positional_inputs), std::move(return_types)};
+  // Codegen does not support return of namedtuples with undefined field names.
+  // Therefore, either all or none returns has field names.
+  bool return_has_field_names =
+      std::all_of(returns.begin(), returns.end(), [&](const Argument& r) {
+        return r.name().length() > 0;
+      });
+  c10::OptNameList return_field_names = c10::nullopt;
+  if (return_has_field_names) {
+    return_field_names =
+        fmap(returns, [&](const Argument& r) { return r.name(); });
+  }
+  return MatchedSchema{std::move(positional_inputs),
+                       std::move(return_types),
+                       std::move(return_field_names)};
 }
 
 // pack outputs of a function following python rules. If there is a single value
 // return a SimpleValue, otherwise pack all the values into a Tuple.
-Value* packOutputs(Graph& g, at::ArrayRef<Value*> values) {
+Value* packOutputs(
+    Graph& g,
+    at::ArrayRef<Value*> values,
+    c10::OptNameList field_names) {
   if (values.size() == 1) {
     return values[0];
   }
-  return g.insertNode(g.createTuple(values))->output();
+  return g.insertNode(g.createTuple(values, std::move(field_names)))->output();
 }
 
 // Given a successful match between operator schema and symbol, emit a node
@@ -332,7 +369,7 @@ static Value* emitBuiltinNode(
   // otherwise schema and dispatch are not in sync
   getOperation(n);
 
-  return packOutputs(graph, n->outputs());
+  return packOutputs(graph, n->outputs(), matched_schema.return_field_names);
 }
 
 static std::string prefixLine(
@@ -348,7 +385,6 @@ static std::string prefixLine(
   }
   return ss.str();
 }
-
 
 // Search for operators matching the provided symbol name and input types.
 // If one is found, emit a node to the graph for that operator.
@@ -385,16 +421,14 @@ Value* emitBuiltinCall(
         return emitBuiltinNode(*matched_schema, loc, graph, name);
       }
     }
-    for (Method* method : builtin_functions) {
-      if (auto result = try_emit_call_to(
+    for (Function* method : builtin_functions) {
+      if (auto result = method->try_emit_call(
               graph,
               loc,
-              *method,
               self,
               inputs,
               attributes,
               failure_messages,
-              nullptr,
               allow_conversions)) {
         return result;
       }
@@ -412,8 +446,9 @@ Value* emitBuiltinCall(
     const auto& user_function_name = name.toQualString();
     error << "unknown builtin op: " << user_function_name << "\n";
     if (close_symbols.size() == 0) {
-      error << "Could not find any similar ops to " << user_function_name
-        << ". This op may not exist or may not be currently supported in TorchScript\n";
+      error
+          << "Could not find any similar ops to " << user_function_name
+          << ". This op may not exist or may not be currently supported in TorchScript\n";
     } else {
       error << "Here are some suggestions: \n";
       for (const auto& sym : close_symbols) {
@@ -427,7 +462,6 @@ Value* emitBuiltinCall(
                          << prefixLine(failure_messages.str(), "  ")
                          << "for call at";
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch

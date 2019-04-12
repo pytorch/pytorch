@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/stack.h>
+#include <ATen/core/stack.h>
 
 #include <cstdint>
 #include <memory>
@@ -36,6 +36,11 @@ TORCH_API void overrideCanFuseOnCPU(bool value);
 // specified device with the given inputs.
 // Returns the outputs.
 TORCH_API std::vector<at::Tensor> debugLaunchGraph(
+    Graph& graph,
+    at::ArrayRef<at::Tensor> inputs);
+
+// Treats the given graph as a fusion group and returns the generated code.
+TORCH_API std::string debugGetFusedKernelCode(
     Graph& graph,
     at::ArrayRef<at::Tensor> inputs);
 

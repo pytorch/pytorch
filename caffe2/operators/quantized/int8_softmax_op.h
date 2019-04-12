@@ -14,9 +14,8 @@ namespace int8 {
 
 class Int8SoftmaxOp final : public Operator<CPUContext> {
  public:
-  Int8SoftmaxOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
-        ws_(ws) {}
+  explicit Int8SoftmaxOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws), ws_(ws) {}
 
   ~Int8SoftmaxOp() {
     if (this->qnnpackOperator_ != nullptr) {

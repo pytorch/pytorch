@@ -9,8 +9,9 @@ class CuDNNLRNOp final : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
 
-  CuDNNLRNOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws),
+  template <class... Args>
+  explicit CuDNNLRNOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_),
         size_(OperatorBase::GetSingleArgument<int>("size", 0)),
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 0)),
@@ -23,7 +24,7 @@ class CuDNNLRNOp final : public Operator<CUDAContext> {
         cudnnSetLRNDescriptor(norm_desc_, size_, alpha_, beta_, bias_));
   }
 
-  ~CuDNNLRNOp() {
+  ~CuDNNLRNOp() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(data_desc_));
     CUDNN_ENFORCE(cudnnDestroyLRNDescriptor(norm_desc_));
   }
@@ -51,8 +52,9 @@ class CuDNNLRNOp final : public Operator<CUDAContext> {
 class CuDNNLRNGradientOp final : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  CuDNNLRNGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws),
+  template <class... Args>
+  explicit CuDNNLRNGradientOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...),
         cudnn_wrapper_(&context_),
         size_(OperatorBase::GetSingleArgument<int>("size", 0)),
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 0)),
@@ -65,7 +67,7 @@ class CuDNNLRNGradientOp final : public Operator<CUDAContext> {
         cudnnSetLRNDescriptor(norm_desc_, size_, alpha_, beta_, bias_));
   }
 
-  ~CuDNNLRNGradientOp() {
+  ~CuDNNLRNGradientOp() override {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(data_desc_));
     CUDNN_ENFORCE(cudnnDestroyLRNDescriptor(norm_desc_));
   }

@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtilsMulti.h"
+#include "ATen/cpp_custom_type_hack.h"
 
 #ifdef USE_FBGEMM
 #include "fbgemm/Fbgemm.h"
@@ -16,6 +17,14 @@
 #include <vector>
 
 #include <chrono>
+
+namespace caffe2 {
+#ifdef USE_FBGEMM
+// Required for cpp_custom_type_hack to work
+CAFFE_KNOWN_TYPE(fbgemm::PackBMatrix<int8_t>);
+#endif // USE_FBGEMM
+}
+
 namespace at {
 namespace native {
 
@@ -34,10 +43,8 @@ Tensor fbgemm_linear_int8_weight(
   // fallback path and rather fail loudly if we cannot run FBGEMM.
   AT_ASSERTM(fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
 
-  // We call contiguous on `input` and `weight` here because these APIs all
-  // expect row-major tensor buffers.
-  auto* input_ptr = input.contiguous().data<float>();
-  auto* weight_ptr = weight.contiguous().data<int8_t>();
+  auto input_contig = input.contiguous();
+  auto* input_ptr = input_contig.data<float>();
 
   AT_ASSERT(input.dim() >= 2);
   int64_t M = 1;
@@ -106,6 +113,8 @@ Tensor fbgemm_linear_int8_weight(
   // This is the end of the pipeline, pass the resulting matrix through
   fbgemm::DoNothing<float, float> doNothingObj{};
 
+  auto bias_contig = bias.contiguous();
+
   // After the uint8 * int8 matrix multiplication is performed, this operation
   // does:
   //  1) Add in row and column offsets to the rows and columns, respectively
@@ -119,21 +128,20 @@ Tensor fbgemm_linear_int8_weight(
       /*Bq_zero_point=*/&weight_zero_point_int32,
       /*row_offsets=*/packA.getRowOffsetBuffer(),
       /*col_offsets=*/col_offsets.data<int32_t>(),
-      /*bias=*/bias.contiguous().data<float>(),
+      /*bias=*/bias_contig.data<float>(),
       /*ncol=*/N);
 
   // Allocate output Tensor and a buffer for fbgemmPacked to use
-  auto output = at::zeros_like(bias).to(at::kFloat).expand({M, N}).contiguous();
-  auto buffer = at::zeros_like(output).to(at::kInt).contiguous();
+  auto output = at::zeros({M, N}, bias.options().dtype(at::kFloat));
+  auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
   // Pull out the PackBMatrix instance from the owning tensor
-  auto* packB = reinterpret_cast<fbgemm::PackBMatrix<int8_t>*>(
-      packed.storage().data_ptr().get());
+  auto& packB = cpp_custom_type_hack::cast<fbgemm::PackBMatrix<int8_t>>(packed);
 
   // Do the GEMM
   fbgemm::fbgemmPacked(
       /*packA=*/packA,
-      /*packB=*/*packB,
+      /*packB=*/packB,
       /*C=*/output.data<float>(),
       /*C_buffer=*/buffer.data<int32_t>(),
       /*ldc=*/N,
@@ -231,8 +239,9 @@ Tensor fbgemm_pack_quantized_matrix(
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
   AT_ASSERTM(fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
-  auto contiguous_ptr = weight.contiguous().data<int8_t>();
-  auto* ptr = new fbgemm::PackBMatrix<int8_t>(
+  auto weight_contig = weight.contiguous();
+  auto contiguous_ptr = weight_contig.data<int8_t>();
+  auto ptr = guts::make_unique<fbgemm::PackBMatrix<int8_t>>(
       /*trans=*/fbgemm::matrix_op_t::Transpose,
       /*nRow=*/K,
       /*nCol=*/N,
@@ -240,26 +249,7 @@ Tensor fbgemm_pack_quantized_matrix(
       /*ld=*/K,
       /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
       /*groups=*/1);
-
-  // We store this instance away in a Tensor and register a deleter function
-  // so that we do not leak memory. On the other side, we pull out the storage's
-  // data_ptr and get the PackBMatrix's pointer.
-  at::DataPtr at_ptr(
-      ptr,
-      ptr,
-      [](void* ptr) {
-        fbgemm::PackBMatrix<int8_t>* typed_ptr =
-            reinterpret_cast<fbgemm::PackBMatrix<int8_t>*>(ptr);
-        delete typed_ptr;
-      },
-      at::kCPU);
-
-  auto retval = at::empty(
-      {sizeof(fbgemm::PackBMatrix<int8_t>)}, weight.options().dtype(at::kByte));
-
-  retval.storage().set_data_ptr(std::move(at_ptr));
-
-  return retval;
+  return cpp_custom_type_hack::create(std::move(ptr));
 }
 
 #else // USE_FBGEMM

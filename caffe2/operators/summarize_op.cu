@@ -75,7 +75,7 @@ struct summary_stats_binary_op
 template<>
 bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
-  const int N = X.size();
+  const int N = X.numel();
   DCHECK_GT(N, 0);
 
   // TODO(Yangqing): Any better way to avoid having to const cast?

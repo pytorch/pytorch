@@ -80,7 +80,7 @@ class ElementwiseRTCOp final : public Operator<CUDAContext> {
     CAFFE_ENFORCE(src.size(), "Op should have a non-zero source code size.");
     func_.Compile(InputSize(), OutputSize(), src);
   }
-  ~ElementwiseRTCOp() {}
+  ~ElementwiseRTCOp() override {}
 
   bool RunOnDevice() override {
     static_assert(sizeof(void*) == sizeof(size_t),

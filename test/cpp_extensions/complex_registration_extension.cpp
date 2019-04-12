@@ -5,13 +5,13 @@
 #include <ATen/core/VariableHooksInterface.h>
 #include <ATen/detail/ComplexHooksInterface.h>
 
-#include "ATen/Allocator.h"
-#include "ATen/CPUGenerator.h"
-#include "ATen/DeviceGuard.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/Utils.h"
-#include "ATen/WrapDimUtils.h"
-#include "ATen/core/Half.h"
+#include <c10/core/Allocator.h>
+#include <ATen/CPUGenerator.h>
+#include <ATen/DeviceGuard.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Utils.h>
+#include <ATen/WrapDimUtils.h>
+#include <c10/util/Half.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
@@ -21,7 +21,7 @@
 #include <memory>
 #include <utility>
 
-#include "ATen/Config.h"
+#include <ATen/Config.h>
 
 namespace at {
 
@@ -36,10 +36,9 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
   caffe2::TypeMeta typeMeta() const override;
   Backend backend() const override;
   const char* toString() const override;
-  size_t elementSizeInBytes() const override;
   TypeID ID() const override;
 
-  Tensor empty(IntList size, const TensorOptions & options) const override {
+  Tensor empty(IntArrayRef size, const TensorOptions & options) const override {
     // Delegate to the appropriate cpu tensor factory
     const DeviceGuard device_guard(options.device());
     return at::native::empty_cpu(/* actuals */ size, options);
@@ -72,10 +71,6 @@ const char* CPUComplexFloatType::toString() const {
 
 TypeID CPUComplexFloatType::ID() const {
   return TypeID::CPUComplexFloat;
-}
-
-size_t CPUComplexFloatType::elementSizeInBytes() const {
-  return sizeof(float);
 }
 
 REGISTER_COMPLEX_HOOKS(ComplexHooks);

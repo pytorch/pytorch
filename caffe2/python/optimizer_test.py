@@ -454,8 +454,7 @@ class TestYellowFin(OptimizerTestBase, TestCase):
                 )
 
     @unittest.skip("Results might vary too much. Only for individual use.")
-    @unittest.skipIf(not workspace.has_gpu_support
-                    and not workspace.has_hip_support, "No gpu support")
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     def test_caffe2_gpu_vs_numpy(self):
         n_dim = 1000000
         n_iter = 50

@@ -29,7 +29,7 @@ class Errors(object):
     >>>     ...
     """
 
-    def __init__(self, msg, rtol=1e-3, atol=1e-7):
+    def __init__(self, msg, rtol=1e-3, atol=1e-5):
         self.msg = msg
         self.errors = []
         self.context = []
@@ -68,7 +68,8 @@ class Errors(object):
         """
         if isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
             try:
-                np.testing.assert_allclose(x, y, rtol=self.rtol, atol=self.atol, equal_nan=False, verbose=True)
+                np.testing.assert_allclose(x, y, rtol=self.rtol, atol=self.atol,
+                                           equal_nan=True, verbose=True)
             except AssertionError as e:
                 raise
                 k("{}{}".format(colonize(msg), str(e).lstrip()))
@@ -176,7 +177,7 @@ class Errors(object):
         if self.errors:
             self.fail()
 
-    def recover(parent_self):
+    def recover(self):
         """
         Returns a context manager which can be used to recover in case of
         an error.  Example usage:
@@ -184,6 +185,8 @@ class Errors(object):
         >>> with errs.recover():
         >>>     ...
         """
+        parent_self = self
+
         class Recover(object):
             def __enter__(self):
                 pass
@@ -193,7 +196,7 @@ class Errors(object):
                     return True
         return Recover()
 
-    def addErrCtxt(parent_self, msg):
+    def addErrCtxt(self, msg):
         """
         Returns a context manager which encloses a fragment of code with
         an extra contextual message, e.g., where an error occurred, or a hint
@@ -202,6 +205,8 @@ class Errors(object):
         >>> with errs.addErrCtx("Some text"):
         >>>     ...
         """
+        parent_self = self
+
         class AddContext(object):
             def __enter__(self):
                 parent_self.context.append(msg)
@@ -252,7 +257,7 @@ def verify(model, args, backend, verbose=False, training=False, rtol=1e-3, atol=
     PyTorch developers.  You can also debug the issue yourself by removing
     suffixes of operators from your model until verification passes.
 
-    For reproduceability, we recommend explicitly setting PyTorch's seed before
+    For reproducibility, we recommend explicitly setting PyTorch's seed before
     invoking this function.
 
     Arguments:

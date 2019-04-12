@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/Allocator.h>
+#include <c10/core/Allocator.h>
 #include <ATen/core/Generator.h>
 #include <c10/util/Exception.h>
 
@@ -100,6 +100,10 @@ struct CAFFE2_API CUDAHooksInterface {
 
   virtual long versionCuDNN() const {
     AT_ERROR("Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
+  }
+
+  virtual std::string showConfig() const {
+    AT_ERROR("Cannot query detailed CUDA version without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual double batchnormMinEpsilonCuDNN() const {

@@ -2,13 +2,12 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/jit/argument_spec.h>
-#include <torch/csrc/jit/batched/BatchTensor.h>
 #include <torch/csrc/jit/export.h>
-#include <torch/csrc/jit/function_schema.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/irparser.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
@@ -19,6 +18,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
+#include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/onnx.h>
@@ -26,22 +26,25 @@
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/passes/specialize_undef.h>
-#include <torch/csrc/jit/passes/to_batch.h>
+#include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_arg_flatten.h>
 #include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/init.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
 
 #include <caffe2/serialize/inline_container.h>
+
+#include <ATen/core/function_schema.h>
 
 #include <pybind11/functional.h>
 
@@ -55,13 +58,10 @@
 namespace torch {
 namespace jit {
 
+using ::c10::Argument;
+using ::c10::FunctionSchema;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
-
-// TODO: make a fake future for python
-namespace detail {
-class Future {};
-} // namespace detail
 
 namespace {
 
@@ -76,15 +76,14 @@ bool loadPythonClasses() {
 
   return true;
 }
-
 } // anonymous namespace
 
 #if defined(_WIN32)
-std::string runJITCPPTests() {
+void runJITCPPTests(bool runCuda) {
   AT_ERROR("JIT tests not yet supported on Windows");
 }
 #else
-std::string runJITCPPTests();
+void runJITCPPTests(bool runCuda);
 #endif
 
 void initJITBindings(PyObject* module) {
@@ -114,6 +113,31 @@ void initJITBindings(PyObject* module) {
             return EliminateCommonSubexpression(g); // overload resolution
           })
       .def(
+          "_jit_pass_propagate_qinfo",
+          [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
+      .def(
+          "_jit_pass_insert_observers",
+          [](std::shared_ptr<Graph>& g, py::function pyObserverFunction) {
+            // Create a new node that would be used in the insert observer pass:
+            // all observer nodes will be cloned from this one.
+            Node* new_node = g->createPythonOp(
+                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
+            InsertObserverNodes(g, new_node);
+            // We don't need this node anymore, don't forget to remove it.
+            new_node->destroy();
+          })
+      .def(
+          "_jit_pass_insert_quantdequant",
+          [](std::shared_ptr<Graph>& g) { return InsertQuantDequantNodes(g); })
+      .def(
+          "_jit_pass_quantlint",
+          [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
+      .def(
+          "_jit_pass_fold_quant_inputs",
+          [](std::shared_ptr<Graph>& g) {
+            return FoldQuantNodesIntoInputsOutputs(g);
+          })
+      .def(
           "_jit_pass_remove_inplace_ops",
           [](std::shared_ptr<Graph> g) { return RemoveInplaceOps(g); })
       .def("_jit_pass_constant_pooling", ConstantPooling)
@@ -129,23 +153,13 @@ void initJITBindings(PyObject* module) {
           [](const std::shared_ptr<Graph>& g) { return Canonicalize(g); })
       .def("_jit_pass_lint", LintGraph)
       .def(
-          "_jit_pass_shape_analysis",
-          [](std::shared_ptr<Graph> graph,
-             std::vector<at::Tensor> inputs,
-             bool with_grad) {
-            setInputTypes(
-                *graph,
-                ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
-            PropagateInputShapes(graph);
-          })
-      .def(
           "_jit_pass_complete_shape_analysis",
           [](std::shared_ptr<Graph> graph, py::tuple inputs, bool with_grad) {
             CompleteArgumentSpec spec(
                 with_grad,
                 evilDeprecatedBadCreateStackDoNotUse(inputs, graph->inputs()));
             auto graph_inputs = graph->inputs();
-            JIT_ASSERT(spec.size() == graph_inputs.size());
+            AT_ASSERT(spec.size() == graph_inputs.size());
             for (size_t i = 0; i < graph_inputs.size(); ++i) {
               graph_inputs[i]->setType(spec.at(i));
             }
@@ -153,6 +167,7 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_remove_expands", RemoveExpands)
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
+      .def("_jit_pass_inline_fork_wait", InlineForkWait)
       .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
       .def("_jit_pass_loop_unrolling", UnrollLoops)
       .def(
@@ -164,14 +179,15 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph> graph) { CreateAutodiffSubgraphs(graph); })
       .def(
           "_jit_run_cpp_tests",
-          [] {
+          [](bool runCuda) {
             // We have to release the GIL inside this method, because if we
             // happen to initialize the autograd engine in these tests, the
             // newly spawned worker threads will try to initialize their
             // PyThreadState*, and they need the GIL for this.
             AutoNoGIL _no_gil;
-            return runJITCPPTests();
-          })
+            return runJITCPPTests(runCuda);
+          },
+          py::arg("run_cuda"))
       .def(
           "_jit_flatten",
           [](py::handle& obj) {
@@ -187,7 +203,9 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
-      .def("_jit_pass_specialize_undef", specializeUndef)
+      .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
+      .def("_jit_can_fuse_on_cpu", canFuseOnCPU)
+      .def("_jit_can_fuse_on_gpu", canFuseOnGPU)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
       .def(
           "_jit_differentiate",
@@ -205,6 +223,11 @@ void initJITBindings(PyObject* module) {
              const std::string& unqualified_op_name) {
             auto stack = toStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
+          })
+      .def(
+          "_jit_fuser_get_fused_kernel_code",
+          [](Graph& g, std::vector<at::Tensor> inps) {
+            return debugGetFusedKernelCode(g, inps);
           });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
@@ -347,9 +370,18 @@ void initJITBindings(PyObject* module) {
       },
       py::arg("qualified_name"));
 
+  m.def("parse_ir", [](const std::string& input) {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(input, &*graph);
+    return graph;
+  });
+
   py::class_<FunctionSchema>(m, "FunctionSchema")
       .def_property_readonly(
           "name", [](FunctionSchema& self) { return self.name(); })
+      .def_property_readonly(
+          "overload_name",
+          [](FunctionSchema& self) { return self.overload_name(); })
       .def_property_readonly(
           "arguments", [](FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(
@@ -376,16 +408,78 @@ void initJITBindings(PyObject* module) {
     });
   });
 
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<detail::Future>(m, "Future");
+  struct PythonFutureWrapper {
+    explicit PythonFutureWrapper(c10::intrusive_ptr<c10::ivalue::Future> fut)
+        : fut(std::move(fut)) {}
 
-  m.def("fork", [](script::Module& sm, py::args args) {
-    // TODO: this is a fake stub
-    return detail::Future();
+    c10::intrusive_ptr<c10::ivalue::Future> fut;
+  };
+
+  py::class_<PythonFutureWrapper>(m, "Future");
+
+  m.def("fork", [](py::args args) {
+    AT_ASSERT(args.size() >= 1);
+
+    py::function f = py::cast<py::function>(args[0]);
+    py::tuple args_tup(args.size() - 1);
+
+    for (size_t i = 1; i < args.size(); ++i) {
+      args_tup[i - 1] = args[i];
+    }
+
+    if (jit::tracer::isTracing()) {
+      auto graph = jit::tracer::getTracingState()->graph;
+      auto fork_node = graph->insertNode(graph->create(prim::fork, 1));
+      auto body_block = fork_node->addBlock();
+
+      Value* node_output;
+      py::object py_func_output;
+      auto retval = c10::make_intrusive<c10::ivalue::Future>();
+      // Insert new trace ops into the fork op's sub-block
+      WithInsertPoint guard(body_block);
+      IValue output_ivalue;
+      {
+        tracer::WithNestedTracingFrame env_guard;
+
+        // Run the user-supplied function
+        py_func_output = f(*args_tup);
+
+        // Convert the output of the user-supplied funciton to IValue. The type
+        // information of this IValue is used both to record the correct type in
+        // the trace.
+        output_ivalue = toIValue(py_func_output);
+        Value* out_val = jit::tracer::getNestedValueTrace(output_ivalue);
+        body_block->registerOutput(out_val);
+        node_output =
+            fork_node->output()->setType(FutureType::create(out_val->type()));
+
+        // Lambda lift into a Subgraph attribute
+        torch::jit::script::lambdaLiftFork(fork_node);
+      }
+
+      // Record the ivalue in the tracer
+      jit::tracer::setValueTrace(retval, node_output);
+
+      // stuff the ivalue output in the Future
+      retval->markCompleted(output_ivalue);
+
+      return PythonFutureWrapper(retval);
+    } else {
+      auto retval = c10::make_intrusive<c10::ivalue::Future>();
+      retval->markCompleted(toIValue(f(*args_tup)));
+      return PythonFutureWrapper(retval);
+    }
   });
 
-  m.def("wait", [](detail::Future& fut) {
-    // TODO: this is a fake stub
+  m.def("wait", [](PythonFutureWrapper& fut) {
+    if (jit::tracer::isTracing()) {
+      auto graph = jit::tracer::getTracingState()->graph;
+
+      Value* fut_val = jit::tracer::getValueTrace(fut.fut);
+      auto output = graph->insert(aten::wait, {fut_val});
+      jit::tracer::setValueTrace(fut.fut->value(), output);
+    }
+    return fut.fut->value();
   });
 
   m.def("_jit_assert_is_instance", [](py::object obj, TypePtr type) {
@@ -396,9 +490,6 @@ void initJITBindings(PyObject* module) {
   tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
-  initBatchTensorBindings(module);
-  initRegisterBatchOpsBindings(module);
 }
-
 } // namespace jit
 } // namespace torch

@@ -2,6 +2,7 @@
 #include <torch/csrc/autograd/function.h>
 
 #include <sstream>
+#include <fstream>
 
 namespace torch { namespace autograd { namespace profiler {
 
@@ -41,40 +42,35 @@ void mark(std::string name, bool include_cuda /* = true */) {
   } else {
     getEventList().record(
         EventKind::Mark,
-        std::move(name),
+        StringView(std::move(name)),
         thread_id,
         include_cuda && state == ProfilerState::CUDA);
   }
 }
 
-const char* c_str(const char *str) { return str; }
-// NB: non-const to disallow temporaries (lifetime issues)
-const char* c_str(std::string& str) { return str.c_str(); }
-
-template<typename T>
-void pushRangeImpl(T name, const char* msg="", int64_t sequence_nr=-1) {
+void pushRangeImpl(const StringView& name, const char* msg="", int64_t sequence_nr=-1) {
   if (state == ProfilerState::Disabled) {
     return;
   }
   if (state == ProfilerState::NVTX) {
     if(sequence_nr >= 0) {
       std::stringstream s;
-      s << name << msg << sequence_nr;
+      s << name.str() << msg << sequence_nr;
       cuda_stubs->nvtxRangePushA(s.str().c_str());
     } else {
-      cuda_stubs->nvtxRangePushA(c_str(name));
+      cuda_stubs->nvtxRangePushA(name.str());
     }
   } else {
     getEventList().record(
         EventKind::PushRange,
-        std::move(name),
+        name,
         thread_id,
         state == ProfilerState::CUDA);
   }
 }
 
 void pushRange(std::string name) {
-  pushRangeImpl(std::move(name));
+  pushRangeImpl(StringView(std::move(name)));
 }
 
 void popRange() {
@@ -86,33 +82,10 @@ void popRange() {
   } else {
     getEventList().record(
         EventKind::PopRange,
-        "",
+        StringView(""),
         thread_id,
         state == ProfilerState::CUDA);
   }
-}
-
-RecordFunction::RecordFunction(Function* fn) {
-  // typeid(*fn).name() would avoid an additional string allocation.
-  // However, typeid(*fn).name() would cause nvtx annotations for all user-defined
-  // (Python-side) custom autograd function backward() methods to have the same name,
-  // because they route through the same C++ side class.
-  // fn->name() ensures that nvtx annotations for custom function backward() methods
-  // receive a relevant, demangled name.
-  pushRangeImpl(fn->name(), ", stashed seq=", fn->sequence_nr());
-}
-
-RecordFunction::RecordFunction(std::string name) {
-  pushRangeImpl(std::move(name));
-}
-
-RecordFunction::RecordFunction(const char* name) {
-  pushRangeImpl<const char*>(name);
-}
-
-RecordFunction::RecordFunction(const char* name, int64_t current_sequence_nr)
-{
-  pushRangeImpl<const char*>(name, ", seq=", current_sequence_nr);
 }
 
 void enableProfiler(ProfilerState new_state) {
@@ -122,6 +95,14 @@ void enableProfiler(ProfilerState new_state) {
   if (state != ProfilerState::Disabled && new_state != state) {
       throw std::runtime_error("can't change kind of profiling (e.g. NVTX to CPU) while profiler is running");
   }
+
+  pushCallback([](const RecordFunction& fn) {
+    auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
+    pushRangeImpl(fn.name(), msg, fn.seqNr());
+  },
+  [](const RecordFunction& /* unused */) {
+    popRange();
+  });
   state = new_state;
 
   if(state == ProfilerState::CUDA) {
@@ -150,7 +131,10 @@ thread_event_lists disableProfiler() {
   }
   ProfilerState old_state = state;
   mark("__stop_profile");
+
+  popCallback();
   state = ProfilerState::Disabled;
+
   if (old_state == ProfilerState::NVTX) {
     return thread_event_lists();
   } else {
@@ -191,5 +175,80 @@ double Event::cuda_elapsed_us(const Event & e) {
 }
 
 CUDAStubs::~CUDAStubs() = default;
+
+
+static jit::CodeTemplate event_template(R"(
+{
+  "name": "${name}",
+  "ph": "X",
+  "ts": ${ts},
+  "dur": ${dur},
+  "tid": ${tid},
+  "pid": "CPU Functions",
+  "args": {}
+})");
+
+
+RecordProfile::RecordProfile(std::ostream& out)
+: out_(out) {
+  init();
+}
+
+RecordProfile::RecordProfile(const std::string& filename)
+: file_(new std::ofstream(filename)), out_(*file_) {
+  init();
+}
+
+void RecordProfile::init() {
+  enableProfiler(ProfilerState::CPU);
+}
+
+RecordProfile::~RecordProfile() {
+  thread_event_lists event_lists = disableProfiler();
+  std::vector<Event*> events;
+  for(auto& l : event_lists) {
+    for(auto& e : l) {
+        events.push_back(&e);
+    }
+  }
+  processEvents(events);
+  if (file_){
+    file_->close();
+  }
+}
+
+void RecordProfile::processEvents(const std::vector<Event*>& events) {
+  AT_CHECK(out_, "could not open file");
+  Event* start = nullptr;
+  for (Event* e : events) {
+    if(0 == strcmp(e->name(), "__start_profile")) {
+      start = e;
+      break;
+    }
+  }
+  AT_CHECK(start, "could not find start?");
+  std::vector<Event*> stack;
+  out_ << "[\n";
+  bool first = true;
+  for(Event* e : events) {
+    if(e->kind() == "push") {
+      stack.push_back(e);
+    } else if(e->kind() == "pop") {
+      if(!first) {
+        out_ << ",\n";
+      }
+      first = false;
+      Event* e_start = stack.back();
+      stack.pop_back();
+      jit::TemplateEnv env;
+      env.s("name", e_start->name());
+      env.d("ts", start->cpu_elapsed_us(*e_start));
+      env.d("dur", e_start->cpu_elapsed_us(*e));
+      env.d("tid", e_start->thread_id());
+      out_ << event_template.format(env);
+    }
+  }
+  out_ << "]\n";
+}
 
 }}}

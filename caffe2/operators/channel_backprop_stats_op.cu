@@ -154,12 +154,12 @@ bool ChannelBackpropStatsOp<CUDAContext>::RunOnDevice() {
   const auto& dY = Input(OUTPUT_GRAD);
   const auto& mean = Input(SAVED_MEAN);
   const auto& invStddev = Input(SAVED_INV_STDDEV);
-  CAFFE_ENFORCE(X.ndim() >= 3 && X.ndim() <= 5);
+  CAFFE_ENFORCE(X.dim() >= 3 && X.dim() <= 5);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
-  const int W = X.ndim() > 3 ? X.dim32(3) : 1;
-  const int D = X.ndim() > 4 ? X.dim32(4) : 1;
+  const int W = X.dim() > 3 ? X.dim32(3) : 1;
+  const int D = X.dim() > 4 ? X.dim32(4) : 1;
 
   const auto Xarr = X.data<float>();
   const auto dYarr = dY.data<float>();

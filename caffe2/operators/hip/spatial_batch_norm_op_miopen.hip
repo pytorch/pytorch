@@ -18,7 +18,7 @@
 #include "caffe2/core/hip/context_gpu.h"
 #include "caffe2/core/hip/miopen_wrapper.h"
 #include "caffe2/operators/spatial_batch_norm_op.h"
-#include "caffe2/operators/hip/spatial_batch_norm_op_gpu_impl.cuh"
+#include "caffe2/operators/hip/spatial_batch_norm_op_impl.cuh"
 #include "caffe2/utils/math.h"
 
 const double MIOPEN_BN_MIN_EPSILON = 1e-6;

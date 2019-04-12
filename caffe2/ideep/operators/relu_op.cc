@@ -1,6 +1,8 @@
 #include <caffe2/ideep/ideep_utils.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class IDEEPReluOp final : public IDEEPOperator {
  public:
@@ -21,7 +23,7 @@ class IDEEPReluOp final : public IDEEPOperator {
       LOG(FATAL) << "Unsupported Relu method: " << operator_def.type();
     }
   }
-  virtual ~IDEEPReluOp() {}
+  ~IDEEPReluOp() override {}
 
   bool RunOnDevice() override {
     const auto& X = Input(INPUT);
@@ -59,7 +61,7 @@ class IDEEPReluGradientOp final : public IDEEPOperator {
       LOG(FATAL) << "Unsupported Relu method: " << operator_def.type();
     }
   }
-  virtual ~IDEEPReluGradientOp() {}
+  ~IDEEPReluGradientOp() override {}
 
   bool RunOnDevice() override {
     const auto& Y = Input(OUTPUT);
@@ -84,4 +86,4 @@ REGISTER_IDEEP_OPERATOR(ReluGradient, IDEEPReluGradientOp);
 REGISTER_IDEEP_OPERATOR(LeakyRelu, IDEEPReluOp);
 REGISTER_IDEEP_OPERATOR(LeakyReluGradient, IDEEPReluGradientOp);
 
-} // namespace caffe2
+} // namespace

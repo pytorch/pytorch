@@ -7,7 +7,6 @@
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
-#include <torch/csrc/autograd/variable_version.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -22,13 +21,12 @@
 namespace torch {
 namespace autograd {
 Variable::Impl::Impl(at::Tensor data, std::unique_ptr<Variable::AutogradMeta> autograd_meta, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(data.type_id(), data.dtype(), /*allocator=*/nullptr, /* is variable */ true),
+    : TensorImpl(data.type_id(), data.dtype(), data.device()),
       data_(std::move(data)) {
   autograd_meta->grad_fn_ = std::move(gradient_edge.function);
   autograd_meta->requires_grad_ = false;
   autograd_meta->is_view_ = false;
   autograd_meta->output_nr_ = gradient_edge.input_nr;
-  autograd_meta->pyobj_ = nullptr;
 
   // set_requires_grad also checks error conditions.
   autograd_meta->set_requires_grad(requires_grad, this);
@@ -48,11 +46,11 @@ int64_t Variable::Impl::numel() const {
   return data_.numel();
 }
 
-IntList Variable::Impl::sizes() const {
+IntArrayRef Variable::Impl::sizes() const {
   return data_.sizes();
 }
 
-IntList Variable::Impl::strides() const {
+IntArrayRef Variable::Impl::strides() const {
   return data_.strides();
 }
 
@@ -92,16 +90,16 @@ void* Variable::Impl::slow_data() const {
   return data_.unsafeGetTensorImpl()->slow_data();
 }
 
+bool Variable::Impl::has_storage() const {
+  return data_.has_storage();
+}
+
 const at::Storage& Variable::Impl::storage() const {
   return data_.storage();
 }
 
 int64_t Variable::Impl::storage_offset() const {
   return data_.storage_offset();
-}
-
-int64_t Variable::Impl::get_device_slow() const {
-  return data_.get_device();
 }
 
 std::shared_ptr<Function> Variable::grad_accumulator() const {
@@ -153,14 +151,14 @@ void Variable::backward(
   Engine::get_default_engine().execute(edges, inputs, keep_graph, create_graph);
 }
 
-void Variable::Impl::set_data(Tensor new_data) {
+void Variable::Impl::set_data(const at::Tensor &new_data) {
   // Resets gradient accumulator if metadata is out of date
   auto autograd_meta = get_autograd_meta();
   std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
   auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
   if (prior_accumulator) {
     const auto prior_device = prior_accumulator->input_metadata(0).device();
-    const auto new_device = new_data.is_cuda() ? new_data.get_device() : -1;
+    const auto new_device = new_data.device();
 
     if (new_data.type() != data_.type() || prior_device != new_device) {
       autograd_meta->grad_accumulator_.reset();
@@ -169,11 +167,16 @@ void Variable::Impl::set_data(Tensor new_data) {
 
   // Updates metadata
   data_type_ = new_data.type().typeMeta();
-  type_id_ = new_data.type().type_id();
-  is_variable_ = true;
+  device_opt_ = new_data.device();
+  type_id_ = new_data.dispatch_type().type_id();
 
-  auto new_data_copy = at::Tensor(new_data.getIntrusivePtr()->shallow_copy_and_detach());
-  data_ = std::move(new_data_copy);
+  auto new_data_impl_copy = new_data.getIntrusivePtr()->shallow_copy_and_detach();
+  // Version counter is not shared when we replace a `Variable`'s underlying `Tensor`
+  // by calling `set_data(...)`. The original version of the `Variable` is always preserved.
+  // See NOTE [ Version Counter Sharing ] for details.
+  auto saved_version_ = data_.unsafeGetTensorImpl()->version_counter().current_version();
+  new_data_impl_copy->set_version_counter(saved_version_);
+  data_ = std::move(at::Tensor(new_data_impl_copy));
 }
 
 void Variable::Impl::release_resources() {
@@ -190,8 +193,8 @@ Variable::DifferentiableViewImpl::DifferentiableViewImpl(Variable base, at::Tens
     diff_view_meta->base_ = diff_view_meta->base_.base();
   }
   diff_view_meta->is_view_ = true;
-  diff_view_meta->version_counter_ = diff_view_meta->base_.version_counter();
-  diff_view_meta->attr_version = diff_view_meta->version_counter_.current_version();
+  data_.unsafeGetTensorImpl()->set_version_counter(diff_view_meta->base_.version_counter());
+  diff_view_meta->attr_version = data_.unsafeGetTensorImpl()->version_counter().current_version();
 }
 
 const std::shared_ptr<Function>& Variable::grad_fn() const {
@@ -201,7 +204,7 @@ const std::shared_ptr<Function>& Variable::grad_fn() const {
     if (!diff_view_meta->grad_fn_ && !diff_view_meta->base_.requires_grad()) {
       return diff_view_meta->grad_fn_;
     }
-    auto current_version = diff_view_meta->version_counter_.current_version();
+    auto current_version = this->current_version();
     if (diff_view_meta->attr_version != current_version) {
       AT_ASSERT(diff_view_meta->output_nr_ == 0);
       auto fn = std::make_shared<generated::AsStridedBackward>();
@@ -211,9 +214,9 @@ const std::shared_ptr<Function>& Variable::grad_fn() const {
       fn->storage_offset = data().storage_offset();
       fn->set_next_edges(collect_next_edges(diff_view_meta->base_));
       fn->add_input_metadata(
-        diff_view_meta->base_.type()
+        diff_view_meta->base_.dispatch_type()
       , sizes() // Note: sizes(), not base_.sizes(), is intentional
-      , diff_view_meta->base_.is_cuda() ? diff_view_meta->base_.get_device() : -1);
+      , diff_view_meta->base_.device());
       diff_view_meta->grad_fn_ = std::move(fn);
       diff_view_meta->attr_version = current_version;
     }

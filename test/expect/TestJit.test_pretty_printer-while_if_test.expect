@@ -1,14 +1,14 @@
 def graph(self,
-    a_1: Tensor,
-    b_1: Tensor) -> Tensor:
-  a, b, c = a_1, b_1, 0
-  _0 = bool(torch.lt(a_1, 10))
+    a: Tensor,
+    b: Tensor) -> Tensor:
+  a0, b0, c = a, b, 0
+  _0 = bool(torch.lt(a, 10))
   while _0:
-    a_2 = torch.add(a, 1, 1)
-    b_2 = torch.add(b, 1, 1)
-    if bool(torch.gt(a_2, b_2)):
-      c_2 = 2
+    a1 = torch.add(a0, 1, 1)
+    b1 = torch.add(b0, 1, 1)
+    if bool(torch.gt(a1, b1)):
+      c0 = 2
     else:
-      c_2 = 3
-    _0, a, b, c = bool(torch.lt(a_2, 10)), a_2, b_2, c_2
-  return torch.add(torch.add(a, 1, 1), c, 1)
+      c0 = 3
+    _0, a0, b0, c = bool(torch.lt(a1, 10)), a1, b1, c0
+  return torch.add(torch.add(a0, 1, 1), c, 1)

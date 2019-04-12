@@ -248,9 +248,9 @@ TEST_F(ModulesTest, BatchNormStateful) {
   ASSERT_EQ(bn->running_mean.dim(), 1);
   ASSERT_EQ(bn->running_mean.size(0), 5);
 
-  ASSERT_TRUE(bn->running_variance.defined());
-  ASSERT_EQ(bn->running_variance.dim(), 1);
-  ASSERT_EQ(bn->running_variance.size(0), 5);
+  ASSERT_TRUE(bn->running_var.defined());
+  ASSERT_EQ(bn->running_var.dim(), 1);
+  ASSERT_EQ(bn->running_var.size(0), 5);
 
   // Is affine by default.
   ASSERT_TRUE(bn->options.affine());
@@ -267,7 +267,7 @@ TEST_F(ModulesTest, BatchNormStateless) {
   BatchNorm bn(BatchNormOptions(5).stateful(false).affine(false));
 
   ASSERT_FALSE(bn->running_mean.defined());
-  ASSERT_FALSE(bn->running_variance.defined());
+  ASSERT_FALSE(bn->running_var.defined());
   ASSERT_FALSE(bn->weight.defined());
   ASSERT_FALSE(bn->bias.defined());
 
@@ -342,7 +342,7 @@ TEST_F(ModulesTest, PrettyPrintConv) {
       c10::str(Conv2d(Conv2dOptions(3, 4, 5).stride(2))),
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 5], stride=[2, 2])");
 
-  const auto options = Conv2dOptions(3, 4, torch::IntList{5, 6}).stride({1, 2});
+  const auto options = Conv2dOptions(3, 4, torch::IntArrayRef{5, 6}).stride({1, 2});
   ASSERT_EQ(
       c10::str(Conv2d(options)),
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");

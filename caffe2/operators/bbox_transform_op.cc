@@ -22,12 +22,6 @@ Transform proposal bounding boxes to target bounding box using bounding box
         "Set to false to match the detectron code, set to true for keypoint"
         " models and for backward compatibility")
     .Arg(
-        "correct_transform_coords",
-        "bool (default false), Correct bounding box transform coordates,"
-        " see bbox_transform() in boxes.py "
-        "Set to true to match the detectron code, set to false for backward"
-        " compatibility")
-    .Arg(
         "rotated",
         "bool (default false). If true, then boxes (rois and deltas) include "
         "angle info to handle rotation. The format will be "
@@ -127,7 +121,7 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
     }
   }
 
-  CAFFE_ENFORCE_EQ(iminfo_in.sizes(), (at::IntList{batch_size, 3}));
+  CAFFE_ENFORCE_EQ(iminfo_in.sizes(), (at::IntArrayRef{batch_size, 3}));
   Eigen::Map<const ERArrXXf> iminfo(
       iminfo_in.data<float>(), iminfo_in.size(0), iminfo_in.size(1));
 
@@ -160,7 +154,6 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
           cur_deltas,
           weights_,
           utils::BBOX_XFORM_CLIP_DEFAULT,
-          correct_transform_coords_,
           angle_bound_on_,
           angle_bound_lo_,
           angle_bound_hi_);
@@ -187,3 +180,26 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
 }
 
 } // namespace caffe2
+
+using BBoxTransformOpFloatCPU =
+    caffe2::BBoxTransformOp<float, caffe2::CPUContext>;
+
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    BBoxTransform,
+    (std::vector<c10::Argument>{
+        c10::Argument("rois"),
+        c10::Argument("deltas"),
+        c10::Argument("im_info"),
+        c10::Argument("weights", ListType::create(FloatType::get())),
+        c10::Argument("apply_scale", BoolType::get()),
+        c10::Argument("rotated", BoolType::get()),
+        c10::Argument("angle_bound_on", BoolType::get()),
+        c10::Argument("angle_bound_lo", IntType::get()),
+        c10::Argument("angle_bound_hi", IntType::get()),
+        c10::Argument("clip_angle_thresh", FloatType::get()),
+    }),
+    (std::vector<c10::Argument>{
+        c10::Argument("output_0"),
+        c10::Argument("output_1"),
+    }),
+    BBoxTransformOpFloatCPU);

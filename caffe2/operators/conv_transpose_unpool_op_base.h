@@ -17,7 +17,9 @@ template <class Context>
 class ConvTransposeUnpoolBase : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ConvTransposeUnpoolBase(const OperatorDef& operator_def, Workspace* ws)
+  explicit ConvTransposeUnpoolBase(
+      const OperatorDef& operator_def,
+      Workspace* ws)
       : Operator<Context>(operator_def, ws),
         legacy_pad_(
             static_cast<LegacyPadding>(this->template GetSingleArgument<int>(
@@ -27,6 +29,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
         stride_(this->template GetRepeatedArgument<int>("strides")),
         pads_(this->template GetRepeatedArgument<int>("pads")),
         adj_(this->template GetRepeatedArgument<int>("adjs")),
+        group_(this->template GetSingleArgument<int>("group", 1)),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))),
         shared_buffer_(
@@ -130,8 +133,8 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       createSharedBuffer<Context>(ws_);
     }
   }
-  // Sets the output size. The output channel is manually specified.
-  void SetOutputSize(const Tensor& input, Tensor* output, int output_channel) {
+  // Gets the output size. The output channel is manually specified.
+  std::vector<int64_t> GetOutputSize(const Tensor& input, int output_channel) {
     CAFFE_ENFORCE(4 == input.dim());
     CAFFE_ENFORCE(input.numel() > 0);
     int N = input.dim32(0);
@@ -171,14 +174,16 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
         &pads_[1],
         &pads_[3],
         &output_width);
+    std::vector<int64_t> sizes;
     if (channel_first) {
-      output->Resize(N, output_channel, output_height, output_width);
+      sizes = {N, output_channel, output_height, output_width};
     } else {
-      output->Resize(N, output_height, output_width, output_channel);
+      sizes = {N, output_height, output_width, output_channel};
     }
     VLOG(2) << "In: N " << N << " M " << M << " H " << H << " W " << W;
     VLOG(2) << "Out: output_channel " << output_channel << " H "
             << output_height << " W " << output_width;
+    return sizes;
   }
 
   bool RunOnDevice() override {
@@ -204,19 +209,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 
   virtual ~ConvTransposeUnpoolBase() {}
 
- private:
-  LegacyPadding legacy_pad_;
-  int pad_;
-
  protected:
-  vector<int> kernel_;
-  vector<int> stride_;
-  vector<int> pads_;
-  vector<int> adj_;
-  StorageOrder order_;
-  bool shared_buffer_;
-  Workspace* ws_;
-
   // Accessors for 2D conv params.
 
   inline int pad_t() const {
@@ -287,14 +280,35 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
         break;
     }
   }
+
+  LegacyPadding legacy_pad_;
+  int pad_;
+
+  std::vector<int> kernel_;
+  std::vector<int> stride_;
+  std::vector<int> pads_;
+  std::vector<int> adj_;
+  int group_;
+  StorageOrder order_;
+  bool shared_buffer_;
+  Workspace* ws_;
 };
 
 #define USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS(Context) \
   USE_OPERATOR_FUNCTIONS(Context);                        \
   using ConvTransposeUnpoolBase<Context>::kernel_;        \
+  using ConvTransposeUnpoolBase<Context>::kernel_h;       \
+  using ConvTransposeUnpoolBase<Context>::kernel_w;       \
   using ConvTransposeUnpoolBase<Context>::stride_;        \
+  using ConvTransposeUnpoolBase<Context>::stride_h;       \
+  using ConvTransposeUnpoolBase<Context>::stride_w;       \
   using ConvTransposeUnpoolBase<Context>::pads_;          \
+  using ConvTransposeUnpoolBase<Context>::pad_t;          \
+  using ConvTransposeUnpoolBase<Context>::pad_l;          \
+  using ConvTransposeUnpoolBase<Context>::pad_b;          \
+  using ConvTransposeUnpoolBase<Context>::pad_r;          \
   using ConvTransposeUnpoolBase<Context>::adj_;           \
+  using ConvTransposeUnpoolBase<Context>::group_;         \
   using ConvTransposeUnpoolBase<Context>::order_;         \
   using ConvTransposeUnpoolBase<Context>::shared_buffer_; \
   using ConvTransposeUnpoolBase<Context>::ws_

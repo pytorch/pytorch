@@ -74,8 +74,6 @@
 # define M_PI 3.14159265358979323846
 #endif
 
-#define TH_INDEX_BASE 0
-
 typedef void (*THErrorHandlerFunction)(const char *msg, void *data);
 typedef void (*THArgErrorHandlerFunction)(int argNumber, const char *msg, void *data);
 

@@ -61,17 +61,17 @@ bool SliceImplGpu(
   auto* starts_data = starts.template data<SIndex>();
   auto* ends_data = ends.template data<SIndex>();
 
-  CAFFE_ENFORCE_EQ(starts.ndim(), 1);
-  CAFFE_ENFORCE_EQ(ends.ndim(), 1);
-  CAFFE_ENFORCE_GE(data.ndim(), starts.size());
-  CAFFE_ENFORCE_EQ(starts.size(), ends.size());
+  CAFFE_ENFORCE_EQ(starts.dim(), 1);
+  CAFFE_ENFORCE_EQ(ends.dim(), 1);
+  CAFFE_ENFORCE_GE(data.dim(), starts.size());
+  CAFFE_ENFORCE_EQ(starts.numel(), ends.numel());
 
-  std::vector<int> starts_idx(data.ndim());
-  std::vector<int> ends_idx(data.ndim());
-  std::vector<int> dst_sizes(data.ndim());
+  std::vector<int> starts_idx(data.dim());
+  std::vector<int> ends_idx(data.dim());
+  std::vector<int> dst_sizes(data.dim());
 
-  for (int i = 0; i < data.ndim(); ++i) {
-    if (i >= starts.size()) {
+  for (int i = 0; i < data.dim(); ++i) {
+    if (i >= starts.numel()) {
       starts_idx[i] = 0;
       ends_idx[i] = data.size(i);
       continue;
@@ -104,7 +104,7 @@ bool SliceImplGpu(
     }
   }
 
-  if (data.size() <= 0) {
+  if (data.numel() <= 0) {
     // When the input is empty, we do not need to do copy.
     if (!backward) {
       output->Resize(dst_sizes);
@@ -114,7 +114,7 @@ bool SliceImplGpu(
   }
   // for now only supports slicing in 1 dimension
   int dim = -1;
-  for (int i = 0; i < data.ndim(); ++i) {
+  for (int i = 0; i < data.dim(); ++i) {
     if (starts_idx[i] > 0 || ends_idx[i] < data.sizes()[i]) {
       CAFFE_ENFORCE_EQ(
           dim, -1, "Currently only possible to slice in 1 dimension.");
@@ -202,7 +202,7 @@ bool SliceImplGpu(
     // Zero out gradient blob before copy since we copy in fewer items than
     // there is space for
     math::Set<float, CUDAContext>(
-        gdata->size(),
+        gdata->numel(),
         0.0f,
         (float*)gdata->raw_mutable_data(go->meta()),
         context);
@@ -235,8 +235,8 @@ template<>
 class SliceOp<CUDAContext> : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  SliceOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws),
+  template<class... Args> explicit SliceOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...),
         starts_(this->template GetRepeatedArgument<int64_t>("starts")),
         ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
@@ -296,8 +296,8 @@ template <>
 class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  SliceGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws),
+  template<class... Args> explicit SliceGradientOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...),
         starts_(this->template GetRepeatedArgument<int64_t>("starts")),
         ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}

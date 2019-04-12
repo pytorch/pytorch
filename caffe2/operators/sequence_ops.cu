@@ -233,7 +233,7 @@ template <>
 template <typename T>
 bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
   const auto& in = Input(0);
-  CAFFE_ENFORCE_GE(in.ndim(), 1);
+  CAFFE_ENFORCE_GE(in.dim(), 1);
   const int32_t outer_size = in.sizes()[0];
   const auto block_size = std::accumulate(
       in.sizes().begin() + 1, in.sizes().end(), 1, std::multiplies<int64_t>());
@@ -244,7 +244,7 @@ bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
   if (InputSize() > 1) {
     const auto& lengths = Input(1);
     lengths_ptr = lengths.data<int32_t>();
-    lengths_size = lengths.size();
+    lengths_size = lengths.numel();
   }
 
   auto out_dims = in.sizes().vec();

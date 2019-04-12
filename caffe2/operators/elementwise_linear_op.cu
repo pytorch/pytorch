@@ -60,10 +60,10 @@ bool ElementwiseLinearOp<float, CUDAContext>::RunOnDevice(){
   const int N = X.size_to_dim(canonical_axis);
   const int D = X.size_from_dim(canonical_axis);
 
-  CAFFE_ENFORCE_EQ(a.ndim(), 1, a.ndim());
-  CAFFE_ENFORCE_EQ(a.dim(0), D, a.ndim());
-  CAFFE_ENFORCE_EQ(b.ndim(), 1, b.ndim());
-  CAFFE_ENFORCE_EQ(b.dim(0), D, b.ndim());
+  CAFFE_ENFORCE_EQ(a.dim(), 1, a.dim());
+  CAFFE_ENFORCE_EQ(a.dim(0), D, a.dim());
+  CAFFE_ENFORCE_EQ(b.dim(), 1, b.dim());
+  CAFFE_ENFORCE_EQ(b.dim(0), D, b.dim());
 
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
 
@@ -92,8 +92,8 @@ bool ElementwiseLinearGradientOp<float, CUDAContext>::RunOnDevice(){
   const int N = X.size_to_dim(canonical_axis);
   const int D = X.size_from_dim(canonical_axis);
 
-  CAFFE_ENFORCE_EQ(a.ndim(), 1, a.ndim());
-  CAFFE_ENFORCE_EQ(a.dim(0), D, a.ndim());
+  CAFFE_ENFORCE_EQ(a.dim(), 1, a.dim());
+  CAFFE_ENFORCE_EQ(a.dim(0), D, a.dim());
 
   
   

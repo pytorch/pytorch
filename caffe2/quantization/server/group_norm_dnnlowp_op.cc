@@ -255,10 +255,16 @@ void GroupNormDNNLowPOp<T>::DequantizedGroupMomentsNCHW(
   const int inner_size = K * HxW;
   X_dequantized_.resize(size);
   fbgemm::Dequantize<T>(X, X_dequantized_.data(), size, in_qparams_[INPUT]);
-  const std::array<int, 2> dims = {outer_size, inner_size};
-  const int axis = 1;
+  const std::array<int, 2> X_dims = {outer_size, inner_size};
+  const std::array<int, 2> Y_dims = {outer_size, 1};
   math::Moments<float, CPUContext>(
-      2, dims.data(), 1, &axis, X_dequantized_.data(), mu, rsig, &context_);
+      2,
+      X_dims.data(),
+      Y_dims.data(),
+      X_dequantized_.data(),
+      mu,
+      rsig,
+      &context_);
   math::InvStd<float>(outer_size, epsilon_, rsig, rsig, &context_);
 }
 
@@ -276,13 +282,12 @@ void GroupNormDNNLowPOp<T>::DequantizedGroupMomentsNHWC(
   const int outer_size = N * G;
   X_dequantized_.resize(size);
   fbgemm::Dequantize<T>(X, X_dequantized_.data(), size, in_qparams_[INPUT]);
-  const std::array<int, 4> dims = {N, HxW, G, K};
-  const std::array<int, 2> axes = {1, 3};
+  const std::array<int, 4> X_dims = {N, HxW, G, K};
+  const std::array<int, 4> Y_dims = {N, 1, G, 1};
   math::Moments<float, CPUContext>(
       4,
-      dims.data(),
-      2,
-      axes.data(),
+      X_dims.data(),
+      Y_dims.data(),
       X_dequantized_.data(),
       mu,
       rsig,

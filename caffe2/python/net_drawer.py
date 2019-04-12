@@ -79,31 +79,38 @@ def GetOpNodeProducer(append_output, **kwargs):
     return ReallyGetOpNode
 
 
+def GetBlobNodeProducer(**kwargs):
+    def ReallyGetBlobNode(node_name, label):
+        return pydot.Node(node_name, label=label, **kwargs)
+    return ReallyGetBlobNode
+
 def GetPydotGraph(
     operators_or_net,
     name=None,
     rankdir='LR',
-    node_producer=None
+    op_node_producer=None,
+    blob_node_producer=None
 ):
-    if node_producer is None:
-        node_producer = GetOpNodeProducer(False, **OP_STYLE)
+    if op_node_producer is None:
+        op_node_producer = GetOpNodeProducer(False, **OP_STYLE)
+    if blob_node_producer is None:
+        blob_node_producer = GetBlobNodeProducer(**BLOB_STYLE)
     operators, name = _rectify_operator_and_name(operators_or_net, name)
     graph = pydot.Dot(name, rankdir=rankdir)
     pydot_nodes = {}
     pydot_node_counts = defaultdict(int)
     for op_id, op in enumerate(operators):
-        op_node = node_producer(op, op_id)
+        op_node = op_node_producer(op, op_id)
         graph.add_node(op_node)
         # print 'Op: %s' % op.name
         # print 'inputs: %s' % str(op.input)
         # print 'outputs: %s' % str(op.output)
         for input_name in op.input:
             if input_name not in pydot_nodes:
-                input_node = pydot.Node(
+                input_node = blob_node_producer(
                     _escape_label(
                         input_name + str(pydot_node_counts[input_name])),
                     label=_escape_label(input_name),
-                    **BLOB_STYLE
                 )
                 pydot_nodes[input_name] = input_node
             else:
@@ -114,11 +121,10 @@ def GetPydotGraph(
             if output_name in pydot_nodes:
                 # we are overwriting an existing blob. need to updat the count.
                 pydot_node_counts[output_name] += 1
-            output_node = pydot.Node(
+            output_node = blob_node_producer(
                 _escape_label(
                     output_name + str(pydot_node_counts[output_name])),
                 label=_escape_label(output_name),
-                **BLOB_STYLE
             )
             pydot_nodes[output_name] = output_node
             graph.add_node(output_node)
@@ -131,7 +137,7 @@ def GetPydotGraphMinimal(
     name=None,
     rankdir='LR',
     minimal_dependency=False,
-    node_producer=None,
+    op_node_producer=None,
 ):
     """Different from GetPydotGraph, hide all blob nodes and only show op nodes.
 
@@ -140,8 +146,8 @@ def GetPydotGraphMinimal(
     op a and b, and op b depends on a, then only the edge b->c will be drawn
     because a->c will be implied.
     """
-    if node_producer is None:
-        node_producer = GetOpNodeProducer(False, **OP_STYLE)
+    if op_node_producer is None:
+        op_node_producer = GetOpNodeProducer(False, **OP_STYLE)
     operators, name = _rectify_operator_and_name(operators_or_net, name)
     graph = pydot.Dot(name, rankdir=rankdir)
     # blob_parents maps each blob name to its generating op.
@@ -149,7 +155,7 @@ def GetPydotGraphMinimal(
     # op_ancestry records the ancestors of each op.
     op_ancestry = defaultdict(set)
     for op_id, op in enumerate(operators):
-        op_node = node_producer(op, op_id)
+        op_node = op_node_producer(op, op_id)
         graph.add_node(op_node)
         # Get parents, and set up op ancestry.
         parents = [

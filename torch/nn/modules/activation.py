@@ -1,7 +1,10 @@
 import warnings
 import torch
+from . import Linear
+from torch.nn.init import xavier_uniform_
+from torch.nn.init import constant_
+from torch.nn.init import xavier_normal_
 from torch.nn.parameter import Parameter
-
 from .module import Module
 from .. import functional as F
 from ..._jit_internal import weak_module, weak_script_method
@@ -9,7 +12,7 @@ from ..._jit_internal import weak_module, weak_script_method
 
 @weak_module
 class Threshold(Module):
-    r"""Thresholds each element of the input Tensor
+    r"""Thresholds each element of the input Tensor.
 
     Threshold is defined as:
 
@@ -58,10 +61,9 @@ class Threshold(Module):
 
 @weak_module
 class ReLU(Threshold):
-    r"""Applies the rectified linear unit function element-wise
-    :math:`\text{ReLU}(x)= \max(0, x)`
+    r"""Applies the rectified linear unit function element-wise:
 
-    .. image:: scripts/activation_images/ReLU.png
+    :math:`\text{ReLU}(x)= \max(0, x)`
 
     Args:
         inplace: can optionally do the operation in-place. Default: ``False``
@@ -70,6 +72,8 @@ class ReLU(Threshold):
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/ReLU.png
 
     Examples::
 
@@ -166,8 +170,6 @@ class Hardtanh(Module):
     The range of the linear region :math:`[-1, 1]` can be adjusted using
     :attr:`min_val` and :attr:`max_val`.
 
-    .. image:: scripts/activation_images/Hardtanh.png
-
     Args:
         min_val: minimum value of the linear region range. Default: -1
         max_val: maximum value of the linear region range. Default: 1
@@ -180,6 +182,8 @@ class Hardtanh(Module):
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/Hardtanh.png
 
     Examples::
 
@@ -394,8 +398,6 @@ class SELU(Module):
     with :math:`\alpha = 1.6732632423543772848170429916717` and
     :math:`\text{scale} = 1.0507009873554804934193349852946`.
 
-    .. image:: scripts/activation_images/SELU.png
-
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
     Args:
@@ -405,6 +407,8 @@ class SELU(Module):
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/SELU.png
 
     Examples::
 
@@ -433,15 +437,15 @@ class SELU(Module):
 class GLU(Module):
     r"""Applies the gated linear unit function
     :math:`{GLU}(a, b)= a \otimes \sigma(b)` where :math:`a` is the first half
-    of the input vector and :math:`b` is the second half.
+    of the input matrices and :math:`b` is the second half.
 
     Args:
         dim (int): the dimension on which to split the input. Default: -1
 
     Shape:
-        - Input: :math:`(*, N, *)` where `*` means, any number of additional
+        - Input: :math:`(\ast_1, N, \ast_2)` where `*` means, any number of additional
           dimensions
-        - Output: :math:`(*, N / 2, *)`
+        - Output: :math:`(\ast_1, M, \ast_2)` where :math:`M=N/2`
 
     Examples::
 
@@ -559,7 +563,8 @@ class LeakyReLU(Module):
 class LogSigmoid(Module):
     r"""Applies the element-wise function:
 
-    .. math:`\text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)`
+    .. math::
+        \text{LogSigmoid}(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x)}\right)
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -668,6 +673,228 @@ class Softshrink(Module):
 
 
 @weak_module
+class MultiheadAttention(Module):
+    r"""Allows the model to jointly attend to information
+    from different representation subspaces.
+    See reference: Attention Is All You Need
+
+    .. math::
+        \text{MultiHead}(Q, K, V) = \text{Concat}(head_1,\dots,head_h)W^O
+        \text{where} head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)
+
+    Args:
+        embed_dim: total dimension of the model
+        num_heads: parallel attention layers, or heads
+
+    Examples::
+
+        >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
+        >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
+    """
+
+    def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False):
+        super(MultiheadAttention, self).__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.dropout = dropout
+        self.head_dim = embed_dim // num_heads
+        assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
+        self.scaling = self.head_dim ** -0.5
+
+        self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
+        if bias:
+            self.in_proj_bias = Parameter(torch.empty(3 * embed_dim))
+        else:
+            self.register_parameter('in_proj_bias', None)
+        self.out_proj = Linear(embed_dim, embed_dim, bias=bias)
+
+        if add_bias_kv:
+            self.bias_k = Parameter(torch.empty(1, 1, embed_dim))
+            self.bias_v = Parameter(torch.empty(1, 1, embed_dim))
+        else:
+            self.bias_k = self.bias_v = None
+
+        self.add_zero_attn = add_zero_attn
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        xavier_uniform_(self.in_proj_weight[:self.embed_dim, :])
+        xavier_uniform_(self.in_proj_weight[self.embed_dim:(self.embed_dim * 2), :])
+        xavier_uniform_(self.in_proj_weight[(self.embed_dim * 2):, :])
+
+        xavier_uniform_(self.out_proj.weight)
+        if self.in_proj_bias is not None:
+            constant_(self.in_proj_bias, 0.)
+            constant_(self.out_proj.bias, 0.)
+        if self.bias_k is not None:
+            xavier_normal_(self.bias_k)
+        if self.bias_v is not None:
+            xavier_normal_(self.bias_v)
+
+    @weak_script_method
+    def forward(self, query, key, value, key_padding_mask=None, incremental_state=None,
+                need_weights=True, static_kv=False, attn_mask=None):
+        """
+        Inputs of forward function
+            query: [target length, batch size, embed dim]
+            key: [sequence length, batch size, embed dim]
+            value: [sequence length, batch size, embed dim]
+            key_padding_mask: if True, mask padding based on batch size
+            incremental_state: if provided, previous time steps are cashed
+            need_weights: output attn_output_weights
+            static_kv: key and value are static
+
+        Outputs of forward function
+            attn_output: [target length, batch size, embed dim]
+            attn_output_weights: [batch size, target length, sequence length]
+        """
+        qkv_same = query.data_ptr() == key.data_ptr() == value.data_ptr()
+        kv_same = key.data_ptr() == value.data_ptr()
+
+        tgt_len, bsz, embed_dim = query.size()
+        assert embed_dim == self.embed_dim
+        assert list(query.size()) == [tgt_len, bsz, embed_dim]
+        assert key.size() == value.size()
+
+        if incremental_state is not None:
+            saved_state = self._get_input_buffer(incremental_state)
+            if 'prev_key' in saved_state:
+                # previous time steps are cached - no need to recompute
+                # key and value if they are static
+                if static_kv:
+                    assert kv_same and not qkv_same
+                    key = value = None
+        else:
+            saved_state = None
+
+        if qkv_same:
+            # self-attention
+            q, k, v = self._in_proj_qkv(query)
+        elif kv_same:
+            # encoder-decoder attention
+            q = self._in_proj_q(query)
+            if key is None:
+                assert value is None
+                k = v = None
+            else:
+                k, v = self._in_proj_kv(key)
+        else:
+            q = self._in_proj_q(query)
+            k = self._in_proj_k(key)
+            v = self._in_proj_v(value)
+        q *= self.scaling
+
+        if self.bias_k is not None:
+            assert self.bias_v is not None
+            k = torch.cat([k, self.bias_k.repeat(1, bsz, 1)])
+            v = torch.cat([v, self.bias_v.repeat(1, bsz, 1)])
+            if attn_mask is not None:
+                attn_mask = torch.cat([attn_mask, attn_mask.new_zeros(attn_mask.size(0), 1)], dim=1)
+            if key_padding_mask is not None:
+                key_padding_mask = torch.cat(
+                    [key_padding_mask, key_padding_mask.new_zeros(key_padding_mask.size(0), 1)], dim=1)
+
+        q = q.contiguous().view(tgt_len, bsz * self.num_heads, self.head_dim).transpose(0, 1)
+        if k is not None:
+            k = k.contiguous().view(-1, bsz * self.num_heads, self.head_dim).transpose(0, 1)
+        if v is not None:
+            v = v.contiguous().view(-1, bsz * self.num_heads, self.head_dim).transpose(0, 1)
+
+        if saved_state is not None:
+            # saved states are stored with shape (bsz, num_heads, seq_len, head_dim)
+            if 'prev_key' in saved_state:
+                prev_key = saved_state['prev_key'].view(bsz * self.num_heads, -1, self.head_dim)
+                if static_kv:
+                    k = prev_key
+                else:
+                    k = torch.cat((prev_key, k), dim=1)
+            if 'prev_value' in saved_state:
+                prev_value = saved_state['prev_value'].view(bsz * self.num_heads, -1, self.head_dim)
+                if static_kv:
+                    v = prev_value
+                else:
+                    v = torch.cat((prev_value, v), dim=1)
+            saved_state['prev_key'] = k.view(bsz, self.num_heads, -1, self.head_dim)
+            saved_state['prev_value'] = v.view(bsz, self.num_heads, -1, self.head_dim)
+
+            self._set_input_buffer(incremental_state, saved_state)
+
+        src_len = k.size(1)
+
+        if key_padding_mask is not None:
+            assert key_padding_mask.size(0) == bsz
+            assert key_padding_mask.size(1) == src_len
+
+        if self.add_zero_attn:
+            src_len += 1
+            k = torch.cat([k, k.new_zeros((k.size(0), 1) + k.size()[2:])], dim=1)
+            v = torch.cat([v, v.new_zeros((v.size(0), 1) + v.size()[2:])], dim=1)
+            if attn_mask is not None:
+                attn_mask = torch.cat([attn_mask, attn_mask.new_zeros(attn_mask.size(0), 1)], dim=1)
+            if key_padding_mask is not None:
+                key_padding_mask = torch.cat(
+                    [key_padding_mask, torch.zeros(key_padding_mask.size(0), 1).type_as(key_padding_mask)], dim=1)
+
+        attn_output_weights = torch.bmm(q, k.transpose(1, 2))
+        assert list(attn_output_weights.size()) == [bsz * self.num_heads, tgt_len, src_len]
+
+        if attn_mask is not None:
+            attn_mask = attn_mask.unsqueeze(0)
+            attn_output_weights += attn_mask
+
+        if key_padding_mask is not None:
+            attn_output_weights = attn_output_weights.view(bsz, self.num_heads, tgt_len, src_len)
+            attn_output_weights = attn_output_weights.masked_fill(
+                key_padding_mask.unsqueeze(1).unsqueeze(2),
+                float('-inf'),
+            )
+            attn_output_weights = attn_output_weights.view(bsz * self.num_heads, tgt_len, src_len)
+
+        attn_output_weights = F.softmax(
+            attn_output_weights.float(), dim=-1,
+            dtype=torch.float32 if attn_output_weights.dtype == torch.float16 else attn_output_weights.dtype)
+        attn_output_weights = F.dropout(attn_output_weights, p=self.dropout, training=self.training)
+
+        attn_output = torch.bmm(attn_output_weights, v)
+        assert list(attn_output.size()) == [bsz * self.num_heads, tgt_len, self.head_dim]
+        attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+        attn_output = self.out_proj(attn_output)
+
+        if need_weights:
+            # average attention weights over heads
+            attn_output_weights = attn_output_weights.view(bsz, self.num_heads, tgt_len, src_len)
+            attn_output_weights = attn_output_weights.sum(dim=1) / self.num_heads
+        else:
+            attn_output_weights = None
+
+        return attn_output, attn_output_weights
+
+    def _in_proj_qkv(self, query):
+        return self._in_proj(query).chunk(3, dim=-1)
+
+    def _in_proj_kv(self, key):
+        return self._in_proj(key, start=self.embed_dim).chunk(2, dim=-1)
+
+    def _in_proj_q(self, query):
+        return self._in_proj(query, end=self.embed_dim)
+
+    def _in_proj_k(self, key):
+        return self._in_proj(key, start=self.embed_dim, end=2 * self.embed_dim)
+
+    def _in_proj_v(self, value):
+        return self._in_proj(value, start=2 * self.embed_dim)
+
+    def _in_proj(self, input, start=0, end=None):
+        weight = self.in_proj_weight
+        bias = self.in_proj_bias
+        weight = weight[start:end, :]
+        if bias is not None:
+            bias = bias[start:end]
+        return F.linear(input, weight, bias)
+
+
+@weak_module
 class PReLU(Module):
     r"""Applies the element-wise function:
 
@@ -707,8 +934,7 @@ class PReLU(Module):
         - Output: :math:`(N, *)`, same shape as the input
 
     Attributes:
-        weight (Tensor): the learnable weights of shape (attr:`num_parameters`).
-            The attr:`dtype` is default to
+        weight (Tensor): the learnable weights of shape (:attr:`num_parameters`).
 
     .. image:: scripts/activation_images/PReLU.png
 
@@ -788,14 +1014,17 @@ class Tanhshrink(Module):
 class Softmin(Module):
     r"""Applies the Softmin function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
-    lie in the range `(0, 1)` and sum to 1
+    lie in the range `[0, 1]` and sum to 1.
+
+    Softmin is defined as:
 
     .. math::
         \text{Softmin}(x_{i}) = \frac{\exp(-x_i)}{\sum_j \exp(-x_j)}
 
     Shape:
-        - Input: any shape
-        - Output: same as input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(*)`, same shape as the input
 
     Arguments:
         dim (int): A dimension along which Softmin will be computed (so every slice
@@ -826,7 +1055,7 @@ class Softmin(Module):
 class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
-    lie in the range (0,1) and sum to 1
+    lie in the range [0,1] and sum to 1.
 
     Softmax is defined as:
 
@@ -834,8 +1063,9 @@ class Softmax(Module):
         \text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
 
     Shape:
-        - Input: any shape
-        - Output: same as input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(*)`, same shape as the input
 
     Returns:
         a Tensor of the same dimension and shape as the input with
@@ -910,12 +1140,12 @@ class LogSoftmax(Module):
         \text{LogSoftmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
 
     Shape:
-        - Input: any shape
-        - Output: same as input
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(*)`, same shape as the input
 
     Arguments:
-        dim (int): A dimension along which Softmax will be computed (so every slice
-            along dim will sum to 1).
+        dim (int): A dimension along which LogSoftmax will be computed.
 
     Returns:
         a Tensor of the same dimension and shape as the input with

@@ -17,7 +17,7 @@ struct IODescriptor {
   struct VariableMetadata {
     VariableMetadata(const autograd::Variable& var)
         : sizes(var.sizes().vec()),
-          type(var.type().scalarType()),
+          type(var.scalar_type()),
           device(var.device()),
           requires_grad(var.requires_grad()) {}
 

@@ -7,13 +7,13 @@
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THCCachingAllocator.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #ifdef USE_NCCL
 #include <nccl.h>
 #endif
 
 #include <torch/csrc/cuda/THCP.h>
-
+#include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -57,20 +57,29 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self)
 PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
 {
   HANDLE_TH_ERRORS
-  int ndevice;
-  if (cudaGetDeviceCount(&ndevice) != cudaSuccess) {
-    cudaGetLastError();
-    ndevice = 0;
-  }
-  return PyLong_FromLong(ndevice);
+  return PyLong_FromLong(at::cuda::device_count());
   END_HANDLE_TH_ERRORS
 }
 
-
-PyObject * THCPModule_getCurrentStream_wrap(PyObject *self)
-{
+PyObject * THCPModule_getCurrentStream_wrap(
+    PyObject * /* unused */, PyObject *device_index) {
   HANDLE_TH_ERRORS
-  return PyLong_FromUnsignedLongLong(at::cuda::getCurrentCUDAStream().pack());
+  THPUtils_assert(
+    THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
+  int64_t device = THPUtils_unpackLong(device_index);
+  return PyLong_FromUnsignedLongLong(
+    at::cuda::getCurrentCUDAStream(device).pack());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_getDefaultStream_wrap(
+    PyObject * /* unused */, PyObject *device_index) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(
+    THPUtils_checkLong(device_index), "invalid argument to getDefaultStream");
+  int64_t device = THPUtils_unpackLong(device_index);
+  return PyLong_FromUnsignedLongLong(
+    at::cuda::getDefaultCUDAStream(device).pack());
   END_HANDLE_TH_ERRORS
 }
 
@@ -82,7 +91,13 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
   if (bits == static_cast<uint64_t>(-1) && PyErr_Occurred()) {
     throw python_error();
   }
-  at::cuda::setCurrentCUDAStream(at::cuda::CUDAStream::unpack(bits));
+  auto stream = at::cuda::CUDAStream::unpack(bits);
+  int device;
+  THCudaCheck(cudaGetDevice(&device));
+  if (device != stream.device_index()) {
+    THCPModule_setDevice(stream.device_index());
+  }
+  at::cuda::setCurrentCUDAStream(stream);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -129,7 +144,8 @@ PyObject * THCPModule_getRNGState(PyObject *_unused)
 PyObject * THCPModule_setRNGState(PyObject *_unused, PyObject *obj)
 {
   HANDLE_TH_ERRORS
-  if (!THPVariable_Check(obj) || THPVariable_UnpackData(obj).type().ID() != at::TypeID::CPUByte) {
+  if (!THPVariable_Check(obj) ||
+      at::globalContext().getNonVariableType(THPVariable_Unpack(obj).type().backend(), THPVariable_Unpack(obj).scalar_type()).ID() != at::TypeID::CPUByte) {
     throw TypeError("set_rng_state expects a torch.ByteTensor, but got %s",
         Py_TYPE(obj)->tp_name);
   }
@@ -196,6 +212,14 @@ PyObject * THCPModule_cudaSynchronize(PyObject *_unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_cudaIPCCollect(PyObject *_unused /* unused */)
+{
+  HANDLE_TH_ERRORS
+  torch::CudaIPCCollect();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles)
 {
   HANDLE_TH_ERRORS
@@ -214,7 +238,7 @@ static PyGILState_STATE cudaMutexGILState;
 
 PyObject * THCPModule_cudaLockMutex(PyObject *module)
 {
-  auto mutex = THCCachingAllocator_getCudaFreeMutex();
+  auto mutex = c10::cuda::CUDACachingAllocator::getFreeMutex();
   // This has to be a busy loop because we **absolutely need to** hold the GIL
   // or it's a recipe for a deadlock otherwise (if we let other Python threads
   // run while we have the cudaMutex, but not the GIL, they might try to e.g.
@@ -235,7 +259,7 @@ PyObject * THCPModule_cudaLockMutex(PyObject *module)
 
 PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
 {
-  auto mutex = THCCachingAllocator_getCudaFreeMutex();
+  auto mutex = c10::cuda::CUDACachingAllocator::getFreeMutex();
   PyGILState_Release(cudaMutexGILState);
   mutex->unlock();
   Py_RETURN_NONE;
@@ -244,7 +268,7 @@ PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
 PyObject * THCPModule_emptyCache(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
-  THCCachingAllocator_emptyCache();
+  c10::cuda::CUDACachingAllocator::emptyCache();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -254,7 +278,7 @@ PyObject * THCPModule_memoryAllocated(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
   int device = (int) THPUtils_unpackLong(arg);
-  auto memory_allocated = THCCachingAllocator_currentMemoryAllocated(device);
+  auto memory_allocated = c10::cuda::CUDACachingAllocator::currentMemoryAllocated(device);
   return PyLong_FromUnsignedLongLong(memory_allocated);
   END_HANDLE_TH_ERRORS
 }
@@ -264,7 +288,7 @@ PyObject * THCPModule_maxMemoryAllocated(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to max_memory_allocated");
   int device = (int) THPUtils_unpackLong(arg);
-  auto max_memory_allocated = THCCachingAllocator_maxMemoryAllocated(device);
+  auto max_memory_allocated = c10::cuda::CUDACachingAllocator::maxMemoryAllocated(device);
   return PyLong_FromUnsignedLongLong(max_memory_allocated);
   END_HANDLE_TH_ERRORS
 }
@@ -274,7 +298,7 @@ PyObject * THCPModule_resetMaxMemoryAllocated(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to reset_max_memory_allocated");
   int device = (int) THPUtils_unpackLong(arg);
-  THCCachingAllocator_resetMaxMemoryAllocated(device);
+  c10::cuda::CUDACachingAllocator::resetMaxMemoryAllocated(device);
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -284,7 +308,7 @@ PyObject * THCPModule_memoryCached(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to memory_cached");
   int device = (int) THPUtils_unpackLong(arg);
-  auto memory_cached = THCCachingAllocator_currentMemoryCached(device);
+  auto memory_cached = c10::cuda::CUDACachingAllocator::currentMemoryCached(device);
   return PyLong_FromUnsignedLongLong(memory_cached);
   END_HANDLE_TH_ERRORS
 }
@@ -294,7 +318,7 @@ PyObject * THCPModule_maxMemoryCached(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to max_memory_cached");
   int device = (int) THPUtils_unpackLong(arg);
-  auto max_memory_cached = THCCachingAllocator_maxMemoryCached(device);
+  auto max_memory_cached = c10::cuda::CUDACachingAllocator::maxMemoryCached(device);
   return PyLong_FromUnsignedLongLong(max_memory_cached);
   END_HANDLE_TH_ERRORS
 }
@@ -304,7 +328,7 @@ PyObject * THCPModule_resetMaxMemoryCached(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to reset_max_memory_cached");
   int device = (int) THPUtils_unpackLong(arg);
-  THCCachingAllocator_resetMaxMemoryCached(device);
+  c10::cuda::CUDACachingAllocator::resetMaxMemoryCached(device);
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -354,11 +378,7 @@ static PyObject * THCPModule_initExtension(PyObject *self)
   THCPShortStorage_postInit(m);
   THCPCharStorage_postInit(m);
   THCPByteStorage_postInit(m);
-
-  bool has_magma = at::hasMAGMA();
-  if (has_magma) {
-    THCMagma_init(state);
-  }
+  THCPBoolStorage_postInit(m);
 
   bool has_half = true;
 
@@ -369,7 +389,7 @@ static PyObject * THCPModule_initExtension(PyObject *self)
     }
   };
 
-  set_module_attr("has_magma", has_magma ? Py_True : Py_False);
+  set_module_attr("has_magma", at::hasMAGMA() ? Py_True : Py_False);
   set_module_attr("has_half", has_half ? Py_True : Py_False);
 
   auto _state_cdata = THPObjectPtr(PyLong_FromVoidPtr(state));
@@ -406,7 +426,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       nullptr},
   {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  nullptr},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, nullptr},
-  {"_cuda_getCurrentStream", (PyCFunction)THCPModule_getCurrentStream_wrap, METH_NOARGS, nullptr},
+  {"_cuda_getCurrentStream",
+    (PyCFunction)THCPModule_getCurrentStream_wrap, METH_O, nullptr},
+  {"_cuda_getDefaultStream",
+    (PyCFunction)THCPModule_getDefaultStream_wrap, METH_O, nullptr},
   {"_cuda_getCurrentBlasHandle", (PyCFunction)THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, nullptr},
   {"_cuda_setStream",    (PyCFunction)THCPModule_setStream_wrap,  METH_O, nullptr},
   {"_cuda_isDriverSufficient", (PyCFunction)THCPModule_isDriverSufficient, METH_NOARGS, nullptr},
@@ -428,6 +451,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_initialSeed", (PyCFunction)THCPModule_initialSeed,      METH_NOARGS,  nullptr},
   {"_cuda_cudaHostAllocator", (PyCFunction)THCPModule_cudaHostAllocator, METH_NOARGS, nullptr},
   {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
+  {"_cuda_ipc_collect", (PyCFunction)THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
   {"_cuda_sleep", (PyCFunction)THCPModule_cudaSleep, METH_O, nullptr},
   {"_cuda_lock_mutex",   (PyCFunction)THCPModule_cudaLockMutex,   METH_NOARGS,  nullptr},
   {"_cuda_unlock_mutex", (PyCFunction)THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},

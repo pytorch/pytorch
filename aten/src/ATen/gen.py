@@ -121,6 +121,10 @@ TYPE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.h")
 TYPE_EXTENDED_INTERFACE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtendedInterface.h")
 TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
+TYPE_EXTENSION_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtension.h")
+TYPE_EXTENSION_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtension.cpp")
+TYPE_EXTENSION_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtensionDerived.h")
+TYPE_EXTENSION_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtensionDerived.cpp")
 
 LEGACY_TH_DISPATCHER_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcher.h")
 LEGACY_TH_DISPATCHER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcher.cpp")
@@ -141,8 +145,16 @@ LEGACY_TH_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHFunctio
 
 NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h")
 
+EXTENSION_BACKEND_REGISTRATION_H = CodeTemplate.from_file(TEMPLATE_PATH + "/ExtensionBackendRegistration.h")
+
 TYPE_REGISTER = CodeTemplate("""\
 context->registerType(Backend::${backend}, ScalarType::${scalar_type}, new ${type_name}());
+""")
+
+EXTENSION_BACKEND_REGISTER_SWITCH = CodeTemplate("""\
+case Backend::${Backend}:
+    ${Type}Dispatch::register_function(schema, fn);
+    break;
 """)
 
 core_file_manager = FileManager(core_install_dir)
@@ -163,18 +175,21 @@ generators = {
 }
 
 backends = ['CPU', 'CUDA']
-densities = ['Dense', 'Sparse']
+densities = ['Dense', 'Sparse', 'Mkldnn']  # TODO: layout instead of densities?
+extension_backends = ['MSNPU', 'XLA']
 
-# scalar_name, c_type, accreal, th_scalar_type, is_floating_type
+# scalar_name, c_type, accreal, is_floating_type
 scalar_types = [
-    ('Byte', 'uint8_t', 'Long', 'uint8_t', False),
-    ('Char', 'int8_t', 'Long', 'int8_t', False),
-    ('Double', 'double', 'Double', 'double', True),
-    ('Float', 'float', 'Double', 'float', True),
-    ('Int', 'int', 'Long', 'int32_t', False),
-    ('Long', 'int64_t', 'Long', 'int64_t', False),
-    ('Short', 'int16_t', 'Long', 'int16_t', False),
-    ('Half', 'Half', 'Double', 'at::Half', True),
+    ('Bool', 'bool', 'BoolAccrealNotDefined', False),
+    ('Byte', 'uint8_t', 'Long', False),
+    ('Char', 'int8_t', 'Long', False),
+    ('Double', 'double', 'Double', True),
+    ('Float', 'float', 'Double', True),
+    ('Int', 'int', 'Long', False),
+    ('Long', 'int64_t', 'Long', False),
+    ('Short', 'int16_t', 'Long', False),
+    ('Half', 'Half', 'Double', True),
+    ('QInt8', 'qint8', 'Long', False),
 ]
 
 # shared environment for non-derived base classes Type.h Tensor.h Storage.h
@@ -193,6 +208,8 @@ top_env = {
     'function_definitions': [],
     'type_ids': [],
     'native_function_declarations': [],
+    'extension_backend_headers': [],
+    'extension_backend_register_switches': [],
 }
 
 
@@ -210,9 +227,9 @@ def postprocess_output_declarations(output_declarations):
                 if decl.inplace:
                     ret['name'] = 'self'
                 elif len(decl.returns) == 1:
-                    ret['name'] = 'result'
+                    ret['name'] = 'out'
                 else:
-                    ret['name'] = 'result' + str(n)
+                    ret['name'] = 'out' + str(n)
             else:
                 has_named_ret = True
 
@@ -233,22 +250,22 @@ def format_yaml(data):
     noalias_dumper.ignore_aliases = lambda self, data: True
     # Support serializing OrderedDict
     noalias_dumper.add_representer(OrderedDict, dict_representer)
-    return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper)
+    # Some yaml parsers (e.g. Haskell's) don't understand line breaks.
+    # width=float('Inf') turns off optional line breaks and improves
+    # the portability of the outputted yaml.
+    return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper, width=float('Inf'))
 
 
 def generate_storage_type_and_tensor(backend, density, scalar_type, declarations):
-    scalar_name, c_type, accreal, th_scalar_type, is_floating_type = scalar_type
+    scalar_name, c_type, accreal, is_floating_type = scalar_type
     env = {}
-    density_tag = 'Sparse' if density == 'Sparse' else ''
+    density_tag = density if density != 'Dense' else ''
     env['Density'] = density
     env['ScalarName'] = scalar_name
     env['ScalarType'] = c_type
-    env['THScalarType'] = th_scalar_type
     env['AccScalarName'] = accreal
     env['isFloatingType'] = is_floating_type
     env['isIntegralType'] = not is_floating_type
-    if density == 'Dense':
-        env['Tensor'] = "{}{}{}Tensor".format(density_tag, backend, scalar_name)
     env['Type'] = "{}{}{}Type".format(density_tag, backend, scalar_name)
     env['DenseTensor'] = "{}{}Tensor".format(backend, scalar_name)
     env['Backend'] = density_tag + backend
@@ -344,12 +361,48 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         top_env['cuda_type_headers'].append(
             '#include "ATen/{}.h"'.format(env['Type']))
 
-    return env
+
+def generate_type_extension_backend(backend, declarations):
+    env = {}
+    env['Type'] = "{}Type".format(backend)
+    env['Backend'] = backend
+    env['DeviceType'] = backend
+
+    declarations, definitions = function_wrapper.create_extension_backend(
+        env, declarations)
+    env['type_method_declarations'] = declarations
+    env['type_method_definitions'] = definitions
+
+    file_manager.write(env['Type'] + ".cpp", TYPE_EXTENSION_CPP, env)
+    file_manager.write(env['Type'] + ".h", TYPE_EXTENSION_H, env)
+
+    extension_backend_register_switch = EXTENSION_BACKEND_REGISTER_SWITCH.substitute(env)
+    top_env['extension_backend_register_switches'].append(extension_backend_register_switch)
+    top_env['extension_backend_headers'].append(
+        '#include <ATen/{}.h>'.format(env['Type']))
+
+
+def generate_type_extension_backend_derived_types(backend):
+    env = {}
+    env['Backend'] = backend
+    for scalar_name, c_type, _, _ in scalar_types:
+        env['Type'] = "{}{}Type".format(backend, scalar_name)
+        env['ScalarName'] = scalar_name
+        env['ScalarType'] = c_type
+        env['TypeID'] = 'TypeID::' + backend + scalar_name
+        top_env['type_ids'].append(backend + scalar_name + ',')
+
+        type_register = TYPE_REGISTER.substitute(backend=env['Backend'], scalar_type=scalar_name, type_name=env['Type'])
+        top_env['cpu_type_registrations'].append(type_register)
+        file_manager.write(env['Type'] + ".cpp", TYPE_EXTENSION_DERIVED_CPP, env)
+        file_manager.write(env['Type'] + ".h", TYPE_EXTENSION_DERIVED_H, env)
+
+        top_env['cpu_type_headers'].append('#include "ATen/{}.h"'.format(env['Type']))
 
 
 def generate_legacy_th_dispatcher(backend, density, scalar_type, declarations):
-    assert density != 'Sparse'
-    scalar_name, c_type, accreal, th_scalar_type, is_floating_type = scalar_type
+    assert density == 'Dense'
+    scalar_name, c_type, accreal, is_floating_type = scalar_type
     env = {}
     env['Backend'] = backend
     env['Dispatcher'] = "LegacyTH{}{}Dispatcher".format(backend, scalar_name)
@@ -368,6 +421,8 @@ def iterate_types():
     for backend in backends:
         for density in densities:
             for scalar_type in scalar_types:
+                if density == 'Mkldnn' and (backend != 'CPU' or scalar_type[0] != 'Float'):
+                    continue
                 if density == 'Sparse' and scalar_type[0] == 'Half':
                     # THS does not do half type yet.
                     continue
@@ -384,7 +439,7 @@ def declare_outputs():
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeExtendedInterface.h', 'TypeDefault.cpp', 'TypeDefault.h',
              'LegacyTHDispatcher.h', 'LegacyTHDispatcher.cpp', 'LegacyTHFunctions.h',
-             'Functions.h', 'NativeFunctions.h', 'RegisterCPU.cpp', 'RegisterCPU.h']
+             'Functions.h', 'NativeFunctions.h', 'RegisterCPU.cpp', 'RegisterCPU.h', 'ExtensionBackendRegistration.h']
     for f in files:
         file_manager.will_write(f)
     cuda_files = ['RegisterCUDA.cpp', 'RegisterCUDA.h']
@@ -395,9 +450,9 @@ def declare_outputs():
         if generators[fname]['name'] == 'CUDA':
             fm = cuda_file_manager
         fm.will_write(fname)
-    for backend, density, scalar_types in iterate_types():
-        scalar_name = scalar_types[0]
-        full_backend = "Sparse" + backend if density == "Sparse" else backend
+    for backend, density, scalar_type in iterate_types():
+        scalar_name = scalar_type[0]
+        full_backend = backend if density == "Dense" else density + backend
         fm = file_manager
         if backend == 'CUDA':
             fm = cuda_file_manager
@@ -408,9 +463,16 @@ def declare_outputs():
             fm.will_write("{}{}{}.h".format(full_backend, scalar_name, kind))
             fm.will_write("{}{}{}.cpp".format(full_backend, scalar_name, kind))
         # output LegacyTHDispatchers
-        if density != 'Sparse':
+        if density == 'Dense':
             fm.will_write("{}{}{}{}.h".format('LegacyTH', full_backend, scalar_name, 'Dispatcher'))
             fm.will_write("{}{}{}{}.cpp".format('LegacyTH', full_backend, scalar_name, 'Dispatcher'))
+    for backend in extension_backends:
+        file_manager.will_write("{}Type.h".format(backend))
+        file_manager.will_write("{}Type.cpp".format(backend))
+        for scalar_type in scalar_types:
+            scalar_name = scalar_type[0]
+            file_manager.will_write("{}{}Type.h".format(backend, scalar_name))
+            file_manager.will_write("{}{}Type.cpp".format(backend, scalar_name))
 
 
 def filter_by_extension(files, *extensions):
@@ -466,18 +528,15 @@ def generate_outputs():
     output_declarations = postprocess_output_declarations(output_declarations)
     file_manager.write("Declarations.yaml", format_yaml(output_declarations))
 
-    # populated by generate_storage_type_and_tensor
-    all_types = []
+    for backend, density, scalar_type in iterate_types():
+        generate_storage_type_and_tensor(backend, density, scalar_type, declarations)
+    for backend in extension_backends:
+        generate_type_extension_backend(backend, declarations)
+        generate_type_extension_backend_derived_types(backend)
 
     for backend, density, scalar_type in iterate_types():
-        all_types.append(generate_storage_type_and_tensor(
-            backend, density, scalar_type, declarations))
-
-    all_legacy_th_dispatchers = []
-    for backend, density, scalar_type in iterate_types():
-        if density != 'Sparse':
-            all_legacy_th_dispatchers.append(generate_legacy_th_dispatcher(
-                backend, density, scalar_type, []))
+        if density == 'Dense':
+            generate_legacy_th_dispatcher(backend, density, scalar_type, [])
 
     core_files = {
         'Type.h': TYPE_H,
@@ -505,6 +564,8 @@ def generate_outputs():
     file_manager.write('LegacyTHFunctions.h', LEGACY_TH_FUNCTIONS_H, top_env)
 
     file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H, top_env)
+
+    file_manager.write('ExtensionBackendRegistration.h', EXTENSION_BACKEND_REGISTRATION_H, top_env)
 
     file_manager.check_all_files_written()
     cuda_file_manager.check_all_files_written()

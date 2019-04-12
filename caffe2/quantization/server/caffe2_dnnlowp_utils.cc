@@ -237,7 +237,8 @@ void ReportQuantizationError(
     const QuantizationErrorStats& stat) {
   if (stat.sum_sq == 0) {
     LOG(INFO) << " output " << op->debug_def().output(0) << " of operator "
-              << op << " with type " << op->debug_def().type()
+              << op << " with type " << op->debug_def().type() << " and engine "
+              << op->debug_def().engine()
               << " has l2 relative error nan (stat.sum_err_sq "
               << stat.sum_err_sq << " stat.sum_sq 0)"
               << " and max abs error " << stat.max_abs_err << " (reference is "
@@ -247,8 +248,8 @@ void ReportQuantizationError(
               << " cnt " << stat.measure_cnt;
   } else {
     LOG(INFO) << " output " << op->debug_def().output(0) << " of operator "
-              << op << " with type " << op->debug_def().type()
-              << " has l2 relative error "
+              << op << " with type " << op->debug_def().type() << " and engine "
+              << op->debug_def().engine() << " has l2 relative error "
               << std::sqrt(stat.sum_err_sq) / std::sqrt(stat.sum_sq)
               << " and max abs error " << stat.max_abs_err << " (reference is "
               << stat.max_err_ref << " and actual is " << stat.max_err_actual
@@ -306,8 +307,8 @@ static unique_ptr<QuantizationFactory> GetQuantizationFactoryOf_(
           FLAGS_caffe2_dnnlowp_weight_quantization_kind);
 
   VLOG(2) << "Quantization method for op with output " << op_def.output(0)
-          << " activation_precision " << activation_precision
-          << " weight_precision " << weight_precision
+          << " engine " << op_def.engine() << " activation_precision "
+          << activation_precision << " weight_precision " << weight_precision
           << " requantization_multiplier_precision "
           << requantization_multiplier_precision
           << " eltwise_quantization_precision "
@@ -438,6 +439,7 @@ NetDef AddScaleZeroOffsetArgumentsWithHistogram(
   }
 
   ist.str(first_line);
+  ist.clear();
 
   bool new_format = true;
   int op_index, i, nbins;
@@ -446,6 +448,7 @@ NetDef AddScaleZeroOffsetArgumentsWithHistogram(
   ist >> op_index >> op_type >> i >> tensor_name >> min >> max >> nbins;
   if (nwords_first_line != nbins + 7) {
     ist.str(first_line);
+    ist.clear();
     ist >> op_index >> i >> tensor_name >> min >> max >> nbins;
     if (nwords_first_line == nbins + 6) {
       new_format = false;

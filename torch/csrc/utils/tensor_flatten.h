@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/utils/functional.h>
+#include <ATen/core/functional.h>
 
 #include <ATen/ATen.h>
 #include <utility>
@@ -33,7 +33,7 @@ struct TensorGroup {
 
   at::Type& type() {
     AT_ASSERT(!tensors.empty());
-    return tensors[0].type();
+    return tensors[0].dispatch_type();
   }
 };
 

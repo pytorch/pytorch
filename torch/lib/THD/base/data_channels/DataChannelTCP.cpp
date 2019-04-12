@@ -268,7 +268,7 @@ void DataChannelTCP::allGather(
   memcpy(
       output[group_rank].data_ptr(),
       input.data_ptr(),
-      input.type().elementSizeInBytes() * input.numel());
+      input.element_size() * input.numel());
 
   auto j = group_rank, jnext = left;
   for (rank_type i = 0; i < group.size(); ++i) {
@@ -315,7 +315,7 @@ void DataChannelTCP::gather(
         memcpy(
             output.at(i).data_ptr(),
             input.data_ptr(),
-            input.numel() * input.type().elementSizeInBytes());
+            input.numel() * input.element_size());
       }
     }
   }
@@ -355,7 +355,7 @@ void DataChannelTCP::scatter(
         memcpy(
             output.data_ptr(),
             input.at(i).data_ptr(),
-            output.numel() * output.type().elementSizeInBytes());
+            output.numel() * output.element_size());
       }
     }
   }
@@ -389,7 +389,7 @@ void DataChannelTCP::allReduce(
   if (!exists)
     return;
 
-  uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
+  uint64_t tensor_bytes = data.element_size() * data.numel();
   auto tmp_tensor = data.clone();
 
   auto pof2 = pow2(group.size());
@@ -489,7 +489,7 @@ void DataChannelTCP::reduce(
     std::memcpy(
         data.data_ptr(),
         result_tensor.data_ptr(),
-        data.type().elementSizeInBytes() * data.numel());
+        data.element_size() * data.numel());
 }
 
 void DataChannelTCP::broadcast(
@@ -703,7 +703,7 @@ void DataChannelTCP::_send(const at::Tensor& data, rank_type dst_rank) {
     throw std::logic_error("tensor to send is not contiguous");
 
   // send size of tensor data in bytes
-  uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
+  uint64_t tensor_bytes = data.element_size() * data.numel();
   send_bytes<uint64_t>(process_dst.socket, &tensor_bytes, 1, true);
 
   // send data (bytes)
@@ -759,7 +759,7 @@ void DataChannelTCP::_receive(const at::Tensor& data, rank_type src_rank) {
   recv_bytes<uint64_t>(process_src.socket, &tensor_bytes, 1);
 
   uint64_t actual_tensor_bytes =
-      data.type().elementSizeInBytes() * data.numel();
+      data.element_size() * data.numel();
   if (actual_tensor_bytes == tensor_bytes) {
     recv_bytes<std::uint8_t>(
         process_src.socket,

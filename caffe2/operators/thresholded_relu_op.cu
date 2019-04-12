@@ -23,14 +23,14 @@ template <>
 bool ThresholdedReluOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
 
-  CAFFE_ENFORCE_GT(X.size(), 0);
+  CAFFE_ENFORCE_GT(X.numel(), 0);
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
   ThresholdedReluKernel<<<
-      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_GET_BLOCKS(X.numel()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(), X.data<float>(), Y->template mutable_data<float>(), alpha_);
+      X.numel(), X.data<float>(), Y->template mutable_data<float>(), alpha_);
   return true;
 }
 
@@ -39,15 +39,15 @@ bool ThresholdedReluGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
 
-  CAFFE_ENFORCE_GT(Y.size(), 0);
-  CAFFE_ENFORCE_EQ(dY.size(), Y.size());
+  CAFFE_ENFORCE_GT(Y.numel(), 0);
+  CAFFE_ENFORCE_EQ(dY.numel(), Y.numel());
   auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   ThresholdedReluGradientKernel<<<
-      CAFFE_GET_BLOCKS(Y.size()),
+      CAFFE_GET_BLOCKS(Y.numel()),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      Y.size(),
+      Y.numel(),
       Y.data<float>(),
       dY.data<float>(),
       dX->template mutable_data<float>());

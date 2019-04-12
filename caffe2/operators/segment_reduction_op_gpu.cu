@@ -431,7 +431,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
     auto& dataInput = Input(0);
     auto& lengthsInput = Input(LENGTHS);
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
     const int64_t dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
     int64_t dataToReduceSize;
@@ -451,7 +451,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
     const IndexType* indices;
     if (SparseFused) { // static if
       auto& indicesInput = Input(INDICES);
-      CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
+      CAFFE_ENFORCE_EQ(1, indicesInput.dim(), "INDICES must be a vector");
       indices = indicesInput.template data<IndexType>();
       dataToReduceSize = indicesInput.dim(0);
     } else {
@@ -551,7 +551,7 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
     auto& dataInput = Input(0);
     auto& lengthsInput = Input(LENGTHS);
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
     const int64_t dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
     int64_t dataToReduceSize;
@@ -571,7 +571,7 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
     const IndexType* indices;
     if (SparseFused) { // static if
       auto& indicesInput = Input(INDICES);
-      CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
+      CAFFE_ENFORCE_EQ(1, indicesInput.dim(), "INDICES must be a vector");
       indices = indicesInput.template data<IndexType>();
       dataToReduceSize = indicesInput.dim(0);
     } else {
@@ -672,7 +672,7 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
     auto& dataInput = Input(0);
     auto& lengthsInput = Input(LENGTHS);
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
     const int64_t dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
     int64_t dataToReduceSize;
@@ -691,7 +691,7 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
     const IndexType* indices;
     if (SparseFused) { // static if
       auto& indicesInput = Input(INDICES);
-      CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
+      CAFFE_ENFORCE_EQ(1, indicesInput.dim(), "INDICES must be a vector");
       indices = indicesInput.template data<IndexType>();
       dataToReduceSize = indicesInput.dim(0);
     } else {
@@ -802,9 +802,9 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
     auto& indicesInput = Input(INDICES);
     auto& lengthsInput = Input(LENGTHS);
 
-    CAFFE_ENFORCE_EQ(1, weightsInput.ndim(), "WEIGHTS must be a vector");
-    CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, weightsInput.dim(), "WEIGHTS must be a vector");
+    CAFFE_ENFORCE_EQ(1, indicesInput.dim(), "INDICES must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
 
     const int64_t dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
@@ -937,7 +937,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
     auto& data = Input(0);
     auto& segment_ids = Input(1);
 
-    if (segment_ids.size() == 0 || data.size() == 0) {
+    if (segment_ids.numel() == 0 || data.numel() == 0) {
       // Special handling for empty input
       auto dims = data.sizes().vec();
       if (dims.size() > 0) {
@@ -947,13 +947,13 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
       return true;
     }
 
-    CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
+    CAFFE_ENFORCE_EQ(1, segment_ids.dim(), "SEGMENT_IDS must be a vector");
     int64_t slize_sz = data.size_from_dim(1);
 
     ReinitializeTensor(&K_tensor_, {1}, at::dtype<SIndex>().device(CUDA));
     // Get maximum segment id so we can size the output.
     // This must be done synchronously with host.
-    if (segment_ids.size() > 4096) {
+    if (segment_ids.numel() > 4096) {
       // when the input size is large, device reduce is better.
       size_t tmp_storage_bytes = 0;
       // the first call to `Max` do nothing, but set correct tmp_storage_bytes.
@@ -962,7 +962,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
           tmp_storage_bytes,
           segment_ids.template data<SIndex>(), // input device data
           K_tensor_.template mutable_data<SIndex>(), // output device data
-          segment_ids.size(), // number of items
+          segment_ids.numel(), // number of items
           context_.cuda_stream());
 
       // the second call do the real computation.
@@ -972,12 +972,12 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
           tmp_storage_bytes,
           segment_ids.template data<SIndex>(), // input device data
           K_tensor_.template mutable_data<SIndex>(), // output device data
-          segment_ids.size(), // number of items
+          segment_ids.numel(), // number of items
           context_.cuda_stream());
     } else {
       MaxSegmentKernel<SIndex>
           <<<1, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
-              segment_ids.size(),
+              segment_ids.numel(),
               segment_ids.template data<SIndex>(),
               K_tensor_.mutable_data<SIndex>());
     }
@@ -993,15 +993,15 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
 
     // Clear the output as we will be accumulating the values
     math::Set<T, CUDAContext>(
-        output->size(), T(0), output->template mutable_data<T>(), &context_);
+        output->numel(), T(0), output->template mutable_data<T>(), &context_);
 
     if (!mean) {
       UnsortedSegmentSumKernel<SIndex, T><<<
-          CAFFE_GET_BLOCKS(data.size()),
+          CAFFE_GET_BLOCKS(data.numel()),
           CAFFE_CUDA_NUM_THREADS,
           0,
           context_.cuda_stream()>>>(
-          data.size(),
+          data.numel(),
           slize_sz,
           segment_ids.template data<SIndex>(),
           data.template data<T>(),
@@ -1011,16 +1011,16 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
       // For mean, we need to compute scaling factors
       ReinitializeTensor(&scaling_factors_, {K + 1}, at::dtype<int>().device(CUDA));
       math::Set<int, CUDAContext>(
-          scaling_factors_.size(),
+          scaling_factors_.numel(),
           int(0),
           scaling_factors_.template mutable_data<int>(),
           &context_);
       UnsortedSegmentSumKernel<SIndex, T><<<
-          CAFFE_GET_BLOCKS(data.size()),
+          CAFFE_GET_BLOCKS(data.numel()),
           CAFFE_CUDA_NUM_THREADS,
           0,
           context_.cuda_stream()>>>(
-          data.size(),
+          data.numel(),
           slize_sz,
           segment_ids.template data<SIndex>(),
           data.template data<T>(),
@@ -1028,11 +1028,11 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
           scaling_factors_.template mutable_data<int>());
       // Divide by the scaling factors to get means
       SegmentScalingKernel<SIndex, T><<<
-          CAFFE_GET_BLOCKS(output->size()),
+          CAFFE_GET_BLOCKS(output->numel()),
           CAFFE_CUDA_NUM_THREADS,
           0,
           context_.cuda_stream()>>>(
-          output->size(),
+          output->numel(),
           slize_sz,
           scaling_factors_.template data<int>(),
           output->template mutable_data<T>());
@@ -1197,29 +1197,29 @@ class SortedSegmentRangeMeanGradientOp : public Operator<Context> {
 
     SIndex K = 0;
     context_.CopyBytesToCPU(
-        sizeof(SIndex), I.template data<SIndex>() + I.size() - 1, &K);
+        sizeof(SIndex), I.template data<SIndex>() + I.numel() - 1, &K);
 
     K += 1;
 
-    if (segment_len_.size() != K) {
+    if (segment_len_.numel() != K) {
       ReinitializeTensor(&segment_len_, {K}, at::dtype<SIndex>().device(CUDA));
     }
 
     math::Set<SIndex, CUDAContext>(
-        segment_len_.size(),
+        segment_len_.numel(),
         0,
         segment_len_.template mutable_data<SIndex>(),
         &context_);
     segment_lengths_kernel<<<
-        CAFFE_GET_BLOCKS(I.size()),
+        CAFFE_GET_BLOCKS(I.numel()),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(
-        I.size(),
+        I.numel(),
         I.template data<SIndex>(),
         segment_len_.template mutable_data<SIndex>());
     sorted_segment_mean_gradient_kernel<T, SIndex, LOGEXP>
-        <<<CAFFE_GET_BLOCKS(dX->size()),
+        <<<CAFFE_GET_BLOCKS(dX->numel()),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context_.cuda_stream()>>>(
@@ -1295,10 +1295,10 @@ class CUDASparseLengthsSumGradientWithIndicesOp : public Operator<CUDAContext> {
     auto& lengthsInput = Input(1);
     auto& indicesInput = Input(2);
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
 
     const int len_length = lengthsInput.dim(0);
-    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(segmentGradsInput.dim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
     auto shape = segmentGradsInput.sizes().vec();
@@ -1374,10 +1374,10 @@ class CUDASparseLengthsMeanGradientWithIndicesOp
     auto& lengthsInput = Input(1);
     auto& indicesInput = Input(2);
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
 
     const int len_length = lengthsInput.dim(0);
-    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(segmentGradsInput.dim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
     auto shape = segmentGradsInput.sizes().vec();
@@ -1454,11 +1454,11 @@ class CUDASparseLengthsWeightedSumGradientWithIndicesOp
     auto& lengthsInput = Input(2);
     auto& indicesInput = Input(3);
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
-    CAFFE_ENFORCE_EQ(1, weightsInput.ndim(), "WEIGHTS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, weightsInput.dim(), "WEIGHTS must be a vector");
 
     const int len_length = lengthsInput.dim(0);
-    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(segmentGradsInput.dim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
     auto shape = segmentGradsInput.sizes().vec();
@@ -1592,9 +1592,9 @@ class CUDALengthsMaxWithMainInputAndForwardOutputGradientOp
     auto& dataInput = Input(3);
     auto& dataOutput = Input(0); // based on CPU version
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
     int len_length = lengthsInput.dim(0);
-    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(segmentGradsInput.dim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
     inclusive_scan_length_buffer_.ResizeLike(lengthsInput);
@@ -1687,11 +1687,11 @@ class CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
     auto& dataInput = Input(3);
     auto& indicesInput = Input(4);
 
-    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
-    CAFFE_ENFORCE_EQ(1, weightsInput.ndim(), "WEIGHTS must be a vector");
+    CAFFE_ENFORCE_EQ(1, lengthsInput.dim(), "LENGTHS must be a vector");
+    CAFFE_ENFORCE_EQ(1, weightsInput.dim(), "WEIGHTS must be a vector");
 
     const int len_length = lengthsInput.dim(0);
-    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(segmentGradsInput.dim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
     auto shape = segmentGradsInput.sizes().vec();

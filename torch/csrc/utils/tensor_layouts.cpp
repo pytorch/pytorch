@@ -23,6 +23,8 @@ void initializeLayouts() {
   // for now, let's look these up by Backend; we could create our own enum in the future.
   registerLayoutObject((THPLayout*)strided_layout, at::Backend::CPU);
   registerLayoutObject((THPLayout*)strided_layout, at::Backend::CUDA);
+  registerLayoutObject((THPLayout*)strided_layout, at::Backend::MSNPU);
+  registerLayoutObject((THPLayout*)strided_layout, at::Backend::XLA);
 
   PyObject *sparse_coo_layout = THPLayout_New(at::Layout::Sparse, "torch.sparse_coo");
   Py_INCREF(sparse_coo_layout);
@@ -31,6 +33,13 @@ void initializeLayouts() {
   }
   registerLayoutObject((THPLayout*)sparse_coo_layout, at::Backend::SparseCPU);
   registerLayoutObject((THPLayout*)sparse_coo_layout, at::Backend::SparseCUDA);
+
+  PyObject *mkldnn_layout = THPLayout_New(at::Layout::Mkldnn, "torch._mkldnn");
+  Py_INCREF(mkldnn_layout);
+  if (PyModule_AddObject(torch_module, "_mkldnn", mkldnn_layout) != 0) {
+    throw python_error();
+  }
+  registerLayoutObject((THPLayout*)mkldnn_layout, at::Backend::MkldnnCPU);
 }
 
 }} // namespace torch::utils

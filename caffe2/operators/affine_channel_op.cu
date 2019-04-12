@@ -59,7 +59,7 @@ bool AffineChannelGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   auto* dX = Output(0, dY.sizes(), at::dtype<float>());
   const int N = dY.dim32(0);
   const int C = dY.dim32(1);
-  const int HxW = dY.size() / (N * C);
+  const int HxW = dY.numel() / (N * C);
   const float* dY_data = dY.data<float>();
   const float* scale_data = scale.data<float>();
   const std::array<int, 3> X_dims = {N, C, HxW};
@@ -103,9 +103,9 @@ bool AffineChannelGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto& scale = is_learnable_ ? Input(2) : Input(1);
   
   auto* dX = Output(0, dY.sizes(), at::dtype<float>());
-  const int ndim = dY.ndim();
+  const int ndim = dY.dim();
   const int C = dY.dim32(ndim - 1);
-  const int rows = dY.size() / C;
+  const int rows = dY.numel() / C;
   const int cols = C;
   const float* dY_data = dY.data<float>();
   const float* scale_data = scale.data<float>();

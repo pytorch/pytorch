@@ -71,6 +71,22 @@ void rowwise_adagrad_update__base(
   internal::rowwise_adagrad_update_inlined(N, w, w_n, g, h, h_n, epsilon, lr);
 }
 
+// version without prefetching
+decltype(adagrad_update__base) adagrad_update__avx_f16c;
+void adagrad_update(
+    int N,
+    const float* w,
+    const float* g,
+    const float* h,
+    float* nw,
+    float* nh,
+    float epsilon,
+    float decay,
+    float lr) {
+  AVX_F16C_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr);
+  BASE_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr);
+}
+
 decltype(adagrad_update_prefetch__base) adagrad_update_prefetch__avx_f16c;
 void adagrad_update_prefetch(
     int N,
@@ -184,27 +200,11 @@ void rowwise_adagrad_update(
   BASE_DO(rowwise_adagrad_update, N, w, w_n, g, h, h_n, epsilon, lr);
 }
 
-// version without prefetching
-decltype(adagrad_update__base) adagrad_update__avx_f16c;
-void adagrad_update(
-    int N,
-    const float* w,
-    const float* g,
-    const float* h,
-    float* nw,
-    float* nh,
-    float epsilon,
-    float decay,
-    float lr) {
-  AVX_F16C_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr);
-  BASE_DO(adagrad_update, N, w, g, h, nw, nh, epsilon, decay, lr);
-}
-
 SPARSE_ADAGRAD_SPECIALIZATION(int32_t, base);
 
 decltype(sparse_adagrad_int32_t__base) sparse_adagrad_int32_t__avx_f16c;
 template <>
-void sparse_adagrad(
+int sparse_adagrad(
     int num_rows,
     int block_size,
     uint64_t param_size,
@@ -215,8 +215,7 @@ void sparse_adagrad(
     float* nw,
     float* nh,
     float epsilon,
-    float lr,
-    const std::string& param_name) {
+    float lr) {
   AVX_F16C_DO(
       sparse_adagrad_int32_t,
       num_rows,
@@ -229,8 +228,7 @@ void sparse_adagrad(
       nw,
       nh,
       epsilon,
-      lr,
-      param_name);
+      lr);
   BASE_DO(
       sparse_adagrad_int32_t,
       num_rows,
@@ -243,15 +241,14 @@ void sparse_adagrad(
       nw,
       nh,
       epsilon,
-      lr,
-      param_name);
+      lr);
 }
 
 SPARSE_ADAGRAD_SPECIALIZATION(int64_t, base);
 
 decltype(sparse_adagrad_int64_t__base) sparse_adagrad_int64_t__avx_f16c;
 template <>
-void sparse_adagrad(
+int sparse_adagrad(
     int num_rows,
     int block_size,
     uint64_t param_size,
@@ -262,8 +259,7 @@ void sparse_adagrad(
     float* nw,
     float* nh,
     float epsilon,
-    float lr,
-    const std::string& param_name) {
+    float lr) {
   AVX_F16C_DO(
       sparse_adagrad_int64_t,
       num_rows,
@@ -276,8 +272,7 @@ void sparse_adagrad(
       nw,
       nh,
       epsilon,
-      lr,
-      param_name);
+      lr);
   BASE_DO(
       sparse_adagrad_int64_t,
       num_rows,
@@ -290,8 +285,7 @@ void sparse_adagrad(
       nw,
       nh,
       epsilon,
-      lr,
-      param_name);
+      lr);
 }
 
 } // namespace caffe2

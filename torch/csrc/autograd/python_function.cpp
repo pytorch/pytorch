@@ -44,7 +44,7 @@ PyObject *THPFunctionClass = nullptr;
 namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
-  : type(&var.type())
+  : type(&var.dispatch_type())
   , device(var.device())
   , size(var.sizes().vec())
   , requires_grad(var.requires_grad()) {
@@ -607,7 +607,7 @@ static void _trace_post_record(
   auto graph = node->owningGraph();
   node->addOutput();
   if (!unpack_output) {
-    std::vector<TypePtr> tuple_values(num_outputs, DynamicType::get());
+    std::vector<TypePtr> tuple_values(num_outputs, TensorType::get());
     TypePtr tuple_type = TupleType::create(std::move(tuple_values));
     node->output()->setType(tuple_type);
     auto unpacked = graph->createTupleUnpack(node->output())->insertAfter(node);

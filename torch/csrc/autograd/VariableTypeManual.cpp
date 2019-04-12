@@ -31,14 +31,8 @@ Allocator* VariableType::allocator() const {
 Device VariableType::getDeviceFromPtr(void * data) const {
   return baseType->getDeviceFromPtr(data);
 }
-Storage VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
-  return baseType->storageFromBlob(data, size, deleter);
-}
 Storage VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   return baseType->unsafeStorageFromTH(th_pointer, retain);
-}
-Storage VariableType::storageWithAllocator(int64_t size, Allocator* allocator) const {
-  return baseType->storageWithAllocator(size, allocator);
 }
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), /*requires_grad=*/false);
@@ -49,9 +43,6 @@ std::unique_ptr<Generator> VariableType::generator() const {
 
 const char * VariableType::toString() const {
   return str.c_str();
-}
-size_t VariableType::elementSizeInBytes() const {
-  return baseType->elementSizeInBytes();
 }
 Type & VariableType::toBackend(Backend b) const {
   return *getVariableTypeFromBaseType(baseType->toBackend(b));
@@ -177,7 +168,7 @@ const Variable & VariableType::checked_cast_variable(const Tensor & t, const cha
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
   if (!t.is_variable()) {
-    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
+    AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " for argument #", pos, " '", name, "'");
   }
   return as_variable_ref(t);
 }
@@ -187,7 +178,7 @@ Variable & VariableType::checked_cast_variable(Tensor & t, const char * name, in
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
   if (!t.is_variable()) {
-    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
+    AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " for argument #", pos, " '", name, "'");
   }
   return as_variable_ref(t);
 }
@@ -218,8 +209,8 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
     if (!t.defined()) {
       continue;
     }
-    if (!isVariableType(t.type())) {
-      AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " at position #", i, " "
+    if (!isVariableType(t.dispatch_type())) {
+      AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " at position #", i, " "
                     "for iterable argument #", pos, " '", name, "'");
     }
     ret[i] = static_cast<const Variable&>(t).data();
@@ -249,7 +240,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
       jit::Node* node = graph->create(jit::aten::expand_as, /*num_outputs=*/1);
       jit::tracer::addInputs(node, "src", src);
       jit::tracer::addInputs(node, "self", self);
-      graph->appendNode(node);
+      graph->insertNode(node);
       jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
       output = node->output();
     } else {
@@ -265,16 +256,19 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
-  requires_grad &= isFloatingPoint(self.type().scalarType());
+  requires_grad &= isFloatingPoint(self.scalar_type());
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
     grad_fn->src_type = &src.type();
     grad_fn->src_device = src.device();
   }
-  if (self.is_sparse() && src.is_sparse()) baseType->copy_sparse_to_sparse_(self_, src_, non_blocking);
-  else if (!self.is_sparse() && !src.is_sparse()) baseType->s_copy_(self_, src_, non_blocking);
-  else AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ", self.type(), " and src type = ", src.type());
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    if (self.is_sparse() && src.is_sparse()) baseType->copy_sparse_to_sparse_(self_, src_, non_blocking);
+    else if (!self.is_sparse() && !src.is_sparse()) baseType->s_copy_(self_, src_, non_blocking);
+    else AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ", self.type(), " and src type = ", src.type());
+  }
   increment_version(self);
   rebase_history(as_variable_ref( self ), std::move(grad_fn));
   if(torch::jit::tracer::isTracing()) {
@@ -287,17 +281,20 @@ Tensor VariableType::_s_copy_from(const Tensor & self, const Tensor & dst, bool 
   AT_ERROR("copy_from does not support automatic differentiation; use copy_ instead");
 }
 
-Tensor & VariableType::resize_(Tensor & self, IntList size) const {
+Tensor & VariableType::resize_(Tensor & self, IntArrayRef size) const {
   auto& self_ = unpack(self, "self", 0);
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
   if (torch::jit::tracer::isTracing()) {
-    jit::tracer::ArgumentStash::popIntList("size");
+    jit::tracer::ArgumentStash::popIntArrayRef("size");
     jit::tracer::warn("resize_", jit::tracer::WARN_RESIZE);
     jit::tracer::delValueTrace(self);
   }
-  baseType->resize_(self_, size);
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    baseType->resize_(self_, size);
+  }
   return self;
 }
 
@@ -311,7 +308,10 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) co
     jit::tracer::warn("resize_as_", jit::tracer::WARN_RESIZE);
     jit::tracer::delValueTrace(self);
   }
-  baseType->resize_as_(self_, the_template_);
+  {
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+    baseType->resize_as_(self_, the_template_);
+  }
   return self;
 }
 
@@ -323,7 +323,7 @@ Tensor VariableType::detach(const Tensor & self) const {
     node = graph->create(jit::aten::detach, /*num_outputs=*/0);
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
-    graph->appendNode(node);
+    graph->insertNode(node);
 
   }
   // <NON_GENERATED_CODE>
@@ -332,7 +332,7 @@ Tensor VariableType::detach(const Tensor & self) const {
   if (jit::tracer::isTracing()) {
     jit::tracer::addOutput(node, result);
   }
-  return result;
+  return std::move(result);
 }
 
 Tensor & VariableType::detach_(Tensor & self) const {
@@ -343,7 +343,7 @@ Tensor & VariableType::detach_(Tensor & self) const {
     node = graph->create(jit::aten::detach, /*num_outputs=*/0);
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
-    graph->appendNode(node);
+    graph->insertNode(node);
     jit::tracer::ensureUniqueIfOutOfPlaced("detach_", self);
   }
   // <NON_GENERATED_CODE>

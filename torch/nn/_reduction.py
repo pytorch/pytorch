@@ -1,6 +1,5 @@
 import warnings
 from .._jit_internal import weak_script
-import torch
 
 # NB: Keep this file in sync with enums in aten/src/ATen/core/Reduction.h
 
@@ -37,8 +36,6 @@ def legacy_get_string(size_average, reduce, emit_warning=True):
     if reduce is None:
         reduce = True
 
-    size_average = torch.jit._unwrap_optional(size_average)
-    reduce = torch.jit._unwrap_optional(reduce)
     if size_average and reduce:
         ret = 'mean'
     elif reduce:
