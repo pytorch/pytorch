@@ -694,7 +694,14 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArra
 
 Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
   // cf. Iain Murray (2016); arXiv 1602.07527
-  // This gradient is symmetric, and not triangular
+  // This gradient is symmetric, and not triangular.
+  // This choice is due to the ambiguity caused by taking triangular gradients,
+  // described in the example below:
+  // Consider a matrix A which is PD, and compute the trace of A's inverse using
+  // A.inverse().trace(). The gradient of this trace w.r.t to A in this case is symmetric
+  // and unique. Note that A = L @ L^{T} => inv(A) = inv(L)^{T} @ inv(L)
+  // The gradient of the trace of A's inverse w.r.t. A using the Cholesky decomposition
+  // should give the same gradient and using triangular gradients doesn't cause this to happen.
   if (upper) {
     L = L.transpose(-1, -2);
     grad = grad.transpose(-1, -2);

@@ -2162,38 +2162,23 @@ class TestAutograd(TestCase):
 
     @skipIfNoLapack
     def test_cholesky(self):
-        def func(root):
+        def func(root, upper):
             x = torch.matmul(root, root.transpose(-1, -2)) + 1e-05
             return torch.cholesky(x, upper)
 
         def run_test(upper, dims):
             root = torch.rand(*dims, requires_grad=True)
 
-            gradcheck(func, [root])
-            gradgradcheck(func, [root])
+            gradcheck(func, [root, upper])
+            gradgradcheck(func, [root, upper])
+
+            root = random_symmetric_pd_matrix(dims[-1], *dims[:-2]).requires_grad_()
+            chol = root.cholesky().sum().backward()
+            self.assertEqual(root.grad, root.grad.transpose(-1, -2))  # Check the gradient is symmetric
 
         for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
             run_test(upper, dims)
-
-        # Testing the inverse using standard inverse and cholesky
-        def mat_test(mat_size, batch_sizes, upper):
-            x = random_symmetric_pd_matrix(mat_size, *batch_sizes)
-            x_clone = x.clone().requires_grad_()
-            x.requires_grad_()
-            standard_inv = x.inverse()
-            chol_factor = x_clone.cholesky(upper=upper)
-            chol_factor_inv = chol_factor.inverse()
-            if upper:
-                chol_inv = torch.matmul(chol_factor_inv, chol_factor_inv.transpose(-1, -2))
-            else:
-                chol_inv = torch.matmul(chol_factor_inv.transpose(-1, -2), chol_factor_inv)
-            standard_inv.sum().backward()
-            chol_inv.sum().backward()
-            self.assertTrue(torch.allclose(x.grad, x_clone.grad))
-
-        for mat_size, batch_sizes, upper in product([3, 5], [(), (3,), (3, 3)], [True, False]):
-            mat_test(mat_size, batch_sizes, upper)
 
     @skipIfNoLapack
     def test_triangular_solve(self):
