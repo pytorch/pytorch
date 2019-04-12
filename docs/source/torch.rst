@@ -225,6 +225,7 @@ Reduction Ops
 .. autofunction:: std
 .. autofunction:: sum
 .. autofunction:: unique
+.. autofunction:: unique_consecutive
 .. autofunction:: var
 
 

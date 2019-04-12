@@ -144,8 +144,6 @@ class ProcessGroup {
   virtual std::shared_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) = 0;
 
-  virtual std::unordered_map<int, int> getGroupRank() = 0;
-
  protected:
   const int rank_;
   const int size_;

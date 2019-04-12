@@ -21,32 +21,28 @@ void requireEqualTensorList(TensorList t1, TensorList t2) {
   }
 }
 
-// split: test method, type, namespace give same result
-void TestSplit(Type& T, Tensor& t) {
+// split: test method, namespace give same result
+void TestSplit(DeprecatedTypeProperties& T, Tensor& t) {
   auto splitMethod = t.split(1, 0);
-  auto splitType = T.split(t, 1, 0);
   auto splitNs = at::split(t, 1, 0);
-  requireEqualTensorList(splitMethod, splitType);
   requireEqualTensorList(splitMethod, splitNs);
 
   // test rebuilding with cat
   ASSERT_EQUAL(at::cat(splitMethod, 0), t);
 }
 
-// chunk: test method, type, namespace give same result
-void TestChunk(Type& T, Tensor& t) {
+// chunk: test method, namespace give same result
+void TestChunk(DeprecatedTypeProperties& T, Tensor& t) {
   // test method, type, namespace give same result
   auto chunkMethod = t.chunk(3, 0);
-  auto chunkType = T.chunk(t, 3, 0);
   auto chunkNs = at::chunk(t, 3, 0);
-  requireEqualTensorList(chunkMethod, chunkType);
   requireEqualTensorList(chunkMethod, chunkNs);
 
   // test rebuilding with cat
   ASSERT_EQUAL(at::cat(chunkMethod, 0), t);
 }
 
-void TestStack(Type& T, Tensor& t) {
+void TestStack(DeprecatedTypeProperties& T, Tensor& t) {
   auto x = rand({2, 3, 4});
   auto y = rand({2, 3, 4});
   auto z = rand({2, 3, 4});
@@ -69,7 +65,7 @@ void TestStack(Type& T, Tensor& t) {
 }
 
 // size / stride
-void TestSize(Type& T, Tensor& t) {
+void TestSize(DeprecatedTypeProperties& T, Tensor& t) {
   auto scalar = randn({}, T);
   // Throw StartsWith("dimension specified as 0 but tensor has no dimensions")
   ASSERT_ANY_THROW(scalar.size(0));
@@ -87,7 +83,7 @@ void TestSize(Type& T, Tensor& t) {
   ASSERT_EQ(empty.stride(-1), 1);
 }
 
-void TestMatmul(Type& T, Tensor& t, Type& AccT) {
+void TestMatmul(DeprecatedTypeProperties& T, Tensor& t, DeprecatedTypeProperties& AccT) {
   auto scalar = randn({}, T);
   auto d1 = randn({3}, T);
   auto d2 = randn({2, 3}, T);
@@ -160,7 +156,7 @@ void TestMatmul(Type& T, Tensor& t, Type& AccT) {
   ASSERT_ANY_THROW(d5.matmul(d5wrong));
 }
 
-void TestStandardGammaGrad(Type& T, Tensor& t) {
+void TestStandardGammaGrad(DeprecatedTypeProperties& T, Tensor& t) {
   // check empty
   auto empty = ones({0}, T);
   ASSERT_EQUAL(empty, at::_standard_gamma_grad(empty, empty));
@@ -179,7 +175,7 @@ void TestStandardGammaGrad(Type& T, Tensor& t) {
   ASSERT_ANY_THROW(at::_standard_gamma_grad(t1, t2));
 }
 
-void TestWhere(Type& T, Tensor& t) {
+void TestWhere(DeprecatedTypeProperties& T, Tensor& t) {
   // empty
   auto empty = ones({0}, T);
   auto& bT = T.toScalarType(ScalarType::Byte);
@@ -198,7 +194,7 @@ void TestWhere(Type& T, Tensor& t) {
       at::where(cond_1d, x_1d, y_1d));
 }
 
-void test(Type& T, Type& AccT) {
+void test(DeprecatedTypeProperties& T, DeprecatedTypeProperties& AccT) {
   auto t = randn({3, 3}, T);
   TestSplit(T, t);
   TestChunk(T, t);

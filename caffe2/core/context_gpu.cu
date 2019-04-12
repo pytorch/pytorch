@@ -485,14 +485,18 @@ struct DefaultCUDAAllocator final : public at::Allocator {
     }
     switch (g_cuda_memory_pool_type) {
       case CudaMemoryPoolType::NONE:
-        CUDA_ENFORCE(cudaMalloc(&ptr, nbytes));
+        if (nbytes != 0) {
+          CUDA_ENFORCE(cudaMalloc(&ptr, nbytes));
+        }
         if (FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
           g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         }
         return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
       case CudaMemoryPoolType::CUB:
-        CUDA_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
+        if (nbytes != 0) {
+          CUDA_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
+        }
         g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         VLOG(2) << "CUB allocating pointer " << ptr << " on device "
                 << CaffeCudaGetDevice();
