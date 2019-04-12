@@ -218,7 +218,7 @@ _unique_cuda(const Tensor& self, const bool sorted, const bool return_inverse) {
     // The current CUDA implementation of unique always sort due to the
     // lack of hashtable implementation in thrust
     Tensor output, inverse;
-    std::tie(output, inverse, std::ignore, std::ignore) = unique_cuda_template<scalar_t>(self, false, false, return_inverse, false);
+    std::tie(output, std::ignore, inverse, std::ignore) = unique_cuda_template<scalar_t>(self, false, false, return_inverse, false);
     return std::make_tuple(output, inverse);
   });
 }
@@ -229,7 +229,7 @@ _unique2_cuda(const Tensor& self, const bool sorted, const bool return_inverse, 
     // The current CUDA implementation of unique always sort due to the
     // lack of hashtable implementation in thrust
     Tensor output, inverse, counts;
-    std::tie(output, inverse, counts, std::ignore) = unique_cuda_template<scalar_t>(self, false, false, return_inverse, return_counts);
+    std::tie(output, std::ignore, inverse, counts) = unique_cuda_template<scalar_t>(self, false, false, return_inverse, return_counts);
     return std::make_tuple(output, inverse, counts);
   });
 }
