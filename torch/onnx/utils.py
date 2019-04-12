@@ -16,7 +16,7 @@ import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
-from torch._C import ListType, propagate_and_assign_input_and_output_shapes
+from torch._C import ListType, _propagate_and_assign_input_and_output_shapes
 
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -238,7 +238,7 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
         try:
             method = model.__getattr__('forward')
             params = method.initial_ivalues()
-            graph = propagate_and_assign_input_and_output_shapes(
+            graph = _propagate_and_assign_input_and_output_shapes(
                 method.graph, tuple(args) + tuple(params), example_outputs, False, propagate)
             # Erase number types to bring the graph to a pre-NumberType state
 

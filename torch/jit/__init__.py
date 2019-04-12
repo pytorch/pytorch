@@ -1551,7 +1551,7 @@ def annotate(the_type, the_value):
 
 Attribute = collections.namedtuple('Attribute', ['value', 'type'])
 
-last_executed_optimized_graph = torch._C.last_executed_optimized_graph
+last_executed_optimized_graph = torch._C._last_executed_optimized_graph
 
 
 def _graph_for(self, *args, **kwargs):

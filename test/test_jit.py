@@ -42,7 +42,7 @@ from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from torch.testing import FileCheck
-from torch._C import TensorType, parse_ir, propagate_shapes, _jit_python_print
+from torch._C import TensorType, parse_ir, _propagate_shapes, _jit_python_print
 from copy import deepcopy
 import random
 from typing import List, Dict, Optional, Tuple
@@ -255,9 +255,9 @@ def enable_cpu_fuser(fn):
 # note: not re-entrant, use unnested only
 @contextmanager
 def disable_autodiff_subgraph_inlining(enabled=True):
-    torch._C.debug_set_autodiff_subgraph_inlining(not enabled)
+    torch._C._debug_set_autodiff_subgraph_inlining(not enabled)
     yield
-    torch._C.debug_set_autodiff_subgraph_inlining(True)
+    torch._C._debug_set_autodiff_subgraph_inlining(True)
 
 
 # helper function to get sum of List[Tensor]
@@ -3698,8 +3698,8 @@ a")
         # test that shape analysis is written correctly for sum with IntArrayRef[1] dim argument
         self.run_pass('constant_propagation', func.graph)
         self.run_pass('constant_propagation', func2.graph)
-        g = propagate_shapes(func.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
-        g2 = propagate_shapes(func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
+        g = _propagate_shapes(func.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
+        g2 = _propagate_shapes(func2.graph, (torch.zeros(1, 1, 1, 1, 4),), False)
         self.assertTrue(g.findNode("aten::sum").output().type().kind()
                         == "DimensionedTensorType")
         self.assertTrue(g2.findNode("aten::sum").output().type().kind()
@@ -3716,20 +3716,20 @@ a")
         @torch.jit.script
         def func2(x, y):
             return torch.cat((x, x), y)
-        func2.debug_disable_autodiff_subgraph_inlining()
+        with disable_autodiff_subgraph_inlining():
 
-        x = torch.rand([2, 2]).requires_grad_()
-        y = torch.tensor(1)
+            x = torch.rand([2, 2]).requires_grad_()
+            y = torch.tensor(1)
 
-        output = func2(x, y)
-        output_ref = torch.cat((x, x), y)
-        self.assertEqual(output, output_ref)
+            output = func2(x, y)
+            output_ref = torch.cat((x, x), y)
+            self.assertEqual(output, output_ref)
 
-        self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::cat'], [])
+            self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::cat'], [])
 
-        grad = torch.autograd.grad(output.sum(), x)
-        grad_ref = torch.autograd.grad(output_ref.sum(), x)
-        self.assertEqual(grad, grad_ref)
+            grad = torch.autograd.grad(output.sum(), x)
+            grad_ref = torch.autograd.grad(output_ref.sum(), x)
+            self.assertEqual(grad, grad_ref)
 
     def test_cat_lifts(self):
         @torch.jit.script
@@ -3759,60 +3759,57 @@ a")
         def func2(x, y):
             return torch.stack((x, y), dim=0)
 
-        func2.debug_disable_autodiff_subgraph_inlining()
+        with disable_autodiff_subgraph_inlining():
+            x = torch.randn([2, 2]).requires_grad_()
+            y = torch.randn([2, 2]).requires_grad_()
 
-        x = torch.randn([2, 2]).requires_grad_()
-        y = torch.randn([2, 2]).requires_grad_()
+            output = func2(x, y)
+            output_ref = torch.stack((x, y), 0)
+            self.assertEqual(output, output_ref)
 
-        output = func2(x, y)
-        output_ref = torch.stack((x, y), 0)
-        self.assertEqual(output, output_ref)
+            self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::stack'], [])
 
-        self.assertAutodiffNode(func2.graph_for(x, y), True, ['aten::stack'], [])
-
-        grads = torch.autograd.grad(output.sum(), (x, y))
-        grads_ref = torch.autograd.grad(output_ref.sum(), (x, y))
-        self.assertEqual(grads, grads_ref)
+            grads = torch.autograd.grad(output.sum(), (x, y))
+            grads_ref = torch.autograd.grad(output_ref.sum(), (x, y))
+            self.assertEqual(grads, grads_ref)
 
     def test_unbind(self):
         @torch.jit.script
         def func(x, y):
             # type: (Tensor, int) -> List[Tensor]
             return torch.unbind(x, y)
-        func.debug_disable_autodiff_subgraph_inlining()
+        with disable_autodiff_subgraph_inlining():
+            x = torch.rand([2, 2]).requires_grad_()
+            y = 0
+            outputs = func(x, y)
+            outputs_ref = torch.unbind(x, dim=y)
+            self.assertEqual(outputs, outputs_ref)
 
-        x = torch.rand([2, 2]).requires_grad_()
-        y = 0
-        outputs = func(x, y)
-        outputs_ref = torch.unbind(x, dim=y)
-        self.assertEqual(outputs, outputs_ref)
+            self.assertAutodiffNode(func.graph_for(x, y), True, ['aten::unbind'], [])
 
-        self.assertAutodiffNode(func.graph_for(x, y), True, ['aten::unbind'], [])
-
-        grad = torch.autograd.grad(_sum_of_list(outputs), x)
-        grad_ref = torch.autograd.grad(_sum_of_list(outputs_ref), x)
-        self.assertEqual(grad, grad_ref)
+            grad = torch.autograd.grad(_sum_of_list(outputs), x)
+            grad_ref = torch.autograd.grad(_sum_of_list(outputs_ref), x)
+            self.assertEqual(grad, grad_ref)
 
     def test_meshgrid(self):
         @torch.jit.script
         def func(a):
             # type: (List[Tensor]) -> List[Tensor]
             return torch.meshgrid(a)
-        func.debug_disable_autodiff_subgraph_inlining()
+        with disable_autodiff_subgraph_inlining():
+            a = torch.tensor([1.0, 2, 3]).requires_grad_()
+            b = torch.tensor([1.0, 2, 3, 4]).requires_grad_()
+            inputs = [a, b]
 
-        a = torch.tensor([1.0, 2, 3]).requires_grad_()
-        b = torch.tensor([1.0, 2, 3, 4]).requires_grad_()
-        inputs = [a, b]
+            outputs_ref = torch.meshgrid(inputs)
+            outputs = func(inputs)
+            self.assertEqual(outputs, outputs_ref)
 
-        outputs_ref = torch.meshgrid(inputs)
-        outputs = func(inputs)
-        self.assertEqual(outputs, outputs_ref)
+            self.assertAutodiffNode(func.graph_for(inputs), True, ['aten::meshgrid'], [])
 
-        self.assertAutodiffNode(func.graph_for(inputs), True, ['aten::meshgrid'], [])
-
-        grads = torch.autograd.grad(_sum_of_list(outputs), inputs)
-        grads_ref = torch.autograd.grad(_sum_of_list(outputs_ref), inputs)
-        self.assertEqual(grads, grads_ref)
+            grads = torch.autograd.grad(_sum_of_list(outputs), inputs)
+            grads_ref = torch.autograd.grad(_sum_of_list(outputs_ref), inputs)
+            self.assertEqual(grads, grads_ref)
 
     def test_list_literal(self):
         def reassign():
@@ -4477,7 +4474,7 @@ a")
                 torch.mul(x, y, out=z)
                 return z
 
-            graph = propagate_shapes(test.graph,
+            graph = _propagate_shapes(test.graph,
                                      (torch.zeros(2, 1), torch.zeros(1, 2), torch.zeros(1, 1, 1)), False)
             self.assertTrue(next(graph.outputs()).type() == TensorType.get())
         out_op_graph_input()
@@ -4497,7 +4494,7 @@ a")
                 return after_resize_alias
 
             self.run_pass('constant_propagation', test.graph)
-            g = propagate_shapes(test.graph, (torch.zeros(1, 1),), False)
+            g = _propagate_shapes(test.graph, (torch.zeros(1, 1),), False)
             resize_node = g.findNode("aten::resize_")
             # first input and output of b.resize_ is b
             self.assertTrue(next(resize_node.inputs()).type() == TensorType.get())
@@ -4521,7 +4518,7 @@ a")
 
             g = test.graph
             self.run_pass('constant_propagation', g)
-            g = propagate_shapes(test.graph, (torch.zeros(1, 1),), False)
+            g = _propagate_shapes(test.graph, (torch.zeros(1, 1),), False)
 
             # x doesn't alias a resized op so it shouldn't be set to base Tensor type
             self.assertTrue(next(g.inputs()).type() != TensorType.get())
@@ -4576,7 +4573,7 @@ a")
 
         x = torch.randn(3, 1, 5, requires_grad=True)
         fn = torch.jit.script(fn)
-        graph = propagate_shapes(fn.graph, (x,), False)
+        graph = _propagate_shapes(fn.graph, (x,), False)
         a = next(graph.outputs()).type().kind()
         self.assertTrue(next(graph.outputs()).type().kind() != 'TensorType')
 
@@ -4586,7 +4583,7 @@ a")
             return x + y
 
         x, y = torch.rand(3, 4, dtype=torch.float), torch.rand(3, 4, dtype=torch.double)
-        graph = propagate_shapes(fn.graph, (x, y), False)
+        graph = _propagate_shapes(fn.graph, (x, y), False)
         FileCheck().check('Double(*, *) = aten::add').run(graph)
 
     def test_shape_prop_promote_scalar_arg(self):
@@ -4595,7 +4592,7 @@ a")
             return math.pi + x
 
         x = torch.zeros(3, 4, dtype=torch.long)
-        graph = propagate_shapes(fn.graph, (x,), False)
+        graph = _propagate_shapes(fn.graph, (x,), False)
         FileCheck().check('Long(*, *) = aten::add').run(graph)
 
     def test_integral_shape_inference(self):
@@ -7169,7 +7166,7 @@ a")
             return torch.cat(c)
 
         b = torch.zeros(2, 4)
-        propagate_shapes(test_list.graph, (b,), False)
+        _propagate_shapes(test_list.graph, (b,), False)
 
     def test_if_supertype(self):
         @torch.jit.script
@@ -7186,7 +7183,7 @@ a")
         b = torch.zeros(2, 4, dtype=torch.long)
         c = torch.zeros(2, 4, dtype=torch.float)
 
-        graph = propagate_shapes(tensor_unifying.graph, (a, b, c), False)
+        graph = _propagate_shapes(tensor_unifying.graph, (a, b, c), False)
         if_outputs = list(graph.findNode("prim::If").outputs())
         self.assertTrue(if_outputs[0].type().str() == "Float(*, *)")
         self.assertTrue(if_outputs[1].type().str() == "Tensor")
