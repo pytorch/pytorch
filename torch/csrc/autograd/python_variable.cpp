@@ -392,6 +392,14 @@ PyObject *THPVariable_is_sparse(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_is_quantized(THPVariable *self)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  return torch::autograd::utils::wrap(self_.is_quantized());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject *THPVariable_dtype(THPVariable *self)
 {
   HANDLE_TH_ERRORS
@@ -431,6 +439,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"shape", (getter)THPVariable_get_shape, nullptr, nullptr, nullptr},
   {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
+  {"is_quantized", (getter)THPVariable_is_quantized, nullptr, nullptr, nullptr},
   {"dtype", (getter)THPVariable_dtype, nullptr, nullptr, nullptr},
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
