@@ -21,6 +21,7 @@ struct TensorOptions;
 namespace at {
 struct Generator;
 struct Type;
+class DeprecatedTypeProperties;
 class Tensor;
 } // namespace at
 
@@ -199,7 +200,9 @@ class CAFFE2_API Tensor {
 
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        tensorTypeIdToBackend(type_id()), scalar_type());
+        tensorTypeIdToBackend(type_id()),
+        scalar_type(),
+        is_variable() && !at::NonVariableTypeMode::is_enabled());
   }
   Type & dispatch_type() const {
     return legacyTensorType(*impl_);
@@ -219,8 +222,8 @@ class CAFFE2_API Tensor {
   bool is_alias_of(const at::Tensor& other) const{
     return impl_->storage().is_alias_of(other.storage());
   }
-  Tensor toType(const Type & t, bool non_blocking=false) const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
+  Tensor toType(const DeprecatedTypeProperties & t, bool non_blocking=false) const;
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
 
