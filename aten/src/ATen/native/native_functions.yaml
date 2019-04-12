@@ -1006,6 +1006,10 @@
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
+  dispatch:
+    CPU: linear
+    CUDA: linear
+    MkldnnCPU: mkldnn_linear
 
 - func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 

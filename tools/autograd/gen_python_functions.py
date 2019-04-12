@@ -30,7 +30,7 @@ SKIP_PYTHON_BINDINGS = [
     '_cholesky.*', '_triangular_solve.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense',
-    'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to',
+    'max_pool1d', 'max_pool2d', 'max_pool3d', 'to',
     'copy_sparse_to_sparse_',
 ]
 
