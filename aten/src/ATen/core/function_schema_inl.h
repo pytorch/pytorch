@@ -1,8 +1,11 @@
-#include <ATen/core/function_schema.h>
+#pragma once
+
+// note: windows build doesn't find symbols in operator files unless
+// this is a header file
 
 namespace c10 {
 
-std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
+inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
   // eventually this should look almost identical to python arg parser, but
   // it is simpler for now to work directly on this schema
 
@@ -39,7 +42,7 @@ std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
   return out;
 }
 
-void FunctionSchema::checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const {
+inline void FunctionSchema::checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const {
   if (!isSubvalueOf(value, argument.type())) {
     std::string position = pos ? ::c10::str(" in position ", *pos) : "";
     AT_ERROR(
@@ -56,7 +59,7 @@ void FunctionSchema::checkArg(const IValue& value, const Argument& argument, opt
   }
 }
 
-void FunctionSchema::findErrorInKwargs(const std::vector<std::string>& kwargs) const {
+inline void FunctionSchema::findErrorInKwargs(const std::vector<std::string>& kwargs) const {
   // First check if any of the kwargs are unknown, i.e. don't match the name of
   // any argument in the schema.
   for (const auto& kwarg : kwargs) {
@@ -90,7 +93,7 @@ void FunctionSchema::findErrorInKwargs(const std::vector<std::string>& kwargs) c
   }
 }
 
-void FunctionSchema::checkAndNormalizeInputs(
+inline void FunctionSchema::checkAndNormalizeInputs(
     std::vector<IValue>& inputs,
     const std::unordered_map<std::string, IValue>& kwargs) const {
   // Do we have more inputs than the schema accepts?
