@@ -148,5 +148,18 @@ class TestMkldnn(TestCase):
                 avg_pool2d(x),
                 avg_pool2d(x.to_mkldnn()).to_dense())
 
+    def test_batch_norm2d(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 100, (1,)).item()
+        x = torch.randn(N, C, 35, 45, dtype=torch.float32) * 10
+
+        for train in [True, False]:
+            bn = torch.nn.BatchNorm2d(C).float().train(train)
+            mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
+            self.assertEqual(
+                bn(x),
+                mkldnn_bn(x.to_mkldnn()).to_dense())
+
+
 if __name__ == '__main__':
     run_tests()
