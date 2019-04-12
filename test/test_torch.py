@@ -1549,11 +1549,12 @@ class _TestTorchMixin(object):
                 self.assertTrue(y.le(0).any())
 
     def test_reciprocal(self):
-        a = torch.randn(100, 89)
-        res_div = 1 / a
-        res_reciprocal = a.clone()
-        res_reciprocal.reciprocal_()
-        self.assertEqual(res_reciprocal, res_div)
+        for dtype in [torch.float, torch.double]:
+            a = torch.randn(100, 89, dtype=dtype)
+            res_div = 1 / a
+            res_reciprocal = a.clone()
+            res_reciprocal.reciprocal_()
+            self.assertEqual(res_reciprocal, res_div)
 
     def test_mul(self):
         m1 = torch.randn(10, 10)
@@ -3012,6 +3013,27 @@ class _TestTorchMixin(object):
         self.assertIs(torch.float64, x.dtype)
         self.assertTrue(x.is_cuda)
         torch.set_default_tensor_type(saved_type)
+
+    def test_bool_tensor_comparison_ops(self):
+        a = torch.tensor([True, False, True, False, True, False], dtype=torch.bool)
+        b = torch.tensor([True, False, True, True, True, True], dtype=torch.bool)
+        for device in torch.testing.get_all_device_types():
+            self.assertEqual(a == b, torch.tensor([1, 1, 1, 0, 1, 0], dtype=torch.uint8))
+            self.assertEqual(a != b, torch.tensor([0, 0, 0, 1, 0, 1], dtype=torch.uint8))
+            self.assertEqual(a < b, torch.tensor([0, 0, 0, 1, 0, 1], dtype=torch.uint8))
+            self.assertEqual(a > b, torch.tensor([0, 0, 0, 0, 0, 0], dtype=torch.uint8))
+            self.assertEqual(a >= b, torch.tensor([1, 1, 1, 0, 1, 0], dtype=torch.uint8))
+            self.assertEqual(a <= b, torch.tensor([1, 1, 1, 1, 1, 1], dtype=torch.uint8))
+            self.assertEqual(a > False, torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.uint8))
+            self.assertEqual(a == torch.tensor(True, dtype=torch.bool), torch.tensor([1, 0, 1, 0, 1, 0], dtype=torch.uint8))
+            self.assertEqual(a == torch.tensor(0, dtype=torch.bool), torch.tensor([0, 1, 0, 1, 0, 1], dtype=torch.uint8))
+
+    def test_bool_tensor_value_change(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.tensor([True, False], dtype=torch.bool)
+            x[0] = False
+            x[1] = True
+            self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool))
 
     def test_unfold_all_devices_and_dtypes(self):
         for device in torch.testing.get_all_device_types():
@@ -10610,6 +10632,28 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(torch.tensor([3, 0, 0, 0, 1, 2], dtype=torch.long, device=device), byte_inverse)
             self.assertEqual(torch.tensor([3, 1, 1, 1], dtype=torch.long, device=device), byte_counts)
 
+            # test consecutive version
+            z = torch.tensor([1, 2, 2, 2, 5, 5, 2, 2, 3], device=device)
+            expected_z_unique = torch.tensor([1, 2, 5, 2, 3], device=device)
+            expected_z_inverse = torch.tensor([0, 1, 1, 1, 2, 2, 3, 3, 4], device=device)
+            expected_z_counts = torch.tensor([1, 3, 2, 2, 1], device=device)
+
+            z_unique = torch.unique_consecutive(z)
+            self.assertEqual(z_unique, expected_z_unique)
+
+            z_unique, z_inverse = torch.unique_consecutive(z, return_inverse=True)
+            self.assertEqual(z_unique, expected_z_unique)
+            self.assertEqual(z_inverse, expected_z_inverse)
+
+            z_unique, z_counts = torch.unique_consecutive(z, return_counts=True)
+            self.assertEqual(z_unique, expected_z_unique)
+            self.assertEqual(z_counts, expected_z_counts)
+
+            z_unique, z_inverse, z_counts = torch.unique_consecutive(z, return_inverse=True, return_counts=True)
+            self.assertEqual(z_unique, expected_z_unique)
+            self.assertEqual(z_inverse, expected_z_inverse)
+            self.assertEqual(z_counts, expected_z_counts)
+
         run_test(torch.device('cpu'))
         if torch.cuda.is_available():
             run_test(torch.device('cuda'))
@@ -10740,6 +10784,37 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim2, x_unique)
             self.assertEqual(expected_inverse_dim2, x_inverse)
             self.assertEqual(expected_counts_dim2, x_counts)
+
+            # test consecutive version
+            y = torch.tensor(
+                [[0, 1],
+                 [0, 1],
+                 [0, 1],
+                 [1, 2],
+                 [1, 2],
+                 [3, 4],
+                 [0, 1],
+                 [0, 1],
+                 [3, 4],
+                 [1, 2]],
+                dtype=dtype,
+                device=device
+            )
+            expected_y_unique = torch.tensor(
+                [[0, 1],
+                 [1, 2],
+                 [3, 4],
+                 [0, 1],
+                 [3, 4],
+                 [1, 2]],
+                dtype=dtype,
+                device=device
+            )
+            expected_y_inverse = torch.tensor([0, 0, 0, 1, 1, 2, 3, 3, 4, 5], dtype=dtype, device=device)
+            expected_y_counts = torch.tensor([3, 2, 1, 2, 1, 1], dtype=dtype, device=device)
+            y_unique, y_inverse, y_counts = torch.unique_consecutive(y, return_inverse=True, return_counts=True, dim=0)
+            self.assertEqual(expected_y_inverse, y_inverse)
+            self.assertEqual(expected_y_counts, y_counts)
 
         run_test(torch.float)
         run_test(torch.double)

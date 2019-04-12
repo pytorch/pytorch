@@ -6,25 +6,29 @@
 #include <ATen/core/SparseTensorRef.h>
 #include <ATen/core/Type.h>
 #include <c10/core/TensorOptions.h>
+#include <ATen/core/DeprecatedTypeProperties.h>
 
 namespace at {
 
-inline Tensor Tensor::toType(const Type & t, bool non_blocking) const {
-  if(dispatch_type() == t)
+inline Tensor Tensor::toType(const DeprecatedTypeProperties & t, bool non_blocking) const {
+  if(type() == t)
     return *this;
-  return t.copy(*this, non_blocking);
+  return to(
+      at::device(t.device_type()).layout(t.layout()).dtype(t.scalarType()),
+      non_blocking,
+      /*copy*/ true);
 }
 
 inline Tensor Tensor::cpu() const {
-  return toType(dispatch_type().cpu());
+  return toType(type().cpu());
 }
 
 inline Tensor Tensor::cuda() const {
-  return toType(dispatch_type().cuda());
+  return toType(type().cuda());
 }
 
 inline Tensor Tensor::hip() const {
-  return toType(dispatch_type().hip());
+  return toType(type().hip());
 }
 
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
@@ -32,11 +36,11 @@ inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {
-  return toType(dispatch_type().toScalarType(t));
+  return toType(type().toScalarType(t));
 }
 
 inline Tensor Tensor::toBackend(Backend b) const {
-  return toType(dispatch_type().toBackend(b));
+  return toType(type().toBackend(b));
 }
 
 inline TensorOptions Tensor::options() const {
@@ -280,6 +284,12 @@ inline Tensor Tensor::floor() const {
 inline Tensor & Tensor::floor_() {
     return dispatch_type().floor_(*this);
 }
+inline Tensor Tensor::frac() const {
+    return dispatch_type().frac(*this);
+}
+inline Tensor & Tensor::frac_() {
+    return dispatch_type().frac_(*this);
+}
 inline Tensor Tensor::ger(const Tensor & vec2) const {
     return dispatch_type().ger(*this, vec2);
 }
@@ -450,6 +460,18 @@ inline Tensor Tensor::pin_memory() const {
 }
 inline Tensor Tensor::pinverse(double rcond) const {
     return dispatch_type().pinverse(*this, rcond);
+}
+inline Tensor Tensor::reciprocal() const {
+    return dispatch_type().reciprocal(*this);
+}
+inline Tensor & Tensor::reciprocal_() {
+    return dispatch_type().reciprocal_(*this);
+}
+inline Tensor Tensor::neg() const {
+    return dispatch_type().neg(*this);
+}
+inline Tensor & Tensor::neg_() {
+    return dispatch_type().neg_(*this);
 }
 inline Tensor Tensor::repeat(IntArrayRef repeats) const {
     return dispatch_type().repeat(*this, repeats);
@@ -1000,17 +1022,8 @@ inline Tensor & Tensor::polygamma_(int64_t n) {
 inline Tensor & Tensor::erfinv_() {
     return dispatch_type().erfinv_(*this);
 }
-inline Tensor & Tensor::frac_() {
-    return dispatch_type().frac_(*this);
-}
 inline Tensor & Tensor::renorm_(Scalar p, int64_t dim, Scalar maxnorm) {
     return dispatch_type().renorm_(*this, p, dim, maxnorm);
-}
-inline Tensor & Tensor::reciprocal_() {
-    return dispatch_type().reciprocal_(*this);
-}
-inline Tensor & Tensor::neg_() {
-    return dispatch_type().neg_(*this);
 }
 inline Tensor & Tensor::pow_(Scalar exponent) {
     return dispatch_type().pow_(*this, exponent);
@@ -1210,17 +1223,8 @@ inline Tensor Tensor::polygamma(int64_t n) const {
 inline Tensor Tensor::erfinv() const {
     return dispatch_type().erfinv(*this);
 }
-inline Tensor Tensor::frac() const {
-    return dispatch_type().frac(*this);
-}
 inline Tensor Tensor::dist(const Tensor & other, Scalar p) const {
     return dispatch_type().dist(*this, other, p);
-}
-inline Tensor Tensor::reciprocal() const {
-    return dispatch_type().reciprocal(*this);
-}
-inline Tensor Tensor::neg() const {
-    return dispatch_type().neg(*this);
 }
 inline Tensor Tensor::atan2(const Tensor & other) const {
     return dispatch_type().atan2(*this, other);

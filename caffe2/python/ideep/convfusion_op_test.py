@@ -503,7 +503,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
         workspace.FeedBlob('b0', b, dc[1])
         net = core.Net("net")
         net.Proto().CopyFrom(old_net)
-        optimizeForIDEEP(net)
+        optimizeForMKLDNN(net)
         workspace.RunNetOnce(net.Proto())
         S2 = workspace.FetchBlob('S0')
         if not np.allclose(S0, S2, atol=0.01, rtol=0.01):
