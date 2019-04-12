@@ -31,6 +31,12 @@ enum class DeviceType : int16_t {
   ONLY_FOR_TEST = 20901, // This device type is only for test.
 };
 
+constexpr DeviceType kCPU = DeviceType::CPU;
+constexpr DeviceType kCUDA = DeviceType::CUDA;
+constexpr DeviceType kHIP = DeviceType::HIP;
+constexpr DeviceType kMSNPU = DeviceType::MSNPU;
+constexpr DeviceType kXLA = DeviceType::XLA;
+
 // define explicit int constant
 constexpr int COMPILE_TIME_MAX_DEVICE_TYPES =
     static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
@@ -53,7 +59,7 @@ C10_API bool isValidDeviceType(DeviceType d);
 
 C10_API std::ostream& operator<<(std::ostream& stream, DeviceType type);
 
-} // namespace at
+} // namespace c10
 
 namespace std {
 template <> struct hash<c10::DeviceType> {
