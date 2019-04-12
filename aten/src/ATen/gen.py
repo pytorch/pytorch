@@ -187,7 +187,7 @@ extension_backends = ['MSNPU', 'XLA']
 
 # scalar_name, c_type, accreal, is_floating_type
 quantized_scalar_types = [
-    ('QInt8', 'qint8', 'QInt8AccrealNotDefined', False),
+    ('QInt8', 'qint8', 'QInt8AccrealNotDefined', 'Qint8IsFloatingTypeNotDefined'),
 ]
 
 scalar_types = [
