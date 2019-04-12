@@ -190,6 +190,7 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict) {
     node->outputs().at(0)->replaceAllUsesWith(newSourceNodeOutput);
 
     node->removeAllInputs();
+    it.destroyCurrent();
   }
   eraseUnusedValuesFromMap(valsToParamsMap);
   eraseUnusedBlockInputs(b);
