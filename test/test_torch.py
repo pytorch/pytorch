@@ -10655,7 +10655,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(z_inverse, expected_z_inverse)
             self.assertEqual(z_counts, expected_z_counts)
 
-            z_unique, z_unique_indices, z_inverse, z_counts = torch.unique_consecutive(z, return_index=True, return_inverse=True, return_counts=True)
+            z_unique, z_unique_indices, z_inverse, z_counts = torch.unique_consecutive(
+                z, return_index=True, return_inverse=True, return_counts=True)
             self.assertEqual(z_unique, expected_z_unique)
             self.assertEqual(z_unique_indices, expected_z_unique_indices)
             self.assertEqual(z_inverse, expected_z_inverse)
