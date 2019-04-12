@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 namespace at { namespace native {
 
@@ -33,6 +34,35 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
   return mkldnn_tensor;
 }
 
+Tensor mkldnn_reorder_conv2d_weight(
+    const Tensor& self,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
+
+  auto stride_vec = expand_param_if_needed(stride, 2);
+  auto padding_vec = expand_param_if_needed(padding, 2);
+  auto dilation_vec = expand_param_if_needed(dilation, 2);
+
+  ideep::tensor w = itensor_from_mkldnn(self).as_weights();
+  w.make_group(groups);
+  ideep::tensor::descriptor desc =
+      ideep::convolution_forward::expected_weights_descriptor(
+          w.get_dims(),
+          w.get_data_type(),
+          {stride_vec.cbegin(), stride_vec.cend()},
+          {padding_vec.cbegin(), padding_vec.cend()},
+          {padding_vec.cbegin(), padding_vec.cend()},
+          {dilation_vec.cbegin(), dilation_vec.cend()},
+          groups,
+          ideep::algorithm::convolution_direct);
+  ideep::tensor&& result(desc);
+  ideep::reorder::compute(w, result);
+
+  return new_with_itensor_mkldnn(std::move(result), self.options());
+}
+
 #else
 
 Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
@@ -41,6 +71,15 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
 
 Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
   AT_ERROR("MKL-DNN build is disabled");
+}
+
+Tensor mkldnn_reorder_conv2d_weight(
+    const Tensor& self,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
+  AT_ERROR("mkldnn_reorder_conv2d_weight: MKL-DNN build is disabled");
 }
 
 #endif // AT_MKLDNN_ENABLED()

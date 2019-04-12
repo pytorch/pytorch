@@ -1,7 +1,9 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+import copy
 import unittest
 
 import torch
+from torch.utils import mkldnn as mkldnn_utils
 from common_utils import TestCase, run_tests
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 
@@ -75,18 +77,38 @@ class TestMkldnn(TestCase):
         root = torch.randn(4, 5, dtype=torch.float32).to_mkldnn().requires_grad_()
 
         detach = root.detach()
-        self.assertEquals((4, 5), detach.size())
+        self.assertEqual((4, 5), detach.size())
         self.assertFalse(detach.requires_grad)
         self.assertTrue(root.requires_grad)
 
         detach_ = root.detach_()
-        self.assertEquals((4, 5), detach_.size())
+        self.assertEqual((4, 5), detach_.size())
         self.assertFalse(detach_.requires_grad)
         self.assertFalse(root.requires_grad)
 
     def test_repr(self):
         self.assertTrue("layout=torch._mkldnn" in str(torch.randn((1, 2, 3, 4),
                         dtype=torch.float, device=torch.device('cpu')).to_mkldnn()))
+
+    def test_conv2d(self):
+        for groups in [1, 4]:
+            N = torch.randint(3, 10, (1,)).item()
+            C = torch.randint(1, 3, (1,)).item() * groups
+            M = torch.randint(1, 3, (1,)).item() * groups
+            x = torch.randn(N, C, 224, 224, dtype=torch.float32) * 100
+            for bias in [True, False]:
+                conv2d = torch.nn.Conv2d(in_channels=C,
+                                         out_channels=M,
+                                         kernel_size=3,
+                                         stride=2,
+                                         padding=1,
+                                         bias=bias,
+                                         groups=groups).float()
+                mkldnn_conv2d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d))
+                self.assertEqual(
+                    conv2d(x),
+                    mkldnn_conv2d(x.to_mkldnn()).to_dense())
+
 
 if __name__ == '__main__':
     run_tests()
