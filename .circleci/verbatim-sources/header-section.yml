@@ -223,6 +223,7 @@ setup_ci_environment: &setup_ci_environment
       linux-image-generic \
       moreutils \
       docker-ce=5:18.09.4~3-0~ubuntu-xenial \
+      nvidia-container-runtime=2.0.0+docker18.09.4-1 \
       nvidia-docker2=2.0.3+docker18.09.4-1 \
       expect-dev
 
