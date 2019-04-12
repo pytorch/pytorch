@@ -10,17 +10,23 @@
 namespace c10 {
 
 /**
- * This legacy enum class defines the set of backends supported by
- * old school, code generated Type-based ATen.  The reason we are
- * sunsetting this enum class is because it doesn't allow for
- * open registration of backends.  TensorTypeId is the replacement
- * for Backend which supports open registration.
+ * This legacy enum class defines the set of backends supported by old school,
+ * code generated Type-based ATen.  A "backend" in this sense roughly
+ * corresponds to the cartesian product of (device type, layout), but restricted
+ * only to combinations which we actually have kernels for.  Backend does NOT
+ * include dtype.
  *
- * ARE YOU SURE YOU WANT TO USE THIS TYPE?  Think about if SparseCPU/SparseCUDA
- * would make sense in your use case.  If it doesn't make sense, maybe
- * you want DeviceType.
+ * The reason we are sunsetting this enum class is because it doesn't allow for
+ * open registration; e.g., if you want to add SparseXLA, you'd have to
+ * edit this enum; you wouldn't be able to do it out of tree.  TensorTypeId is
+ * the replacement for Backend which supports open registration.
+ *
+ * NB: The concept of 'Backend' here disagrees with the notion of backend
+ * exposed to users in torch.backends.  Backend here is something like "CPU"
+ * or "SparseCUDA"; backend in torch.backends is something like "MKL" or
+ * "CUDNN".
  */
-enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, Undefined, NumOptions };
+enum class Backend { CPU, CUDA, HIP, SparseCPU, SparseCUDA, SparseHIP, MSNPU, XLA, QuantizedCPU, Undefined, MkldnnCPU, NumOptions };
 
 static inline Backend toSparse(Backend b) {
   switch (b) {
@@ -59,6 +65,8 @@ static inline Backend toDense(Backend b) {
       return Backend::CUDA;
     case Backend::SparseHIP:
       return Backend::HIP;
+    case Backend::QuantizedCPU:
+      return Backend::QuantizedCPU;
     default:
       throw std::runtime_error("Unknown backend");
   }
@@ -81,6 +89,10 @@ static inline Backend tensorTypeIdToBackend(TensorTypeId t) {
     return Backend::SparseCUDA;
   } else if (t == SparseHIPTensorId()) {
     return Backend::SparseHIP;
+  } else if (t == MkldnnCPUTensorId()) {
+    return Backend::MkldnnCPU;
+  } else if (t == QuantizedCPUTensorId()) {
+    return Backend::QuantizedCPU;
   } else if (t == UndefinedTensorId()) {
     return Backend::Undefined;
   } else {
@@ -106,6 +118,10 @@ static inline TensorTypeId backendToTensorTypeId(Backend b) {
       return SparseCUDATensorId();
     case Backend::SparseHIP:
       return SparseHIPTensorId();
+    case Backend::MkldnnCPU:
+      return MkldnnCPUTensorId();
+    case Backend::QuantizedCPU:
+      return QuantizedCPUTensorId();
     case Backend::Undefined:
       return UndefinedTensorId();
     default:
@@ -131,27 +147,13 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::CUDA;
     case Backend::SparseHIP:
       return DeviceType::HIP;
+    case Backend::MkldnnCPU:
+    case Backend::QuantizedCPU:
+      return DeviceType::CPU;
     case Backend::Undefined:
       AT_ERROR("Undefined backend is not a valid device type");
     default:
       AT_ERROR("Unknown backend");
-  }
-}
-
-static inline Backend deviceTypeToBackend(DeviceType d) {
-  switch (d) {
-    case DeviceType::CPU:
-      return Backend::CPU;
-    case DeviceType::CUDA:
-      return Backend::CUDA;
-    case DeviceType::HIP:
-      return Backend::HIP;
-    case DeviceType::MSNPU:
-      return Backend::MSNPU;
-    case DeviceType::XLA:
-      return Backend::XLA;
-    default:
-      AT_ERROR("Unknown device type ", d);
   }
 }
 
@@ -172,6 +174,10 @@ static inline Backend backendToCPU(Backend b) {
     case Backend::MSNPU:
     case Backend::XLA:
       return Backend::CPU;
+    case Backend::MkldnnCPU:
+      return Backend::MkldnnCPU;
+    case Backend::QuantizedCPU:
+      return Backend::QuantizedCPU;
     case Backend::Undefined:
       return Backend::Undefined;
     default:
@@ -241,6 +247,10 @@ static inline const char* toString(Backend b) {
       return "SparseCUDA";
     case Backend::SparseHIP:
       return "SparseHIP";
+    case Backend::MkldnnCPU:
+      return "MkldnnCPU";
+    case Backend::QuantizedCPU:
+      return "QuantizedCPU";
     default:
       return "UNKNOWN_BACKEND";
   }

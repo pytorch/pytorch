@@ -46,8 +46,9 @@ template <class Context>
 class CollectAndDistributeFpnRpnProposalsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  CollectAndDistributeFpnRpnProposalsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit CollectAndDistributeFpnRpnProposalsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         roi_canonical_scale_(
             this->template GetSingleArgument<int>("roi_canonical_scale", 224)),
         roi_canonical_level_(

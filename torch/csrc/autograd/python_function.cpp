@@ -44,7 +44,7 @@ PyObject *THPFunctionClass = nullptr;
 namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
-  : type(&var.type())
+  : type(&var.dispatch_type())
   , device(var.device())
   , size(var.sizes().vec())
   , requires_grad(var.requires_grad()) {

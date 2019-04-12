@@ -47,7 +47,7 @@ static int64_t count_specified_dimensions(PyObject* index) {
     PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     if (THPVariable_Check(obj)) {
       auto& var = reinterpret_cast<THPVariable*>(obj)->cdata;
-      if (var.type().scalarType() == kByte) {
+      if (var.scalar_type() == kByte) {
         count += var.dim();
       } else {
         count++;
@@ -107,14 +107,14 @@ static Variable applySelect(const Variable& self, int64_t dim, int64_t index, in
 
 static Variable sequenceToVariable(const at::Type& type, PyObject* seq) {
   auto& idx_type = type.toScalarType(kLong);
-  return torch::utils::indexing_tensor_from_data(idx_type, c10::nullopt, seq);
+  return torch::utils::indexing_tensor_from_data(idx_type, kLong, c10::nullopt, seq);
 }
 
 static Variable valueToTensor(const at::Type & type, PyObject* value) {
   if (THPVariable_Check(value)) {
     return reinterpret_cast<THPVariable*>(value)->cdata;
   }
-  if (THPUtils_checkLong(value)) {
+  if (THPUtils_checkLong(value) || PyBool_Check(value)) {
     return at::scalar_tensor(Scalar(THPUtils_unpackLong(value)), type.options());
   }
   if (PyFloat_Check(value)) {
@@ -166,7 +166,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
       handle_var(boolToIndexingTensor(result, obj == Py_True)); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     } else if (THPVariable_Check(obj)) {
       auto& var = THPVariable_Unpack(obj);
-      auto scalar_type = var.type().scalarType();
+      auto scalar_type = var.scalar_type();
       if (var.dim() == 0 && at::isIntegralType(scalar_type)) {
         if (scalar_type != at::kByte) {
           result = applySelect(result, dim, THPUtils_unpackLong(obj), i);
@@ -178,7 +178,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
         handle_var(var);
       }
     } else if (PySequence_Check(obj)) {
-      handle_var(sequenceToVariable(self.type(), obj));
+      handle_var(sequenceToVariable(self.dispatch_type(), obj));
     } else {
       auto index = THPObjectPtr(PyNumber_Index(obj));
       if (!index) {
@@ -334,7 +334,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
 
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  auto value = valueToTensor(self_.type(), py_value);
+  auto value = valueToTensor(self_.dispatch_type(), py_value);
 
   // handle simple types: integers, slices, ellipsis, bool
   if (index == Py_False) { // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)

@@ -1,5 +1,4 @@
 import math
-import random
 import warnings
 
 import torch
@@ -197,8 +196,8 @@ def _calculate_fan_in_and_fan_out(tensor):
 
 def xavier_uniform_(tensor, gain=1):
     r"""Fills the input `Tensor` with values according to the method
-    described in "Understanding the difficulty of training deep feedforward
-    neural networks" - Glorot, X. & Bengio, Y. (2010), using a uniform
+    described in `Understanding the difficulty of training deep feedforward
+    neural networks` - Glorot, X. & Bengio, Y. (2010), using a uniform
     distribution. The resulting tensor will have values sampled from
     :math:`\mathcal{U}(-a, a)` where
 
@@ -224,8 +223,8 @@ def xavier_uniform_(tensor, gain=1):
 
 def xavier_normal_(tensor, gain=1):
     r"""Fills the input `Tensor` with values according to the method
-    described in "Understanding the difficulty of training deep feedforward
-    neural networks" - Glorot, X. & Bengio, Y. (2010), using a normal
+    described in `Understanding the difficulty of training deep feedforward
+    neural networks` - Glorot, X. & Bengio, Y. (2010), using a normal
     distribution. The resulting tensor will have values sampled from
     :math:`\mathcal{N}(0, \text{std})` where
 
@@ -260,8 +259,8 @@ def _calculate_correct_fan(tensor, mode):
 
 def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
     r"""Fills the input `Tensor` with values according to the method
-    described in "Delving deep into rectifiers: Surpassing human-level
-    performance on ImageNet classification" - He, K. et al. (2015), using a
+    described in `Delving deep into rectifiers: Surpassing human-level
+    performance on ImageNet classification` - He, K. et al. (2015), using a
     uniform distribution. The resulting tensor will have values sampled from
     :math:`\mathcal{U}(-\text{bound}, \text{bound})` where
 
@@ -274,12 +273,12 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
         tensor: an n-dimensional `torch.Tensor`
         a: the negative slope of the rectifier used after this layer (0 for ReLU
             by default)
-        mode: either 'fan_in' (default) or 'fan_out'. Choosing `fan_in`
+        mode: either ``'fan_in'`` (default) or ``'fan_out'``. Choosing ``'fan_in'``
             preserves the magnitude of the variance of the weights in the
-            forward pass. Choosing `fan_out` preserves the magnitudes in the
+            forward pass. Choosing ``'fan_out'`` preserves the magnitudes in the
             backwards pass.
         nonlinearity: the non-linear function (`nn.functional` name),
-            recommended to use only with 'relu' or 'leaky_relu' (default).
+            recommended to use only with ``'relu'`` or ``'leaky_relu'`` (default).
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -295,8 +294,8 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
 
 def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
     r"""Fills the input `Tensor` with values according to the method
-    described in "Delving deep into rectifiers: Surpassing human-level
-    performance on ImageNet classification" - He, K. et al. (2015), using a
+    described in `Delving deep into rectifiers: Surpassing human-level
+    performance on ImageNet classification` - He, K. et al. (2015), using a
     normal distribution. The resulting tensor will have values sampled from
     :math:`\mathcal{N}(0, \text{std})` where
 
@@ -309,12 +308,12 @@ def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
         tensor: an n-dimensional `torch.Tensor`
         a: the negative slope of the rectifier used after this layer (0 for ReLU
             by default)
-        mode: either 'fan_in' (default) or 'fan_out'. Choosing `fan_in`
+        mode: either ``'fan_in'`` (default) or ``'fan_out'``. Choosing ``'fan_in'``
             preserves the magnitude of the variance of the weights in the
-            forward pass. Choosing `fan_out` preserves the magnitudes in the
+            forward pass. Choosing ``'fan_out'`` preserves the magnitudes in the
             backwards pass.
         nonlinearity: the non-linear function (`nn.functional` name),
-            recommended to use only with 'relu' or 'leaky_relu' (default).
+            recommended to use only with ``'relu'`` or ``'leaky_relu'`` (default).
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -329,8 +328,8 @@ def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
 
 def orthogonal_(tensor, gain=1):
     r"""Fills the input `Tensor` with a (semi) orthogonal matrix, as
-    described in "Exact solutions to the nonlinear dynamics of learning in deep
-    linear neural networks" - Saxe, A. et al. (2013). The input tensor must have
+    described in `Exact solutions to the nonlinear dynamics of learning in deep
+    linear neural networks` - Saxe, A. et al. (2013). The input tensor must have
     at least 2 dimensions, and for tensors with more than 2 dimensions the
     trailing dimensions are flattened.
 
@@ -346,7 +345,7 @@ def orthogonal_(tensor, gain=1):
         raise ValueError("Only tensors with 2 or more dimensions are supported")
 
     rows = tensor.size(0)
-    cols = tensor[0].numel()
+    cols = tensor.numel() // rows
     flattened = tensor.new(rows, cols).normal_(0, 1)
 
     if rows < cols:
@@ -371,8 +370,8 @@ def orthogonal_(tensor, gain=1):
 def sparse_(tensor, sparsity, std=0.01):
     r"""Fills the 2D input `Tensor` as a sparse matrix, where the
     non-zero elements will be drawn from the normal distribution
-    :math:`\mathcal{N}(0, 0.01)`, as described in "Deep learning via
-    Hessian-free optimization" - Martens, J. (2010).
+    :math:`\mathcal{N}(0, 0.01)`, as described in `Deep learning via
+    Hessian-free optimization` - Martens, J. (2010).
 
     Args:
         tensor: an n-dimensional `torch.Tensor`

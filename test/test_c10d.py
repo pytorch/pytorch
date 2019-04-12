@@ -2,12 +2,15 @@ import copy
 import math
 import multiprocessing
 import os
+import random
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from datetime import timedelta
 
+from itertools import groupby
 from functools import wraps
 from collections import namedtuple
 
@@ -16,6 +19,7 @@ import common_utils as common
 from torch import nn
 import torch.nn.functional as F
 import torch.distributed as c10d
+import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 
 from common_utils import TestCase, load_tests, run_tests
@@ -170,10 +174,8 @@ class StoreTestBase(object):
 
 class FileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
+        super(FileStoreTest, self).setUp()
         self.file = tempfile.NamedTemporaryFile(delete=False)
-
-    def tearDown(self):
-        pass
 
     def _create_store(self):
         store = c10d.FileStore(self.file.name, 1)
@@ -183,13 +185,11 @@ class FileStoreTest(TestCase, StoreTestBase):
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
+        super(PrefixFileStoreTest, self).setUp()
         self.file = tempfile.NamedTemporaryFile(delete=False)
         self.filestore = c10d.FileStore(self.file.name, 1)
         self.prefix = "test_prefix"
         self.filestore.set_timeout(timedelta(seconds=300))
-
-    def tearDown(self):
-        pass
 
     def _create_store(self):
         return c10d.PrefixStore(self.prefix, self.filestore)
@@ -232,6 +232,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
+        super(PrefixTCPStoreTest, self).setUp()
         self.tcpstore = create_tcp_store('localhost')
         self.prefix = "test_prefix"
         self.tcpstore.set_timeout(timedelta(seconds=300))
@@ -449,11 +450,13 @@ class MultiProcessTestCase(TestCase):
                 setattr(cls, attr, cls.join_or_run(fn))
 
     def setUp(self):
+        super(MultiProcessTestCase, self).setUp()
         self.rank = self.MAIN_PROCESS_RANK
         self.file = tempfile.NamedTemporaryFile(delete=False)
         self.processes = [self._spawn_process(rank) for rank in range(int(self.world_size))]
 
     def tearDown(self):
+        super(MultiProcessTestCase, self).tearDown()
         for p in self.processes:
             p.terminate()
 
@@ -499,11 +502,68 @@ class MultiProcessTestCase(TestCase):
         return self.rank == 0
 
 
+class TimeoutTest(TestCase):
+    def _test_store_timeout(self, backend, init_method, c2p):
+        try:
+            c10d.distributed_c10d.init_process_group(
+                backend=backend, init_method=init_method, world_size=1, rank=0,
+                timeout=timedelta(seconds=1))
+            default_store = c10d.distributed_c10d._get_default_store()
+            tik = time.time()
+            with self.assertRaisesRegex(RuntimeError, "Timeout"):
+                default_store.get("nonexistent key")
+            tok = time.time()
+            c10d.destroy_process_group()
+            c2p.append(float(tok - tik))
+        except RuntimeError as e:
+            # catch "Address already in use" error and report it to the main
+            # thread
+            c2p.append(e)
+
+    def _init_methods(self):
+        f = tempfile.NamedTemporaryFile(delete=False)
+        yield "file://%s" % f.name
+        f.close()
+        yield "tcp://127.0.0.1:%d" % common.find_free_port()
+
+    def _test_default_store_timeout(self, backend):
+        for init_method in self._init_methods():
+            c2p = []
+            t = threading.Thread(
+                target=self._test_store_timeout,
+                args=(backend, init_method, c2p))
+            t.daemon = True
+            t.start()
+            t.join(5)
+
+            self.assertEqual(1, len(c2p))
+            if isinstance(c2p[0], float):
+                # waiting time should be 1s, use 3s to rule out false alarm
+                self.assertGreater(3, c2p[0])
+            elif isinstance(c2p[0], RuntimeError):
+                # let @retry_on_address_already_in_use_error handle the error
+                raise c2p[0]
+            else:
+                raise RuntimeError("Unexpected type {}".format(type(c2p[0])))
+
+    @retry_on_address_already_in_use_error
+    def test_default_store_timeout_nccl(self):
+        # TODO remove this hack
+        if not hasattr(c10d, "ProcessGroupNCCL"):
+            raise unittest.SkipTest("C10D is not built with NCCL process group,"
+                                    " skipping test")
+        self._test_default_store_timeout('nccl')
+
+    @retry_on_address_already_in_use_error
+    def test_default_store_timeout_gloo(self):
+        self._test_default_store_timeout('gloo')
+
+
 class ProcessGroupGlooTest(MultiProcessTestCase):
     def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
         opts.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
-        opts.timeout = 1.0
+        opts.timeout = 5.0
         opts.threads = threads
         return opts
 
@@ -1739,6 +1799,139 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         c10d._sync_reduction(work, grads_batch[0], local_grad_sum)
         # The expected result of the allreduce should be the average
         self.assertEqual(grads_batch[0], (torch.ones(10) * (self.world_size + 1) * len(devices) / 2.0).chunk(5))
+
+
+class ReducerModule(nn.Module):
+    def __init__(self):
+        super(ReducerModule, self).__init__()
+        self.fc1 = nn.Linear(2, 10, bias=False)
+        self.fc2 = nn.Linear(10, 4, bias=False)
+        self.fc3 = nn.Linear(4, 4, bias=False)
+        self.relu = nn.ReLU()
+
+    def forward(self, x, use_fc3=True):
+        x = self.relu(self.fc1(x)).float()
+        x = self.relu(self.fc2(x)).float()
+        if use_fc3:
+            x = self.fc3(x).float()
+        return F.softmax(x, dim=1)
+
+
+class ReducerTest(TestCase):
+    def setUp(self):
+        self.store = c10d.FileStore("/dev/null", 1)
+        self.process_group = c10d.ProcessGroupGloo(self.store, 0, 1)
+
+    def test_single_dtype_single_bucket(self):
+        model = ReducerModule()
+        parameters = list(model.parameters())
+        buckets = [list(range(len(parameters)))]
+        dist.Reducer([parameters], buckets, self.process_group)
+
+    def _create_mixed_precision_model(self):
+        model = ReducerModule()
+        model.float()
+        model.fc1.double()
+        return model
+
+    def test_multi_dtype_single_bucket(self):
+        model = self._create_mixed_precision_model()
+
+        # Raise if there are multiple types per bucket.
+        # In this case we create one bucket for all parameters.
+        with self.assertRaises(RuntimeError):
+            parameters = [list(model.parameters())]
+            buckets = [list(range(len(parameters[0])))]
+            dist.Reducer(parameters, buckets, self.process_group)
+
+    def test_multi_dtype_multi_bucket(self):
+        model = self._create_mixed_precision_model()
+        parameters = [list(model.parameters())]
+        group_by_type = groupby(
+            range(len(parameters[0])),
+            key=lambda i: parameters[0][i].type())
+        buckets = [list(indices) for _, indices in group_by_type]
+        dist.Reducer(parameters, buckets, self.process_group)
+
+    def _create_reducer_for_models(self, models):
+        parameters = [list(model.parameters()) for model in models]
+        group_by_type = groupby(
+            range(len(parameters[0])),
+            key=lambda i: parameters[0][i].type())
+        buckets = [list(indices) for _, indices in group_by_type]
+        return dist.Reducer(parameters, buckets, self.process_group)
+
+    def test_forward_backward_single_replica(self):
+        batch_size = 10
+        model = self._create_mixed_precision_model()
+        reducer = self._create_reducer_for_models([model])
+        loss = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.double)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
+        output = loss(model(input), target)
+        reducer.prepare_for_backward(output)
+        output.backward()
+
+    def test_forward_backward_multi_replica(self):
+        batch_size = 10
+        num_replicas = 2
+        models = [self._create_mixed_precision_model() for _ in range(num_replicas)]
+        reducer = self._create_reducer_for_models(models)
+        loss = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.double).chunk(num_replicas)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
+        outputs = [models[i](input[i]) for i in range(num_replicas)]
+        output = loss(torch.cat(outputs), target)
+        reducer.prepare_for_backward(output)
+        output.backward()
+
+        # The reducer will have reduced the gradients for all model replicas.
+        # Verify that they are equal across model replicas.
+        for parameters in zip(*[model.parameters() for model in models]):
+            for parameter in parameters:
+                self.assertEqual(parameters[0].grad, parameter.grad)
+
+    def test_forward_backward_unused_parameters(self):
+        batch_size = 10
+        model = self._create_mixed_precision_model()
+        reducer = self._create_reducer_for_models([model])
+        loss = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.double)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
+        output = loss(model(input, use_fc3=False), target)
+
+        # Check that the grad of fc3 is not set.
+        self.assertEqual(None, model.fc3.weight.grad)
+
+        # Compute and accumulate gradients.
+        reducer.prepare_for_backward(output)
+        output.backward()
+
+        # The reducer will have marked the grad of fc3 as ready, because
+        # it doesn't show up in the autograd graph of `output`.
+        # This should result in its contents being equal to zero.
+        self.assertEqual(torch.zeros(model.fc3.weight.size()), model.fc3.weight.grad)
+
+    def test_forward_backward_optimizer(self):
+        batch_size = 10
+        model = self._create_mixed_precision_model()
+        reducer = self._create_reducer_for_models([model])
+        loss = nn.CrossEntropyLoss()
+        optimizer = torch.optim.Adam(model.parameters())
+        for i in range(3):
+            input = torch.rand([batch_size, 2], dtype=torch.double)
+            target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
+
+            # The `zero_grad` function calls `detach_` and `zero_` on the grad
+            # tensors of model parameters. If we tried to set the grad tensors
+            # to a view of the reducer's bucket tensors, this would blow up.
+            optimizer.zero_grad()
+
+            # Unused parameter only in the first iteration.
+            output = loss(model(input, use_fc3=(i > 0)), target)
+            reducer.prepare_for_backward(output)
+            output.backward()
+            optimizer.step()
 
 
 if __name__ == '__main__':

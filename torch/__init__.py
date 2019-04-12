@@ -13,7 +13,7 @@ import sys
 import platform
 from ._utils import _import_dotted_name
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment
-from .version import __version__
+from .version import __version__  # noqa: F401
 from ._six import string_classes as _string_classes
 
 __all__ = [
@@ -39,28 +39,11 @@ import os as _dl_flags
 # if we have numpy, it *must* be imported before the call to setdlopenflags()
 # or there is risk that later c modules will segfault when importing numpy
 try:
-    import numpy as _np
+    import numpy as _np  # noqa: F401
 except ImportError:
     pass
 
 if platform.system() == 'Windows':
-    IS_CONDA = 'conda' in sys.version or 'Continuum' in sys.version or any([x.startswith('CONDA') for x in os.environ])
-
-    if IS_CONDA:
-        from ctypes import windll, c_wchar_p
-        from ctypes.wintypes import DWORD, HMODULE
-
-        AddDllDirectory = windll.kernel32.AddDllDirectory
-        AddDllDirectory.restype = DWORD
-        AddDllDirectory.argtypes = [c_wchar_p]
-
-    def add_extra_dll_dir(extra_dll_dir):
-        if _dl_flags.path.isdir(extra_dll_dir):
-            _dl_flags.environ['PATH'] = extra_dll_dir + os.pathsep + _dl_flags.environ['PATH']
-
-            if IS_CONDA:
-                AddDllDirectory(extra_dll_dir)
-
     # first get nvToolsExt PATH
     def get_nvToolsExt_path():
         NVTOOLEXT_HOME = _dl_flags.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt')
@@ -73,11 +56,10 @@ if platform.system() == 'Windows':
     py_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(sys.executable), 'Library', 'bin')
     th_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(__file__), 'lib')
 
-    dll_paths = [th_dll_path, py_dll_path, get_nvToolsExt_path()]
+    dll_paths = [th_dll_path, py_dll_path, get_nvToolsExt_path(), _dl_flags.environ['PATH']]
 
     # then add the path to env
-    for p in dll_paths:
-        add_extra_dll_dir(p)
+    _dl_flags.environ['PATH'] = ';'.join(dll_paths)
 
 else:
     # first check if the os package has the required flags
@@ -299,7 +281,7 @@ del BoolStorageBase
 
 import torch.cuda
 import torch.autograd
-from torch.autograd import no_grad, enable_grad, set_grad_enabled
+from torch.autograd import no_grad, enable_grad, set_grad_enabled  # noqa: F401
 import torch.nn
 import torch.optim
 import torch.multiprocessing
@@ -307,12 +289,14 @@ import torch.sparse
 import torch.utils.backcompat
 import torch.onnx
 import torch.jit
+import torch.hub
 import torch.random
 import torch.distributions
 import torch.testing
 import torch.backends.cuda
 import torch.backends.mkl
 import torch.backends.openmp
+import torch.__config__
 
 _C._init_names(list(torch._storage_classes))
 
@@ -327,4 +311,7 @@ def compiled_with_cxx11_abi():
 
 
 # Import the ops "namespace"
-from torch._ops import ops
+from torch._ops import ops  # noqa: F401
+
+# Import the quasi random sampler
+import torch.quasirandom

@@ -102,6 +102,13 @@ Value* getValueTrace(const IValue& var) {
     }
 
     // Didn't find it. Bake in a constant
+    if (ten.is_variable() && ten.requires_grad()) {
+      std::ostringstream oss;
+      oss << "Cannot insert a Tensor that requires grad as a constant. "
+          << "Consider making it a parameter or input, or detaching the gradient\n";
+      throw std::runtime_error(oss.str());
+    }
+
     Value* constant = state->graph->insertConstant(ten);
     recordSourceLocation(constant->node());
     constant->inferTypeFrom(ten);
@@ -229,7 +236,8 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
       return Tuple::create(std::move(elems));
     } else {
       AT_ERROR(
-          "Only tensors or tuples of tensors can be inputs to traced functions");
+          "Only tensors or tuples of tensors can be inputs to traced functions. Got ",
+          type);
     }
   };
   for (IValue& input : inputs) {
@@ -430,6 +438,10 @@ void addInputs(Node* n, const char* name, const ArrayRef<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
 
+void addInputs(Node* n, const char* name, const std::vector<double>& value) {
+  AT_ERROR("Tracing float lists currently not supported!");
+}
+
 void addOutput(Node* node, const at::Tensor& output) {
   setOutput(node->addOutput(), output);
 }
@@ -499,7 +511,7 @@ void ensureUniqueIfOutOfPlaced(const char* name, const at::Tensor& tensor) {
        << " live references to the data region being modified when tracing in-place operator "
        << name
        << ". This might cause the trace to be incorrect, because all other views "
-       << "that also reference this data will not not reflect this change in the trace! "
+       << "that also reference this data will not reflect this change in the trace! "
        << "On the other hand, if all other views use the same memory chunk, but are disjoint (e.g. "
        << "are outputs of torch.split), this might still be safe.";
     warn(ss.str().c_str());

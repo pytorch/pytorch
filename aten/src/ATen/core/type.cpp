@@ -59,8 +59,8 @@ TensorTypePtr TensorType::get() {
   static auto value = TensorType::create();
   return value;
 }
-UndefinedTensorTypePtr UndefinedTensorType::get() {
-  static auto value = UndefinedTensorType::create();
+AutogradZeroTensorTypePtr AutogradZeroTensorType::get() {
+  static auto value = AutogradZeroTensorType::create();
   return value;
 }
 NumberTypePtr NumberType::get() {
@@ -176,6 +176,19 @@ TypePtr attemptToRecoverType(const IValue& ivalue) {
 
 // Checks if input_ivalue is a subvalue of type.
 bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
+  if (ivalue.isTuple()) {
+    const auto& ivalue_elem = ivalue.toTuple()->elements();
+    auto tuple_type = type->cast<TupleType>();
+    if (!tuple_type || tuple_type->elements().size() != ivalue_elem.size()) {
+      return false;
+    }
+    auto type_elem = tuple_type->elements();
+    bool is_subvalue = true;
+    for (size_t i = 0; i < type_elem.size() && is_subvalue; ++i) {
+      is_subvalue = isSubvalueOf(ivalue_elem[i], type_elem[i]);
+    }
+    return is_subvalue;
+  }
   if (ivalue.isGenericList()) {
     auto list_type = type->cast<ListType>();
     if (!list_type) {
@@ -425,15 +438,15 @@ bool Type::isSubtypeOf(const TypePtr rhs) const {
 }
 
 namespace {
-class UserTypeRegistry {
+class ClassTypeRegistry {
  public:
-  void registerType(std::string name, UserTypePtr type) {
+  void registerType(std::string name, ClassTypePtr type) {
     std::lock_guard<std::mutex> g(mutex_);
     // TODO: new type registrations will override the old ones. Is this safe?
     reg_[name] = type;
   }
 
-  UserTypePtr getType(const std::string& name) {
+  ClassTypePtr getType(const std::string& name) {
     std::lock_guard<std::mutex> g(mutex_);
     if (reg_.count(name)) {
       return reg_.at(name);
@@ -441,26 +454,51 @@ class UserTypeRegistry {
     return nullptr;
   }
 
+  void clear() {
+    std::lock_guard<std::mutex> g(mutex_);
+    reg_.clear();
+  }
+
  private:
   std::mutex mutex_;
-  std::unordered_map<std::string, UserTypePtr> reg_;
+  std::unordered_map<std::string, ClassTypePtr> reg_;
 };
 
-UserTypeRegistry& getRegistry() {
-  static UserTypeRegistry r;
+ClassTypeRegistry& getRegistry() {
+  static ClassTypeRegistry r;
   return r;
 }
 } // namespace
 
-UserTypePtr UserType::create(
+ClassTypePtr ClassType::create(
     const std::string& name,
-    std::shared_ptr<Module> module) {
-  auto ptr = UserTypePtr(new UserType(name, std::move(module)));
+    std::shared_ptr<CompilationUnit> cu) {
+  auto ptr = ClassTypePtr(new ClassType(name, std::move(cu)));
   getRegistry().registerType(name, ptr);
   return ptr;
 }
 
-UserTypePtr UserType::get(const std::string& name) {
+ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> cu) {
+  return ClassTypePtr(new ClassType("Module", std::move(cu)));
+}
+
+ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
+  auto ptr = ClassTypePtr(new ClassType(typename_, compilation_unit_));
+  AT_ASSERT(numAttributes() == refined_slots.size());
+  for(size_t i = 0; i < attributeNames_.size(); ++i) {
+    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
+    ptr->addAttribute(attributeNames_[i], refined_slots[i]);
+  }
+  return ptr;
+}
+
+ClassTypePtr ClassType::get(const std::string& name) {
   return getRegistry().getType(name);
 }
+
+
+void ClassType::clearRegistry() {
+  getRegistry().clear();
+}
+
 } // namespace c10

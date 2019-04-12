@@ -79,7 +79,7 @@ condDiv(T *q, int64_t *J, int64_t inputsize, T q_max) {
       q[idx] = one;
     } else {
       if (THCNumerics<T>::gt(q_max, one)) {
-	q[idx] = THCNumerics<T>::div(q[idx], q_max);
+        q[idx] = THCNumerics<T>::div(q[idx], q_max);
       }
     }
   }
@@ -91,6 +91,9 @@ condDiv(T *q, int64_t *J, int64_t inputsize, T q_max) {
 
 // Normalizes the L1 norm of every row to 1; used by multinomial
 template <typename T>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(1024)
+#endif
 __global__ void renormRowsL1(T* dist, long rows, long cols) {
   extern __shared__  unsigned char my_smem[];
   T *smem = reinterpret_cast<T *>(my_smem);
@@ -156,6 +159,9 @@ __device__ int binarySearchForMultinomial(T* cumdist,
 }
 
 template <typename T, typename AccT>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(1024)
+#endif
 __global__ void
 sampleMultinomialOnce(int64_t* dest,
                       int64_t distributions,
@@ -211,7 +217,7 @@ sampleMultinomialOnce(int64_t* dest,
     if (THCNumerics<AccT>::eq(sum,  accZero)) {
       // Choose the first element
       if (threadIdx.x == 0) {
-        dest[curDist] = TH_INDEX_BASE;
+        dest[curDist] = 0;
       }
 
       continue;
@@ -230,7 +236,7 @@ sampleMultinomialOnce(int64_t* dest,
           THCNumerics<AccT>::div(
               ScalarConvert<T, AccT>::to(dist[curDist * stride_dist + cat * stride_categories]),
               sum) :
-	  accZero);
+          accZero);
 
       smem[threadIdx.x] = dist_val;
       __syncthreads();
@@ -265,7 +271,7 @@ sampleMultinomialOnce(int64_t* dest,
       if (inBucket) {
         // We're done; we have the sample
         // Torch indices are 1-based
-        dest[curDist] = cat + TH_INDEX_BASE;
+        dest[curDist] = cat;
         found = true;
       }
 
@@ -284,7 +290,7 @@ sampleMultinomialOnce(int64_t* dest,
       // rarity in which this occurs, this should not be an issue.
       for (int cat = categories - 1; cat >= 0; --cat) {
         if (THCNumerics<T>::gt(dist[curDist * stride_dist + cat * stride_categories], zero)) {
-          dest[curDist] = cat + TH_INDEX_BASE;
+          dest[curDist] = cat;
           break;
         }
       }
@@ -328,7 +334,7 @@ sampleMultinomialWithReplacement(curandStateMtgp32* state,
           r);
 
         // Torch indices are 1-based
-        dest[curDist * totalSamples + sample] = choice + TH_INDEX_BASE;
+        dest[curDist * totalSamples + sample] = choice;
       }
     }
   }
@@ -370,7 +376,7 @@ sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
         r);
 
       // Torch indices are 1-based
-      dest[curDist * totalSamples + sample] = choice + TH_INDEX_BASE;
+      dest[curDist * totalSamples + sample] = choice;
 
       // Without replacement, so update the original probability so it
       // is not considered a second time

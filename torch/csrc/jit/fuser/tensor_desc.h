@@ -39,7 +39,7 @@ struct TORCH_API TensorDesc {
       : TensorDesc(type, TensorDesc::findContiguous(sizes, strides)) {}
 
   TensorDesc(const at::Tensor& t)
-      : TensorDesc(t.type().scalarType(), t.sizes(), t.strides()) {}
+      : TensorDesc(t.scalar_type(), t.sizes(), t.strides()) {}
 
   TensorDesc(const c10::CompleteTensorTypePtr& type)
       : TensorDesc(type->scalarType(), type->sizes(), type->strides()) {}

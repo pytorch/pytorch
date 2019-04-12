@@ -299,6 +299,13 @@ PyObject *THPModule_hasDistributed(PyObject *_unused)
 #endif
 }
 
+static PyObject *THPModule_showConfig(PyObject *module)
+{
+  HANDLE_TH_ERRORS
+  return THPUtils_packString(at::show_config());
+  END_HANDLE_TH_ERRORS
+}
+
 void DLPack_Capsule_Destructor(PyObject* data) {
   HANDLE_TH_ERRORS
   DLManagedTensor * dlMTensor = (DLManagedTensor *)PyCapsule_GetPointer(data, "dltensor");
@@ -433,6 +440,7 @@ static PyMethodDef TorchMethods[] = {
   {"_crash_if_csrc_asan", (PyCFunction)THPModule_crashIfCsrcASAN, METH_O, nullptr},
   {"_crash_if_csrc_ubsan", (PyCFunction)THPModule_crashIfCsrcUBSAN, METH_O, nullptr},
   {"_crash_if_aten_asan", (PyCFunction)THPModule_crashIfATenASAN, METH_O, nullptr},
+  {"_show_config",    (PyCFunction)THPModule_showConfig, METH_NOARGS, nullptr},
   {"_set_backcompat_broadcast_warn", (PyCFunction)THPModule_setBackcompatBroadcastWarn, METH_O, nullptr},
   {"_get_backcompat_broadcast_warn", (PyCFunction)THPModule_getBackcompatBroadcastWarn, METH_NOARGS, nullptr},
   {"_set_backcompat_keepdim_warn", (PyCFunction)THPModule_setBackcompatKeepdimWarn, METH_O, nullptr},
@@ -644,6 +652,15 @@ PyObject* initModule() {
   ASSERT_TRUE(set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_lapack", at::hasLAPACK() ? Py_True : Py_False));
+
+#ifdef USE_CUDA
+  PyObject *has_cuda = Py_True;
+#else
+  PyObject *has_cuda = Py_False;
+#endif
+  ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
+
+  ASSERT_TRUE(set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 
 #ifdef _GLIBCXX_USE_CXX11_ABI
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", _GLIBCXX_USE_CXX11_ABI ? Py_True : Py_False));

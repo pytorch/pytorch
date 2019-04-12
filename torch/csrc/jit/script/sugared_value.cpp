@@ -16,7 +16,7 @@ struct NoneValue : SugaredValue {
 
 std::shared_ptr<SugaredValue> PrintValue::call(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
@@ -58,7 +58,7 @@ builtin_cast_methods() {
 
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
@@ -70,7 +70,7 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
   if (value_->type()->isSubtypeOf(TensorType::get())) {
@@ -113,13 +113,13 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     throw ErrorReport(loc) << "Unknown attribute to named tuple";
   }
 
-  if (auto userType = value_->type()->cast<UserType>()) {
-    // This is a user-defined type, emit the proper attribute lookup
-    if (auto method = userType->getMethod(field)) {
-      return std::make_shared<MethodValue>(shared_from_this(), *method);
+  if (auto classType = value_->type()->cast<ClassType>()) {
+    // This is a class, emit the proper attribute lookup
+    if (auto method = classType->getMethod(field)) {
+      return std::make_shared<MethodValue>(getValue(), *method);
     }
 
-    if (!userType->hasAttribute(field)) {
+    if (!classType->hasAttribute(field)) {
       throw ErrorReport(loc)
           << "Tried to access to nonexistent attribute " << field
           << ". Did you forget to initialize it in __init__()?";
@@ -135,7 +135,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     const c10::optional<size_t>& size_hint) {
   static const auto make_simple_value =
       [](Value* v) -> std::shared_ptr<SugaredValue> {
@@ -147,7 +147,8 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
   } else if (value_->type()->kind() == TypeKind::ListType) {
     if (!size_hint) {
       throw ErrorReport(loc)
-          << "cannot statically infer the expected size of a list in this context";
+          << "cannot statically infer the expected size of a "
+          << "list in this context";
     }
     auto graph = value_->owningGraph();
     Node* unpack =
@@ -160,24 +161,32 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
 
 void SimpleValue::setAttr(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     const std::string& field,
-    Value* newValue,
-    bool shouldDefine) {
-  const auto userType = value_->type()->cast<UserType>();
-  if (!userType) {
+    Value* newValue) {
+  const auto classType = value_->type()->cast<ClassType>();
+  if (!classType) {
     throw ErrorReport(loc) << "Tried to set an attribute: " << field
-                           << " on a non-user-defined type: "
-                           << value_->type()->str();
+                           << " on a non-class: " << value_->type()->str();
   }
-
-  auto expectedType = userType->getAttribute(field);
+  auto expectedType = classType->getAttribute(field);
   if (!expectedType) {
-    // We don't have an attribute with this name, either add it to the type
-    // definition or throw an error
-    if (shouldDefine) {
-      userType->addAttribute(field, newValue->type());
+    // If we are still compiling the __init__ method for this class, then
+    // setting an unknown attribute adds it to the class's definition.
+
+    // We are initializing if:
+    const auto isInitializing =
+        // 1. The method we're currently inserting into is an init method
+        m.name() == "__init__" &&
+        // 2. The `self` arg matches this value's type (i.e. we are in the init
+        // method for this class, not some other class)
+        !m.graph()->inputs().empty() &&
+        m.graph()->inputs().at(0)->type() == classType;
+
+    if (isInitializing) {
+      classType->addAttribute(field, newValue->type());
       expectedType = newValue->type();
+
       const auto insertPoint = m.graph()->insertPoint();
       const auto topLevelBlock = m.graph()->block();
       if (insertPoint->owningBlock() != topLevelBlock) {
@@ -192,6 +201,8 @@ void SimpleValue::setAttr(
     }
   }
 
+  AT_ASSERT(expectedType);
+
   // Check type correctness
   const auto newType = newValue->type();
   if (!newType->isSubtypeOf(expectedType)) {
@@ -204,9 +215,9 @@ void SimpleValue::setAttr(
   g.insertNode(g.createSetAttr(value_, field, newValue));
 }
 
-std::shared_ptr<SugaredValue> UserTypeValue::call(
+std::shared_ptr<SugaredValue> ClassValue::call(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     // note: names for args will be 'argument 0', 'argument 1', etc..
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
@@ -215,8 +226,7 @@ std::shared_ptr<SugaredValue> UserTypeValue::call(
 
   // Generate a new object of the right type, then call `__init__` on it
   auto& g = *m.graph();
-  auto createNode = g.insertNode(g.createUserObject(type_));
-  auto self = std::make_shared<SimpleValue>(createNode->output());
+  auto self = g.insertNode(g.createObject(type_))->output();
 
   auto initMethod = type_->getMethod("__init__");
   AT_ASSERT(initMethod);
@@ -224,7 +234,17 @@ std::shared_ptr<SugaredValue> UserTypeValue::call(
   // Call the init function
   MethodValue(self, *initMethod).call(loc, m, inputs, attributes, n_binders);
 
-  return self;
+  return std::make_shared<SimpleValue>(self);
+}
+
+std::shared_ptr<SugaredValue> ClassValue::attr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  if (field != "__new__") {
+    throw ErrorReport(loc) << "Tried to lookup unknown attribute on class";
+  }
+  return std::make_shared<ClassNewMethod>(type_);
 }
 } // namespace script
 } // namespace jit

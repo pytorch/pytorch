@@ -15,23 +15,6 @@ caffe2_pb2.COMPILE_TIME_MAX_DEVICE_TYPES = caffe2_pb2.PROTO_COMPILE_TIME_MAX_DEV
 caffe2_pb2.ONLY_FOR_TEST = caffe2_pb2.PROTO_ONLY_FOR_TEST
 
 if platform.system() == 'Windows':
-    IS_CONDA = 'conda' in sys.version or 'Continuum' in sys.version or any([x.startswith('CONDA') for x in os.environ])
-
-    if IS_CONDA:
-        from ctypes import windll, c_wchar_p
-        from ctypes.wintypes import DWORD, HMODULE
-
-        AddDllDirectory = windll.kernel32.AddDllDirectory
-        AddDllDirectory.restype = DWORD
-        AddDllDirectory.argtypes = [c_wchar_p]
-
-    def add_extra_dll_dir(extra_dll_dir):
-        if os.path.isdir(extra_dll_dir):
-            os.environ['PATH'] = extra_dll_dir + os.pathsep + os.environ['PATH']
-
-            if IS_CONDA:
-                AddDllDirectory(extra_dll_dir)
-
     # first get nvToolsExt PATH
     def get_nvToolsExt_path():
         NVTOOLEXT_HOME = os.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt')
@@ -45,8 +28,7 @@ if platform.system() == 'Windows':
     th_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'torch')
     th_dll_path = os.path.join(th_root, 'lib')
 
-    dll_paths = [th_dll_path, py_dll_path, get_nvToolsExt_path()]
+    dll_paths = [th_dll_path, py_dll_path, get_nvToolsExt_path(), os.environ['PATH']]
 
     # then add the path to env
-    for p in dll_paths:
-        add_extra_dll_dir(p)
+    os.environ['PATH'] = ';'.join(dll_paths)

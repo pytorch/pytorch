@@ -11,7 +11,7 @@
 #include <ATen/core/Generator.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/cpu/UnaryOpsKernel.h>
+#include <ATen/native/UnaryOps.h>
 
 #include <type_traits>
 #include <functional>
@@ -126,7 +126,7 @@ Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
 }
 
 Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
-  AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_tensor_cpu_self_", [&] {
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "bernoulli_tensor_cpu_self_", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);
     using self_t = scalar_t;
@@ -137,7 +137,7 @@ Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
           ret_val = static_cast<self_t>(THRandom_bernoulli(generator, p_val));
         });
     } else {
-      AT_DISPATCH_FLOATING_TYPES(p_.type(), "bernoulli_tensor_cpu_p_", [&] {
+      AT_DISPATCH_FLOATING_TYPES(p_.scalar_type(), "bernoulli_tensor_cpu_p_", [&] {
         auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
         using p_t = scalar_t;
         CPU_tensor_apply2<self_t, p_t>(
@@ -160,7 +160,7 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
     return self;
   }
 #endif
-  AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_scalar_cpu_", [&] {
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);
     CPU_tensor_apply1<scalar_t>(
@@ -174,7 +174,7 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
   Tensor ret = at::empty(self.sizes(), self.options());
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "_standard_gamma_grad", [&] {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "_standard_gamma_grad_cpu", [&] {
     CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(ret, self, output,
       [](scalar_t& ret_val, const scalar_t& self_val, const scalar_t &output_val) {
         ret_val = standard_gamma_grad_one<scalar_t, double>(self_val, output_val);
@@ -190,7 +190,7 @@ Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
 
 Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
   Tensor ret = at::zeros(lambda.sizes(), lambda.options());
-  AT_DISPATCH_FLOATING_TYPES(ret.type(), "poisson", [&] {
+  AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "poisson_cpu", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);
     CPU_tensor_apply2<scalar_t, scalar_t>(ret, lambda,
@@ -204,7 +204,7 @@ Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
 
 Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
   Tensor ret = at::zeros(alpha.sizes(), alpha.options());
-  AT_DISPATCH_FLOATING_TYPES(ret.type(), "gamma", [&] {
+  AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "gamma_cpu", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);
     CPU_tensor_apply2<scalar_t, scalar_t>(ret, alpha,
@@ -228,4 +228,41 @@ Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
   return ret;
 }
 
+Tensor _s_dirichlet_cpu(const Tensor& alpha, Generator *gen) {
+  Tensor ret = at::zeros(alpha.sizes(), alpha.options());
+  AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "dirichlet", [&] {
+    Tensor gamma = at::zeros(alpha.sizes(), alpha.options().dtype(ScalarType::Double));
+    THGenerator* generator = get_generator(gen);
+    std::lock_guard<std::mutex> lock(generator->mutex);
+    /* Generate gamma sample by casting alpha to double to prevent underflow. */
+    CPU_tensor_apply2<double, scalar_t>(gamma, alpha,
+      [generator](double& ret_val, const scalar_t& alpha){
+        auto uniform_lambda = [generator] () {
+          return THRandom_standard_uniform(generator);
+        };
+        BaseSampler<double, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
+
+        auto normal_lambda = [generator] () {
+          return THRandom_normal(generator, 0.0, 1.0);
+        };
+        BaseSampler<double, decltype(normal_lambda)> standard_normal(normal_lambda);
+        auto sample = sample_gamma<double, double, decltype(uniform_lambda), decltype(normal_lambda)>
+          (alpha, standard_uniform, standard_normal);
+        ret_val = std::max(std::numeric_limits<double>::min(), sample);
+      }
+    );
+    /* Normalize and cast back to scalar_t. */
+    Tensor gamma_sum = gamma.sum(-1, true).expand(alpha.sizes());
+    CPU_tensor_apply3<scalar_t, double , double>(ret, gamma, gamma_sum,
+      [](scalar_t& ret_val, const double& gamma, const double& gamma_sum){
+        ret_val = gamma / gamma_sum;
+        auto min_val = std::numeric_limits<scalar_t>::min();
+        auto max_val = std::nexttoward(static_cast<scalar_t>(1.0f), 0.0f);
+        ret_val = std::min(max_val, std::max(min_val, ret_val));
+        ret_val = static_cast<scalar_t>(ret_val);
+      }
+    );
+  });
+  return ret;
+}
 }} // namespace at::native

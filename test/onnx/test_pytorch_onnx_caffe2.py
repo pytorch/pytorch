@@ -3,7 +3,6 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from functools import wraps
 import numpy as np
 import sys
 import unittest
@@ -11,6 +10,7 @@ import itertools
 
 import torch.onnx
 import torch.onnx.operators
+from torch.onnx import ExportTypes
 from torch import nn
 from torch.autograd import Variable, function
 import torch.utils.model_zoo as model_zoo
@@ -33,6 +33,8 @@ import model_defs.word_language_model as word_language_model
 from model_defs.mnist import MNIST
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
+from caffe2.python.operator_test.torch_integration_test import (generate_rois_rotated,
+                                                                create_bbox_transform_inputs)
 
 import onnx
 import caffe2.python.onnx.backend as c2
@@ -206,6 +208,57 @@ class TestCaffe2Backend(unittest.TestCase):
         model = MyModel()
         input = torch.randn(3, 4, requires_grad=True)
         self.run_model_test(model, train=False, batch_size=0, input=input)
+
+    def test_onnx_export_with_parameter_renaming(self):
+        class SimpleFcNet(nn.Module):
+            def __init__(self):
+                super(SimpleFcNet, self).__init__()
+                self.fc1 = nn.Linear(5, 10)
+
+            def forward(self, input):
+                return self.fc1(input)
+
+        model = SimpleFcNet()
+        input = torch.randn(7, 5)
+        output = model(input)
+
+        f = io.BytesIO()
+        # Note that the export call explicitly sets the names of not just the input,
+        # but also the parameters. This test checks that the model can be loaded and
+        # executed in Caffe2 backend correctly.
+        torch.onnx._export(model, input, f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE,
+                           input_names=['input1', 'parameter1', 'parameter2'])
+
+        f.seek(0)
+        model_c2 = c2.prepare_zip_archive(f)
+        result = model_c2.run(input.numpy())
+        np.testing.assert_almost_equal(output.data.cpu().numpy(), result[0], decimal=3)
+
+    def test_onnx_export_param_name_duplication(self):
+        class SimpleFcNet(nn.Module):
+            def __init__(self):
+                super(SimpleFcNet, self).__init__()
+                self.fc1 = nn.Linear(5, 10)
+
+            def forward(self, input):
+                return self.fc1(input)
+
+        model = SimpleFcNet()
+        input = torch.randn(7, 5)
+        output = model(input)
+
+        f = io.BytesIO()
+        # The export call explicitly sets the names of the input, and the first parameter.
+        # But note that the target first parameter name is the same as the second parameter name.
+        # This test checks that given this edge condition, the model can be loaded and executed
+        # in Caffe2 backend correctly.
+        torch.onnx._export(model, input, f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE,
+                           input_names=['input1', 'fc1.bias'], _retain_param_name=False)
+
+        f.seek(0)
+        model_c2 = c2.prepare_zip_archive(f)
+        result = model_c2.run(input.numpy())
+        np.testing.assert_almost_equal(output.data.cpu().numpy(), result[0], decimal=3)
 
     def test_lstm_cell(self):
         model = nn.LSTMCell(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE)
@@ -664,6 +717,22 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.MaxPool2d(5, padding=2)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
+    def test_maxpool1d_ceil(self):
+        model = nn.MaxPool1d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_maxpool2d_ceil(self):
+        model = nn.MaxPool2d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_maxpool3d_ceil(self):
+        model = nn.MaxPool3d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 44, 31, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    @unittest.skip("C2 and PyTorch have small difference in padding implementation")
     def test_avgpool2d(self):
         model = nn.AvgPool2d(5, padding=(2))
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
@@ -679,6 +748,51 @@ class TestCaffe2Backend(unittest.TestCase):
     def test_avgpool2d_no_padding(self):
         model = nn.AvgPool2d(5)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
+
+    def test_avg_pool1D_ceil(self):
+        model = torch.nn.AvgPool1d(3, 2, ceil_mode=True)
+        x = torch.randn(1, 1, 7, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_avg_pool2D_ceil(self):
+        model = torch.nn.AvgPool2d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_avg_pool3D_ceil(self):
+        model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
+        x = torch.randn(20, 16, 50, 44, 31, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_avg_pool1D(self):
+        model = torch.nn.AdaptiveAvgPool1d((5))
+        x = torch.randn(20, 16, 50, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_avg_pool2D(self):
+        model = torch.nn.AdaptiveAvgPool2d((5, 4))
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_avg_pool3D(self):
+        model = torch.nn.AdaptiveAvgPool3d((5, 4, 3))
+        x = torch.randn(20, 16, 50, 44, 30, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_max_pool1D(self):
+        model = torch.nn.AdaptiveMaxPool1d((5))
+        x = torch.randn(20, 16, 50, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_max_pool2D(self):
+        model = torch.nn.AdaptiveMaxPool2d((5, 4))
+        x = torch.randn(20, 16, 50, 32, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_adaptive_max_pool3D(self):
+        model = torch.nn.AdaptiveMaxPool3d((5, 4, 3))
+        x = torch.randn(20, 16, 50, 44, 30, requires_grad=True)
+        self.run_model_test(model, train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_weight_norm(self):
         model = nn.utils.weight_norm(nn.Conv1d(1, 1, 3))
@@ -780,7 +894,25 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_upsample(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        model = nn.Upsample(scale_factor=2, mode='nearest')
+        model = nn.Upsample(size=[v * 2 for v in x.size()[2:]], mode='nearest')
+        self.run_model_test(model, train=False, input=(x),
+                            batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_interpolate_upsample(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, x):
+                size = [v * 2 for v in x.size()[2:]]
+                # work around for now: turn the dynamic sizes into constant
+                size = [int(i) for i in size]
+                return nn.functional.interpolate(x,
+                                                 size=size,
+                                                 mode='nearest')
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        model = MyModel()
         self.run_model_test(model, train=False, input=(x),
                             batch_size=BATCH_SIZE, use_gpu=False)
 
@@ -821,11 +953,20 @@ class TestCaffe2Backend(unittest.TestCase):
 
     # TODO: Add test cases for prod once Caffe2 has support for ReduceProd
     def test_softmax(self):
-        for i in range(7)[2:]:
-            model = nn.Softmax(dim=i - 1)
-            dims = [2] * (i - 2) + [3, 4]
-            input = torch.ones(*dims, requires_grad=True)
-            self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=input)
+        for i in range(2, 8):
+            for d in range(0, i - 1):
+                model = nn.Softmax(dim=d)
+                dims = [2] * (i - 2) + [3, 4]
+                input = torch.ones(*dims, requires_grad=True)
+                self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=input)
+
+    def test_softmax_dtype(self):
+        class SoftmaxModel(torch.nn.Module):
+            def forward(self, input):
+                return nn.functional.softmax(input, dim=0, dtype=torch.float64)
+
+        x = torch.randn(1, 2, 3, requires_grad=True, dtype=torch.float32)
+        self.run_model_test(SoftmaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_logsoftmax(self):
         for i in range(7)[2:]:
@@ -1027,6 +1168,14 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(RsubModel(), train=False, input=(x,),
                             batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_isnan(self):
+        class IsNaNModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.isnan(input)
+
+        x = torch.tensor([1.0, float('nan'), 2.0])
+        self.run_model_test(IsNaNModel(), train=False, input=x, batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_flatten(self):
         class FlattenModel(torch.nn.Module):
             def forward(self, input):
@@ -1042,6 +1191,38 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.run_model_test(FlattenModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_argmax(self):
+        class ArgmaxModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.argmax(input, dim=1)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(ArgmaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_argmax_none_dim(self):
+        class ArgmaxModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.argmax(input)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(ArgmaxModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_argmin(self):
+        class ArgminModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.argmin(input, dim=1)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(ArgminModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_argmin_none_dim(self):
+        class ArgminModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.argmin(input)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        self.run_model_test(ArgminModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
     def test_reshape(self):
         class ReshapeModel(torch.nn.Module):
@@ -1059,6 +1240,235 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(2, 3, requires_grad=True)
         self.run_model_test(ReshapeAsModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_narrow(self):
+        class NarrowModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.narrow(input, 0, 0, 2)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        self.run_model_test(NarrowModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_traced_ints(self):
+        A = 4
+        H = 10
+        W = 8
+        img_count = 3
+
+        # in this model, the constant propagation in JIT doesn't work
+        # so we have ListConstruct in the symbolic
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.conv = torch.nn.Conv2d(A, 4 * A, 1, stride=1)
+
+            def forward(self, feature, im_info, anchors):
+                bbox_deltas = self.conv(feature)
+                a, b = torch.ops._caffe2.GenerateProposals(
+                    feature, bbox_deltas, im_info, anchors,
+                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0,
+                )
+                output = torch.ops._caffe2.RoIAlign(
+                    feature, a,
+                    order="NCHW",
+                    spatial_scale=1.0,
+                    pooled_h=3,
+                    pooled_w=3,
+                    sampling_ratio=0,
+                )
+                return output
+
+        feature = torch.Tensor(img_count, A, H, W)
+        im_info = torch.ones(img_count, 3, dtype=torch.float32)
+        anchors = torch.ones(A, 4, dtype=torch.float32)
+        inputs = (feature, im_info, anchors)
+
+        model = MyModel()
+        with torch.no_grad():
+            self.run_model_test(MyModel(), train=False, input=inputs, batch_size=BATCH_SIZE)
+
+    def test_c2_roi_align(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, feature, rois):
+                roi_feature = torch.ops._caffe2.RoIAlign(
+                    feature, rois, order="NCHW", spatial_scale=1.0,
+                    pooled_h=3, pooled_w=3, sampling_ratio=3,
+                )
+                return roi_feature
+
+        def rand_roi(N, C, H, W):
+            return [
+                float(int(N * np.random.rand())),
+                0.5 * np.random.rand() * W,
+                0.5 * np.random.rand() * H,
+                (0.5 + 0.5 * np.random.rand()) * W,
+                (0.5 + 0.5 * np.random.rand()) * H,
+            ]
+
+        N, C, H, W = 1, 4, 10, 8
+        feature = torch.randn(N, C, H, W)
+        rois = torch.tensor([rand_roi(N, C, H, W) for _ in range(10)])
+        inputs = (feature, rois)
+        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
+
+    def test_c2_generate_proposals(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, scores, bbox_deltas, im_info, anchors):
+                a, b = torch.ops._caffe2.GenerateProposals(
+                    scores, bbox_deltas, im_info, anchors,
+                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0,
+                )
+                return a, b
+
+        A = 4
+        H = 10
+        W = 8
+        img_count = 3
+        scores = torch.ones(img_count, A, H, W, dtype=torch.float32)
+        bbox_deltas = torch.linspace(0, 10, steps=img_count * 4 * A * H * W,
+                                     dtype=torch.float32)
+        bbox_deltas = bbox_deltas.view(img_count, 4 * A, H, W)
+        im_info = torch.ones(img_count, 3, dtype=torch.float32)
+        anchors = torch.ones(A, 4, dtype=torch.float32)
+        inputs = (scores, bbox_deltas, im_info, anchors)
+        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
+
+    def test_c2_bbox_transform(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, rois, deltas, im_info):
+                a, b = torch.ops._caffe2.BBoxTransform(
+                    rois,
+                    deltas,
+                    im_info,
+                    weights=[1., 1., 1., 1.],
+                    apply_scale=False,
+                    rotated=True,
+                    angle_bound_on=True,
+                    angle_bound_lo=-90,
+                    angle_bound_hi=90,
+                    clip_angle_thresh=0.5,
+                )
+                return a, b
+
+        roi_counts = [0, 2, 3, 4, 5]
+        batch_size = len(roi_counts)
+        total_rois = sum(roi_counts)
+        im_dims = np.random.randint(100, 600, batch_size)
+        rois = generate_rois_rotated(roi_counts, im_dims)
+        box_dim = 5
+        num_classes = 7
+        deltas = np.random.randn(total_rois, box_dim * num_classes).astype(np.float32)
+        im_info = np.zeros((batch_size, 3)).astype(np.float32)
+        im_info[:, 0] = im_dims
+        im_info[:, 1] = im_dims
+        im_info[:, 2] = 1.0
+        im_info = torch.zeros((batch_size, 3))
+        inputs = (torch.tensor(rois), torch.tensor(deltas), torch.tensor(im_info))
+        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
+
+    # BoxWithNMSLimits has requirements for the inputs, so randomly generated inputs
+    # in Caffe2BackendTestEmbed doesn't work with this op.
+    @skipIfEmbed
+    def test_c2_box_with_nms_limits(self):
+        roi_counts = [0, 2, 3, 4, 5]
+        num_classes = 7
+        rotated = False
+        angle_bound_on = True
+        clip_angle_thresh = 0.5
+        rois, deltas, im_info = create_bbox_transform_inputs(
+            roi_counts, num_classes, rotated
+        )
+        pred_bbox, batch_splits = [
+            t.detach().numpy()
+            for t in torch.ops._caffe2.BBoxTransform(
+                torch.tensor(rois),
+                torch.tensor(deltas),
+                torch.tensor(im_info),
+                [1.0, 1.0, 1.0, 1.0],
+                False,
+                rotated,
+                angle_bound_on,
+                -90,
+                90,
+                clip_angle_thresh,
+            )
+        ]
+        class_prob = np.random.randn(sum(roi_counts), num_classes).astype(np.float32)
+        score_thresh = 0.5
+        nms_thresh = 0.5
+        topk_per_image = int(sum(roi_counts) / 2)
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, class_prob, pred_bbox, batch_splits):
+                a, b, c, d = torch.ops._caffe2.BoxWithNMSLimit(
+                    class_prob,
+                    pred_bbox,
+                    batch_splits,
+                    score_thresh=score_thresh,
+                    nms=nms_thresh,
+                    detections_per_im=topk_per_image,
+                    soft_nms_enabled=False,
+                    soft_nms_method="linear",
+                    soft_nms_sigma=0.5,
+                    soft_nms_min_score_thres=0.001,
+                    rotated=rotated,
+                )
+                return a, b, c, d
+
+        inputs = (torch.tensor(class_prob), torch.tensor(pred_bbox), torch.tensor(batch_splits))
+        self.run_model_test(MyModel(), train=False, input=inputs, batch_size=3)
+
+    def test_c2_inference_lstm(self):
+        num_layers = 4
+        seq_lens = 6
+        emb_lens = 10
+        has_bias = True
+        batch_first = True
+        is_bidirectional = True
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, lstm_in):
+                a, b, c = torch.ops._caffe2.InferenceLSTM(
+                    lstm_in, num_layers, has_bias, batch_first, is_bidirectional
+                )
+                return a, b, c
+
+        num_directions = 2
+        bsz = 5
+        hidden_size = 7
+        hx = np.zeros((num_layers * num_directions, bsz, hidden_size), dtype=np.float32)
+        inputs = np.random.randn(bsz, seq_lens, emb_lens).astype(np.float32)
+        torch_lstm = torch.nn.LSTM(
+            emb_lens,
+            hidden_size,
+            batch_first=batch_first,
+            bidirectional=is_bidirectional,
+            bias=has_bias,
+            num_layers=num_layers,
+        )
+        lstm_in = [
+            torch.from_numpy(inputs),
+            torch.from_numpy(hx),
+            torch.from_numpy(hx),
+        ] + [param.detach() for param in torch_lstm._flat_weights]
+
+        self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3)
+
 
 # a bit of metaprogramming to set up all the rnn tests
 

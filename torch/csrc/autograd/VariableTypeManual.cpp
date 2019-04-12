@@ -31,14 +31,8 @@ Allocator* VariableType::allocator() const {
 Device VariableType::getDeviceFromPtr(void * data) const {
   return baseType->getDeviceFromPtr(data);
 }
-Storage VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
-  return baseType->storageFromBlob(data, size, deleter);
-}
 Storage VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   return baseType->unsafeStorageFromTH(th_pointer, retain);
-}
-Storage VariableType::storageWithAllocator(int64_t size, Allocator* allocator) const {
-  return baseType->storageWithAllocator(size, allocator);
 }
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), /*requires_grad=*/false);
@@ -49,9 +43,6 @@ std::unique_ptr<Generator> VariableType::generator() const {
 
 const char * VariableType::toString() const {
   return str.c_str();
-}
-size_t VariableType::elementSizeInBytes() const {
-  return baseType->elementSizeInBytes();
 }
 Type & VariableType::toBackend(Backend b) const {
   return *getVariableTypeFromBaseType(baseType->toBackend(b));
@@ -177,7 +168,7 @@ const Variable & VariableType::checked_cast_variable(const Tensor & t, const cha
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
   if (!t.is_variable()) {
-    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
+    AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " for argument #", pos, " '", name, "'");
   }
   return as_variable_ref(t);
 }
@@ -187,7 +178,7 @@ Variable & VariableType::checked_cast_variable(Tensor & t, const char * name, in
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
   if (!t.is_variable()) {
-    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
+    AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " for argument #", pos, " '", name, "'");
   }
   return as_variable_ref(t);
 }
@@ -218,8 +209,8 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
     if (!t.defined()) {
       continue;
     }
-    if (!isVariableType(t.type())) {
-      AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " at position #", i, " "
+    if (!isVariableType(t.dispatch_type())) {
+      AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " at position #", i, " "
                     "for iterable argument #", pos, " '", name, "'");
     }
     ret[i] = static_cast<const Variable&>(t);
@@ -265,7 +256,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
-  requires_grad &= isFloatingPoint(self.type().scalarType());
+  requires_grad &= isFloatingPoint(self.scalar_type());
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));

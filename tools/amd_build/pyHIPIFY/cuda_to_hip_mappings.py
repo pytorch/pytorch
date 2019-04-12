@@ -2235,15 +2235,37 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     # straight to the normal versions hip::HIPCachingAllocator
     ("cuda::CUDACachingAllocator::get", ("hip::HIPCachingAllocatorMasqueradingAsCUDA::get", API_PYTORCH)),
     ("CUDACachingAllocator::get", ("HIPCachingAllocatorMasqueradingAsCUDA::get", API_PYTORCH)),
+    ("cuda::CUDACachingAllocator::recordStream", ("hip::HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA", API_PYTORCH)),
+    ("CUDACachingAllocator::recordStream", ("HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA", API_PYTORCH)),
+
+    ("cuda::CUDAStream", ("hip::HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
+    ("CUDAStream", ("HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
+
+    ("cuda::getStreamFromPool", ("hip::getStreamFromPoolMasqueradingAsCUDA", API_PYTORCH)),
+    ("getStreamFromPool", ("getStreamFromPoolMasqueradingAsCUDA", API_PYTORCH)),
+
+    ("cuda::getDefaultCUDAStream", ("hip::getDefaultHIPStreamMasqueradingAsCUDA", API_PYTORCH)),
+    ("getDefaultCUDAStream", ("getDefaultHIPStreamMasqueradingAsCUDA", API_PYTORCH)),
+
+    ("cuda::getCurrentCUDAStream", ("hip::getCurrentHIPStreamMasqueradingAsCUDA", API_PYTORCH)),
+    ("getCurrentCUDAStream", ("getCurrentHIPStreamMasqueradingAsCUDA", API_PYTORCH)),
+
+    ("cuda::setCurrentCUDAStream", ("hip::setCurrentHIPStreamMasqueradingAsCUDA", API_PYTORCH)),
+    ("setCurrentCUDAStream", ("setCurrentHIPStreamMasqueradingAsCUDA", API_PYTORCH)),
 
     # TODO: Undo this special-case; see the header for motivation behind this
     # hack.  It's VERY important this is only applied to PyTorch HIPify.
     ("c10/cuda/CUDAGuard.h", ("ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h", API_PYTORCH)),
     ("c10/cuda/CUDACachingAllocator.h", ("ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h", API_PYTORCH)),
+    ("c10/cuda/CUDAStream.h", ("ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h", API_PYTORCH)),
 ])
 
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cuda_stream" , ("hip_stream", API_CAFFE2)),
+    # if the header is a native hip folder (under hip directory),
+    # there is no need to add a hip path to it; the trie in hipify script
+    # takes this mapping order to forbid further replacement
+    ("/hip/" , ("/hip/", API_CAFFE2)),
     ("/context_gpu" , ("/hip/context_gpu", API_CAFFE2)),
     ("/common_gpu"  , ("/hip/common_gpu", API_CAFFE2)),
     ("/mixed_utils" , ("/hip/mixed_utils", API_CAFFE2)),

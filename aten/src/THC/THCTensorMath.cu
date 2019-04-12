@@ -92,7 +92,7 @@ struct idx_functor
 
   __host__ __device__
   int64_t operator()(int64_t val) {
-    return (val / div) % size + TH_INDEX_BASE;
+    return (val / div) % size;
   }
 };
 
@@ -109,5 +109,17 @@ struct NonZeroOp
   }
 };
 
+template <>
+struct NonZeroOp<bool>
+{
+  NonZeroOp() {}
+  __host__ __device__ bool operator()(bool lhs) const {
+    return lhs != false;
+  }
+};
+
 #include <THC/generic/THCTensorMath.cu>
 #include <THC/THCGenerateAllTypes.h>
+
+#include <THC/generic/THCTensorMath.cu>
+#include <THC/THCGenerateBoolType.h>

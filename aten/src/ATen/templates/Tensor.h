@@ -13,6 +13,7 @@
 #include <c10/util/Optional.h>
 #include <c10/core/Tensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 
 namespace c10{
 struct TensorOptions;
@@ -20,6 +21,7 @@ struct TensorOptions;
 namespace at {
 struct Generator;
 struct Type;
+class DeprecatedTypeProperties;
 class Tensor;
 } // namespace at
 
@@ -175,7 +177,34 @@ class CAFFE2_API Tensor {
   bool is_contiguous() const {
     return impl_->is_contiguous();
   }
-  Type & type() const {
+
+  // Total bytes consumed by the "view" of elements of the array.  Does not
+  // include size of metadata.  The number reported here does not necessarily
+  // correspond to the true physical memory consumed by a tensor; instead,
+  // it reports the memory the tensor would take *if* it were contiguous.
+  // Defined to be numel() * itemsize()
+  size_t nbytes() const {
+    return impl_->numel() * impl_->itemsize();
+  }
+
+  // Length of one array element in bytes.  This is the traditional
+  // Numpy naming.
+  size_t itemsize() const {
+    return impl_->itemsize();
+  }
+
+  // Same as itemsize().  This is the PyTorch naming.
+  size_t element_size() const {
+    return impl_->itemsize();
+  }
+
+  DeprecatedTypeProperties & type() const {
+    return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+        tensorTypeIdToBackend(type_id()),
+        scalar_type(),
+        is_variable() && !at::NonVariableTypeMode::is_enabled());
+  }
+  Type & dispatch_type() const {
     return legacyTensorType(*impl_);
   }
   TensorTypeId type_id() const {
@@ -193,8 +222,8 @@ class CAFFE2_API Tensor {
   bool is_alias_of(const at::Tensor& other) const{
     return impl_->storage().is_alias_of(other.storage());
   }
-  Tensor toType(const Type & t, bool non_blocking=false) const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
+  Tensor toType(const DeprecatedTypeProperties & t, bool non_blocking=false) const;
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
 
@@ -222,6 +251,9 @@ class CAFFE2_API Tensor {
 
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
+
+  /// Returns if a `Tensor` has quantized backend.
+  bool is_quantized() const;
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.

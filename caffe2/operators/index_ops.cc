@@ -15,8 +15,9 @@ namespace caffe2 {
 template <class T>
 class IndexCreateOp : public Operator<CPUContext> {
  public:
-  IndexCreateOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws),
+  template <class... Args>
+  explicit IndexCreateOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...),
         maxElements_(OperatorBase::GetSingleArgument<int>(
             "max_elements",
             std::numeric_limits<int>::max())) {}
@@ -33,8 +34,8 @@ class IndexCreateOp : public Operator<CPUContext> {
 
 class IndexGetOp : public Operator<CPUContext> {
  public:
-  IndexGetOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit IndexGetOp(Args&&... args) : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<IndexKeyTypes>::call(this, Input(1));
@@ -57,8 +58,9 @@ class IndexGetOp : public Operator<CPUContext> {
 
 class IndexLoadOp : public Operator<CPUContext> {
  public:
-  IndexLoadOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws),
+  template <class... Args>
+  explicit IndexLoadOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...),
         skipFirstEntry_(
             OperatorBase::GetSingleArgument<int>("skip_first_entry", 0)) {}
 
@@ -87,8 +89,9 @@ class IndexLoadOp : public Operator<CPUContext> {
 
 class IndexStoreOp : public Operator<CPUContext> {
  public:
-  IndexStoreOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit IndexStoreOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& base = OperatorBase::Input<std::unique_ptr<IndexBase>>(0);
@@ -106,8 +109,9 @@ class IndexStoreOp : public Operator<CPUContext> {
 
 class IndexFreezeOp : public Operator<CPUContext> {
  public:
-  IndexFreezeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit IndexFreezeOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& base = OperatorBase::Input<std::unique_ptr<IndexBase>>(0);
@@ -118,8 +122,9 @@ class IndexFreezeOp : public Operator<CPUContext> {
 
 class IndexSizeOp : public Operator<CPUContext> {
  public:
-  IndexSizeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit IndexSizeOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& base = OperatorBase::Input<std::unique_ptr<IndexBase>>(0);

@@ -14,6 +14,7 @@
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/ComplexHooksInterface.h>
 #include <c10/util/Exception.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 
 #include <memory>
 #include <mutex>
@@ -67,6 +68,7 @@ class CAFFE2_API Context {
   bool hasOpenMP() const;
   bool hasMKL() const;
   bool hasLAPACK() const;
+  bool hasMKLDNN() const;
   bool hasMAGMA() const {
     return detail::getCUDAHooks().hasMAGMA();
   }
@@ -75,6 +77,9 @@ class CAFFE2_API Context {
   }
   bool hasHIP() const {
     return detail::getHIPHooks().hasHIP();
+  }
+  bool hasXLA() const {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
@@ -171,26 +176,25 @@ static inline TypeExtendedInterface& getNonVariableType(Backend p, ScalarType s)
   return globalContext().getNonVariableType(p, s);
 }
 
-static inline TypeExtendedInterface& getNonVariableType(DeviceType p, ScalarType s) {
-  return globalContext().getNonVariableType(deviceTypeToBackend(p), s);
-}
-
 CAFFE2_API TypeExtendedInterface& getType(TensorOptions options);
 CAFFE2_API TypeExtendedInterface& getType(const TensorImpl*);
 CAFFE2_API TypeExtendedInterface& getType(const Tensor&);
 
 CAFFE2_API Allocator* getCPUAllocator();
 
-static inline TypeExtendedInterface& CPU(ScalarType s) {
-  return getNonVariableType(Backend::CPU, s);
+static inline DeprecatedTypeProperties& CPU(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::CPU, s, /*is_variable*/false);
 }
 
-static inline TypeExtendedInterface& CUDA(ScalarType s) {
-  return getNonVariableType(Backend::CUDA, s);
+static inline DeprecatedTypeProperties& CUDA(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::CUDA, s, /*is_variable*/false);
 }
 
-static inline TypeExtendedInterface& HIP(ScalarType s) {
-  return getNonVariableType(Backend::HIP, s);
+static inline DeprecatedTypeProperties& HIP(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::HIP, s, /*is_variable*/false);
 }
 
 CAFFE2_API LegacyTHDispatcher& getLegacyTHDispatcher(TensorOptions options);
@@ -204,14 +208,28 @@ static inline bool hasHIP() {
   return globalContext().hasHIP();
 }
 
+static inline bool hasXLA() {
+  return globalContext().hasXLA();
+}
+
+// Despite its name, this function returns the number of *CUDA* GPUs.
 static inline size_t getNumGPUs() {
-  if (hasCUDA()) {
+  // WARNING: DO NOT ADD LOGIC TO HANDLE OTHER DEVICE TYPES TO THIS
+  // FUNCTION.  If you are interested in interrogating the number of
+  // devices for a specific device type, add that function to the
+  // relevant library (e.g., similar to at::cuda::device_count())
+  if (hasCUDA() && hasHIP()) {
+    throw std::runtime_error(
+        "Enabling both CUDA and HIP in ATen is not supported, as HIP masquerades "
+        "to be CUDA (e.g., when you say CUDA, on a HIP build of ATen, this actually "
+        "means HIP.  Rebuild PyTorch with one or the other disabled.");
+  } else if (hasCUDA()) {
     return detail::getCUDAHooks().getNumGPUs();
-  }
-  if (hasHIP()) {
+  } else if (hasHIP()) {
     return detail::getHIPHooks().getNumGPUs();
+  } else {
+    return 0;
   }
-  return 0;
 }
 
 static inline bool hasOpenMP() {
@@ -228,6 +246,10 @@ static inline bool hasLAPACK() {
 
 static inline bool hasMAGMA() {
   return globalContext().hasMAGMA();
+}
+
+static inline bool hasMKLDNN() {
+  return globalContext().hasMKLDNN();
 }
 
 static inline void manual_seed(uint64_t seed) {

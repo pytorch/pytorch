@@ -21,9 +21,14 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
       {"float", FloatType::get()},
       {"int", IntType::get()},
       {"bool", BoolType::get()},
+      {"None", NoneType::get()},
   };
-  auto tok = L.expect(TK_IDENT);
-  auto text = tok.text();
+  auto tok = L.cur();
+  if (!L.nextIf(TK_NONE)) {
+    L.expect(TK_IDENT);
+  }
+  std::string text = tok.text();
+
   auto it = type_map.find(text);
   if (it == type_map.end()) {
     if (text.size() > 0 && islower(text[0])) {
@@ -53,16 +58,33 @@ c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
 
         // If we found a wildcard, ignore all subsequent annotations
       } else if (!alias_info.isWildcard()) {
-        alias_info.addSet(
+        alias_info.addBeforeSet(
             Symbol::fromQualString("alias::" + L.expect(TK_IDENT).text()));
       }
     });
     if (L.nextIf('!')) {
       alias_info.setIsWrite(true);
     }
+    if (L.nextIf(TK_ARROW)) {
+      // optional 'alias set annotation'
+      parseList(TK_NOTHING, '|', TK_NOTHING, [&] {
+        if (L.cur().kind == '*') {
+          L.reportError("Wildcard not allowed as part of the output set");
+        }
+        alias_info.addAfterSet(
+            Symbol::fromQualString("alias::" + L.expect(TK_IDENT).text()));
+      });
+    } else {
+      // We didn't encounter an ->, so assume the "after set" is identical
+      // to the "before set"
+      AT_ASSERT(alias_info.afterSets().empty());
+      for (const auto& set : alias_info.beforeSets()) {
+        alias_info.addAfterSet(set);
+      }
+    }
     L.expect(')');
   } else if (L.nextIf('!')) {
-    alias_info.addSet(
+    alias_info.addBeforeSet(
         Symbol::fromQualString("alias::$" + std::to_string(next_id++)));
     alias_info.setIsWrite(true);
   } else {

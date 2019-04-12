@@ -31,7 +31,9 @@ class Filler {
     for (const auto& item : *input_data) {
       bytes += item.nbytes();
     }
-    CAFFE_ENFORCE(bytes > 0, "input bytes should be positive");
+    if (bytes == 0) {
+      LOG(WARNING) << "0 input bytes filled";
+    }
 
     return bytes;
   }
@@ -135,6 +137,13 @@ class TestDataRandomFiller : public DataRandomFiller {
   // Fill input directly to the workspace.
   void fillInputToWorkspace(Workspace* workspace) const;
 };
+
+// Convenient helpers to fill data to workspace.
+CAFFE2_API void fillRandomNetworkInputs(
+    const NetDef& net,
+    const std::vector<std::vector<std::vector<int64_t>>>& inputDims,
+    const std::vector<std::vector<std::string>>& inputTypes,
+    Workspace* workspace);
 
 } // namespace emulator
 } // namespace caffe2

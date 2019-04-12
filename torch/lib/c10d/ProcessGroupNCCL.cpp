@@ -66,7 +66,19 @@ std::vector<at::Device> getDeviceList(const std::vector<at::Tensor>& tensors) {
   return res;
 }
 
-// Helper that lets the input ncclStreams to wait for the current stream
+// [Sync Streams] Helper that lets the input ncclStreams to wait for the current
+// stream. NCCL communications run on ncclStreams, but input tensors are
+// allocated on different streams (i.e., current streams). Communications on
+// ncclStreams cannot start before pending input tensor ops on current streams
+// finish. Otherwise, ops on two streams might read/write same tensors
+// concurrently.
+//
+// The synchronization above alone is not enough. We also need to make sure
+// input tensors are not freed before their usages on ncclStreams finish. This
+// can be achieved by calling c10::cuda::CUDACachingAllocator::recordStream,
+// which remembers the usage stream (ncclStream), creates an event on the usage
+// stream when GC attempts to free the input tensor, and delays GC until that
+// event is done.
 void syncStreams(
     const std::vector<at::Device>& devices,
     std::vector<at::cuda::CUDAEvent>& ncclEvents,
@@ -301,7 +313,7 @@ void ProcessGroupNCCL::tensorCheckHelper(
   usedDevices.reserve(input.size());
 
   auto inputNumElement = input[0].numel();
-  auto elementType = input[0].type().scalarType();
+  auto elementType = input[0].scalar_type();
 
   for (size_t i = 0; i < input.size(); ++i) {
     //  Check to make sure it's a GPU dense tensor
@@ -312,8 +324,8 @@ void ProcessGroupNCCL::tensorCheckHelper(
           "collective operations");
     }
     // Check the tensor type is identical
-    if (input[i].type().scalarType() != elementType ||
-        output[i].type().scalarType() != elementType) {
+    if (input[i].scalar_type() != elementType ||
+        output[i].scalar_type() != elementType) {
       throw std::runtime_error(
           "Expecting all GPU tensors to have identical "
           "type");
@@ -361,7 +373,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
   auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices);
 
-  // First let NCCL streams wait for THC stream
+  // First let NCCL streams wait for input tensors allocation streams
   syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
 
   // Work itself will create the CUDA events on all GPUs of tensors
@@ -378,11 +390,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
     gpuGuard.set_index(devices[i].index());
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
 
+    // Input `tensors` are created on a worker stream and used in different
+    // ncclStream. Hence, `tensors` must record the ncclStream to prevent being
+    // freed before ncclAllReduce finishes. See [Sync Streams].
+    c10::cuda::CUDACachingAllocator::recordStream(
+      tensors[i].storage().data(), ncclStream);
+
     C10D_NCCL_CHECK(ncclAllReduce(
         tensors[i].data_ptr(),
         tensors[i].data_ptr(),
         tensors[i].numel(),
-        getNcclDataType(tensors[i].type().scalarType()),
+        getNcclDataType(tensors[i].scalar_type()),
         ncclOp[opts.reduceOp],
         ncclComms[i]->getNcclComm(),
         ncclStream.stream()));
@@ -427,10 +445,16 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
     // root rank of the the GPU
     int root = opts.rootRank * tensors.size() + opts.rootTensor;
 
+    // Input `tensors` are created on worker streams and used in different
+    // ncclStreams. Hence, `tensors` must record ncclStreams to prevent being
+    // freed before ncclBcast finishes. See [Sync Streams].
+    c10::cuda::CUDACachingAllocator::recordStream(
+      tensors[i].storage().data(), ncclStream);
+
     C10D_NCCL_CHECK(ncclBcast(
         tensors[i].data_ptr(),
         tensors[i].numel(),
-        getNcclDataType(tensors[i].type().scalarType()),
+        getNcclDataType(tensors[i].scalar_type()),
         root,
         ncclComms[i]->getNcclComm(),
         ncclStream.stream()));
@@ -475,11 +499,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce(
     // root rank of the the GPU
     int root = opts.rootRank * tensors.size() + opts.rootTensor;
 
+    // Input `tensors` are created on worker streams and used in different
+    // ncclStreams. Hence, `tensors` must record ncclStreams to prevent being
+    // freed before ncclReduce finishes. See [Sync Streams].
+    c10::cuda::CUDACachingAllocator::recordStream(
+      tensors[i].storage().data(), ncclStream);
+
     C10D_NCCL_CHECK(ncclReduce(
         tensors[i].data_ptr(),
         tensors[i].data_ptr(),
         tensors[i].numel(),
-        getNcclDataType(tensors[i].type().scalarType()),
+        getNcclDataType(tensors[i].scalar_type()),
         ncclOp[opts.reduceOp],
         root,
         ncclComms[i]->getNcclComm(),
@@ -543,11 +573,21 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
 
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
 
+    // Input `inputTensors` and `flattenOutputTensors` are created on worker
+    // streams and used in different ncclStreams. Hence, `tensors` must record
+    // ncclStreams to prevent beingfreed before ncclReduce finishes.
+    // See [Sync Streams].
+    c10::cuda::CUDACachingAllocator::recordStream(
+      inputTensors[i].storage().data(), ncclStream);
+
+    c10::cuda::CUDACachingAllocator::recordStream(
+      flattenOutputTensors[i].storage().data(), ncclStream);
+
     C10D_NCCL_CHECK(ncclAllGather(
         inputTensors[i].data_ptr(),
         flattenOutputTensors[i].data_ptr(),
         inputTensors[i].numel(),
-        getNcclDataType(inputTensors[i].type().scalarType()),
+        getNcclDataType(inputTensors[i].scalar_type()),
         ncclComms[i]->getNcclComm(),
         ncclStream.stream()));
   }
@@ -559,6 +599,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
     at::cuda::CUDAStreamGuard guard(ncclStream);
     for (size_t j = 0; j < outputTensors[0].size(); ++j) {
+      // See [Sync Streams].
+      c10::cuda::CUDACachingAllocator::recordStream(
+        outputTensors[i][i].storage().data(), ncclStream);
+
       outputTensors[i][j].copy_(flattenOutputTensors[i][j], true);
     }
   }
@@ -643,10 +687,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */) {
   throw std::runtime_error("ProcessGroupNCCL does not support recv");
-}
-
-std::unordered_map<int, int> ProcessGroupNCCL::getGroupRank() {
-  throw std::runtime_error("ProcessGroupNCCL doest not support getGroupRank");
 }
 
 } // namespace c10d

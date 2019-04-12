@@ -1,8 +1,6 @@
 import math
 import torch
-from functools import reduce
-from sys import float_info
-from torch._six import inf, nan
+from torch._six import inf
 
 
 class __PrinterOptions(object):
@@ -282,7 +280,10 @@ def _str(self):
         else:
             if not has_default_dtype:
                 suffixes.append('dtype=' + str(self.dtype))
-            tensor_str = _tensor_str(self, indent)
+            if self.layout != torch.strided:
+                tensor_str = _tensor_str(self.to_dense(), indent)
+            else:
+                tensor_str = _tensor_str(self, indent)
 
     if self.layout != torch.strided:
         suffixes.append('layout=' + str(self.layout))

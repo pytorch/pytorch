@@ -45,22 +45,23 @@ libtorch_sources = [
     "torch/csrc/autograd/grad_mode.cpp",
     "torch/csrc/autograd/input_buffer.cpp",
     "torch/csrc/autograd/profiler.cpp",
+    "torch/csrc/autograd/record_function.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
     "torch/csrc/Exceptions.cpp",
     "torch/csrc/jit/autodiff.cpp",
     "torch/csrc/jit/attributes.cpp",
+    "torch/csrc/jit/argument_spec.cpp",
     "torch/csrc/jit/constants.cpp",
     "torch/csrc/jit/node_hashing.cpp",
     "torch/csrc/jit/export.cpp",
+    "torch/csrc/jit/pickler.cpp",
     "torch/csrc/jit/graph_executor.cpp",
     "torch/csrc/jit/import.cpp",
     "torch/csrc/jit/interpreter.cpp",
     "torch/csrc/jit/ir.cpp",
     "torch/csrc/jit/irparser.cpp",
     "torch/csrc/jit/netdef_converter.cpp",
-    "torch/csrc/jit/caffe2_operator.cpp",
-    "torch/csrc/jit/register_caffe2_ops.cpp",
     "torch/csrc/jit/register_c10_ops.cpp",
     "torch/csrc/jit/symbolic_script.cpp",
     "torch/csrc/jit/operator.cpp",
@@ -82,26 +83,30 @@ libtorch_sources = [
     "torch/csrc/jit/passes/lower_tuples.cpp",
     "torch/csrc/jit/passes/peephole.cpp",
     "torch/csrc/jit/passes/python_print.cpp",
+    "torch/csrc/jit/passes/quantization.cpp",
     "torch/csrc/jit/passes/remove_expands.cpp",
     "torch/csrc/jit/passes/requires_grad_analysis.cpp",
     "torch/csrc/jit/passes/shape_analysis.cpp",
-    "torch/csrc/jit/passes/specialize_undef.cpp",
+    "torch/csrc/jit/passes/specialize_autogradzero.cpp",
     "torch/csrc/jit/passes/utils/subgraph_utils.cpp",
-    "torch/csrc/jit/passes/utils/alias_tracker.cpp",
+    "torch/csrc/jit/passes/utils/memory_dag.cpp",
     "torch/csrc/jit/register_prim_ops.cpp",
     "torch/csrc/jit/register_special_ops.cpp",
+    "torch/csrc/jit/register_quantized_ops.cpp",
     "torch/csrc/jit/scope.cpp",
     "torch/csrc/jit/script/compiler.cpp",
+    "torch/csrc/api/src/jit.cpp",
     "torch/csrc/jit/script/edit_distance.cpp",
+    "torch/csrc/jit/script/logging.cpp",
     "torch/csrc/jit/script/final_returns.cpp",
     "torch/csrc/jit/script/schema_type_parser.cpp",
     "torch/csrc/jit/script/script_type_parser.cpp",
     "torch/csrc/jit/script/sugared_value.cpp",
     "torch/csrc/jit/script/schema_matching.cpp",
-    "torch/csrc/jit/script/user_type.cpp",
+    "torch/csrc/jit/script/class_type.cpp",
     "torch/csrc/jit/script/parser.cpp",
     "torch/csrc/jit/testing/file_check.cpp",
-    "torch/csrc/jit/import_method.cpp",
+    "torch/csrc/jit/import_source.cpp",
     "torch/csrc/jit/hooks_for_testing.cpp",
     "torch/csrc/jit/script/builtin_functions.cpp",
     "torch/csrc/jit/script/lexer.cpp",
@@ -117,6 +122,7 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/fuser/cpu/dynamic_library_unix.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
+    "test/cpp/jit/test.cpp",
 ]
 
 libtorch_cuda_sources = [
@@ -141,11 +147,17 @@ def add_torch_libs():
             # distributed only uses Module.cpp
             # so remove all other files and just include that
             "torch/csrc/distributed/**/*.cpp",
+            # top-level hook of extension registration lives in a separate file
+            "torch/csrc/stub.cpp",
+            # to avoid redefinitions of symbols defined in
+            # dynamic_library_unix.cpp
+            "torch/csrc/jit/fuser/cpu/dynamic_library_win.cpp",
         ],
     ) + [
         "torch/csrc/distributed/Module.cpp",
         "torch/csrc/distributed/c10d/init.cpp",
         "torch/csrc/distributed/c10d/ddp.cpp",
+        "torch/csrc/distributed/c10d/reducer.cpp",
     ] + [":generate-code=" + x for x in GENERATED_CPP])
     libtorch_python_sources = sets.to_list(sets.difference(
         sets.make(globbed_sources),
@@ -161,7 +173,6 @@ def add_torch_libs():
             "-DUSE_NCCL",
             "-DUSE_NUMPY",
             "-DUSE_SCALARS",
-            "-DTH_INDEX_BASE=0",
             "-DNO_CUDNN_DESTROY_HANDLE",
             "-DPYTORCH_ONNX_CAFFE2_BUNDLE",
             "-Wno-write-strings",
@@ -180,7 +191,7 @@ def add_torch_libs():
                 "-Wno-unknown-pragmas",
             ]
         },
-        "headers": native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp"]),
+        "headers": native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp", "test/cpp/jit/*.h"]),
         "preprocessor_flags": [
             "-Icaffe2",
             "-Icaffe2/torch/csrc/api/include",
@@ -201,6 +212,7 @@ def add_torch_libs():
             "//caffe2/aten:ATen-cpu",
             "//caffe2/caffe2:caffe2_cpu",
             "//caffe2/torch/lib/libshm:libshm",
+            "//caffe2/caffe2/quantization/server:dnnlowp_ops",
         ],
         external_deps=[
             ("nanopb", None, "protobuf-nanopb"),
@@ -225,6 +237,7 @@ def add_torch_libs():
             "//caffe2/aten:ATen",
             "//caffe2/aten:generated-aten-headers-cuda",
             "//caffe2/caffe2:caffe2_cpu",
+            "//caffe2/caffe2:caffe2_gpu",
             "//caffe2/torch/lib/libshm:libshm",
         ],
         external_deps=[
@@ -237,14 +250,14 @@ def add_torch_libs():
         **common_flags
     )
 
-    cpp_python_extension(
-        name="_C",
+    # TODO: split it into cpp and cuda parts similarly to libtorch
+    cpp_library(
+        name="_C_impl",
         srcs=libtorch_python_sources,
-        base_module="torch",
+        link_whole=True,
         deps=[
             ":libtorch_cuda",
             ":thnn",
-            ":torch-lib-headers",
             "//caffe2/torch/lib/THD:THD",
             "//caffe2/torch/lib/c10d:c10d",
             "//caffe2/torch/lib/libshm:libshm",
@@ -252,8 +265,18 @@ def add_torch_libs():
         external_deps=[
             ("numpy", None, "cpp"),
             ("pybind11", None),
+            ("python", None),
         ],
         **common_flags
+    )
+
+    cpp_python_extension(
+        name="_C",
+        srcs=[
+            "torch/csrc/stub.cpp",
+        ],
+        base_module="torch",
+        deps=[":_C_impl"],
     )
 
     return r

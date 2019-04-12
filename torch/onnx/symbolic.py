@@ -1,9 +1,6 @@
-import numbers
-
 import torch
-from torch._C import DynamicType, ListType, OptionalType
+from torch._C import ListType, OptionalType
 from torch.nn.modules.utils import _single, _pair, _triple
-from torch.nn.utils.rnn import PackedSequence
 import warnings
 
 import torch.onnx
@@ -11,9 +8,10 @@ import torch.onnx
 # ONNX symbolics
 import torch.onnx.utils
 
-from collections import Iterable
 from functools import partial, wraps
-import itertools
+
+import numpy
+import math
 
 # EDITING THIS FILE? READ THIS FIRST!
 #
@@ -28,9 +26,9 @@ import itertools
 #   transparently dispatched to their non inplace versions in
 #   'run_symbolic_function'.   See Note [Export inplace]
 #
-# ---------------------------------------------------------------------
+# ----------------------------------------------------------------------------------
 # A note on Tensor types
-# ---------------------------------------------------------------------
+# ----------------------------------------------------------------------------------
 #
 # In general, we should avoid depending on the type of Tensor Values contained
 # within the trace graph. However, this is sometimes unavoidable (due to ONNX
@@ -38,30 +36,29 @@ import itertools
 # type information, note that there are several levels of Tensor types, defined
 # in aten/src/ATen/core/jit_type.h:
 #
-# DynamicType - This is a Tensor, but we don't know anything about its
+# TensorType - This is a Tensor, but we don't know anything about its
 #               properties (e.g. scalar type, # dims, shapes).
 #               Appears as `Tensor` in graph print-outs.
-# UndefinedTensorType <: DynamicType - Denotes an undefined Tensor
-# TensorType <: DynamicType - Denotes a Tensor for which we know the scalar
+# DimensionedTensorType <: TensorType - Denotes a Tensor for which we know the scalar
 #                             type and number of dimensions, but not the concrete
 #                             shapes. For example, appears as 'Float(*, *)' in
 #                             graph print-outs. Useful accessor methods include
 #                             dim() and scalarType()
-# CompleteTensorType <: TensorType - Denotes a Tensor for which we know the
-#                                    concrete sizes in addition to the information
-#                                    contained in TensorTyper. This adds a sizes()
-#                                    method which can be used to retrieve the
-#                                    concrete sizes.
+# CompleteTensorType <: DimensionedTensorType - Denotes a Tensor for which we know the
+#                                               concrete sizes in addition to the information
+#                                               contained in TensorTyper. This adds a sizes()
+#                                               method which can be used to retrieve the
+#                                               concrete sizes.
 #
 # In general, we should prefer to rely on the least specific information possible.
 # For example, not relying on tensor properties at all is better than relying
-# on the number of dimensions (TensorType) which is better than relying on
+# on the number of dimensions (DimensionedTensorType) which is better than relying on
 # concrete shapes (CompleteTensorType). Doing so will make the export symbolics
 # more robust to different graphs.
 
-# ---------------------------------------------------------------------
+# ---------------------------------------------------------------------------------
 # Helper functions
-# ---------------------------------------------------------------------
+# ---------------------------------------------------------------------------------
 
 # Save some builtins as locals, because we'll shadown them below
 _sum = sum
@@ -72,19 +69,30 @@ def _parse_arg(value, desc):
         return value
     if desc == 'v' or not _is_value(value):
         return value
-    if value.node().kind() != 'onnx::Constant':
-        raise RuntimeError("ONNX symbolic expected a constant value in the trace")
-    tval = value.node()['value']
-    if desc == 'i':
-        return int(tval)
-    elif desc == 'f':
-        return float(tval)
-    elif desc == 't':
-        return tval
-    elif desc == 'is':
-        return [int(v) for v in tval]
-    else:
-        raise RuntimeError("Casting constants to `{}` is not implemented".format(desc))
+    if value.node().kind() == 'onnx::Constant':
+        tval = value.node()['value']
+        if desc == 'i':
+            return int(tval)
+        elif desc == 'f':
+            return float(tval)
+        elif desc == 't':
+            return tval
+        elif desc == 'is':
+            return [int(v) for v in tval]
+        else:
+            raise RuntimeError("ONNX symbolic doesn't know to interpret Constant node")
+    elif value.node().kind() == 'prim::ListConstruct':
+        if desc == 'is':
+            for v in value.node().inputs():
+                if v.node().kind() != 'onnx::Constant':
+                    raise RuntimeError("Failed to export an ONNX attribute, "
+                                       "since it's not constant, please try to make "
+                                       "things (e.g., kernel size) static if possible")
+            return [int(v.node()['value']) for v in value.node().inputs()]
+        else:
+            raise RuntimeError("ONNX symbolic doesn't know to interpret ListConstruct node")
+
+    raise RuntimeError("Unexpected node type: {}".format(value.node().kind()))
 
 
 def _maybe_get_const(value, desc):
@@ -115,7 +123,8 @@ def _unpack_list(list_value):
 def parse_args(*arg_descriptors):
     def decorator(fn):
         def wrapper(g, *args):
-            assert len(arg_descriptors) == len(args)
+            # some args may be optional, so the length may be smaller
+            assert len(arg_descriptors) >= len(args)
             args = [_parse_arg(arg, arg_desc) for arg, arg_desc in zip(args, arg_descriptors)]
             return fn(g, *args)
         # In Python 2 functools.wraps chokes on partially applied functions, so we need this as a workaround
@@ -197,16 +206,18 @@ def _try_get_scalar_type(*args):
 # and the symbolic functions should check it to determine the behavior
 # of the exporter.
 
-_default_onnx_opset_version = 10
-_export_onnx_opset_version = _default_onnx_opset_version
+
+_default_onnx_opset_version = 9
+_onnx_master_opset = 10
 _onnx_stable_opsets = [9]
+_export_onnx_opset_version = _default_onnx_opset_version
 
 
 def _set_opset_version(opset_version):
     global _export_onnx_opset_version
     if opset_version == _default_onnx_opset_version:
         return
-    if opset_version in _onnx_stable_opsets:
+    if opset_version in _onnx_stable_opsets + [_onnx_master_opset]:
         _export_onnx_opset_version = opset_version
         return
     raise ValueError("Unsupported ONNX opset version: " + str(opset_version))
@@ -382,6 +393,13 @@ def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
 
+def _slice_op(g, input, axes, starts, ends):
+    assert len(starts) == len(ends)
+    if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807:
+        return input
+    return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
+
+
 def _reduce_op_symbolic(onnx_op_name):
     def symbolic(g, self, dim=None, keepdim=None):
         if dim is None:
@@ -423,14 +441,18 @@ def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     return g.op("Gather", weight, indices)
 
 
-@parse_args('v', 'v', 'v', 'i', 'i', 'i')
+@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v')
 def embedding_bag(g,
                   embedding_matrix,
                   indices,
                   offsets,
                   scale_grad_by_freq,
                   mode,
-                  sparse):
+                  sparse,
+                  per_sample_weights):
+    if not per_sample_weights.node().mustBeNone():
+        raise RuntimeError('Unsupported: ONNX export of embedding_bag '
+                           'with per_sample_weights')
     return g.op("ATen",
                 embedding_matrix,
                 indices,
@@ -470,7 +492,7 @@ def view(g, self, size):
     if _is_value(size):
         shape = size
     else:
-        if self.isTensor():
+        if self.isCompleteTensor():
             self_sizes = self.type().sizes()
             if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
                 return g.op("Flatten", self, axis_i=1)
@@ -518,7 +540,8 @@ def select(g, self, dim, index):
         # of Gather in caffe2. We need to change this as soon as possible.
         # TODO: this breaks if index == -1
         index_val = _parse_arg(index, 'i')
-        slice_node = g.op("Slice", self, axes_i=[dim], starts_i=[index_val], ends_i=[index_val + 1])
+        slice_node = _slice_op(g, self, axes=[dim],
+                               starts=[index_val], ends=[index_val + 1])
         return g.op("Squeeze", slice_node, axes_i=[dim])
     else:
         return g.op("Gather", self, index, axis_i=dim)
@@ -541,6 +564,14 @@ def prelu(g, self, weight):
 
 def relu(g, input):
     return g.op("Relu", input)
+
+
+def ceil(g, input):
+    return g.op("Ceil", input)
+
+
+def floor(g, input):
+    return g.op("Floor", input)
 
 
 @parse_args('v', 't', 't')
@@ -568,8 +599,8 @@ def glu(g, input, dim):
     return g.op('Mul', first, g.op('Sigmoid', second))
 
 
-@parse_args('v', 'i')
-def softmax(g, input, dim):
+@parse_args('v', 'i', 'i')
+def softmax(g, input, dim, dtype=None):
     # Softmax does normalization at vector level.
     # PyTorch and ONNX use different strategies to split the input tensor into vectors.
     # Thus dim and axis have different meanings.
@@ -586,11 +617,22 @@ def softmax(g, input, dim):
     #           [0.167, 0.167, 0.167]]
     # So only when dim and axis both equal to ndim - 1 (the last dimension),
     # their semantics are equivalent.
-    if dim < 0:
-        dim = input.type().dim() + dim
-    if input.type().dim() != dim + 1:
-        return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
-    return g.op('Softmax', input, axis_i=dim)
+    # So use softmax when dim and axis both equal to ndim - 1
+    # otherwise compute softmax using a subgraph with other operators
+    if input.type().kind() == "CompleteTensorType" or input.type().kind() == "DimensionedTensorType":
+        if dim < 0:
+            dim = input.type().dim() + dim
+        if input.type().dim() == dim + 1:
+            softmax = g.op('Softmax', input, axis_i=dim)
+            if dtype:
+                softmax = g.op("Cast", softmax, to_i=scalar_type_to_onnx[dtype])
+            return softmax
+    exp = g.op('Exp', input)
+    sum = g.op('ReduceSum', exp, axes_i=[dim])
+    softmax = g.op('Div', exp, sum)
+    if dtype:
+        softmax = g.op("Cast", softmax, to_i=scalar_type_to_onnx[dtype])
+    return softmax
 
 
 @parse_args('v', 't', 'v')
@@ -600,17 +642,46 @@ def softplus(g, self, beta, threshold):
     return g.op('Softplus', self)
 
 
+def get_pool_ceil_padding(input, kernel_size, stride, padding):
+    dim = input.type().sizes()[-len(padding):]
+    ceiled_output_dim = [int(math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i]))) + 1
+                         for i in range(0, len(padding))]
+    # ensure last pooling starts inside
+    ceiled_output_dim = [ceiled_output_dim[i] - 1
+                         if (((ceiled_output_dim[i] - 1) * stride[i]) >= (dim[i] + padding[i]))
+                         else ceiled_output_dim[i]
+                         for i in range(0, len(ceiled_output_dim))]
+    padding_ceil = [0
+                    if (stride[i] == 1)
+                    else
+                    (kernel_size[i] - (dim[i] + 2 * padding[i] - ((ceiled_output_dim[i] - 1) * stride[i] + 1)))
+                    for i in range(0, len(padding))]
+    # ensure padding is not > kernel_size
+    padding_ceil = [(int(padding_ceil[i]) if padding_ceil[i] < kernel_size[i] - 1 else int(kernel_size[i] - 1))
+                    if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
+                    else
+                    int(padding_ceil[i])
+                    for i in range(0, len(padding_ceil))]
+    return padding_ceil
+
+
 @parse_args('v', 'is', 'is', 'is', 'is', 'i')
 def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode:
-        return _unimplemented("max_pool1d_with_indices", "ceil_mode")
+    if ceil_mode and input.type().kind() != "CompleteTensorType":
+        return _unimplemented("max_pool1d_with_indices", "input size not accesible")
     if set(_single(dilation)) != {1}:
         return _unimplemented("max_pool1d_with_indices", "dilation")
     if stride is None:
         stride = kernel_size
+    padding = tuple(_single(padding))
+    if ceil_mode:
+        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+        padding = padding + tuple(numpy.add(padding_ceil, padding))
+    else:
+        padding = padding * 2
     r, indices = g.op("MaxPool", input, outputs=2,
                       kernel_shape_i=_single(kernel_size),
-                      pads_i=_single(padding) * 2,
+                      pads_i=padding,
                       strides_i=_single(stride))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened.
@@ -629,22 +700,28 @@ def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
                                 kernel_shape_i=[1],
                                 strides_i=[1])
     # convert indices to have non-flattened indices values
-    s = g.op("Slice", flattened_indices, axes_i=[2], starts_i=[0], ends_i=[1])
+    s = _slice_op(g, flattened_indices, axes=[2], starts=[0], ends=[1])
     indices = sub(g, indices, s)
     return r, indices
 
 
 @parse_args('v', 'is', 'is', 'is', 'is', 'i')
 def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode:
-        return _unimplemented("max_pool2d_with_indices", "ceil_mode")
+    if ceil_mode and input.type().kind() != "CompleteTensorType":
+        return _unimplemented("max_pool2d_with_indices", "input size not accesible")
     if set(_pair(dilation)) != {1}:
         return _unimplemented("max_pool2d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
+    padding = tuple(_pair(padding))
+    if ceil_mode:
+        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+        padding = padding + tuple(numpy.add(padding_ceil, padding))
+    else:
+        padding = padding * 2
     r, indices = g.op("MaxPool", input, outputs=2,
                       kernel_shape_i=_pair(kernel_size),
-                      pads_i=_pair(padding) * 2,
+                      pads_i=padding,
                       strides_i=_pair(stride))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened
@@ -653,22 +730,28 @@ def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
                                 kernel_shape_i=[1, 1],
                                 strides_i=[1, 1])
     # convert indices to have non-flattened indices values
-    s = g.op("Slice", flattened_indices, axes_i=[2, 3], starts_i=[0, 0], ends_i=[1, 1])
+    s = _slice_op(g, flattened_indices, axes=[2, 3], starts=[0, 0], ends=[1, 1])
     indices = sub(g, indices, s)
     return r, indices
 
 
 @parse_args('v', 'is', 'is', 'is', 'is', 'i')
 def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
-    if ceil_mode:
-        return _unimplemented("max_pool3d_with_indices", "ceil_mode")
+    if ceil_mode and input.type().kind() != "CompleteTensorType":
+        return _unimplemented("max_pool3d_with_indices", "input size not accesible")
     if set(_triple(dilation)) != {1}:
         return _unimplemented("max_pool3d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
+    padding = tuple(_triple(padding))
+    if ceil_mode:
+        padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+        padding = padding + tuple(numpy.add(padding_ceil, padding))
+    else:
+        padding = padding * 2
     r, indices = g.op("MaxPool", input, outputs=2,
                       kernel_shape_i=_triple(kernel_size),
-                      pads_i=_triple(padding) * 2,
+                      pads_i=padding,
                       strides_i=_triple(stride))
     # easy but hacky way to get flattened indices values
     # to be used to convert the indices values to non-flattened
@@ -677,7 +760,7 @@ def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
                                 kernel_shape_i=[1, 1, 1],
                                 strides_i=[1, 1, 1])
     # convert indices to have non-flattened indices values
-    s = g.op("Slice", flattened_indices, axes_i=[2, 3, 4], starts_i=[0, 0, 0], ends_i=[1, 1, 1])
+    s = _slice_op(g, flattened_indices, axes=[2, 3, 4], starts=[0, 0, 0], ends=[1, 1, 1])
     indices = sub(g, indices, s)
     return r, indices
 
@@ -685,23 +768,28 @@ def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
 def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
-        if ceil_mode:
-            return _unimplemented("avg_pool2d", "ceil_mode")
+        if ceil_mode and input.type().kind() != "CompleteTensorType":
+            return _unimplemented(name, "input size not accesible")
         if not stride:
             stride = kernel_size
-
         padding = tuple(tuple_fn(padding))
+        if ceil_mode:
+            padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
         if count_include_pad:
             input = g.op("Pad", input,
                          pads_i=((0,) * 2 + padding) * 2,
                          mode_s='constant',
                          value_f=0.)
             padding = (0,) * len(padding)
-
-        return g.op("AveragePool", input,
-                    kernel_shape_i=tuple_fn(kernel_size),
-                    strides_i=tuple_fn(stride),
-                    pads_i=padding * 2)
+        if ceil_mode:
+            padding = padding + tuple(numpy.add(padding_ceil, padding))
+        else:
+            padding = padding * 2
+        output = g.op("AveragePool", input,
+                      kernel_shape_i=tuple_fn(kernel_size),
+                      strides_i=tuple_fn(stride),
+                      pads_i=padding)
+        return output
     return symbolic_fn
 
 
@@ -710,16 +798,49 @@ avg_pool2d = _avg_pool('avg_pool2d', _pair)
 avg_pool3d = _avg_pool('avg_pool3d', _triple)
 
 
-@parse_args('v', 'is')
-def adaptive_avg_pool2d(g, input, output_size):
-    assert output_size == [1, 1], "Only output_size=[1, 1] is supported"
-    return g.op("GlobalAveragePool", input)
+def _adaptive_pool(name, type, tuple_fn, fn=None):
+    @parse_args('v', 'is')
+    def symbolic_fn(g, input, output_size):
+        # _adaptive_pool is supported for cases where output_size is 1 for all dimensions,
+        # by executing a GlobalPool.
+        # It is also supported for cases where the output size is a factor of the input size.
+        # For these cases the stride and kernel size are uniform along all the indices of
+        # the same dimension, which makes it possible to export it to ONNX.
+        # for MaxPool, GlobalMaxPool does not return indices,
+        # so we try using max_poolxd_with_indices, and if it is not possible
+        # (input is not CompleteTensorType or output size not factor of input size)
+        # then we call GlobalAveragePool and return None for the indices
+        if output_size == [1] * len(output_size) and type == "AveragePool":
+            return g.op("GlobalAveragePool", input)
+        if input.type().kind() != "CompleteTensorType":
+            if output_size == [1] * len(output_size):
+                return g.op("GlobalMaxPool", input), None
+            return _unimplemented(name, 'input size not accesible')
+        dim = input.type().sizes()[2:]
+        # verify if output size % input size = 0 for all dim
+        mod = [dim[i] % output_size[i] for i in range(0, len(dim))]
+        if mod != [0] * len(mod):
+            if output_size == [1] * len(output_size):
+                return g.op("GlobalMaxPool", input), None
+            return _unimplemented(name, 'output size that are not factor of input size')
+        k = [int(dim[i] / output_size[i]) for i in range(0, len(dim))]
+        # call max_poolxd_with_indices to get indices in the output
+        if type == "MaxPool":
+            return fn(g, input, k, k, (0,) * len(dim), (1,) * len(dim), False)
+        output = g.op(type, input,
+                      kernel_shape_i=tuple_fn(k),
+                      strides_i=tuple_fn(k))
+        return output
+    return symbolic_fn
 
 
-@parse_args('v', 'is')
-def adaptive_max_pool2d(g, input, output_size):
-    assert output_size == [1, 1], "Only output_size=[1, 1] is supported"
-    return g.op("GlobalMaxPool", input), None
+adaptive_avg_pool1d = _adaptive_pool('adaptive_avg_pool1d', "AveragePool", _single)
+adaptive_avg_pool2d = _adaptive_pool('adaptive_avg_pool2d', "AveragePool", _pair)
+adaptive_avg_pool3d = _adaptive_pool('adaptive_avg_pool3d', "AveragePool", _triple)
+
+adaptive_max_pool1d = _adaptive_pool('adaptive_max_pool1d', "MaxPool", _single, max_pool1d_with_indices)
+adaptive_max_pool2d = _adaptive_pool('adaptive_max_pool2d', "MaxPool", _pair, max_pool2d_with_indices)
+adaptive_max_pool3d = _adaptive_pool('adaptive_max_pool3d', "MaxPool", _triple, max_pool3d_with_indices)
 
 
 @parse_args('v', 'is', 'f')
@@ -835,18 +956,21 @@ def le(g, input, other):
 
 
 def where(g, condition, self, other):
-    return g.op("ATen", condition, self, other, operator_s="where")
+    return g.op("Where", condition, self, other)
 
 
-@parse_args('v', 'i')
-def log_softmax(g, input, dim=None):
+@parse_args('v', 'i', 'i')
+def log_softmax(g, input, dim=None, dtype=None):
     # PyTorch dim and ONNX axis have different meanings.
     # See Softmax comment for details.
     if dim < 0:
         dim = input.type().dim() + dim
     if input.type().dim() != dim + 1:
         return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
-    return g.op("LogSoftmax", input, axis_i=dim)
+    return_op = g.op("LogSoftmax", input, axis_i=dim)
+    if dtype:
+        return_op = g.op("Cast", return_op, to_i=scalar_type_to_onnx[dtype])
+    return return_op
 
 
 @parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is', 'i', 'i', 'i', 'i')
@@ -971,10 +1095,10 @@ def index_put(g, self, indices_list_value, values, accumulate):
 
 
 def type_as(g, self, other):
-    if self.isTensor() and other.isTensor() and self.type().scalarType() == other.type().scalarType():
+    if self.isCompleteTensor() and other.isCompleteTensor() and self.type().scalarType() == other.type().scalarType():
         return self
 
-    if other.isTensor():
+    if other.isCompleteTensor():
         other_type_name = other.type().scalarType()
         return g.op("Cast", self, to_i=cast_pytorch_to_onnx[other_type_name])
     else:
@@ -1190,27 +1314,27 @@ scalar_type_to_onnx = [
 def zeros(g, sizes, dtype, layout, device):
     # NOTE: no way to set device and layout in ONNX, so we ignore it
     return g.op("ConstantOfShape", sizes,
-                value_t=torch.tensor(0, dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v')
 def zeros_like(g, input, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor(0, dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([0], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v')
 def ones(g, sizes, dtype, layout, device):
     return g.op("ConstantOfShape", sizes,
-                value_t=torch.tensor(1, dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v')
 def ones_like(g, input, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor(1, dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([1], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 def full(g, sizes, value, dtype, layout, device):
@@ -1221,14 +1345,14 @@ def full(g, sizes, value, dtype, layout, device):
     else:
         dtype = _get_const(dtype, 'i', 'dtype')
         return g.op("ConstantOfShape", sizes,
-                    value_t=torch.tensor(const_value, dtype=scalar_type_to_pytorch_type[dtype]))
+                    value_t=torch.tensor([const_value], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'f', 'i', 'v', 'v')
 def full_like(g, input, fill_value, dtype, layout, device):
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
-                value_t=torch.tensor(fill_value, dtype=scalar_type_to_pytorch_type[dtype]))
+                value_t=torch.tensor([fill_value], dtype=scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'v', 'v', 'v', 'i')
@@ -1245,7 +1369,7 @@ def slice(g, self, dim, start, end, step):
         start = _parse_arg(start, 'i')
         end = _parse_arg(end, 'i')
         dim = _parse_arg(dim, 'i')
-        return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
+        return _slice_op(g, self, axes=[dim], starts=[start], ends=[end])
 
 
 @parse_args('v', 'f', 'f')
@@ -1300,7 +1424,7 @@ def repeat(g, self, repeats):
         repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
     const_repeats = _maybe_get_const(repeats, 'is')
 
-    if self.isTensor() and not _is_value(const_repeats):
+    if self.isCompleteTensor() and not _is_value(const_repeats):
         sizes = self.type().sizes()
         diff_dims = len(const_repeats) - len(sizes)
         if diff_dims > 0:
@@ -1513,10 +1637,10 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
     # PackPadded operators cannot be optimized out.
     if batch_first:
         input = g.op('Transpose', input, perm_i=[1, 0, 2])
-    if not lengths.type().isSubtypeOf(torch._C.DynamicType.get()):
+    if not lengths.type().isSubtypeOf(torch._C.TensorType.get()):
         raise RuntimeError("Lengths must be a Tensor for ONNX export")
     # We know it's a TensorType so this check is now safe.
-    # It's really only necessary beacuse those operators expand to something that
+    # It's really only necessary because those operators expand to something that
     # only works with int32 types in Caffe2...
     if lengths.type().scalarType() != 'Int':
         lengths = _cast_Int(g, lengths, False)
@@ -1584,4 +1708,36 @@ def flatten(g, input, start_dim, end_dim):
 
 @parse_args('v')
 def nonzero(g, input):
-    return g.op('NonZero', input)
+    return t(g, g.op('NonZero', input))
+
+
+@parse_args('v')
+def isnan(g, input):
+    output = g.op('IsNaN', input)
+    output = _cast_func_template(cast_pytorch_to_onnx['Byte'], g, output, None)
+    return output
+
+
+@parse_args('v', 'i', 'i', 'i')
+def narrow(g, input, dim, start, length):
+    return _slice_op(g, input, axes=[dim], starts=[start], ends=[start + length])
+
+
+def argmax(g, input, dim, keepdim):
+    if dim.node().mustBeNone():
+        flattened = reshape(g, input, (-1,))
+        return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False)
+    else:
+        dim = _parse_arg(dim, 'i')
+        keepdim = _parse_arg(keepdim, 'i')
+        return g.op('ArgMax', input, axis_i=dim, keepdims_i=keepdim)
+
+
+def argmin(g, input, dim, keepdim):
+    if dim.node().mustBeNone():
+        flattened = reshape(g, input, (-1,))
+        return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False)
+    else:
+        dim = _parse_arg(dim, 'i')
+        keepdim = _parse_arg(keepdim, 'i')
+        return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)

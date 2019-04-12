@@ -3,12 +3,14 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/anomaly_mode.h>
 
 #include <ATen/Tensor.h>
 
 #include <cstdint>
 #include <list>
 #include <memory>
+#include <sstream>
 
 namespace torch { namespace autograd {
 
@@ -39,12 +41,6 @@ Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
     return Variable();
   }
 
-  if (saved_version_ != version_counter_.current_version()) {
-    throw std::runtime_error(
-        "one of the variables needed for gradient computation has been "
-        "modified by an inplace operation");
-  }
-
   auto grad_fn = grad_fn_;
   if (has_grad_fn_ && !grad_fn) {
     if (!saved_for) {
@@ -53,6 +49,30 @@ Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
       throw std::runtime_error("No grad_fn for non-leaf saved variable");
     }
     grad_fn = std::move(saved_for);
+  }
+
+  if (saved_version_ != version_counter_.current_version()) {
+    std::stringstream message;
+    message << "one of the variables needed for gradient computation has been "
+        "modified by an inplace operation: [" << data_.type().toString() << " "
+        << data_.sizes() << "]";
+    if (grad_fn) {
+        message << ", which is output " << output_nr_
+            << " of " << grad_fn->name() << ",";
+    }
+    message << " is at version " << version_counter_.current_version()
+        << "; expected version " << saved_version_ << " instead.";
+    if (!AnomalyMode::is_enabled()) {
+        message << " Hint: enable anomaly detection to find the operation "
+            "that failed to compute its gradient, with torch.autograd."
+            "set_detect_anomaly(True).";
+    }
+    else {
+        message << " Hint: the backtrace further above shows the operation "
+            "that failed to compute its gradient. The variable in question "
+            "was changed in there or anywhere later. Good luck!";
+    }
+    throw std::runtime_error(message.str());
   }
 
   // NB: saved views are unpacked as normal Variables (not views) even though

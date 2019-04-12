@@ -4,7 +4,6 @@
 #include <c10/core/Backend.h>
 #include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
-#include <c10/core/ScalarTypeUtils.h>
 #include <c10/core/Device.h>
 
 #include <c10/util/Optional.h>
@@ -101,11 +100,13 @@ struct C10_API TensorOptions {
   TensorOptions()
     : requires_grad_(false)
     , is_variable_(false)
+    , pinned_memory_(false)
     , has_device_(false)
     , has_dtype_(false)
     , has_layout_(false)
     , has_requires_grad_(false)
     , has_is_variable_(false)
+    , has_pinned_memory_(false)
     {}
 
   /// Constructs a `TensorOptions` object with the given layout.
@@ -133,11 +134,6 @@ struct C10_API TensorOptions {
             typename = c10::guts::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
    /* implicit */ TensorOptions(Args&&... args)
     : TensorOptions(Device(std::forward<Args>(args)...)) {}
-
-  /// Constructs a `TensorOptions` object from a backend, forwarded to the
-  /// `Device` constructor.
-  /* implicit */ TensorOptions(Backend backend)
-      : TensorOptions(Device(backendToDeviceType(backend))) {}
 
   /// Constructs a `TensorOptions` object with the given dtype.
   /* implicit */ TensorOptions(caffe2::TypeMeta dtype) : TensorOptions() {
@@ -238,6 +234,14 @@ struct C10_API TensorOptions {
     return r;
   }
 
+
+  /// Sets the `pinned_memory` property on the `TensorOptions`.
+  C10_NODISCARD TensorOptions pinned_memory(c10::optional<bool> pinned_memory) const noexcept {
+    TensorOptions r = *this;
+    r.set_pinned_memory(pinned_memory);
+    return r;
+  }
+
   /// Returns the device of the `TensorOptions`.
   Device device() const noexcept {
     return has_device_ ? device_ : Device(kCPU);
@@ -318,22 +322,81 @@ struct C10_API TensorOptions {
     return has_is_variable_;
   }
 
+
+  /// Returns the `pinned_memory` property of the `TensorOptions`.
+  bool pinned_memory() const noexcept {
+    return has_pinned_memory_ ? pinned_memory_ : false;
+  }
+
+  /// Returns whether the `pinned_memory` is specified.
+  bool has_pinned_memory() const noexcept {
+    return has_pinned_memory_;
+  }
+
+
   /// Returns the `is_variable` property of the `TensorOptions`, or
   /// `c10::nullopt` if `is_variable` is not specified.
   c10::optional<bool> is_variable_opt() const noexcept {
     return has_is_variable_ ? c10::make_optional(is_variable_) : c10::nullopt;
   }
 
+
+  /// Returns the `pinned_memory` property of the `TensorOptions`, or
+  /// `c10::nullopt` if `pinned_memory` is not specified.
+  c10::optional<bool> pinned_memory_opt() const noexcept {
+    return has_pinned_memory_ ? c10::make_optional(pinned_memory_) : c10::nullopt;
+  }
+
   // Resolves the ATen backend specified by the current construction axes.
   Backend backend() const noexcept {
-    Backend backend = deviceTypeToBackend(device().type());
+    return at::tensorTypeIdToBackend(computeTensorTypeId());
+  }
+
+  inline TensorTypeId computeTensorTypeId() const {
     switch (layout()) {
-      case kStrided:
-        return backend;
-      case kSparse:
-        return toSparse(backend);
+      case Layout::Strided:
+        switch (device().type()) {
+          case DeviceType::CPU:
+            return CPUTensorId();
+          case DeviceType::CUDA:
+            return CUDATensorId();
+          case DeviceType::MKLDNN:
+            return MKLDNNTensorId();
+          case DeviceType::OPENGL:
+            return OpenGLTensorId();
+          case DeviceType::OPENCL:
+            return OpenCLTensorId();
+          case DeviceType::IDEEP:
+            return IDEEPTensorId();
+          case DeviceType::HIP:
+            return HIPTensorId();
+          case DeviceType::MSNPU:
+            return MSNPUTensorId();
+          case DeviceType::XLA:
+            return XLATensorId();
+          default:
+            AT_ERROR("Unsupported device type for dense layout: ", device().type());
+        }
+      case Layout::Sparse:
+        switch (device().type()) {
+          case DeviceType::CPU:
+            return SparseCPUTensorId();
+          case DeviceType::CUDA:
+            return SparseCUDATensorId();
+          case DeviceType::HIP:
+            return SparseHIPTensorId();
+          default:
+            AT_ERROR("Unsupported device type for sparse layout: ", device().type());
+        }
+      case Layout::Mkldnn:
+        switch (device().type()) {
+          case DeviceType::CPU:
+            return MkldnnCPUTensorId();
+          default:
+            AT_ERROR("Unsupported device type for mkldnn layout: ", device().type());
+        }
       default:
-        return backend;
+        AT_ERROR("Unsupported layout: ", layout());
     }
   }
 
@@ -411,6 +474,16 @@ struct C10_API TensorOptions {
     }
   }
 
+  /// Mutably set the `pinned_memory` property of `TensorOptions`.
+  void set_pinned_memory(c10::optional<bool> pinned_memory) & noexcept {
+    if (pinned_memory) {
+      pinned_memory_ = *pinned_memory;
+      has_pinned_memory_ = true;
+    } else {
+      has_pinned_memory_ = false;
+    }
+  }
+
   // WARNING: If you edit TensorOptions to add more options, you
   // must adjust the implementation of Tensor::options
 
@@ -426,12 +499,15 @@ struct C10_API TensorOptions {
 
   bool requires_grad_     : 1;
   bool is_variable_       : 1;
+  bool pinned_memory_     : 1;
+
 
   bool has_device_        : 1;
   bool has_dtype_         : 1;
   bool has_layout_        : 1;
   bool has_requires_grad_ : 1;
   bool has_is_variable_   : 1;
+  bool has_pinned_memory_ : 1;
 };
 
 // We should aspire to fit in one machine-size word; but a size greater than two
@@ -492,44 +568,7 @@ inline TensorOptions dtype() {
 // TensorOptions.  WARNING: If you do this, you need to fix the calls
 // to computeTensorTypeId in caffe2/tensor.h
 inline TensorTypeId computeTensorTypeId(TensorOptions options) {
-  switch (options.layout()) {
-    case Layout::Strided:
-      switch (options.device().type()) {
-        case DeviceType::CPU:
-          return CPUTensorId();
-        case DeviceType::CUDA:
-          return CUDATensorId();
-        case DeviceType::MKLDNN:
-          return MKLDNNTensorId();
-        case DeviceType::OPENGL:
-          return OpenGLTensorId();
-        case DeviceType::OPENCL:
-          return OpenCLTensorId();
-        case DeviceType::IDEEP:
-          return IDEEPTensorId();
-        case DeviceType::HIP:
-          return HIPTensorId();
-        case DeviceType::MSNPU:
-          return MSNPUTensorId();
-        case DeviceType::XLA:
-          return XLATensorId();
-        default:
-          AT_ERROR("Unsupported device type for dense layout: ", options.device().type());
-      }
-    case Layout::Sparse:
-      switch (options.device().type()) {
-        case DeviceType::CPU:
-          return SparseCPUTensorId();
-        case DeviceType::CUDA:
-          return SparseCUDATensorId();
-        case DeviceType::HIP:
-          return SparseHIPTensorId();
-        default:
-          AT_ERROR("Unsupported device type for sparse layout: ", options.device().type());
-      }
-    default:
-      AT_ERROR("Unsupported layout: ", options.layout());
-  }
+  return options.computeTensorTypeId();
 }
 
 inline DeviceType computeDeviceType(TensorTypeId tid) {
@@ -559,6 +598,8 @@ inline DeviceType computeDeviceType(TensorTypeId tid) {
     return DeviceType::CUDA;
   } else if (tid == SparseHIPTensorId()) {
     return DeviceType::HIP;
+  } else if (tid == MkldnnCPUTensorId()) {
+    return DeviceType::CPU;
   } else {
     AT_ASSERTM(false, "Unknown TensorTypeId: ", tid);
   }

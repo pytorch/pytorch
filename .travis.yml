@@ -15,12 +15,11 @@ matrix:
       - name: "Ensure consistent CircleCI YAML"
         python: "3.6"
         dist: xenial
-        install:
-          - sudo add-apt-repository universe
-          - sudo apt update
-          - sudo apt install graphviz
-          - pip3 install pygraphviz
         script: cd .circleci && ./ensure-consistency.py
+      - name: "Ensure no tabs"
+        python: "2.7"
+        script:
+          - (! git grep -I -l $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above files have tabs; please convert them to spaces"; false))
       - name: "Python 2.7 Lint"
         python: "2.7"
         install: pip install flake8
@@ -29,7 +28,11 @@ matrix:
         python: "3.7"
         dist: xenial    # required for Python 3.7 (travis-ci/travis-ci#9069)
         sudo: required  # required for Python 3.7 (travis-ci/travis-ci#9069)
-        install: pip install flake8
+        install:
+          - pip install flake8 flake8-mypy flake8-comprehensions flake8-pyi mccabe pycodestyle pyflakes
+          # Apparently Facebook runs master of this one
+          # https://github.com/PyCQA/flake8-bugbear/issues/53
+          - pip install git+https://github.com/PyCQA/flake8-bugbear.git@d9444713a51a9fb6ee8cd2d88fca85e9ff0c2d58
         script: flake8
       - name: "MyPy typecheck"
         python: "3.6"
@@ -48,3 +51,4 @@ matrix:
 branches:
   only:
   - master
+  - /gh\/.*\/base/

@@ -102,7 +102,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId(), false);
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId());
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -132,15 +132,15 @@ Tensor& empty_out(Tensor& result, IntArrayRef size) {
 // specialized operators for each datatype.
 // TODO: remove when we have Type support in the IR
 
-#define DEFINE_CAST_OP(_1, n, _2)                                \
-  Tensor _cast_##n(const Tensor& self, bool non_blocking) {      \
-    auto& target_type = self.type().toScalarType(ScalarType::n); \
-    if (self.type() == target_type)                              \
-      return self;                                               \
-    return target_type.copy(self, non_blocking);                 \
+#define DEFINE_CAST_OP(_1, n, _2)                                         \
+  Tensor _cast_##n(const Tensor& self, bool non_blocking) {               \
+    auto& target_type = self.dispatch_type().toScalarType(ScalarType::n); \
+    if (self.dispatch_type() == target_type)                              \
+      return self;                                                        \
+    return target_type.copy(self, non_blocking);                          \
   }
 
-AT_FORALL_SCALAR_TYPES(DEFINE_CAST_OP)
+AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 
@@ -183,7 +183,7 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
-  AT_DISPATCH_ALL_TYPES(result.type(), "eye", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "eye", [&]() -> void {
     scalar_t* result_data = result.data<scalar_t>();
     for(int64_t i = 0; i < sz; i++) {
       result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
@@ -452,7 +452,7 @@ Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
   AT_CHECK(n >= 0, "n must be non-negative, got", n);
   result.resize_({n});
   auto gen = get_generator(generator);
-  AT_DISPATCH_ALL_TYPES(result.type(), "randperm", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "randperm", [&]() -> void {
     randperm_cpu<scalar_t>(result, n, gen);
   });
 
@@ -500,7 +500,7 @@ Tensor tril_indices_cpu(
   //
   // 3. sequential RAM + transpose: create an n X 2 Tensor, fill the Tensor
   //    sequentially, and then transpose it.
-  AT_DISPATCH_ALL_TYPES(result.type(), "tril_indices", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tril_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data<scalar_t>();
     int64_t i = 0;
@@ -533,7 +533,7 @@ Tensor triu_indices_cpu(
   // create an empty Tensor with correct size
   auto result = at::empty({2, triu_size}, options);
 
-  AT_DISPATCH_ALL_TYPES(result.type(), "triu_indices", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data<scalar_t>();
     int64_t i = 0;
@@ -704,7 +704,7 @@ template <typename T>
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
   AT_ASSERT(result.is_contiguous());
-  AT_DISPATCH_ALL_TYPES(result.type(), "tensor_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tensor_cpu", [&] {
     std::copy(values.begin(), values.end(), result.template data<scalar_t>());
   });
   return result;
@@ -724,7 +724,7 @@ Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
       return tensor_cpu(values, options);                           \
     }                                                               \
   }
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
+AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(TENSOR)
 #undef TENSOR
 } // namespace native
 } // namespace at

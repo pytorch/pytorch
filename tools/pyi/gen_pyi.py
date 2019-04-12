@@ -1,11 +1,7 @@
 from __future__ import print_function
-import multiprocessing
-import sys
 import os
-import inspect
 import collections
 import yaml
-import types
 import re
 import argparse
 
@@ -76,6 +72,7 @@ blacklist = [
     'tensordot',
     'norm',
     'split',
+    'unique_consecutive',
     # These are handled specially by python_arg_parser.cpp
     'add',
     'add_',

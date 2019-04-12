@@ -112,7 +112,7 @@ void CUDAContext::CopyBytesSync(
   // This emulates Caffe2 original behavior where sync copy doesn't change the
   // device. It's probably better for clarity to switch to the target device
   // explicitly here, but in the worst case CUDA would sync for us.
-  // TODO: change it to DeviceGuard
+  // TODO: change it to CUDAGuard
   CUDAContext context(-1); // take current device
   CUDA_ENFORCE(cudaMemcpyAsync(
       dst, src, nbytes, cudaMemcpyDefault, context.cuda_stream()));
@@ -212,7 +212,7 @@ static void Caffe2InitializeCuda() {
       "). Increase that and recompile.");
 
   for (DeviceIndex i = 0; i < NumCudaDevices(); ++i) {
-    DeviceGuard g(i);
+    CUDAGuard g(i);
     // Enable peer access.
     const int peer_group = i / CAFFE2_CUDA_MAX_PEER_SIZE;
     const int peer_start = peer_group * CAFFE2_CUDA_MAX_PEER_SIZE;
@@ -485,14 +485,18 @@ struct DefaultCUDAAllocator final : public at::Allocator {
     }
     switch (g_cuda_memory_pool_type) {
       case CudaMemoryPoolType::NONE:
-        CUDA_ENFORCE(cudaMalloc(&ptr, nbytes));
+        if (nbytes != 0) {
+          CUDA_ENFORCE(cudaMalloc(&ptr, nbytes));
+        }
         if (FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
           g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         }
         return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
       case CudaMemoryPoolType::CUB:
-        CUDA_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
+        if (nbytes != 0) {
+          CUDA_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
+        }
         g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         VLOG(2) << "CUB allocating pointer " << ptr << " on device "
                 << CaffeCudaGetDevice();

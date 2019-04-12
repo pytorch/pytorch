@@ -40,7 +40,6 @@ public:
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
 
-  IntArrayRef sizes() const override;
   IntArrayRef strides() const override;
   bool is_contiguous() const override;
   int64_t stride(int64_t d) const override;
@@ -184,8 +183,12 @@ public:
   // make it happen
   void set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values);
 
-  // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
-  // because it is unique for each Variable.
+  // NOTE: `shallow_copy_and_detach()` does not copy the following TensorImpl fields:
+  // 1. the AutogradMeta pointer, because it is unique for each Variable.
+  // 2. the version counter, because although it lives in TensorImpl, the version counter is managed
+  // by autograd, and the call sites of `shallow_copy_and_detach()` (from autograd) should decide what
+  // the version counter should be for each new TensorImpl. See NOTE [ Version Counter Sharing ] for details.
+  //
   // NOTE: We don't set `allow_tensor_metadata_change_` to false here, because there are call sites
   // to this function that need to change the shallow copy's size or storage afterwards, and setting
   // `allow_tensor_metadata_change_` to false would prevent those changes from happening and is
@@ -206,41 +209,13 @@ public:
     impl->dense_dim_ = dense_dim();
     impl->indices_ = indices();
     impl->values_ = values();
+    impl->device_opt_ = device();
     impl->coalesced_ = coalesced();
     impl->refresh_numel();
     return impl;
   }
-
-  // NOTE: `shallow_copy_from()` does not copy the AutogradMeta pointer
-  // because it is unique for each Variable.
-  virtual void shallow_copy_from(c10::intrusive_ptr<TensorImpl> impl) override {
-    AT_ASSERT(impl->is_sparse());
-    auto sparse_impl = static_cast<SparseTensorImpl*>(impl.get());
-    type_id_ = sparse_impl->type_id();
-    data_type_ = sparse_impl->dtype();
-
-    // TensorImpl general fields
-    // Note that these fields are not used in sparse tensor code, and we copy them here only for completeness.
-    sizes_ = sparse_impl->sizes_;
-    strides_ = sparse_impl->strides_;
-    storage_offset_ = sparse_impl->storage_offset_;
-    is_contiguous_ = sparse_impl->is_contiguous_;
-    is_wrapped_number_ = sparse_impl->is_wrapped_number_;
-    reserved_ = sparse_impl->reserved_;
-
-    // Sparse-specific fields
-    sparse_dim_ = sparse_impl->sparse_dim();
-    dense_dim_ = sparse_impl->dense_dim();
-    indices_ = sparse_impl->indices();
-    values_ = sparse_impl->values();
-    coalesced_ = sparse_impl->coalesced();
-    refresh_numel();
-  }
- private:
-  int64_t get_device_slow() const override {
-    return values_.get_device();
-  }
-
+private:
+    explicit SparseTensorImpl(at::TensorTypeId, const caffe2::TypeMeta&, at::Tensor indices, at::Tensor values);
 };
 
 } // namespace at

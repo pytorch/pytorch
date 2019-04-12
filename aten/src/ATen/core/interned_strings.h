@@ -10,7 +10,7 @@
 
 namespace c10 {
 
-#if !C10_MOBILE
+#ifndef C10_MOBILE
 #define FORALL_NS_SYMBOLS(_)       \
   _(namespaces, prim)              \
   _(namespaces, aten)              \
@@ -18,13 +18,13 @@ namespace c10 {
   _(namespaces, attr)              \
   _(namespaces, scope)             \
   _(namespaces, user)              \
+  _(namespaces, _caffe2)           \
   _(namespaces, namespaces)        \
   _(prim, Assign)                  \
   _(prim, BroadcastingChunk)       \
   _(prim, BroadcastSizes)          \
   _(prim, Constant)                \
   _(prim, ChunkSizes)              \
-  _(prim, None)                    \
   _(prim, Drop)                    \
   _(prim, Eval)                    \
   _(prim, Expand) /* onnx */       \
@@ -46,7 +46,8 @@ namespace c10 {
   _(prim, Reverse)                 \
   _(prim, Return)                  \
   _(prim, Store)                   \
-  _(prim, Undefined)               \
+  _(prim, AutogradZero)            \
+  _(prim, AutogradAnyNonZero)      \
   _(prim, Starred)                 \
   _(prim, TupleConstruct)          \
   _(prim, TupleUnpack)             \
@@ -56,6 +57,7 @@ namespace c10 {
   _(prim, ListUnpack)              \
   _(prim, DictConstruct)           \
   _(prim, DictIndex)               \
+  _(prim, StringIndex)             \
   _(prim, NumToTensor)             \
   _(prim, ImplicitTensorToNum)     \
   _(prim, Bool)                    \
@@ -67,13 +69,14 @@ namespace c10 {
   _(prim, requires_grad)           \
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
-  _(prim, AnyDefined)              \
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
   _(prim, MMTreeReduce)            \
   _(prim, MMBatchSide)             \
   _(prim, min)                     \
   _(prim, max)                     \
+  _(prim, abs)                     \
+  _(prim, rangelist)               \
   _(aten, _grad_sum_to_size)       \
   _(aten, _ncf_unsqueeze)          \
   _(aten, warn)                    \
@@ -83,21 +86,42 @@ namespace c10 {
   _(prim, fork)                    \
   _(prim, RaiseException)          \
   _(prim, Function)                \
-  _(prim, CreateUserObject)        \
+  _(prim, CreateObject)            \
   _(prim, SetAttr)                 \
   _(prim, GetAttr)                 \
+  _(prim, AddStatValue)            \
+  _(prim, TimePoint)               \
   _(aten, append)                  \
+  _(aten, item)                    \
   _(aten, format)                  \
   _(aten, __not__)                 \
   _(aten, __is__)                  \
   _(aten, __isnot__)               \
   _(aten, copy_)                   \
+  _(aten, t_)                      \
+  _(aten, addbmm_)                 \
+  _(aten, addcdiv_)                \
+  _(aten, addcmul_)                \
+  _(aten, addmv_)                  \
+  _(aten, addr_)                   \
+  _(aten, baddbmm_)                \
+  _(aten, ge_)                     \
+  _(aten, gt_)                     \
+  _(aten, le_)                     \
+  _(aten, lerp_)                   \
+  _(aten, lt_)                     \
+  _(aten, ne_)                     \
+  _(aten, transpose_)              \
+  _(aten, unsqueeze_)              \
   _(aten, _set_item)               \
+  _(aten, set_)                    \
   _(aten, index_put_)              \
   _(aten, device)                  \
+  _(aten, hash)                    \
   _(aten, len)                     \
   _(aten, list)                    \
   _(aten, wait)                    \
+  _(aten, ord)                     \
   _(prim, unchecked_unwrap_optional)\
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
@@ -165,6 +189,7 @@ namespace c10 {
   _(namespaces, attr)              \
   _(namespaces, scope)             \
   _(namespaces, user)              \
+  _(namespaces, _caffe2)           \
   _(namespaces, namespaces)
 #endif
 
@@ -232,6 +257,7 @@ struct CAFFE2_API Symbol {
   static Symbol onnx(const std::string & s);
   static Symbol prim(const std::string & s);
   static Symbol user(const std::string & s);
+  static Symbol caffe2(const std::string & s);
   // TODO: eliminate me
   static Symbol scope(const std::string & s);
 
@@ -240,6 +266,7 @@ struct CAFFE2_API Symbol {
   bool is_prim() const;
   bool is_onnx() const;
   bool is_user() const;
+  bool is_caffe2() const;
 
   // So we can switch on this
   constexpr operator unique_t() const {
@@ -299,11 +326,13 @@ inline Symbol Symbol::onnx(const std::string & s)  { return Symbol::fromQualStri
 inline Symbol Symbol::prim(const std::string & s)  { return Symbol::fromQualString("prim::" + s); }
 inline Symbol Symbol::scope(const std::string & s) { return Symbol::fromQualString("scope::" + s); }
 inline Symbol Symbol::user(const std::string & s) { return Symbol::fromQualString("user::" + s); }
+inline Symbol Symbol::caffe2(const std::string & s) { return Symbol::fromQualString("_caffe2::" + s); }
 inline bool Symbol::is_attr() const { return ns() == namespaces::attr; }
 inline bool Symbol::is_aten() const { return ns() == namespaces::aten; }
 inline bool Symbol::is_prim() const { return ns() == namespaces::prim; }
 inline bool Symbol::is_onnx() const { return ns() == namespaces::onnx; }
 inline bool Symbol::is_user() const { return ns() == namespaces::user; }
+inline bool Symbol::is_caffe2() const { return ns() == namespaces::_caffe2; }
 
 } // namespace c10
 
