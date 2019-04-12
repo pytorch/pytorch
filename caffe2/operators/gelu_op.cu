@@ -142,17 +142,7 @@ bool GeluGradientFunctor<CUDAContext>::Forward(
   return true;
 }
 
-REGISTER_CUDA_OPERATOR(
-    Gelu,
-    UnaryElementwiseWithArgsOp<
-        TensorTypes<float>,
-        CUDAContext,
-        GeluFunctor<CUDAContext>>);
-REGISTER_CUDA_OPERATOR(
-    GeluGradient,
-    BinaryElementwiseWithArgsOp<
-        TensorTypes<float>,
-        CUDAContext,
-        GeluGradientFunctor<CUDAContext>>);
+REGISTER_CUDA_OPERATOR(Gelu, GeluOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(GeluGradient, GeluGradientOp<CUDAContext>);
 
 } // namespace caffe2
