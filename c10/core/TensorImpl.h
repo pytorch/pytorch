@@ -138,6 +138,61 @@ struct C10_API AutogradMetaInterface {
   virtual ~AutogradMetaInterface();
 };
 
+// NOTE [ Version Counter Sharing ]
+//
+// Every Tensor has a version counter. Version counters are incremented whenever the
+// data or size of a tensor changes through in-place Variable operations. Version
+// counters are used to detect modifications to saved variables which would result in
+// incorrect gradient calculations. Version counters may be shared between Variables:
+//
+// 1. A view shares the version counter of the base Variable,
+// 2. `x.detach()` shares the version counter of `x`,
+// 3. Unpacked saved variables share the version counter of the source.
+//
+// Version counters are not shared in these scenarios:
+//
+// 1. When we replace a `Variable`'s underlying `Tensor` by calling `set_data(...)`,
+// 2. `x.data` does not share the version counter of `x`. (See discussion at
+// https://github.com/pytorch/pytorch/issues/5396)
+//
+// Question: Why do we put the version counter in TensorImpl instead of AutogradMeta?
+//
+// Answer: After the Variable/Tensor merge, a tensor will not have AutogradMeta when
+// its `requires_grad_` is false, but when we use this tensor in the forward pass of
+// a function that requires saving this tensor for backward, we need to keep track of
+// this tensor's version to make sure it's always valid in the autograd graph.
+//
+// To achieve this goal, we put the version counter in TensorImpl instead of AutogradMeta,
+// and have it always be available. This allows us to have the optimization of not
+// carrying AutogradMeta when a tensor doesn't require gradient.
+//
+// A hypothetical alternative way to achieve this goal is to initialize AutogradMeta and
+// create the version counter for the non-requires-grad tensor only when it's saved for
+// backward. However, since saving a tensor for backward happens in the forward pass, and
+// our invariant is that forward pass needs to be thread-safe, lazy-initializing AutogradMeta
+// when saving a tensor can introduce race conditions when we are running the forward
+// pass in multi-thread scenarios, thus making the forward pass not thread-safe anymore,
+// which breaks the invariant.
+struct C10_API VariableVersion {
+ public:
+  // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
+  // leaves it in a persistently undefined state. See
+  // https://cplusplus.github.io/LWG/issue2334.
+  VariableVersion(uint32_t version = 0)
+      : version_block_(std::make_shared<std::atomic<uint32_t>>(version)) {}
+
+  void bump() noexcept {
+    version_block_->fetch_add(1);
+  }
+
+  uint32_t current_version() const noexcept {
+    return version_block_->load();
+  }
+
+ private:
+  std::shared_ptr<std::atomic<uint32_t>> version_block_;
+};
+
 /**
  * The low-level representation of a tensor, which contains a pointer
  * to a storage (which contains the actual data) and metadata (e.g., sizes and
@@ -845,13 +900,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return std::move(autograd_meta_);
   }
 
-  // NOTE: `shallow_copy_and_detach()` does not copy the AutogradMeta pointer
-  // because it is unique for each Variable.
+  // NOTE: `shallow_copy_and_detach()` does not copy the following TensorImpl fields:
+  // 1. the AutogradMeta pointer, because it is unique for each Variable.
+  // 2. the version counter, because although it lives in TensorImpl, the version counter is managed
+  // by autograd, and the call sites of `shallow_copy_and_detach()` (from autograd) should decide what
+  // the version counter should be for each new TensorImpl. See NOTE [ Version Counter Sharing ] for details.
+  //
   // NOTE: We don't set `allow_tensor_metadata_change_` to false here, because there are call sites
   // to this function that need to change the shallow copy's size or storage afterwards, and setting
   // `allow_tensor_metadata_change_` to false would prevent those changes from happening and is
   // undesirable.
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach() const {
+    AT_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id());
     impl->set_sizes_and_strides(sizes(), strides());
     impl->storage_offset_ = storage_offset_;
@@ -860,6 +920,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     impl->refresh_numel();
     impl->refresh_contiguous();
     return impl;
+  }
+
+  void set_version_counter(
+    const c10::VariableVersion& version_counter) noexcept {
+    version_counter_ = version_counter;
+  }
+
+  const c10::VariableVersion& version_counter() const noexcept {
+    return version_counter_;
+  }
+
+  void bump_version() noexcept {
+    version_counter_.bump();
   }
 
   inline void set_pyobj(PyObject* pyobj) noexcept {
@@ -1384,6 +1457,8 @@ protected:
   // at a time).
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
+  c10::VariableVersion version_counter_;
+
   PyObject* pyobj_ = nullptr; // weak reference
 
   // We could save a word or two by combining the SmallVector structs,
@@ -1470,6 +1545,8 @@ protected:
 //    weak refcount
 //    storage pointer
 //    autograd metadata pointer
+//    version counter (word 0)
+//    version counter (word 1)
 //    PyObject pointer
 //    sizes SmallVector (begin)
 //    sizes SmallVector (end)
@@ -1494,7 +1571,7 @@ protected:
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 27,
+              sizeof(TensorImpl) == sizeof(int64_t) * 29,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 
