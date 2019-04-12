@@ -177,6 +177,26 @@ class CAFFE2_API Tensor {
     return impl_->is_contiguous();
   }
 
+  bool is_transposed() const {
+    if (is_contiguous()) {
+      return false;
+    }
+    int64_t max_stride = 1;
+    int64_t size_max_stride = 1;
+    int64_t z = 1;
+    int d;
+    for (d = 0; d < dim(); ++d) {
+      if (stride(d) == 0 && size(d) != 1)
+        return false;
+      if (stride(d) > max_stride) {
+        max_stride = stride(d);
+        size_max_stride = size(d);
+      }
+      z *= size(d);
+    }
+    return z == max_stride * size_max_stride;
+  }
+
   // Total bytes consumed by the "view" of elements of the array.  Does not
   // include size of metadata.  The number reported here does not necessarily
   // correspond to the true physical memory consumed by a tensor; instead,

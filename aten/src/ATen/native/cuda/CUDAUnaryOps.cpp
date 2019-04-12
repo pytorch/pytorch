@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/LegacyTHFunctions.h>
 
 namespace at { namespace native {
 
@@ -37,6 +38,10 @@ Tensor& _clamp_min__cuda(Tensor& self, Scalar min) {
 
 Tensor& _clamp_min_out_cuda(Tensor& result, const Tensor& self, Scalar min) {
   return _th_clamp_min_out(result, self, min);
+}
+
+Tensor& _fill__cuda(Tensor& self, Scalar value) {
+  return legacy::th::_th_fill_(self, value);
 }
 
 // These are just forwarding stubs

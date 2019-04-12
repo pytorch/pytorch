@@ -247,8 +247,9 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   }
 
   if (isQIntType(a) || isQIntType(b)) {
-    AT_ERROR(
-        "promoteTypes with quantized numbers is not handled yet; figure out what the correct rules should be");
+    return ScalarType::Undefined;
+    // AT_ERROR(
+    //     "promoteTypes with quantized numbers is not handled yet; figure out what the correct rules should be");
   }
 
   // this matrix has to be consistent with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX

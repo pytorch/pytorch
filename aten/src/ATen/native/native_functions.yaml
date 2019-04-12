@@ -793,6 +793,9 @@
 
 - func: fill_(Tensor(a!) self, Scalar value) -> Tensor(a!)
   variants: function, method
+  dispatch:
+    CPU: _fill__cpu
+    CUDA: _fill__cuda
 
 - func: fill_(Tensor(a!) self, Tensor value) -> Tensor(a!)
   variants: function, method
