@@ -1196,7 +1196,6 @@ def create_derived(backend_type_env, declarations):
     # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str]]
     type_object_declarations = []
     type_object_definitions = []
-
     is_cuda = 'CUDA' in backend_type_env['Backend']
 
     def replace_with_null(argument):

@@ -7,22 +7,22 @@
 namespace at {
 namespace native {
 
-QTensor quantize_linear(const RealTensor& self, double scale, int64_t zero_point) {
+QTensor quantize_linear_cpu(const RealTensor& self, double scale, int64_t zero_point) {
   auto quantizer = make_per_tensor_affine_quantizer(scale, zero_point);
   return quantizer->quantize(self);
 }
 
-RealTensor dequantize(const QTensor& self) {
+RealTensor dequantize_quant(const QTensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
-Scalar q_scale(const QTensor& self) {
+Scalar q_scale_quant(const QTensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   AT_ASSERT(quantizer->qscheme() == kPerTensorAffine);
   return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer.get())->scale());
 }
 
-Scalar q_zero_point(const QTensor& self) {
+Scalar q_zero_point_quant(const QTensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   AT_ASSERT(quantizer->qscheme() == kPerTensorAffine);
   return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer.get())->zero_point());
