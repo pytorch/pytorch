@@ -6,6 +6,8 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/elementwise_ops.h"
 
+C10_DECLARE_CAFFE2_OPERATOR(Gelu);
+
 namespace caffe2 {
 
 namespace gelu_utils {
@@ -43,6 +45,18 @@ struct GeluGradientFunctor {
 
   const bool fast_gelu;
 };
+
+template <class Context>
+using GeluOp = UnaryElementwiseWithArgsOp<
+    TensorTypes<float>,
+    Context,
+    GeluFunctor<Context>>;
+
+template <class Context>
+using GeluGradientOp = BinaryElementwiseWithArgsOp<
+    TensorTypes<float>,
+    Context,
+    GeluGradientFunctor<Context>>;
 
 } // namespace caffe2
 
