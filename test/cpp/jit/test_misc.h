@@ -740,9 +740,8 @@ graph(%a):
 
   std::vector<IValue> stack = {IValue(torch::randn({22}, at::kCPU))};
   auto run = [&](std::shared_ptr<Graph>& graph, std::vector<IValue> stack) {
-    Code code(graph);
-    InterpreterState interp(code);
-    interp.run(stack);
+    GraphExecutor executor(graph);
+    executor.run(stack);
     return stack;
   };
   run(graph, stack);
