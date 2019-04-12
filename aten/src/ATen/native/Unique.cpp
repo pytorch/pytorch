@@ -256,7 +256,7 @@ _unique_dim2_cpu(const Tensor& self, const int64_t dim, const bool sorted, const
 
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 unique_dim_consecutive_cpu(const Tensor& self, const int64_t dim, const bool return_index, const bool return_inverse, const bool return_counts) {
-  AT_CHECK(!return_index, "torch.unique with not None dim does not support return_index for CPU tensor yet");
+  AT_CHECK(!return_index, "torch.unique with dim!=None and return_index==True for CPU tensor is not implemented yet");
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique_dim_consecutive", [&] {
     Tensor output, unique_indices, inverse, counts;
     std::tie(output, inverse, counts) = _unique_dim_cpu_template<scalar_t>(self, dim, /*consecutive=*/true, return_inverse, return_counts);

@@ -74,7 +74,7 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> compute_unique(
       if (consecutive) {
         unique_indices = range;
       } else {
-        AT_ERROR("unique and unique_dim does not support return_index yet");
+        AT_ERROR("unique and unique_dim support of return_index is not implemented yet");
       }
     }
   }
