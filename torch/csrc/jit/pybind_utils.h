@@ -356,7 +356,8 @@ inline py::object toPyObject(IValue&& ivalue) {
 
     for (size_t slot = 0; slot < numAttrs; slot++) {
       const auto& attrName = classType->getAttributeName(slot);
-      py::setattr(pyObj, attrName.c_str(), toPyObject(obj->getSlot(slot)));
+      IValue v = obj->getSlot(slot);
+      py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
     }
     return pyObj;
   } else {

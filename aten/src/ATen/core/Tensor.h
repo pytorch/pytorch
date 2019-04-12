@@ -21,6 +21,7 @@ struct TensorOptions;
 namespace at {
 struct Generator;
 struct Type;
+class DeprecatedTypeProperties;
 class Tensor;
 } // namespace at
 
@@ -199,7 +200,9 @@ class CAFFE2_API Tensor {
 
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        tensorTypeIdToBackend(type_id()), scalar_type());
+        tensorTypeIdToBackend(type_id()),
+        scalar_type(),
+        is_variable() && !at::NonVariableTypeMode::is_enabled());
   }
   Type & dispatch_type() const {
     return legacyTensorType(*impl_);
@@ -219,7 +222,7 @@ class CAFFE2_API Tensor {
   bool is_alias_of(const at::Tensor& other) const{
     return impl_->storage().is_alias_of(other.storage());
   }
-  Tensor toType(const Type & t, bool non_blocking=false) const;
+  Tensor toType(const DeprecatedTypeProperties & t, bool non_blocking=false) const;
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
 
@@ -374,7 +377,6 @@ class CAFFE2_API Tensor {
   Tensor clamp_min(Scalar min) const;
   Tensor & clamp_min_(Scalar min);
   Tensor contiguous() const;
-  Tensor copy(bool non_blocking=false) const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
   Tensor cos() const;
   Tensor & cos_();
@@ -409,6 +411,8 @@ class CAFFE2_API Tensor {
   Tensor & fill_(const Tensor & value);
   Tensor floor() const;
   Tensor & floor_();
+  Tensor frac() const;
+  Tensor & frac_();
   Tensor ger(const Tensor & vec2) const;
   Tensor fft(int64_t signal_ndim, bool normalized=false) const;
   Tensor ifft(int64_t signal_ndim, bool normalized=false) const;
@@ -466,7 +470,13 @@ class CAFFE2_API Tensor {
   Tensor permute(IntArrayRef dims) const;
   Tensor pin_memory() const;
   Tensor pinverse(double rcond=1e-15) const;
+  Tensor reciprocal() const;
+  Tensor & reciprocal_();
+  Tensor neg() const;
+  Tensor & neg_();
   Tensor repeat(IntArrayRef repeats) const;
+  Tensor repeat_interleave(const Tensor & repeats, c10::optional<int64_t> dim=c10::nullopt) const;
+  Tensor repeat_interleave(int64_t repeats, c10::optional<int64_t> dim=c10::nullopt) const;
   Tensor reshape(IntArrayRef shape) const;
   Tensor reshape_as(const Tensor & other) const;
   Tensor round() const;
@@ -572,6 +582,7 @@ class CAFFE2_API Tensor {
   std::vector<Tensor> unbind(int64_t dim=0) const;
   Tensor to_sparse(int64_t sparse_dim) const;
   Tensor to_sparse() const;
+  Tensor to_mkldnn() const;
   Tensor quantize_linear(double scale, int64_t zero_point) const;
   Tensor dequantize() const;
   Scalar q_scale() const;
@@ -646,10 +657,7 @@ class CAFFE2_API Tensor {
   Tensor & digamma_();
   Tensor & polygamma_(int64_t n);
   Tensor & erfinv_();
-  Tensor & frac_();
   Tensor & renorm_(Scalar p, int64_t dim, Scalar maxnorm);
-  Tensor & reciprocal_();
-  Tensor & neg_();
   Tensor & pow_(Scalar exponent);
   Tensor & pow_(const Tensor & exponent);
   Tensor & lerp_(const Tensor & end, Scalar weight);
@@ -710,16 +718,13 @@ class CAFFE2_API Tensor {
   std::tuple<Tensor,Tensor> geqrf() const;
   Tensor orgqr(const Tensor & input2) const;
   Tensor ormqr(const Tensor & input2, const Tensor & input3, bool left=true, bool transpose=false) const;
-  Tensor btrisolve(const Tensor & LU_data, const Tensor & LU_pivots) const;
+  Tensor lu_solve(const Tensor & LU_data, const Tensor & LU_pivots) const;
   Tensor multinomial(int64_t num_samples, bool replacement=false, Generator * generator=nullptr) const;
   Tensor lgamma() const;
   Tensor digamma() const;
   Tensor polygamma(int64_t n) const;
   Tensor erfinv() const;
-  Tensor frac() const;
   Tensor dist(const Tensor & other, Scalar p=2) const;
-  Tensor reciprocal() const;
-  Tensor neg() const;
   Tensor atan2(const Tensor & other) const;
   Tensor lerp(const Tensor & end, Scalar weight) const;
   Tensor lerp(const Tensor & end, const Tensor & weight) const;

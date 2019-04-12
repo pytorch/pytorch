@@ -6,11 +6,12 @@
 #include <ATen/core/SparseTensorRef.h>
 #include <ATen/core/Type.h>
 #include <c10/core/TensorOptions.h>
+#include <ATen/core/DeprecatedTypeProperties.h>
 
 namespace at {
 
-inline Tensor Tensor::toType(const Type & t, bool non_blocking) const {
-  if(dispatch_type() == t)
+inline Tensor Tensor::toType(const DeprecatedTypeProperties & t, bool non_blocking) const {
+  if(type() == t)
     return *this;
   return to(
       at::device(t.device_type()).layout(t.layout()).dtype(t.scalarType()),
@@ -19,23 +20,23 @@ inline Tensor Tensor::toType(const Type & t, bool non_blocking) const {
 }
 
 inline Tensor Tensor::cpu() const {
-  return toType(dispatch_type().cpu());
+  return toType(type().cpu());
 }
 
 inline Tensor Tensor::cuda() const {
-  return toType(dispatch_type().cuda());
+  return toType(type().cuda());
 }
 
 inline Tensor Tensor::hip() const {
-  return toType(dispatch_type().hip());
+  return toType(type().hip());
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {
-  return toType(dispatch_type().toScalarType(t));
+  return toType(type().toScalarType(t));
 }
 
 inline Tensor Tensor::toBackend(Backend b) const {
-  return toType(dispatch_type().toBackend(b));
+  return toType(type().toBackend(b));
 }
 
 inline TensorOptions Tensor::options() const {
@@ -180,9 +181,6 @@ inline Tensor & Tensor::clamp_min_(Scalar min) {
 inline Tensor Tensor::contiguous() const {
     return dispatch_type().contiguous(*this);
 }
-inline Tensor Tensor::copy(bool non_blocking) const {
-    return dispatch_type().copy(*this, non_blocking);
-}
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
     return dispatch_type().copy_(*this, src, non_blocking);
 }
@@ -284,6 +282,12 @@ inline Tensor Tensor::floor() const {
 }
 inline Tensor & Tensor::floor_() {
     return dispatch_type().floor_(*this);
+}
+inline Tensor Tensor::frac() const {
+    return dispatch_type().frac(*this);
+}
+inline Tensor & Tensor::frac_() {
+    return dispatch_type().frac_(*this);
 }
 inline Tensor Tensor::ger(const Tensor & vec2) const {
     return dispatch_type().ger(*this, vec2);
@@ -456,8 +460,26 @@ inline Tensor Tensor::pin_memory() const {
 inline Tensor Tensor::pinverse(double rcond) const {
     return dispatch_type().pinverse(*this, rcond);
 }
+inline Tensor Tensor::reciprocal() const {
+    return dispatch_type().reciprocal(*this);
+}
+inline Tensor & Tensor::reciprocal_() {
+    return dispatch_type().reciprocal_(*this);
+}
+inline Tensor Tensor::neg() const {
+    return dispatch_type().neg(*this);
+}
+inline Tensor & Tensor::neg_() {
+    return dispatch_type().neg_(*this);
+}
 inline Tensor Tensor::repeat(IntArrayRef repeats) const {
     return dispatch_type().repeat(*this, repeats);
+}
+inline Tensor Tensor::repeat_interleave(const Tensor & repeats, c10::optional<int64_t> dim) const {
+    return dispatch_type().repeat_interleave(*this, repeats, dim);
+}
+inline Tensor Tensor::repeat_interleave(int64_t repeats, c10::optional<int64_t> dim) const {
+    return dispatch_type().repeat_interleave(*this, repeats, dim);
 }
 inline Tensor Tensor::reshape(IntArrayRef shape) const {
     return dispatch_type().reshape(*this, shape);
@@ -774,6 +796,9 @@ inline Tensor Tensor::to_sparse(int64_t sparse_dim) const {
 inline Tensor Tensor::to_sparse() const {
     return dispatch_type().to_sparse(*this);
 }
+inline Tensor Tensor::to_mkldnn() const {
+    return dispatch_type().to_mkldnn(*this);
+}
 inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point) const {
     return dispatch_type().quantize_linear(*this, scale, zero_point);
 }
@@ -996,17 +1021,8 @@ inline Tensor & Tensor::polygamma_(int64_t n) {
 inline Tensor & Tensor::erfinv_() {
     return dispatch_type().erfinv_(*this);
 }
-inline Tensor & Tensor::frac_() {
-    return dispatch_type().frac_(*this);
-}
 inline Tensor & Tensor::renorm_(Scalar p, int64_t dim, Scalar maxnorm) {
     return dispatch_type().renorm_(*this, p, dim, maxnorm);
-}
-inline Tensor & Tensor::reciprocal_() {
-    return dispatch_type().reciprocal_(*this);
-}
-inline Tensor & Tensor::neg_() {
-    return dispatch_type().neg_(*this);
 }
 inline Tensor & Tensor::pow_(Scalar exponent) {
     return dispatch_type().pow_(*this, exponent);
@@ -1188,8 +1204,8 @@ inline Tensor Tensor::orgqr(const Tensor & input2) const {
 inline Tensor Tensor::ormqr(const Tensor & input2, const Tensor & input3, bool left, bool transpose) const {
     return dispatch_type().ormqr(*this, input2, input3, left, transpose);
 }
-inline Tensor Tensor::btrisolve(const Tensor & LU_data, const Tensor & LU_pivots) const {
-    return dispatch_type().btrisolve(*this, LU_data, LU_pivots);
+inline Tensor Tensor::lu_solve(const Tensor & LU_data, const Tensor & LU_pivots) const {
+    return dispatch_type().lu_solve(*this, LU_data, LU_pivots);
 }
 inline Tensor Tensor::multinomial(int64_t num_samples, bool replacement, Generator * generator) const {
     return dispatch_type().multinomial(*this, num_samples, replacement, generator);
@@ -1206,17 +1222,8 @@ inline Tensor Tensor::polygamma(int64_t n) const {
 inline Tensor Tensor::erfinv() const {
     return dispatch_type().erfinv(*this);
 }
-inline Tensor Tensor::frac() const {
-    return dispatch_type().frac(*this);
-}
 inline Tensor Tensor::dist(const Tensor & other, Scalar p) const {
     return dispatch_type().dist(*this, other, p);
-}
-inline Tensor Tensor::reciprocal() const {
-    return dispatch_type().reciprocal(*this);
-}
-inline Tensor Tensor::neg() const {
-    return dispatch_type().neg(*this);
 }
 inline Tensor Tensor::atan2(const Tensor & other) const {
     return dispatch_type().atan2(*this, other);

@@ -111,12 +111,12 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
     for (p = 0; p < nbatch; p++)
     {
       THNN_(SpatialMaxUnpooling_updateOutput_frame)(
-						    input_data+p*nslices*iwidth*iheight,
-						    output_data+p*nslices*owidth*oheight,
-						    indices_data+p*nslices*iwidth*iheight,
-						    nslices,
-						    iwidth, iheight,
-						    owidth, oheight);
+                                                    input_data+p*nslices*iwidth*iheight,
+                                                    output_data+p*nslices*owidth*oheight,
+                                                    indices_data+p*nslices*iwidth*iheight,
+                                                    nslices,
+                                                    iwidth, iheight,
+                                                    owidth, oheight);
     }
   }
 
@@ -196,7 +196,7 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
 
   if(owidth!=gradOutput->size(dimw) || oheight!=gradOutput->size(dimh)){
     THError("Inconsistent gradOutput size. oheight= %d, owidth= %d, gradOutput: %dx%d",
-	    oheight, owidth, gradOutput->size(dimh), gradOutput->size(dimw));
+            oheight, owidth, gradOutput->size(dimh), gradOutput->size(dimw));
   }
 
   /* get raw pointers */

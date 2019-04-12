@@ -82,8 +82,7 @@ static PyObject * THPGenerator_setState(THPGenerator *self, PyObject *_new_state
     throw TypeError("expected a torch.ByteTensor, but got %s", Py_TYPE(_new_state)->tp_name);
   }
   auto& tensor = ((THPVariable*)_new_state)->cdata.data();
-  auto& tensor_type = at::globalContext().getNonVariableType(tensor.type().backend(), tensor.scalar_type());
-  if (tensor_type != CPU(kByte)) {
+  if (tensor.layout() != kStrided || tensor.device().type() != kCPU || tensor.scalar_type() != kByte) {
     auto type_name = torch::utils::type_to_string(tensor.dispatch_type());
     throw TypeError("expected a torch.ByteTensor, but got %s", type_name.c_str());
   }

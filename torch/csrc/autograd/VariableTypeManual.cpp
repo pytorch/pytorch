@@ -31,14 +31,8 @@ Allocator* VariableType::allocator() const {
 Device VariableType::getDeviceFromPtr(void * data) const {
   return baseType->getDeviceFromPtr(data);
 }
-Storage VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
-  return baseType->storageFromBlob(data, size, deleter);
-}
 Storage VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   return baseType->unsafeStorageFromTH(th_pointer, retain);
-}
-Storage VariableType::storageWithAllocator(int64_t size, Allocator* allocator) const {
-  return baseType->storageWithAllocator(size, allocator);
 }
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), /*requires_grad=*/false);
@@ -235,7 +229,8 @@ void VariableType::backward(
 void VariableType::set_data(Tensor & self, Tensor new_data) const {
   as_variable_ref(self).set_data(new_data);
 }
-Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
+
+Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   jit::Value* output = nullptr;
   if(torch::jit::tracer::isTracing()) {
     const jit::tracer::TracingState& state = *jit::tracer::getTracingState();
@@ -266,14 +261,12 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
-    grad_fn->src_type = &src.dispatch_type();
+    grad_fn->src_type = &src.type();
     grad_fn->src_device = src.device();
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    if (self.is_sparse() && src.is_sparse()) baseType->copy_sparse_to_sparse_(self_, src_, non_blocking);
-    else if (!self.is_sparse() && !src.is_sparse()) baseType->s_copy_(self_, src_, non_blocking);
-    else AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ", self.type(), " and src type = ", src.type());
+    baseType->copy_(self_, src_, non_blocking);
   }
   increment_version(self);
   rebase_history(as_variable_ref( self ), std::move(grad_fn));
@@ -281,10 +274,6 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
     jit::tracer::setOutput(output, self);
   }
   return self;
-}
-
-Tensor VariableType::_s_copy_from(const Tensor & self, const Tensor & dst, bool non_blocking) const {
-  AT_ERROR("copy_from does not support automatic differentiation; use copy_ instead");
 }
 
 Tensor & VariableType::resize_(Tensor & self, IntArrayRef size) const {
