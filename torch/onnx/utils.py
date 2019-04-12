@@ -55,7 +55,8 @@ def set_training(model, mode):
 
 def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
-           operator_export_type=None, opset_version=None, _retain_param_name=True):
+           operator_export_type=None, opset_version=None, _retain_param_name=True,
+           do_constant_folding=False):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -107,6 +108,10 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             opset version. Right now, supported stable opset version is 9.
             The opset_version must be _onnx_master_opset or in _onnx_stable_opsets
             which are defined in torch/onnx/symbolic.py
+        do_constant_folding (bool, default False): If True, the constant-folding 
+            optimization is applied to the model during export. Constant-folding 
+            optimization will replace some of the ops that have all constant 
+            inputs, with pre-computed constant nodes.
     """
     if aten or export_raw_ir:
         assert operator_export_type is None
@@ -119,7 +124,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             operator_export_type = OperatorExportTypes.ONNX
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
-            _retain_param_name=_retain_param_name)
+            _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding)
 
 
 # ONNX can't handle constants that are lists of tensors, which can
@@ -226,6 +231,7 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
                     operator_export_type=OperatorExportTypes.ONNX,
                     example_outputs=None, propagate=False,
                     _retain_param_name=False, do_constant_folding=False):
+    from torch.onnx.symbolic import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
         args = (args, )
@@ -276,7 +282,7 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
     param_names = input_and_param_names[len(input_and_param_names) - len(params):]
     params_dict = dict(zip(param_names, params))
 
-    if do_constant_folding:
+    if do_constant_folding and _export_onnx_opset_version is 9:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict)
 
     if verbose:
