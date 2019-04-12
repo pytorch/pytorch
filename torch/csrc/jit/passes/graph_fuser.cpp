@@ -165,7 +165,7 @@ c10::optional<bool> isDefined(Value* tensor) {
 bool isFusableNorm(Node* normalize_op) {
   static const OperatorSet decomposable_normalization_ops = {
       "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
-      "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias, float eps, bool cudnn_enable) -> Tensor",
+      "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, bool cudnn_enable) -> Tensor",
   };
 
   if (decomposable_normalization_ops.find(normalize_op)) {
@@ -304,7 +304,7 @@ struct GraphFuser {
                 norm_var = torch._unwrap_optional(running_var)
             norm_mean = torch._ncf_unsqueeze(norm_mean, input.dim())
             norm_var = torch._ncf_unsqueeze(norm_var, input.dim())
-            norm_invstd = 1 / (eps + torch.sqrt(norm_var))
+            norm_invstd = 1 / (torch.sqrt(norm_var + eps))
             return ((input - norm_mean) * norm_invstd)
       )SCRIPT";
     static const char* lm_source = R"SCRIPT(
@@ -373,111 +373,6 @@ struct GraphFuser {
       normalization_op->output()->replaceAllUsesWith(new_output);
       normalization_op->destroy();
     }
-  }
-
-  void decomposeLayerNorm(Node* layer_norm) {
-    static std::shared_ptr<Graph> ln_graph;
-    static std::once_flag flag;
-    std::call_once(
-        flag,
-        [](std::shared_ptr<Graph>* graph_ptr) {
-          static const char* source = R"SCRIPT(
-        def layer_norm(input : Tensor, normalized_shape : List[int], eps : float, cudnn_enable : bool) -> Tensor:
-            input_ndim = input.dim()
-            normalized_ndim = len(normalized_shape)
-            n = 1
-            for i in range(input_ndim - normalized_ndim):
-                n *= input.size(i)
-            input_reshape = input.contiguous().view(1, n, -1)
-            mean, invstd = torch.batch_norm_stats(input_reshape, eps)
-            input_shape = input.size()
-            mean = torch._ncf_view(mean, input_shape, normalized_ndim)
-            invstd = torch._ncf_view(invstd, input_shape, normalized_ndim)
-
-            return (input - mean) * invstd
-      )SCRIPT";
-          auto module = std::make_shared<script::Module>();
-          defineMethodsInModule(
-              module, source, script::nativeResolver, /*self=*/c10::nullopt);
-          *graph_ptr = module->get_method("layer_norm").graph();
-        },
-        &ln_graph);
-
-    AT_ASSERT(isFusableNorm(layer_norm));
-    WithInsertPoint insert_guard{layer_norm};
-    Value* input = layer_norm->namedInput(attr::input);
-    std::vector<Value*> inputs{input,
-                               layer_norm->namedInput(attr::normalized_shape),
-                               layer_norm->namedInput(attr::eps),
-                               layer_norm->namedInput(attr::cudnn_enable)};
-    Value* new_output =
-        SubgraphUtils::inlineGraph(ln_graph, inputs, layer_norm).at(0);
-    auto weight = layer_norm->namedInput(attr::weight);
-    auto bias = layer_norm->namedInput(attr::bias);
-    auto weight_defined = isDefined(weight).value();
-    auto bias_defined = isDefined(bias).value();
-    if (weight_defined && bias_defined) {
-      new_output = graph_->insert(aten::addcmul, {bias, new_output, weight});
-    } else if (weight_defined) {
-      new_output = graph_->insert(aten::mul, {new_output, weight});
-    } else if (bias_defined) {
-      new_output = graph_->insert(aten::add, {new_output, bias});
-    }
-    layer_norm->output()->replaceAllUsesWith(new_output);
-    layer_norm->destroy();
-  }
-
-  void decomposeBatchNorm(Node* batch_norm) {
-    static std::shared_ptr<Graph> bn_graph;
-    static std::once_flag flag;
-    std::call_once(
-        flag,
-        [](std::shared_ptr<Graph>* graph_ptr) {
-          static const char* source = R"SCRIPT(
-        def batch_norm(input : Tensor, running_mean : Optional[Tensor], running_var : Optional[Tensor], training : bool, momentum : float, eps : float) -> Tensor:
-            if training:
-                norm_mean, norm_var = torch.batch_norm_update_stats(input, running_mean, running_var, momentum)
-            else:
-                norm_mean = torch._unwrap_optional(running_mean)
-                norm_var = torch._unwrap_optional(running_var)
-            norm_mean = torch._ncf_unsqueeze(norm_mean, input.dim())
-            norm_var = torch._ncf_unsqueeze(norm_var, input.dim())
-            norm_invstd = 1 / (eps + torch.sqrt(norm_var))
-            return ((input - norm_mean) * norm_invstd)
-      )SCRIPT";
-          auto module = std::make_shared<script::Module>();
-          defineMethodsInModule(
-              module, source, script::nativeResolver, /*self=*/c10::nullopt);
-          *graph_ptr = module->get_method("batch_norm").graph();
-        },
-        &bn_graph);
-
-    AT_ASSERT(isFusableNorm(batch_norm));
-    WithInsertPoint insert_guard{batch_norm};
-    Value* input = batch_norm->namedInput(attr::input);
-    Value* input_dim = graph_->insert(aten::dim, {input});
-    std::vector<Value*> inputs{input,
-                               batch_norm->namedInput(attr::running_mean),
-                               batch_norm->namedInput(attr::running_var),
-                               batch_norm->namedInput(attr::training),
-                               batch_norm->namedInput(attr::momentum),
-                               batch_norm->namedInput(attr::eps)};
-    Value* new_output =
-        SubgraphUtils::inlineGraph(bn_graph, inputs, batch_norm).at(0);
-    auto weight = batch_norm->namedInput(attr::weight);
-    auto bias = batch_norm->namedInput(attr::bias);
-    if (isDefined(weight).value()) {
-      Value* expanded_weight =
-          graph_->insert(aten::_ncf_unsqueeze, {weight, input_dim});
-      new_output = graph_->insert(aten::mul, {new_output, expanded_weight});
-    }
-    if (isDefined(bias).value()) {
-      Value* expanded_bias =
-          graph_->insert(aten::_ncf_unsqueeze, {bias, input_dim});
-      new_output = graph_->insert(aten::add, {new_output, expanded_bias});
-    }
-    batch_norm->output()->replaceAllUsesWith(new_output);
-    batch_norm->destroy();
   }
 
   void mergeFusionGroups(Node* consumer_group, Node* producer_group) {
