@@ -69,6 +69,8 @@ set CXX=sccache cl
 
 set CMAKE_GENERATOR=Ninja
 
+set CFLAGS=/permissive- /Zc:twoPhase-
+
 if not "%USE_CUDA%"=="1" (
   if "%REBUILD%"=="" (
     set NO_CUDA=1
