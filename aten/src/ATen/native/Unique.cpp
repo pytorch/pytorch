@@ -80,13 +80,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
   int64_t *counts_data = nullptr;
   if (numel > 0) {
     *output_data = *input_data;
-    if (return_index) {
-      *unique_indices_data = 0;
-    }
   }
   if (return_index) {
     unique_indices.resize_(input.sizes());
     unique_indices_data = unique_indices.data<int64_t>();
+    if (numel > 0) {
+      *unique_indices_data = 0;
+    }
   }
   if (return_inverse) {
     inverse_indices.resize_(input.sizes());
