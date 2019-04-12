@@ -222,6 +222,20 @@ void checkDeviceType(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::DeviceType
   }
 }
 
+void checkLayout(CheckedFrom c, const Tensor& t, Layout layout) {
+  AT_CHECK(
+    !t.defined() || t.type().layout() == layout,
+    "Expected tensor to have ", layout,
+    " Layout, but got tensor with ", t.type().layout(), " Layout ",
+    "(while checking arguments for ", c, ")");
+}
+
+void checkLayout(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Layout layout) {
+  for (auto &t : tensors) {
+    checkLayout(c, t, layout);
+  }
+}
+
 void * maybe_data_ptr(const Tensor& tensor) {
   return tensor.defined() ? (void *)tensor.data_ptr() : nullptr;
 }
