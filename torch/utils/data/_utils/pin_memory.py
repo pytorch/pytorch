@@ -36,27 +36,27 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
         elif isinstance(r[1], ExceptionWrapper):
             out_queue.put(r)
         else:
-            idx, batch = r
+            idx, data = r
             try:
-                batch = pin_memory_batch(batch)
+                data = pin_memory_data(data)
             except Exception:
                 out_queue.put((idx, ExceptionWrapper(sys.exc_info())))
             else:
-                out_queue.put((idx, batch))
+                out_queue.put((idx, data))
 
 
-def pin_memory_batch(batch):
-    if isinstance(batch, torch.Tensor):
-        return batch.pin_memory()
-    elif isinstance(batch, string_classes):
-        return batch
-    elif isinstance(batch, container_abcs.Mapping):
-        return {k: pin_memory_batch(sample) for k, sample in batch.items()}
-    elif isinstance(batch, tuple) and hasattr(batch, '_fields'):  # namedtuple
-        return type(batch)(*(pin_memory_batch(sample) for sample in batch))
-    elif isinstance(batch, container_abcs.Sequence):
-        return [pin_memory_batch(sample) for sample in batch]
-    elif hasattr(batch, "pin_memory"):
-        return batch.pin_memory()
+def pin_memory_data(data):
+    if isinstance(data, torch.Tensor):
+        return data.pin_memory()
+    elif isinstance(data, string_classes):
+        return data
+    elif isinstance(data, container_abcs.Mapping):
+        return {k: pin_memory_data(sample) for k, sample in data.items()}
+    elif isinstance(data, tuple) and hasattr(data, '_fields'):  # namedtuple
+        return type(data)(*(pin_memory_data(sample) for sample in data))
+    elif isinstance(data, container_abcs.Sequence):
+        return [pin_memory_data(sample) for sample in data]
+    elif hasattr(data, "pin_memory"):
+        return data.pin_memory()
     else:
-        return batch
+        return data
