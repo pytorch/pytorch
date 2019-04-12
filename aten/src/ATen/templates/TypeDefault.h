@@ -21,6 +21,9 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
   bool is_sparse() const override {
     return backend() == Backend::SparseCPU || backend() == Backend::SparseCUDA || backend() == Backend::SparseHIP;
   }
+  bool is_quantized() const override {
+    return backend() == Backend::QuantizedCPU;
+  }
   bool is_distributed() const override {
     return false;
   }
