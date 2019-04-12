@@ -2489,19 +2489,23 @@
 
 - func: quantize_linear(Tensor self, float scale, int zero_point) -> Tensor
   variants: function, method
-  requires_tensor: True
+  dispatch:
+    CPU: quantize_linear_cpu
 
 - func: dequantize(Tensor self) -> Tensor
   variants: function, method
-  requires_tensor: True
+  dispatch:
+    QuantizedCPU: dequantize_quant
 
 - func: q_scale(Tensor self) -> Scalar
   variants: function, method
-  requires_tensor: True
+  dispatch:
+    QuantizedCPU: q_scale_quant
 
 - func: q_zero_point(Tensor self) -> Scalar
   variants: function, method
-  requires_tensor: True
+  dispatch:
+    QuantizedCPU: q_zero_point_quant
 
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.

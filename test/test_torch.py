@@ -2661,9 +2661,15 @@ class _TestTorchMixin(object):
         qr = r.quantize_linear(scale, zero_point)
         self.assertEqual(qr.q_scale(), scale)
         self.assertEqual(qr.q_zero_point(), zero_point)
+        self.assertTrue(qr.is_quantized)
+        self.assertFalse(r.is_quantized)
         rqr = qr.dequantize()
         for i in range(num_elements):
             self.assertEqual(r[i], rqr[i])
+        # Testing item
+        r = torch.ones(1, dtype=torch.float)
+        qr = r.quantize_linear(scale, zero_point)
+        self.assertEqual(qr.item(), 1)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
