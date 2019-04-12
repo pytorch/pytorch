@@ -83,7 +83,7 @@ def get_worker_info():
     * :attr:`num_workers`: the total number of workers.
     * :attr:`seed`: the random seed set for the current worker. This value is
       determined by main process RNG and the worker id. See
-      :class:`torch.utils.data.DataLoader`'s documentation for more details.
+      :class:`~torch.utils.data.DataLoader`'s documentation for more details.
     * :attr:`dataset`: the copy of the dataset object in **this** process. Note
       that this will be a different object in a different process than the one
       in the main process.
@@ -93,9 +93,10 @@ def get_worker_info():
     .. note::
        When used in a :attr:`worker_init_fn` passed over to
        :class:`~torch.utils.data.DataLoader`, this method can be useful to
-       set up each worker process differently. E.g., the :attr:`worker_init_fn`
-       can use the worker ``worker_id`` to configure the ``dataset`` object to
-       only read a specific fraction of a sharded dataset.
+       set up each worker process differently, for instance, using ``worker_id``
+       to configure the ``dataset`` object to only read a specific fraction of a
+       sharded dataset, or use ``seed`` to seed other libraries used in dataset
+       code (e.g., NumPy).
     """
     return _worker_info
 
