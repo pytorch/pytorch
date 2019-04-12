@@ -42,8 +42,9 @@ inline QTensor new_qtensor(
       allocator->allocate(nelements * dtype.itemsize()),
       allocator,
       /*resizable=*/true);
+  // TODO: get TensorTypeId from quantizer
   auto tensor = detail::make_tensor<QTensorImpl>(
-      storage_impl, at::CPUTensorId(), quantizer);
+      storage_impl, at::QuantizedCPUTensorId(), quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   return tensor;
 }
