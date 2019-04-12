@@ -116,6 +116,15 @@ inline bool is_sparse(Tensor self) {
   return self.is_sparse();
 }
 
+inline bool Tensor::is_quantized() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_quantized();
+}
+
+inline bool is_quantized(Tensor self) {
+  return self.is_quantized();
+}
+
 #define DEFINE_CAST(T, name, _)                  \
   template <>                                    \
   inline T* Tensor::data() const {               \
@@ -139,8 +148,5 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_AND_QINT(DEFINE_ITEM)
 #undef DEFINE_ITEM
-
-// TODO: after is_quantized() is implemented,
-// implement item() (returnning a float) for quantized Tensor
 
 } //namespace at
