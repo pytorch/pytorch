@@ -121,6 +121,11 @@
   tensor1: grad * tensor2 * value
   tensor2: grad * tensor1 * value
 
+- name: linear(Tensor self, Tensor weight, Tensor bias)
+  self: mm_mat1_backward(grad, weight.t(), self, 1)
+  weight: mm_mat2_backward(grad, self, weight.t().sizes(), weight.t().strides(), 1).t()
+  bias: grad
+
 - name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
   mat1: mm_mat1_backward(grad, mat2, mat1, alpha)

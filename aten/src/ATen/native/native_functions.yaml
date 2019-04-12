@@ -1005,7 +1005,8 @@
 
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
 
-- func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
+- func: linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
+  python_module: nn
   dispatch:
     CPU: linear
     CUDA: linear
