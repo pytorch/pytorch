@@ -212,3 +212,5 @@ inline std::string toString(const FunctionSchema& schema) {
 }
 
 } // namespace c10
+
+#include <ATen/core/function_schema_inl.h>
