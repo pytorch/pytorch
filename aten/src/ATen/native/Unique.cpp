@@ -230,7 +230,7 @@ _unique_dim_cpu(const Tensor& self, const int64_t dim, const bool sorted, const 
 }
 
 std::tuple<Tensor, Tensor, Tensor>
-_unique_dim2_cpu(const Tensor& self, const int64_t dim, const bool sorted, const bool return_inverse, const bool return_counts) {
+unique_dim_cpu(const Tensor& self, const int64_t dim, const bool sorted, const bool return_inverse, const bool return_counts) {
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique_dim", [&] {
     // The current implementation using `dim` always sorts due to unhashable tensors
     return _unique_dim_cpu_template<scalar_t>(self, dim, false, return_inverse, return_counts);
