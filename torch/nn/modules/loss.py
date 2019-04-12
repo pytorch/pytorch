@@ -551,7 +551,7 @@ class BCEWithLogitsLoss(_Loss):
     :math:`c = 1` for single-label binary classification),
     :math:`n` is the number of the sample in the batch and
     :math:`p_c` is the weight of the positive answer for the class :math:`c`.
-    
+
     :math:`p_c > 1` increases the recall, :math:`p_c < 1` increases the precision.
 
     For example, if a dataset contains 100 positive and 300 negative examples of a single class,
