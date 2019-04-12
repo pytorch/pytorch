@@ -301,6 +301,10 @@ at::Tensor conv1d(
 at::Tensor conv2d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
+  if (input.type_id() == MkldnnCPUTensorId()) {
+    return at::mkldnn_convolution(
+        input, weight, bias, padding, stride, dilation, groups);
+  }
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {{0, 0}}, groups);
 }

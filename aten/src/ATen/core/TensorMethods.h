@@ -800,6 +800,9 @@ inline Tensor Tensor::to_sparse() const {
 inline Tensor Tensor::to_mkldnn() const {
     return dispatch_type().to_mkldnn(*this);
 }
+inline Tensor Tensor::mkldnn_reorder_conv2d_weight(IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups) const {
+    return dispatch_type().mkldnn_reorder_conv2d_weight(*this, padding, stride, dilation, groups);
+}
 inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point) const {
     return dispatch_type().quantize_linear(*this, scale, zero_point);
 }
