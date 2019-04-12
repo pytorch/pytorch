@@ -182,6 +182,15 @@ class TestMkldnn(TestCase):
         mx += my
         self.assertEqual(x, mx.to_dense())
 
+    def test_view(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
+        size = (x.size(0), -1)
+
+        self.assertEqual(
+            x.view(size),
+            x.to_mkldnn().view(size).to_dense(),
+        )
+
 
 if __name__ == '__main__':
     run_tests()

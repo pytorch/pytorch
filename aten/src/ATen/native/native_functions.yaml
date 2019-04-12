@@ -2690,6 +2690,10 @@
   cuda_bool: True
   variants: method
   device_guard: False
+  dispatch:
+    CPU: view
+    CUDA: view
+    MkldnnCPU: mkldnn_view
 
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
