@@ -203,7 +203,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   return out << arg.type()->str() << " " << arg.name() << (arg.default_value() ? "=<default>" : "");
 }
 
-C10_API std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema);
+inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema);
 
 inline std::string toString(const FunctionSchema& schema) {
   std::ostringstream str;
