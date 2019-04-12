@@ -810,13 +810,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_variable() const { return autograd_meta_ != nullptr; };
 
   /**
-   * Set whether a tensor is a variable.  See Note [Tensor versus Variable in C++]
-   */
-  void set_is_variable(bool value) {
-    is_variable_ = value;
-  }
-
-  /**
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    */
   virtual void set_allow_tensor_metadata_change(bool value) {
