@@ -243,7 +243,7 @@ THC_API void THNN_(LookupTableBag_updateOutput)(
            THCTensor *weight,
            THCTensor *output,
            THCIndexTensor *offset2bag,
-	   int mode,
+           int mode,
            THCIndexTensor *seq_length);       // [OPTIONAL]
 
 THC_API void THNN_(LookupTableBag_accGradParameters)(
@@ -256,8 +256,8 @@ THC_API void THNN_(LookupTableBag_accGradParameters)(
            THCIndexTensor *sortedIndices,
            THCIndexTensor *origIndices,
            bool scaleGradByFreq,
-	   int mode,
-	   THCIndexTensor *seq_length,        // [OPTIONAL]
+           int mode,
+           THCIndexTensor *seq_length,        // [OPTIONAL]
            accreal scale_);
 
 THC_API void THNN_(L1Cost_updateOutput)(

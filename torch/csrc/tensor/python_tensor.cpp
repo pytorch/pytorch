@@ -35,7 +35,6 @@ struct PyTensorType {
   THPDtype* dtype;
   THPLayout* layout;
   bool is_cuda;
-  bool is_quantized;
   char name[64];
   int backend;
   int scalar_type;
@@ -72,7 +71,8 @@ static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs
   if (!aten_type) {
     throw unavailable_type(tensor_type);
   }
-  return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(*aten_type, args, kwargs));
+  auto scalar_type = static_cast<ScalarType>(tensor_type.scalar_type);
+  return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(*aten_type, scalar_type, args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -86,7 +86,7 @@ static PyObject* Tensor_instancecheck(PyTensorType* self, PyObject* arg) {
     // be nullptr if you had a tensor of some type, in which case you can
     // skip initializign aten_type(), but TestAutograd.test_type_conversions
     // seems to violate this property (for whatever reason.)
-    if (&var.type() == self->aten_type()) {
+    if (&var.dispatch_type() == self->aten_type()) {
       Py_RETURN_TRUE;
     }
   }
@@ -118,14 +118,6 @@ PyObject *Tensor_is_sparse(PyTensorType *self) {
   }
 }
 
-PyObject *Tensor_is_quantized(PyTensorType* self) {
-  if (self->is_quantized) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-}
-
 static struct PyMethodDef metaclass_methods[] = {
   {"__instancecheck__", (PyCFunction)Tensor_instancecheck, METH_O, nullptr},
   {nullptr}
@@ -138,7 +130,6 @@ static struct PyGetSetDef metaclass_properties[] = {
   {"layout",       (getter)Tensor_layout, nullptr, nullptr, nullptr},
   {"is_cuda",      (getter)Tensor_is_cuda, nullptr, nullptr, nullptr},
   {"is_sparse",    (getter)Tensor_is_sparse, nullptr, nullptr, nullptr},
-  {"is_quantized",    (getter)Tensor_is_quantized, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
@@ -215,7 +206,6 @@ static void set_type(PyTensorType& type_obj, Backend backend, ScalarType scalarT
   type_obj.layout = torch::getLayout(backend);
   type_obj.dtype = torch::getDtype(scalarType);
   type_obj.is_cuda = (backend == at::Backend::CUDA || backend == at::Backend::SparseCUDA);
-  type_obj.is_quantized = (backend == at::Backend::AffineCPU || backend == at::Backend::PerChannelAffineCPU);
 }
 
 static void set_name(PyTensorType& type_obj, const std::string& name) {
@@ -357,7 +347,7 @@ void py_set_default_dtype(PyObject* obj) {
   if (THPDtype_Check(obj)) {
     auto &current_default = get_default_tensor_type();
     type = &get_tensor_type((THPDtype*)obj, torch::getLayout(current_default.backend()),
-                            torch::getDeviceType(current_default) == at::Device::Type::CUDA);
+                            current_default.device_type() == at::Device::Type::CUDA);
   } else {
     throw TypeError("invalid type object");
   }
@@ -397,5 +387,9 @@ void set_default_tensor_type(const at::Type& type) {
 at::Type& get_default_tensor_type() {
   AT_ASSERT(default_tensor_type);
   return *default_tensor_type;
+}
+
+ScalarType get_default_scalar_type() {
+  return typeMetaToScalarType(get_default_dtype());
 }
 }} // namespace torch::tensors

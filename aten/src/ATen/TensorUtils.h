@@ -115,6 +115,11 @@ CAFFE2_API void checkBackend(
     at::ArrayRef<Tensor> t,
     at::Backend backend);
 
+CAFFE2_API void checkDeviceType(
+    CheckedFrom c,
+    at::ArrayRef<Tensor> tensors,
+    at::DeviceType device_type);
+
 // Methods for getting data_ptr if tensor is defined
 CAFFE2_API void* maybe_data_ptr(const Tensor& tensor);
 CAFFE2_API void* maybe_data_ptr(const TensorArg& tensor);
@@ -125,4 +130,9 @@ CAFFE2_API void* maybe_data_ptr(const TensorArg& tensor);
 // constructing a tensor, e.g., when you want to choose a kernel strategy based
 // on whether a subgeometry is contiguous.
 CAFFE2_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
-}
+
+namespace detail {
+CAFFE2_API std::vector<int64_t> defaultStrides(IntArrayRef sizes);
+CAFFE2_API int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides);
+} // namespace detail
+} // namespace at

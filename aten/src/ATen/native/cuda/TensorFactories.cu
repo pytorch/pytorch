@@ -46,7 +46,6 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
 Tensor empty_cuda(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == at::Backend::CUDA);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
-  AT_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
   check_size_nonnegative(size);
 
   auto* allocator = at::cuda::getCUDADeviceAllocator();
@@ -59,7 +58,7 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options) {
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId(), false);
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId());
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -266,6 +265,9 @@ inline void get_coordinate_in_triu_trapezoid(
 
 template <typename scalar_t>
 __global__
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 void tril_indices_kernel(scalar_t * tensor,
                          int64_t row_offset,
                          int64_t m_first_row,
