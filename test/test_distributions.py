@@ -1752,6 +1752,7 @@ class TestDistributions(TestCase):
         # of the perturbed covariances and their inverses (precision)
         def multivariate_normal_log_prob_gradcheck(mean, covariance=None, precision=None, scale_tril=None):
             mvn_samples = MultivariateNormal(mean, covariance, precision, scale_tril).sample().requires_grad_()
+
             def gradcheck_func(samples, mu, sigma, prec, scale_tril):
                 if sigma is not None:
                     sigma = 0.5 * (sigma + sigma.transpose(-1, -2))  # Ensure symmetry of covariance
