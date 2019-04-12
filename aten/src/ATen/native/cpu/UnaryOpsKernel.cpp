@@ -45,6 +45,17 @@ static void sigmoid_kernel(TensorIterator& iter) {
   });
 }
 
+static void fill_kernel(TensorIterator& iter, Scalar value) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "fill_cpu", [&]() {
+    scalar_t fill_value = value.to<scalar_t>();
+    Vec256<scalar_t> fill_vec_value = Vec256<scalar_t>(fill_value);
+    unary_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return fill_value; },
+        [=](Vec256<scalar_t> a) { return fill_vec_value; });
+  });
+}
+
 static void abs_kernel(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "abs_cpu", [&]() {
     unary_kernel_vec(
@@ -187,6 +198,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
 
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel)
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel)
+REGISTER_DISPATCH(fill_stub, &fill_kernel)
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);

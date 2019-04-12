@@ -10,6 +10,7 @@ namespace at { struct TensorIterator; }
 namespace at { namespace native {
 
 using unary_fn = void(*)(TensorIterator&);
+using unary_fn_scalar = void(*)(TensorIterator&, Scalar);
 
 DECLARE_DISPATCH(unary_fn, abs_stub);
 DECLARE_DISPATCH(unary_fn, acos_stub);
@@ -22,6 +23,7 @@ DECLARE_DISPATCH(unary_fn, erf_stub);
 DECLARE_DISPATCH(unary_fn, erfc_stub);
 DECLARE_DISPATCH(unary_fn, exp_stub);
 DECLARE_DISPATCH(unary_fn, expm1_stub);
+DECLARE_DISPATCH(unary_fn_scalar, fill_stub);
 DECLARE_DISPATCH(unary_fn, floor_stub);
 DECLARE_DISPATCH(unary_fn, frac_stub);
 DECLARE_DISPATCH(unary_fn, log_stub);

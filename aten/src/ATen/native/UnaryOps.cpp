@@ -89,15 +89,12 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
 
 Tensor& _fill__cpu(Tensor& self, Scalar value) {
   auto iter = TensorIterator::unary_op(self, self);
-  AT_DISPATCH_ALL_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::Bool,
-      iter->dtype(),
-      "fill_cpu",
-      [&]() {
-        scalar_t fill_value = value.to<scalar_t>();
-        unary_kernel(*iter, [=](scalar_t a) -> scalar_t { return fill_value; });
-      });
+  if (iter->dtype() == at::ScalarType::Half) {
+    at::Half fill_value = value.to<at::Half>();
+    unary_kernel(*iter, [=](at::Half a) -> at::Half { return fill_value; });
+    return self;
+  }
+  fill_stub(iter->device_type(), *iter, value);
   return self;
 }
 
@@ -216,6 +213,7 @@ DEFINE_DISPATCH(erf_stub);
 DEFINE_DISPATCH(erfc_stub);
 DEFINE_DISPATCH(exp_stub);
 DEFINE_DISPATCH(expm1_stub);
+DEFINE_DISPATCH(fill_stub);
 DEFINE_DISPATCH(floor_stub);
 DEFINE_DISPATCH(frac_stub);
 DEFINE_DISPATCH(log_stub);
