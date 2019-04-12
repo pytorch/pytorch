@@ -32,7 +32,7 @@ Quantizer* quantizer(const QTensor& self) {
   return get_qtensorimpl(self)->quantizer().get();
 }
 
-RealTensor int_repr_quant(const QTensor& self) {
+Tensor int_repr_quant(const QTensor& self) {
   return self.to(self.device(), at::kByte);
 }
 
