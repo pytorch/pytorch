@@ -23,10 +23,10 @@ struct AllocForMKLDNN {
   }
 };
 
-// Construct MKL-DNN tensor given an ideep tensor
+// Construct aten MKL-DNN tensor given an ideep tensor
 Tensor new_with_itensor_mkldnn(ideep::tensor&& it, const TensorOptions& options);
 
-// Construct MKL-DNN tensor given `sizes` for allocation
+// Construct aten MKL-DNN tensor given `sizes` for allocation
 Tensor new_with_sizes_mkldnn(IntArrayRef sizes, const TensorOptions& options);
 
 // Retrieve `ideep::tensor` from MKL-DNN tensor

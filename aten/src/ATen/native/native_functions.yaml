@@ -1505,9 +1505,17 @@
 
 - func: relu(Tensor self) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: relu
+    CUDA: relu
+    MkldnnCPU: mkldnn_relu
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
+  dispatch:
+    CPU: relu_
+    CUDA: relu_
+    MkldnnCPU: mkldnn_relu_
 
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   variants: function, method
@@ -3628,9 +3636,17 @@
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: avg_pool2d_out
+    CUDA: avg_pool2d_out
+    MkldnnCPU: mkldnn_avg_pool2d_out
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: avg_pool2d
+    CUDA: avg_pool2d
+    MkldnnCPU: mkldnn_avg_pool2d
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -3705,10 +3721,18 @@
 # Return: (Tensor output, Tensor indices)
 - func: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CPU: max_pool2d_with_indices_out
+    CUDA: max_pool2d_with_indices_out
+    MkldnnCPU: mkldnn_max_pool2d_with_indices_out
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
   python_module: nn
+  dispatch:
+    CPU: max_pool2d_with_indices
+    CUDA: max_pool2d_with_indices
+    MkldnnCPU: mkldnn_max_pool2d_with_indices
 
 - func: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn

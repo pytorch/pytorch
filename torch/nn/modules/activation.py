@@ -92,6 +92,10 @@ class ReLU(Threshold):
     def __init__(self, inplace=False):
         super(ReLU, self).__init__(0., 0., inplace)
 
+    @weak_script_method
+    def forward(self, input):
+        return F.relu(input, inplace=self.inplace)
+
     def extra_repr(self):
         inplace_str = 'inplace' if self.inplace else ''
         return inplace_str
