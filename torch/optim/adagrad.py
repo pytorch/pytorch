@@ -44,17 +44,17 @@ class Adagrad(Optimizer):
                     state['sum'].share_memory_()
 
     def __getstate__(self):
-        base_dict = super().__getstate__()
+        base_dict = super(Adagrad, self).__getstate__()
         base_dict['_is_share_memory'] = self._is_share_memory
         return base_dict
 
     def state_dict(self):
-        base_state_dict = super().state_dict()
+        base_state_dict = super(Adagrad, self).state_dict()
         base_state_dict['_is_share_memory'] = True
         return base_state_dict
 
     def load_state_dict(self, state_dict):
-        super().load_state_dict(state_dict)
+        super(Adagrad, self).load_state_dict(state_dict)
         self._is_share_memory = state_dict['_is_share_memory']
 
     def step(self, closure=None):
