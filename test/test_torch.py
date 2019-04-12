@@ -10826,7 +10826,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_y_counts, y_counts)
 
             if device == torch.device('cuda'):
-                _, unique_indices = torch.unique_consecutive(y, return_inverse=True, return_counts=True, dim=0)
+                _, unique_indices = torch.unique_consecutive(y, return_index=True, dim=0)
                 self.assertEqual(expected_y_unique_indices, unique_indices)
 
         run_test(torch.float)
