@@ -117,7 +117,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> unique_cuda_template(
   int64_t num_out;
   std::tie(unique_indices, inverse_indices, counts, num_out) = compute_unique(
     policy, output_data, num_inp, sorted_indices,
-    return_inverse, return_counts, options,
+    return_index, return_inverse, return_counts, options,
     thrust::equal_to<scalar_t>(),
     thrust::not_equal_to<scalar_t>()
   );
@@ -182,7 +182,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> unique_dim_cuda_template(
   int64_t num_out;
   std::tie(unique_indices, inverse_indices, counts, num_out) = compute_unique(
     policy, indices_data, num_inp, indices,
-    return_inverse, return_counts, options,
+    return_index, return_inverse, return_counts, options,
     [=] __device__ (int64_t a, int64_t b) -> bool {
       for (int64_t i = 0; i < n; ++i) {
         scalar_t lhs = input_flat_ptr[i + a * n];
