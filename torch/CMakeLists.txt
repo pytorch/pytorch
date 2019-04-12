@@ -123,6 +123,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
   ${TORCH_SRC_DIR}/csrc/jit/pickler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp
@@ -174,6 +175,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/register_quantized_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
+  ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
   ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
@@ -235,7 +237,6 @@ if (NOT NO_API)
     ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/random.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/sequential.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/stream.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
@@ -270,12 +271,6 @@ target_compile_definitions(torch PUBLIC _THP_CORE)
 
 # until they can be unified, keep these lists synced with setup.py
 if(MSVC)
-  if (${CMAKE_BUILD_TYPE} MATCHES "Debug")
-    set (MSVC_RUNTIME_LIBRARY_FLAG "/MDd")
-  else()
-    set (MSVC_RUNTIME_LIBRARY_FLAG "/MD")
-  endif()
-
   target_compile_options(torch PUBLIC
     ${MSVC_RUNTIME_LIBRARY_OPTION}
     /Z7
@@ -533,7 +528,6 @@ if (BUILD_PYTHON)
     ${TORCH_SRC_DIR}/csrc/jit/python_tracer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/init.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/python_tree_views.cpp
     ${TORCH_SRC_DIR}/csrc/multiprocessing/init.cpp
     ${TORCH_SRC_DIR}/csrc/nn/THNN.cpp
@@ -686,6 +680,7 @@ if (BUILD_PYTHON)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
     if (NOT MSVC AND NOT APPLE)
       list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp)
+      list(APPEND TORCH_PYTHON_SRCS ${TORCH_SRC_DIR}/csrc/distributed/c10d/reducer.cpp)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
       if (USE_CUDA)

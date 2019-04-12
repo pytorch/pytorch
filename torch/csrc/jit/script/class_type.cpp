@@ -5,15 +5,21 @@ namespace c10 {
 
 // This file exists because we need to reference module.h, which we can't from
 // c10. Sigh...
-Method* ClassType::getMethod(const std::string& name) const {
-  return module_->find_method(name);
+Function* ClassType::getMethod(const std::string& name) const {
+  return compilation_unit_->find_function(name).get();
 }
 
-std::vector<Method*> ClassType::methods() const {
-  const auto& methods = module_->get_methods();
-  std::vector<Method*> ret;
-  for (const auto& pr : methods.items()) {
-    ret.push_back(pr.value().get());
+CompilationUnit& ClassType::compilation_unit() {
+  return *compilation_unit_;
+}
+const CompilationUnit& ClassType::compilation_unit() const {
+  return *compilation_unit_;
+}
+
+std::vector<Function*> ClassType::methods() const {
+  std::vector<Function*> ret;
+  for (const auto& pr : compilation_unit().get_functions()) {
+    ret.push_back(pr.get());
   }
   return ret;
 }

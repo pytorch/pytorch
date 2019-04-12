@@ -146,12 +146,17 @@ public:
     return is_varret_;
   }
   bool is_mutable() const {
-    return std::any_of(
-        arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
-          const auto& aliasInfo = arg.alias_info();
-          return aliasInfo && aliasInfo.value().isWrite();
-        });
+    // see [custom operator aliasing]
+    const auto kind = Symbol::fromQualString(name_);
+    const auto is_custom_op = !kind.is_aten() && !kind.is_prim();
+    return is_custom_op ||
+        std::any_of(
+            arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
+              const auto& aliasInfo = arg.alias_info();
+              return aliasInfo && aliasInfo.value().isWrite();
+            });
   }
+
   c10::optional<int> argumentIndexWithName(const std::string& name) const {
     for(size_t i = 0; i < arguments().size(); ++i) {
       if(name == arguments()[i].name())
@@ -159,6 +164,18 @@ public:
     }
     return c10::nullopt;
   }
+  FunctionSchema cloneWithArguments(std::vector<Argument> new_arguments) const {
+    return FunctionSchema(
+        name(),
+        overload_name(),
+        std::move(new_arguments),
+        returns(),
+        is_vararg(),
+        is_varret());
+  }
+  // Check that inputs have the correct types and appends any missing default
+  // values.
+  void checkAndNormalizeInputs(std::vector<IValue>& inputs) const;
 };
 
 inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {
@@ -220,6 +237,48 @@ inline std::string toString(const FunctionSchema& schema) {
   std::ostringstream str;
   str << schema;
   return str.str();
+}
+
+inline void FunctionSchema::checkAndNormalizeInputs(std::vector<IValue>& inputs) const {
+  // Do we have more inputs than the schema accepts?
+  AT_CHECK(
+      inputs.size() <= arguments().size(),
+      "Expected at most ",
+      arguments().size(),
+      " argument(s) for operator '",
+      name(),
+      "', but received ",
+      inputs.size(),
+      " argument(s). Declaration: ",
+      *this);
+
+  for (size_t pos = 0; pos < arguments().size(); ++pos) {
+    const auto& argument = arguments()[pos];
+    if (pos < inputs.size()) {
+      if (!isSubvalueOf(inputs[pos], argument.type())) {
+        AT_ERROR(
+            "Expected value of type ",
+            *argument.type(),
+            " for argument '",
+            argument.name(),
+            "' in position ",
+            pos,
+            ", but instead got value of type ",
+            attemptToRecoverType(inputs[pos])->str(),
+            ". Declaration: ",
+            *this);
+      }
+    } else if (argument.default_value()) {
+      inputs.push_back(*argument.default_value());
+    } else {
+      AT_ERROR(
+          name(),
+          "() is missing value for argument '",
+          argument.name(),
+          "'. Declaration: ",
+          *this);
+    }
+  }
 }
 
 } // namespace c10

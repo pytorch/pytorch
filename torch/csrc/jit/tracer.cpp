@@ -244,7 +244,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs) {
       AT_ASSERT(elem_pairs.size() == elem_values.size());
 
       size_t i = 0;
-      for (auto pair : elem_pairs) {
+      for (const auto &pair : elem_pairs) {
         elem_pairs[pair.first] = add_input(pair.second, dict_type->getValueType(), elem_values[i++]);
       }
 
@@ -454,6 +454,7 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
 void addInputs(Node* n, const char* name, const ArrayRef<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
+
 void addInputs(Node* n, const char* name, const std::vector<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
@@ -527,7 +528,7 @@ void ensureUniqueIfOutOfPlaced(const char* name, const at::Tensor& tensor) {
        << " live references to the data region being modified when tracing in-place operator "
        << name
        << ". This might cause the trace to be incorrect, because all other views "
-       << "that also reference this data will not not reflect this change in the trace! "
+       << "that also reference this data will not reflect this change in the trace! "
        << "On the other hand, if all other views use the same memory chunk, but are disjoint (e.g. "
        << "are outputs of torch.split), this might still be safe.";
     warn(ss.str().c_str());

@@ -56,8 +56,7 @@ THTensor *THTensor_(new)(void)
 {
   return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
-    at::CPUTensorId(),
-    false
+    at::CPUTensorId()
   ).release();
 }
 
@@ -66,8 +65,7 @@ THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 {
   THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
-    at::CPUTensorId(),
-    false
+    at::CPUTensorId()
   ).release();
   THTensor_(setStorageNd)(self,
                           THTensor_getStoragePtr(tensor),
@@ -85,8 +83,7 @@ THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset,
   }
   THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
-    at::CPUTensorId(),
-    false
+    at::CPUTensorId()
   ).release();
   THTensor_(setStorageNd)(self, storage, storageOffset, sizes.size(),
                           const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
@@ -190,13 +187,6 @@ THTensor *THTensor_(newTranspose)(THTensor *tensor, int dimension1_, int dimensi
 {
   THTensor *self = THTensor_(newWithTensor)(tensor);
   THTensor_(transpose)(self, NULL, dimension1_, dimension2_);
-  return self;
-}
-
-THTensor *THTensor_(newUnfold)(THTensor *tensor, int dimension_, int64_t size_, int64_t step_)
-{
-  THTensor *self = THTensor_(newWithTensor)(tensor);
-  THTensor_(unfold)(self, NULL, dimension_, size_, step_);
   return self;
 }
 

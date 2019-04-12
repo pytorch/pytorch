@@ -159,6 +159,10 @@ case ${key}: { // ${name}
 } break;
 """)
 
+ASSIGN_CHECK_SIZE_TEMPLATE = CT("""\
+  if(OutputSize() > ${offset}) {${assignment}}
+""")
+
 
 def get_output(o, i):
     if len(o['returns']) == 1:
@@ -196,6 +200,15 @@ def find_factory_methods(decls):
         if any(arg['dynamic_type'] == 'TensorOptions' for arg in o['arguments']):
             factory_methods[o['name']] = 0
     return factory_methods
+
+
+def emit_assignments(o, env):
+    for i, r in enumerate(o['returns']):
+        t = RETURN_MAP[r['type'] if not value_is_tensor_type(r) else 'Tensor']
+        assignment = CT(t).substitute(env, offset=i, output=get_output(o, i))
+        check_size_assignment = ASSIGN_CHECK_SIZE_TEMPLATE.substitute(env, offset=i, assignment=assignment)
+
+        env['assignments'].append(check_size_assignment)
 
 
 if __name__ == '__main__':
@@ -258,10 +271,9 @@ if __name__ == '__main__':
                 # switch to indexing the "stack" from the end as if we only had
                 env['statements'].append(
                     'auto {} = peekSlice({}, InputSize() - {}, InputSize());'
-                        .format(arg['name'], real_inputs, static_tensor_inputs))
+                    .format(arg['name'], real_inputs, static_tensor_inputs))
             elif value_is_tensor_type(arg):
                 # load tensor inputs from Caffe2
-
                 env['statements'].append(
                     'auto {} = peek({}, {});'.format(arg['name'], real_inputs, view_length))
                 real_inputs += 1
@@ -269,10 +281,7 @@ if __name__ == '__main__':
                 init = CT(ARGUMENT_MAP[arg['type']]).substitute(env, arg=arg['name'])
                 env['initialization'].append(init)
 
-        for i, r in enumerate(o['returns']):
-            t = RETURN_MAP[r['type'] if not value_is_tensor_type(r) else 'Tensor']
-            assignment = CT(t).substitute(env, offset=i, output=get_output(o, i))
-            env['assignments'].append(assignment)
+        emit_assignments(o, env)
 
         if 'namespace' in o['method_of']:
             env['invocation'] = CT("at::${name}(${arguments})").substitute(env)

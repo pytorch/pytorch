@@ -76,11 +76,11 @@ pthreadpool_t nnpack_threadpool() {
     enum nnp_status nnpack_status = nnp_initialize();
     if (nnpack_status != nnp_status_success) {
       if (nnpack_status == nnp_status_out_of_memory) {
-	throw std::runtime_error("could not initialize NNPack (out of memory)");
+        throw std::runtime_error("could not initialize NNPack (out of memory)");
       } else if (nnpack_status == nnp_status_unsupported_hardware) {
-	throw std::runtime_error("could not initialize NNPack (unsupported hardware)");
+        throw std::runtime_error("could not initialize NNPack (unsupported hardware)");
       } else {
-	throw std::runtime_error("could not initialize NNPack (unknown error)");
+        throw std::runtime_error("could not initialize NNPack (unknown error)");
       }
     }
     unsigned int threads;
@@ -213,10 +213,10 @@ Tensor _nnpack_spatial_convolution(
   auto algorithm = nnp_convolution_algorithm_auto;
 
   // All Tensors must be float Tensors
-  if (input.type().ID() != at::TypeID::CPUFloat ||
-      weight.type().ID() != at::TypeID::CPUFloat ||
-      output.type().ID() != at::TypeID::CPUFloat ||
-      (bias.defined() && bias.type().ID() != at::TypeID::CPUFloat)) {
+  if (input.dispatch_type().ID() != at::TypeID::CPUFloat ||
+      weight.dispatch_type().ID() != at::TypeID::CPUFloat ||
+      output.dispatch_type().ID() != at::TypeID::CPUFloat ||
+      (bias.defined() && bias.dispatch_type().ID() != at::TypeID::CPUFloat)) {
     throw std::runtime_error(
         "Mismatched Tensor types in NNPack convolutionOutput");
   }

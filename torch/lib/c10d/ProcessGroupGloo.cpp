@@ -123,9 +123,15 @@ void setOutput(O& opts, at::Tensor& tensor) {
 #ifdef USE_CUDA
 
 at::Tensor pinnedLike(at::Tensor& tensor) {
-  auto& type = tensor.type().toBackend(at::Backend::CPU);
   auto* allocator = at::cuda::getPinnedMemoryAllocator();
-  return type.tensorWithAllocator(tensor.sizes(), tensor.strides(), allocator);
+  auto storage = c10::Storage(
+      tensor.dtype(),
+      at::detail::computeStorageSize(tensor.sizes(), tensor.strides()),
+      allocator,
+      /*resizable=*/false
+  );
+  return at::empty({0}, tensor.options().device(at::kCPU)).set_(
+      storage, 0, tensor.sizes(), tensor.strides());
 }
 
 // This function initializes a vector of CUDA streams, one for every
@@ -290,16 +296,15 @@ ProcessGroupGloo::ProcessGroupGloo(
 
 ProcessGroupGloo::~ProcessGroupGloo() {
   std::unique_lock<std::mutex> lock(workMutex_);
-  while (!workQueue_.empty()) {
-    workConsumeCV_.wait(lock);
-  }
+  workConsumeCV_.wait(lock, [&] { return workQueue_.empty(); });
 
   // Queue is empty, signal stop
   stop_ = true;
 
   // Release lock to allow threads to terminate
-  workProduceCV_.notify_all();
   lock.unlock();
+
+  workProduceCV_.notify_all();
 
   // Wait for worker threads to terminate
   for (auto& thread : threads_) {
@@ -322,10 +327,13 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 
     auto work = std::move(workQueue_.front());
     workQueue_.pop_front();
-    workConsumeCV_.notify_one();
-
     workInProgress_[workerIndex] = work;
     lock.unlock();
+
+    // Notify after releasing the lock so that the waiter
+    // does not immediately block.
+    workConsumeCV_.notify_one();
+
     AsyncWork::execute(std::move(work));
     lock.lock();
     workInProgress_[workerIndex] = nullptr;
@@ -335,6 +343,10 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 void ProcessGroupGloo::enqueue(std::shared_ptr<AsyncWork> work) {
   std::unique_lock<std::mutex> lock(workMutex_);
   workQueue_.push_back(std::move(work));
+  lock.unlock();
+
+  // Notify after releasing the lock so that the waiter
+  // does not immediately block.
   workProduceCV_.notify_one();
 }
 
@@ -1511,10 +1523,6 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
       contexts_[0], std::move(priorWork), nextTag());
   enqueue(work);
   return work;
-}
-
-std::unordered_map<int, int> ProcessGroupGloo::getGroupRank() {
-  throw std::runtime_error("ProcessGroupGloo does not support getGroupRank");
 }
 
 } // namespace c10d

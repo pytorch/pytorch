@@ -11,7 +11,6 @@
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
-#include <torch/csrc/utils/object_ptr.h>
 
 #include <torch/csrc/jit/constants.h>
 
@@ -26,7 +25,7 @@ namespace jit {
 namespace script {
 
 using SugaredValuePtr = std::shared_ptr<SugaredValue>;
-using FunctionTable = std::unordered_map<std::string, Method&>;
+using FunctionTable = std::unordered_map<std::string, Function&>;
 using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
@@ -191,7 +190,7 @@ static bool meaningfulName(const std::string& name) {
 //      delete unnecessary ones later with replaceAllusesWith().
 struct Environment {
   Environment(
-      Method& method,
+      Function& method,
       Resolver resolver,
       Block* b,
       std::shared_ptr<Environment> next = nullptr)
@@ -200,7 +199,7 @@ struct Environment {
         b(b),
         next(std::move(next)) {}
 
-  Method& method;
+  Function& method;
   Resolver resolver;
   std::vector<std::string> captured_inputs;
   std::unordered_map<std::string, std::string> error_messages;
@@ -402,9 +401,9 @@ struct Environment {
           {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
+          {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
-          {"rangelist", std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
           {"rangelist",
            std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
       };
@@ -519,8 +518,8 @@ struct to_ir {
   to_ir(
       const Def& def,
       Resolver resolver_,
-      const c10::optional<Self>& self,
-      Method& method) // method being constructed
+      const Self& self,
+      Function& method) // method being constructed
       : method(method),
         graph(method.graph()),
         resolver(std::move(resolver_)),
@@ -542,7 +541,7 @@ struct to_ir {
   }
 
  private:
-  Method& method;
+  Function& method;
   std::shared_ptr<Graph> graph;
   Resolver resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
@@ -578,7 +577,7 @@ struct to_ir {
 
   FunctionSchema emitDef(
       const Def& def,
-      const c10::optional<Self>& self,
+      const Self& self,
       Block* block) {
     auto schema = extractSchemaFromDef(def, self);
     // TODO need guards on init returning none
@@ -625,15 +624,16 @@ struct to_ir {
         blank_decl,
         List<Stmt>::create(r, {ret}));
     auto m = std::make_shared<Module>();
-    defineMethodsInModule(m, {def}, {resolver}, c10::nullopt);
+    CompilationUnit cu;
+    cu.define({def}, {resolver}, nullptr);
     Stack stack;
-    m->get_method("defaults").run(stack);
+    cu.get_function("defaults").run(stack);
     return stack.at(0).toTuple()->elements();
   }
 
   std::vector<Argument> parseArgsFromDecl(
       const Decl& decl,
-      const c10::optional<Self>& self) {
+      const Self& self) {
     auto params_begin = decl.params().begin();
     auto params_end = decl.params().end();
     if (self) {
@@ -707,7 +707,7 @@ struct to_ir {
   }
   FunctionSchema extractSchemaFromDef(
       const Def& def,
-      const c10::optional<Self>& self) {
+      const Self& self) {
     const auto name = def.name().name();
     std::vector<Argument> args = parseArgsFromDecl(def.decl(), self);
     std::vector<Argument> returns = parseReturnFromDecl(def.decl());
@@ -717,9 +717,10 @@ struct to_ir {
 
   std::vector<Argument> emitFormalArguments(
       const Def& def,
-      const c10::optional<Self>& self,
+      const Self& self,
       const FunctionSchema& schema,
       Block* block) {
+
     std::vector<Argument> arguments; // for schema
     // inputs
     auto it = def.decl().params().begin();
@@ -739,14 +740,9 @@ struct to_ir {
     if (self) {
       AT_ASSERT(it != end);
       const auto& name = (*it).ident().name();
-      if (auto type = self->asFirstClass()) {
-        Value* new_input =
-            block->addInput()->setUniqueName(name)->setType(type);
-        environment_stack->setVar((*it).ident().range(), name, new_input);
-        arguments.emplace_back(name, type);
-      } else {
-        environment_stack->setSugaredVar(def.range(), name, self->asSugared());
-      }
+      Value* new_input = block->addInput()->setUniqueName(name);
+      environment_stack->setSugaredVar((*it).ident().range(), name, self(new_input));
+      arguments.emplace_back(name, new_input->type());
       ++it;
     }
     size_t arg_annotation_idx = 0;
@@ -832,7 +828,7 @@ struct to_ir {
       pushFrame(block, /*starts_def=*/true);
       emitDef(
           def,
-          c10::nullopt,
+          nullptr,
           block); // ignore schema return, we just wont use it for now since we
                   // never create a Method for the closure
       popFrame(/*ends_def=*/true);
@@ -1124,14 +1120,23 @@ struct to_ir {
   Value* emitCond(const Expr& cond) {
     Value* v = emitExpr(cond);
     if (!v->type()->isSubtypeOf(BoolType::get())) {
-      ErrorReport error(cond);
-      error << "expected a boolean expression for condition but found "
+      Value* cast_v = emitBuiltinCall(
+          cond.get()->range(),
+          *v->owningGraph(),
+          prim::Bool,
+          c10::nullopt,
+          {v},
+          {},
+          /*required*/ false);
+      if (cast_v == nullptr) {
+        ErrorReport error(cond);
+        error
+            << "expected a bool, int, float, or Tensor expression for condition but found "
             << v->type()->str();
-      if (v->type()->isSubtypeOf(TensorType::get())) {
-        error << ", to use a tensor in a boolean"
-              << " expression, explicitly cast it with `bool()`";
+        throw error;
+      } else {
+        v = cast_v;
       }
-      throw error;
     }
     return v;
   }
@@ -2255,7 +2260,6 @@ struct to_ir {
       node_output = fork_node->output()->setType(
           FutureType::create(fn_simple_output->type()));
     }
-
     // Lambda lift block(0) into attr::Subgraph
     lambdaLiftFork(fork_node);
 
@@ -2480,6 +2484,17 @@ struct to_ir {
         loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }
 
+  Value* emitUnsqueeze(const SourceRange& loc, Value* input, int64_t dim) {
+    return emitBuiltinCall(
+        loc,
+        *graph,
+        aten::unsqueeze,
+        c10::nullopt,
+        {input, graph->insertConstant(dim, nullptr, loc)},
+        {},
+        true);
+  }
+
   Value* emitIndex(
       const SourceRange& loc,
       Value* input,
@@ -2525,6 +2540,10 @@ struct to_ir {
       if (index->type() == IntType::get()) {
         sliceable = emitSelect(loc, sliceable, dim, index);
         continue;
+      } else if (index->type()->isSubtypeOf(NoneType::get())) {
+        sliceable = emitUnsqueeze(loc, sliceable, dim);
+        dim++;
+        continue;
       } else if (index->type()->isSubtypeOf(OptionalType::ofTensor())) {
         // NB:index type can either be a Tensor or : (None of Optional Tensor)
         handle_tensor(index);
@@ -2546,7 +2565,7 @@ struct to_ir {
     return std::make_pair(sliceable, tensor_indices);
   }
 
-  // Desugars multidim slicing into slice/select/index calls.
+  // Desugars multidim slicing into slice/select/index/unsqueeze calls.
   //
   // XXX: Errors in user code are not elegantly reported.
   // Let's say someone were to do the following:
@@ -2725,23 +2744,21 @@ struct to_ir {
           {},
           true);
     } else {
-      throw ErrorReport(loc)
-          << "Indexing only supported on List, Dict, "
-             "Tensor, Tuple, and str but got type '"
-          << gatherable->type()->python_str() << "'";
+      throw ErrorReport(loc) << "Indexing only supported on List, Dict, "
+                                "Tensor, Tuple, and str but got type '"
+                             << gatherable->type()->python_str() << "'";
     }
   }
 };
 
-void defineMethodsInModule(
-    const std::shared_ptr<Module>& m,
+void CompilationUnit::define(
     const std::vector<Def>& definitions,
     const std::vector<Resolver>& resolvers,
-    const c10::optional<Self>& self) {
+    const Self& self) {
   AT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
-  std::vector<Method*> methods;
-  std::unordered_map<std::string, Method*> function_table;
+  std::vector<Function*> methods;
+  std::unordered_map<std::string, Function*> function_table;
   for (const Def& def : definitions) {
     const std::string& name = def.name().name();
     auto resolver = *resolver_it++;
@@ -2752,37 +2769,34 @@ void defineMethodsInModule(
       // the function table so the methods can see each other
       resolver = [resolver, &function_table](
                      const std::string& name,
-                     Method& m,
+                     Function& m,
                      const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
         auto it = function_table.find(name);
         if (it != function_table.end()) {
-          return std::make_shared<MethodValue>(nullptr, *it->second);
+          return std::make_shared<MethodValue>(c10::nullopt, *it->second);
         }
         return resolver(name, m, loc);
       };
     }
-    auto creator = [def, resolver, self](Method& method) {
+    auto creator = [def, resolver, self](Function& method) {
       AT_ASSERT(resolver);
       to_ir(def, resolver, self, method);
     };
-    Method& method = m->create_method(name, creator);
-    function_table[name] = &method;
-    methods.push_back(&method);
+    std::unique_ptr<Function> fn(
+        new Function(name, is_optimized(), std::make_shared<Graph>(), creator));
+    function_table[name] = fn.get();
+    methods.push_back(fn.get());
+    register_function(std::move(fn));
   }
-  for (Method* method : methods) {
+  for (Function* method : methods) {
     method->ensure_defined();
-  }
-  if (!self || !self->asFirstClass()) {
-    // Disable module hooks if the module is only used to store a class's code.
-    didFinishEmitModule(m);
   }
 }
 
-void defineMethodsInModule(
-    const std::shared_ptr<Module>& m,
+void CompilationUnit::define(
     const std::string& source,
     const Resolver& resolver,
-    const c10::optional<Self>& self) {
+    const Self& self) {
   Parser p(source);
   std::vector<Def> definitions;
   std::vector<Resolver> resolvers;
@@ -2791,7 +2805,7 @@ void defineMethodsInModule(
     definitions.push_back(def);
     resolvers.push_back(resolver);
   }
-  defineMethodsInModule(m, definitions, resolvers, self);
+  define(definitions, resolvers, self);
 }
 
 void lambdaLiftFork(Node* fork_node) {
@@ -2816,6 +2830,7 @@ void lambdaLiftFork(Node* fork_node) {
   fork_node->g_(attr::Subgraph, forked_graph);
   fork_node->eraseBlock(0);
 }
+
 } // namespace script
 } // namespace jit
 } // namespace torch
