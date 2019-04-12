@@ -125,6 +125,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
   ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/pass_manager.cpp
   ${TORCH_SRC_DIR}/csrc/jit/pickler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp
