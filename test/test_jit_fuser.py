@@ -428,43 +428,56 @@ class TestFuser(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_fuse_batch_norm(self):
-
+    def test_fuse_decompose_normalization(self):
         class ResLike(torch.jit.ScriptModule):
-            def __init__(self, optimize=True):
+            def __init__(self, norm_module, optimize=True):
                 super(ResLike, self).__init__(optimize)
-                self.bn = nn.BatchNorm2d(16)
+                self.nm = norm_module
 
             @torch.jit.script_method
             def forward(self, x, y):
-                return y + torch.relu(self.bn(x))
+                return y + torch.relu(self.nm(x))
 
-        model = ResLike().cuda()
-        model_noopt = ResLike(optimize=False).cuda()
-        model_noopt.load_state_dict(model.state_dict())
-        x = torch.randn(2, 16, 8, 8, device='cuda')
-        y = torch.randn(2, 16, 8, 8, device='cuda')
-        # FIXME: We need differentiation for CNNs for this optimization to trigger
-        with torch.no_grad():
-            out = model(x, y)
-            graph = model.graph_for(x, y)
-            rep = str(graph)
+        def test_norm_decompose(nm, in_opt_graph, not_in_opt_graph, in_fusegraph):
+            model = ResLike(nm).cuda()
+            model_noopt = ResLike(nm, optimize=False).cuda()
+            model_noopt.load_state_dict(model.state_dict())
+            x = torch.randn(2, 16, 8, 8, device='cuda')
+            y = torch.randn(2, 16, 8, 8, device='cuda')
 
-            out_noopt = model_noopt(x, y)
-            rep_noopt = str(model_noopt.graph_for(x, y))
-            self.assertEqual(out, out_noopt, prec=3e-5)
+            # FIXME: We need differentiation for CNNs for this optimization to trigger
+            with torch.no_grad():
+                out = model(x, y)
+                graph = model.graph_for(x, y)
+                rep = str(graph)
 
-        # Check that batch_norm has really been decomposed
-        self.assertIn('aten::batch_norm_update_stats', rep)
-        self.assertNotIn('aten::batch_norm(', rep)
-        self.assertIn('aten::batch_norm(', rep_noopt)
+                out_noopt = model_noopt(x, y)
+                rep_noopt = str(model_noopt.graph_for(x, y))
+                self.assertEqual(out, out_noopt, prec=3e-5)
 
-        # Make sure the fusion group is big, and contains aten::sqrt, which could
-        # originate only from decomposing batch_norm in this case
-        fusion_groups = [node for node in graph.nodes() if node.kind() == 'prim::FusionGroup']
-        self.assertEqual(len(fusion_groups), 1)
-        fused_graph = fusion_groups[0].g('Subgraph')
-        self.assertTrue(any(node.kind() == 'aten::sqrt' for node in fused_graph.nodes()))
+            # Check that normalization op has really been decomposed
+            for node_in_graph in in_opt_graph:
+                self.assertIn(node_in_graph, rep)
+
+            for node_not_in_graph in not_in_opt_graph:
+                self.assertNotIn(node_not_in_graph, rep)
+                self.assertIn(node_not_in_graph, rep_noopt)
+
+            fusion_groups = [node for node in graph.nodes() if node.kind() == 'prim::FusionGroup']
+            self.assertEqual(len(fusion_groups), 1)
+            fused_graph = str(fusion_groups[0].g('Subgraph'))
+            for node_in_fusegraph in in_fusegraph:
+                self.assertIn(node_in_fusegraph, fused_graph)
+
+        # test for batchnorm decompose
+        bm = nn.BatchNorm2d(16)
+        test_norm_decompose(bm, ['aten::batch_norm_update_stats'],
+                            ['aten::batch_norm('], ['aten::sqrt'])
+
+        # test for layernorm decompose
+        lm = nn.LayerNorm(8)
+        test_norm_decompose(lm, ['aten::batch_norm_stats'],
+                            ['aten::layer_norm('], ['aten::sub', 'aten::mul', 'aten::addcmul'])
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")

@@ -16,6 +16,7 @@
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/interpreter.h"
+#include "torch/csrc/jit/pass_manager.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
@@ -719,6 +720,32 @@ void testModuleDefine() {
   )");
   auto result = m->run_method("add_it", torch::ones({}));
   AT_ASSERT(result.toTensor().item<float>() == 6)
+}
+
+static int testPassValue = 0;
+void fakePass(std::shared_ptr<Graph>& g) {
+  testPassValue++;
+  return;
+}
+
+RegisterPass p(fakePass);
+
+void testPassManagement() {
+  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  script::parseIR(
+      R"IR(
+graph(%a):
+  return (%a))IR",
+      &*graph);
+
+  std::vector<IValue> stack = {IValue(torch::randn({22}, at::kCPU))};
+  auto run = [&](std::shared_ptr<Graph>& graph, std::vector<IValue> stack) {
+    GraphExecutor executor(graph);
+    executor.run(stack);
+    return stack;
+  };
+  run(graph, stack);
+  AT_ASSERT(testPassValue);
 }
 
 } // namespace test
