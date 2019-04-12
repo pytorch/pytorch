@@ -12,7 +12,7 @@ namespace c10 {
 // errors. These objects should be constructed from C10 schema once those
 // are available.
 
-struct C10_API Argument {
+struct Argument {
   Argument(
       std::string name = "",
       TypePtr type = nullptr,
@@ -84,7 +84,7 @@ inline bool operator==(const Argument& lhs, const Argument& rhs) {
           && lhs.alias_info() == rhs.alias_info();
 }
 
-struct C10_API FunctionSchema {
+struct FunctionSchema {
   FunctionSchema(
       std::string name,
       std::string overload_name,
