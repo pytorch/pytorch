@@ -14,7 +14,7 @@ std::vector<TensorGroup> take_tensors(
   std::vector<TensorGroup> results;
   // an overapproximation, but at least we won't have to copy stuff around
   results.reserve(tensors.size());
-  std::map<TypeID, TensorGroup> groups;
+  std::unordered_map<DeprecatedTypeProperties*, TensorGroup> groups;
   size_t cur_group_size = 0;
 
   for (const auto & tensor : tensors) {
@@ -28,7 +28,7 @@ std::vector<TensorGroup> take_tensors(
       tensor_size = tensor.numel() * tensor.element_size();
     }
 
-    auto& type_group = groups[tensor.dispatch_type().ID()];
+    auto& type_group = groups[&tensor.type()];
     type_group.tensors.push_back(tensor);
 
     if (fine_grained) {
