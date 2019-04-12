@@ -283,10 +283,9 @@ struct GraphFuser {
         [](std::shared_ptr<Graph>* graph_ptr,
            const char* source,
            const std::string& method_name) {
-          auto module = std::make_shared<script::Module>();
-          defineMethodsInModule(
-              module, source, script::nativeResolver, /*self=*/c10::nullopt);
-          *graph_ptr = module->get_method(method_name).graph();
+          script::CompilationUnit cu;
+          cu.define(source, script::nativeResolver, nullptr);
+          *graph_ptr = cu.get_function(method_name).graph();
         },
         &nm_graph,
         source,
@@ -327,8 +326,8 @@ struct GraphFuser {
 
             return (input - mean) * invstd
       )SCRIPT";
+    Value* input = normalization_op->namedInput(attr::input);
     if (normalization_op->kind() == aten::batch_norm) {
-      Value* input = normalization_op->namedInput(attr::input);
       Value* input_dim = graph_->insert(aten::dim, {input});
       std::vector<Value*> inputs{
           input,
@@ -356,7 +355,6 @@ struct GraphFuser {
       normalization_op->destroy();
 
     } else if (normalization_op->kind() == aten::layer_norm) {
-      Value* input = normalization_op->namedInput(attr::input);
       std::vector<Value*> inputs{
           input,
           normalization_op->namedInput(attr::normalized_shape),
