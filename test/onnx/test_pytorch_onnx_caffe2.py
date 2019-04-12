@@ -892,10 +892,27 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(4, 3, 2, 1, requires_grad=True)
         self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
-    @unittest.skip("Temporary - waiting for https://github.com/onnx/onnx/pull/1773.")
     def test_upsample(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        model = nn.Upsample(scale_factor=2, mode='nearest')
+        model = nn.Upsample(size=[v * 2 for v in x.size()[2:]], mode='nearest')
+        self.run_model_test(model, train=False, input=(x),
+                            batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_interpolate_upsample(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, x):
+                size = [v * 2 for v in x.size()[2:]]
+                # work around for now: turn the dynamic sizes into constant
+                size = [int(i) for i in size]
+                return nn.functional.interpolate(x,
+                                                 size=size,
+                                                 mode='nearest')
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        model = MyModel()
         self.run_model_test(model, train=False, input=(x),
                             batch_size=BATCH_SIZE, use_gpu=False)
 
@@ -1231,6 +1248,44 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(3, 3, requires_grad=True)
         self.run_model_test(NarrowModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_traced_ints(self):
+        A = 4
+        H = 10
+        W = 8
+        img_count = 3
+
+        # in this model, the constant propagation in JIT doesn't work
+        # so we have ListConstruct in the symbolic
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.conv = torch.nn.Conv2d(A, 4 * A, 1, stride=1)
+
+            def forward(self, feature, im_info, anchors):
+                bbox_deltas = self.conv(feature)
+                a, b = torch.ops._caffe2.GenerateProposals(
+                    feature, bbox_deltas, im_info, anchors,
+                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0,
+                )
+                output = torch.ops._caffe2.RoIAlign(
+                    feature, a,
+                    order="NCHW",
+                    spatial_scale=1.0,
+                    pooled_h=3,
+                    pooled_w=3,
+                    sampling_ratio=0,
+                )
+                return output
+
+        feature = torch.Tensor(img_count, A, H, W)
+        im_info = torch.ones(img_count, 3, dtype=torch.float32)
+        anchors = torch.ones(A, 4, dtype=torch.float32)
+        inputs = (feature, im_info, anchors)
+
+        model = MyModel()
+        with torch.no_grad():
+            self.run_model_test(MyModel(), train=False, input=inputs, batch_size=BATCH_SIZE)
 
     def test_c2_roi_align(self):
         class MyModel(torch.nn.Module):
