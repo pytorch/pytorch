@@ -166,8 +166,8 @@ PyObject *THPDevice_reduce(THPDevice *self)
 typedef PyObject *(*getter)(PyObject *, void *);
 
 static struct PyGetSetDef THPDevice_properties[] = {
-  {"type",       (getter)THPDevice_type, nullptr, nullptr, nullptr},
-  {"index",      (getter)THPDevice_index, nullptr, nullptr, nullptr},
+  {const_cast<char*>("type"),       (getter)THPDevice_type, nullptr, nullptr, nullptr},
+  {const_cast<char*>("index"),      (getter)THPDevice_index, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
