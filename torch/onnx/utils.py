@@ -108,9 +108,9 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             opset version. Right now, supported stable opset version is 9.
             The opset_version must be _onnx_master_opset or in _onnx_stable_opsets
             which are defined in torch/onnx/symbolic.py
-        do_constant_folding (bool, default False): If True, the constant-folding 
-            optimization is applied to the model during export. Constant-folding 
-            optimization will replace some of the ops that have all constant 
+        do_constant_folding (bool, default False): If True, the constant-folding
+            optimization is applied to the model during export. Constant-folding
+            optimization will replace some of the ops that have all constant
             inputs, with pre-computed constant nodes.
     """
     if aten or export_raw_ir:
