@@ -547,7 +547,6 @@ struct to_ir {
   Resolver resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
   std::unordered_map<double, Value*> fp_constants;
-  Value* bottom_val;
   std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
 
@@ -965,17 +964,6 @@ struct to_ir {
               << "Unrecognized statement kind " << kindToString(stmt.kind());
       }
     }
-  }
-
-  Value* getBottomVal() {
-    if (bottom_val != nullptr) {
-      return bottom_val;
-    }
-    WithInsertPoint guard(graph->block()->nodes().front());
-    bottom_val = graph->insertNode(graph->create(prim::Bottom, {}, 1))
-                     ->output()
-                     ->setType(BottomType::get());
-    return bottom_val;
   }
 
   std::shared_ptr<Environment> emitSingleIfBranch(
