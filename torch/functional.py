@@ -450,7 +450,7 @@ def unique(input, sorted=True, return_inverse=False, dim=None):
         return output
 
 
-def unique_consecutive(input, return_inverse=False, return_counts=False, dim=None):
+def unique_consecutive(input, return_index=False, return_inverse=False, return_counts=False, dim=None):
     r"""Eliminates all but the first element from every consecutive group of equivalent elements.
 
     .. note:: This function is different from :func:`torch.unique` in the sense that this function
@@ -459,6 +459,9 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
 
     Arguments:
         input (Tensor): the input tensor
+        return_index(bool): Whether to also return the indices of the first
+            occurrences of the unique values in input (along the specified dim,
+            if provided, or in the flattened array).
         return_inverse (bool): Whether to also return the indices for where
             elements in the original input ended up in the returned unique list.
         return_counts (bool): Whether to also return the counts for each unique
@@ -470,11 +473,16 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
         (Tensor, Tensor (optional), Tensor (optional)): A tensor or a tuple of tensors containing
 
             - **output** (*Tensor*): the output list of unique scalar elements.
+            - **unique_indices** (*Tensor*): (optional) if
+              :attr:`return_index` is True, there will be an additional
+              returned tensor (same shape as output or output.size(dim),
+              if dim was specified) representing the indices of the first
+              occurrences of the unique values in input (along the specified dim,
+              if provided, or in the flattened array).
             - **inverse_indices** (*Tensor*): (optional) if
               :attr:`return_inverse` is True, there will be an additional
               returned tensor (same shape as input) representing the indices
-              for where elements in the original input map to in the output;
-              otherwise, this function will only return a single tensor.
+              for where elements in the original input map to in the output.
             - **counts** (*Tensor*): (optional) if
               :attr:`return_counts` is True, there will be an additional
               returned tensor (same shape as output or output.size(dim),
@@ -500,15 +508,19 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
         >>> counts
         tensor([2, 2, 1, 2, 1])
     """
-    output, inverse_indices, counts = torch._C._VariableFunctions.unique_consecutive(
-        input, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
-    if return_inverse and return_counts:
-        return output, inverse_indices, counts
+    output, unique_indices, inverse_indices, counts = torch._C._VariableFunctions.unique_consecutive(
+        input, return_index=return_index, return_inverse=return_inverse,
+        return_counts=return_counts, dim=dim)
+    ret = [output]
+    if not (return_index or return_inverse or return_counts):
+        return output
+    if return_index:
+        ret.append(unique_indices)
     if return_inverse:
-        return output, inverse_indices
+        ret.append(inverse_indices)
     if return_counts:
-        return output, counts
-    return output
+        ret.append(counts)
+    return tuple(ret)
 
 
 def tensordot(a, b, dims=2):

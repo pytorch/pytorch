@@ -61,22 +61,32 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
 }
 
 template <typename scalar_t>
-std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
+std::tuple<Tensor, Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
     const Tensor& self,
+    const bool return_index,
     const bool return_inverse,
     const bool return_counts) {
   const Tensor& input = self.contiguous();
   const scalar_t* input_data = input.data<scalar_t>();
   int64_t numel = input.numel();
   Tensor output = at::empty({numel}, input.options());
+  Tensor unique_indices = at::empty({0}, self.options().dtype(kLong));
   Tensor inverse_indices = at::empty({0}, self.options().dtype(kLong));
   Tensor counts = at::empty({0}, self.options().dtype(kLong));
 
   scalar_t *output_data = output.data<scalar_t>();
+  int64_t *unique_indices_data = nullptr;
   int64_t *inverse_data = nullptr;
   int64_t *counts_data = nullptr;
   if (numel > 0) {
     *output_data = *input_data;
+    if (return_index) {
+      *unique_indices_data = 0;
+    }
+  }
+  if (return_index) {
+    unique_indices.resize_(input.sizes());
+    unique_indices_data = unique_indices.data<int64_t>();
   }
   if (return_inverse) {
     inverse_indices.resize_(input.sizes());
@@ -88,10 +98,14 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
   }
   scalar_t *p = output_data;
   int64_t *q = counts_data;
+  int64_t *r = unique_indices_data;
   int64_t last = 0;
   for (int64_t i = 0; i < numel; i++) {
     if (input_data[i] != *p) {
       *(++p) = input_data[i];
+      if (return_index) {
+        *(++r) = i;
+      }
       if (return_counts) {
         *(q++) = i - last;
         last = i;
@@ -106,9 +120,12 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
     *q = numel - last;
     counts.resize_({output_size});
   }
+  if (return_index) {
+    unique_indices.resize_({output_size});
+  }
   output.resize_({output_size});
 
-  return std::make_tuple(output, inverse_indices, counts);
+  return std::make_tuple(output, unique_indices, inverse_indices, counts);
 }
 
 template<class ForwardIt>
@@ -237,21 +254,24 @@ _unique_dim2_cpu(const Tensor& self, const int64_t dim, const bool sorted, const
   });
 }
 
-std::tuple<Tensor, Tensor, Tensor>
-unique_dim_consecutive_cpu(const Tensor& self, const int64_t dim, const bool return_inverse, const bool return_counts) {
-  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique_dim", [&] {
-    return _unique_dim_cpu_template<scalar_t>(self, dim, true, return_inverse, return_counts);
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+unique_dim_consecutive_cpu(const Tensor& self, const int64_t dim, const bool return_index, const bool return_inverse, const bool return_counts) {
+  AT_CHECK(!return_index, "torch.unique with not None dim does not support return_index for CPU tensor yet");
+  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique_dim_consecutive", [&] {
+    Tensor output, unique_indices, inverse, counts;
+    std::tie(output, inverse, counts) = _unique_dim_cpu_template<scalar_t>(self, dim, true, return_inverse, return_counts);
+    return std::make_tuple(output, unique_indices, inverse, counts);
   });
 }
 
-std::tuple<Tensor, Tensor, Tensor>
-unique_consecutive_cpu(const Tensor& self, const bool return_inverse, const bool return_counts, c10::optional<int64_t> dim) {
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+unique_consecutive_cpu(const Tensor& self, const bool return_index, const bool return_inverse, const bool return_counts, c10::optional<int64_t> dim) {
   if (!dim.has_value()) {
-    return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique", [&] {
-      return unique_consecutive_cpu_template<scalar_t>(self, return_inverse, return_counts);
+    return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique_consecutive", [&] {
+      return unique_consecutive_cpu_template<scalar_t>(self, return_index, return_inverse, return_counts);
     });
   }
-  return unique_dim_consecutive_cpu(self, dim.value(), return_inverse, return_counts);
+  return unique_dim_consecutive_cpu(self, dim.value(), return_index, return_inverse, return_counts);
 }
 
 }  // namespace native
