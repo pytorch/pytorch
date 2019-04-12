@@ -629,19 +629,19 @@ inline bool Variable::is_leaf() const noexcept {
 
 inline void Variable::set_version_counter(
     const c10::VariableVersion& version_counter) noexcept {
-  data().unsafeGetTensorImpl()->set_version_counter(version_counter);
+  unsafeGetTensorImpl()->set_version_counter(version_counter);
 }
 
 inline void Variable::bump_version() noexcept {
-  data().unsafeGetTensorImpl()->bump_version();
+  unsafeGetTensorImpl()->bump_version();
 }
 
 inline uint32_t Variable::current_version() const noexcept {
-  return data().unsafeGetTensorImpl()->version_counter().current_version();
+  return unsafeGetTensorImpl()->version_counter().current_version();
 }
 
 inline const c10::VariableVersion& Variable::version_counter() const noexcept {
-  return data().unsafeGetTensorImpl()->version_counter();
+  return unsafeGetTensorImpl()->version_counter();
 }
 
 // Hooks
