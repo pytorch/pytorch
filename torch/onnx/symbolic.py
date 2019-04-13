@@ -353,6 +353,11 @@ def addmm(g, self, mat1, mat2, beta, alpha):
     return g.op("Gemm", mat1, mat2, self, beta_f=_scalar(beta), alpha_f=_scalar(alpha))
 
 
+@parse_args('v', 'v', 'v')
+def linear(g, self, w, b):
+    return g.op("Gemm", self, w, b, transB_i=1)
+
+
 def neg(g, self):
     return g.op("Neg", self)
 

@@ -832,6 +832,10 @@ class TestCaffe2Backend(unittest.TestCase):
         m2 = torch.randn(4, 5)
         self.run_model_test(MyModel(), train=False, input=(ma, m1, m2), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_linear(self):
+        x = torch.randn(3, 4)
+        self.run_model_test(torch.nn.Linear(4, 5), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
     # test for a pytorch optimization pass, see https://github.com/pytorch/pytorch/pull/7872
     def test_consecutive_transposes(self):
         class MyModel(torch.nn.Module):
