@@ -1152,9 +1152,7 @@ struct PythonPrintPass {
         [](const Argument& arg) { return arg.default_value(); });
     printFunction(graph, name, is_class, defaults, ivalue_names);
   }
-  void printFunction(
-      script::Function& method,
-      bool is_class) {
+  void printFunction(script::Function& method, bool is_class) {
     const std::string& name = method.name();
     Graph& graph = *method.graph();
     auto defaults = fmap(
