@@ -55,7 +55,7 @@ Tensor& mkldnn_avg_pool2d_out(
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_EBABLED
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -185,4 +185,4 @@ Tensor& mkldnn_avg_pool2d_out(
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_EBABLED
+#endif // AT_MKLDNN_ENABLED
