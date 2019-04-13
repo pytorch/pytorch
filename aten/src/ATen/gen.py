@@ -174,12 +174,14 @@ generators = {
     },
 }
 
-backends = ['CPU', 'CUDA', 'QuantizedCPU']
-densities = ['Dense', 'Sparse', 'Mkldnn']  # TODO: layout instead of densities?
+
 def backend_to_devicetype(backend):
     if backend == 'QuantizedCPU':
         return 'CPU'
     return backend
+
+backends = ['CPU', 'CUDA', 'QuantizedCPU']
+densities = ['Dense', 'Sparse', 'Mkldnn']  # TODO: layout instead of densities?
 
 quantized_backends = ['QuantizedCPU']
 
@@ -201,7 +203,6 @@ scalar_types = [
     ('Short', 'int16_t', 'Long', False),
     ('Half', 'Half', 'Double', True),
 ] + quantized_scalar_types
-
 
 
 # shared environment for non-derived base classes Type.h Tensor.h Storage.h
@@ -439,7 +440,7 @@ def iterate_types():
                     continue
                 if backend in quantized_backends:
                     if density == 'Dense' and scalar_type in quantized_scalar_types:
-                            yield (backend, density, scalar_type)
+                        yield (backend, density, scalar_type)
                     else:
                         continue
                 else:
