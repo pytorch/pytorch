@@ -1193,6 +1193,10 @@ struct PythonPrintPass {
   void print(std::ostream& out) {
     out << getImports() << body_.str();
   }
+
+  void print(std::ostream& out) {
+    out << body_.str();
+  }
 };
 
 TORCH_API void PythonPrint(
