@@ -108,10 +108,6 @@ struct TORCH_API Function {
     return get_executor().getDebugState();
   }
 
-  void debugDisableAutodiffSubgraphInlining() {
-    return get_executor().debugDisableAutodiffSubgraphInlining();
-  }
-
   bool is_optimized() const {
     return optimize_;
   }
