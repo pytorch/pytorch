@@ -185,4 +185,4 @@ Tensor& mkldnn_avg_pool2d_out(
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_EBABLED
+#endif // AT_MKLDNN_ENABLED
