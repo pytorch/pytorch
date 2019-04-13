@@ -1357,7 +1357,8 @@ void loadModule(const script::CompilationUnit& module) {
 void loadFunctions() {
   for (const std::string& str : functions) {
     script::CompilationUnit cu;
-    cu.define(str, script::nativeResolver, nullptr);
+    auto resolver = std::make_shared<script::NativeResolver>();
+    cu.define(str, std::move(resolver), nullptr);
     loadModule(cu);
   }
 }

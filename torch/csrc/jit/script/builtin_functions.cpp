@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/script/builtin_functions.h>
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/code_template.h>
+#include <torch/csrc/jit/script/builtin_functions.h>
 
 namespace torch {
 namespace jit {
@@ -63,8 +63,9 @@ struct BuiltinFunctionRegistry {
  private:
   void loadSource(const std::string& source) {
     std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
+    auto resolver = std::make_shared<script::NativeResolver>();
     modules.emplace_back(cu);
-    cu->define(source, script::nativeResolver, /*self=*/nullptr);
+    cu->define(source, std::move(resolver), /*self=*/nullptr);
     for (auto& method : cu->get_functions()) {
       builtins_by_name[Symbol::fromQualString("aten::" + method->name())]
           .push_back(method.get());
