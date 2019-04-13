@@ -925,14 +925,6 @@ void initJitScriptBindings(PyObject* module) {
                 "Attempted to call get_debug_state on a Module without a compiled forward()");
           })
       .def(
-          "debug_disable_autodiff_subgraph_inlining",
-          [](Module& self) {
-            if (self.find_method("forward")) {
-              Method& m = self.get_method("forward");
-              m.get_executor().debugDisableAutodiffSubgraphInlining();
-            }
-          })
-      .def(
           "forward",
           [](py::args args, py::kwargs kwargs) {
             // We implement this in C++ to avoid incurring the pybind11 dispatch
@@ -1040,11 +1032,6 @@ void initJitScriptBindings(PyObject* module) {
             return self.graph_for(createStackForSchema(
                 self.getSchema(), tuple_slice(std::move(args), 1), kwargs));
           })
-      .def(
-          "debug_disable_autodiff_subgraph_inlining",
-          [](Method& m) {
-            return m.get_executor().debugDisableAutodiffSubgraphInlining();
-          })
       .def("schema", &Method::getSchema)
       .def(
           "pretty_print_schema",
@@ -1142,6 +1129,8 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_import_methods", import_methods);
   m.def("_jit_set_emit_module_hook", setEmitModuleHook);
   m.def("_jit_clear_class_registry", ClassType::clearRegistry);
+  m.def(
+      "_debug_set_autodiff_subgraph_inlining", debugSetAutodiffSubgraphInlining);
 
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())
