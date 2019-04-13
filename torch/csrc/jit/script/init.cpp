@@ -655,6 +655,10 @@ struct PythonResolver : public Resolver {
     return toSugaredValue(obj, m, loc);
   }
 
+  TypePtr resolveType(const std::string& name) const override {
+    return ClassType::get(name);
+  }
+
  private:
   ResolutionCallback rcb_;
 };

@@ -97,6 +97,10 @@ struct SourceResolver : public Resolver {
     return it->second;
   }
 
+  TypePtr resolveType(const std::string& name) const override {
+    return ClassType::get(name);
+  }
+
  private:
   std::unordered_map<std::string, std::shared_ptr<SugaredValue>> env_;
 };
