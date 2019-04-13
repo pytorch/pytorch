@@ -355,7 +355,10 @@ def addmm(g, self, mat1, mat2, beta, alpha):
 
 @parse_args('v', 'v', 'v')
 def linear(g, self, w, b):
-    return g.op("Gemm", self, w, b, transB_i=1)
+    if b.node().mustBeNone():
+        return matmul(g, self, t(g, w))
+    else:
+        return g.op("Gemm", self, w, b, transB_i=1)
 
 
 def neg(g, self):

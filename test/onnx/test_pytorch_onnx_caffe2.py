@@ -191,23 +191,24 @@ class TestCaffe2Backend(unittest.TestCase):
                                 use_gpu=use_gpu_, example_outputs=example_outputs)
 
     def test_linear(self):
-        class MyModel(torch.nn.Module):
-            def __init__(self):
-                super(MyModel, self).__init__()
-                self.many_fc = nn.Sequential(
-                    nn.Linear(4, 5, bias=True),
-                    nn.ReLU(inplace=True),
-                    nn.Linear(5, 6, bias=True),
-                    nn.ReLU(inplace=True),
-                    nn.Linear(6, 7, bias=True),
-                )
+        for bias in [True, False]:
+            class MyModel(torch.nn.Module):
+                def __init__(self):
+                    super(MyModel, self).__init__()
+                    self.many_fc = nn.Sequential(
+                        nn.Linear(4, 5, bias=bias),
+                        nn.ReLU(inplace=True),
+                        nn.Linear(5, 6, bias=bias),
+                        nn.ReLU(inplace=True),
+                        nn.Linear(6, 7, bias=bias),
+                    )
 
-            def forward(self, input):
-                return self.many_fc(input)
+                def forward(self, input):
+                    return self.many_fc(input)
 
-        model = MyModel()
-        input = torch.randn(3, 4, requires_grad=True)
-        self.run_model_test(model, train=False, batch_size=0, input=input)
+            model = MyModel()
+            input = torch.randn(3, 4, requires_grad=True)
+            self.run_model_test(model, train=False, batch_size=0, input=input)
 
     def test_onnx_export_with_parameter_renaming(self):
         class SimpleFcNet(nn.Module):
@@ -221,6 +222,7 @@ class TestCaffe2Backend(unittest.TestCase):
         model = SimpleFcNet()
         input = torch.randn(7, 5)
         output = model(input)
+
 
         f = io.BytesIO()
         # Note that the export call explicitly sets the names of not just the input,
@@ -831,10 +833,6 @@ class TestCaffe2Backend(unittest.TestCase):
         m1 = torch.randn(3, 4)
         m2 = torch.randn(4, 5)
         self.run_model_test(MyModel(), train=False, input=(ma, m1, m2), batch_size=BATCH_SIZE, use_gpu=False)
-
-    def test_linear(self):
-        x = torch.randn(3, 4)
-        self.run_model_test(torch.nn.Linear(4, 5), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
     # test for a pytorch optimization pass, see https://github.com/pytorch/pytorch/pull/7872
     def test_consecutive_transposes(self):
