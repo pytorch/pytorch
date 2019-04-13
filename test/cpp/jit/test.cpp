@@ -47,6 +47,7 @@ namespace jit {
   _(FromQualString)                \
   _(InternedStrings)               \
   _(IValue)                        \
+  _(PassManagement)                \
   _(Proto)                         \
   _(RegisterFusionCachesKernel)    \
   _(SchemaParser)                  \
