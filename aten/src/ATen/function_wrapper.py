@@ -208,7 +208,7 @@ CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 
 # scalar_name, c_type, accreal, is_floating_type
 scalar_types = [
-    ('Bool', 'uint8_t', 'BoolAccrealNotDefined', False),
+    ('Bool', 'bool', 'BoolAccrealNotDefined', False),
     ('Byte', 'uint8_t', 'Long', False),
     ('Char', 'int8_t', 'Long', False),
     ('Double', 'double', 'Double', True),
@@ -1306,14 +1306,14 @@ def create_derived(backend_type_env, declarations):
         return [get_argument(env, argument, option)
                 for argument in arguments if not drop_argument(argument, option)]
 
-    def is_actual_return_long(ret):
-        # type: (ReturnDecl) -> bool
+    def is_actual_return_long(env, ret):
+        # type: (Environment, ReturnDecl) -> bool
         if ret['type'] == 'long':
             return True
         if ret['type'] == 'real':
-            return backend_type_env['ScalarName'] == 'Long'
+            return env['ScalarName'] == 'Long'
         if ret['type'] == 'accreal':
-            return backend_type_env['AccScalarName'] == 'Long'
+            return env['AccScalarName'] == 'Long'
         return False
 
     def handle_zero_dim(env, option):
@@ -1607,7 +1607,7 @@ def create_derived(backend_type_env, declarations):
                         case_body.append(CodeTemplate(return_scalar).substitute(case_env, call=call))
                     else:
                         # we using int64_t for long in the API, so correct it here...
-                        if is_actual_return_long(ret):
+                        if is_actual_return_long(case_env, ret):
                             call = "static_cast<int64_t>({})".format(call)
                         case_body.append("return {};".format(call))
                 else:
@@ -1620,7 +1620,6 @@ def create_derived(backend_type_env, declarations):
     def process_option(option):
         # type: (FunctionOption) -> None
         backend = backend_type_env['Backend']
-        scalar_name = backend_type_env['ScalarName']
         if backend in option['backend_types']:
             env = nested_dict(option, backend_type_env)
             body = emit_body(env, option, option['backend_types'][backend])  # type: ignore
