@@ -8,12 +8,9 @@ namespace at {
 namespace native {
 
 Tensor mkldnn_linear(
-    Tensor& result,
-    const Tensor& self,
-    const Tensor& mat1,
-    const Tensor& mat2,
-    Scalar beta,
-    Scalar alpha) {
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias) {
   AT_ERROR("mkldnn_linear: ATen not compiled with MKLDNN support");
 }
 
