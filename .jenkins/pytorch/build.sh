@@ -66,7 +66,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   scripts/build_host_protoc.sh
   mkdir -p ../android-build
   pushd ../android-build
-  WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY --android-abi="armeabi-v7a with NEON"
+  VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY --android-abi="armeabi-v7a with NEON"
   popd
 fi
 
