@@ -699,7 +699,7 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
   // R^{n x n}, and hence the derivative is not well-defined for off-diagonal
   // elements. We resolve this by taking the gradient of the functionally independent
   // elements of the matrix (i.e., the lower triangular portion of the input) and then
-  // reflecting it on upper triangular portion, thereby symmetrizing the gradient of
+  // reflect it on the upper triangular portion, thereby symmetrizing the gradient of
   // the cholesky operation. The motivation behind this choice is that symmetric gradient
   // leads to stable gradient updates, and retains symmetry of the updated matrix if it
   // were updated by a gradient based algorithm.
