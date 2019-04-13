@@ -194,10 +194,7 @@ static void check_shape_forward(const at::Tensor& input,
   std::vector<int64_t> weight_sizes(k);
   // mkldnn conv2d weights could have been re-ordered to 5d by
   // mkldnn_reorder_conv2d_weight
-  if (weight_dim == k + 1) {
-    AT_ASSERTM(
-        input_is_mkldnn,
-        "Only mkldnn weights could have been reordered to 5d");
+  if ((weight_dim == k + 1) && input_is_mkldnn) {
     weight_sizes[0] = weight.size(0) * weight.size(1);
     std::copy_n(
         weight.sizes().cbegin() + 2, k - 1, weight_sizes.begin() + 1);
