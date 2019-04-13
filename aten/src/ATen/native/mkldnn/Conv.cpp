@@ -42,20 +42,19 @@ using namespace mkldnn;
 
 namespace at { namespace native {
 
-Tensor _ideep_conv2d(
+Tensor _mkldnn_conv2d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     at::IntArrayRef padding, at::IntArrayRef stride, at::IntArrayRef dilation, int64_t groups) {
-
-  auto stride_vec = expand_param_if_needed(stride, 2);
-  auto padding_vec = expand_param_if_needed(padding, 2);
-  auto dilation_vec = expand_param_if_needed(dilation, 2);
-
   const ideep::tensor& x = itensor_from_mkldnn(input);
   const ideep::tensor& w = itensor_from_mkldnn(weight);
 
-
   std::vector<int64_t> kernel_size(input.dim());
-  if (groups > 1 && (weight.dim() == input.dim() + 1)) {
+  // mkldnn conv2d weights could have been re-ordered to 5d by
+  // mkldnn_reorder_conv2d_weight
+  if (weight.dim() == input.dim() + 1) {
+    AT_ASSERTM(
+        groups > 1,
+        "Only group _mkldnn_conv2d weights could have been reordered to 5d");
     kernel_size[0] = weight.size(0) * weight.size(1);
     std::copy_n(
         weight.sizes().cbegin() + 2, input.dim() - 1, kernel_size.begin() + 1);
@@ -67,7 +66,6 @@ Tensor _ideep_conv2d(
   std::vector<int64_t> output_sizes = conv_output_size(
     input.sizes(), kernel_size, padding, stride, dilation);
 
-  ideep::scale_t dummy_scale;
   ideep::tensor y;
   if (bias.defined()) {
     const ideep::tensor& b = itensor_from_mkldnn(bias);
@@ -77,14 +75,11 @@ Tensor _ideep_conv2d(
       b,
       {output_sizes.cbegin(), output_sizes.cend()},
       y,
-      {stride_vec.cbegin(), stride_vec.cend()},
-      {dilation_vec.cbegin(), dilation_vec.cend()},
-      {padding_vec.cbegin(), padding_vec.cend()},
-      {padding_vec.cbegin(), padding_vec.cend()},
+      {stride.begin(), stride.end()},
+      {dilation.begin(), dilation.end()},
+      {padding.begin(), padding.end()},
+      {padding.begin(), padding.end()},
       groups,
-      dummy_scale,
-      dummy_scale,
-      dummy_scale,
       ideep::descriptor_group::attr_t{},
       ideep::algorithm::convolution_direct,
       ideep::prop_kind::forward);
@@ -94,14 +89,11 @@ Tensor _ideep_conv2d(
       w,
       {output_sizes.cbegin(), output_sizes.cend()},
       y,
-      {stride_vec.cbegin(), stride_vec.cend()},
-      {dilation_vec.cbegin(), dilation_vec.cend()},
-      {padding_vec.cbegin(), padding_vec.cend()},
-      {padding_vec.cbegin(), padding_vec.cend()},
+      {stride.begin(), stride.end()},
+      {dilation.begin(), dilation.end()},
+      {padding.begin(), padding.end()},
+      {padding.begin(), padding.end()},
       groups,
-      dummy_scale,
-      dummy_scale,
-      dummy_scale,
       ideep::descriptor_group::attr_t{},
       ideep::algorithm::convolution_direct,
       ideep::prop_kind::forward);
@@ -114,7 +106,7 @@ at::Tensor mkldnn_convolution(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
 {
   if (input.type_id() == MkldnnCPUTensorId()) {
-    return _ideep_conv2d(input, weight, bias, padding, stride, dilation, groups);
+    return _mkldnn_conv2d(input, weight, bias, padding, stride, dilation, groups);
   }
 
   auto output = at::empty(

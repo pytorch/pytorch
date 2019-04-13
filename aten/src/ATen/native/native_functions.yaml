@@ -2486,7 +2486,8 @@
     CPU: dense_to_mkldnn
 
 - func: mkldnn_reorder_conv2d_weight(Tensor self, int[2] padding=0, int[2] stride=1, int[2] dilation=1, int groups=1) -> Tensor
-  variants: method
+  variants: function
+  python_module: nn
   dispatch:
     MkldnnCPU: mkldnn_reorder_conv2d_weight
 

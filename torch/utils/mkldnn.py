@@ -24,7 +24,8 @@ def to_mkldnn(module):
             module._buffers[key] = fn(buf)
 
     if isinstance(module, torch.nn.Conv2d):
-        module.weight.data = module.weight.data.mkldnn_reorder_conv2d_weight(
+        module.weight.data = torch._C._nn.mkldnn_reorder_conv2d_weight(
+            module.weight.data,
             module.padding,
             module.stride,
             module.dilation,

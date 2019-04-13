@@ -147,11 +147,12 @@ auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
 
 auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 #if AT_MKLDNN_ENABLED()
-  return input.type().backend() == at::Backend::CPU &&
-         input.scalar_type() == kFloat && // only on CPU Float Tensors
-         !is_dilated() && // doesn't support dilation
-         !transposed && // or transposed tensors
-         input.ndimension() == 4; // must be in NCHW format
+  return (input.type_id() == MkldnnCPUTensorId()) || // input is mkldnn Tensor
+    (input.type().backend() == at::Backend::CPU &&
+     input.scalar_type() == kFloat && // only on CPU Float Tensors
+     !is_dilated() && // doesn't support dilation
+     !transposed && // or transposed tensors
+     input.ndimension() == 4); // must be in NCHW format
 #endif
   return false;
 }
@@ -186,10 +187,25 @@ auto ConvParams::is_depthwise(
 }
 
 static void check_shape_forward(const at::Tensor& input,
-                                      const at::Tensor& weight, const at::Tensor& bias,
-                                      const ConvParams& params) {
+                                const at::Tensor& weight, const at::Tensor& bias,
+                                const ConvParams& params, bool input_is_mkldnn) {
   int64_t k = input.ndimension();
   int64_t weight_dim = weight.ndimension();
+  std::vector<int64_t> weight_sizes(k);
+  // mkldnn conv2d weights could have been re-ordered to 5d by
+  // mkldnn_reorder_conv2d_weight
+  if (weight_dim == k + 1) {
+    AT_ASSERTM(
+        input_is_mkldnn,
+        "Only mkldnn weights could have been reordered to 5d");
+    weight_sizes[0] = weight.size(0) * weight.size(1);
+    std::copy_n(
+        weight.sizes().cbegin() + 2, k - 1, weight_sizes.begin() + 1);
+    weight_dim = k;
+  } else {
+    std::copy_n(
+        weight.sizes().cbegin(), k, weight_sizes.begin());
+  }
   int64_t groups = params.groups;
   auto padding = params.padding;
   auto output_padding = params.output_padding;
@@ -203,14 +219,14 @@ static void check_shape_forward(const at::Tensor& input,
 
   AT_CHECK(weight_dim == k,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
-           "-dimensional weight ", weight.sizes(), ", but got ", k, "-dimensional input of size ",
+           "-dimensional weight ", weight_sizes, ", but got ", k, "-dimensional input of size ",
            input.sizes(), " instead");
-  AT_CHECK(weight.size(0) >= groups,
+  AT_CHECK(weight_sizes[0] >= groups,
            "Given groups=", groups, ", expected weight to be at least ", groups,
-           " at dimension 0, but got weight of size ", weight.sizes(), " instead");
-  AT_CHECK(weight.size(0) % groups == 0,
+           " at dimension 0, but got weight of size ", weight_sizes, " instead");
+  AT_CHECK(weight_sizes[0] % groups == 0,
            "Given groups=", groups, ", expected weight to be divisible by ",
-           groups, " at dimension 0, but got weight of size ", weight.sizes(),
+           groups, " at dimension 0, but got weight of size ", weight_sizes,
            " instead");
 
   if (!transposed) {
@@ -218,20 +234,20 @@ static void check_shape_forward(const at::Tensor& input,
     std::vector<int64_t> kernel_shape;
     bool kernel_size_correct = true;
 
-    AT_CHECK(input.size(1) == (weight.size(1) * groups),
-             "Given groups=", groups, ", weight of size ", weight.sizes(),
+    AT_CHECK(input.size(1) == (weight_sizes[1] * groups),
+             "Given groups=", groups, ", weight of size ", weight_sizes,
              ", expected input", input.sizes(), " to have ",
-             (weight.size(1) * groups), " channels, but got ", input.size(1),
+             (weight_sizes[1] * groups), " channels, but got ", input.size(1),
              " channels instead");
-    AT_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight.size(0)),
-             "Given weight of size ", weight.sizes(),
-             ", expected bias to be 1-dimensional with ", weight.size(0), " elements",
+    AT_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight_sizes[0]),
+             "Given weight of size ", weight_sizes,
+             ", expected bias to be 1-dimensional with ", weight_sizes[0], " elements",
              ", but got bias of size ", bias.sizes(), " instead");
 
     for (int i = 2; i < k; ++i) {
       input_shape.push_back(input.size(i) + 2 * padding[i-2]);
       // log new kernel size considering dilation
-      kernel_shape.push_back(dilation[i-2] * (weight.size(i)-1) + 1);
+      kernel_shape.push_back(dilation[i-2] * (weight_sizes[i]-1) + 1);
       if (input_shape.back() < kernel_shape.back()) {
         kernel_size_correct = false;
       }
@@ -256,13 +272,13 @@ static void check_shape_forward(const at::Tensor& input,
                "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
     }
   } else { // transposed
-    AT_CHECK(input.size(1) == weight.size(0),
-             "Given transposed=", transposed, ", weight of size ", weight.sizes(),
-             ", expected input", input.sizes(), " to have ", weight.size(0),
+    AT_CHECK(input.size(1) == weight_sizes[0],
+             "Given transposed=", transposed, ", weight of size ", weight_sizes,
+             ", expected input", input.sizes(), " to have ", weight_sizes[0],
              " channels, but got ", input.size(1), " channels instead");
-    AT_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight.size(1) * groups),
-             "Given transposed=", transposed, ", weight of size ", weight.sizes(),
-             ", expected bias to be 1-dimensional with ", weight.size(1) * groups, " elements",
+    AT_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight_sizes[1] * groups),
+             "Given transposed=", transposed, ", weight of size ", weight_sizes,
+             ", expected bias to be 1-dimensional with ", weight_sizes[1] * groups, " elements",
              ", but got bias of size ", bias.sizes(), " instead");
   }
 }
@@ -301,10 +317,6 @@ at::Tensor conv1d(
 at::Tensor conv2d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
-  if (input.type_id() == MkldnnCPUTensorId()) {
-    return at::mkldnn_convolution(
-        input, weight, bias, padding, stride, dilation, groups);
-  }
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {{0, 0}}, groups);
 }
@@ -368,10 +380,14 @@ at::Tensor _convolution(
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled) {
 
-  auto input = input_r.contiguous();
+  const bool input_is_mkldnn = (input_r.type_id() == MkldnnCPUTensorId());
+  auto input = input_r;
+  if (!input_is_mkldnn) {
+    input = input.contiguous();
+  }
   auto weight = weight_r;
   auto bias = bias_r;
-  auto k = weight.ndimension();
+  auto k = input.ndimension();
   int64_t dim = k - 2;
 
   AT_CHECK(dim > 0, "weight should have at least three dimensions");
@@ -387,7 +403,7 @@ at::Tensor _convolution(
   params.deterministic = deterministic;
   params.cudnn_enabled = cudnn_enabled;
 
-  check_shape_forward(input, weight, bias, params);
+  check_shape_forward(input, weight, bias, params, input_is_mkldnn);
 
   if (k == 3) {
     params.view1d_as_2d();
@@ -395,7 +411,10 @@ at::Tensor _convolution(
     weight = view4d(weight);
   }
 
-  auto output = at::empty({0}, input.options());
+  Tensor output;
+  if (!input_is_mkldnn) {
+    output = at::empty({0}, input.options());
+  }
 
   if (params.is_depthwise(input, weight)) {
       /* output.resize_(output_size(input, weight)); */
@@ -447,8 +466,14 @@ at::Tensor _convolution(
     AT_CHECK(!bias.defined() || (input.type() == bias.type()),
              "Input type (", input.type().toString(), ") and bias type (", bias.type().toString(),
              ") should be the same");
-    output = at::mkldnn_convolution(input, weight.contiguous(), bias.defined() ? bias.contiguous() : bias,
-                                    params.padding, params.stride, params.dilation, params.groups);
+    if (!input_is_mkldnn) {
+      output = at::mkldnn_convolution(input, weight.contiguous(), bias.defined() ? bias.contiguous() : bias,
+                                      params.padding, params.stride, params.dilation, params.groups);
+    } else {
+      // do not call contiguous on mkldnn tensor
+      output = at::mkldnn_convolution(input, weight, bias,
+                                      params.padding, params.stride, params.dilation, params.groups);
+    }
 #endif
   } else {
     if (params.groups == 1) {
