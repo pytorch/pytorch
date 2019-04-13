@@ -252,6 +252,7 @@ def enable_cpu_fuser(fn):
             torch._C._jit_override_can_fuse_on_cpu(False)
     return wrapper
 
+
 # note: not re-entrant, use unnested only
 @contextmanager
 def disable_autodiff_subgraph_inlining(enabled=True):
@@ -4507,7 +4508,7 @@ a")
                 return z
 
             graph = _propagate_shapes(test.graph,
-                                     (torch.zeros(2, 1), torch.zeros(1, 2), torch.zeros(1, 1, 1)), False)
+                                      (torch.zeros(2, 1), torch.zeros(1, 2), torch.zeros(1, 1, 1)), False)
             self.assertTrue(next(graph.outputs()).type() == TensorType.get())
         out_op_graph_input()
 
