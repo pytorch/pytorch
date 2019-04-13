@@ -220,7 +220,7 @@ def get_grad_executor(plan_state, diff_graph_idx=None):
             pass
         else:
             raise RuntimeError("Can't get a grad_executor for a non-differentiable graph")
-    grad_executors = list(plan_state.code.grad_executors())
+    grad_executors = list(plan_state.code.grad_executor_states())
     return grad_executors[diff_graph_idx or 0]
 
 
@@ -229,8 +229,8 @@ def backward_graph(script_module, diff_graph_idx=None):
         raise RuntimeError('Expected ScriptModule')
     ge_state = script_module.get_debug_state()
     fwd_plan = get_execution_plan(ge_state)
-    grad_executor = get_grad_executor(fwd_plan, diff_graph_idx=diff_graph_idx)
-    bwd_plan = get_execution_plan(grad_executor.get_debug_state())
+    grad_executor_state = get_grad_executor(fwd_plan, diff_graph_idx=diff_graph_idx)
+    bwd_plan = get_execution_plan(grad_executor_state)
     # Running JIT passes requires that we own the graph (with a shared_ptr).
     # The debug state struct does not own its graph so we make a copy of it.
     return bwd_plan.graph.copy()
@@ -540,11 +540,8 @@ class JitTestCase(TestCase):
         else:
             recording_inputs = reference_tensors
 
-        if isinstance(func, torch._C.Graph):
-            ge = torch._C.GraphExecutor(func, optimize)
-        else:
-            ge = torch.jit.trace(func, input_tensors, optimize=optimize, check_tolerance=check_tolerance,
-                                 _force_outplace=_force_outplace)
+        ge = torch.jit.trace(func, input_tensors, optimize=optimize, check_tolerance=check_tolerance,
+                             _force_outplace=_force_outplace)
 
         if export_import:
             ge = self.getExportImportCopy(ge)
@@ -1440,7 +1437,7 @@ graph(%x : Tensor,
             return MyInplaceFn.apply(x)
 
         x = torch.randn(5, 5)
-        ge = torch._C.GraphExecutor(fn, (x,), lambda var: '', _force_outplace=True)
+        ge = torch.jit.trace(fn, (x,), _force_outplace=True, check_trace=False)
         with self.assertRaisesRegex(RuntimeError, 'inplace MyInplaceFn'):
             ge(x)
 
@@ -1856,7 +1853,7 @@ graph(%x : Tensor,
             return a * b / (a - b) + b
         V = Variable
         a, b = V(torch.rand(1)), V(torch.rand(1))
-        ge = torch._C.GraphExecutor(foo, (a, b), lambda var: '')
+        ge = torch.jit.trace(foo, (a, b))
         a, b = V(torch.rand(1), requires_grad=True), V(
             torch.rand(1), requires_grad=True)
         r, = ge(a, b)
