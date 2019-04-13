@@ -12,6 +12,17 @@ namespace jit {
 namespace {
 // QuantizerUtils
 
+void insertNodeHelper(Node* new_n, Node* ins_node, bool insert_after) {
+  AT_ASSERT(ins_node != nullptr);
+  AT_ASSERT(new_n != nullptr);
+  // True: After insertion point, False: Before insertion point
+  if (insert_after) {
+    new_n->insertAfter(ins_node);
+  } else {
+    new_n->insertBefore(ins_node);
+  }
+}
+
 bool checkIfNodeQuantizable(Node* n) {
   AT_ASSERT(n != nullptr);
   // This is map for quantizable nodes. It will be expanded in future to
@@ -104,8 +115,10 @@ void PropagateQuantInfo(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
 
-static void addObserverFor(Value* v, Node* original_observer_node) {
-  Node* def = v->node();
+static void addObserverFor(Value* v, Node* original_observer_node,
+  std::pair<Node*, bool> insert_info) {
+  Node* def = insert_info.first;
+  AT_ASSERT(def != nullptr);
   WithInsertPoint ins(def);
 
   // We need to pass the value name to observer function - create a constant
@@ -116,9 +129,8 @@ static void addObserverFor(Value* v, Node* original_observer_node) {
   Node* observerNode =
       def->owningGraph()
           ->createClone(
-              &*original_observer_node, [&](Value* v) { return v; }, false)
-          ->insertAfter(def);
-
+              &*original_observer_node, [&](Value* v) { return v; }, false);
+  insertNodeHelper(observerNode, def, insert_info.second);
   // Set the type and the name of the output of the new observer node. It will
   // be used instead of the original value v.
   Value* observedValue = observerNode->addOutput();
@@ -131,43 +143,80 @@ static void addObserverFor(Value* v, Node* original_observer_node) {
 }
 
 static bool outputsNeedToBeObserved(Node* n) {
-  return n->kind() != prim::Constant;
+  return n->kind() != prim::Constant && n->kind() != prim::PythonOp;
 }
 
-void InsertObserverNodes(std::shared_ptr<Graph>& graph, Node* observer_node) {
+void InsertObserverNodes(std::shared_ptr<Graph>& graph,
+  std::unordered_map<std::string, Node*>& observerNodeDict,
+  ssize_t num_input_params) {
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
   // For traversing all blocks in the graph including subblocks.
   std::stack<Block*> blocks_to_visit;
 
+  // Observer nodes
+  Node* activation_observer = observerNodeDict.count("activation")
+    ? observerNodeDict["activation"] : nullptr;
+  Node* param_observer = observerNodeDict.count("param")
+    ? observerNodeDict["param"] : nullptr;
+
+  // Add observer for prim::Param nodes
+  auto inputVals = graph->inputs();
+  int inputlength = inputVals.size();
+  // Module params get appended after external inputs
+  int param_start_index = inputlength - num_input_params;
+  AT_ASSERT(param_start_index >= 0);
+  // Insert point is the beginning of graph node
+  Node* insert_node = *graph->nodes().begin();
+  for (auto idx = 0; idx < inputlength; ++idx) {
+    // This distinguish the model param from external data
+    // to insert correct observer
+    Node* observer = (idx < param_start_index) ?
+      activation_observer : param_observer;
+    if (observer == nullptr) {
+      continue;
+    }
+    auto& v = inputVals[idx];
+    if (v->type()->isSubtypeOf(TensorType::get())) {
+      addObserverFor(v, observer,
+        std::make_pair(insert_node, false));
+    }
+  }
+
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
+
     for (Node* n : b->nodes()) {
       // Skip nodes that we don't need to observe, e.g. 'prim::Constant'.
       if (!outputsNeedToBeObserved(n)) {
         continue;
       }
 
+      // Schedule subblocks (if any) for visiting.
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+
+      // Activations not observed
+      if (!activation_observer) {
+        continue;
+      }
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
         values_to_observe.push_back(v);
       }
-
-      // Schedule subblocks (if any) for visiting.
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
-      }
     }
   }
 
-  // Actually add observer nodes.
+  // Actually add observer nodes for activations.
   for (Value* v : values_to_observe) {
     if (v->type()->isSubtypeOf(TensorType::get())) {
-      addObserverFor(v, observer_node);
+      addObserverFor(v, activation_observer,
+        std::make_pair(v->node(), true));
     }
   }
 }

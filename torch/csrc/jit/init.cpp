@@ -39,6 +39,7 @@
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/init.h>
 #include <torch/csrc/jit/script/jit_exception.h>
+#include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
 
@@ -117,14 +118,44 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
       .def(
           "_jit_pass_insert_observers",
-          [](std::shared_ptr<Graph>& g, py::function pyObserverFunction) {
+          [](std::shared_ptr<script::Module>& moduleObj,
+              py::dict& pyObserverDict) {
             // Create a new node that would be used in the insert observer pass:
             // all observer nodes will be cloned from this one.
-            Node* new_node = g->createPythonOp(
-                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(g, new_node);
-            // We don't need this node anymore, don't forget to remove it.
-            new_node->destroy();
+            auto observerDict = py::cast<std::unordered_map<std::string,
+              py::function>>(pyObserverDict);
+            if (!observerDict.size()) {
+              return;
+            }
+
+            // This is a placeholder. Once Modules are first class citizens
+            // and code inlining from graph is removed, we would need to
+            // recursively call sub-modules and invoke the IR mutations for each
+            // subgraph. The code logic will move within moduleIteratorFunc
+            // below :
+            // std::function<void(script::Module&)>
+            //   moduleIteratorFunc = [](script::Module& moduleObj) {};
+            // moduleObj->apply(moduleIteratorFunc);
+
+            script::Method* method = moduleObj->find_method("forward");
+            AT_ASSERT(method != nullptr);
+
+            auto g = method->graph();
+            // Convert to new dict with new (key value)
+            std::unordered_map<std::string, Node*> observerNodeDict;
+            for (auto& it : observerDict) {
+              Node* new_node = g->createPythonOp(
+                  THPObjectPtr(it.second.release().ptr()), "dd", {});
+              observerNodeDict.emplace(it.first, new_node);
+            }
+
+            InsertObserverNodes(g, observerNodeDict,
+              method->initial_ivalues().size());
+            // We don't need these nodes anymore, don't forget to remove it.
+            for (auto& it : observerNodeDict) {
+              Node* node = it.second;
+              node->destroy();
+            }
           })
       .def(
           "_jit_pass_insert_quantdequant",
