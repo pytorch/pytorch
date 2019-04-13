@@ -62,12 +62,11 @@ fi
 # Use special scripts for Android builds
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
-  build_args=()
-  build_args+=("-DBUILD_BINARY=ON")
-  build_args+=("-DBUILD_TEST=ON")
-  build_args+=("-DUSE_OBSERVERS=ON")
-  build_args+=("-DUSE_ZSTD=ON")
-  exec ./scripts/build_android.sh "${build_args[@]}" "$@"
+  BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
+  mkdir -p ../android-build
+  pushd ../android-build
+  WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY --android-abi="armeabi-v7a with NEON"
+  popd
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
