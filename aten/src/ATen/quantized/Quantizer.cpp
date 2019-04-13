@@ -94,7 +94,7 @@ RealTensor PerTensorAffineQuantizer::dequantize(QTensor tensor) {
   const auto* qvd = tensor.data<qint8>();
   float* rvd = rv.data<float>();
   for (auto i = 0; i < tensor.numel(); ++i) {
-    rvd[i] = (static_cast<uint32_t>(qvd[i].val_) - zero_point_) * scale_;
+    rvd[i] = (static_cast<float>(qvd[i].val_) - zero_point_) * scale_;
   }
   return rv;
 }
