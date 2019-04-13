@@ -1,6 +1,7 @@
 #include "import_source.h"
 
 #include <torch/csrc/jit/script/parser.h>
+#include <torch/csrc/jit/script/resolver.h>
 
 namespace torch {
 namespace jit {
@@ -62,16 +63,17 @@ struct ConstantTableValue : public SugaredValue {
   ArrayRef<at::Tensor> constants_;
 };
 
-// Helper that contains the state for a parsing a TorchScript source string.
-struct SourceImporter {
-  SourceImporter(
-      const std::string& src,
-      const std::vector<at::Tensor>& constant_table)
-      : parser_(src), constant_table_(constant_table) {
-    const auto version = parseVersionNumber();
+// A resolver that doesn't rely on Python, and understands references to model
+// constants.
+struct SourceResolver : public Resolver {
+  explicit SourceResolver(
+      size_t version,
+      const std::vector<at::Tensor>& constant_table) {
     env_ = {
         {"torch", std::make_shared<BuiltinModule>("aten", version)},
         {"ops", std::make_shared<OpsValue>(version)},
+        // Constants present in the model. Used to resolve "CONSTANTS.n" to the
+        // actual value
         {"CONSTANTS", std::make_shared<ConstantTableValue>(constant_table)},
         {"fork", std::make_shared<ForkValue>()},
         {"annotate", std::make_shared<AnnotateValue>()},
@@ -82,26 +84,35 @@ struct SourceImporter {
          std::make_shared<ConstantValue>(
              std::numeric_limits<double>::quiet_NaN())},
     };
+  }
 
-    resolver_ = [&](const std::string& name,
-                    Function& m,
-                    const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
-      auto it = env_.find(name);
-      if (it == env_.end()) {
-        return nullptr;
-      }
-      return it->second;
-    };
+  std::shared_ptr<SugaredValue> resolveValue(
+      const std::string& name,
+      Function& m,
+      const SourceRange& loc) const override {
+    auto it = env_.find(name);
+    if (it == env_.end()) {
+      return nullptr;
+    }
+    return it->second;
+  }
+
+ private:
+  std::unordered_map<std::string, std::shared_ptr<SugaredValue>> env_;
+};
+
+// Helper that contains the state for a parsing a TorchScript source string.
+struct SourceImporter {
+  SourceImporter(
+      const std::string& src,
+      const std::vector<at::Tensor>& constant_table)
+      : parser_(src) {
+    const auto version = parseVersionNumber();
+    resolver_ = std::make_shared<SourceResolver>(version, constant_table);
   }
 
   Parser parser_;
-  // Constants present in the model. Used to resolve "CONSTANTS.n" to the actual
-  // value
-  const std::vector<at::Tensor>& constant_table_;
-  std::unordered_map<std::string, std::shared_ptr<SugaredValue>> env_;
-  std::function<std::shared_ptr<
-      SugaredValue>(const std::string& name, Function& m, const SourceRange& loc)>
-      resolver_;
+  ResolverPtr resolver_;
 
   size_t parseVersionNumber() {
     auto& L = parser_.lexer();
@@ -128,7 +139,7 @@ void import_methods(
   auto& p = importer.parser_;
 
   std::vector<Def> definitions;
-  std::vector<Resolver> resolvers;
+  std::vector<ResolverPtr> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
     auto def = Def(p.parseFunction(/*is_method=*/true));
     definitions.emplace_back(def);
@@ -149,7 +160,7 @@ void import_libs(
 
   while (p.lexer().cur().kind != TK_EOF) {
     std::vector<Def> definitions;
-    std::vector<Resolver> resolvers;
+    std::vector<ResolverPtr> resolvers;
     auto class_def = ClassDef(p.parseClass());
     for (const auto& method_def : class_def.defs()) {
       definitions.emplace_back(method_def);
