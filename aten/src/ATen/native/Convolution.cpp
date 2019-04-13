@@ -384,7 +384,12 @@ at::Tensor _convolution(
   }
   auto weight = weight_r;
   auto bias = bias_r;
-  auto k = input.ndimension();
+  auto k = weight.ndimension();
+  // mkldnn conv2d weights could have been re-ordered to 5d by
+  // mkldnn_reorder_conv2d_weight
+  if (input_is_mkldnn && (k == input.ndimension() + 1)) {
+    k = input.ndimension();
+  }
   int64_t dim = k - 2;
 
   AT_CHECK(dim > 0, "weight should have at least three dimensions");
