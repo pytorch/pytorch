@@ -63,6 +63,7 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
   BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
+  scripts/build_host_protoc.sh
   mkdir -p ../android-build
   pushd ../android-build
   WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY --android-abi="armeabi-v7a with NEON"
