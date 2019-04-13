@@ -159,12 +159,15 @@ void ScriptModuleDeserializer::loadAttributeTable() {
 
 void ScriptModuleDeserializer::loadLibs(torch::ModelDef* model_def) {
   const auto lib_def = model_def->libs();
-  if (lib_def.has_torchscript_arena()) {
-    at::DataPtr data;
-    size_t size;
-    std::tie(data, size) = reader_.getRecord(lib_def.torchscript_arena().key());
-    std::string data_str(static_cast<const char*>(data.get()), size);
-    script::import_libs(data_str, tensor_table_);
+  for (const auto lib : lib_def) {
+    AT_ASSERT(lib.has_torchscript_arena()) {
+      at::DataPtr data;
+      size_t size;
+      std::tie(data, size) = reader_.getRecord(lib.torchscript_arena().key());
+      std::string data_str(static_cast<const char*>(data.get()), size);
+      script::import_libs(
+          lib.torchscript_arena().key(), data_str, tensor_table_);
+    }
   }
 }
 
@@ -229,7 +232,8 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
             .set_(storage_it->second, tensor_proto.offset(), dims, strides);
   } else if (device.type() == at::DeviceType::CUDA) {
     result =
-        at::empty({0}, c10::TensorOptions(type).device(storage_it->second.device()))
+        at::empty(
+            {0}, c10::TensorOptions(type).device(storage_it->second.device()))
             .set_(storage_it->second, tensor_proto.offset(), dims, strides);
   }
   AT_ASSERT(result.defined());
@@ -267,10 +271,9 @@ void ScriptModuleDeserializer::convertModule(
     }
 
     module->register_attribute(
-      attr_def.name(),
-      typeParser.parseType(attr_def.type()),
-      attribute_table_.at(attr_def.id())
-    );
+        attr_def.name(),
+        typeParser.parseType(attr_def.type()),
+        attribute_table_.at(attr_def.id()));
   }
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;

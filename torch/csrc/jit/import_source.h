@@ -18,6 +18,9 @@ TORCH_API void import_methods(
 
 // Defined the list of classes in `src`.
 TORCH_API void import_libs(
+    // The path to the class's source file. This is used to construct a
+    // qualified name for the class.
+    const std::string& class_path,
     const std::string& src,
     const std::vector<at::Tensor>& constant_table);
 

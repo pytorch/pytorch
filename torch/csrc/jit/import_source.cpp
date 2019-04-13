@@ -68,7 +68,9 @@ struct ConstantTableValue : public SugaredValue {
 struct SourceResolver : public Resolver {
   explicit SourceResolver(
       size_t version,
-      const std::vector<at::Tensor>& constant_table) {
+      const std::vector<at::Tensor>& constant_table,
+      std::unordered_set<std::string>&& imports)
+      : imports_(std::move(imports)) {
     env_ = {
         {"torch", std::make_shared<BuiltinModule>("aten", version)},
         {"ops", std::make_shared<OpsValue>(version)},
@@ -91,10 +93,14 @@ struct SourceResolver : public Resolver {
       Function& m,
       const SourceRange& loc) const override {
     auto it = env_.find(name);
-    if (it == env_.end()) {
-      return nullptr;
+    if (it != env_.end()) {
+      return it->second;
     }
-    return it->second;
+
+    if (imports_.count(name)) {
+      return std::make_shared<ClassNamespaceValue>(name);
+    }
+    return nullptr;
   }
 
   TypePtr resolveType(const std::string& name) const override {
@@ -102,52 +108,57 @@ struct SourceResolver : public Resolver {
   }
 
  private:
+  std::unordered_set<std::string> imports_;
   std::unordered_map<std::string, std::shared_ptr<SugaredValue>> env_;
 };
 
-// Helper that contains the state for a parsing a TorchScript source string.
-struct SourceImporter {
-  SourceImporter(
-      const std::string& src,
-      const std::vector<at::Tensor>& constant_table)
-      : parser_(src) {
-    const auto version = parseVersionNumber();
-    resolver_ = std::make_shared<SourceResolver>(version, constant_table);
-  }
+static size_t parseVersionNumber(Lexer& L) {
+  auto range = L.cur().range;
+  auto name = L.expect(TK_IDENT).text();
+  L.expect('=');
+  std::string version_text = L.expect(TK_NUMBER).text();
+  L.expect(TK_NEWLINE);
+  auto version = Const::create(L.cur().range, version_text);
+  if (name != "op_version_set")
+    throw ErrorReport(range) << "expected an assignment to op_version_set";
+  if (!version.isIntegral())
+    throw ErrorReport(range)
+        << "expected an integral version but found " << version.text();
+  return size_t(version.asIntegral());
+}
 
-  Parser parser_;
-  ResolverPtr resolver_;
-
-  size_t parseVersionNumber() {
-    auto& L = parser_.lexer();
-    auto range = L.cur().range;
-    auto name = L.expect(TK_IDENT).text();
-    L.expect('=');
-    std::string version_text = L.expect(TK_NUMBER).text();
+static std::unordered_set<std::string> parseImports(Lexer& L) {
+  std::unordered_set<std::string> imports;
+  while (L.cur().text() == "import") {
+    L.next();
+    const auto qualifier = L.expect(TK_IDENT).text();
+    while (L.cur().kind != TK_NEWLINE) {
+      L.next();
+    }
     L.expect(TK_NEWLINE);
-    auto version = Const::create(L.cur().range, version_text);
-    if (name != "op_version_set")
-      throw ErrorReport(range) << "expected an assignment to op_version_set";
-    if (!version.isIntegral())
-      throw ErrorReport(range)
-          << "expected an integral version but found " << version.text();
-    return size_t(version.asIntegral());
+    imports.insert(qualifier);
   }
-};
+
+  return imports;
+}
 
 void import_methods(
     const std::shared_ptr<Module>& mod,
     const std::string& src,
     const std::vector<at::Tensor>& constant_table) {
-  SourceImporter importer(src, constant_table);
-  auto& p = importer.parser_;
+  Parser p(src);
+  const size_t version = parseVersionNumber(p.lexer());
+  auto imports = parseImports(p.lexer());
+
+  auto resolver = std::make_shared<SourceResolver>(
+      version, constant_table, std::move(imports));
 
   std::vector<Def> definitions;
   std::vector<ResolverPtr> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
     auto def = Def(p.parseFunction(/*is_method=*/true));
     definitions.emplace_back(def);
-    resolvers.emplace_back(importer.resolver_);
+    resolvers.emplace_back(resolver);
   }
   auto self = [&](Value* v) {
     v->setType(mod->module_object()->type());
@@ -157,22 +168,43 @@ void import_methods(
 }
 
 void import_libs(
+    const std::string& class_path,
     const std::string& src,
     const std::vector<at::Tensor>& constant_table) {
-  SourceImporter importer(src, constant_table);
-  auto& p = importer.parser_;
+  Parser p(src);
+  const size_t version = parseVersionNumber(p.lexer());
+
+  // strip the "py" from the class path
+  const auto end = class_path.rfind("py");
+  AT_ASSERT(end != std::string::npos);
+
+  static const std::string lib_prefix = "libs/";
+  size_t libs_idx = class_path.find(lib_prefix);
+  size_t start = 0;
+  if (libs_idx == 0) {
+    // strip libs/ from starting path
+    AT_ASSERT(class_path.size() > lib_prefix.size());
+    start = lib_prefix.size();
+  }
+
+  const auto class_qualifier = class_path.substr(start, end - start);
 
   while (p.lexer().cur().kind != TK_EOF) {
+    auto imports = parseImports(p.lexer());
+    auto resolver = std::make_shared<SourceResolver>(
+        version, constant_table, std::move(imports));
+
     std::vector<Def> definitions;
     std::vector<ResolverPtr> resolvers;
     auto class_def = ClassDef(p.parseClass());
     for (const auto& method_def : class_def.defs()) {
       definitions.emplace_back(method_def);
-      resolvers.emplace_back(importer.resolver_);
+      resolvers.emplace_back(resolver);
     }
 
     auto cu = std::make_shared<CompilationUnit>();
-    auto class_type = ClassType::create(class_def.name().name(), cu);
+    const auto qualified_classname = class_qualifier + class_def.name().name();
+    auto class_type = ClassType::create(qualified_classname, cu);
     auto self = [&](Value* v) {
       v->setType(class_type);
       return std::make_shared<SimpleValue>(v);

@@ -656,7 +656,20 @@ struct PythonResolver : public Resolver {
   }
 
   TypePtr resolveType(const std::string& name) const override {
-    return ClassType::get(name);
+    AutoGIL ag;
+    py::object obj = rcb_(name);
+    if (obj.is(py::none())) {
+      return nullptr;
+    }
+    py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
+    if (!py::cast<bool>(isClass)) {
+      return nullptr;
+    }
+
+    py::str qualifiedName =
+        py::module::import("torch.jit").attr("_qualified_name")(obj);
+
+    return ClassType::get(qualifiedName);
   }
 
  private:

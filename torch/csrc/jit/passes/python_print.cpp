@@ -157,6 +157,7 @@ const static std::unordered_set<std::string> reserved_names = {
     "nan",
     "ops",
     "self",
+    "__torch__",
     // the python keywords
     "and",
     "as",
@@ -205,11 +206,16 @@ struct PythonPrintPass {
   // Any classes used are written to this table, to be later written out as
   // dependencies.
   std::vector<ClassTypePtr>& class_table_;
+  std::vector<ClassTypePtr> class_deps_;
   // Helper to avoid duplicating class types
   void addToClassTable(const ClassTypePtr& classType) {
     if (std::find(class_table_.cbegin(), class_table_.cend(), classType) ==
         class_table_.cend()) {
       class_table_.push_back(classType);
+    }
+    if (std::find(class_deps_.cbegin(), class_deps_.cend(), classType) ==
+        class_deps_.cend()) {
+      class_deps_.push_back(classType);
     }
   }
 
@@ -573,7 +579,7 @@ struct PythonPrintPass {
     if (emit_as_for_loop) {
       indent();
       body_ << "for " << useOf(stmt.currentTripCount()) << " in range("
-           << useOf(stmt.maxTripCount()) << "):\n";
+            << useOf(stmt.maxTripCount()) << "):\n";
     } else {
       // note: trip_count_in_block is unused because this is a while loop,
       // so we reuse the Value* as a stand-in for the loop condition
@@ -723,7 +729,8 @@ struct PythonPrintPass {
         const auto type = obj->type()->expect<ClassType>();
         const auto& attrname = node->s(attr::name);
         indent();
-        body_ << useOf(obj) << "." << attrname << " = " << useOf(newVal) << "\n";
+        body_ << useOf(obj) << "." << attrname << " = " << useOf(newVal)
+              << "\n";
       } break;
       default:
         std::stringstream ss;
@@ -924,7 +931,8 @@ struct PythonPrintPass {
       } break;
       case prim::CreateObject: {
         const auto classType = node->output()->type()->expect<ClassType>();
-        stmt << classType->name() << ".__new__(" << classType->name() << ")";
+        stmt << classType->python_str() << ".__new__("
+             << classType->python_str() << ")";
       } break;
       case prim::GetAttr: {
         const auto obj = node->inputs().at(0);
@@ -1075,12 +1083,25 @@ struct PythonPrintPass {
     }
   }
 
+  std::string getImports() {
+    std::ostringstream ret;
+    std::unordered_set<std::string> already_printed;
+    for (const auto& c : class_deps_) {
+      if (already_printed.count(c->qualifier())) {
+        continue;
+      }
+      ret << "import " << c->qualifier() << "\n";
+      already_printed.insert(c->qualifier());
+    }
+    return ret.str();
+  }
+
  public:
   PythonPrintPass(
       std::vector<at::Tensor>& tensor_table,
       std::vector<ClassTypePtr>& class_table,
-      bool enforce_importable) :
-        tensor_table_(tensor_table),
+      bool enforce_importable)
+      : tensor_table_(tensor_table),
         class_table_(class_table),
         enforce_importable_(enforce_importable) {}
 
@@ -1158,17 +1179,21 @@ struct PythonPrintPass {
   }
 
   void printClass(const ClassTypePtr& classType) {
-    body_ << "class " << classType->name() << ":\n";
+    body_ << "class " << classType->basename() << ":\n";
     {
       const auto guard = WithIndented();
       for (auto& method : classType->methods()) {
         printFunction(*method, /*is_class=*/true);
       }
     }
+    // remove `classType` from the list of deps
+    class_deps_.erase(
+        std::remove(class_deps_.begin(), class_deps_.end(), classType),
+        class_deps_.end());
   }
 
   void print(std::ostream& out) {
-    out << body_.str();
+    out << getImports() << body_.str();
   }
 };
 
