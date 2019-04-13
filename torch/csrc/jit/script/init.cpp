@@ -387,8 +387,7 @@ struct ModuleValue : public SugaredValue {
           auto& param = *it;
           params.emplace_back(g.insertGetAttr(self_, param.name()));
         }
-        auto list =
-            g.insertNode(g.createTuple(params))->output();
+        auto list = g.insertNode(g.createTuple(params))->output();
         return std::make_shared<ConstantParameterList>(list);
       }
       if (py::isinstance<py::function>(attr) ||
@@ -700,6 +699,61 @@ static Self moduleSelf(const std::shared_ptr<Module>& m) {
   };
 }
 
+static void setInputTensorTypes(Graph& g, const Stack& stack) {
+  AT_ASSERT(stack.size() == g.inputs().size());
+  for (size_t i = 0; i < stack.size(); ++i) {
+    g.inputs().at(i)->setType(
+        DimensionedTensorType::create(stack.at(i).toTensor()));
+  }
+}
+
+static std::shared_ptr<Graph> _propagate_shapes(
+    Graph& graph,
+    std::vector<at::Tensor> inputs,
+    bool with_grad = false) {
+  Stack stack(inputs.begin(), inputs.end());
+  auto retval = graph.copy();
+  setInputTensorTypes(*retval, stack);
+  PropagateInputShapes(retval);
+  return retval;
+}
+
+static std::shared_ptr<Graph> _propagate_and_assign_input_and_output_shapes(
+    Graph& graph,
+    std::vector<at::Tensor> inputs,
+    std::vector<at::Tensor> outputs,
+    bool with_grad = false,
+    bool propagate = true) {
+  auto retval = graph.copy();
+  if (propagate) {
+    setInputTensorTypes(*retval, fmap<IValue>(inputs));
+    PropagateInputShapes(retval);
+  }
+  AT_ASSERT(retval->inputs().size() == inputs.size());
+  for (size_t i = 0; i < retval->inputs().size(); ++i) {
+    auto scalar_type = inputs[i].scalar_type();
+    auto sizes = inputs[i].sizes();
+    auto type =
+        torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
+    retval->inputs()[i]->setType(type);
+  }
+  at::ArrayRef<Value*> output_values = retval->outputs();
+  // patch this to still work if we are returning a tuple of multiple values
+  if (output_values.at(0)->type()->kind() == TupleType::Kind) {
+    AT_ASSERT(output_values.at(0)->node()->kind() == prim::TupleConstruct);
+    output_values = output_values.at(0)->node()->inputs();
+  }
+  AT_ASSERT(output_values.size() == outputs.size());
+  for (size_t i = 0; i < retval->outputs().size(); ++i) {
+    auto scalar_type = outputs[i].scalar_type();
+    auto sizes = outputs[i].sizes();
+    auto type =
+        torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
+    output_values[i]->setType(type);
+  }
+  return retval;
+}
+
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -984,7 +1038,6 @@ void initJitScriptBindings(PyObject* module) {
           });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
-      .def("graph", [&](Method& self) { return self.graph(); })
       .def(
           "__call__",
           [](py::args args, py::kwargs kwargs) {
@@ -993,28 +1046,7 @@ void initJitScriptBindings(PyObject* module) {
             return invokeScriptMethodFromPython(
                 method, tuple_slice(std::move(args), 1), std::move(kwargs));
           })
-      .def_property_readonly("graph", [](Method& m) { return m.graph(); })
-      .def(
-          "propagate_shapes",
-          [](Method& m, const std::vector<at::Tensor>& inputs, bool with_grad) {
-            return propagate_shapes(
-                *m.graph(), inputs, m.initial_ivalues(), with_grad);
-          })
-      .def(
-          "propagate_and_assign_input_and_output_shapes",
-          [](Method& m,
-             const std::vector<at::Tensor>& inputs,
-             std::vector<at::Tensor> outputs,
-             bool with_grad,
-             bool propagate) {
-            return propagate_and_assign_input_and_output_shapes(
-                *m.graph(),
-                inputs,
-                m.initial_ivalues(),
-                outputs,
-                with_grad,
-                propagate);
-          })
+      .def_property_readonly("graph", &Method::graph)
       .def(
           "initial_ivalues",
           [](Method& m) {
@@ -1131,7 +1163,10 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_clear_class_registry", ClassType::clearRegistry);
   m.def(
       "_debug_set_autodiff_subgraph_inlining", debugSetAutodiffSubgraphInlining);
-
+  m.def("_propagate_shapes", _propagate_shapes);
+  m.def(
+      "_propagate_and_assign_input_and_output_shapes",
+      _propagate_and_assign_input_and_output_shapes);
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())
       .def("check", &testing::FileCheck::check)
