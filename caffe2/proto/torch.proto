@@ -79,7 +79,7 @@ message LibDef {
 }
 
 enum ProtoVersion {
-  PROTO_VERSION_NEWEST = 0x0000000000000002;
+  PROTO_VERSION_NEWEST = 0x0000000000000003;
 }
 
 message ModelDef {
@@ -104,5 +104,5 @@ message ModelDef {
 
   // TorchScript code that this module hierarchy depends on
   // Libs will be loaded in before the main module is compiled.
-  optional LibDef libs = 9;
+  repeated LibDef libs = 9;
 }
