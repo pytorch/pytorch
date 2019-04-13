@@ -196,7 +196,8 @@ class Module(object):
             if param is not None:
                 # Tensors stored in modules are graph leaves, and we don't
                 # want to create copy nodes, so we have to unpack the data.
-                param.data = fn(param.data)
+                with torch.no_grad():
+                    param = fn(param)
                 if param._grad is not None:
                     with torch.no_grad():
                         param._grad = fn(param._grad)
