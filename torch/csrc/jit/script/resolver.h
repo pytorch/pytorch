@@ -1,6 +1,6 @@
 #pragma once
 
-#include <aten/src/ATen/core/jit_type.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/script/sugared_value.h>
 
 namespace torch {
