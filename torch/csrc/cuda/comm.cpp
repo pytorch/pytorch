@@ -66,7 +66,6 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
 #else
   {
 #endif
-    auto & gpu_type = type.toBackend(type.is_sparse() ? at::Backend::SparseCUDA : at::Backend::CUDA);
     if (type.is_cuda()) {
       tensors.push_back(tensor);
     }
@@ -74,7 +73,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
     for (auto device : loop_devices) {
       _device_guard.set_index(device);
       tensors.push_back(tensor.to(
-          type.device_type(),
+          kCUDA,
           type.scalarType(),
           /*non_blocking*/true,
           /*copy*/true));
