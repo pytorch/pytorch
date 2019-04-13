@@ -573,7 +573,7 @@ struct PythonPrintPass {
     if (emit_as_for_loop) {
       indent();
       body_ << "for " << useOf(stmt.currentTripCount()) << " in range("
-           << useOf(stmt.maxTripCount()) << "):\n";
+            << useOf(stmt.maxTripCount()) << "):\n";
     } else {
       // note: trip_count_in_block is unused because this is a while loop,
       // so we reuse the Value* as a stand-in for the loop condition
@@ -723,7 +723,8 @@ struct PythonPrintPass {
         const auto type = obj->type()->expect<ClassType>();
         const auto& attrname = node->s(attr::name);
         indent();
-        body_ << useOf(obj) << "." << attrname << " = " << useOf(newVal) << "\n";
+        body_ << useOf(obj) << "." << attrname << " = " << useOf(newVal)
+              << "\n";
       } break;
       default:
         std::stringstream ss;
@@ -1079,8 +1080,8 @@ struct PythonPrintPass {
   PythonPrintPass(
       std::vector<at::Tensor>& tensor_table,
       std::vector<ClassTypePtr>& class_table,
-      bool enforce_importable) :
-        tensor_table_(tensor_table),
+      bool enforce_importable)
+      : tensor_table_(tensor_table),
         class_table_(class_table),
         enforce_importable_(enforce_importable) {}
 
@@ -1131,9 +1132,7 @@ struct PythonPrintPass {
         [](const Argument& arg) { return arg.default_value(); });
     printFunction(graph, name, is_class, defaults, ivalue_names);
   }
-  void printFunction(
-      script::Function& method,
-      bool is_class) {
+  void printFunction(script::Function& method, bool is_class) {
     const std::string& name = method.name();
     Graph& graph = *method.graph();
     auto defaults = fmap(
