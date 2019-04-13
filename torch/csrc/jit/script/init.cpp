@@ -995,15 +995,6 @@ void initJitScriptBindings(PyObject* module) {
                 tuple_slice(std::move(args), 1),
                 std::move(kwargs));
           })
-      .def(
-          "_python_print",
-          [](Module& self) {
-            std::ostringstream ss;
-            std::vector<at::Tensor> tensors;
-            std::vector<ClassTypePtr> classes;
-            PythonPrint(ss, self, tensors, classes, true);
-            return std::make_pair(ss.str(), tensors);
-          })
       .def_property_readonly(
           "code",
           [](Module& self) {
@@ -1064,24 +1055,7 @@ void initJitScriptBindings(PyObject* module) {
             return self.graph_for(createStackForSchema(
                 self.getSchema(), tuple_slice(std::move(args), 1), kwargs));
           })
-      .def("schema", &Method::getSchema)
-      .def(
-          "pretty_print_schema",
-          [](Method& m) {
-            const FunctionSchema& schema = m.getSchema();
-            std::stringstream ss;
-            ss << schema;
-            return ss.str();
-          })
-      .def(
-          "python_print",
-          [](Method& m) {
-            std::ostringstream oss;
-            std::vector<at::Tensor> constants;
-            std::vector<ClassTypePtr> classes;
-            PythonPrint(oss, m, constants, classes, true);
-            return std::make_pair(oss.str(), std::move(constants));
-          })
+      .def_property_readonly("schema", &Method::getSchema)
       .def_property_readonly("code", [](Method& self) {
         std::ostringstream ss;
         std::vector<at::Tensor> tensors;
@@ -1167,6 +1141,20 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_propagate_and_assign_input_and_output_shapes",
       _propagate_and_assign_input_and_output_shapes);
+  m.def("_jit_python_print", [](py::object obj) {
+    std::ostringstream ss;
+    std::vector<at::Tensor> constants;
+    std::vector<ClassTypePtr> classes;
+    if (py::isinstance<Module>(obj)) {
+      auto& self = py::cast<Module&>(obj);
+      PythonPrint(ss, self, constants, classes, true);
+    } else {
+      auto& m = py::cast<Method&>(obj);
+      PythonPrint(ss, m, constants, classes, true);
+    }
+    return std::make_pair(ss.str(), std::move(constants));
+  });
+
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())
       .def("check", &testing::FileCheck::check)

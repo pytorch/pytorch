@@ -385,7 +385,12 @@ void initJITBindings(PyObject* module) {
       .def_property_readonly(
           "arguments", [](FunctionSchema& self) { return self.arguments(); })
       .def_property_readonly(
-          "returns", [](FunctionSchema& self) { return self.returns(); });
+          "returns", [](FunctionSchema& self) { return self.returns(); })
+      .def("__str__", [](FunctionSchema& self) {
+        std::stringstream ss;
+        ss << self;
+        return ss.str();
+      });
   py::class_<Argument>(m, "Argument")
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })
