@@ -294,6 +294,7 @@ struct Expr : public TreeView {
       case '&':
       case '^':
       case '|':
+      case TK_LIST_COMP:
         return;
       default:
         throw ErrorReport(tree)
@@ -495,6 +496,30 @@ struct For : public Stmt {
       const List<Expr>& itrs,
       const List<Stmt>& body) {
     return For(Compound::create(TK_FOR, range, {targets, itrs, body}));
+  }
+};
+
+//TODO: supports only single comprehension for now
+struct ListComp : public Expr {
+  explicit ListComp(const TreeRef& tree) : Expr(tree) {
+    tree->match(TK_LIST_COMP);
+  }
+  Expr elt() const {
+    return Expr(subtree(0));
+  }
+  Expr target() const {
+    return Expr(subtree(1));
+  }
+  Expr iter() const {
+    return Expr(subtree(2));
+  }
+  // TODO: no ifs for now
+  static ListComp create(
+      const SourceRange& range,
+      const Expr& elt,
+      const Expr& target,
+      const Expr& iter) {
+    return ListComp(Compound::create(TK_LIST_COMP, range, {elt, target, iter}));
   }
 };
 

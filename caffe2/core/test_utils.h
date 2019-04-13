@@ -56,7 +56,7 @@ void assertTensorListEquals(
     const Workspace& workspace2);
 
 // Read a tensor from the workspace.
-const caffe2::Tensor& getTensor(
+CAFFE2_API const caffe2::Tensor& getTensor(
     const caffe2::Workspace& workspace,
     const std::string& name);
 
@@ -95,6 +95,15 @@ caffe2::Tensor* createTensorAndFill(
     Workspace* workspace) {
   auto* tensor = createTensor(name, workspace);
   fillTensor<T>(shape, data, tensor);
+  return tensor;
+}
+
+template <typename T>
+caffe2::Tensor createTensorAndFill(
+    const std::vector<int64_t>& shape,
+    const std::vector<T>& data) {
+  Tensor tensor(caffe2::CPU);
+  fillTensor<T>(shape, data, &tensor);
   return tensor;
 }
 

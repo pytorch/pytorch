@@ -15,7 +15,6 @@ import torch.cuda
 import torch.distributed.deprecated as dist
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
 from common_utils import TestCase, run_tests
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 
@@ -1083,6 +1082,7 @@ if BACKEND == "tcp" or BACKEND == "gloo" or BACKEND == "nccl":
                     setattr(cls, attr, cls.manager_join(fn))
 
         def setUp(self):
+            super(TestDistBackend, self).setUp()
             self.processes = []
             self.rank = self.MANAGER_PROCESS_RANK
             Barrier.init()
@@ -1090,6 +1090,7 @@ if BACKEND == "tcp" or BACKEND == "gloo" or BACKEND == "nccl":
                 self.processes.append(self._spawn_process(rank))
 
         def tearDown(self):
+            super(TestDistBackend, self).tearDown()
             for p in self.processes:
                 p.terminate()
 

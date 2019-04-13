@@ -446,6 +446,12 @@ Normalization layers
 .. autoclass:: GroupNorm
     :members:
 
+:hidden:`SyncBatchNorm`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: SyncBatchNorm
+    :members:
+
 :hidden:`InstanceNorm1d`
 ~~~~~~~~~~~~~~~~~~~~~~~~
 

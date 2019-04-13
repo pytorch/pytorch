@@ -5,8 +5,6 @@ import ast
 import inspect
 import string
 from textwrap import dedent
-from functools import partial
-from collections import namedtuple
 from torch._six import PY2
 from torch._C._jit_tree_views import *
 
@@ -582,6 +580,20 @@ class ExprBuilder(Builder):
         value = str(expr.s)
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
         return StringLiteral(r, value)
+
+    @staticmethod
+    def build_ListComp(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset)
+        if (len(stmt.generators) > 1):
+            raise NotSupportedError(r, "multiple comprehension generators not supported yet")
+
+        if (len(stmt.generators[0].ifs) != 0):
+            raise NotSupportedError(r, "comprehension ifs not supported yet")
+
+        elt_expr = build_expr(ctx, stmt.elt)
+        target_expr = build_expr(ctx, stmt.generators[0].target)
+        iter_expr = build_expr(ctx, stmt.generators[0].iter)
+        return ListComp(r, elt_expr, target_expr, iter_expr)
 
     @staticmethod
     def build_Starred(ctx, expr):

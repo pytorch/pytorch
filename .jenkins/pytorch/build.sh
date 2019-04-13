@@ -48,12 +48,26 @@ pip install -q -r requirements.txt || true
 
 # TODO: Don't install this here
 if ! which conda; then
-  if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc7.2* ]] || [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc4.8* ]]; then
+  # In ROCm CIs, we are doing cross compilation on build machines with
+  # intel cpu and later run tests on machines with amd cpu.
+  # Also leave out two builds to make sure non-mkldnn builds still work.
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* && "$BUILD_ENVIRONMENT" != *-xenial-cuda8-cudnn7-py3-* ]]; then
     pip install -q mkl mkl-devel
     export USE_MKLDNN=1
   else
     export USE_MKLDNN=0
   fi
+fi
+
+# Use special scripts for Android builds
+if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
+  export ANDROID_NDK=/opt/ndk
+  build_args=()
+  build_args+=("-DBUILD_BINARY=ON")
+  build_args+=("-DBUILD_TEST=ON")
+  build_args+=("-DUSE_OBSERVERS=ON")
+  build_args+=("-DUSE_ZSTD=ON")
+  exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then

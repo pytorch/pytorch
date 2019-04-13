@@ -30,7 +30,7 @@ TEST(CUDACaffe2ToPytorch, SimpleLegacy) {
     caffe2::math::Set<int64_t>(16, 777, data, &context);
   }
   at::Tensor at_tensor(c2_tensor);
-  ASSERT_TRUE(&at_tensor.type() != nullptr);
+  ASSERT_TRUE(&at_tensor.dispatch_type() != nullptr);
   ASSERT_TRUE(at_tensor.is_cuda());
 
   auto at_cpu = at_tensor.cpu();
@@ -50,7 +50,7 @@ TEST(CUDACaffe2ToPytorch, Simple) {
     caffe2::math::Set<int64_t>(16, 777, data, &context);
   }
   at::Tensor at_tensor(c2_tensor);
-  ASSERT_TRUE(&at_tensor.type() != nullptr);
+  ASSERT_TRUE(&at_tensor.dispatch_type() != nullptr);
   ASSERT_TRUE(at_tensor.is_cuda());
 
   auto at_cpu = at_tensor.cpu();

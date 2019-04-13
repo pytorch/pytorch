@@ -163,6 +163,7 @@ message Argument {
   repeated bytes strings = 7;
   repeated TensorProto tensors = 11;
   repeated NetDef nets = 9;
+  repeated QTensorProto qtensors = 12;
 }
 
 // DeviceType that Caffe2 currently supports.

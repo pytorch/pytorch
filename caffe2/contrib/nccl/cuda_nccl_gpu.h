@@ -10,12 +10,12 @@
 #include <unordered_map>
 
 #define NCCL_VERSION_MIN(major, minor, patch) \
-  ((NCCL_MAJOR > major) || \
-    ((NCCL_MAJOR == major) && ((NCCL_MINOR > minor) || \
-      ((NCCL_MINOR == minor) && (NCCL_PATCH >= patch)) )))
+  ((NCCL_MAJOR > major) ||                    \
+   ((NCCL_MAJOR == major) &&                  \
+    ((NCCL_MINOR > minor) ||                  \
+     ((NCCL_MINOR == minor) && (NCCL_PATCH >= patch)))))
 
 namespace caffe2 {
-
 namespace nccl {
 
 #define CAFFE_NCCL_CHECK(condition)    \
@@ -45,6 +45,10 @@ struct NCCLExecution {
   size_t root{0};
 };
 
+// Called when the last NCCL op is destructed and all lazily created
+// NCCLContext instances can safely be destroyed.
+void destroyContexts();
+
 template <typename T>
 class NCCL {
  public:
@@ -54,5 +58,6 @@ class NCCL {
   static void AllGather(const NCCLExecution& ex);
   static void ReduceScatter(const NCCLExecution& ex);
 };
-}
-}
+
+} // namespace nccl
+} // namespace caffe2

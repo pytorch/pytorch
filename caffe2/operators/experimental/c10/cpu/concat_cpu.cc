@@ -1,7 +1,7 @@
-#include <ATen/core/dispatch/KernelRegistration.h>
-#include "caffe2/operators/experimental/c10/schemas/concat.h"
-#include "caffe2/utils/math.h"
+#include <ATen/core/op_registration/op_registration.h>
+#include "caffe2/core/operator_c10wrapper.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/utils/math.h"
 
 using caffe2::BaseContext;
 using caffe2::CPUContext;
@@ -27,7 +27,7 @@ void concat_op_cpu_impl(
   int adj_size = Tensor(inputs[0]).dim() + (add_axis ? 1 : 0);
   int canonical_axis = caffe2::canonical_axis_index_(axis, adj_size);
   CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
-  for (int i = 1; i < inputs.size(); ++i) {
+  for (size_t i = 1; i < inputs.size(); ++i) {
     CAFFE_ENFORCE(
         Tensor(inputs[i]).dtype() == Tensor(inputs[0]).dtype(),
         "All inputs must have the same type, expected: ",
@@ -51,7 +51,7 @@ void concat_op_cpu_impl(
       after *= dim;
     }
     // check the input dims are compatible.
-    for (int j = 1; j < inputs.size(); ++j) {
+    for (size_t j = 1; j < inputs.size(); ++j) {
       int dim_j = Tensor(inputs[j]).dim32(i);
       CAFFE_ENFORCE(
           dim == dim_j,
@@ -75,7 +75,7 @@ void concat_op_cpu_impl(
   }
 
   int output_channels = 0;
-  for (int i = 0; i < inputs.size(); ++i) {
+  for (size_t i = 0; i < inputs.size(); ++i) {
     axis_data[i] = add_axis ? 1 : Tensor(inputs[i]).dim32(canonical_axis);
     output_channels += axis_data[i];
   }
@@ -86,7 +86,7 @@ void concat_op_cpu_impl(
   }
   output.Resize(output_dims);
   size_t output_offset = 0;
-  for (int i = 0; i < inputs.size(); ++i) {
+  for (size_t i = 0; i < inputs.size(); ++i) {
     Tensor input(inputs[i]);
     auto axis_dim = add_axis ? 1 : input.dim32(canonical_axis);
     caffe2::math::CopyMatrix<Context>(
@@ -103,11 +103,27 @@ void concat_op_cpu_impl(
     output_offset += axis_dim * after * input.itemsize();
   }
 }
-} // namespace
-} // namespace caffe2
 
-namespace c10 {
-C10_REGISTER_KERNEL(caffe2::ops::Concat)
-    .kernel<decltype(caffe2::concat_op_cpu_impl<float, CPUContext>), &caffe2::concat_op_cpu_impl<float, CPUContext>>()
-    .dispatchKey(CPUTensorId());
-} // namespace c10
+static auto registry = c10::RegisterOperators().op(
+    FunctionSchema(
+        "_c10_experimental::Concat",
+        "",
+        (std::vector<c10::Argument>{
+            c10::Argument("inputs", ListType::ofTensors()),
+            c10::Argument("output"),
+            c10::Argument("split_info"),
+            c10::Argument("add", IntType::get()),
+            c10::Argument("add_axis", IntType::get())}),
+        (std::vector<c10::Argument>{})),
+    c10::kernel<
+        decltype(concat_op_cpu_impl<float, CPUContext>),
+        &concat_op_cpu_impl<float, CPUContext>>(),
+    c10::dispatchKey(CPUTensorId()));
+
+} // namespace
+
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::Concat",
+    C10Concat_DontUseThisOpYet)
+
+} // namespace caffe2

@@ -56,6 +56,9 @@ FILE(GLOB native_cpp "native/*.cpp")
 FILE(GLOB native_mkl_cpp "native/mkl/*.cpp")
 FILE(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
 FILE(GLOB native_sparse_cpp "native/sparse/*.cpp")
+FILE(GLOB native_quantized_cpp
+            "native/quantized/*.cpp"
+            "native/quantized/cpu/*.cpp")
 
 FILE(GLOB native_cuda_cu "native/cuda/*.cu")
 FILE(GLOB native_cuda_cpp "native/cuda/*.cpp")
@@ -70,7 +73,8 @@ FILE(GLOB native_cudnn_hip_cpp "native/cudnn/hip/*.cpp")
 FILE(GLOB native_sparse_hip_hip "native/sparse/hip/*.hip")
 FILE(GLOB native_sparse_hip_cpp "native/sparse/hip/*.cpp")
 
-set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${cpu_kernel_cpp})
+add_subdirectory(quantized)
+set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${cpu_kernel_cpp})
 if(AT_MKL_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
 endif()
@@ -250,21 +254,21 @@ IF(USE_CUDA AND NOT USE_ROCM)
     EXECUTE_PROCESS(COMMAND touch ${CMAKE_CURRENT_BINARY_DIR}/empty_file.cc)
     if(${CUDA_VERSION_MAJOR} EQUAL "8")
       SET(CUFFT_FAKELINK_OPTIONS
-	--generate-code arch=compute_35,code=sm_35
-	--generate-code arch=compute_50,code=sm_50
-	--generate-code arch=compute_60,code=sm_60)
+        --generate-code arch=compute_35,code=sm_35
+        --generate-code arch=compute_50,code=sm_50
+        --generate-code arch=compute_60,code=sm_60)
     elseif(${CUDA_VERSION_MAJOR} EQUAL "9")
       SET(CUFFT_FAKELINK_OPTIONS
-	--generate-code arch=compute_35,code=sm_35
-	--generate-code arch=compute_50,code=sm_50
-	--generate-code arch=compute_60,code=sm_60
-	--generate-code arch=compute_70,code=sm_70)
+        --generate-code arch=compute_35,code=sm_35
+        --generate-code arch=compute_50,code=sm_50
+        --generate-code arch=compute_60,code=sm_60
+        --generate-code arch=compute_70,code=sm_70)
     elseif(${CUDA_VERSION_MAJOR} EQUAL "10")
       SET(CUFFT_FAKELINK_OPTIONS
-	--generate-code arch=compute_35,code=sm_35
-	--generate-code arch=compute_50,code=sm_50
-	--generate-code arch=compute_60,code=sm_60
-	--generate-code arch=compute_70,code=sm_70)
+        --generate-code arch=compute_35,code=sm_35
+        --generate-code arch=compute_50,code=sm_50
+        --generate-code arch=compute_60,code=sm_60
+        --generate-code arch=compute_70,code=sm_70)
     else()
       MESSAGE(FATAL_ERROR "Unhandled major cuda version ${CUDA_VERSION_MAJOR}")
     endif()
@@ -435,10 +439,12 @@ set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} PARENT_SCOPE)
 set(ATen_HIP_SRCS ${ATen_HIP_SRCS} PARENT_SCOPE)
+set(ATen_QUANTIZED_SRCS ${ATen_QUANTIZED_SRCS} PARENT_SCOPE)
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CORE_TEST_SRCS ${ATen_CORE_TEST_SRCS} PARENT_SCOPE)
 set(ATen_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS} PARENT_SCOPE)
+set(ATen_QUANTIZED_TEST_SRCS ${ATen_QUANTIZED_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE} PARENT_SCOPE)
 set(ATen_THIRD_PARTY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE} PARENT_SCOPE)
 set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE} PARENT_SCOPE)

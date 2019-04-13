@@ -2,7 +2,7 @@ import torch
 from torch._six import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import probs_to_logits, logits_to_probs, lazy_property, broadcast_all
+from torch.distributions.utils import probs_to_logits, logits_to_probs, lazy_property
 
 
 class Categorical(Distribution):
@@ -64,7 +64,7 @@ class Categorical(Distribution):
         if 'probs' in self.__dict__:
             new.probs = self.probs.expand(param_shape)
             new._param = new.probs
-        else:
+        if 'logits' in self.__dict__:
             new.logits = self.logits.expand(param_shape)
             new._param = new.logits
         new._num_events = self._num_events

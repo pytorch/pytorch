@@ -384,7 +384,7 @@ Tensor instance_norm(
 Tensor layer_norm(const Tensor& input, IntArrayRef normalized_shape,
     const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     double eps, bool cudnn_enabled) {
-
+  
     int64_t normalized_ndim = normalized_shape.size();
 
     AT_CHECK(normalized_ndim >= 1,
