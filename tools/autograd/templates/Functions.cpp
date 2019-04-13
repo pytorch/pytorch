@@ -695,13 +695,14 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArra
 Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
   // cf. Iain Murray (2016); arXiv 1602.07527
   // This gradient is symmetric, and not triangular.
-  // This choice is due to the ambiguity caused by taking triangular gradients,
-  // described in the example below:
-  // Consider a matrix A which is PD, and compute the trace of A's inverse using
-  // A.inverse().trace(). The gradient of this trace w.r.t to A in this case is symmetric
-  // and unique. Note that A = L @ L^{T} => inv(A) = inv(L)^{T} @ inv(L)
-  // The gradient of the trace of A's inverse w.r.t. A using the Cholesky decomposition
-  // should give the same gradient and using triangular gradients doesn't cause this to happen.
+  // Cholesky additionally assumes that the input is symmetric, which is a subspace of
+  // R^{n x n}, and hence the derivative is not well-defined for off-diagonal
+  // elements. We resolve this by taking the gradient of the functionally independent
+  // elements of the matrix (i.e., the lower triangular portion of the input) and then
+  // reflecting it on upper triangular portion, thereby symmetrizing the gradient of
+  // the cholesky operation. The motivation behind this choice is that symmetric gradient
+  // leads to stable gradient updates, and retains symmetry of the updated matrix if it
+  // were updated by a gradient based algorithm.
   if (upper) {
     L = L.transpose(-1, -2);
     grad = grad.transpose(-1, -2);
@@ -711,7 +712,7 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
   phi.tril_().diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
 
   auto grad_input = at::matmul(at::matmul(L_inverse.transpose(-1, -2), phi), L_inverse);
-  return grad_input.add(grad_input.transpose(-1, -2)).mul_(0.5);
+  return grad_input.add(grad_input.transpose(-1, -2)).mul_(0.5);  // Symmetrizing the gradient
 }
 
 Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &grads,
