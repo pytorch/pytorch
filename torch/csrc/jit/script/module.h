@@ -78,8 +78,10 @@ struct TORCH_API Method {
     run(stack);
   }
 
-  IValue operator()(std::vector<IValue> stack) {
-    getSchema().checkAndNormalizeInputs(stack);
+  IValue operator()(
+      std::vector<IValue> stack,
+      const Kwargs& kwargs = Kwargs()) {
+    getSchema().checkAndNormalizeInputs(stack, kwargs);
     for (auto input : initial_ivalues_) {
       push(stack, input.value());
     }
