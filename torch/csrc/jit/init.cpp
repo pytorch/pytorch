@@ -239,9 +239,12 @@ void initJITBindings(PyObject* module) {
       });
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ArgumentSpec>(m, "ArgumentSpec");
-  py::class_<Code>(m, "Code").def("grad_executors", [](Code& c) {
-    return py::make_iterator(
-        c.grad_executors().begin(), c.grad_executors().end());
+  py::class_<Code>(m, "Code").def("grad_executor_states", [](Code& c) {
+    std::vector<GraphExecutorState> states;
+    for (auto& e : c.grad_executors()) {
+      states.emplace_back(e->getDebugState());
+    }
+    return states;
   });
 
   py::class_<ExecutionPlanState>(m, "ExecutionPlanState")
@@ -274,50 +277,6 @@ void initJITBindings(PyObject* module) {
           [](GraphExecutorState& s) { return s.execution_plans; })
       .def_property_readonly(
           "fallback", [](GraphExecutorState& s) { return s.fallback; });
-
-  py::class_<GraphExecutor>(m, "GraphExecutor", py::dynamic_attr())
-      .def(
-          py::init([](py::function func,
-                      py::tuple inputs,
-                      py::function var_name_lookup_fn,
-                      bool optimize,
-                      bool _force_outplace) {
-            auto graph = tracer::createGraphByTracing(
-                func, toStack(inputs), var_name_lookup_fn, _force_outplace);
-            return GraphExecutor(graph, optimize);
-          }),
-          py::arg("func"),
-          py::arg("inputs"),
-          py::arg("var_name_lookup_fn"),
-          py::arg("optimize") = true,
-          py::arg("_force_outplace") = false)
-      .def(
-          py::init([](std::shared_ptr<Graph> graph, bool optimize) {
-            return GraphExecutor(std::move(graph), optimize);
-          }),
-          py::arg("graph"),
-          py::arg("optimize") = true)
-      .def(
-          "graph_for",
-          [](GraphExecutor& ge, py::args args) {
-            return ge.graphFor(evilDeprecatedBadCreateStackDoNotUse(
-                args, ge.graph()->inputs()));
-          })
-      .def_property_readonly(
-          "graph", [](GraphExecutor& ge) { return ge.graph(); })
-      .def(
-          "get_debug_state",
-          [](GraphExecutor& ge) { return ge.getDebugState(); })
-      .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
-        const auto& graph = ge.graph();
-        auto stack =
-            evilDeprecatedBadCreateStackDoNotUse(args, graph->inputs());
-        {
-          AutoNoGIL no_gil_guard;
-          ge.run(stack);
-        }
-        return createPyObjectForStack(std::move(stack));
-      });
 
   py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())
