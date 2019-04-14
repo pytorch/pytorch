@@ -24,7 +24,7 @@ import six
 import time
 
 from .embedding import make_mat, make_sprite, make_tsv, append_pbtxt
-from tensorboard.writer.event_file_writer import EventFileWriter
+from tensorboard.summary.writer.event_file_writer import EventFileWriter
 from .onnx_graph import gg
 from .pytorch_graph import graph
 from tensorboard.compat.proto import event_pb2
