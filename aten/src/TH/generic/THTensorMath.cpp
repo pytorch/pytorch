@@ -21,6 +21,7 @@
 // sense (rather than just having cut the file down the middle, which is
 // what I did when I split these up originally).
 
+#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
 // Should wrap if the value (a) has a different sign than the divisor (b), but is not 0.
 static inline bool modulo_wrap(scalar_t a, scalar_t b) {
@@ -1196,5 +1197,7 @@ void THTensor_(addbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t al
   c10::raw::intrusive_ptr::decref(matrix1);
   c10::raw::intrusive_ptr::decref(matrix2);
 }
+
+#endif /* !defined(TH_REAL_IS_BOOL) */
 
 #endif /* TH_GENERIC_FILE */
