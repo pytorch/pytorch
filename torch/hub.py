@@ -142,6 +142,10 @@ def _get_cache_or_reload(github, force_reload):
     # Parse github repo information
     repo_owner, repo_name, branch = _parse_repo_info(github)
 
+    # Github renames folder repo-v1.x.x to repo-1.x.x
+    # We don't know the repo name before downloading the zip file
+    # and inspect name from it.
+    # To check if cached repo exists, we need to normalize repo names.
     repo_dir = os.path.join(hub_dir, repo_name + '_' + branch)
 
     use_cache = (not force_reload) and os.path.exists(repo_dir)
@@ -155,9 +159,6 @@ def _get_cache_or_reload(github, force_reload):
         url = _git_archive_link(repo_owner, repo_name, branch)
         _download_archive_zip(url, cached_file)
 
-        # Github uses '{repo_name}-{branch_name}' as folder name which is not importable
-        # We need to manually rename it to '{repo_name}_{branch_name}'
-        # Github also renames folder repo-v1.x.x to repo-1.x.x
         cached_zipfile = zipfile.ZipFile(cached_file)
         extraced_repo_name = cached_zipfile.infolist()[0].filename
         extracted_repo = os.path.join(hub_dir, extraced_repo_name)
@@ -177,6 +178,8 @@ def _load_hubconf_module(github, force_reload):
     _setup_hubdir()
 
     repo_dir = _get_cache_or_reload(github, force_reload)
+
+    sys.path.insert(0, repo_dir)
 
     m = import_module(MODULE_HUBCONF, repo_dir + '/' + MODULE_HUBCONF)
 
@@ -286,7 +289,7 @@ def help(github, model, force_reload=False):
     return entry.__doc__
 
 
-def load(github, model, force_reload=False, *args, **kwargs):
+def load(github, model, *args, force_reload=False, **kwargs):
     r"""
     Load a model from a github repo, with pretrained weights.
 
@@ -295,9 +298,9 @@ def load(github, model, force_reload=False, *args, **kwargs):
             tag/branch. The default branch is `master` if not specified.
             Example: 'pytorch/vision[:hub]'
         model: Required, a string of entrypoint name defined in repo's hubconf.py
-        force_reload: Optional, whether to discard the existing cache and force a fresh download.
-            Default is `False`.
         *args: Optional, the corresponding args for callable `model`.
+        force_reload: Optional, whether to force a fresh download of github repo unconditionally.
+            Default is `False`.
         **kwargs: Optional, the corresponding kwargs for callable `model`.
 
     Returns:
