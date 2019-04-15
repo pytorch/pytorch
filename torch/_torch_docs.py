@@ -1934,10 +1934,10 @@ Args:
     out (tuple, optional): the optional destination tensor
 
 Returns:
-    (Tensor, Tensor): A tuple containing:
+    (Tensor, Tensor): A namedtuple (solution, QR) containing:
 
-        - **X** (*Tensor*): the least squares solution
-        - **qr** (*Tensor*): the details of the QR factorization
+        - **solution** (*Tensor*): the least squares solution
+        - **QR** (*Tensor*): the details of the QR factorization
 
 .. note::
 
@@ -2562,6 +2562,32 @@ Example::
     >>> torch.lt(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
     tensor([[ 0,  0],
             [ 1,  0]], dtype=torch.uint8)
+""")
+
+add_docstr(torch.lu_solve,
+           r"""
+lu_solve(b, LU_data, LU_pivots, out=None) -> Tensor
+
+Batch LU solve.
+
+Returns the LU solve of the linear system :math:`Ax = b` using the partially pivoted
+LU factorization of A from :meth:`torch.lu`.
+
+Arguments:
+    b (Tensor): the RHS tensor
+    LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu`.
+    LU_pivots (IntTensor): the pivots of the LU factorization
+    out (Tensor, optional): the optional output tensor
+
+Example::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> b = torch.randn(2, 3)
+    >>> A_LU = torch.lu(A)
+    >>> x = torch.lu_solve(b, *A_LU)
+    >>> torch.norm(torch.bmm(A, x.unsqueeze(2)) - b.unsqueeze(2))
+    tensor(1.00000e-07 *
+           2.8312)
 """)
 
 add_docstr(torch.masked_select,
@@ -4031,7 +4057,11 @@ Args:
     end (float): the ending value for the set of points
     step (float): the gap between each pair of adjacent points. Default: ``1``.
     {out}
-    {dtype}
+    {dtype} If `dtype` is not given, infer the data type from the other input
+        arguments. If any of `start`, `end`, or `stop` are floating-point, the
+        `dtype` is inferred to be the default dtype, see
+        :meth:`~torch.get_default_dtype`. Otherwise, the `dtype` is inferred to
+        be `torch.int64`.
     {layout}
     {device}
     {requires_grad}
@@ -5123,9 +5153,9 @@ Args:
         1 and not referenced from :math:`A`. Default: ``False``.
 
 Returns:
-    A tuple :math:`(X, M)` where :math:`M` is a clone of :math:`A` and :math:`X`
-    is the solution to :math:`AX = b` (or whatever variant of the system of
-    equations, depending on the keyword arguments.)
+    A namedtuple :math:`(solution, cloned_coefficient)` where :math:`cloned_coefficient`
+    is a clone of :math:`A` and :math:`solution` is the solution :math:`X` to :math:`AX = b`
+    (or whatever variant of the system of equations, depending on the keyword arguments.)
 
 Examples::
 
@@ -5138,8 +5168,10 @@ Examples::
     tensor([[-0.0210,  2.3513, -1.5492],
             [ 1.5429,  0.7403, -1.0243]])
     >>> torch.triangular_solve(b, A)
-    (tensor([[ 1.7840,  2.9045, -2.5405],
-            [ 1.9319,  0.9269, -1.2826]]), tensor([[ 1.1527, -1.0753],
+    torch.return_types.triangular_solve(
+    solution=tensor([[ 1.7841,  2.9046, -2.5405],
+            [ 1.9320,  0.9270, -1.2826]]),
+    cloned_coefficient=tensor([[ 1.1527, -1.0753],
             [ 0.0000,  0.7986]]))
 """)
 
@@ -5515,95 +5547,6 @@ Example::
     tensor([[ 0.,  0.,  0.],
             [ 0.,  0.,  0.]])
 """.format(**factory_like_common_args))
-
-add_docstr(torch.btrifact,
-           r"""
-btrifact(A, pivot=True) -> (Tensor, IntTensor)
-
-Batch LU factorization.
-
-Returns a tuple containing the LU factorization and pivots. Pivoting is done if
-:attr:`pivot` is set.
-
-.. note::
-    LU factorization with :attr:`pivot` = ``True`` is not available for CPU, and attempting
-    to do so will throw an error. However, LU factorization with :attr:`pivot` = ``True`` is
-    available for CUDA.
-
-Arguments:
-    A (Tensor): the tensor to factor
-    pivot (bool, optional): controls whether pivoting is done
-
-Returns:
-    A tuple containing factorization and pivots.
-
-Example::
-
-    >>> A = torch.randn(2, 3, 3)
-    >>> A_LU, pivots = torch.btrifact(A)
-    >>> A_LU
-    tensor([[[ 1.3506,  2.5558, -0.0816],
-             [ 0.1684,  1.1551,  0.1940],
-             [ 0.1193,  0.6189, -0.5497]],
-
-            [[ 0.4526,  1.2526, -0.3285],
-             [-0.7988,  0.7175, -0.9701],
-             [ 0.2634, -0.9255, -0.3459]]])
-
-    >>> pivots
-    tensor([[ 3,  3,  3],
-            [ 3,  3,  3]], dtype=torch.int32)
-""")
-
-add_docstr(torch.btrifact_with_info,
-           r"""
-btrifact_with_info(A, pivot=True) -> (Tensor, IntTensor, IntTensor)
-
-Batch LU factorization with additional error information.
-
-This is a version of :meth:`torch.btrifact` that always creates an info
-`IntTensor`, and returns it as the third return value.
-
-Arguments:
-    A (Tensor): the tensor to factor
-    pivot (bool, optional): controls whether pivoting is done
-
-Returns:
-    A tuple containing factorization, pivots, and an `IntTensor` where non-zero
-    values indicate whether factorization for each minibatch sample succeeds.
-
-Example::
-
-    >>> A = torch.randn(2, 3, 3)
-    >>> A_LU, pivots, info = A.btrifact_with_info()
-    >>> if info.nonzero().size(0) == 0:
-    >>>   print('LU factorization succeeded for all samples!')
-    LU factorization succeeded for all samples!
-""")
-
-add_docstr(torch.btrisolve,
-           r"""
-btrisolve(b, LU_data, LU_pivots) -> Tensor
-
-Batch LU solve.
-
-Returns the LU solve of the linear system :math:`Ax = b`.
-
-Arguments:
-    b (Tensor): the RHS tensor
-    LU_data (Tensor): the pivoted LU factorization of A from :meth:`btrifact`.
-    LU_pivots (IntTensor): the pivots of the LU factorization
-
-Example::
-
-    >>> A = torch.randn(2, 3, 3)
-    >>> b = torch.randn(2, 3)
-    >>> A_LU = torch.btrifact(A)
-    >>> x = torch.btrisolve(b, *A_LU)
-    >>> torch.norm(torch.bmm(A, x.unsqueeze(2)) - b.unsqueeze(2))
-    tensor(1.00000e-07 *
-           2.8312)
-""")
 
 add_docstr(torch.empty,
            r"""
@@ -6456,4 +6399,50 @@ Example::
             [2, 2],
             [2, 3],
             [3, 3]])
+""")
+
+
+add_docstr(torch.repeat_interleave,
+           r"""
+.. function:: repeat_interleave(input, repeats, dim=None) -> Tensor
+
+Repeat elements of a tensor.
+
+.. warning::
+
+    This is different from :func:`torch.repeat` but similar to `numpy.repeat`.
+
+Args:
+    input (Tensor): The input tensor
+    repeats (Tensor or int): The number of repetitions for each element.
+        repeats is broadcasted to fit the shape of the given axis.
+    dim (int, optional): The dimension along which to repeat values.
+        By default, use the flattened input array, and return a flat output
+        array.
+
+Returns:
+    Tensor: Repeated tensor which has the same shape as input, except along the
+     given axis.
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3])
+    >>> x.repeat_interleave(2)
+    tensor([1, 1, 2, 2, 3, 3])
+    >>> y = torch.tensor([[1, 2], [3, 4]])
+    >>> torch.repeat_interleave(y, 2)
+    tensor([1, 1, 2, 2, 3, 3, 4, 4])
+    >>> torch.repeat_interleave(y, 3, dim=1)
+    tensor([[1, 1, 1, 2, 2, 2],
+            [3, 3, 3, 4, 4, 4]])
+    >>> torch.repeat_interleave(y, torch.tensor([1, 2]), dim=0)
+    tensor([[1, 2],
+            [3, 4],
+            [3, 4]])
+
+.. function:: repeat_interleave(repeats) -> Tensor
+
+If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
+`tensor([0, 0, ..., 1, 1, ..., 2, 2, ..., ...])` where `0` appears `n1` times,
+`1` appears `n2` times, `2` appears `n3` times, etc.
 """)

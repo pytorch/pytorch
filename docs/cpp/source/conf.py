@@ -20,10 +20,7 @@
 import os
 # sys.path.insert(0, os.path.abspath('.'))
 
-import sys
 import textwrap
-
-import pytorch_sphinx_theme
 
 # -- General configuration ------------------------------------------------
 

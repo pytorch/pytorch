@@ -282,9 +282,39 @@ class Tensor(torch._C._TensorBase):
     def trtrs(self, A, upper=True, transpose=False, unitriangular=False):
         r"""See :func:`torch.triangular_solve`"""
         warnings.warn("torch.trtrs is deprecated in favour of torch.triangular_solve and will be "
-                      "removed in the next release. Please use torch.triangular_solve.", stacklevel=2)
+                      "removed in the next release. Please use torch.triangular_solve instead.",
+                      stacklevel=2)
         return super(Tensor, self).triangular_solve(A, upper=upper,
                                                     transpose=transpose, unitriangular=unitriangular)
+
+    def btrifact(self, pivot=True):
+        r"""See :func:`torch.lu`"""
+        warnings.warn("torch.btrifact is deprecated in favour of torch.lu and will be removed in "
+                      "the next release. Please use torch.lu instead.", stacklevel=2)
+        return torch._lu_with_info(self, pivot=pivot, check_errors=True)
+
+    def btrifact_with_info(self, pivot=True):
+        r"""See :func:`torch.lu`"""
+        warnings.warn("torch.btrifact_with_info is deprecated in favour of torch.lu with the "
+                      "get_infos argument and will be removed in the next release. Please use "
+                      "torch.lu with the get_infos argument set to True instead.", stacklevel=2)
+        return torch._lu_with_info(self, pivot=pivot, check_errors=False)
+
+    def btrisolve(self, LU_data, LU_pivots):
+        r"""See :func:`torch.lu_solve`"""
+        warnings.warn("torch.btrisolve is deprecated in favour of torch.lu_solve and will be "
+                      "removed in the next release. Please use torch.lu_solve instead.",
+                      stacklevel=2)
+        return super(Tensor, self).lu_solve(LU_data=LU_data, LU_pivots=LU_pivots)
+
+    def lu(self, pivot=True, get_infos=False):
+        r"""See :func:`torch.lu`"""
+        # If get_infos is True, then we don't need to check for errors and vice versa
+        LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
+        if get_infos:
+            return LU, pivots, infos
+        else:
+            return LU, pivots
 
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,
              center=True, pad_mode='reflect', normalized=False, onesided=True):
@@ -337,6 +367,13 @@ class Tensor(torch._C._TensorBase):
             return output, inverse_indices
         else:
             return output
+
+    def unique_consecutive(self, return_inverse=False, return_counts=False, dim=None):
+        r"""Eliminates all but the first element from every consecutive group of equivalent elements.
+
+        See :func:`torch.unique_consecutive`
+        """
+        return torch.unique_consecutive(self, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
 
     def __rsub__(self, other):
         return _C._VariableFunctions.rsub(self, other)

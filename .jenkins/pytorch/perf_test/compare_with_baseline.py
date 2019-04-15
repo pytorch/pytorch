@@ -1,7 +1,6 @@
 import sys
 import json
 import math
-import numpy
 import argparse
 
 parser = argparse.ArgumentParser()

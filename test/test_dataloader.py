@@ -3,13 +3,10 @@ import sys
 import errno
 import os
 import ctypes
-import signal
 import torch
 import gc
 import time
-import traceback
 import unittest
-import subprocess
 import itertools
 import warnings
 from torch import multiprocessing as mp
@@ -724,6 +721,7 @@ class TestDataLoader(TestCase):
 
     @skipIfRocm
     @unittest.skipIf(not HAS_PSUTIL, "psutil not found")
+    @unittest.skip("this test is flaky, see https://github.com/pytorch/pytorch/issues/14501")
     def test_proper_exit(self):
         (r'''There might be ConnectionResetError or leaked semaphore warning '''
          r'''(due to dirty process exit), but they are all safe to ignore''')

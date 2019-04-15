@@ -486,7 +486,9 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
       &initialization_list,
       &total_inputs_vec);
   auto* shape_arg = onnxifi_net.add_arg();
+  auto* qshape_arg = onnxifi_net.add_arg();
   shape_arg->set_name("input_shape_info");
+  qshape_arg->set_name("input_qshape_info");
   onnxifi_net.clear_external_input();
   for (const auto& i : total_inputs_vec) {
     auto input = i;
@@ -495,8 +497,14 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
       input = it->second;
     }
     onnxifi_net.add_external_input(input);
-    shape_arg->mutable_tensors()->Add()->CopyFrom(
-        wrapShapeInfoIntoTensorProto(input, shape_hints.at(i)));
+    auto info = shape_hints.at(i);
+    if (!info.is_quantized) {
+      shape_arg->mutable_tensors()->Add()->CopyFrom(
+          wrapShapeInfoIntoTensorProto(input, shape_hints.at(i)));
+    } else {
+      qshape_arg->mutable_qtensors()->Add()->CopyFrom(
+          wrapShapeInfoIntoQTensorProto(input, shape_hints.at(i)));
+    }
   }
 
   // Compute output shape hints
@@ -812,24 +820,43 @@ bool OnnxifiTransformer::supportOpC2(
 
     // Encode the input/output shapes to an argument
     auto* shape_arg = net.add_arg();
+    auto* qshape_arg = net.add_arg();
     shape_arg->set_name("input_shape_info");
+    qshape_arg->set_name("input_qshape_info");
     for (const auto& i : op.input()) {
       const auto it = shape_hints.find(i);
       if (it == shape_hints.end()) {
+        VLOG(1) << "Skipping " << op.type() << " (" << pos
+                << ") due to missing shape info for input " << i;
         return false;
       }
-      shape_arg->mutable_tensors()->Add()->CopyFrom(
-          wrapShapeInfoIntoTensorProto(i, it->second));
+      if ((it->second).is_quantized == false) {
+        shape_arg->mutable_tensors()->Add()->CopyFrom(
+            wrapShapeInfoIntoTensorProto(i, it->second));
+      } else {
+        qshape_arg->mutable_qtensors()->Add()->CopyFrom(
+            wrapShapeInfoIntoQTensorProto(i, it->second));
+      }
     }
+
+    qshape_arg = net.add_arg();
     shape_arg = net.add_arg();
     shape_arg->set_name("output_shape_info");
+    qshape_arg->set_name("output_qshape_info");
     for (const auto& i : op.output()) {
       const auto it = shape_hints.find(i);
       if (it == shape_hints.end()) {
+        VLOG(1) << "Skipping " << op.type() << " (" << pos
+                << ") due to missing shape info for output " << i;
         return false;
       }
-      shape_arg->mutable_tensors()->Add()->CopyFrom(
-          wrapShapeInfoIntoTensorProto(i, it->second));
+      if ((it->second).is_quantized == false) {
+        shape_arg->mutable_tensors()->Add()->CopyFrom(
+            wrapShapeInfoIntoTensorProto(i, it->second));
+      } else {
+        qshape_arg->mutable_qtensors()->Add()->CopyFrom(
+            wrapShapeInfoIntoQTensorProto(i, it->second));
+      }
     }
 
     std::string c2_model_str;
@@ -1000,15 +1027,7 @@ void OnnxifiTransformer::transform(
   }
 
   if (opts_.debug) {
-    NetDef shape_net(*pred_net);
-    auto* shape_arg = shape_net.add_arg();
-    shape_arg->set_name("shape_info");
-    for (const auto& kv : shape_hints) {
-      auto t = wrapShapeInfoIntoTensorProto(kv.first, kv.second);
-      t.add_int32_data(static_cast<int32_t>(kv.second.dim_type));
-      shape_arg->mutable_tensors()->Add()->CopyFrom(t);
-    }
-    WriteProtoToTextFile(shape_net, "debug_ssa_net.pb_txt");
+    dumpNet(*pred_net, shape_hints, "debug_ssa_net.pb_txt");
   }
 
   // Get backend id
@@ -1029,7 +1048,7 @@ void OnnxifiTransformer::transform(
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());
 
   if (opts_.debug) {
-    WriteProtoToTextFile(net_opt, "debug_full_opt_net.pb_txt");
+    dumpNet(*pred_net, shape_hints, "debug_full_opt_net.pb_txt");
   }
   pred_net->Swap(&net_opt);
 }

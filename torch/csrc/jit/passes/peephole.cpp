@@ -208,6 +208,36 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       if (input->mustNotBeNone()) {
         node->output()->replaceAllUsesWith(node->input());
       }
+    } else if (node->matches("prim::dtype(Tensor a) -> int")) {
+      if (auto dim_tensor =
+              node->input()->type()->cast<DimensionedTensorType>()) {
+        WithInsertPoint guard(node);
+        auto output = node->owningGraph()->insertConstant(
+            static_cast<int64_t>(dim_tensor->scalarType()));
+        node->output()->replaceAllUsesWith(output);
+      }
+    } else if (node->matches("prim::device(Tensor a) -> Device")) {
+      if (auto dim_tensor =
+              node->input()->type()->cast<DimensionedTensorType>()) {
+        WithInsertPoint guard(node);
+        auto output = node->owningGraph()->insertConstant(dim_tensor->device());
+        node->output()->replaceAllUsesWith(output);
+      }
+    } else if (node->matches("aten::dim(Tensor self) -> int")) {
+      if (auto dim_tensor =
+              node->input()->type()->cast<DimensionedTensorType>()) {
+        WithInsertPoint guard(node);
+        auto output = node->owningGraph()->insertConstant(dim_tensor->dim());
+        node->output()->replaceAllUsesWith(output);
+      }
+    } else if (node->matches("prim::is_cuda(Tensor a) -> bool")) {
+      if (auto dim_tensor =
+              node->input()->type()->cast<DimensionedTensorType>()) {
+        WithInsertPoint guard(node);
+        auto output =
+            node->owningGraph()->insertConstant(dim_tensor->device().is_cuda());
+        node->output()->replaceAllUsesWith(output);
+      }
     }
   }
 }

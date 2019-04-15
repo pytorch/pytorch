@@ -5,8 +5,6 @@ import ast
 import inspect
 import string
 from textwrap import dedent
-from functools import partial
-from collections import namedtuple
 from torch._six import PY2
 from torch._C._jit_tree_views import *
 

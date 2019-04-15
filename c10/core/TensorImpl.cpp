@@ -33,26 +33,25 @@ const at::Tensor& TensorImpl::grad() const {
   }
 }
 
-TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, Allocator *allocator, bool is_variable)
-    : TensorImpl({}, type_id, data_type, is_variable) {
-  // Variables, UndefinedTensors and SparseTensors don't have storages.
-  if (!is_variable && type_id != UndefinedTensorId() && data_type.id() != caffe2::TypeIdentifier::uninitialized()
-      && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
-    storage_ = Storage(data_type, 0, allocator, true);
-  }
-}
+TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id)
+    : TensorImpl(std::move(storage), type_id, storage.dtype(), storage.device()) {}
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable)
-    : TensorImpl(std::move(storage), type_id, storage.dtype(), is_variable) {}
+TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
+    : TensorImpl({}, type_id, data_type, std::move(device_opt)) {}
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable)
+TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type,
+                       c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
       sizes_{0},
       storage_offset_(0),
       numel_(0),
       data_type_(data_type),
-      type_id_(type_id),
-      is_variable_(is_variable) {
+      device_opt_(device_opt),
+      type_id_(type_id) {
+  AT_ASSERT(type_id == UndefinedTensorId() || data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
+            device_opt_.has_value());
+  // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
+  // Storages with default devices.
   strides_.push_back(1);
 }
 

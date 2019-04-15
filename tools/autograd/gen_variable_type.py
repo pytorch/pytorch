@@ -23,7 +23,6 @@
 #     differentiable subcomponents.
 #
 from __future__ import print_function
-import os
 import sys
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS

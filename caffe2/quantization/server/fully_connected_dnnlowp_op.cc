@@ -6,6 +6,7 @@
 
 #include "caffe2/core/flags.h"
 #include "caffe2/core/tensor_int8.h"
+#include "caffe2/operators/fc_inference.h"
 #include "caffe2/utils/cpuid.h"
 #include "fbgemm_pack_matrix_cache.h"
 #include "fbgemm_pack_op.h"
@@ -24,8 +25,8 @@ namespace caffe2 {
 
 using namespace std;
 
-template <typename T>
-FullyConnectedDNNLowPOp<T>::FullyConnectedDNNLowPOp(
+template <typename T, bool ReluFused>
+FullyConnectedDNNLowPOp<T, ReluFused>::FullyConnectedDNNLowPOp(
     const OperatorDef& operator_def,
     Workspace* ws)
     : BaseType(operator_def, ws),
@@ -50,12 +51,17 @@ FullyConnectedDNNLowPOp<T>::FullyConnectedDNNLowPOp(
   VLOG(2) << "DNNLOWP FC with output " << operator_def.output(0);
 }
 
-template <typename T>
-bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
+template <typename T, bool ReluFused>
+bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
   using namespace std;
   using namespace dnnlowp;
 
+  bool first_invocation = !this->arguments_parsed_;
   this->ParseDNNLowPOperatorArguments_();
+  if (first_invocation && ReluFused) {
+    followed_by_ = "Relu";
+    AdjustOutputTensorQuantizationParamsWithFollowedBy(this, followed_by_);
+  }
 
   if ((!GetCpuId().avx2() || FLAGS_caffe2_dnnlowp_enforce_default_operators) &&
       dequantize_output_) {
@@ -199,9 +205,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
             row_offsets_.data());
 
         if (quantize_channelwise_) {
-          ReQuantizeOutput<
-              false /* FUSE_RELU */,
-              QuantizationGranularity::OUT_CHANNEL>
+          ReQuantizeOutput<ReluFused, QuantizationGranularity::OUT_CHANNEL>
               outputProcObj(
                   doNothingObj,
                   requantization_multipliers_.data(),
@@ -224,7 +228,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
               0, // thread_id
               1); // num_threads
         } else {
-          ReQuantizeOutput<false /* FUSE_RELU */> outputProcObj(
+          ReQuantizeOutput<ReluFused> outputProcObj(
               doNothingObj,
               requantization_multipliers_.data(),
               out_qparams_.zero_point,
@@ -258,7 +262,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
             X_pack_buf_.data(), // buffer for packed matrix
             1); // group
 
-        ReQuantizeOutput<false /* FUSE_RELU */> outputProcObj(
+        ReQuantizeOutput<ReluFused> outputProcObj(
             doNothingObj,
             requantization_multipliers_.data(),
             out_qparams_.zero_point,
@@ -305,9 +309,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
         DoNothing<float, float> doNothingObj{};
 
         if (quantize_channelwise_) {
-          ReQuantizeForFloat<
-              false /* FUSE_RELU*/,
-              QuantizationGranularity::OUT_CHANNEL>
+          ReQuantizeForFloat<ReluFused, QuantizationGranularity::OUT_CHANNEL>
               outputProcObj(
                   doNothingObj,
                   in_qparams_[0].scale,
@@ -329,7 +331,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
               0, // thread_id
               1); // num_threads
         } else {
-          ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
+          ReQuantizeForFloat<ReluFused> outputProcObj(
               doNothingObj,
               in_qparams_[0].scale,
               filter_scales_.data(),
@@ -367,9 +369,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
         DoNothing<float, float> doNothingObj{};
 
         if (quantize_channelwise_) {
-          ReQuantizeForFloat<
-              false /* FUSE_RELU*/,
-              QuantizationGranularity::OUT_CHANNEL>
+          ReQuantizeForFloat<ReluFused, QuantizationGranularity::OUT_CHANNEL>
               outputProcObj(
                   doNothingObj,
                   in_qparams_[0].scale,
@@ -391,7 +391,7 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
               0, // thread_id
               1); // num_threads
         } else {
-          ReQuantizeForFloat<false /* FUSE_RELU*/> outputProcObj(
+          ReQuantizeForFloat<ReluFused> outputProcObj(
               doNothingObj,
               in_qparams_[0].scale,
               filter_scales_.data(),
@@ -491,6 +491,9 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
           Ydata[i * N + j] = Y_int32_[i * N + j] * in_qparams_[0].scale *
                   filter_qparams_[quant_group].scale +
               b_dequantized_data_[j];
+          if (ReluFused) {
+            Ydata[i * N + j] = std::max(Ydata[i * N + j], 0.0f);
+          }
         }
       }
     }
@@ -516,6 +519,10 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
 
           Ydata[i * N + j] = fbgemm::Requantize<T>(
               Y_int32_[i * N + j], requantization_params_[quant_group]);
+          if (ReluFused) {
+            Ydata[i * N + j] =
+                std::max<T>(out_qparams_.zero_point, Ydata[i * N + j]);
+          }
         }
       }
     }
@@ -546,8 +553,8 @@ bool FullyConnectedDNNLowPOp<T>::RunOnDevice() {
   return true;
 }
 
-template <typename T>
-bool FullyConnectedDNNLowPOp<T>::GetQuantizationParameters_() {
+template <typename T, bool ReluFused>
+bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
   using namespace dnnlowp;
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
@@ -854,5 +861,21 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FC,
     DNNLOWP_ROWWISE,
     FullyConnectedDNNLowPOp<uint8_t>);
+
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    Int8FCRelu,
+    DNNLOWP,
+    FullyConnectedDNNLowPOp<uint8_t, true>);
+REGISTER_CPU_OPERATOR_WITH_ENGINE(
+    Int8FCRelu,
+    DNNLOWP_ROWWISE,
+    FullyConnectedDNNLowPOp<uint8_t, true>);
+
+using namespace std::placeholders;
+OPERATOR_SCHEMA(Int8FCRelu)
+    .NumInputs(3)
+    .NumOutputs(1)
+    .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
+    .CostInferenceFunction(std::bind(CostInferenceForFC, _1, _2, false));
 
 } // namespace caffe2

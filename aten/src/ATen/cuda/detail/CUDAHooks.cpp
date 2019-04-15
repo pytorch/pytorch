@@ -16,8 +16,17 @@
 #include <ATen/cudnn/cudnn-wrapper.h>
 #endif
 
+#ifdef USE_MAGMA
+#include <magma.h>
+#endif
+
+#ifdef __HIP_PLATFORM_HCC__
+#include <miopen/version.h>
+#endif
+
 #include <cuda.h>
 
+#include <sstream>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -33,6 +42,9 @@ std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
   THCState* thc_state = THCState_alloc();
 
   THCudaInit(thc_state);
+#ifdef USE_MAGMA
+  THCMagma_init(thc_state);
+#endif
   return std::unique_ptr<THCState, void (*)(THCState*)>(
       thc_state, [](THCState* p) {
         if (p)
@@ -103,6 +115,76 @@ long CUDAHooks::versionCuDNN() const {
 #else
   AT_ERROR("Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
 #endif
+}
+
+std::string CUDAHooks::showConfig() const {
+  std::ostringstream oss;
+
+  int runtimeVersion;
+  cudaRuntimeGetVersion(&runtimeVersion);
+
+  auto printCudaStyleVersion = [&](int v) {
+    oss << (v / 1000) << "." << (v / 10 % 100);
+    if (v % 10 != 0) {
+      oss << "." << (v % 10);
+    }
+  };
+
+#ifndef __HIP_PLATFORM_HCC__
+  oss << "  - CUDA Runtime ";
+#else
+  oss << "  - HIP Runtime ";
+#endif
+  printCudaStyleVersion(runtimeVersion);
+  oss << "\n";
+
+  // TODO: Make HIPIFY understand CUDART_VERSION macro
+#ifndef __HIP_PLATFORM_HCC__
+  if (runtimeVersion != CUDART_VERSION) {
+    oss << "  - Built with CUDA Runtime ";
+    printCudaStyleVersion(CUDART_VERSION);
+    oss << "\n";
+  }
+  oss << "  - NVCC architecture flags: " << NVCC_FLAGS_EXTRA << "\n";
+#endif
+
+#ifndef __HIP_PLATFORM_HCC__
+#if AT_CUDNN_ENABLED()
+
+
+  auto printCudnnStyleVersion = [&](int v) {
+    oss << (v / 1000) << "." << (v / 100 % 10);
+    if (v % 100 != 0) {
+      oss << "." << (v % 100);
+    }
+  };
+
+  size_t cudnnVersion = cudnnGetVersion();
+  oss << "  - CuDNN ";
+  printCudnnStyleVersion(cudnnVersion);
+  size_t cudnnCudartVersion = cudnnGetCudartVersion();
+  if (cudnnCudartVersion != CUDART_VERSION) {
+    oss << "  (built against CUDA ";
+    printCudaStyleVersion(cudnnCudartVersion);
+    oss << ")";
+  }
+  oss << "\n";
+  if (cudnnVersion != CUDNN_VERSION) {
+    oss << "    - Built with CuDNN ";
+    printCudnnStyleVersion(CUDNN_VERSION);
+    oss << "\n";
+  }
+#endif
+#else
+  // TODO: Check if miopen has the functions above and unify
+  oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << "." << MIOPEN_VERSION_MINOR << "." << MIOPEN_VERSION_PATCH << "\n";
+#endif
+
+#ifdef USE_MAGMA
+  oss << "  - Magma " << MAGMA_VERSION_MAJOR << "." << MAGMA_VERSION_MINOR << "." << MAGMA_VERSION_MICRO << "\n";
+#endif
+
+  return oss.str();
 }
 
 double CUDAHooks::batchnormMinEpsilonCuDNN() const {

@@ -45,6 +45,42 @@ static void sigmoid_kernel(TensorIterator& iter) {
   });
 }
 
+static void abs_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "abs_cpu", [&]() {
+    unary_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return std::abs(a); },
+        [=](Vec256<scalar_t> a) { return a.abs(); });
+  });
+}
+
+static void frac_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "frac_cpu", [&]() {
+    unary_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return a - std::trunc(a); },
+        [=](Vec256<scalar_t> a) { return a.frac(); });
+  });
+}
+
+static void reciprocal_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "reciprocal_cpu", [&]() {
+    unary_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return decltype(a)(1.0) / a; },
+        [=](Vec256<scalar_t> a) { return a.reciprocal(); });
+  });
+}
+
+static void neg_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "neg_cpu", [&]() {
+    unary_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return -a; },
+        [=](Vec256<scalar_t> a) { return a.neg(); });
+  });
+}
+
 #if !AT_MKL_ENABLED()
 void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
   // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
@@ -152,6 +188,10 @@ static void rsqrt_kernel(TensorIterator& iter) {
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel)
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel)
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
+REGISTER_DISPATCH(abs_stub, &abs_kernel);
+REGISTER_DISPATCH(frac_stub, &frac_kernel);
+REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
+REGISTER_DISPATCH(neg_stub, &neg_kernel);
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)

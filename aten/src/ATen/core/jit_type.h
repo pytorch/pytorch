@@ -17,8 +17,8 @@
 namespace torch {
 namespace jit {
 namespace script {
-struct Module;
-struct Method;
+struct CompilationUnit;
+struct Function;
 }
 } // namespace jit
 } // namespace torch
@@ -1100,15 +1100,20 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
-using ::torch::jit::script::Module;
-using ::torch::jit::script::Method;
+using ::torch::jit::script::CompilationUnit;
+using ::torch::jit::script::Function;
 
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public Type {
   // Create a user type and register it globally.
   static ClassTypePtr create(
       const std::string& name,
-      std::shared_ptr<Module> module);
+      std::shared_ptr<CompilationUnit> module);
+
+  // Create a type representing a Module,
+  // These do not have methods, and are not globally registered
+  static ClassTypePtr createModuleType(std::shared_ptr<CompilationUnit> module);
+
   // returns nullptr if there is no type with that name
   static ClassTypePtr get(const std::string& name);
   // For testing: delete all registered types
@@ -1151,7 +1156,7 @@ struct CAFFE2_API ClassType : public Type {
     return attributeTypes_[pos];
   }
 
-  TypePtr getAttribute(size_t slot) const {
+  const TypePtr& getAttribute(size_t slot) const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     AT_ASSERT(slot < attributeTypes_.size());
     return attributeTypes_[slot];
@@ -1163,10 +1168,13 @@ struct CAFFE2_API ClassType : public Type {
     return attributeNames_[slot];
   }
 
-  Method* getMethod(const std::string& name) const;
-  std::vector<Method*> methods() const;
+  Function* getMethod(const std::string& name) const;
+  CompilationUnit& compilation_unit();
+  const CompilationUnit& compilation_unit() const;
+  std::vector<Function*> methods() const;
 
-  std::string name() const {
+
+  const std::string& name() const {
     return typename_;
   }
 
@@ -1203,17 +1211,28 @@ struct CAFFE2_API ClassType : public Type {
     attributeTypes_.push_back(type);
   }
 
+  at::ArrayRef<std::string> attributeNames() const {
+    return attributeNames_;
+  }
+
   at::ArrayRef<TypePtr> containedTypes() const override {
     return attributeTypes_;
   }
 
+  // generate a refined version of this class.
+  // It has the same name but the slot Types are subtypes of
+  // the original slots. It is only valid to refine a class type in a context
+  // where it is know that there are not assignments to the objects slots
+  // that would invalidate the refinement.
+  // These variants are not registered in the global class table.
+  ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
-  ClassType(std::string name, std::shared_ptr<Module> module)
+  ClassType(std::string name, std::shared_ptr<CompilationUnit> cu)
       : Type(TypeKind::ClassType),
         typename_(std::move(name)),
-        module_(std::move(module)) {}
+        compilation_unit_(std::move(cu)) {}
 
   // Name of type (note that this has to be globally unique).
   std::string typename_;
@@ -1227,7 +1246,7 @@ struct CAFFE2_API ClassType : public Type {
   std::vector<std::string> attributeNames_;
   std::vector<TypePtr> attributeTypes_;
   // Holds method attributes
-  std::shared_ptr<Module> module_;
+  std::shared_ptr<CompilationUnit> compilation_unit_;
 
 };
 } // namespace c10
