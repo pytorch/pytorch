@@ -803,6 +803,17 @@ void testMemoryDAG() {
     AT_ASSERT(t.mayContainAlias(d, c));
 
     AT_ASSERT(t.mayContainAlias(a, d));
+
+    // f(e)
+    auto f = t.makeFreshValue(aValue);
+    auto e = t.makeFreshValue(bValue);
+
+    t.addToContainedElements(f, e);
+
+    for (auto elem : {a, b, c, d}) {
+      AT_ASSERT(!t.mayContainAlias(f, elem));
+      AT_ASSERT(!t.mayContainAlias(e, elem));
+    }
   }
 }
 } // namespace jit

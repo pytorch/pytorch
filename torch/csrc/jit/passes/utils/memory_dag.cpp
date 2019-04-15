@@ -88,7 +88,7 @@ void MemoryDAG::makePointerTo(Element* from, Element* to) {
 }
 
 void MemoryDAG::addToContainedElements(Element* elem, Element* container) {
-  container->contained_elements.push_back(elem);
+  container->contained_elements.insert(elem);
 }
 
 // Give `v` a fresh alias (i.e. it does not point to any value)

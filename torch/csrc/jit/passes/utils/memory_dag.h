@@ -113,7 +113,7 @@ struct Element {
   // Backreference for points-to.
   std::unordered_set<Element*> pointedFrom;
 
-  std::vector<Element*> contained_elements;
+  std::unordered_set<Element*> contained_elements;
 
   // Return the unique memory locations that `Element` might represent.
   std::unordered_set<const Element*> getMemoryLocations() const;
