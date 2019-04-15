@@ -30,6 +30,8 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
     return impl;
   }
 
+  // yf225 TODO: add shallow_copy_from here!
+
  private:
   QuantizerPtr quantizer_;
 };
