@@ -33,7 +33,7 @@ struct ProfilingRecord {
       const std::function<void(Stack&)>& fp,
       at::ArrayRef<Value*> inputs);
   void instrumentBlock(Block* block);
-  ProfilingRecord(const std::shared_ptr<Graph>& g);
+  ProfilingRecord(std::shared_ptr<Graph> g);
   // N.B. list is used to make sure that std::function objs
   // aren't moved anywhere since we are stashing pointers
   // to those in nodes' attributes

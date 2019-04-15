@@ -3,8 +3,8 @@
 namespace torch {
 namespace jit {
 
-ProfilingRecord::ProfilingRecord(const std::shared_ptr<Graph>& g)
-    : profiled_graph_(g) {}
+ProfilingRecord::ProfilingRecord(std::shared_ptr<Graph> g)
+    : profiled_graph_(std::move(g)) {}
 
 Node* ProfilingRecord::createProfileNode(
     const std::function<void(Stack&)>& fp,
