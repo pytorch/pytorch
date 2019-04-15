@@ -69,7 +69,7 @@ static const std::string compile_string =
 #ifndef __PPC64__
 //  "-march=native "
 #endif
-    "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
+    "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm ${extra_compile_args}";
 
 static void runCompiler(
     const std::string& cpp_file,
@@ -80,6 +80,17 @@ static void runCompiler(
   env.s("fopenmp", config.openmp ? "-fopenmp" : "");
   env.s("cpp_file", cpp_file);
   env.s("so_file", so_file);
+  std::string extra_args;
+  // We can use this env var to do things like pass in -march=native on platforms
+  // where we know it's safe.
+  if (char *env_args = getenv("PYTORCH_FUSION_EXTRA_COMPILE_ARGS")) {
+    extra_args += std::string(env_args) + " ";
+  }
+// Needed for Sleef symbols on mac
+#if defined(__APPLE__)
+  extra_args += "-undefined dynamic_lookup ";
+#endif
+  env.s("extra_compile_args", extra_args);
   std::string result = format(compile_string, env);
   int r = system(result.c_str());
   if (config.openmp && r != 0) {
